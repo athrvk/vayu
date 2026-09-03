@@ -122,8 +122,17 @@ export function CommandScrollIntoView() {
 
 	React.useEffect(() => {
 		const list = ref.current?.closest<HTMLElement>("[cmdk-list]");
-		// Scoped to this list, never across the document: the app mounts several
-		// of these and the highlight being scrolled to is this one's.
+		/*
+		 * Scoped to this list, never across the document: the app mounts several
+		 * of these and the highlight being scrolled to is this one's.
+		 *
+		 * On `aria-selected`, where `CommandListboxProbe` above deliberately reads
+		 * `data-value` instead: that probe has to name a row on the list's first
+		 * paint, when the rendered `aria-selected` still lags a layout effect.
+		 * This one has nothing to say about a paint that has not scrolled yet, so
+		 * it can use the selector `cmdk` uses for this job itself - which is the
+		 * point, since the scroll it is standing in for is `cmdk`'s.
+		 */
 		const row = list?.querySelector<HTMLElement>('[cmdk-item][aria-selected="true"]');
 		if (!row) return;
 		if (row.parentElement?.firstChild === row) {

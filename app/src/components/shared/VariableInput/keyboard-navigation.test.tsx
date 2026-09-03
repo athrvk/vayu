@@ -153,6 +153,23 @@ describe("the suggestion list the arrows steer", () => {
 		expect(input.value).toBe("{{");
 	});
 
+	/*
+	 * Closing is this component's state rather than the list's, so Escape is
+	 * answered even where there is nothing to navigate - and nothing mounted
+	 * inside the list, the scroll probe included, has a say in it. Untested
+	 * until issue #1333 went looking for it.
+	 */
+	it("closes the list on Escape", () => {
+		const { container, input } = renderHarness();
+
+		type(input, "{{");
+		expect(container.querySelectorAll("[cmdk-list]")).toHaveLength(1);
+
+		fireEvent.keyDown(input, { key: "Escape" });
+
+		expect(container.querySelectorAll("[cmdk-list]")).toHaveLength(0);
+	});
+
 	it("navigates the plain suggestion list the same way", () => {
 		const { input } = renderHarness({
 			scoped: false,
