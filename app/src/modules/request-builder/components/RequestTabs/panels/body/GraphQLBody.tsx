@@ -384,8 +384,18 @@ export function GraphQLBody({
 	 * here rather than in the pane because this is where the decision is made,
 	 * and cleared by the next activation that lands - a refusal about the last
 	 * row is not an answer about this one.
+	 *
+	 * It carries the request it was written for, and is only shown while that is
+	 * still the request on screen. Switching tabs does not remount this
+	 * component - nothing above it is keyed on the request - so a notice about
+	 * one request's schema would otherwise sit in the pane describing another's,
+	 * which is worse than saying nothing. Compared during render rather than
+	 * cleared in an effect, so the wrong text is never painted even once.
 	 */
-	const [explorerNotice, setExplorerNotice] = useState<string | null>(null);
+	const [explorerNotice, setExplorerNotice] = useState<{
+		requestId: string | null;
+		text: string;
+	} | null>(null);
 	const [pendingVariables, setPendingVariables] = useState<string[]>([]);
 	// Stable, so the reveal effect below can depend on it without re-running per
 	// render. The two setters are stable already; this only says so.
@@ -657,7 +667,7 @@ export function GraphQLBody({
 		const result = insertionForNode(activeSchema, node, query, cursor);
 		if (!result) return;
 		if (isRefusal(result)) {
-			setExplorerNotice(result.reason);
+			setExplorerNotice({ requestId, text: result.reason });
 			announce(result.reason);
 			return;
 		}
@@ -860,7 +870,9 @@ export function GraphQLBody({
 						onRefresh={refresh}
 						onClose={() => setExplorerOpen(false)}
 						onInsert={handleExplorerInsert}
-						notice={explorerNotice}
+						notice={
+							explorerNotice?.requestId === requestId ? explorerNotice.text : null
+						}
 					/>
 				</ResizablePanel>
 			)}

@@ -295,6 +295,33 @@ describe("search results carry the address a flat list threw away", () => {
 		expect(document.activeElement).toBe(revealed);
 	});
 
+	it("holds the window open far enough to render the row it revealed", () => {
+		/*
+		 * The growing window resets to one step whenever the row count changes,
+		 * and leaving the results for the tree changes it - so on a schema with
+		 * more types than a step, the revealed row was expanded in the store and
+		 * never rendered: Reveal became the click that does nothing, which is the
+		 * defect this whole pane is fixing. Mutation check: drop `revealFloor`
+		 * and this row is absent.
+		 */
+		const types = Array.from(
+			{ length: 250 },
+			(_, i) =>
+				`type T${String(i).padStart(3, "0")} { f${String(i).padStart(3, "0")}: String }`
+		).join("\n");
+		const wide = buildSchema(`type Query { ping: String }\n${types}`);
+		renderExplorer({ entry: { schema: wide } });
+
+		search("f249");
+		act(() => {
+			fireEvent.click(rowNamed("f249")!.querySelector("[data-tree-menu]")!);
+		});
+
+		const revealed = rowNamed("f249")!;
+		expect(revealed.getAttribute("data-tree-id")).toBe("branch:types/type:T249/T249.f249");
+		expect(document.activeElement).toBe(revealed);
+	});
+
 	it("leaves a path already open alone rather than closing half of it", () => {
 		renderExplorer();
 		fireEvent.click(rowNamed("Types")!.querySelector("[data-tree-toggle]")!);

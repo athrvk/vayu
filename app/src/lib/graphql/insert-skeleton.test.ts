@@ -364,29 +364,60 @@ describe("insertField - a mutation", () => {
 });
 
 describe("insertFragment", () => {
+	/** A document whose innermost selection set is a `Post`, cursor inside it. */
+	const inPost = `mutation Draft($input: CreatePostInput!) {\n  createPost(input: $input) {\n    id\n  }\n}\n`;
+	const postCursor = inPost.indexOf("id\n  }");
+
 	it("writes a fragment on the type with its scalar fields", () => {
-		const result = inserted(insertFragment(schema, "", "Post"));
+		const result = inserted(insertFragment(schema, inPost, postCursor, "Post"));
 
 		expect(result.placement).toBe("fragment");
 		expect(result.text).toContain("fragment PostFields on Post");
 		expect(result.text).toContain("title");
-		expect(parse(result.text)).toBeTruthy();
+		expectValid(result.text);
+	});
+
+	it("spreads the fragment it wrote, since an unused one fails validation", () => {
+		/*
+		 * `Fragment "X" is never used` rejects the whole request, the operation
+		 * the user already had included. Mutation check: drop the spread edit and
+		 * `expectValid` reddens with exactly that message while the document
+		 * still parses - which is why parsing was never the test to run here.
+		 */
+		const result = inserted(insertFragment(schema, inPost, postCursor, "Post"));
+
+		expect(result.text).toContain("...PostFields");
+		expectValid(result.text);
 	});
 
 	it("gives a union fragment __typename, since a union has no fields", () => {
-		const result = inserted(insertFragment(schema, "", "SearchResult"));
+		const doc = `query Draft {\n  search(term: "x") {\n    __typename\n  }\n}\n`;
+		const result = inserted(
+			insertFragment(schema, doc, doc.indexOf("__typename"), "SearchResult")
+		);
+
+		expect(result.text).toContain("fragment SearchResultFields on SearchResult");
 		expect(result.text).toContain("__typename");
-		expect(parse(result.text)).toBeTruthy();
+		expectValid(result.text);
 	});
 
 	it("does not collide with a fragment the document already defines", () => {
-		const doc = `fragment PostFields on Post {\n  id\n}\n`;
-		const result = inserted(insertFragment(schema, doc, "Post"));
+		const doc = `${inPost}\nfragment PostFields on Post {\n  id\n}\n`;
+		const result = inserted(insertFragment(schema, doc, doc.indexOf("id\n  }"), "Post"));
 		expect(result.text).toContain("fragment PostFields2 on Post");
+		expect(result.text).toContain("...PostFields2");
+	});
+
+	it("refuses when nothing on screen selects the type, rather than orphaning it", () => {
+		const doc = `query Draft {\n  ping: __typename\n}\n`;
+		const result = insertFragment(schema, doc, doc.length - 1, "Post");
+
+		expect(isRefusal(result)).toBe(true);
+		if (isRefusal(result)) expect(result.reason).toContain("Post");
 	});
 
 	it("refuses a type a fragment cannot be written on", () => {
-		const result = insertFragment(schema, "", "Ranking");
+		const result = insertFragment(schema, inPost, postCursor, "Ranking");
 		expect(isRefusal(result)).toBe(true);
 	});
 });
@@ -531,22 +562,28 @@ describe("insertionForNode - a type row", () => {
 		expect(result.text).not.toContain("legacySearch");
 	});
 
-	it("writes a fragment only beside an operation that can carry it", () => {
-		const orphaned = buildSchema(`
-			type Orphan { tag: String }
-			type Query { ping: String }
+	it("writes a fragment where its spread can go, and validates as a whole", () => {
+		/*
+		 * `Inner` is reachable only through `Outer`, so no root field returns it
+		 * and there is no query to write - but a document can still be sitting
+		 * inside one, which is exactly where a fragment on it belongs.
+		 */
+		const nested = buildSchema(`
+			type Inner { tag: String }
+			type Outer { inner: Inner }
+			type Query { outer: Outer }
 		`);
-		const doc = `query Existing {\n  ping\n}\n`;
-		const result = inserted(insertionForNode(orphaned, typeRow(orphaned, "Orphan"), doc, 0)!);
+		const doc = `query Existing {\n  outer {\n    inner {\n      tag\n    }\n  }\n}\n`;
+		const result = inserted(
+			insertionForNode(nested, typeRow(nested, "Inner"), doc, doc.indexOf("tag"))!
+		);
 
-		expect(result.placement).toBe("fragment");
-		expect(result.text).toContain("fragment OrphanFields on Orphan");
-		// The operation the fragment stands beside is still there, so the
-		// document is still something Send can be pressed on.
-		expect(result.text).toContain("query Existing");
+		expect(result.text).toContain("fragment InnerFields on Inner");
+		expect(result.text).toContain("...InnerFields");
+		expect(validate(nested, parse(result.text)).map((e) => e.message)).toEqual([]);
 	});
 
-	it("refuses rather than leaving a fragment with nothing to run", () => {
+	it("refuses rather than leaving a fragment with nothing to spread it", () => {
 		const orphaned = buildSchema(`
 			type Orphan { tag: String }
 			type Query { ping: String }
@@ -556,7 +593,7 @@ describe("insertionForNode - a type row", () => {
 		expect(result && isRefusal(result)).toBe(true);
 		if (result && isRefusal(result)) {
 			expect(result.reason).toContain("Orphan");
-			expect(result.reason).toContain("Write an operation first");
+			expect(result.reason).toContain("Put the cursor inside one");
 		}
 	});
 

@@ -81,10 +81,12 @@ for you.
 
 Selecting a **type** inserts the operation that returns it - `Post` writes the
 `createPost` mutation that answers with one, following the shortest route the
-schema offers and never a deprecated one. A fragment definition is written
-instead only when nothing in Query or Mutation returns the type *and* the
-document already holds an operation for the fragment to stand beside; with
-neither, Vayu says so rather than leaving you a document with nothing to run.
+schema offers and never a deprecated one. Where nothing in Query or Mutation
+returns the type - a type reachable only through its parent - Vayu writes a
+fragment on it **and the spread that uses it**, into the selection set your
+cursor is in. It needs that cursor: a fragment nothing spreads is rejected
+along with the rest of the document, so with nowhere to put the spread Vayu
+says so rather than handing you a request the server will refuse.
 Under a type row, **Returned by** lists the root fields that answer with it, so
 you can pick a different route than the one a click takes.
 

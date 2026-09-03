@@ -241,14 +241,29 @@ export function SchemaExplorer({
 	 */
 	const revealTarget = useRef<string | null>(null);
 	const [revealSeq, setRevealSeq] = useState(0);
+	/**
+	 * How far the window must stay open for a revealed row to exist.
+	 *
+	 * The growing window is what would otherwise swallow this: `visible` resets
+	 * to one step whenever the row count changes, and going from results to tree
+	 * changes it - so on a schema with more types than a step, the target is
+	 * expanded in the store and never rendered, and Reveal becomes the click
+	 * that does nothing all over again. Where it lands is knowable before the
+	 * render, so hold the window open at least that far.
+	 */
+	const [revealFloor, setRevealFloor] = useState(0);
 
 	const reveal = useCallback(
 		(location: TreeLocation) => {
+			if (!schema) return;
+			const opened = new Set([...expanded, ...location.expand]);
+			const index = visibleRows(schema, opened).findIndex((r) => r.node.id === location.id);
+			setRevealFloor(index >= 0 ? index + 1 : 0);
 			revealTarget.current = location.id;
 			revealPath(schemaKey, location.expand);
 			setRevealSeq((n) => n + 1);
 		},
-		[revealPath, schemaKey]
+		[expanded, revealPath, schema, schemaKey]
 	);
 
 	useEffect(() => {
@@ -261,14 +276,16 @@ export function SchemaExplorer({
 		 */
 		const rendered = treeRef.current?.querySelectorAll<HTMLElement>("[data-tree-id]") ?? [];
 		const row = Array.from(rendered).find((el) => el.getAttribute("data-tree-id") === id);
-		// Absent only when the row sits past the growing window; the tree is open
-		// at the right place either way, so there is nothing to announce.
+		// Absent only when the schema changed under the reveal; `revealFloor`
+		// holds the window open far enough for every row the tree can show.
 		if (!row) return;
 		row.scrollIntoView({ block: "center" });
 		row.focus();
 	}, [revealSeq]);
 
-	const { visible, sentinelRef, hasMore } = useGrowingWindow(rows.length, ROW_WINDOW);
+	const { visible, sentinelRef } = useGrowingWindow(rows.length, ROW_WINDOW);
+	/** The window, never smaller than a reveal needs it to be. */
+	const shown = Math.max(visible, revealFloor);
 
 	/*
 	 * Restore the scroll position the last mount left behind.
@@ -364,7 +381,12 @@ export function SchemaExplorer({
 					<Input
 						ref={searchRef}
 						value={search}
-						onChange={(e) => setSearch(schemaKey, e.target.value)}
+						onChange={(e) => {
+							// A new list is a new window; the last reveal's floor
+							// describes rows this one does not have.
+							setRevealFloor(0);
+							setSearch(schemaKey, e.target.value);
+						}}
 						placeholder="Search schema"
 						aria-label="Search schema"
 						className="h-6 pl-6 text-[11px]"
@@ -419,7 +441,7 @@ export function SchemaExplorer({
 						onKeyDown={onKeyDown}
 						onFocus={roving.onFocus}
 					>
-						{rows.slice(0, visible).map((row) =>
+						{rows.slice(0, shown).map((row) =>
 							row.kind === "group" ? (
 								<p
 									key={row.key}
@@ -448,10 +470,10 @@ export function SchemaExplorer({
 								/>
 							)
 						)}
-						{hasMore && (
+						{shown < rows.length && (
 							<div ref={sentinelRef} className="px-2 py-1">
 								<span className={EYEBROW_CLASS}>
-									Showing {visible} of {rows.length}
+									Showing {shown} of {rows.length}
 								</span>
 							</div>
 						)}

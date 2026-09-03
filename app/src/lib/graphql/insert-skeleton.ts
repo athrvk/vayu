@@ -638,10 +638,24 @@ function appendOperation(
 	};
 }
 
-/** A fragment definition on `typeName`, appended to the document. */
+/**
+ * A fragment definition on `typeName`, **and the spread that uses it**.
+ *
+ * The two are one edit because a fragment nothing spreads is not merely
+ * useless, it is invalid: `Fragment "X" is never used` is a validation rule
+ * every spec-conformant server enforces, and it rejects the *whole* request -
+ * including the operation the user already had and did not touch. Appending a
+ * definition on its own therefore breaks a working document, which is the
+ * opposite of what a click should do.
+ *
+ * So the spread decides where a fragment can go at all: the cursor has to be in
+ * a selection set the fragment applies to. Anywhere else is refused, which is
+ * the same honest end as every other placement this module cannot make.
+ */
 export function insertFragment(
 	schema: GraphQLSchema,
 	text: string,
+	cursor: number,
 	typeName: string
 ): InsertResult {
 	const type = schema.getType(typeName);
@@ -649,6 +663,20 @@ export function insertFragment(
 		return {
 			refused: true,
 			reason: `A fragment needs an object, interface or union type. ${typeName} is neither.`,
+		};
+	}
+
+	// Innermost first, the same order `insertField` prefers: the set closest to
+	// where the user is looking is the one they meant.
+	const chain = enclosingSets(schema, text, cursor)?.chain ?? [];
+	let host: EnclosingSet | null = null;
+	for (let depth = chain.length - 1; depth >= 0 && !host; depth--) {
+		if (chain[depth].typeName === typeName) host = chain[depth];
+	}
+	if (!host) {
+		return {
+			refused: true,
+			reason: `Nothing here selects a ${typeName}. Put the cursor inside one to add a fragment on it - a fragment nothing spreads is rejected with the rest of the document.`,
 		};
 	}
 
@@ -667,8 +695,17 @@ export function insertFragment(
 	for (let n = 2; taken.has(name); n++) name = `${typeName}Fields${n}`;
 
 	const body = leafSelection(type) ?? "__typename";
-	const fragment = `fragment ${name} on ${typeName} {\n${indentBlock(`${body}${CARET}`)}\n}`;
-	const applied = applyEdits(withBlankLine(text) + fragment + "\n", []);
+	const definition = `fragment ${name} on ${typeName} {\n${indentBlock(`${body}${CARET}`)}\n}`;
+	/*
+	 * The definition goes after everything, the spread where the cursor is, and
+	 * `applyEdits` commits them last-first so the spread's offsets are still the
+	 * ones it was computed against.
+	 */
+	const gap = text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+	const applied = applyEdits(text, [
+		insertIntoSet(text, host.selectionSet, `...${name}`),
+		{ start: text.length, end: text.length, text: `${gap}${definition}\n` },
+	]);
 	return { ...applied, variables: {}, placement: "fragment", label: `fragment ${name}` };
 }
 
@@ -798,9 +835,8 @@ function rootedPath(schema: GraphQLSchema, node: SchemaTreeNode): FieldStep[] | 
  * to that is the query that returns one.
  *
  * So: the best route from a root field, when the schema has one. Otherwise a
- * fragment - but only where one can stand, meaning beside an operation that is
- * already in the document, or when the type is not fragmentable at all and
- * `insertFragment` is the thing that knows why. Never a fragment alone.
+ * fragment, which `insertFragment` writes only where its spread can go and
+ * refuses everywhere else. Never a fragment alone.
  */
 function insertTypeSelection(
 	schema: GraphQLSchema,
@@ -809,37 +845,12 @@ function insertTypeSelection(
 	typeName: string
 ): InsertResult {
 	const [best] = rootPathsToType(schema, typeName);
-	if (best) {
-		const last = best[best.length - 1];
-		return insertField(schema, text, cursor, {
-			parentTypeName: last.parentTypeName,
-			fieldName: last.fieldName,
-			rootPath: best,
-		});
-	}
+	if (!best) return insertFragment(schema, text, cursor, typeName);
 
-	const type = schema.getType(typeName);
-	const fragmentable = isObjectType(type) || isInterfaceType(type) || isUnionType(type);
-	if (!fragmentable || hasOperation(text)) return insertFragment(schema, text, typeName);
-
-	return {
-		refused: true,
-		reason: `Nothing in Query or Mutation returns ${typeName}. Write an operation first - a fragment on its own has nothing to run.`,
-	};
-}
-
-/** Whether the document already holds an operation a fragment could serve. */
-function hasOperation(text: string): boolean {
-	try {
-		return parse(maskGraphqlTemplates(text).masked).definitions.some(
-			(d) => d.kind === Kind.OPERATION_DEFINITION
-		);
-	} catch {
-		/*
-		 * A document that does not parse holds no operation this can rely on -
-		 * and appending a fragment to it would not produce one either. Refusing
-		 * with a next step is the outcome the user can act on.
-		 */
-		return false;
-	}
+	const last = best[best.length - 1];
+	return insertField(schema, text, cursor, {
+		parentTypeName: last.parentTypeName,
+		fieldName: last.fieldName,
+		rootPath: best,
+	});
 }
