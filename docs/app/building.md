@@ -153,11 +153,19 @@ The app will:
 
 ### Build Outputs
 
-Production builds are output to `app/release/`:
+Production builds are output to `app/release/`. `artifactName` in
+`electron-builder.json` is the source of truth for these names: the top-level
+pattern is `${productName}-${arch}.${ext}`, and the `mac` and `appImage` blocks
+override it to insert `${version}`, so the dmg, the zip and the AppImage carry
+a version while the exe and the deb do not.
 
-- **macOS**: `Vayu-0.1.1-universal.dmg`
-- **Windows**: `Vayu Setup 0.1.1.exe` (NSIS installer)
-- **Linux**: `Vayu-0.1.1.AppImage` and `vayu-client_0.1.1_amd64.deb`
+- **macOS**: `Vayu-<version>-universal.dmg` and `Vayu-<version>-universal.zip`.
+  The zip carries the macOS install and update path - `install.sh` downloads it
+  and `latest-mac.yml` names it - while the dmg is the drag-to-Applications
+  route. A single-arch build names that arch instead of `universal`, which is
+  what `python build.py` does on macOS.
+- **Windows**: `Vayu-<arch>.exe` (NSIS installer)
+- **Linux**: `Vayu-<version>-x86_64.AppImage` and `Vayu-amd64.deb`
 
 ### Electron Builder Configuration
 
