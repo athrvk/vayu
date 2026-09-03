@@ -29,6 +29,7 @@
  * tab switch, which unmounts the panel.
  */
 
+import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
 	Collapsible,
@@ -45,17 +46,28 @@ import {
 import { useScriptCompletionsQuery } from "@/queries";
 import { useLayoutStore } from "@/stores";
 import { countSnippets, snippetsForContext } from "@/lib/script-snippets";
+import type { SnippetInsertion, SnippetPlacement } from "@/lib/editor-snippet";
 import { cn } from "@/lib/utils";
 
 export interface ScriptSnippetsProps {
 	/** Which editor this list sits under. */
 	context: "pre" | "test";
 	/**
-	 * Insert the template at the cursor. The host owns the editor instance, so
-	 * it owns the insertion; this list only says which template was chosen.
+	 * Insert the template. The host owns the editor instance, so it owns the
+	 * insertion; this list says which template was chosen and narrates what came
+	 * back.
 	 */
-	onInsert: (snippet: string) => void;
+	onInsert: (snippet: string) => SnippetInsertion | null;
 }
+
+/**
+ * How each landing reads out loud, in the shape the GraphQL explorer's
+ * `PLACEMENT_PHRASE` set: "Inserted X <phrase>."
+ */
+const PLACEMENT_PHRASE: Record<SnippetPlacement, string> = {
+	cursor: "at the cursor",
+	"end-of-script": "at the end of the script",
+};
 
 export function ScriptSnippets({ context, onInsert }: ScriptSnippetsProps) {
 	const collapsed = useLayoutStore((s) => s.scriptSnippetsCollapsed);
@@ -64,6 +76,40 @@ export function ScriptSnippets({ context, onInsert }: ScriptSnippetsProps) {
 
 	const groups = snippetsForContext(data?.completions, context);
 	const total = countSnippets(groups);
+
+	/*
+	 * What just happened, said out loud - the explorer's pattern and its reason
+	 * (`GraphQLBody.tsx`): an insertion lands out of sight of the list that
+	 * asked for it, and a live region only speaks when its text *changes*, so
+	 * the same template twice would be silent the second time and read as the
+	 * click not landing. The sequence number is what makes the repeat audible.
+	 */
+	const [announcement, setAnnouncement] = useState<{ text: string; seq: number }>({
+		text: "",
+		seq: 0,
+	});
+	const say = (text: string) => setAnnouncement((prev) => ({ text, seq: prev.seq + 1 }));
+
+	/*
+	 * The one outcome with nothing to look at. An insertion shows itself in the
+	 * editor; a refusal reaching `sr-only` text alone is a click that, to a
+	 * sighted user, did nothing - which is the defect this whole surface was
+	 * fixed for. Cleared by the next insertion that lands.
+	 */
+	const [notice, setNotice] = useState("");
+
+	const insert = (snippet: string, label: string) => {
+		const result = onInsert(snippet);
+		if (!result) {
+			const refusal =
+				"That snippet had no editor to go into. Click in the editor and try again.";
+			setNotice(refusal);
+			say(refusal);
+			return;
+		}
+		setNotice("");
+		say(`Inserted ${label} ${PLACEMENT_PHRASE[result.placement]}.`);
+	};
 
 	return (
 		<Collapsible open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
@@ -86,6 +132,15 @@ export function ScriptSnippets({ context, onInsert }: ScriptSnippetsProps) {
 				Snippets
 				{total > 0 && <span className="ml-1 tabular-nums opacity-70">{total}</span>}
 			</CollapsibleTrigger>
+
+			{notice && (
+				<p className="mt-2 text-xs text-muted-foreground" role="status">
+					{notice}
+				</p>
+			)}
+			<span key={announcement.seq} className="sr-only" aria-live="polite">
+				{announcement.text}
+			</span>
 
 			<CollapsibleContent className="mt-2">
 				{!collapsed && (
@@ -118,7 +173,9 @@ export function ScriptSnippets({ context, onInsert }: ScriptSnippetsProps) {
 												<CommandItem
 													key={snippet.label}
 													value={`${group} ${snippet.label} ${snippet.filterText ?? ""}`}
-													onSelect={() => onInsert(snippet.insertText)}
+													onSelect={() =>
+														insert(snippet.insertText, snippet.label)
+													}
 													className="cursor-pointer flex-col items-start gap-0.5"
 												>
 													<span className="font-mono text-xs">
