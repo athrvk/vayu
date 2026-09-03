@@ -128,6 +128,35 @@ export const PREVIOUS_TAB_CHORD: Chord = {
 };
 
 /**
+ * Go back to the previous place in the navigation history - and forward again.
+ *
+ * The one pair in this file that is defined per platform, because the two
+ * platforms disagree about what the chord *is* rather than about which modifier
+ * spells it: ⌘[ / ⌘] is what Safari and Chrome bind on macOS, Alt+← / Alt+→ is
+ * what every browser binds on Windows and Linux, and each is dead or harmful on
+ * the other. Alt+← on macOS moves the caret a word left in every text field;
+ * Ctrl+[ on Windows is Escape at the terminal level and is bound by nothing a
+ * user would expect to navigate.
+ *
+ * This is not the fork `NEXT_TAB_CHORD` declined. That one would have offered
+ * *two* chords for one action on one platform - two bindings, two rows in the
+ * panel, two keys to keep free. Here `isMac` picks one definition at import, so
+ * every surface still reads a single `Chord` with a single label and the
+ * Keyboard Shortcuts panel still prints one row.
+ *
+ * Matched by `code` for the reason the digit row is: `[` is unshifted on a US
+ * layout and AltGr+8 on a German one, while `BracketLeft` is the same key
+ * everywhere. `key` stays what is displayed, so the hint reads ⌘[ and Alt+←.
+ */
+export const GO_BACK_CHORD: Chord = isMac
+	? { mod: true, key: "[", code: "BracketLeft", label: "Go back" }
+	: { alt: true, key: "←", code: "ArrowLeft", label: "Go back" };
+
+export const GO_FORWARD_CHORD: Chord = isMac
+	? { mod: true, key: "]", code: "BracketRight", label: "Go forward" }
+	: { alt: true, key: "→", code: "ArrowRight", label: "Go forward" };
+
+/**
  * Move focus to the next region of the window - and, shifted, to the previous.
  *
  * F6 is the desktop convention for cycling panes (Windows Explorer, Firefox,
@@ -290,7 +319,13 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 	{
 		id: "tabs",
 		title: "Tabs",
-		chords: [NEXT_TAB_CHORD, PREVIOUS_TAB_CHORD, ...TAB_CHORDS],
+		chords: [
+			GO_BACK_CHORD,
+			GO_FORWARD_CHORD,
+			NEXT_TAB_CHORD,
+			PREVIOUS_TAB_CHORD,
+			...TAB_CHORDS,
+		],
 	},
 	{
 		id: "focus",

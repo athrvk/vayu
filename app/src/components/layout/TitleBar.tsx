@@ -25,15 +25,29 @@
  */
 
 import { useEffect, useState } from "react";
-import { Minus, X, Maximize2, Square, Check, ChevronDown, Cloud } from "lucide-react";
-import { useSessionStore, useToastStore } from "@/stores";
+import {
+	Minus,
+	X,
+	Maximize2,
+	Square,
+	Check,
+	ChevronDown,
+	Cloud,
+	ArrowLeft,
+	ArrowRight,
+} from "lucide-react";
+import { canGoBack, canGoForward, useSessionStore, useTabsStore, useToastStore } from "@/stores";
 import { useEnvironmentsQuery, useSetActiveEnvironmentMutation } from "@/queries";
 import {
 	DropdownMenu,
 	DropdownMenuTrigger,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	TooltipIconButton,
 } from "@/components/ui";
+import { GO_BACK_CHORD, GO_FORWARD_CHORD } from "@/constants/shortcuts";
+import { formatChord } from "@/lib/platform";
+import { navigateHistory } from "@/lib/navigate-history";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { CommandSearchBar } from "./CommandSearchBar";
@@ -169,6 +183,51 @@ function AppIcon() {
 			aria-haspopup="menu"
 		>
 			<img src={iconUrl} alt="" className="w-4 h-4" />
+		</div>
+	);
+}
+
+/**
+ * Back and Forward, at the window's leading edge (#1245).
+ *
+ * Where every application that has this pair puts it - browsers, Finder,
+ * Explorer, VS Code - and the reason to put them in the title bar rather than
+ * beside the tab strip: they navigate the whole workspace, not the strip. A tab
+ * closed three steps ago is somewhere Back can still go, and the strip has no
+ * row for it.
+ *
+ * Each button is disabled when its half of the history is empty, which is the
+ * affordance a browser's are: greyed until there is somewhere to go.
+ */
+function NavigationControls() {
+	const back = useTabsStore(canGoBack);
+	const forward = useTabsStore(canGoForward);
+
+	return (
+		// Per-control `no-drag`, the pattern AppIcon and the env switcher follow -
+		// a drag region swallows the click before the button sees it.
+		<div
+			className="flex items-center gap-0.5 pl-1 shrink-0"
+			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+		>
+			<TooltipIconButton
+				label="Back"
+				tooltipHint={formatChord(GO_BACK_CHORD)}
+				tooltipSide="bottom"
+				icon={<ArrowLeft className="w-3.5 h-3.5" />}
+				className="h-7 w-7"
+				disabled={!back}
+				onClick={() => navigateHistory("back", "ui")}
+			/>
+			<TooltipIconButton
+				label="Forward"
+				tooltipHint={formatChord(GO_FORWARD_CHORD)}
+				tooltipSide="bottom"
+				icon={<ArrowRight className="w-3.5 h-3.5" />}
+				className="h-7 w-7"
+				disabled={!forward}
+				onClick={() => navigateHistory("forward", "ui")}
+			/>
 		</div>
 	);
 }
@@ -320,6 +379,10 @@ export default function TitleBar() {
 				    means a root-absolute path does not resolve under the packaged
 				    file:// build. */}
 				<AppIcon />
+
+				{/* Leading edge, after the icon and the traffic-light inset - where
+				    a window's navigation controls go on every platform. */}
+				<NavigationControls />
 			</div>
 
 			{/* The palette's entry point. Bounded rather than fluid: a search field

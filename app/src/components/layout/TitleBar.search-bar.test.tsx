@@ -92,16 +92,23 @@ function stubPlatform(platform: string | null) {
 async function renderFor(platform: string | null) {
 	stubPlatform(platform);
 	vi.resetModules();
-	const [{ default: TitleBar }, { useLayoutStore }] = await Promise.all([
+	// The row now holds tooltip-bearing controls (the navigation buttons), which
+	// rely on the app-level provider `main.tsx` supplies. It is imported from the
+	// same fresh graph as the bar: after `resetModules` a statically imported one
+	// is a different Radix instance, and the tooltip context would not match.
+	const [{ default: TitleBar }, { useLayoutStore }, { TooltipProvider }] = await Promise.all([
 		import("./TitleBar"),
 		import("@/stores"),
+		import("@/components/ui"),
 	]);
 	useLayoutStore.setState({ paletteOpen: false });
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return {
 		...render(
 			<QueryClientProvider client={client}>
-				<TitleBar />
+				<TooltipProvider>
+					<TitleBar />
+				</TooltipProvider>
 			</QueryClientProvider>
 		),
 		useLayoutStore,

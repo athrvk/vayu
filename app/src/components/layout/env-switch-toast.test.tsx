@@ -57,6 +57,7 @@ vi.hoisted(() => {
 
 import { useToastStore, useSessionStore } from "@/stores";
 import TitleBar from "./TitleBar";
+import { TooltipProvider } from "@/components/ui";
 
 const environments = [
 	{ id: "env-1", name: "Staging" },
@@ -96,8 +97,12 @@ vi.mock("@/services/api", async (importOriginal) => {
 function renderTitleBar(TitleBar: () => React.ReactNode) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
+		// The row's navigation buttons carry tooltips, which rely on the app-level
+		// provider `main.tsx` supplies.
 		<QueryClientProvider client={client}>
-			<TitleBar />
+			<TooltipProvider>
+				<TitleBar />
+			</TooltipProvider>
 		</QueryClientProvider>
 	);
 }

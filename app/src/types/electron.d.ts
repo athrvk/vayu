@@ -96,6 +96,14 @@ interface ElectronAPI {
 	 */
 	onZoomCommand: (callback: (command: "in" | "out" | "reset") => void) => () => void;
 
+	/**
+	 * A step through the tab navigation history, asked for by the View menu or
+	 * by an OS gesture the renderer cannot hear - the mouse's back/forward
+	 * buttons where the OS reports them as application commands, and the macOS
+	 * swipe (#1245).
+	 */
+	onNavigateHistory: (callback: (direction: "back" | "forward") => void) => () => void;
+
 	// Open one of the app's own doc links in the system browser
 	openAppLink: (key: "docs" | "scripting" | "issues") => Promise<void>;
 
