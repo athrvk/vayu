@@ -110,7 +110,8 @@ jobs:
             automake \
             libtool \
             xvfb \
-            openbox
+            openbox \
+            x11-utils
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
@@ -318,8 +319,22 @@ jobs:
             exit
           fi
           # openbox inside the session, not beside it: the display only exists
-          # for the length of xvfb-run's command, and it exits with it.
-          xvfb-run -a bash -c "openbox --sm-disable & $measure"
+          # for the length of xvfb-run's command, and it exits with it. Waited
+          # for rather than merely started - a backgrounded window manager takes
+          # a moment to claim the role, and the app launches about a second
+          # later: one run measured 743 ms and the next timed out with the same
+          # workflow, which is the shape of that race. `_NET_SUPPORTING_WM_CHECK`
+          # is the property a manager sets when it has taken over.
+          xvfb-run -a bash -c '
+            openbox --sm-disable &
+            for _ in $(seq 50); do
+              xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id" && break
+              sleep 0.2
+            done
+            if ! xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id"; then
+              echo "::warning::no window manager after 10s - the packaged leg will report unavailable"
+            fi
+            '"$measure"
 
       # tee, not a plain redirect: a leg that reports "unavailable" is a green
       # job with a note in it, so the log has to carry the table too. That is
