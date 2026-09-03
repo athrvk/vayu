@@ -12,9 +12,13 @@ import {
 	branchRootTypeName,
 	buildSearchIndex,
 	childNodes,
+	groupSearchMatches,
+	rootFieldsReturning,
+	rootPathsToType,
 	schemaBranches,
 	searchSchema,
 	splitAtMatch,
+	treeLocationOf,
 	type SchemaTreeNode,
 } from "./schema-tree";
 
@@ -114,15 +118,21 @@ describe("childNodes", () => {
 		]);
 	});
 
-	it("expands a union into its members", () => {
+	it("expands a union into its members, under the routes that reach it", () => {
 		const union = childNamed(branch("types"), "SearchResult");
-		expect(childNodes(schema, union).map((m) => m.name)).toEqual(["User", "Post"]);
+		expect(childNodes(schema, union).map((m) => m.name)).toEqual([
+			"Returned by",
+			"User",
+			"Post",
+		]);
 	});
 
 	it("expands an interface into its fields", () => {
 		const node = childNamed(branch("types"), "Node");
 		expect(node.signature).toBe("interface");
-		expect(childNodes(schema, node).map((f) => f.name)).toEqual(["id"]);
+		// `Query.node` returns a Node, so the routes come first and the one
+		// declared field after them.
+		expect(childNodes(schema, node).map((f) => f.name)).toEqual(["Returned by", "id"]);
 	});
 
 	it("treats a scalar as a leaf", () => {
@@ -418,5 +428,223 @@ describe("splitAtMatch", () => {
 				expect(before + match + after).toBe(name);
 			}
 		}
+	});
+});
+
+describe("the routes that reach a type", () => {
+	it("lists the root fields whose result type is this one", () => {
+		expect(rootFieldsReturning(schema, "Post")).toEqual([
+			{
+				branch: "mutation",
+				parentTypeName: "Mutation",
+				fieldName: "createPost",
+				deprecated: false,
+			},
+		]);
+	});
+
+	it("puts a deprecated route last, so a click never takes one", () => {
+		// `Query.legacySearch` is deprecated and declared after `Query.search`;
+		// both answer with a SearchResult.
+		const routes = rootFieldsReturning(schema, "SearchResult");
+		expect(routes.map((r) => r.fieldName)).toEqual(["search", "legacySearch"]);
+	});
+
+	it("keeps a subscription out, since one cannot be run here", () => {
+		// `Subscription.postAdded` also returns a Post. Offering it as the route
+		// would hand the user an operation this app refuses to send.
+		expect(rootFieldsReturning(schema, "Post").map((r) => r.branch)).toEqual(["mutation"]);
+	});
+
+	it("answers nothing for a type no root field returns", () => {
+		expect(rootFieldsReturning(schema, "PostFilter")).toEqual([]);
+		expect(rootPathsToType(schema, "PostFilter")).toEqual([]);
+	});
+
+	it("keys only types a selection can be written against", () => {
+		// Every root field returns a scalar somewhere down its tree; a `String`
+		// row listing them all would be noise, and "insert a String" is not a
+		// query anyone wanted.
+		expect(rootFieldsReturning(schema, "String")).toEqual([]);
+		expect(rootFieldsReturning(schema, "Ranking")).toEqual([]);
+	});
+
+	it("hands insertion a one-step path, so shortest is a fact not a guess", () => {
+		expect(rootPathsToType(schema, "User")).toEqual([
+			[{ parentTypeName: "Query", fieldName: "user" }],
+		]);
+	});
+
+	it("shows the routes as a container above the type's own members", () => {
+		const post = childNamed(branch("types"), "Post");
+		const children = childNodes(schema, post);
+
+		expect(children[0].kind).toBe("returned-by");
+		expect(children[0].name).toBe("Returned by");
+		expect(children.slice(1).map((c) => c.name)).toEqual(["id", "title", "body", "author"]);
+	});
+
+	it("expands the container into the root fields, each carrying its route", () => {
+		const post = childNamed(branch("types"), "Post");
+		const routes = childNodes(schema, childNamed(post, "Returned by"));
+
+		expect(routes.map((r) => r.name)).toEqual(["createPost"]);
+		expect(routes[0].rootPath).toEqual([
+			{ parentTypeName: "Mutation", fieldName: "createPost" },
+		]);
+		expect(routes[0].branch).toBe("mutation");
+	});
+
+	it("omits the container for a type nothing returns", () => {
+		const filter = childNamed(branch("types"), "PostFilter");
+		expect(childNodes(schema, filter).map((c) => c.kind)).not.toContain("returned-by");
+	});
+
+	it("calls a childless type expandable when something returns it", () => {
+		// An empty object type has no members of its own; the container is still
+		// a child, and a row that holds one while reporting nothing to open is
+		// the dead chevron pointing the other way.
+		const sparse = buildSchema(`
+			type Empty { placeholder: String }
+			type Query { empty: Empty }
+		`);
+		const types = schemaBranches(sparse).find((b) => b.branch === "types")!;
+		const empty = childNodes(sparse, types).find((t) => t.name === "Empty")!;
+		expect(empty.expandable).toBe(true);
+	});
+
+	it("asks how a type row was reached, never how a field row was", () => {
+		// `Query.user` leads to a User, and the row above it is how it was
+		// reached - repeating the routes there would be noise on every field.
+		const user = childNamed(branch("query"), "user");
+		expect(childNodes(schema, user).map((c) => c.kind)).not.toContain("returned-by");
+	});
+});
+
+describe("groupSearchMatches", () => {
+	const index = buildSearchIndex(schema);
+
+	it("puts results under the headings the tree uses, in the tree's order", () => {
+		// `search` reaches Query (two fields) and Types (the SearchResult union,
+		// and Ranking through its description) and nothing else.
+		const groups = groupSearchMatches(searchSchema(index, "search"));
+		expect(groups.map((g) => g.label)).toEqual(["Query", "Types"]);
+	});
+
+	it("keeps the ranking inside a group rather than reshuffling it", () => {
+		const groups = groupSearchMatches(searchSchema(index, "post"));
+		const types = groups.find((g) => g.branch === "types")!;
+		// The closest name match still leads its own group.
+		expect(types.matches[0].node.name).toBe("Post");
+	});
+
+	it("separates same-named fields by the branch they belong to", () => {
+		const groups = groupSearchMatches(searchSchema(index, "id"));
+		const owners = groups.flatMap((g) =>
+			g.matches.filter((m) => m.node.name === "id").map((m) => m.node.ownerTypeName)
+		);
+		// Three types declare `id`; each row knows which one, which is what a
+		// flat list of three identical names could not say.
+		expect(owners).toEqual(expect.arrayContaining(["Node", "User", "Post"]));
+	});
+
+	it("omits a heading no result landed under", () => {
+		// `deletePost` names one row in the whole schema.
+		const groups = groupSearchMatches(searchSchema(index, "deletePost"));
+		expect(groups.map((g) => g.branch)).toEqual(["mutation"]);
+	});
+
+	it("is empty for no matches", () => {
+		expect(groupSearchMatches([])).toEqual([]);
+	});
+});
+
+describe("the tier a match landed in", () => {
+	const index = buildSearchIndex(schema);
+
+	it("names the haystack that put the row in the results", () => {
+		const byName = searchSchema(index, "Ranking").find((m) => m.node.name === "Ranking");
+		const bySignature = searchSchema(index, "Ranking").find((m) => m.node.name === "search");
+		const byDescription = searchSchema(index, "across").find((m) => m.node.name === "search");
+
+		expect(byName?.tier).toBe("name");
+		expect(bySignature?.tier).toBe("signature");
+		expect(byDescription?.tier).toBe("description");
+	});
+
+	it("stays 'name' when the description happens to mention the term too", () => {
+		// `Query.search` is named `search` and described "Search across users and
+		// posts." Reading the tier off `descriptionStart` calls this a
+		// description match and draws the whole sentence over the results.
+		const search = searchSchema(index, "search").find((m) => m.node.name === "search");
+		expect(search?.tier).toBe("name");
+		expect(search?.descriptionStart).toBe(0);
+	});
+});
+
+describe("treeLocationOf", () => {
+	it("walks a root field back to its branch", () => {
+		const index = buildSearchIndex(schema);
+		const search = searchSchema(index, "search").find((m) => m.node.name === "search")!;
+
+		expect(treeLocationOf(search.node)).toEqual({
+			expand: ["branch:query"],
+			id: "branch:query/Query.search",
+		});
+	});
+
+	it("walks a non-root field back through its owning type", () => {
+		const index = buildSearchIndex(schema);
+		const handle = searchSchema(index, "handle").find((m) => m.node.name === "handle")!;
+
+		expect(treeLocationOf(handle.node)).toEqual({
+			expand: ["branch:types", "branch:types/type:User"],
+			id: "branch:types/type:User/User.handle",
+		});
+	});
+
+	it("walks a type back to the Types branch", () => {
+		const index = buildSearchIndex(schema);
+		const post = searchSchema(index, "Post").find((m) => m.node.name === "Post")!;
+
+		expect(treeLocationOf(post.node)).toEqual({
+			expand: ["branch:types"],
+			id: "branch:types/type:Post",
+		});
+	});
+
+	it("names ids the tree actually builds, not ids that merely look right", () => {
+		/*
+		 * The whole point: a reconstructed address that no row answers to
+		 * expands the tree and lands on nothing. Drive it against the tree
+		 * itself - every search row's location must be a row `childNodes`
+		 * produces.
+		 */
+		const index = buildSearchIndex(schema);
+		const rows = ["search", "handle", "Post", "RELEVANCE", "authorId"];
+		expect(rows.length).toBeGreaterThan(0);
+
+		for (const name of rows) {
+			const match = searchSchema(index, name).find((m) => m.node.name === name);
+			if (!match) throw new Error(`fixture no longer has a row named ${name}`);
+			const location = treeLocationOf(match.node);
+			if (!location) throw new Error(`no tree location for ${name}`);
+
+			let level = schemaBranches(schema);
+			for (const id of location.expand) {
+				const parent = level.find((n) => n.id === id);
+				if (!parent) throw new Error(`no row ${id} to expand for ${name}`);
+				level = childNodes(schema, parent);
+			}
+			expect(level.map((n) => n.id)).toContain(location.id);
+		}
+	});
+
+	it("has nothing to reveal for a row that is not in the tree as itself", () => {
+		const types = schemaBranches(schema).find((b) => b.branch === "types")!;
+		expect(treeLocationOf(types)).toBeNull();
+
+		const post = childNamed(types, "Post");
+		expect(treeLocationOf(childNamed(post, "Returned by"))).toBeNull();
 	});
 });

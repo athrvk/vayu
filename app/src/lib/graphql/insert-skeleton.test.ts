@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parse, validate, type GraphQLSchema } from "graphql";
+import { buildSchema, parse, validate, type GraphQLSchema } from "graphql";
 import { fixtureSchema } from "@/test/graphql-schema-fixture";
 import {
 	insertField,
@@ -454,6 +454,138 @@ describe("insertionForNode - a row found by search", () => {
 		const result = inserted(insertionForNode(schema, searched("search"), "", 0)!);
 		expect(result.text).toContain("query Search");
 		expectValid(result.text);
+	});
+
+	it("reaches a non-root field through the route that returns its owner", () => {
+		/*
+		 * `User.handle` is the commonest search result there is - a field on a
+		 * type the user has not opened - and clicking it used to refuse whenever
+		 * the cursor was not already inside a `User`. `Query.user` returns one,
+		 * so the route exists and the click can take it.
+		 */
+		const result = inserted(insertionForNode(schema, searched("handle"), "", 0)!);
+
+		expect(result.text).toContain("user(id: $id)");
+		expect(result.text).toContain("handle");
+		expectValid(result.text);
+	});
+
+	it("takes the same route from the Types branch as from the search box", () => {
+		const fromSearch = insertionForNode(schema, searched("handle"), "", 0);
+		const fromTree = insertionForNode(schema, browsed("User", "handle"), "", 0);
+		expect(fromSearch).toEqual(fromTree);
+	});
+
+	it("still refuses a field nothing can reach, rather than inventing a route", () => {
+		// `Orphan` is returned by no root field, so `Orphan.tag` has no route and
+		// the refusal is the honest answer.
+		const orphaned = buildSchema(`
+			type Orphan { tag: String }
+			type Query { ping: String }
+		`);
+		const tag = searchSchema(buildSearchIndex(orphaned), "tag").find(
+			(m) => m.node.name === "tag"
+		)!;
+		const result = insertionForNode(orphaned, tag.node, "", 0);
+
+		expect(result && isRefusal(result)).toBe(true);
+		if (result && isRefusal(result)) expect(result.reason).toContain("Orphan");
+	});
+});
+
+/**
+ * A type row's whole job: answer "give me one of these" with something the user
+ * can press Send on. It used to answer with a fragment, which on an empty
+ * document is a file that parses and cannot be run.
+ */
+describe("insertionForNode - a type row", () => {
+	/** The Types-branch row for a named type. */
+	function typeRow(target: GraphQLSchema, name: string): SchemaTreeNode {
+		const types = schemaBranches(target).find((b) => b.branch === "types");
+		if (!types) throw new Error("no types branch");
+		const found = childNodes(target, types).find((t) => t.name === name);
+		if (!found) throw new Error(`no type ${name}`);
+		return found;
+	}
+
+	it("inserts the query that returns the type, not a fragment", () => {
+		const result = inserted(insertionForNode(schema, typeRow(schema, "User"), "", 0)!);
+
+		expect(result.text).toContain("user(id: $id)");
+		expect(result.text).not.toContain("fragment");
+		expectValid(result.text);
+	});
+
+	it("uses a mutation when that is what returns the type", () => {
+		const result = inserted(insertionForNode(schema, typeRow(schema, "Post"), "", 0)!);
+		expect(result.text).toContain("mutation");
+		expect(result.text).toContain("createPost(input: $input)");
+		expectValid(result.text);
+	});
+
+	it("does not route through a deprecated root field when another exists", () => {
+		// `Query.legacySearch` is deprecated; `Query.search` returns the same
+		// union and is the route a click should take.
+		const result = inserted(insertionForNode(schema, typeRow(schema, "SearchResult"), "", 0)!);
+		expect(result.text).toContain("search(term: $term)");
+		expect(result.text).not.toContain("legacySearch");
+	});
+
+	it("writes a fragment only beside an operation that can carry it", () => {
+		const orphaned = buildSchema(`
+			type Orphan { tag: String }
+			type Query { ping: String }
+		`);
+		const doc = `query Existing {\n  ping\n}\n`;
+		const result = inserted(insertionForNode(orphaned, typeRow(orphaned, "Orphan"), doc, 0)!);
+
+		expect(result.placement).toBe("fragment");
+		expect(result.text).toContain("fragment OrphanFields on Orphan");
+		// The operation the fragment stands beside is still there, so the
+		// document is still something Send can be pressed on.
+		expect(result.text).toContain("query Existing");
+	});
+
+	it("refuses rather than leaving a fragment with nothing to run", () => {
+		const orphaned = buildSchema(`
+			type Orphan { tag: String }
+			type Query { ping: String }
+		`);
+		const result = insertionForNode(orphaned, typeRow(orphaned, "Orphan"), "", 0);
+
+		expect(result && isRefusal(result)).toBe(true);
+		if (result && isRefusal(result)) {
+			expect(result.reason).toContain("Orphan");
+			expect(result.reason).toContain("Write an operation first");
+		}
+	});
+
+	it("keeps the reason a fragment is impossible at all", () => {
+		// An enum can be neither queried for nor fragmented on; the wording that
+		// says which is the fragment module's, and it survives the new routing.
+		const result = insertionForNode(schema, typeRow(schema, "Ranking"), "", 0);
+		expect(result && isRefusal(result)).toBe(true);
+		if (result && isRefusal(result)) expect(result.reason).toContain("object, interface");
+	});
+
+	it("never leaves the document without an operation, over every type row", () => {
+		const types = schemaBranches(schema).find((b) => b.branch === "types")!;
+		const rows = childNodes(schema, types);
+		// A guard that scanned nothing would pass forever.
+		expect(rows.length).toBeGreaterThan(4);
+
+		for (const row of rows) {
+			const result = insertionForNode(schema, row, "", 0);
+			if (!result || isRefusal(result) || isAlreadyPresent(result)) continue;
+			const operations = parse(result.text).definitions.filter(
+				(d) => d.kind === "OperationDefinition"
+			);
+			expect({ type: row.name, operations: operations.length }).toEqual({
+				type: row.name,
+				operations: 1,
+			});
+			expectValid(result.text);
+		}
 	});
 });
 

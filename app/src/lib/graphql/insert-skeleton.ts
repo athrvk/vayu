@@ -8,8 +8,15 @@
 /**
  * Turning a row of the schema explorer into an edit of the query document.
  *
- * **The contract is that the document still parses afterwards.** Everything
- * awkward in here follows from it:
+ * **The contract is that the document still parses afterwards *and* can be
+ * run.** A document that parses is not necessarily one the endpoint will
+ * accept: a lone `fragment PostFields on Post { … }` is valid GraphQL and holds
+ * no operation, so pressing Send on it gets nothing back. A click has to leave
+ * behind something the user can run, which is why a type row inserts the query
+ * that reaches it and falls back to a fragment only when the document already
+ * carries an operation for that fragment to live beside.
+ *
+ * Everything awkward in here follows from the parses half of it:
  *
  * - A field is inserted into the selection set the cursor is in *only* when
  *   that set's type is the one that owns the field. No inline-fragment
@@ -56,7 +63,7 @@ import {
 	type SelectionSetNode,
 } from "graphql";
 import { maskGraphqlTemplates } from "./templates";
-import type { FieldStep, SchemaTreeNode } from "./schema-tree";
+import { rootPathsToType, type FieldStep, type SchemaTreeNode } from "./schema-tree";
 
 /** One indent level. Matches `CodeEditor`'s `tabSize: 2`. */
 const INDENT = "  ";
@@ -731,9 +738,9 @@ export function insertionForNode(
 	query: string,
 	cursor: number
 ): InsertResult | null {
-	// A branch is a container. Activating it is the toggle, which the row
-	// already handles; there is nothing to write.
-	if (node.kind === "branch") return null;
+	// A branch and a "Returned by" heading are containers. Activating one is the
+	// toggle, which the row already handles; there is nothing to write.
+	if (node.kind === "branch" || node.kind === "returned-by") return null;
 
 	if (node.kind === "input-field" || node.kind === "enum-value") {
 		return {
@@ -742,7 +749,7 @@ export function insertionForNode(
 		};
 	}
 
-	if (node.kind === "type") return insertFragment(schema, query, node.name);
+	if (node.kind === "type") return insertTypeSelection(schema, query, cursor, node.name);
 
 	if (node.branch === "subscription") {
 		return {
@@ -754,6 +761,85 @@ export function insertionForNode(
 	return insertField(schema, query, cursor, {
 		parentTypeName: node.ownerTypeName ?? "",
 		fieldName: node.name,
-		rootPath: node.rootPath,
+		rootPath: rootedPath(schema, node),
 	});
+}
+
+/**
+ * The route to a row, borrowing one to its owner when the row has none.
+ *
+ * A field found by search under a non-root type carries no path - `Post.title`
+ * says nothing about how a `Post` is reached - and until now that made the
+ * commonest search result un-insertable: clicking it produced a refusal
+ * whenever the cursor was not already inside a `Post`. It is only un-insertable
+ * if nothing is allowed to say how a `Post` is reached, and the schema does say:
+ * `rootPathsToType` reads the root fields that answer with one. Borrowing the
+ * best of those and appending this field is the same path the user would have
+ * built by expanding the tree, arrived at without the expanding.
+ *
+ * Still null when nothing returns the owner type, which is the honest answer and
+ * the case `insertField` refuses out loud.
+ */
+function rootedPath(schema: GraphQLSchema, node: SchemaTreeNode): FieldStep[] | null {
+	if (node.rootPath) return node.rootPath;
+	if (!node.ownerTypeName) return null;
+	const [best] = rootPathsToType(schema, node.ownerTypeName);
+	if (!best) return null;
+	return [...best, { parentTypeName: node.ownerTypeName, fieldName: node.name }];
+}
+
+/**
+ * What activating a *type* row writes.
+ *
+ * A type row used to write a fragment unconditionally, which on an empty
+ * document left `fragment PostFields on Post { … }` and nothing else: a
+ * document that parses, holds no operation, and cannot be sent. A user clicking
+ * a type in a schema browser is asking "give me one of these", and the answer
+ * to that is the query that returns one.
+ *
+ * So: the best route from a root field, when the schema has one. Otherwise a
+ * fragment - but only where one can stand, meaning beside an operation that is
+ * already in the document, or when the type is not fragmentable at all and
+ * `insertFragment` is the thing that knows why. Never a fragment alone.
+ */
+function insertTypeSelection(
+	schema: GraphQLSchema,
+	text: string,
+	cursor: number,
+	typeName: string
+): InsertResult {
+	const [best] = rootPathsToType(schema, typeName);
+	if (best) {
+		const last = best[best.length - 1];
+		return insertField(schema, text, cursor, {
+			parentTypeName: last.parentTypeName,
+			fieldName: last.fieldName,
+			rootPath: best,
+		});
+	}
+
+	const type = schema.getType(typeName);
+	const fragmentable = isObjectType(type) || isInterfaceType(type) || isUnionType(type);
+	if (!fragmentable || hasOperation(text)) return insertFragment(schema, text, typeName);
+
+	return {
+		refused: true,
+		reason: `Nothing in Query or Mutation returns ${typeName}. Write an operation first - a fragment on its own has nothing to run.`,
+	};
+}
+
+/** Whether the document already holds an operation a fragment could serve. */
+function hasOperation(text: string): boolean {
+	try {
+		return parse(maskGraphqlTemplates(text).masked).definitions.some(
+			(d) => d.kind === Kind.OPERATION_DEFINITION
+		);
+	} catch {
+		/*
+		 * A document that does not parse holds no operation this can rely on -
+		 * and appending a fragment to it would not produce one either. Refusing
+		 * with a next step is the outcome the user can act on.
+		 */
+		return false;
+	}
 }
