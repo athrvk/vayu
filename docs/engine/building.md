@@ -387,7 +387,9 @@ tracking issue.
   two runs, both sides of the report being pool threads parsing their first
   response - against 2796/2796 with the entry in place. That test alone
   reproduces it 10 times out of 10, which is the cheap way to re-measure this
-  one. What is left is upstream in libstdc++.
+  one, and the way it was re-measured at `dc25029` after the baseline moved to
+  cpp-httplib 0.53.1: 8 of 10 runs raced without the entry, 10 of 10 passed
+  with it. What is left is upstream in libstdc++.
 
 The matrix has therefore paid for itself twice over: two engine-side defects
 found and fixed, one of them a race the ordinary suite is structurally unable
