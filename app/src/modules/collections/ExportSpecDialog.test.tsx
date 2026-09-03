@@ -111,6 +111,25 @@ function open() {
 	render(withQueryClient(<ExportSpecDialog collection={collection()} onOpenChange={vi.fn()} />));
 }
 
+/**
+ * The one question both in-flight indicators answer (issue #1311): the
+ * placeholder card on the first read, the spinner beside the toggle once there
+ * is a summary to keep. Asking it by role rather than by sentence is what lets
+ * the two forms share an assertion.
+ */
+function assembling() {
+	return screen.queryByRole("status", { name: "Assembling the document" });
+}
+
+/** An export the test resolves by hand, to hold the dialog mid-read. */
+function deferred() {
+	let settle!: (answer: SpecExportResponse) => void;
+	const promise = new Promise<SpecExportResponse>((resolve) => {
+		settle = resolve;
+	});
+	return { promise, settle };
+}
+
 beforeEach(() => {
 	vi.restoreAllMocks();
 	exportSpec.mockReset();
@@ -152,9 +171,9 @@ describe("ExportSpecDialog", () => {
 		fireEvent.click(screen.getByRole("radio", { name: "YAML" }));
 		await waitFor(() => expect(exportSpec).toHaveBeenCalledTimes(2));
 		expect(exportSpec.mock.calls[1][0]).toEqual({ collectionId: "col_1", format: "yaml" });
-		// The other format is a second read, not a re-render: the pending line
-		// going away is what says its answer is the one Download now holds.
-		await waitFor(() => expect(screen.queryByText(/Assembling the document/)).toBeNull());
+		// The other format is a second read, not a re-render: the in-flight
+		// indicator going away is what says its answer is the one Download holds.
+		await waitFor(() => expect(assembling()).toBeNull());
 		fireEvent.click(screen.getByRole("button", { name: "Download" }));
 		const asYaml = await download.read();
 		expect(asYaml.fileName).toBe("petstore.openapi.yaml");
@@ -192,6 +211,73 @@ describe("ExportSpecDialog", () => {
 
 		expect(await screen.findByText("The document could not be assembled")).toBeTruthy();
 		expect(screen.getByText(/unexpected end of document/)).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Download" }).hasAttribute("disabled")).toBe(
+			true
+		);
+	});
+
+	it("keeps the summary on screen while the other format assembles", async () => {
+		const download = captureDownload();
+		open();
+		await screen.findByText(/own document, updated/);
+
+		const yaml = deferred();
+		exportSpec.mockReturnValue(yaml.promise);
+		fireEvent.click(screen.getByRole("radio", { name: "YAML" }));
+
+		// The card is what used to be torn down for a one-line spinner, taking
+		// ~200px of a self-centring dialog with it. It states properties of the
+		// collection, which the serialisation does not change, so it stays - and
+		// the read says so beside the toggle instead.
+		await waitFor(() => expect(assembling()).not.toBeNull());
+		expect(screen.getByText(/own document, updated/)).toBeTruthy();
+		expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0);
+		// What is held under it is still JSON's text, so neither button may act
+		// on it: a Copy here would put JSON on the clipboard under a YAML toggle.
+		expect(screen.getByRole("button", { name: "Download" }).hasAttribute("disabled")).toBe(
+			true
+		);
+		expect(screen.getByRole("button", { name: "Copy" }).hasAttribute("disabled")).toBe(true);
+
+		yaml.settle(answer({ text: "openapi: 3.0.3\n", fileName: "petstore.openapi.yaml" }));
+		await waitFor(() => expect(assembling()).toBeNull());
+		fireEvent.click(screen.getByRole("button", { name: "Download" }));
+		expect((await download.read()).fileName).toBe("petstore.openapi.yaml");
+	});
+
+	it("opens at the summary's height instead of growing into it", async () => {
+		const first = deferred();
+		exportSpec.mockReturnValue(first.promise);
+		open();
+
+		// The first read has no previous answer to keep, so it holds the card's
+		// footprint: the summary's own box with rows in it, not a line of text
+		// the arriving card would push the dialog's edges away from.
+		const placeholder = screen.getByRole("status", { name: "Assembling the document" });
+		expect(placeholder.className).toContain("surface-sunken");
+		// A heading bar, two for the paragraph that wraps under it, and a row
+		// per count: seven, between the six a free-form summary lists and the
+		// eight a bound one does. jsdom measures no heights, so the row counts
+		// those heights come from are what a test can hold.
+		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(10);
+
+		first.settle(answer());
+		expect(await screen.findByText(/own document, updated/)).toBeTruthy();
+		expect(assembling()).toBeNull();
+	});
+
+	it("does not leave the previous format's summary under an error", async () => {
+		open();
+		await screen.findByText(/own document, updated/);
+
+		exportSpec.mockRejectedValue(new Error("The stored document could not be read"));
+		fireEvent.click(screen.getByRole("radio", { name: "YAML" }));
+
+		// Keeping the previous answer is for a read that is still coming, not one
+		// that failed: what is on screen has to be the format on the toggle, and
+		// there is nothing to download for it.
+		expect(await screen.findByText("The document could not be assembled")).toBeTruthy();
+		expect(screen.queryByText(/own document, updated/)).toBeNull();
 		expect(screen.getByRole("button", { name: "Download" }).hasAttribute("disabled")).toBe(
 			true
 		);
