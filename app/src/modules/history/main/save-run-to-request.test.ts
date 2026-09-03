@@ -364,7 +364,18 @@ describe("buildChangeset", () => {
 		expect(set.map((i) => i.field)).not.toContain("Pre-request script");
 	});
 
-	it("diffs headers per entry, and never the app's own system headers", () => {
+	/*
+	 * A run traced before issue #1229 carries the rows the renderer injected -
+	 * the engine adds its defaults at send time now and stores nothing, but the
+	 * trace is a record of what went out then, and writing those back would pin
+	 * a stale version and one frozen correlation id onto the request.
+	 *
+	 * The rule is `isLegacyManagedHeader`'s, so it is narrow: a browser
+	 * `User-Agent` and a hand-typed `X-Request-ID` are the user's headers and
+	 * are saved. Broaden `userEntries` back to a key list and the second half
+	 * fails.
+	 */
+	it("diffs headers per entry, and never the rows a pre-#1229 client injected", () => {
 		const stale = run({
 			configSnapshot: {
 				method: "POST",
@@ -372,7 +383,8 @@ describe("buildChangeset", () => {
 				headers: {
 					"X-Plain": "visible",
 					"X-Vayu-Version": "0.9.0",
-					"X-Request-ID": "old-uuid",
+					"X-Request-ID": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+					"User-Agent": "Vayu/0.9.0",
 				},
 			},
 		} as Partial<Run>);
@@ -386,11 +398,34 @@ describe("buildChangeset", () => {
 		expect(keys).toContain("X-Old");
 		expect(keys).not.toContain("X-Vayu-Version");
 		expect(keys).not.toContain("X-Request-ID");
+		expect(keys).not.toContain("User-Agent");
 
 		const patch = applyRunToRequest(seed, live);
 		const written = (patch.headers ?? []).map((h) => h.key.toLowerCase());
 		expect(written).not.toContain("x-vayu-version");
 		expect(written).not.toContain("x-request-id");
+		expect(written).not.toContain("user-agent");
+	});
+
+	it("saves a User-Agent and an X-Request-ID the user chose, which are not Vayu's", () => {
+		const traced = run({
+			configSnapshot: {
+				method: "POST",
+				url: "https://api.example.test/users?page=2",
+				headers: {
+					"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)",
+					"X-Request-ID": "order-42",
+				},
+			},
+		} as Partial<Run>);
+		const live = liveRequest();
+
+		const seed = seedFromRun(traced, live);
+		const patch = applyRunToRequest(seed, live);
+		const written = new Map((patch.headers ?? []).map((h) => [h.key, h.value]));
+
+		expect(written.get("User-Agent")).toBe("Mozilla/5.0 (X11; Linux x86_64)");
+		expect(written.get("X-Request-ID")).toBe("order-42");
 	});
 
 	it("shows Body as a kept row with a reason when the run was truncated", () => {

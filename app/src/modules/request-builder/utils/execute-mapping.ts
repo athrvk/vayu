@@ -129,6 +129,25 @@ export function execIdentity(request: RequestState): { requestName?: string } {
 }
 
 /**
+ * The engine defaults this send refuses (issue #1229), as the wire field - or
+ * nothing at all.
+ *
+ * Absent rather than `[]` when the user switched none off, so a payload that
+ * refuses nothing is byte-for-byte the payload sent before the field existed.
+ * The engine refuses a malformed list with a 400 and ignores a name it adds
+ * nothing under, so there is nothing to filter here.
+ *
+ * Shared by the builder's Send, its stream, its load run and the History run
+ * view's replay - the four places a request leaves this app.
+ */
+export function disabledDefaults(request: Pick<RequestState, "disabledDefaultHeaders">): {
+	disabledDefaultHeaders?: string[];
+} {
+	const names = request.disabledDefaultHeaders;
+	return names.length > 0 ? { disabledDefaultHeaders: names } : {};
+}
+
+/**
  * The string the pane's Pretty view reads, given the raw body beside it.
  *
  * The first branch is the only one that builds a *second* full copy of the

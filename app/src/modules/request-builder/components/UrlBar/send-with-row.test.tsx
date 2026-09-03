@@ -72,6 +72,7 @@ function ctx(
 		},
 		setRequest: vi.fn(),
 		updateField: vi.fn(),
+		setDisabledDefaultHeaders: vi.fn(),
 		restoreStoredName: vi.fn(),
 		getBodyDrafts: () => emptyDrafts(null),
 		setBodyDrafts: vi.fn(),

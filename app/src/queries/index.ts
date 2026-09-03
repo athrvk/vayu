@@ -133,7 +133,7 @@ export { useTrashQuery, useRestoreTrashMutation, usePurgeTrashMutation } from ".
 
 // Health & Config
 export { useHealthQuery } from "./health";
-export { useConfigQuery, useUpdateConfigMutation } from "./config";
+export { useConfigQuery, useRequestDefaultsQuery, useUpdateConfigMutation } from "./config";
 
 // Script Completions
 export { useScriptCompletionsQuery } from "./script-completions";

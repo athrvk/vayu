@@ -48,7 +48,7 @@ import type {
 import type { KeyValueItem } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
-import { SYSTEM_HEADER_KEYS } from "@/modules/request-builder/utils/system-headers";
+import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import type { DesignRunSeed } from "./design-run-seed";
 
 /** How one key/value entry differs between the request and the run. */
@@ -138,14 +138,21 @@ export function diffSegments(from: string, to: string): DiffSeg[] {
 }
 
 /**
- * The app's own managed headers - `X-Vayu-Version`, `X-Request-ID`, `User-Agent`.
- * They are injected fresh on every send and re-added by the builder on load, so
- * they never belong in a saved request: a stored run carries whatever version it
- * sent, and writing that back would pin an old version onto the request. Dropped
- * from both the diff and the write.
+ * The rows a pre-#1229 Vayu client added to a send, dropped from both the diff
+ * and the write.
+ *
+ * No client writes them any more - the engine adds its defaults at send time and
+ * nothing is stored - but a run *trace* captured before that change still
+ * carries them, and this reads traces. Writing one back would pin a stale
+ * version, or a single frozen correlation id, onto the saved request.
+ *
+ * The rule comes from `isLegacyManagedHeader` rather than a key list of its own,
+ * so a browser `User-Agent` or a hand-typed `X-Request-ID` the run really did
+ * send is saved like any other header. One definition, two readers - it drifting
+ * from the loader's copy is how the two sides came to disagree before.
  */
 function userEntries(entries: KeyValueEntry[]): KeyValueEntry[] {
-	return entries.filter((e) => !SYSTEM_HEADER_KEYS.has(e.key.trim().toLowerCase()));
+	return entries.filter((e) => !isLegacyManagedHeader(e.key, e.value));
 }
 
 /** Enabled, non-empty keys as a map; last value wins on a duplicate key. */

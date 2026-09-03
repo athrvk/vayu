@@ -237,6 +237,13 @@ export const queryKeys = {
 		all: ["config"] as const,
 	},
 
+	// What a send would add on its own (issue #1229). Its own key rather than a
+	// slice of `config`: it is a different endpoint, and invalidating one must
+	// not refetch the other.
+	requestDefaults: {
+		all: ["requestDefaults"] as const,
+	},
+
 	// Script Completions
 	scriptTypes: {
 		all: ["scriptTypes"] as const,

@@ -354,6 +354,19 @@ export interface ExecuteRequestRequest {
 	 * (issue #706).
 	 */
 	verifySSL?: boolean;
+	/**
+	 * The engine's own default headers this send refuses, by name (issue #1229) -
+	 * see {@link RequestDefaults} for what it can name.
+	 *
+	 * Omitted, never `[]`, when the send refuses none: a payload refusing
+	 * nothing is exactly the payload sent before the field existed. A malformed
+	 * list (not an array, a non-string in it, a name that is not a header name)
+	 * is a `400`, because a client asking for a request it will not get has no
+	 * later gate that would notice; a name the engine adds nothing under is
+	 * accepted and does nothing, since config can switch a default off between
+	 * a client reading the declared set and sending.
+	 */
+	disabledDefaultHeaders?: string[];
 	requestId?: string;
 	/**
 	 * The request's name, for the script sandbox to read as `pm.info.requestName`
@@ -535,6 +548,14 @@ export interface StartLoadTestRequest {
 
 	/** TLS verification - same rationale, and see {@link Request.verifySSL}. */
 	verifySSL?: boolean;
+
+	/**
+	 * The engine's own default headers this run refuses, by name (issue #1229).
+	 * Same field, same rules and same omit-when-empty contract as
+	 * {@link ExecuteRequestRequest.disabledDefaultHeaders} - a load run has to
+	 * send the header set a Send sends, or it measures a different request.
+	 */
+	disabledDefaultHeaders?: string[];
 
 	// Load test strategy
 	mode: LoadTestMode;
@@ -1230,6 +1251,30 @@ export interface UpdateConfigRequest {
 	value?: string;
 	// Bulk update
 	entries?: Record<string, string>;
+}
+
+/**
+ * One header the engine adds to a request that does not name it (issue #1229).
+ *
+ * Declared by the engine over `GET /request-defaults` rather than re-derived
+ * here from the config entries: a client deriving the set would be a second
+ * definition of the same rule, which is exactly how the renderer's copies and
+ * the engine came to disagree before.
+ */
+export interface RequestDefaultHeader {
+	/** The header name as it goes on the wire. */
+	name: string;
+	/** Absent when `generated` - there is no value until a send makes one. */
+	value?: string;
+	/** A fresh value per transfer, so no two sends carry the same one. */
+	generated: boolean;
+	/** The engine config key governing it; absent for one that is always on. */
+	configKey?: string;
+}
+
+/** What `GET /request-defaults` answers: what a send would add, right now. */
+export interface RequestDefaults {
+	headers: RequestDefaultHeader[];
 }
 
 // Import API

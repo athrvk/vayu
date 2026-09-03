@@ -158,6 +158,18 @@ export interface RequestState {
 	url: string;
 	params: KeyValueItem[];
 	headers: KeyValueItem[];
+	/**
+	 * Names of the engine's own default headers this send refuses (issue #1229),
+	 * ticked off in the Headers tab's "Added by Vayu" group and sent as
+	 * `disabledDefaultHeaders`.
+	 *
+	 * **None of it is persisted.** It is a property of this send, not of the
+	 * request: the defaults are resolved from engine config at send time, so a
+	 * saved opt-out would be a stored answer to a question config re-answers on
+	 * every send - which is the whole defect #1229 removes. `handleSave` writes
+	 * no such field, and there is none on `Request` to write it to.
+	 */
+	disabledDefaultHeaders: string[];
 
 	// Body (flattened for editor access)
 	bodyMode: BodyMode;
@@ -370,6 +382,16 @@ export interface RequestBuilderContextValue {
 	request: RequestState;
 	setRequest: (request: Partial<RequestState>) => void;
 	updateField: <K extends keyof RequestState>(field: K, value: RequestState[K]) => void;
+
+	/**
+	 * Which of the engine's own default headers this send refuses (issue #1229).
+	 *
+	 * Separate from `updateField` because it is the one piece of `RequestState`
+	 * that is never saved: routing it through the ordinary setter would mark the
+	 * tab as having unsaved changes, and autosave would then write a request
+	 * whose stored fields nobody touched.
+	 */
+	setDisabledDefaultHeaders: (names: string[]) => void;
 
 	/**
 	 * Put the stored name back on screen, discarding whatever the name field

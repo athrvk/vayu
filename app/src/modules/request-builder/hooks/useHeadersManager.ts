@@ -8,18 +8,19 @@
 /**
  * useHeadersManager Hook
  *
- * Centralized hook for managing request headers with system header support
- * Handles:
- * - System header management
- * - Header updates
- * - Bulk edit operations
- * - Editability checks
+ * The Headers tab's two ways of editing the same list: the table and the
+ * bulk-edit text.
+ *
+ * It used to re-impose three managed system rows on every change and answer
+ * "may this row be edited / removed / disabled" for the table. Neither exists
+ * since issue #1229: every row in the headers table is the user's, and what
+ * Vayu adds is declared by the engine and shown beside the table rather than
+ * written into it.
  */
 
 import { useCallback, useMemo } from "react";
 import type { KeyValueItem } from "@/types";
-import { ensureSystemHeaders } from "../utils/system-headers";
-import { canEditHeaderField, canRemoveHeader, canDisableHeader } from "../utils/system-headers";
+import { withTrailingBlank } from "@/components/shared/KeyValueEditor/key-value";
 import { formatHeadersToText, parseHeadersFromText } from "../utils/headers-format";
 
 interface UseHeadersManagerOptions {
@@ -28,75 +29,41 @@ interface UseHeadersManagerOptions {
 }
 
 interface UseHeadersManagerReturn {
-	// Current headers with system headers ensured
+	/** The rows to render, always ending in one blank row to type into. */
 	displayHeaders: KeyValueItem[];
 
 	// Handlers
-	handleHeadersChange: (newHeaders: KeyValueItem[]) => void;
+	handleHeadersChange: (headers: KeyValueItem[]) => void;
 	handleBulkEdit: (text: string) => void;
 
 	// Formatting
 	formatForBulkEdit: () => string;
-
-	// Editability checks (for KeyValueEditor callbacks)
-	canEdit: (item: KeyValueItem, field: keyof KeyValueItem) => boolean;
-	canRemove: (item: KeyValueItem) => boolean;
-	canDisable: (item: KeyValueItem) => boolean;
 }
 
 export function useHeadersManager({
 	headers,
 	onUpdate,
 }: UseHeadersManagerOptions): UseHeadersManagerReturn {
-	// Ensure system headers are always present
-	const displayHeaders = useMemo(() => {
-		return ensureSystemHeaders(headers);
-	}, [headers]);
+	// A stored request arrives with the blank row already (`toHeaderItems`), but
+	// a bulk-edit commit does not, and neither does a request whose last row was
+	// just removed - so the rule is applied where the rows are rendered.
+	const displayHeaders = useMemo(() => withTrailingBlank(headers), [headers]);
 
-	// Handle headers change from KeyValueEditor
-	const handleHeadersChange = useCallback(
-		(newHeaders: KeyValueItem[]) => {
-			const headersWithSystem = ensureSystemHeaders(newHeaders);
-			onUpdate(headersWithSystem);
-		},
-		[onUpdate]
-	);
-
-	// Handle bulk edit text
 	const handleBulkEdit = useCallback(
 		(text: string) => {
-			const parsedHeaders = parseHeadersFromText(text, true); // Skip version header
-			const headersWithSystem = ensureSystemHeaders(parsedHeaders);
-			onUpdate(headersWithSystem);
+			onUpdate(withTrailingBlank(parseHeadersFromText(text)));
 		},
 		[onUpdate]
 	);
 
-	// Format headers for bulk edit display
 	const formatForBulkEdit = useCallback(() => {
 		return formatHeadersToText(displayHeaders);
 	}, [displayHeaders]);
 
-	// Editability callbacks for KeyValueEditor
-	const canEdit = useCallback((item: KeyValueItem, field: keyof KeyValueItem) => {
-		return canEditHeaderField(item, field);
-	}, []);
-
-	const canRemove = useCallback((item: KeyValueItem) => {
-		return canRemoveHeader(item);
-	}, []);
-
-	const canDisable = useCallback((item: KeyValueItem) => {
-		return canDisableHeader(item);
-	}, []);
-
 	return {
 		displayHeaders,
-		handleHeadersChange,
+		handleHeadersChange: onUpdate,
 		handleBulkEdit,
 		formatForBulkEdit,
-		canEdit,
-		canRemove,
-		canDisable,
 	};
 }

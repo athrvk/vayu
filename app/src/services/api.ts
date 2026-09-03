@@ -64,6 +64,7 @@ import type {
 	ConnectionTestResult,
 	WorkspaceBackupResult,
 	GetConfigResponse,
+	RequestDefaults,
 	UpdateConfigRequest,
 	GlobalsResponse,
 	ImportFetchProgress,
@@ -175,6 +176,10 @@ export const apiService = {
 
 	async updateConfig(config: UpdateConfigRequest): Promise<GetConfigResponse> {
 		return await httpClient.post<GetConfigResponse>(API_ENDPOINTS.CONFIG, config);
+	},
+
+	async getRequestDefaults(): Promise<RequestDefaults> {
+		return await httpClient.get<RequestDefaults>(API_ENDPOINTS.REQUEST_DEFAULTS);
 	},
 
 	// Collections

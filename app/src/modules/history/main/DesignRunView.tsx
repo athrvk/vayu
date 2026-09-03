@@ -49,11 +49,11 @@ import type { RequestState, ResponseState } from "@/modules/request-builder/type
 import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
 import {
 	buildExecBody,
+	disabledDefaults,
 	execIdentity,
 	responseFromExecuteResult,
 	scriptsMayWriteVariables,
 } from "@/modules/request-builder/utils/execute-mapping";
-import { generateUUID } from "@/lib/id";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { seedFromRun } from "./design-run-seed";
@@ -158,11 +158,10 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	const handleExecute = useCallback(
 		async (request: RequestState): Promise<ResponseState | null> => {
 			try {
+				// The copy's own headers and nothing else: what Vayu adds is the
+				// engine's since issue #1229, so a replay is not handed a header
+				// set the builder's Send would not produce.
 				const headersRecord = toFlatHeaders(request.headers);
-				headersRecord["X-Request-ID"] = generateUUID();
-				const version =
-					typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
-				headersRecord["X-Vayu-Version"] = version;
 
 				// Shared with the builder's own send path - see execute-mapping.ts.
 				// Raw: the engine resolves {{variables}} and inherit auth at compose
@@ -228,6 +227,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						// Files the new run under the same request, so a resend
 						// lands beside the run it came from.
 						...(run.requestId ? { requestId: run.requestId } : {}),
+						// The engine defaults this replay refuses (issue #1229),
+						// switched off in the copy's own Headers tab.
+						...disabledDefaults(request),
 					},
 					activeEnvironmentId || undefined
 				);

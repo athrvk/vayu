@@ -44,6 +44,7 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		request: { ...createDefaultRequestState(), url: "https://example.test/x" },
 		setRequest: vi.fn(),
 		updateField: vi.fn(),
+		setDisabledDefaultHeaders: vi.fn(),
 		restoreStoredName: vi.fn(),
 		// Body drafts belong to the Body panel; the URL bar never reads them. This
 		// is the one context in the suite built without a cast, so it has to be

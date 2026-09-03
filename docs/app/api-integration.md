@@ -132,7 +132,19 @@ for the full contract.
 apiService.getHealth(): Promise<EngineHealth>
 apiService.getConfig(): Promise<EngineConfig>
 apiService.updateConfig(config): Promise<EngineConfig>
+apiService.getRequestDefaults(): Promise<RequestDefaults>
 ```
+
+`getRequestDefaults` reads what the engine will add to a request that names none
+of it (issue #1229) - a `User-Agent`, a negotiated `Accept-Encoding`, and an
+opt-in correlation id - as `{headers: [{name, value?, generated, configKey?}]}`.
+A row with `generated: true` carries no `value`: it is made fresh per transfer.
+The set is **read, never derived**: the engine resolves it (its libcurl decides
+which encodings can even be asked for), so a renderer working it out from the
+config entries would be a second definition of the same rule. The Headers tab
+renders it as the read-only "Added by Vayu" group, and a row ticked off there
+rides the send as `disabledDefaultHeaders`, which `POST /execute` and
+`POST /runs` both take. None of it is persisted on the request.
 
 #### Cookie jar
 
@@ -891,6 +903,8 @@ export const API_ENDPOINTS = {
   // Health & Config
   HEALTH: "/health",
   CONFIG: "/config",
+  // What a send adds on its own, resolved from config by the engine
+  REQUEST_DEFAULTS: "/request-defaults",
   
   // Collections
   COLLECTIONS: "/collections",
