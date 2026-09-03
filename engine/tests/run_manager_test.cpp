@@ -320,6 +320,44 @@ TEST (RunManagerRetention, RetainReleasesTheMachineryAndKeepsTheTopic) {
     EXPECT_TRUE (found->closed.load ());
 }
 
+// Windows' 1 ms timer resolution is one of those execution resources since
+// issue #1161: a run takes it because its event loop polls at 1ms and its
+// pacing sleeps below ~500 RPS would otherwise round to ~15.6ms, and an idle
+// engine - which the sidecar is for almost all of an app session - holds
+// nothing. Retention is what has to give it back: a retained run has stopped
+// sending, and the 60-90s window would otherwise be a run's worth of held
+// resolution per run.
+TEST (RunManagerRetention, RetainGivesBackTheHighResolutionTimer) {
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+
+    RunManager mgr;
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> ("run_z", cfg);
+    mgr.register_run ("run_z", ctx);
+
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 1);
+
+    mgr.retain_run ("run_z");
+
+    // Still reachable as a retained run, holding nothing of the machinery.
+    auto found = mgr.get_run_or_retained ("run_z");
+    ASSERT_NE (found, nullptr);
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+}
+
+// A run that never reaches retention - one refused, or one whose context is
+// dropped by a failing spawn - gives the request back all the same, because
+// the scope is a member and not a pair of calls to remember.
+TEST (RunManagerRetention, ADroppedContextGivesBackTheHighResolutionTimer) {
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+    {
+        nlohmann::json cfg;
+        RunContext ctx ("run_dropped", cfg);
+        EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 1);
+    }
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+}
+
 TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
     nlohmann::json stats;
     stats["totalRequests"] = 42;

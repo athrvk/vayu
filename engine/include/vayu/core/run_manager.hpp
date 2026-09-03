@@ -35,6 +35,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/transport_policy.hpp"
+#include "vayu/platform/platform.hpp"
 
 namespace vayu::http {
 // A scenario run's steps send through the daemon's jar; the manager only passes
@@ -177,6 +178,15 @@ struct EngineDefaults {
 
 struct RunContext {
     std::string run_id;
+    /// Windows' 1 ms timer resolution, held for exactly as long as this run is
+    /// sending (issue #1161). It is an execution resource like the loop below
+    /// and goes back with it in `release_execution_resources`, not 60-90s
+    /// later when the sweeper drops the last reference to a retained run: the
+    /// two things that need it - the loop's 1 ms `curl_multi_poll` and the
+    /// sub-500-RPS pacing sleeps - have both stopped by then. Engaged from the
+    /// constructor rather than from the worker thread so that no path into a
+    /// run can start sending without it. A no-op off Windows.
+    std::optional<vayu::platform::HighResolutionTimerScope> timer_resolution{ std::in_place };
     std::unique_ptr<vayu::http::EventLoop> event_loop;
     // Orders the metrics thread's reads of `event_loop` against its
     // publication (#956). start_run spawns the metrics thread before the
@@ -243,6 +253,10 @@ struct RunContext {
         }
         load_data.reset ();
         scenario.reset ();
+        // The 1 ms timer request goes back here rather than with the context:
+        // the loop that polled at 1 ms has just been moved out, and an idle
+        // Windows sidecar holding the request is what issue #1161 is about.
+        timer_resolution.reset ();
         // The sample reservoirs, but not the collector: the two deferred passes
         // that read them have run by now - both finish before the summary is
         // written, and the paths that reach retention without them are the ones

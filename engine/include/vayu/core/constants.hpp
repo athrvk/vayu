@@ -98,6 +98,9 @@ constexpr size_t MAX_PER_HOST = 200;
 /// Timeout for a worker's curl_multi_poll in milliseconds. Deliberately short:
 /// it only bounds how long a worker with active transfers blocks waiting for
 /// IO, and submit() interrupts the poll via curl_multi_wakeup anyway.
+/// On Windows a 1ms wait is only 1ms because the run holds
+/// `platform::HighResolutionTimerScope`; at the OS default this poll would
+/// return after ~15.6ms (issue #1161).
 constexpr int POLL_TIMEOUT_MS = 1;
 /// DNS cache timeout in seconds (avoids DNS resolver saturation).
 /// Governs both curl's own cache and the pre-resolution pin cache.

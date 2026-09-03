@@ -216,11 +216,26 @@ system resolver. Three rules make that safe:
 - Max concurrent requests per worker: 1000 (configurable)
 - Max connections per host: 100
 - Poll timeout: 1ms (kept short because a submission interrupts the poll via
-  `curl_multi_wakeup`)
+  `curl_multi_wakeup`; on Windows see **Timer resolution** below for what makes
+  a 1ms wait 1ms)
 - TCP keep-alive: 60s idle, 30s probe interval
 - Max response body per transfer: 32MB (`maxResponseBodyBytes`); a larger
   response fails that request rather than being buffered, since every in-flight
   request holds its own body
+
+**Timer resolution (Windows).** Windows waits at a ~15.6ms granularity by
+default, so both the 1ms poll above and the pacing loop's `sleep_for` leg
+(below ~500 RPS - a faster tick spins its remainder out instead) would return
+roughly fifteen times late. `timeBeginPeriod(1)` buys 1ms, and the engine holds
+that request **only while a run is sending**: each `RunContext` takes a
+refcounted `platform::HighResolutionTimerScope` when it is created and gives it
+back in `release_execution_resources`, beside the event loop it was for. The
+sidecar is resident for a whole app session and idle for nearly all of it, so
+the request is scoped to runs rather than to the process - a process-lifetime
+request is the classic Windows idle-power finding. Nesting is why it is
+refcounted: overlapping runs take it once between them, under a mutex that
+moves the count and the OS call together. Nothing on Linux or macOS is
+affected; the scope compiles to a counter there.
 
 ### Run Manager
 
