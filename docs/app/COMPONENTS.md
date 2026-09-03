@@ -1634,7 +1634,11 @@ winning value and is the escape from this trap - and the tooltip prints sources
 (`environment - Staging`), never values, because a shadowing definition may be a
 secret. The engine is correct here and untouched: `js_pm_scope_get` returns the
 stored empty string when an enabled row holds one, and `undefined` when none
-does, which is exactly what these two states say.
+does, which is exactly what these two states say. **The completion list inside
+the accessor now says the same thing at typing time** (issue #1302): it offers
+the scope's own definitions rather than the ladder's winners, so the trapped
+name is offered at all, and its `detail` is `describeScopedRead`'s sentence -
+one function, two surfaces, rather than a second cross-check written beside it.
 
 **A run-time token receives pointer events; the overlay does not.** The overlay
 is `pointer-events: none` so clicks reach the transparent input underneath and

@@ -62,7 +62,11 @@ vi.mock("@/lib/monaco-loader", () => ({
 
 /** No variables at all, so every suggestion below can only be a column. */
 vi.mock("./useVariableResolver", () => ({
-	useVariableResolver: () => ({ getAllVariables: () => ({}) }),
+	useVariableResolver: () => ({
+		getAllVariables: () => ({}),
+		getScopeVariables: () => ({}),
+		getVariableOrigins: () => [],
+	}),
 }));
 
 vi.mock("./useActiveCollectionId", () => ({ useActiveCollectionId: () => "col_1" }));

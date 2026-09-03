@@ -42,7 +42,12 @@ import {
 	describeColumnToken,
 	type DataTokenDescription,
 } from "./data-contract";
-import type { DataContractScope, VariableOrigin, VariableScope } from "@/types/domain";
+import type {
+	DataContractScope,
+	VariableOrigin,
+	VariableOriginScope,
+	VariableScope,
+} from "@/types/domain";
 
 /**
  * `pm.<accessor>.get("x")`, for every accessor whose first argument is a name.
@@ -247,11 +252,19 @@ export function describeColumnReference(
  * `useVariableResolver`, which pushes the collection chain root-first and marks
  * the last enabled definition the winner. A disabled row is looked past here for
  * the same reason it is there (D17).
+ *
+ * Exported because the completion list asks the same question of the same
+ * origins (#1302): `getScopeVariables` builds one entry per name from this, so
+ * what `pm.collectionVariables.get` is offered and what the chip beside it says
+ * come from one rule rather than two that can drift.
+ *
+ * Generic in the origin so a caller holding `ScopeVariableOrigin`s gets one
+ * back, rather than widening to a `"row"` scope this can never return.
  */
-function ownAnswer(
-	origins: readonly VariableOrigin[],
+export function scopeAnswer<T extends VariableOrigin>(
+	origins: readonly T[],
 	scope: VariableScope
-): VariableOrigin | null {
+): T | null {
 	for (let i = origins.length - 1; i >= 0; i--) {
 		const origin = origins[i];
 		if (origin.scope === scope && origin.enabled) return origin;
@@ -292,8 +305,12 @@ function ladderWinner(origins: readonly VariableOrigin[]): VariableOrigin | null
  *
  * The value is never printed, only the source: the definition may be a secret,
  * and the popover's rule is that a secret shows a mask and never a value.
+ *
+ * Takes the two fields it reads rather than a whole origin, because the
+ * completion list names the same definition from a `ResolvedVariable` (#1302)
+ * and a second spelling of one vocabulary is what this exists to prevent.
  */
-function sourceLabel(origin: VariableOrigin): string {
+export function sourceLabel(origin: { scope: VariableOriginScope; sourceName?: string }): string {
 	return origin.sourceName ? `${origin.scope} - ${origin.sourceName}` : origin.scope;
 }
 
@@ -340,7 +357,7 @@ export function describeScopedRead(
 	const { name, scope } = reference;
 	if (scope === null) return null;
 
-	const own = ownAnswer(origins, scope);
+	const own = scopeAnswer(origins, scope);
 	// The healthy read: this scope answers, and answers with something.
 	if (own && own.value !== "") return null;
 

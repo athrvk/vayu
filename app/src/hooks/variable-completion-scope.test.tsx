@@ -42,12 +42,19 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
+import {
+	stubAllVariables,
+	stubOrigins,
+	stubScopeVariables,
+	type ScopeDefinitions,
+} from "@/lib/scoped-variables.testkit";
+import type { VariableScope } from "@/types";
 
 interface ProviderLike {
 	provideCompletionItems: (
 		model: { getLineContent: () => string },
 		position: { lineNumber: number; column: number }
-	) => { suggestions: Array<{ label: string }> };
+	) => { suggestions: Array<{ label: string; detail?: string; documentation?: string }> };
 }
 
 const registered: ProviderLike[] = [];
@@ -72,13 +79,21 @@ vi.mock("@/lib/monaco-loader", () => ({
 /** The `collectionId` each provider handed the resolver, in call order. */
 const scopes: Array<string | undefined> = [];
 
-/** What the resolver reports - keyed the way `ResolvedVariable` is shaped. */
-const variables: Record<string, { value: string; scope: string; sourceId?: string }> = {};
+/**
+ * What each scope defines. The resolver's three views are derived from it
+ * (`scoped-variables.testkit`), so a case cannot describe a scope map that
+ * disagrees with the merged one - a state the real resolver cannot be in.
+ */
+const defs: ScopeDefinitions = {};
 
 vi.mock("./useVariableResolver", () => ({
 	useVariableResolver: (options?: { collectionId?: string }) => {
 		scopes.push(options?.collectionId);
-		return { getAllVariables: () => variables };
+		return {
+			getAllVariables: () => stubAllVariables(defs),
+			getScopeVariables: (scope: VariableScope) => stubScopeVariables(defs, scope),
+			getVariableOrigins: (name: string) => stubOrigins(defs, name),
+		};
 	},
 }));
 
@@ -97,24 +112,27 @@ vi.mock("./useDataContract", () => ({ useDataContract: () => undefined }));
 import { useVariableCompletionProvider } from "./useVariableCompletionProvider";
 import { useScriptVariableCompletionProvider } from "./useScriptVariableCompletionProvider";
 
-/** Labels the first registered provider offers for `line`, caret at its end. */
-function labelsFor(hook: () => void, line: string) {
+/** What the first registered provider offers for `line`, caret at its end. */
+function suggestionsFor(hook: () => void, line: string) {
 	registered.length = 0;
 	renderHook(hook);
 	expect(registered.length).toBeGreaterThan(0);
-	return registered[0]
-		.provideCompletionItems(
-			{ getLineContent: () => line },
-			{ lineNumber: 1, column: line.length + 1 }
-		)
-		.suggestions.map((s) => s.label);
+	return registered[0].provideCompletionItems(
+		{ getLineContent: () => line },
+		{ lineNumber: 1, column: line.length + 1 }
+	).suggestions;
+}
+
+/** Labels the first registered provider offers for `line`, caret at its end. */
+function labelsFor(hook: () => void, line: string) {
+	return suggestionsFor(hook, line).map((s) => s.label);
 }
 
 beforeEach(() => {
 	scopes.length = 0;
 	registered.length = 0;
 	activeCollectionId.current = undefined;
-	for (const key of Object.keys(variables)) delete variables[key];
+	for (const scope of Object.keys(defs) as VariableScope[]) delete defs[scope];
 });
 
 describe("the Monaco completion providers resolve against the active collection", () => {
@@ -139,8 +157,10 @@ describe("the Monaco completion providers resolve against the active collection"
 describe("the body `{{` list offers the whole ancestor chain", () => {
 	it("offers a parent collection's variable, which `{{name}}` does resolve", () => {
 		activeCollectionId.current = "leaf";
-		variables.from_parent = { value: "1", scope: "collection", sourceId: "root" };
-		variables.from_leaf = { value: "2", scope: "collection", sourceId: "leaf" };
+		defs.collection = {
+			from_parent: { value: "1", sourceId: "root" },
+			from_leaf: { value: "2", sourceId: "leaf" },
+		};
 
 		const labels = labelsFor(() => useVariableCompletionProvider(), "{{");
 		expect(labels).toContain("from_parent");
@@ -151,9 +171,11 @@ describe("the body `{{` list offers the whole ancestor chain", () => {
 describe("the script list offers the ancestor chain the engine now walks (#234)", () => {
 	beforeEach(() => {
 		activeCollectionId.current = "leaf";
-		variables.from_parent = { value: "1", scope: "collection", sourceId: "root" };
-		variables.from_leaf = { value: "2", scope: "collection", sourceId: "leaf" };
-		variables.from_env = { value: "3", scope: "environment", sourceId: "e1" };
+		defs.collection = {
+			from_parent: { value: "1", sourceId: "root" },
+			from_leaf: { value: "2", sourceId: "leaf" },
+		};
+		defs.environment = { from_env: { value: "3", sourceId: "e1" } };
 	});
 
 	it("offers an ancestor's variable inside `pm.collectionVariables.get()`", () => {
@@ -185,5 +207,108 @@ describe("the script list offers the ancestor chain the engine now walks (#234)"
 		activeCollectionId.current = undefined;
 		labelsFor(() => useScriptVariableCompletionProvider(), 'pm.variables.get("');
 		expect(scopes).toEqual([undefined]);
+	});
+});
+
+/**
+ * The list a single-scope accessor gets is that scope's own definitions
+ * (issue #1302).
+ *
+ * It used to be the winner map filtered by the winning scope, which answers a
+ * different question: `pm.collectionVariables.get` reads the collection chain
+ * and answers from it whether or not the environment defines the name too, so
+ * filtering by "which scope won the ladder" hid a collection's own variable
+ * behind an environment that shadowed it - and shadowed is exactly the case an
+ * author needs the list for, since it is the one where the scoped read and the
+ * `{{name}}` beside it disagree.
+ *
+ * Revert the hook to `getAllVariables()` filtered by `info.scope` and the first
+ * three of these fail: the name is not offered at all, so there is no detail to
+ * be wrong about.
+ */
+describe("a single-scope list is what that scope defines, not what it wins", () => {
+	beforeEach(() => {
+		activeCollectionId.current = "leaf";
+	});
+
+	it("offers a collection variable the environment shadows", () => {
+		defs.collection = { shop_domain: { value: "shop.test", sourceName: "Acme" } };
+		defs.environment = { shop_domain: { value: "staging.shop.test", sourceName: "Staging" } };
+
+		const labels = labelsFor(
+			() => useScriptVariableCompletionProvider(),
+			'pm.collectionVariables.get("'
+		);
+		expect(
+			labels,
+			"the call reads the collection chain, so the name is one it can answer"
+		).toContain("shop_domain");
+	});
+
+	it("shows that scope's own value, not the winner's", () => {
+		defs.collection = { shop_domain: { value: "shop.test", sourceName: "Acme" } };
+		defs.environment = { shop_domain: { value: "staging.shop.test", sourceName: "Staging" } };
+
+		const item = suggestionsFor(
+			() => useScriptVariableCompletionProvider(),
+			'pm.collectionVariables.get("'
+		).find((s) => s.label === "shop_domain");
+		expect(item?.detail).toBe("shop.test");
+		expect(item?.documentation).toBe("collection - Acme");
+	});
+
+	/**
+	 * #1196's second item, reachable only now that the trapped name is offered:
+	 * the collection row is enabled and empty, so the read returns `""` while
+	 * `{{shop_domain}}` resolves the environment's value - and the sentence comes
+	 * from `describeScopedRead`, the one the chip above the editor shows.
+	 */
+	it("says so when the scope's own row is empty and another scope holds the value", () => {
+		defs.collection = { shop_domain: { value: "", sourceName: "Acme" } };
+		defs.environment = { shop_domain: { value: "staging.shop.test", sourceName: "Staging" } };
+
+		const item = suggestionsFor(
+			() => useScriptVariableCompletionProvider(),
+			'pm.collectionVariables.get("'
+		).find((s) => s.label === "shop_domain");
+		expect(item?.detail).toBe('Empty at collection scope - this read returns ""');
+		expect(item?.documentation).toContain("environment - Staging holds the value");
+	});
+
+	it("stays quiet where the scope's own answer is the one that resolves", () => {
+		defs.collection = { shop_domain: { value: "shop.test", sourceName: "Acme" } };
+		defs.global = { shop_domain: { value: "global.shop.test" } };
+
+		const item = suggestionsFor(
+			() => useScriptVariableCompletionProvider(),
+			'pm.collectionVariables.get("'
+		).find((s) => s.label === "shop_domain");
+		expect(item?.detail).toBe("shop.test");
+		expect(item?.documentation).toBe("collection - Acme");
+	});
+
+	// `get` reads enabled rows only, so absence is the honest answer - the same
+	// one the winner map gives a name whose every definition is switched off.
+	it("leaves out a name whose definitions in that scope are all disabled", () => {
+		defs.collection = { retired: { value: "1", enabled: false } };
+		defs.environment = { retired: { value: "2" } };
+
+		const labels = labelsFor(
+			() => useScriptVariableCompletionProvider(),
+			'pm.collectionVariables.get("'
+		);
+		expect(labels).not.toContain("retired");
+		expect(
+			labelsFor(() => useScriptVariableCompletionProvider(), 'pm.environment.get("'),
+			"the environment's enabled row still answers there"
+		).toContain("retired");
+	});
+
+	it("still leaves out a name only another scope defines", () => {
+		defs.environment = { only_env: { value: "1" } };
+
+		expect(
+			labelsFor(() => useScriptVariableCompletionProvider(), 'pm.collectionVariables.get("')
+		).not.toContain("only_env");
 	});
 });
