@@ -59,7 +59,7 @@ const MEMBER_RULES: Array<[string, RegExp]> = [
 	],
 	["a script-set header beats the Auth tab", /overrides the one the Auth tab applied/i],
 	["a refused value loses the whole edit", /rejects the whole edit/i],
-	["a test script's writes to pm.request do nothing", /writing to it does nothing/i],
+	["a test script's writes to pm.request do nothing", /a write to it does nothing/i],
 	["header indexing is case-sensitive", /Names are case-sensitive here/i],
 	[
 		"the header methods are not",
