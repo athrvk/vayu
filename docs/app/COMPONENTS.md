@@ -1620,9 +1620,14 @@ merged and row reads and for a template mention, and `describeScopedRead`
 (beside the helper, so the two surfaces cannot disagree) joins it against
 `useVariableResolver`'s `getVariableOrigins` - which both panels were already
 handed and neither read. The chip is amber when that scope's own **last enabled**
-definition is empty or absent while a different scope holds a non-empty one, and
-the tooltip names both facts: what the read returns, and where the value the
-author is looking at lives. Amber and not destructive, for the same reason the
+definition is empty or absent while **the ladder's winner** is a different scope
+holding a non-empty value, and the tooltip names both facts: what the read
+returns, and where the value the author is looking at lives. The winner is the
+test, not "some other scope has a value", because the two part company exactly
+where the read's own scope is the one that wins: an empty collection row beside a
+non-empty global is the collection's answer *and* the merged answer, and an
+enabled environment row wins whatever it holds, so neither can be shadowed by
+anything. Amber on those would be amber on healthy scripts. Amber and not destructive, for the same reason the
 undeclared column is: the read works and the name resolves, it just does not
 resolve there. The merged read never warns - `pm.variables.get` returns the
 winning value and is the escape from this trap - and the tooltip prints sources

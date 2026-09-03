@@ -88,10 +88,15 @@ export type PmRead = "scope" | "merged" | "row";
 /**
  * What each accessor reads, and - for the single-scope three - which scope.
  *
- * One table rather than two, because both facts are answers about the same
- * accessor and a second table keyed by the same five names is how they come to
- * disagree. `scope` is null exactly where `reads` is not `"scope"`: the merged
+ * One table rather than two *here*, because both facts are answers about the
+ * same accessor and a second table keyed by the same five names is how they come
+ * to disagree. `scope` is null exactly where `reads` is not `"scope"`: the merged
  * read has no single scope to name, and the row is not a scope at all.
+ *
+ * `SCOPE_BY_ACCESSOR` in `script-variable-completion.ts` does key the same five
+ * names, and predates this. The two have not diverged; folding them together is
+ * worth doing on the next change that touches both, rather than widening a paint
+ * fix into that file.
  */
 interface PmAccessor {
 	reads: PmRead;
@@ -255,24 +260,41 @@ function ownAnswer(
 }
 
 /**
- * The other scopes holding a non-empty value for the name, as the tooltip prints
- * them - `environment - Staging`, the spelling `monaco-variable-tokens` and the
- * popover already use, so a reader meets one vocabulary and not a second.
+ * The definition that wins the whole ladder - what `{{name}}` substitutes and
+ * what `pm.variables.get` returns.
  *
- * Values are never printed, only sources: one of these definitions may be a
- * secret, and the popover's rule is that a secret shows a mask and never a
- * value. The row is skipped because it is not a scope - `pm.iterationData` is
- * its accessor and `describeColumnReference` already paints reads of it.
+ * Last enabled again, over every scope this time, which is exactly how
+ * `useVariableResolver` derives `variableMap`. **Precedence has to be read off
+ * the ladder rather than inferred from "some other scope has a value"**: an
+ * enabled row wins even when its value is empty, so a lower scope holding
+ * something is masked by the empty winner rather than masking it. Reading it as
+ * the latter warns on healthy scripts - an empty collection row beside a
+ * non-empty global is the collection's answer *and* the merged answer, with
+ * nothing to warn about.
+ *
+ * The row is skipped because it is not a scope. `pm.iterationData` is its
+ * accessor and `describeColumnReference` already paints reads of it; a bound row
+ * changing what a scoped read should say about itself is #1064's question, not
+ * this one's.
  */
-function shadowingSources(origins: readonly VariableOrigin[], scope: VariableScope): string[] {
-	const labels: string[] = [];
-	for (const origin of origins) {
-		if (origin.scope === scope || origin.scope === "row") continue;
-		if (!origin.enabled || origin.value === "") continue;
-		const label = origin.sourceName ? `${origin.scope} - ${origin.sourceName}` : origin.scope;
-		if (!labels.includes(label)) labels.push(label);
+function ladderWinner(origins: readonly VariableOrigin[]): VariableOrigin | null {
+	for (let i = origins.length - 1; i >= 0; i--) {
+		const origin = origins[i];
+		if (origin.scope !== "row" && origin.enabled) return origin;
 	}
-	return labels;
+	return null;
+}
+
+/**
+ * How the tooltip names a definition - `environment - Staging`, the spelling
+ * `monaco-variable-tokens` and the popover already use, so a reader meets one
+ * vocabulary and not a second.
+ *
+ * The value is never printed, only the source: the definition may be a secret,
+ * and the popover's rule is that a secret shows a mask and never a value.
+ */
+function sourceLabel(origin: VariableOrigin): string {
+	return origin.sourceName ? `${origin.scope} - ${origin.sourceName}` : origin.scope;
 }
 
 /**
@@ -293,10 +315,19 @@ function shadowingSources(origins: readonly VariableOrigin[], scope: VariableSco
  * `describeColumnToken` draws for an undeclared column, and the reason #604 took
  * destructive off this row in the first place.
  *
+ * **The contradiction is against the ladder's winner, not against "some other
+ * scope".** Those are different questions wherever the read's own scope is the
+ * one that wins: an empty collection row beside a non-empty global is the
+ * collection's answer and the merged answer alike, and an enabled environment
+ * row is unconditionally the winner, so neither can be shadowed by anything. A
+ * warning that fired on them would be amber on healthy scripts, which is the way
+ * this kind of paint stops being read at all.
+ *
  * Only the accessor's own scope is checked. `pm.variables` is the merged read
  * and returns the winning value, so it is correct by construction and must never
  * warn; a name written through two different single-scope accessors keeps the
- * first, by the same equal-claim rule that orders the row.
+ * first, by the same equal-claim rule that orders the row - so the second
+ * accessor's read of that name carries no chip of its own.
  *
  * Takes the origins rather than the resolver so it stays a pure join of "what
  * did the script write" and "what is defined", the way `describeColumnReference`
@@ -314,18 +345,20 @@ export function describeScopedRead(
 	if (own && own.value !== "") return null;
 
 	/*
-	 * Nothing else holds a value either, so there is no contradiction to report.
-	 * A name nothing defines is the destructive chip's business, and one that is
-	 * empty everywhere is empty exactly as the author left it.
+	 * What the rest of the app shows for this name. Nothing non-empty resolves,
+	 * so there is no contradiction to report: a name nothing defines is the
+	 * destructive chip's business, and one the ladder also answers emptily is
+	 * empty exactly as the author left it - including the case where this very
+	 * scope is the empty winner.
 	 */
-	const shadowing = shadowingSources(origins, scope);
-	if (shadowing.length === 0) return null;
+	const winner = ladderWinner(origins);
+	if (!winner || winner.value === "" || winner.scope === scope) return null;
 
 	return {
 		tone: "warning",
 		description: own
 			? `Empty at ${scope} scope - this read returns ""`
 			: `Not defined at ${scope} scope - this read returns undefined`,
-		note: `non-empty in ${shadowing.join(", ")}; pm.variables.get("${name}") reads that`,
+		note: `${sourceLabel(winner)} holds the value; pm.variables.get("${name}") reads that`,
 	};
 }

@@ -440,6 +440,55 @@ describe("the reads that must stay silent", () => {
 		).toBeNull();
 	});
 
+	/*
+	 * The precedence half, and the reason "some other scope has a value" is not
+	 * the question. Both of these look like the trap from the shape of the
+	 * origins - own scope empty, another scope non-empty - and neither is one,
+	 * because the ladder's winner is the empty definition either way. Warning
+	 * here would paint healthy scripts amber, which is how a colour stops being
+	 * read at all.
+	 */
+	it("does not warn when a lower-precedence scope holds the value its own scope masks", () => {
+		// Collection outranks globals, so an enabled empty collection row is what
+		// `{{shop_domain}}` and `pm.variables.get` resolve to as well. The global
+		// value is masked by this read, not hidden from it.
+		expect(
+			describeScopedRead(scopedRead(COLLECTION_GET), [
+				origin({ scope: "global", value: "acme.example.com" }),
+				origin({ scope: "collection", value: "", winner: true }),
+			])
+		).toBeNull();
+	});
+
+	it("does not warn on an empty environment read, which nothing can shadow", () => {
+		// The environment is pushed last, so an enabled row there wins whatever it
+		// holds. An empty one makes every surface empty together.
+		expect(
+			describeScopedRead(scopedRead('pm.environment.get("shop_domain")'), [
+				origin({ scope: "collection", value: "acme.example.com" }),
+				origin({ scope: "environment", sourceName: "Staging", value: "", winner: true }),
+			])
+		).toBeNull();
+	});
+
+	it("names only the definition the merged read would actually return", () => {
+		// Two scopes hold a value and `pm.variables.get` can only return one of
+		// them. Listing the other would send the author to a row that answers
+		// nothing.
+		const result = describeScopedRead(scopedRead(COLLECTION_GET), [
+			origin({ scope: "global", value: "global.example.com" }),
+			origin({
+				scope: "environment",
+				sourceName: "Staging",
+				value: "env.example.com",
+				winner: true,
+			}),
+		]);
+
+		expect(result?.note).toContain("environment - Staging");
+		expect(result?.note).not.toContain("global");
+	});
+
 	it("does not treat a bound row as the scope that shadows", () => {
 		// The row is not a scope - `pm.iterationData` is its accessor, and
 		// `describeColumnReference` already paints reads of it.
