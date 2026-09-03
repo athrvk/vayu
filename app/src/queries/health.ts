@@ -34,12 +34,19 @@ export function healthPollIntervalMs(status: "error" | "pending" | "success"): n
 }
 
 /**
- * What a failed poll means, given the launch it failed on.
+ * What a failed poll means, given the start it failed on.
  *
  * A refused connection is the same transport error either way, so the failure
- * itself cannot tell a cold start from a dead engine - only its place in the
- * session can. An engine that answered once and stopped is unreachable
- * immediately, with no grace: it proved it could serve, so its silence is news.
+ * itself cannot tell an engine coming up from one that is not coming - only
+ * whether a start is in flight can. `windowOpenedAt` is `null` when none is, and
+ * an engine that answered with nothing starting is unreachable immediately, with
+ * no grace: it proved it could serve, so its silence is news.
+ *
+ * Judged against the window rather than against the session's own age, because
+ * the app itself restarts the engine (`useEngineRestart`) and the process that
+ * comes back does the same cold-start work as the first one. Reading the session
+ * instead called every restart a failure, since an engine had answered - the one
+ * this one replaced (#1227).
  *
  * Derived here rather than pushed from the main process. `sidecar.ts` knows more
  * precisely - it holds the child handle and raises `EngineNotReadyError` on the
@@ -48,11 +55,11 @@ export function healthPollIntervalMs(status: "error" | "pending" | "success"): n
  * source of truth for one label.
  */
 export function engineStatusAfterFailedPoll(
-	hasEverConnected: boolean,
-	msSinceMount: number
+	windowOpenedAt: number | null,
+	now: number
 ): "starting" | "unreachable" {
-	if (hasEverConnected) return "unreachable";
-	return msSinceMount < TIMING.ENGINE_STARTUP_GRACE_MS ? "starting" : "unreachable";
+	if (windowOpenedAt === null) return "unreachable";
+	return now - windowOpenedAt < TIMING.ENGINE_STARTUP_GRACE_MS ? "starting" : "unreachable";
 }
 
 /**
@@ -60,29 +67,34 @@ export function engineStatusAfterFailedPoll(
  * Updates engine store with connection status
  */
 export function useHealthQuery() {
-	const { setEngineStatus, setEngineError, setEngineRecovery } = useEngineStore();
+	const {
+		setEngineStatus,
+		setEngineError,
+		setEngineRecovery,
+		openEngineStartWindow,
+		closeEngineStartWindow,
+	} = useEngineStore();
 	const queryClient = useQueryClient();
 
 	/**
-	 * When this session started counting, and whether the engine has ever
-	 * answered it - the two facts that separate a cold start from a dead engine.
+	 * The launch's own start window, opened where the wait actually begins.
 	 *
-	 * Mount is the right zero: the hook is mounted once by `App`, at first paint,
-	 * which is when the main process spawned the engine and started spending its
-	 * own budget on the same wait. Stamped in an effect rather than in the render
-	 * that declares the ref, because a clock read during render is impure
+	 * Mount is the right moment: the hook is mounted once by `App`, at first
+	 * paint, which is when the main process spawned the engine and started
+	 * spending its own budget on the same wait. Opened in an effect rather than
+	 * in render, because a clock read during render is impure
 	 * (`react-hooks/purity`) - and nothing can have polled before this runs,
 	 * provided this effect stays declared ahead of the sync effect below. In the
-	 * other order a launch's first failure would measure against zero, land far
-	 * past the grace window, and report the failure this issue exists to hide -
-	 * which is what "records no reason…" in `health.test.ts` catches.
+	 * other order a launch's first failure would find no window open at all and
+	 * report the failure this exists to hide - which is what "records no
+	 * reason…" in `health.test.ts` catches.
+	 *
+	 * The window lives in the engine store rather than in a ref here, because the
+	 * restart path opens one too (#1227); see `engine-store.ts`.
 	 */
-	const mountedAt = useRef(0);
-	const hasEverConnected = useRef(false);
-
 	useEffect(() => {
-		mountedAt.current = Date.now();
-	}, []);
+		openEngineStartWindow(Date.now());
+	}, [openEngineStartWindow]);
 
 	/**
 	 * Set by a poll that failed, cleared by the recovery it earns.
@@ -108,7 +120,9 @@ export function useHealthQuery() {
 	// Sync query state with app store
 	useEffect(() => {
 		if (query.isSuccess && query.data?.status === "ok") {
-			hasEverConnected.current = true;
+			// Whatever start this poll was waiting on is over; from here a silence
+			// is an engine that stopped rather than one that has not arrived.
+			closeEngineStartWindow();
 			setEngineStatus("connected");
 			setEngineError(null);
 			// Absent means a clean start, so it clears rather than being left
@@ -133,9 +147,15 @@ export function useHealthQuery() {
 			}
 		} else if (query.isError) {
 			sawDisconnect.current = true;
+			// Read, not subscribed. A window opened while the query's last state is
+			// still a success - which is exactly what a restart does - would re-run
+			// this effect into the branch above and close the window it had just
+			// opened. So the window is consulted when a poll settles, and the poll
+			// after it is what re-reads a window that closed meanwhile; a failing
+			// poll is already on the fast cadence.
 			const status = engineStatusAfterFailedPoll(
-				hasEverConnected.current,
-				Date.now() - mountedAt.current
+				useEngineStore.getState().engineStartWindow,
+				Date.now()
 			);
 			setEngineStatus(status);
 			// A launch still inside the grace window has nothing to report yet, and
@@ -156,6 +176,7 @@ export function useHealthQuery() {
 		setEngineStatus,
 		setEngineError,
 		setEngineRecovery,
+		closeEngineStartWindow,
 		queryClient,
 	]);
 

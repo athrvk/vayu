@@ -52,6 +52,7 @@ beforeEach(() => {
 	useEngineStore.setState({
 		engineStatus: "connected",
 		engineError: null,
+		engineStartWindow: null,
 		pendingRestart: false,
 		restartRequiredKeys: [],
 	});
@@ -108,5 +109,43 @@ describe("the Dock's pending-restart signal", () => {
 		// a failed restart must not clear it.
 		expect(useEngineStore.getState().pendingRestart).toBe(true);
 		expect(signal()).not.toBeNull();
+	});
+});
+
+/**
+ * The other half of #1227's seam.
+ *
+ * The health poll classifies a failed poll against the engine store's start
+ * window (`queries/health.ts`), and a restart is a cold start - the daemon is
+ * killed and a fresh one repeats the whole startup with the port down. So the
+ * restart has to open that window, and close it again if the main process says
+ * no engine is coming up after all. Asserted on the store rather than on the
+ * label, because the poll that turns it into a label does not run here; the two
+ * meet in `Dock.restart-status.test.tsx`.
+ */
+describe("the restart's own start window", () => {
+	it("opens before the engine is killed, so the poll reads a cold start", async () => {
+		useEngineStore.getState().addRestartRequiredKey("dbCacheSize");
+		renderDock();
+
+		fireEvent.click(signal()!);
+
+		await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
+		// Opened by the click, not by the outcome: the port is already down while
+		// the IPC call is still in flight.
+		expect(useEngineStore.getState().engineStartWindow).not.toBeNull();
+	});
+
+	it("closes again when the main process reports the restart failed", async () => {
+		restartEngine.mockResolvedValue({ success: false, error: "engine did not come back" });
+		useEngineStore.getState().addRestartRequiredKey("dbCacheSize");
+		renderDock();
+
+		fireEvent.click(signal()!);
+
+		await waitFor(() => expect(useToastStore.getState().toasts.length).toBe(1));
+		// Nothing is starting, so the next failed poll owes the user its reason
+		// rather than a spinner over an engine nobody is bringing up.
+		expect(useEngineStore.getState().engineStartWindow).toBeNull();
 	});
 });

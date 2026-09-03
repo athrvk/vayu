@@ -55,7 +55,12 @@ beforeEach(() => {
 	// Implementation too, not just the call record: a queued `…Once` rejection
 	// left behind by a case that ended early is a failure in the next test.
 	getHealth.mockReset();
-	useEngineStore.setState({ engineStatus: "starting", engineError: null, recovery: null });
+	useEngineStore.setState({
+		engineStatus: "starting",
+		engineError: null,
+		recovery: null,
+		engineStartWindow: null,
+	});
 });
 
 describe("useHealthQuery", () => {
@@ -187,18 +192,16 @@ describe("useHealthQuery - a cold start is not a dead engine", () => {
 		};
 	}
 
-	it("classifies a failed poll by how long the session has been waiting", () => {
-		// The decision itself, without a clock: the hook feeds it the elapsed time.
-		expect(engineStatusAfterFailedPoll(false, 0)).toBe("starting");
-		expect(engineStatusAfterFailedPoll(false, TIMING.ENGINE_STARTUP_GRACE_MS - 1)).toBe(
-			"starting"
-		);
-		expect(engineStatusAfterFailedPoll(false, TIMING.ENGINE_STARTUP_GRACE_MS)).toBe(
-			"unreachable"
-		);
-		// An engine that answered once proved it could serve, so its silence is
-		// news immediately - the grace is for engines that never started.
-		expect(engineStatusAfterFailedPoll(true, 0)).toBe("unreachable");
+	it("classifies a failed poll by how long the engine has been coming up", () => {
+		// The decision itself, without a clock: the hook feeds it both times, and
+		// zero stands in for the moment the window opened.
+		expect(engineStatusAfterFailedPoll(0, 0)).toBe("starting");
+		expect(engineStatusAfterFailedPoll(0, TIMING.ENGINE_STARTUP_GRACE_MS - 1)).toBe("starting");
+		expect(engineStatusAfterFailedPoll(0, TIMING.ENGINE_STARTUP_GRACE_MS)).toBe("unreachable");
+		// No window open means nothing is coming up: an engine that answered proved
+		// it could serve, so its silence is news immediately - the grace is for
+		// engines that have not finished starting.
+		expect(engineStatusAfterFailedPoll(null, 0)).toBe("unreachable");
 	});
 
 	it("records no reason while the launch is inside the grace window", async () => {
@@ -258,6 +261,24 @@ describe("useHealthQuery - a cold start is not a dead engine", () => {
 		expect(useEngineStore.getState().engineError).toContain("socket hang up");
 	});
 
+	it("holds the window open across a poll that never succeeded", async () => {
+		// The window is opened once, on mount, and a launch's repeated failures
+		// must not consume it: only the clock closes it. Without this, a second
+		// failed poll inside the budget could still read `unreachable`.
+		const client = clientWithFastRetries();
+		getHealth.mockRejectedValue(new Error("Network error: fetch failed"));
+
+		const { result } = renderHook(() => useHealthQuery(), { wrapper: wrapperFor(client) });
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("starting"));
+
+		await act(async () => {
+			await result.current.refetch();
+		});
+
+		expect(useEngineStore.getState().engineStatus).toBe("starting");
+		expect(useEngineStore.getState().engineStartWindow).not.toBeNull();
+	});
+
 	it("waits exactly as long as the main process waits for the same engine", () => {
 		// Two files that share no module graph (`tsconfig.json` includes `src`,
 		// `tsconfig.node.json` includes `electron`), asking the same question from
@@ -273,5 +294,115 @@ describe("useHealthQuery - a cold start is not a dead engine", () => {
 
 		const budget = /ENGINE_HEALTH_POLL_BUDGET_MS\s*=\s*(\d+)/.exec(constants)?.[1];
 		expect(Number(budget)).toBe(TIMING.ENGINE_STARTUP_GRACE_MS);
+	});
+});
+
+/**
+ * A restart is a cold start too (#1227).
+ *
+ * `useEngineRestart` kills the running engine and spawns a fresh one that
+ * repeats the whole startup housekeeping, with the port down for all of it - so
+ * the poll's failures during that window describe an engine coming up, not one
+ * that died. The seam between the two paths is the store's start window: the
+ * restart opens it, and this is the half that proves the poll reads it. The
+ * other half - that the restart path really does open it - is
+ * `Dock.pending-restart.test.tsx`, and both together are asserted end to end in
+ * `Dock.restart-status.test.tsx`.
+ */
+describe("useHealthQuery - a restart is a cold start", () => {
+	function clientWithFastRetries() {
+		return new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+	}
+
+	function wrapperFor(client: QueryClient) {
+		return function Wrapper({ children }: { children: ReactNode }) {
+			return createElement(QueryClientProvider, { client }, children);
+		};
+	}
+
+	/**
+	 * A refusal per attempt, as the transport really delivers them.
+	 *
+	 * These cases turn on two *consecutive* failed polls reading differently, and
+	 * the hook re-reads a failure when the query hands it a new one. One reused
+	 * `Error` is one unchanged value, so the second poll would never be classified
+	 * at all - a property of the fixture, not of the engine.
+	 */
+	function rejectWith(message: string) {
+		getHealth.mockImplementation(() => Promise.reject(new Error(message)));
+	}
+
+	/** Connect, then hand back the hook with the launch's own window spent. */
+	async function connected(client: QueryClient) {
+		getHealth.mockResolvedValueOnce({ status: "ok", version: "1.0.0", workers: 8 });
+		const { result } = renderHook(() => useHealthQuery(), { wrapper: wrapperFor(client) });
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("connected"));
+		expect(useEngineStore.getState().engineStartWindow).toBeNull();
+		return result;
+	}
+
+	it("calls the silence a start when the app itself asked for the restart", async () => {
+		const client = clientWithFastRetries();
+		const result = await connected(client);
+
+		// What `useEngineRestart` does before it invokes the IPC.
+		useEngineStore.getState().openEngineStartWindow(Date.now());
+		rejectWith("connect ECONNREFUSED 127.0.0.1:9876");
+		await act(async () => {
+			await result.current.refetch();
+		});
+
+		// Reverting the re-open reddens this: the poll would see an engine that
+		// answered and stopped, and paint the failure the user themselves asked for.
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("starting"));
+		// The Dock's tooltip hangs off this being null.
+		expect(useEngineStore.getState().engineError).toBeNull();
+	});
+
+	it("still gives up on a restart whose engine never comes back", async () => {
+		const client = clientWithFastRetries();
+		const result = await connected(client);
+
+		const restartedAt = Date.now();
+		const now = vi.spyOn(Date, "now").mockReturnValue(restartedAt);
+		useEngineStore.getState().openEngineStartWindow(restartedAt);
+		rejectWith("connect ECONNREFUSED 127.0.0.1:9876");
+		await act(async () => {
+			await result.current.refetch();
+		});
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("starting"));
+
+		// Same budget as a cold launch, spent from the restart rather than from
+		// the session's start.
+		now.mockReturnValue(restartedAt + TIMING.ENGINE_STARTUP_GRACE_MS + 1);
+		await act(async () => {
+			await result.current.refetch();
+		});
+
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
+		expect(useEngineStore.getState().engineError).toContain("ECONNREFUSED");
+		now.mockRestore();
+	});
+
+	it("goes back to owing a reason once a restart is reported failed", async () => {
+		const client = clientWithFastRetries();
+		const result = await connected(client);
+
+		useEngineStore.getState().openEngineStartWindow(Date.now());
+		rejectWith("socket hang up");
+		await act(async () => {
+			await result.current.refetch();
+		});
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("starting"));
+
+		// What `useEngineRestart` does when the main process reports failure:
+		// nothing is coming up, so the strip must not sit on "Starting…".
+		useEngineStore.getState().closeEngineStartWindow();
+		await act(async () => {
+			await result.current.refetch();
+		});
+
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
+		expect(useEngineStore.getState().engineError).toContain("socket hang up");
 	});
 });

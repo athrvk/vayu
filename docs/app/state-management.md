@@ -432,6 +432,7 @@ Merged store managing engine connection status and restart-required notification
   engineStatus: EngineStatus  // "starting" | "connected" | "unreachable"
   engineError: string | null
   recovery: EngineRecovery | null  // What the engine's startup did to the database
+  engineStartWindow: number | null  // When the engine now coming up began, or null
   pendingRestart: boolean
   restartRequiredKeys: string[]  // Config keys requiring restart
 }
@@ -443,6 +444,7 @@ const {
   engineStatus, setEngineStatus,
   engineError, setEngineError,
   recovery, setEngineRecovery,
+  engineStartWindow, openEngineStartWindow, closeEngineStartWindow,
   pendingRestart, addRestartRequiredKey, clearRestartRequired,
 } = useEngineStore();
 ```
@@ -452,15 +454,32 @@ written by the same poll that writes `engineError` and read by `RecoveryBanner`.
 `null` is a clean start; a value means the engine restored the database from its
 backup or deleted it as unrecoverable.
 
-`engineStatus` is `starting` while no poll has yet succeeded and the launch is
-still inside its grace window, `connected` once a poll has answered `ok`, and
-`unreachable` once a poll fails past that window or an engine that had
-answered stops answering. `engineError` is what the failed health poll
-recorded (`queries/health.ts`), and it is `null` in every state but
-`unreachable`: a launch still inside its grace window has no failure to report.
-The Dock's connection indicator renders it in a tooltip, for `unreachable`
-alone - "Disconnected" on its own read the same for a refused connection, a
-timeout and a TLS failure.
+`engineStatus` is `starting` while no poll has succeeded since the engine now
+coming up began coming up and it is still inside its grace window, `connected`
+once a poll has answered `ok`, and `unreachable` once a poll fails past that
+window or an engine that had answered stops answering with nothing starting.
+`engineError` is what the failed health poll recorded (`queries/health.ts`), and
+it is `null` in every state but `unreachable`: an engine still inside its grace
+window has no failure to report. The Dock's connection indicator renders it in a
+tooltip, for `unreachable` alone - "Disconnected" on its own read the same for a
+refused connection, a timeout and a TLS failure.
+
+`engineStartWindow` is the evidence that decision is made against: the moment
+the engine now coming up began coming up, or `null` when none is. It is a
+window rather than a "has ever connected" flag because a cold start is not only
+the app's first (#1227) - `useEngineRestart` kills the running engine and spawns
+a fresh one that repeats the whole startup housekeeping, with the port down for
+all of it, and a flag called that silence a failure on the evidence of an engine
+that no longer existed. **Two paths open it - `useHealthQuery` on mount and the
+restart path before it invokes the IPC - and it is deliberately evidence rather
+than a status, so `useHealthQuery` stays the only writer of `engineStatus`.** It
+is closed by the poll an engine answers, and by a restart the main process
+reports as failed, after which the next failed poll owes the user its reason
+again. A window nobody closes is spent rather than cleared - an engine that
+never arrives leaves its opening time in place, expired - so this is not an "is
+something starting" flag and must not be read as one: only
+`engineStatusAfterFailedPoll` interprets it, and to that an expired timestamp
+and a `null` mean the same thing.
 
 **Non-persisted** (cleared on app restart).
 
@@ -1357,7 +1376,9 @@ into a pane that can never load on every restart.
 - **`useHealthQuery()`** - Health check, polled every
   `TIMING.HEALTH_CHECK_INTERVAL_MS`; it is what sets `engineStatus` /
   `engineError` on `engine-store`, and is where the starting-vs-unreachable
-  decision gets made, so the connection indicator follows it
+  decision gets made, so the connection indicator follows it. It reads that
+  decision off `engineStartWindow`, which `useEngineRestart` also opens - the
+  restart supplies the evidence, the poll still does the classifying
 - **`useConfigQuery()`** / **`useUpdateConfigMutation()`** - Engine configuration
   (`QUERY_CACHE.CONFIG_STALE_TIME_MS`); also the home of the live chart window,
   which is engine config rather than a renderer preference
