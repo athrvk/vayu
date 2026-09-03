@@ -20,11 +20,30 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { VariablesSection } from "./VariablesSection";
+import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import type { ResolvedVariable } from "@/types";
 
+// The section leads with the variables this request *references* (#1308), so the
+// mock request references every name under test - each then renders as a
+// resolved row at the top of the section, which is what these cases pin.
 vi.mock("@/queries", () => ({
-	useRequestQuery: () => ({ data: { id: "req_1", collectionId: "col_1" } }),
+	useRequestQuery: () => ({
+		data: {
+			id: "req_1",
+			collectionId: "col_1",
+			url: Object.keys(resolved)
+				.map((name) => `{{${name}}}`)
+				.join(" "),
+			params: [],
+			headers: [],
+			body: { mode: "none" },
+			auth: { mode: "none" },
+			preRequestScript: "",
+			postRequestScript: "",
+		},
+	}),
+	useCollectionAncestors: () => [],
 	useUpdateGlobalsMutation: () => ({ mutate: vi.fn() }),
 	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
 	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
@@ -33,7 +52,10 @@ vi.mock("@/queries", () => ({
 let resolved: Record<string, ResolvedVariable> = {};
 
 vi.mock("@/hooks/useVariableResolver", () => ({
-	useVariableResolver: () => ({ getAllVariables: () => resolved }),
+	useVariableResolver: () => ({
+		getAllVariables: () => resolved,
+		getVariable: (name: string) => resolved[name] ?? null,
+	}),
 }));
 
 const TAB = { id: "t1", type: "request", entityId: "req_1" } as const;
@@ -45,7 +67,9 @@ function renderSection() {
 	client.setQueryData(queryKeys.collections.list(), []);
 	return render(
 		<QueryClientProvider client={client}>
-			<VariablesSection tab={TAB} />
+			<TooltipProvider>
+				<VariablesSection tab={TAB} />
+			</TooltipProvider>
 		</QueryClientProvider>
 	);
 }
@@ -68,10 +92,13 @@ describe("VariablesSection - naming what a screen reader reads", () => {
 		resolved = { apiKey: { value: "s3cret", scope: "collection", secret: true } };
 		renderSection();
 
-		const input = screen.getByRole("textbox", { name: "Value of apiKey" });
+		// A secret is now the shared `SecretInput` (#1308): a masked `type=password`
+		// field, not the old literal `••••••`. A password input carries no textbox
+		// role, so it is reached by its label rather than by role - still named for a
+		// screen reader, and read-only, since a secret's edit lands elsewhere.
+		const input = screen.getByLabelText("Value of apiKey");
 		expect(input).toHaveAttribute("readonly");
-		expect(input).toHaveValue("••••••");
-		expect(screen.queryByDisplayValue("s3cret")).not.toBeInTheDocument();
+		expect(input).toHaveAttribute("type", "password");
 	});
 });
 

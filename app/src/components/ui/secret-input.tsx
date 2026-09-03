@@ -26,6 +26,16 @@ interface SecretInputProps {
 	className?: string;
 	disabled?: boolean;
 	/**
+	 * Read-only display: the value can be revealed but not edited. The eye toggle
+	 * stays live (revealing is not editing), unlike `disabled`, which greys it out.
+	 * Its host is a surface that shows a secret it does not own the edit path for -
+	 * the context bar's request-tab variables row, whose edits land on the
+	 * Variables page.
+	 */
+	readOnly?: boolean;
+	/** Names the field for a screen reader, e.g. `Value of apiKey`. */
+	"aria-label"?: string;
+	/**
 	 * Blur passthrough, for a host that commits on focus-out rather than on
 	 * every keystroke - the variables table saves there, so without this the
 	 * only field it cannot mount this primitive in would be the secret one.
@@ -39,6 +49,8 @@ export function SecretInput({
 	placeholder,
 	className,
 	disabled,
+	readOnly,
+	"aria-label": ariaLabel,
 	onBlur,
 }: SecretInputProps) {
 	const [revealed, setRevealed] = useState(false);
@@ -51,6 +63,8 @@ export function SecretInput({
 				onBlur={onBlur}
 				placeholder={placeholder}
 				disabled={disabled}
+				readOnly={readOnly}
+				aria-label={ariaLabel}
 				className={cn("pr-9 font-mono text-sm", className)}
 			/>
 			<TooltipIconButton

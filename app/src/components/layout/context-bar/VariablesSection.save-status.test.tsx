@@ -42,8 +42,25 @@ const globalsMutate = vi.fn(
 	}
 );
 
+// The request references the resolved name (#1308), so `host` renders as a row at
+// the top of the section - the row this suite edits.
 vi.mock("@/queries", () => ({
-	useRequestQuery: () => ({ data: { id: "req_1", collectionId: null } }),
+	useRequestQuery: () => ({
+		data: {
+			id: "req_1",
+			collectionId: null,
+			url: Object.keys(resolved)
+				.map((name) => `{{${name}}}`)
+				.join(" "),
+			params: [],
+			headers: [],
+			body: { mode: "none" },
+			auth: { mode: "none" },
+			preRequestScript: "",
+			postRequestScript: "",
+		},
+	}),
+	useCollectionAncestors: () => [],
 	useUpdateGlobalsMutation: () => ({ mutate: globalsMutate }),
 	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
 	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
@@ -54,7 +71,10 @@ const resolved: Record<string, ResolvedVariable> = {
 };
 
 vi.mock("@/hooks/useVariableResolver", () => ({
-	useVariableResolver: () => ({ getAllVariables: () => resolved }),
+	useVariableResolver: () => ({
+		getAllVariables: () => resolved,
+		getVariable: (name: string) => resolved[name] ?? null,
+	}),
 }));
 
 // The section reads only the save store from `@/stores`; the real one is kept so
