@@ -37,6 +37,14 @@ export interface TokenEditRequest {
 	onClose?: () => void;
 }
 
+/** A token the pointer is resting on, for the shared tooltip to answer. */
+export interface TokenHoverRequest {
+	/** The variable name, without braces. */
+	name: string;
+	/** The token's rectangle, so the tooltip points at it. */
+	rect: TokenAnchorRect;
+}
+
 export interface EditorVariableTokensValue {
 	/** What a name is, in `resolveTemplate`'s order. */
 	classify: (name: string) => VariableTokenKind;
@@ -44,6 +52,14 @@ export interface EditorVariableTokensValue {
 	getVariableOrigins: (name: string) => VariableOrigin[];
 	/** Open the shared popover over a token. */
 	openTokenEditor: (request: TokenEditRequest) => void;
+	/**
+	 * Show the shared tooltip over a token, or take it down with `null`.
+	 *
+	 * One tooltip for the whole subtree, like the popover beside it: an editor
+	 * says which token the pointer is on and the provider draws the same card the
+	 * single-line fields draw over theirs.
+	 */
+	setHoveredToken: (request: TokenHoverRequest | null) => void;
 }
 
 export const EditorVariableTokensContext = createContext<EditorVariableTokensValue | null>(null);

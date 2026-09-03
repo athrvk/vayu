@@ -9,8 +9,9 @@
  */
 
 /**
- * What one editor does with the tokens in its text: paints them, opens one on
- * ⌘-click, and binds the chord that opens the one under the caret.
+ * What one editor does with the tokens in its text: paints them, shows the one
+ * under the pointer, opens one on ⌘-click, and binds the chord that opens the
+ * one under the caret.
  *
  * Driven against a Monaco stub rather than a real editor - the API surface used
  * here is six methods, and jsdom has no layout for the real one to measure. The
@@ -19,24 +20,26 @@
  * hook exactly as they went in.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type * as Monaco from "monaco-editor";
 import type { MonacoApi } from "@/lib/monaco-api";
 import type { ResolvedVariable } from "@/types";
 import { classifyVariableToken } from "@/lib/variable-token-kind";
-import { isVariableTokenModel } from "@/lib/variable-token-models";
+import { TIMING } from "@/config/timing";
 import { EditorVariableTokensContext, type EditorVariableTokensValue } from "./context";
 import { useEditorVariableTokens } from "./useEditorVariableTokens";
 
 const variables: Record<string, ResolvedVariable> = {};
 
 const openTokenEditor = vi.fn();
+const setHoveredToken = vi.fn();
 
 const contextValue: EditorVariableTokensValue = {
 	classify: (name) => classifyVariableToken(name, { variables }),
 	getVariableOrigins: () => [],
 	openTokenEditor,
+	setHoveredToken,
 };
 
 /** Monaco's key constants, as `chordKeybinding` reads them. */
@@ -47,15 +50,16 @@ const monacoStub = {
 
 function stubEditor(lines: string[]) {
 	const decorations = { set: vi.fn(), clear: vi.fn() };
-	// One object for the editor's life, as Monaco's own model is - the token
-	// layer marks it by identity so the language-wide hover can tell a painted
-	// model from a response body's.
+	// One object for the editor's life, as Monaco's own model is.
 	const model = {
 		getLineCount: () => lines.length,
 		getLineContent: (lineNumber: number) => lines[lineNumber - 1] ?? "",
 	};
 	const handlers: {
 		mouse?: (e: Monaco.editor.IEditorMouseEvent) => void;
+		move?: (e: Monaco.editor.IEditorMouseEvent) => void;
+		leave?: () => void;
+		scroll?: () => void;
 		commands: Array<{ binding: number; run: () => void }>;
 	} = { commands: [] };
 	let position = { lineNumber: 1, column: 1 };
@@ -74,6 +78,18 @@ function stubEditor(lines: string[]) {
 		onDidChangeModel: () => ({ dispose: () => {} }),
 		onMouseDown: (cb: (e: Monaco.editor.IEditorMouseEvent) => void) => {
 			handlers.mouse = cb;
+			return { dispose: () => {} };
+		},
+		onMouseMove: (cb: (e: Monaco.editor.IEditorMouseEvent) => void) => {
+			handlers.move = cb;
+			return { dispose: () => {} };
+		},
+		onMouseLeave: (cb: () => void) => {
+			handlers.leave = cb;
+			return { dispose: () => {} };
+		},
+		onDidScrollChange: (cb: () => void) => {
+			handlers.scroll = cb;
 			return { dispose: () => {} };
 		},
 		addCommand: (binding: number, run: () => void) => {
@@ -114,6 +130,16 @@ function mount(
 	return rendered;
 }
 
+/** The pointer resting on `column` of the first line, past the hover delay. */
+function hoverAt(stub: ReturnType<typeof stubEditor>, column: number | null) {
+	act(() => {
+		stub.handlers.move?.({
+			target: { position: column === null ? null : { lineNumber: 1, column } },
+		} as unknown as Monaco.editor.IEditorMouseEvent);
+		vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS);
+	});
+}
+
 /** A ⌘-click landing on `column` of the first line. */
 function metaClickAt(stub: ReturnType<typeof stubEditor>, column: number) {
 	const preventDefault = vi.fn();
@@ -125,8 +151,14 @@ function metaClickAt(stub: ReturnType<typeof stubEditor>, column: number) {
 }
 
 beforeEach(() => {
+	vi.useFakeTimers();
 	openTokenEditor.mockClear();
+	setHoveredToken.mockClear();
 	for (const key of Object.keys(variables)) delete variables[key];
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 describe("useEditorVariableTokens", () => {
@@ -155,25 +187,90 @@ describe("useEditorVariableTokens", () => {
 		expect(stub.handlers.commands).toHaveLength(0);
 	});
 
-	it("marks its model, so the language-wide hover may answer for it", () => {
-		const stub = stubEditor(["{{baseUrl}}"]);
+	it("shows the token the pointer rests on, over the token's own rectangle", () => {
+		variables.baseUrl = { value: "https://x", scope: "environment" };
+		const stub = stubEditor(["GET {{baseUrl}}"]);
 		mount(stub);
-		expect(isVariableTokenModel(stub.model)).toBe(true);
+
+		hoverAt(stub, 8);
+		expect(setHoveredToken).toHaveBeenCalledTimes(1);
+		expect(setHoveredToken.mock.calls[0][0]).toMatchObject({
+			name: "baseUrl",
+			rect: { left: 10 + 5 * 8, top: 24, height: 18 },
+		});
 	});
 
-	it("never marks a read-only model - the hover has to leave a response body alone", () => {
+	it("waits the tooltip delay out, so sweeping across a body opens nothing", () => {
+		variables.baseUrl = { value: "https://x", scope: "environment" };
+		const stub = stubEditor(["GET {{baseUrl}}"]);
+		mount(stub);
+
+		act(() => {
+			stub.handlers.move?.({
+				target: { position: { lineNumber: 1, column: 8 } },
+			} as unknown as Monaco.editor.IEditorMouseEvent);
+			vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS - 1);
+		});
+		// Mutation check: open on the move itself and this fails.
+		expect(setHoveredToken).not.toHaveBeenCalled();
+	});
+
+	it("stays open while the pointer moves inside the token it is showing", () => {
+		variables.baseUrl = { value: "https://x", scope: "environment" };
+		const stub = stubEditor(["GET {{baseUrl}}"]);
+		mount(stub);
+
+		hoverAt(stub, 8);
+		hoverAt(stub, 10);
+		// One open, and no take-down in between: re-arming the timer per character
+		// is a tooltip that never opens while the hand is not perfectly still.
+		expect(setHoveredToken.mock.calls).toEqual([
+			[expect.objectContaining({ name: "baseUrl" })],
+		]);
+	});
+
+	it("takes it down off the token, on a scroll, and when the editor goes", () => {
+		variables.baseUrl = { value: "https://x", scope: "environment" };
+		const stub = stubEditor(["GET {{baseUrl}}"]);
+		const rendered = mount(stub);
+
+		hoverAt(stub, 8);
+		hoverAt(stub, 2);
+		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+
+		hoverAt(stub, 8);
+		act(() => stub.handlers.scroll?.());
+		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+
+		hoverAt(stub, 8);
+		act(() => stub.handlers.leave?.());
+		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+
+		hoverAt(stub, 8);
+		rendered.unmount();
+		// A card left hanging over whatever replaces the editor is the failure
+		// this one guards.
+		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+	});
+
+	it("never shows one in a read-only editor - a response body's `{{x}}` is data", () => {
 		const stub = stubEditor(["{{baseUrl}}"]);
 		mount(stub, { readOnly: true });
-		// Mutation check: mark at install rather than in `paint`, or drop the
-		// `readOnly` gate, and the response viewer starts answering hovers.
-		expect(isVariableTokenModel(stub.model)).toBe(false);
+		// The hook installs nothing there, so there is no handler to fire.
+		expect(stub.handlers.move).toBeUndefined();
+		hoverAt(stub, 4);
+		expect(setHoveredToken).not.toHaveBeenCalled();
 	});
 
-	it("stops marking it once the editor is gone", () => {
-		const stub = stubEditor(["{{baseUrl}}"]);
-		const rendered = mount(stub);
-		rendered.unmount();
-		expect(isVariableTokenModel(stub.model)).toBe(false);
+	it("closes the tooltip when the popover opens over the same token", () => {
+		variables.baseUrl = { value: "https://x", scope: "environment" };
+		const stub = stubEditor(["GET {{baseUrl}}"]);
+		mount(stub);
+
+		hoverAt(stub, 8);
+		metaClickAt(stub, 8);
+		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
+		expect(openTokenEditor).toHaveBeenCalledTimes(1);
 	});
 
 	it("leaves a script editor alone - the engine never interpolates script source", () => {

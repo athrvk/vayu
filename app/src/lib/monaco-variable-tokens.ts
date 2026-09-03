@@ -11,13 +11,13 @@
  * A `VariableInput` paints a strip of real DOM tokens over its `<input>`, so a
  * variable there can carry a colour, a tooltip and a popover trigger. A Monaco
  * editor has no DOM to hang them on - its text is drawn by the editor - so the
- * same three answers arrive as decorations (the colour), a hover provider (the
- * reading) and a click/chord that opens the shared `VariablePopover` over the
- * token's screen rectangle (the editing). Issue #1220.
+ * same three answers arrive as decorations (the colour), and as the app's own
+ * tooltip and the shared `VariablePopover` drawn over the token's screen
+ * rectangle (the reading and the editing). Issues #1220 and #1320.
  *
- * This module is the pure half: where the tokens are in a model, which class
- * paints each state, and what the hover says. The registration and the popover
- * live in `components/shared/EditorVariableTokens/`, which is where React is.
+ * This module is the pure half: where the tokens are in a model, and which
+ * class paints each state. The tooltip, the popover and the mouse handlers live
+ * in `components/shared/EditorVariableTokens/`, which is where React is.
  *
  * **The states, and their classes, are `EditableVariable`'s.** The overlay
  * strip paints `text-destructive-text` / `text-muted-foreground` / `text-primary`
@@ -28,7 +28,6 @@
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import type { VariableTokenKind } from "./variable-token-kind";
-import type { VariableOrigin } from "@/types";
 
 /** One `{{name}}` found in a model, in Monaco's 1-based line/column space. */
 export interface VariableTokenRange {
@@ -73,11 +72,8 @@ export function variableTokenRanges(model: ScannableModel, maxLines = 5000): Var
 	return ranges;
 }
 
-/**
- * The tokens in one line. What a hover needs - it is asked about a single
- * position, so scanning the document to answer would be work nobody reads.
- */
-export function variableTokensInLine(line: string, lineNumber: number): VariableTokenRange[] {
+/** The tokens in one line, which is how `variableTokenRanges` walks a model. */
+function variableTokensInLine(line: string, lineNumber: number): VariableTokenRange[] {
 	if (!line.includes("{{")) return [];
 	const ranges: VariableTokenRange[] = [];
 	for (const match of line.matchAll(VARIABLE_PATTERN)) {
@@ -120,94 +116,3 @@ export function variableTokenClass(kind: VariableTokenKind): string {
 
 /** Every class this module can produce - what a stylesheet guard checks. */
 export const VARIABLE_TOKEN_CLASSES: readonly string[] = Object.values(TOKEN_CLASS);
-
-/**
- * A value as the hover prints it, in the wording the tooltip already uses.
- *
- * A secret is the word `secret` and never dots and never the value: the popover
- * gates a reveal behind a deliberate click, and a hover that printed the string
- * on mouseover would walk straight around that gate (`EditableVariable`).
- */
-function printedValue(value: string, secret: boolean | undefined): string {
-	if (secret) return "_secret_";
-	return value ? codeSpan(value) : "_empty_";
-}
-
-/**
- * A value inside a markdown code span, fenced rather than escaped.
- *
- * A backslash is literal inside a code span, so escaping the backticks does
- * nothing: `` \` `` still closes the span and the rest of the value spills into
- * the hover as markup. CommonMark's actual rule is the fence - a span opened
- * with N backticks runs to the next run of exactly N - so the fence is one
- * longer than the longest run the value contains, and a value that starts or
- * ends with a backtick takes a space of padding the renderer strips again.
- *
- * The values here are the user's own environment data: a shell command with
- * backticks, a Windows path full of backslashes, a JSON blob.
- */
-function codeSpan(value: string): string {
-	const longestRun = Math.max(0, ...Array.from(value.matchAll(/`+/g), (m) => m[0].length));
-	const fence = "`".repeat(longestRun + 1);
-	const pad = value.startsWith("`") || value.endsWith("`") ? " " : "";
-	return `${fence}${pad}${value}${pad}${fence}`;
-}
-
-/** `environment - Staging`, or the bare scope where there is no name to give. */
-function printedSource(scope: string, sourceName: string | undefined): string {
-	return sourceName ? `${scope} - ${sourceName}` : scope;
-}
-
-/**
- * The hover's markdown, as `Hover.contents` takes it (Monaco 0.55 accepts
- * `IMarkdownString[]` only - no React, which is why the *edit* affordance is a
- * click and a chord rather than a button in here).
- *
- * It answers the same three questions as the tooltip over a single-line field,
- * from the same origins list: what does this resolve to, where did it come
- * from, and what else defines it. A token that answered them differently in two
- * places would be worse than one that answered both wrongly.
- */
-export function variableHoverMarkdown(
-	name: string,
-	kind: VariableTokenKind,
-	origins: VariableOrigin[],
-	editHint?: string
-): string[] {
-	const heading = "`{{" + name + "}}`";
-
-	if (kind.state === "runtime") {
-		return [`${heading}\n\n${kind.description}\n\n_${kind.note}_`];
-	}
-
-	const boundRow = origins.find((o) => o.scope === "row");
-	const shadowed = origins.filter((o) => o.scope !== "row" && !o.winner);
-
-	const lines: string[] = [];
-	if (boundRow) {
-		// The row outranks every scope, so it is the answer whether or not one of
-		// them also defines the name - the popover's own first branch.
-		lines.push(`${heading}\n\n${printedValue(boundRow.value, false)}\n\n_Bound row_`);
-	} else if (kind.state === "undefined") {
-		lines.push(`${heading}\n\n_not defined_`);
-	} else {
-		const info = kind.info;
-		lines.push(
-			`${heading}\n\n${printedValue(info?.value ?? "", info?.secret)}\n\n_${printedSource(
-				info?.scope ?? "global",
-				info?.sourceName
-			)}_`
-		);
-	}
-
-	if (shadowed.length > 0) {
-		const rows = shadowed.map(
-			(o) =>
-				`- ~~${printedSource(o.scope, o.sourceName)}~~${o.enabled ? "" : " (off)"}: ${printedValue(o.value, o.secret)}`
-		);
-		lines.push(["Also defined in:", ...rows].join("\n"));
-	}
-
-	if (editHint) lines.push(`_${editHint}_`);
-	return lines;
-}

@@ -30,9 +30,14 @@
  * render, at the cost of installing imperatively, which is what Monaco's API is
  * anyway.
  *
- * The hover half is registered globally, per language, by
- * `useVariableHoverProvider` - Monaco takes one hover provider per language, not
- * one per editor.
+ * **The hover is this editor's too** (issue #1320). It used to be a Monaco
+ * hover provider, registered once per language for the whole app, which is why
+ * the token had to mark its model for the provider to know which `{{x}}` was a
+ * variable and which was a response body someone was sent. The card is now the
+ * app's own tooltip over the token's rectangle, drawn by the provider that
+ * already draws the popover there - so it exists only on editors that reach
+ * this far, and the marking, the model registry and the per-language
+ * registration are all gone with it.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -44,8 +49,8 @@ import {
 	variableTokenClass,
 	type VariableTokenRange,
 } from "@/lib/monaco-variable-tokens";
-import { forgetVariableTokenModel, markVariableTokenModel } from "@/lib/variable-token-models";
 import { chordKeybinding } from "@/lib/editor-chords";
+import { TIMING } from "@/config/timing";
 import { EDIT_VARIABLE_CHORD } from "@/constants/shortcuts";
 import {
 	useEditorVariableTokensContext,
@@ -118,8 +123,15 @@ interface Installation {
 	decorations: Monaco.editor.IEditorDecorationsCollection;
 	listeners: Monaco.IDisposable[];
 	timer?: ReturnType<typeof setTimeout>;
-	/** The model currently marked for the hover - see `paint`. */
-	marked?: Monaco.editor.ITextModel;
+	/** Counting down to the tooltip the pointer has been resting on. */
+	hoverTimer?: ReturnType<typeof setTimeout>;
+	/** The token that tooltip is for, showing or pending - see `hoverAt`. */
+	hovered?: string;
+}
+
+/** Identifies a token across mouse moves: the same name, in the same place. */
+function tokenKey(range: VariableTokenRange): string {
+	return `${range.lineNumber}:${range.startColumn}:${range.name}`;
 }
 
 export function useEditorVariableTokens({
@@ -156,17 +168,6 @@ export function useEditorVariableTokens({
 			current.decorations.clear();
 			return;
 		}
-		/*
-		 * Say so for the hover, which is registered per language and would
-		 * otherwise answer for a response body's `{{x}}` too. Marked on every
-		 * paint rather than once at install: a body-mode switch hands the editor
-		 * a new model, and the mark belongs to the model, not the editor.
-		 */
-		if (model !== current.marked) {
-			if (current.marked) forgetVariableTokenModel(current.marked);
-			markVariableTokenModel(model);
-			current.marked = model;
-		}
 		current.decorations.set(
 			variableTokenRanges(model).map((range) => ({
 				range: {
@@ -180,11 +181,63 @@ export function useEditorVariableTokens({
 		);
 	}, []);
 
+	/** Take the tooltip down, and forget whatever it was counting down to. */
+	const hideHover = useCallback(() => {
+		const current = installation.current;
+		if (!current) return;
+		clearTimeout(current.hoverTimer);
+		current.hoverTimer = undefined;
+		if (current.hovered === undefined) return;
+		current.hovered = undefined;
+		live.current.tokens?.setHoveredToken(null);
+	}, []);
+
+	/**
+	 * The pointer moved: show the token under it, hide anything else.
+	 *
+	 * The delay is the app's own tooltip delay rather than Monaco's, because
+	 * what opens is the app's own tooltip - the same card, after the same wait,
+	 * as the one over a `{{token}}` in the URL bar one row above. Moving along a
+	 * line of text fires this per character, so a move that stays inside the
+	 * token it is already showing does nothing at all: re-arming the timer there
+	 * would mean a hover that never opens while the hand is not perfectly still.
+	 */
+	const hoverAt = useCallback(
+		(editor: Monaco.editor.IStandaloneCodeEditor, position: Monaco.IPosition | null) => {
+			const current = installation.current;
+			const context = live.current.tokens;
+			if (!current || !context) return;
+			const model = editor.getModel();
+			const range =
+				position && model ? tokenAtPosition(variableTokenRanges(model), position) : null;
+			if (!range) {
+				hideHover();
+				return;
+			}
+			const key = tokenKey(range);
+			if (current.hovered === key) return;
+			clearTimeout(current.hoverTimer);
+			current.hovered = key;
+			current.hoverTimer = setTimeout(() => {
+				// Measured when it opens, not when the pointer arrived: a scroll or
+				// an edit in between moved the token, and the card points at where
+				// it is now or does not open at all.
+				const rect = tokenRect(editor, range);
+				if (!rect) return;
+				context.setHoveredToken({ name: range.name, rect });
+			}, TIMING.TOOLTIP_DELAY_MS);
+		},
+		[hideHover]
+	);
+
 	/** Open the popover over a token, if there is anything behind it to edit. */
 	const open = useCallback(
 		(editor: Monaco.editor.IStandaloneCodeEditor, range: VariableTokenRange) => {
 			const context = live.current.tokens;
 			if (!context) return;
+			// Whatever happens next, the pointer's tooltip is not part of it: the
+			// popover that opens carries the same value over the same rectangle.
+			hideHover();
 			// A generator or a bound column has no stored variable to edit, so there
 			// is nothing to open - the hover already said what it is.
 			if (context.classify(range.name).state === "runtime") return;
@@ -199,7 +252,7 @@ export function useEditorVariableTokens({
 				onClose: () => editor.focus(),
 			});
 		},
-		[]
+		[hideHover]
 	);
 
 	/** Find the token at a position and open it. */
@@ -238,10 +291,21 @@ export function useEditorVariableTokens({
 			editor.onDidChangeModelContent(() => {
 				clearTimeout(current.timer);
 				current.timer = setTimeout(paint, REPAINT_DELAY_MS);
+				// The text under the pointer just moved, so the card is pointing at
+				// a token that is no longer there.
+				hideHover();
 			}),
 			// A body mode switch swaps the model under the same editor, and the
 			// new one arrives unpainted.
-			editor.onDidChangeModel(() => paint()),
+			editor.onDidChangeModel(() => {
+				hideHover();
+				paint();
+			}),
+			editor.onMouseMove((event) => hoverAt(editor, event.target?.position ?? null)),
+			// Off the editor entirely, and on a scroll: the rectangle the card was
+			// drawn over belongs to a line that has moved.
+			editor.onMouseLeave(() => hideHover()),
+			editor.onDidScrollChange(() => hideHover()),
 			editor.onMouseDown((event) => {
 				// ⌘/Ctrl-click edits, plain click keeps placing the caret - taking
 				// the plain one would steal the click that puts the cursor in the
@@ -265,7 +329,7 @@ export function useEditorVariableTokens({
 		}
 
 		paint();
-	}, [open, openAt, paint]);
+	}, [hideHover, hoverAt, open, openAt, paint]);
 
 	/*
 	 * The install, reachable from the mount callback without that callback
@@ -310,14 +374,15 @@ export function useEditorVariableTokens({
 			const current = installation.current;
 			if (!current) return;
 			clearTimeout(current.timer);
+			// The tooltip is the provider's, and it outlives this editor: an editor
+			// unmounted with the pointer on a token would otherwise leave its card
+			// hanging over whatever replaced it.
+			hideHover();
 			current.listeners.forEach((listener) => listener.dispose());
 			current.decorations.clear();
-			// The hover must stop answering for a model this editor no longer
-			// paints, even in the window before Monaco disposes it.
-			if (current.marked) forgetVariableTokenModel(current.marked);
 			installation.current = null;
 		};
-	}, []);
+	}, [hideHover]);
 
 	return onEditorMount;
 }

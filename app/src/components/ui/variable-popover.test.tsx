@@ -209,7 +209,9 @@ describe("where the value came from", () => {
 	it("states what saves the edit, instead of keycaps that pointed at it", () => {
 		const panel = (renderPopover(), open());
 		expect(panel.querySelectorAll('[data-slot="kbd"]')).toHaveLength(0);
-		expect(within(panel).getByText(/Saves when you click away\. Esc discards\./)).toBeInTheDocument();
+		expect(
+			within(panel).getByText(/Saves when you click away\. Esc discards\./)
+		).toBeInTheDocument();
 	});
 
 	it("leaves that sentence out of manual mode, which saves on a button", () => {
