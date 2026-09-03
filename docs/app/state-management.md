@@ -778,6 +778,8 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
   steps: ScenarioStepRow[]   // Reported so far, in plan order
   summary: StepListSummary   // The four outcome counts, plus how many steps are
                              // past the first pass and how many bound a data row
+  appendEpoch: number        // Moves whenever the list changed by anything other
+                             // than growing at its end
   isStreaming: boolean
   error: string | null       // A transport failure on the stream
 }
@@ -788,6 +790,8 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
 Steps are folded in by `foldStepEvents` (`modules/history/main/scenario-steps.ts`), which keys on `(iteration, stepIndex)` rather than arrival order: the engine's SSE ring replays from `Last-Event-ID`, so a reconnect re-delivers events already rendered and an append-only list would double every row it re-saw. A whole batch costs one array copy, and the fold returns the state it was given when every event in the batch was an idempotent replay, so a reconnect's replay does not re-render the list.
 
 `summary` is maintained by that same fold rather than recounted by the view - the `dashboard-store` aggregate stance, for the same reason: a scan per commit is a scan over a list that grows for the length of the run. `ScenarioRunView` is its reader, for the four count chips and for the two whole-list questions its rows answer. It does **not** displace the report: once `report.scenario` can give the run's own totals those win, because thinning drops passes and the stored rows undercount them (see `docs/app/COMPONENTS.md`). `summarizeSteps` answers for the stored rows, which arrive complete, and is the oracle the incremental summary is tested against.
+
+`appendEpoch` is the second thing that fold publishes, and the reason it has to (issue #1205). Every commit hands the view a new array - immutability, which zustand's change detection depends on - so from the rows alone an appended row and a replaced one look alike, and a reader that wants to keep anything derived from the list has to compare the two lists to find out. The fold already knows, so it says: `foldStepEvents` returns `appendedOnly` beside the fold, and the store turns it into a monotone counter that moves for a replay that replaced a row, a gap-resume that spliced one in, and a `startRun` that emptied the list. `useFilteredSteps` (`modules/history/main/`) is its reader: it keeps the rows a chip or the search box matched and extends them with the batch that arrived, so a narrowed live list costs one predicate pass over the batch rather than over the whole run per flush. Monotone matters - React may render once for two commits, and a value that could return to one a reader had already seen would let a stale prefix through.
 
 Once a run reaches a terminal status its stored `results` rows are the complete record and the view reads those instead. `ScenarioRunService.handleClose` invalidates `runs.detail(runId)` and refetches `runs.report(runId)` through the query cache - the same keys the tab reads, so a bare fetch would leave the pane on the stale copy. It also invalidates `runs.lists()` (the History row still says "running") and `runs.lastCollectionRuns()` (the context bar's Last run section says it too, from its own family, and is not polled at all).
 

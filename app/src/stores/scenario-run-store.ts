@@ -50,6 +50,24 @@ interface ScenarioRunState {
 	 * only thing that makes storing it worth the field.
 	 */
 	summary: StepListSummary;
+	/**
+	 * Bumped whenever {@link steps} changed by anything other than growing at
+	 * its end - a run starting, a replay replacing a row in place, a gap-resume
+	 * splicing one in. Constant while the list only appends.
+	 *
+	 * Read by `useFilteredSteps` (issue #1205), which keeps the rows a chip or
+	 * the search box matched and extends them with the batch that just arrived
+	 * rather than re-filtering the whole run per commit. Every commit hands the
+	 * view a new array, so "the same list, longer" and "a different list" are
+	 * indistinguishable from the rows alone; this is the fold telling it, in one
+	 * number rather than a comparison of the two lists.
+	 *
+	 * Monotone, and never reset: a reader that missed a commit - React may
+	 * render once for two of them - sees the number move and rebuilds, where a
+	 * value that could return to one it had already seen would let a stale
+	 * prefix through.
+	 */
+	appendEpoch: number;
 	/** True between `startRun` and the stream closing. */
 	isStreaming: boolean;
 	/** A transport failure on the stream; cleared by the next `startRun`. */
@@ -66,17 +84,22 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 	runId: null,
 	steps: [],
 	summary: emptyStepSummary(),
+	appendEpoch: 0,
 	isStreaming: false,
 	error: null,
 
+	// An emptied list is the sharpest case of "not the list you were reading",
+	// so the epoch moves here too - without it, a second run's first batches
+	// would look like the first run's list getting longer.
 	startRun: (runId) =>
-		set({
+		set((state) => ({
 			runId,
 			steps: [],
 			summary: emptyStepSummary(),
+			appendEpoch: state.appendEpoch + 1,
 			isStreaming: true,
 			error: null,
-		}),
+		})),
 
 	/*
 	 * Ignoring the identity of the run is not an option here: the stream is
@@ -90,10 +113,17 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 	addSteps: (steps) =>
 		set((state) => {
 			if (!state.runId || steps.length === 0) return state;
-			const next = foldStepEvents({ steps: state.steps, summary: state.summary }, steps);
-			return next.steps === state.steps
+			const { fold, appendedOnly } = foldStepEvents(
+				{ steps: state.steps, summary: state.summary },
+				steps
+			);
+			return fold.steps === state.steps
 				? state
-				: { steps: next.steps, summary: next.summary };
+				: {
+						steps: fold.steps,
+						summary: fold.summary,
+						appendEpoch: appendedOnly ? state.appendEpoch : state.appendEpoch + 1,
+					};
 		}),
 
 	setStreaming: (isStreaming) => set({ isStreaming }),
