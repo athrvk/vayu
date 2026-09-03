@@ -110,7 +110,7 @@ describe("the live schema verdict", () => {
  * covers it - so only the rows are under test.
  */
 function append(steps: ScenarioStepRow[], event: ScenarioStepEvent): ScenarioStepRow[] {
-	return foldStepEvents({ steps, summary: emptyStepSummary() }, [event]).steps;
+	return foldStepEvents({ steps, summary: emptyStepSummary() }, [event]).fold.steps;
 }
 
 describe("foldStepEvents, one event at a time", () => {
@@ -226,11 +226,14 @@ describe("foldStepEvents, one event at a time", () => {
  */
 describe("foldStepEvents, a batch at a time", () => {
 	const empty = (): StepFold => ({ steps: [], summary: emptyStepSummary() });
+	// The rows and their summary; what the batch disturbed has its own block.
+	const fold = (current: StepFold, events: readonly ScenarioStepEvent[]): StepFold =>
+		foldStepEvents(current, events).fold;
 
 	it("folds a batch to the same rows the events would one at a time", () => {
 		const events = [event(0, 0), event(0, 1), event(1, 0, "failed"), event(1, 1, "skipped")];
 
-		const batched = foldStepEvents(empty(), events);
+		const batched = fold(empty(), events);
 		let oneAtATime: ScenarioStepRow[] = [];
 		for (const e of events) oneAtATime = append(oneAtATime, e);
 
@@ -238,7 +241,7 @@ describe("foldStepEvents, a batch at a time", () => {
 	});
 
 	it("carries a summary equal to a fresh count of the rows it produced", () => {
-		const batch = foldStepEvents(empty(), [
+		const batch = fold(empty(), [
 			event(0, 0, "passed"),
 			event(0, 1, "failed"),
 			event(0, 2, "skipped"),
@@ -256,16 +259,16 @@ describe("foldStepEvents, a batch at a time", () => {
 		 * failed copy of one step - two outcomes from one execution, and a
 		 * `passed` count the four chips would show that no row supports.
 		 */
-		const first = foldStepEvents(empty(), [event(0, 0, "passed"), event(0, 1, "passed")]);
-		const second = foldStepEvents(first, [event(0, 1, "failed"), event(0, 2, "passed")]);
+		const first = fold(empty(), [event(0, 0, "passed"), event(0, 1, "passed")]);
+		const second = fold(first, [event(0, 1, "failed"), event(0, 2, "passed")]);
 
 		expect(second.summary).toEqual(summarizeSteps(second.steps));
 		expect(second.summary.counts).toEqual({ passed: 2, failed: 1, skipped: 0, errored: 0 });
 	});
 
 	it("returns the fold itself when every event in the batch is an idempotent replay", () => {
-		const first = foldStepEvents(empty(), [event(0, 0), event(0, 1)]);
-		const again = foldStepEvents(first, [event(0, 0), event(0, 1)]);
+		const first = fold(empty(), [event(0, 0), event(0, 1)]);
+		const again = fold(first, [event(0, 0), event(0, 1)]);
 
 		// Identity, not equality: the store reads this to commit nothing, so a
 		// fold that merely matched would still re-render the list on a
@@ -275,8 +278,8 @@ describe("foldStepEvents, a batch at a time", () => {
 	});
 
 	it("commits the whole batch when only part of it is a replay", () => {
-		const first = foldStepEvents(empty(), [event(0, 0)]);
-		const second = foldStepEvents(first, [event(0, 0), event(0, 1)]);
+		const first = fold(empty(), [event(0, 0)]);
+		const second = fold(first, [event(0, 0), event(0, 1)]);
 
 		expect(second.steps).not.toBe(first.steps);
 		expect(second.steps.map(stepKey)).toEqual(["0:0", "0:1"]);
@@ -284,13 +287,13 @@ describe("foldStepEvents, a batch at a time", () => {
 	});
 
 	it("answers the two whole-list questions the header asks", () => {
-		const plain = foldStepEvents(empty(), [event(0, 0)]);
+		const plain = fold(empty(), [event(0, 0)]);
 		expect(plain.summary.iterationSteps).toBe(0);
 		expect(plain.summary.dataBoundSteps).toBe(0);
 
 		// A second pass over the plan, and a run bound to a data set: the row
 		// says which iteration it belongs to and which row it took.
-		const richer = foldStepEvents(plain, [event(1, 0, "passed", { dataRowIndex: 3 })]);
+		const richer = fold(plain, [event(1, 0, "passed", { dataRowIndex: 3 })]);
 		expect(richer.summary.iterationSteps).toBe(1);
 		expect(richer.summary.dataBoundSteps).toBe(1);
 	});
@@ -305,10 +308,10 @@ describe("foldStepEvents, a batch at a time", () => {
 		 * Nothing the engine sends does this today; the fold does not need to
 		 * assume that.
 		 */
-		const bound = foldStepEvents(empty(), [event(0, 0, "passed", { dataRowIndex: 3 })]);
+		const bound = fold(empty(), [event(0, 0, "passed", { dataRowIndex: 3 })]);
 		expect(bound.summary.dataBoundSteps).toBe(1);
 
-		const unbound = foldStepEvents(bound, [event(0, 0, "failed")]);
+		const unbound = fold(bound, [event(0, 0, "failed")]);
 
 		expect(unbound.steps).toHaveLength(1);
 		expect(unbound.summary.dataBoundSteps).toBe(0);
@@ -316,8 +319,57 @@ describe("foldStepEvents, a batch at a time", () => {
 	});
 
 	it("leaves an empty batch alone", () => {
-		const first = foldStepEvents(empty(), [event(0, 0)]);
-		expect(foldStepEvents(first, [])).toBe(first);
+		const first = fold(empty(), [event(0, 0)]);
+		expect(fold(first, [])).toBe(first);
+	});
+});
+
+/**
+ * Issue #1205. A reader holding rows a filter matched needs to know whether the
+ * rows below the ones that just arrived are still the rows it matched, and by
+ * the time a list reaches them an appended row and a replaced one look alike.
+ * The fold is the only place that knows, so it says - and what it says is only
+ * useful if it is false for every disturbance, which is what these pin.
+ */
+describe("what a batch disturbed", () => {
+	const empty = (): StepFold => ({ steps: [], summary: emptyStepSummary() });
+
+	it("only appended, for a batch of steps that arrived in plan order", () => {
+		expect(foldStepEvents(empty(), [event(0, 0), event(0, 1)]).appendedOnly).toBe(true);
+	});
+
+	it("only appended, for a replay that changed nothing", () => {
+		const first = foldStepEvents(empty(), [event(0, 0)]).fold;
+
+		// Nothing moved, so nothing a reader holds is stale.
+		expect(foldStepEvents(first, [event(0, 0)]).appendedOnly).toBe(true);
+	});
+
+	it("did more than append when a replay replaced a row in place", () => {
+		const first = foldStepEvents(empty(), [event(0, 0, "passed"), event(0, 1, "passed")]).fold;
+
+		/*
+		 * The mutation this pins: reporting an append here. Row 0:0 stopped
+		 * being passed, so a view holding the passed rows it had matched would
+		 * keep showing one the list no longer has - and would never look at it
+		 * again, since only this flag sends it back over the list.
+		 */
+		expect(foldStepEvents(first, [event(0, 0, "failed")]).appendedOnly).toBe(false);
+	});
+
+	it("did more than append when a gap-resume spliced a row mid-list", () => {
+		const first = foldStepEvents(empty(), [event(0, 0), event(0, 3)]).fold;
+
+		// Placed between the two, so every row after it moved along one.
+		expect(foldStepEvents(first, [event(0, 1)]).appendedOnly).toBe(false);
+	});
+
+	it("did more than append when one batch does both", () => {
+		const first = foldStepEvents(empty(), [event(0, 0, "passed")]).fold;
+		const mixed = foldStepEvents(first, [event(0, 0, "failed"), event(0, 1, "passed")]);
+
+		expect(mixed.fold.steps).toHaveLength(2);
+		expect(mixed.appendedOnly).toBe(false);
 	});
 });
 

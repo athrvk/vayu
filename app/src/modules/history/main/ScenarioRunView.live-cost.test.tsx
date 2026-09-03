@@ -160,6 +160,45 @@ describe("what a live run costs the list", () => {
 		}
 	});
 
+	/*
+	 * Issue #1205. The rows a chip or the search box matched are kept across
+	 * commits and extended with the batch that arrived, so what the list shows
+	 * is no longer read off the whole run per flush. `useFilteredSteps.test.tsx`
+	 * proves the equivalence and the cost; this is the wiring - that the view
+	 * asks it for the rows and the total, and that a batch landing under an
+	 * active filter reaches the screen.
+	 */
+	it("shows what a filter matches, batch after batch", () => {
+		const shown = () =>
+			screen
+				.queryAllByRole("button", { expanded: false })
+				.map((row) => (row.textContent ?? "").match(/Step \d+/)?.[0] ?? "");
+
+		render(<ScenarioRunView run={RUN} />);
+		stream([event(0, "passed"), event(1, "failed")]);
+		fireEvent.click(screen.getByLabelText(/show only failed steps/i));
+		expect(shown()).toEqual(["Step 2"]);
+
+		// The batch, not the run: only its failed row joins the list.
+		stream([event(2, "passed"), event(3, "failed")]);
+		expect(shown()).toEqual(["Step 2", "Step 4"]);
+
+		// And a replay that revises a row already on screen throws the kept rows
+		// away rather than showing one the list no longer holds.
+		stream([event(1, "passed")]);
+		expect(shown()).toEqual(["Step 4"]);
+	});
+
+	it("says the list is empty because of the chip, not because the run is", () => {
+		render(<ScenarioRunView run={RUN} />);
+		stream([event(0, "passed")]);
+		fireEvent.click(screen.getByLabelText(/show only failed steps/i));
+
+		// The narrowed-to-nothing empty state, which reads the same total the
+		// rows do - not the run's own emptiness, which has its own wording.
+		expect(screen.getByText(/no failed steps in the stored rows/i)).toBeTruthy();
+	});
+
 	it("reads the two whole-list questions from the summary too", () => {
 		render(<ScenarioRunView run={RUN} />);
 		// A first pass with no data binding: neither question is answered yes,

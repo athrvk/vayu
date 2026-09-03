@@ -134,19 +134,37 @@ function matchesQuery(step: ScenarioStepRow, query: string): boolean {
 }
 
 /**
+ * Whether either control is narrowing the list.
+ *
+ * The one place that question is answered, because three callers ask it and
+ * they must agree: {@link filterSteps} hands the list back untouched when
+ * nothing narrows, {@link emptyStepListReason} has no control to blame an empty
+ * list on, and `useFilteredSteps` has nothing to maintain. A whitespace-only
+ * query narrows nothing, which is the half a second copy of this would get
+ * wrong.
+ */
+export function narrowsSteps(filter: StepListFilter): boolean {
+	return filter.outcome !== null || filter.query.trim() !== "";
+}
+
+/**
  * The rows to show under `filter`.
  *
  * Returns the same array reference when nothing narrows, so an untouched view
  * hands `useGrowingWindow` the total it already had rather than a new array
  * that only looks like a new list.
+ *
+ * One predicate, wherever the rows come from: a live list maintains what it
+ * matched across commits (`useFilteredSteps`, issue #1205) by calling this with
+ * the batch that just arrived rather than by testing rows a second way.
  */
 export function filterSteps(
 	steps: readonly ScenarioStepRow[],
 	filter: StepListFilter
 ): readonly ScenarioStepRow[] {
+	if (!narrowsSteps(filter)) return steps;
 	const query = filter.query.trim().toLowerCase();
 	const { outcome } = filter;
-	if (outcome === null && query === "") return steps;
 	return steps.filter(
 		(step) =>
 			(outcome === null || step.outcome === outcome) &&
@@ -176,9 +194,9 @@ export function emptyStepListReason(
 	filter: StepListFilter,
 	thinned: ThinningDisclosure | null
 ): EmptyStepListReason | null {
+	if (!narrowsSteps(filter)) return null;
 	const query = filter.query.trim();
 	const { outcome } = filter;
-	if (outcome === null && query === "") return null;
 
 	// Said wherever the chip is one of the two controls: it counts the whole
 	// run, and this list is what the run's store kept.
@@ -292,6 +310,26 @@ export interface StepFold {
 	summary: StepListSummary;
 }
 
+/** A fold, and what the batch that produced it disturbed. */
+export interface StepFoldResult {
+	/** The list and its summary after the batch. */
+	fold: StepFold;
+	/**
+	 * Whether every row the batch changed landed at the end of the list.
+	 *
+	 * False when a replay replaced a row in place or a gap-resume spliced one
+	 * in - the two cases that disturb rows a reader has already been shown.
+	 * True for the ordinary append, and for a batch that changed nothing.
+	 *
+	 * Its reader is `scenario-run-store`, which turns it into the epoch a
+	 * filtered view needs to tell "the same list, longer" from "a different
+	 * list" without comparing the rows (issue #1205). The fold is the only
+	 * place that knows: by the time the list reaches a reader, an appended row
+	 * and a replaced one look alike.
+	 */
+	appendedOnly: boolean;
+}
+
 /**
  * Fold a batch of `step` events into the live list and its summary.
  *
@@ -307,10 +345,14 @@ export interface StepFold {
  * can only be a replay of that execution, and the newer copy is the one to
  * trust.
  */
-export function foldStepEvents(current: StepFold, events: readonly ScenarioStepEvent[]): StepFold {
+export function foldStepEvents(
+	current: StepFold,
+	events: readonly ScenarioStepEvent[]
+): StepFoldResult {
 	// Null until an event actually changes something, which is what lets an
 	// all-replay batch return `current` and commit nothing.
 	let next: StepFold | null = null;
+	let appendedOnly = true;
 
 	for (const event of events) {
 		const fold = next ?? current;
@@ -331,6 +373,7 @@ export function foldStepEvents(current: StepFold, events: readonly ScenarioStepE
 		if (replacing) {
 			applyStepRow(next.summary, next.steps[at], -1);
 			next.steps[at] = row;
+			appendedOnly = false;
 		} else if (at === next.steps.length) {
 			// Events arrive in plan order in the ordinary case, so this is an
 			// append; a gap-resume that lands one out of order still finds its
@@ -338,11 +381,12 @@ export function foldStepEvents(current: StepFold, events: readonly ScenarioStepE
 			next.steps.push(row);
 		} else {
 			next.steps.splice(at, 0, row);
+			appendedOnly = false;
 		}
 		applyStepRow(next.summary, row, 1);
 	}
 
-	return next ?? current;
+	return { fold: next ?? current, appendedOnly };
 }
 
 /**

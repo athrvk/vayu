@@ -39,7 +39,9 @@
  * "the failed executions of `POST /checkout`" is the question neither answers
  * alone, since a run's failures are spread across a dozen different steps and a
  * name is repeated once per iteration. One predicate also means one empty
- * state, which names whichever combination emptied the list.
+ * state, which names whichever combination emptied the list. A live run runs
+ * that predicate over the batch that just arrived rather than over the whole
+ * run per commit - `useFilteredSteps` keeps what it has matched (issue #1205).
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -64,7 +66,6 @@ import ScenarioStepCard from "./components/ScenarioStepCard";
 import {
 	emptyStepListReason,
 	emptyStepSummary,
-	filterSteps,
 	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
@@ -73,6 +74,7 @@ import {
 	type ScenarioStepRow,
 	type StepListSummary,
 } from "./scenario-steps";
+import { useFilteredSteps } from "./useFilteredSteps";
 import type { Run, StepOutcome } from "@/types";
 import { STEP_OUTCOMES } from "@/types";
 
@@ -113,6 +115,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const liveSummary = useScenarioRunStore((s) =>
 		s.runId === run.id ? s.summary : EMPTY_SUMMARY
 	);
+	// Which live list this is, for the filter that has to know whether the rows
+	// it matched are still the rows below the ones that just arrived. A tab that
+	// is not the streaming run reads `EMPTY_STEPS`: nothing has been matched
+	// from an empty list, so the value it reads here cannot carry anything over.
+	const liveAppendEpoch = useScenarioRunStore((s) => (s.runId === run.id ? s.appendEpoch : 0));
 	const isStreaming = useScenarioRunStore((s) => s.runId === run.id && s.isStreaming);
 	const streamError = useScenarioRunStore((s) => (s.runId === run.id ? s.error : null));
 
@@ -239,9 +246,22 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 * hide steps from whoever opens it next.
 	 */
 	const [query, setQuery] = useState("");
-	const shownSteps = useMemo(
-		() => filterSteps(steps, { outcome: outcomeFilter, query }),
-		[steps, outcomeFilter, query]
+	/*
+	 * Held across commits rather than recomputed per commit (issue #1205). A
+	 * narrowing filter ran its predicate over every row the run had produced on
+	 * every batch that arrived - the search lowercasing each step's name as it
+	 * went - because the store hands the view a new array each time. The rows
+	 * already matched cannot stop matching when more arrive at the end, so
+	 * `useFilteredSteps` keeps them and filters the batch alone; `appendKey` is
+	 * what tells it this is the same list only longer, and the store's epoch is
+	 * the only thing that knows (a replaced row and an appended one look alike
+	 * from here). The stored rows are their own key: they arrive complete and
+	 * change only when the report does.
+	 */
+	const shownSteps = useFilteredSteps(
+		steps,
+		{ outcome: outcomeFilter, query },
+		usingStored ? storedSteps : liveAppendEpoch
 	);
 
 	/*
@@ -253,7 +273,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 * below by its status.
 	 */
 	const emptyReason =
-		shownSteps.length === 0
+		shownSteps.total === 0
 			? emptyStepListReason({ outcome: outcomeFilter, query }, thinned)
 			: null;
 
@@ -272,11 +292,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 * exact moment the run finished.
 	 */
 	const { visible, sentinelRef, hasMore } = useGrowingWindow(
-		shownSteps.length,
+		shownSteps.total,
 		undefined,
 		`${run.id}:${outcomeFilter ?? ""}:${query}`
 	);
-	const rendered = shownSteps.slice(0, visible);
+	const rendered = shownSteps.take(visible);
 
 	return (
 		<div className="flex flex-col h-full overflow-hidden">
@@ -489,7 +509,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 								className="px-1 py-2 text-xs text-muted-foreground"
 							>
 								Showing {rendered.length.toLocaleString()} of{" "}
-								{shownSteps.length.toLocaleString()} steps - scroll for more.
+								{shownSteps.total.toLocaleString()} steps - scroll for more.
 							</p>
 						)}
 					</>
