@@ -239,8 +239,7 @@ export type ReorderMove =
  * can never land on a scope the caller did not mean.
  */
 export type ReorderNormalize =
-	| { type: "collection"; parentId: string | null }
-	| { type: "request"; collectionId: string };
+	{ type: "collection"; parentId: string | null } | { type: "request"; collectionId: string };
 
 export interface ReorderRequest {
 	moves: ReorderMove[];

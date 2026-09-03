@@ -928,12 +928,7 @@ export interface StepTestTally {
  * which is why the Events tab says which one fired rather than just stopping.
  */
 export type StreamEndReason =
-	| "completed"
-	| "stopped"
-	| "maxStreamEvents"
-	| "maxStreamDurationMs"
-	| "idleTimeout"
-	| "error";
+	"completed" | "stopped" | "maxStreamEvents" | "maxStreamDurationMs" | "idleTimeout" | "error";
 
 /** Every {@link StreamEndReason}, for exhaustiveness checks and narrowing. */
 export const STREAM_END_REASONS: readonly StreamEndReason[] = [
@@ -1383,11 +1378,7 @@ export interface RunListParams {
 
 /** Load-test execution strategy. Single source of truth for the mode union. */
 export type LoadTestMode =
-	| "constant_rps"
-	| "constant_concurrency"
-	| "iterations"
-	| "ramp_up"
-	| "capacity";
+	"constant_rps" | "constant_concurrency" | "iterations" | "ramp_up" | "capacity";
 
 /**
  * Pass/fail budgets a run declares up front, so the engine can judge it rather

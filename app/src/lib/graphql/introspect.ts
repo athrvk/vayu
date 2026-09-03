@@ -41,12 +41,7 @@ import type { ComposedRequest, ExecuteRequestRequest } from "@/types";
  * evidence: the HTTP status, the GraphQL error list, the raw body.
  */
 export type IntrospectionFailureKind =
-	| "auth"
-	| "unsupported"
-	| "http"
-	| "network"
-	| "parse"
-	| "too-large";
+	"auth" | "unsupported" | "http" | "network" | "parse" | "too-large";
 
 export class IntrospectionError extends Error {
 	constructor(

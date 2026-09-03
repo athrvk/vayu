@@ -44,8 +44,7 @@ export class ApiError extends Error {
  * this", and a name it had to know was special would not say that.
  */
 export type StreamMessage =
-	| { kind: "event"; event: string; data: unknown }
-	| { kind: "buffered"; data: unknown };
+	{ kind: "event"; event: string; data: unknown } | { kind: "buffered"; data: unknown };
 
 /**
  * The failure an engine response carries, as an `ApiError`.

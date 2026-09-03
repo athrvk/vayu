@@ -21,12 +21,7 @@ import {
 } from "@/constants/layout";
 
 export type DrawerView =
-	| "collections"
-	| "history"
-	| "variables"
-	| "services"
-	| "trash"
-	| "settings";
+	"collections" | "history" | "variables" | "services" | "trash" | "settings";
 
 interface LayoutState {
 	// Drawer

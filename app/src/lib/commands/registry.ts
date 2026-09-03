@@ -272,19 +272,17 @@ const ACTION_COMMANDS: readonly Command[] = [
  */
 const DRAWER_VIEW_COMMANDS: readonly Command[] = DRAWER_VIEWS.filter(
 	({ view }) => view !== "settings"
-).map(
-	({ view, label, icon }): Command => ({
-		id: `show-${view}`,
-		// The chord's own label ("Show collections"), so the palette row and the
-		// Keyboard Shortcuts panel read the same sentence.
-		title: DRAWER_VIEW_CHORDS[view].label ?? label,
-		keywords: [view, label, "drawer", "sidebar", "show", "view"],
-		group: "action",
-		icon,
-		shortcut: DRAWER_VIEW_CHORDS[view],
-		perform: () => useLayoutStore.getState().revealDrawerView(view),
-	})
-);
+).map(({ view, label, icon }): Command => ({
+	id: `show-${view}`,
+	// The chord's own label ("Show collections"), so the palette row and the
+	// Keyboard Shortcuts panel read the same sentence.
+	title: DRAWER_VIEW_CHORDS[view].label ?? label,
+	keywords: [view, label, "drawer", "sidebar", "show", "view"],
+	group: "action",
+	icon,
+	shortcut: DRAWER_VIEW_CHORDS[view],
+	perform: () => useLayoutStore.getState().revealDrawerView(view),
+}));
 
 /**
  * One command per settings section, generated from the registries the sidebar
@@ -292,36 +290,32 @@ const DRAWER_VIEW_COMMANDS: readonly Command[] = DRAWER_VIEWS.filter(
  * nor miss one that was added there.
  */
 const SETTINGS_COMMANDS: readonly Command[] = [
-	...APP_SETTINGS_PANELS.map(
-		(panel): Command => ({
-			id: `settings:${panel.id}`,
-			title: panel.label,
-			// The panel's own description, split into words: it is the sentence
-			// the screen prints, so it is also what a user is likely to type.
-			keywords: [panel.id, "settings", "preferences", ...panel.description.split(/\s+/)],
-			group: "settings",
-			icon: panel.icon,
-			subtitle: "Settings",
-			perform: () => revealSettingsCategory(panel.id),
-		})
-	),
-	...ENGINE_SETTINGS_CATEGORIES.map(
-		(category): Command => ({
-			id: `settings:${category.id}`,
-			title: category.label,
-			keywords: [
-				category.id,
-				"settings",
-				"engine",
-				"preferences",
-				...category.description.split(/\s+/),
-			],
-			group: "settings",
-			icon: category.icon,
-			subtitle: "Engine settings",
-			perform: () => revealSettingsCategory(category.id),
-		})
-	),
+	...APP_SETTINGS_PANELS.map((panel): Command => ({
+		id: `settings:${panel.id}`,
+		title: panel.label,
+		// The panel's own description, split into words: it is the sentence
+		// the screen prints, so it is also what a user is likely to type.
+		keywords: [panel.id, "settings", "preferences", ...panel.description.split(/\s+/)],
+		group: "settings",
+		icon: panel.icon,
+		subtitle: "Settings",
+		perform: () => revealSettingsCategory(panel.id),
+	})),
+	...ENGINE_SETTINGS_CATEGORIES.map((category): Command => ({
+		id: `settings:${category.id}`,
+		title: category.label,
+		keywords: [
+			category.id,
+			"settings",
+			"engine",
+			"preferences",
+			...category.description.split(/\s+/),
+		],
+		group: "settings",
+		icon: category.icon,
+		subtitle: "Engine settings",
+		perform: () => revealSettingsCategory(category.id),
+	})),
 ];
 
 /** Every command the app declares, in palette order. */

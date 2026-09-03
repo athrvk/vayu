@@ -57,14 +57,7 @@ import SaveAsExampleDialog from "./SaveAsExampleDialog";
 import type { ResponseState } from "../../types";
 
 type ResponseTab =
-	| "body"
-	| "headers"
-	| "cookies"
-	| "timing"
-	| "console"
-	| "tests"
-	| "events"
-	| "raw-request";
+	"body" | "headers" | "cookies" | "timing" | "console" | "tests" | "events" | "raw-request";
 
 export default function ResponseViewer() {
 	const { request, response, isExecuting } = useRequestBuilderContext();
