@@ -894,6 +894,17 @@ the answer to "which environment". A short label beside a short one
 (`TooltipIconButton`'s shortcut hint) has neither ingredient and stays a row.
 → `tooltip-value-layout.test.ts` reads every tooltip block for the shape.
 
+`VariablePopover`'s source line is the same rule, one primitive over (issue
+#1320). It used to share the footer with the Enter and Esc keycaps - a
+`truncate` span beside a `shrink-0` chip group - so "Shopify QA - expiring
+tokens" clipped exactly as an unbroken tooltip value would. The source now
+stacks under the header, full width, with nothing beside it to hand its space
+away: a source name never shares a row with something that will not shrink,
+whether the row is a tooltip's or a popover's. Because `TooltipContent`
+cannot see inside a `Popover`, this one is guarded by a rendered-class check
+in `variable-popover.test.tsx` rather than by `tooltip-value-layout.test.ts`'s
+block scan.
+
 | Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
 |--------|-----------|----------|----------|
 | `sunset` | `24 90% 46%` | `24 95% 58%` | `24 90% 46%` |

@@ -23,7 +23,6 @@ import { useActiveEnvironmentGuard } from "./hooks/useActiveEnvironmentGuard";
 import { useAppearance } from "./hooks/useAppearance";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 import { useVariableCompletionProvider } from "./hooks/useVariableCompletionProvider";
-import { useVariableHoverProvider } from "./hooks/useVariableHoverProvider";
 import { useScriptVariableCompletionProvider } from "./hooks/useScriptVariableCompletionProvider";
 import { useScriptTypeDefinitions } from "./hooks/useScriptTypeDefinitions";
 import { useMenuActions } from "./hooks/useMenuActions";
@@ -68,10 +67,9 @@ function App() {
 	// `{{variable}}` completion in the body editors. Global per language, so one
 	// registration covers every editor instance - same as the line above.
 	useVariableCompletionProvider();
-	// What a `{{variable}}` resolves to, on hover in those same editors - the
-	// reading half of the token affordances the single-line fields already had.
-	// Global per language, like the registration above it.
-	useVariableHoverProvider();
+	// What a `{{variable}}` resolves to is answered by the app's own tooltip,
+	// per editor, in `EditorVariableTokens` - not by a hover provider here
+	// (issue #1320).
 	// Variable names inside `pm.environment.get("…")` and its siblings - the
 	// script editors' equivalent of the line above, since a script names
 	// variables through the accessors rather than through braces.

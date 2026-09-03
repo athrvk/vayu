@@ -1562,27 +1562,32 @@ and keeps the red paint that is how a typo is spotted (issue #186).
 
 **The same four states now paint inside the Monaco body and GraphQL editors
 too** (issue #1220), as decorations rather than DOM tokens - there is no
-`<input>` behind that text to overlay. Hovering reads the token the same way
-the overlay's tooltip does, and ⌘/Ctrl-click or the `EDIT_VARIABLE_CHORD`
-opens the same `VariablePopover`, positioned over the token's screen
-rectangle. The decision of *what a token is* is shared: `classifyVariableToken`
-(`lib/variable-token-kind.ts`) lifts the same ladder this section describes
-out of the paint, so the editors and the overlay answer one `{{name}}`
-identically - the overlay classifies each `{{name}}` once per repaint, before
-any paint, and its five ordered checks exist nowhere else (issue #1239).
-Script editors are excluded:
-the engine never interpolates script source, so `{{name}}` there is literal
+`<input>` behind that text to overlay. Hovering opens the app's own tooltip
+card over the token's screen rectangle, saying what the overlay's tooltip
+says - not Monaco's own hover widget, which is what answered until issue
+#1320 - and ⌘/Ctrl-click or the `EDIT_VARIABLE_CHORD` opens the same
+`VariablePopover`, positioned over that same rectangle. The decision of *what
+a token is* is shared: `classifyVariableToken` (`lib/variable-token-kind.ts`)
+lifts the same ladder this section describes out of the paint, so the editors
+and the overlay answer one `{{name}}` identically - the overlay classifies
+each `{{name}}` once per repaint, before any paint, and its five ordered
+checks exist nowhere else (issue #1239). Script editors are excluded: the
+engine never interpolates script source, so `{{name}}` there is literal
 text except inside `pm.variables.replaceIn`. Read-only editors (response
 body, raw request/response, the settings preview) are excluded too - a
 response body's `{{x}}` is data someone was sent, not a token the app owns.
 
-Excluding them takes two mechanisms, not one, because the decorations are per
-editor and a Monaco hover provider is per *language*: the `json` provider
-answering for a request body is the same object Monaco asks about a response
-body. So an editor that paints tokens marks its model
-(`lib/variable-token-models.ts`) and the hover answers for a marked model and
-no other. `readOnly` cannot decide it - that is an editor option, and the
-provider is handed a model.
+Excluding them is one mechanism now, not two (issue #1320). The paint, the
+hover card and the popover are all installed by `useEditorVariableTokens` -
+one call, per editor - so a script or read-only editor is excluded simply by
+never calling it; there is no model left to mark and no per-language provider
+left to answer for one anyway. That is simpler than the two mechanisms this
+used to take: a Monaco hover provider is registered per *language*, not per
+editor, so the `json` provider answering for a request body was the same
+object Monaco asked about a response body, and an editor that painted tokens
+had to mark its model (`lib/variable-token-models.ts`, since deleted) for the
+hover to tell them apart. `readOnly` could not decide it either way - that is
+an editor option, and the provider was handed a model.
 
 **A `data.*` token has three states of its own** (issue #600), decided by
 `describeDataToken` against `VariableSupport.dataColumns` - the contract the
