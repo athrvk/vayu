@@ -90,8 +90,7 @@ export function useScriptCompletionProvider() {
 						insertTextRules: callee
 							? undefined
 							: (c.insertTextRules as
-									| Monaco.languages.CompletionItemInsertTextRule
-									| undefined),
+									Monaco.languages.CompletionItemInsertTextRule | undefined),
 						detail: c.detail,
 						documentation: c.documentation,
 						sortText: c.sortText,

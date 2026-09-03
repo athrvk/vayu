@@ -15,7 +15,7 @@
 import { CheckCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ScriptSource, TestResult } from "@/types";
-import { SCRIPT_SECTIONS } from "./console/ScriptSection";
+import { SCRIPT_SECTIONS } from "./console/script-sections";
 
 export interface TestResultsProps {
 	results: readonly TestResult[];

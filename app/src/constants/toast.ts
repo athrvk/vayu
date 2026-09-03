@@ -32,12 +32,7 @@ export const MAX_TOASTS = 4;
 /* ── Position ────────────────────────────────────────────────────────────── */
 
 export type ToastPosition =
-	| "bottom-right"
-	| "bottom-left"
-	| "bottom-center"
-	| "top-right"
-	| "top-left"
-	| "top-center";
+	"bottom-right" | "bottom-left" | "bottom-center" | "top-right" | "top-left" | "top-center";
 
 /**
  * Where the stack anchors, and everything that follows from that choice.

@@ -121,9 +121,7 @@ const ROW_WINDOW_STEP = 100;
 
 /** What the row-number field was asking for, or why it cannot be honoured. */
 type RowEntry =
-	| { kind: "empty" }
-	| { kind: "row"; index: number }
-	| { kind: "error"; message: string };
+	{ kind: "empty" } | { kind: "row"; index: number } | { kind: "error"; message: string };
 
 /**
  * Read a typed row number as a 0-based index into `total` rows.

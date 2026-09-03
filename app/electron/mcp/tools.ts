@@ -1097,8 +1097,7 @@ function pickEnvironment(rows: readonly unknown[], environmentId: string | undef
 		return found as Record<string, unknown>;
 	}
 	return rows.find((row) => isRecord(row) && row.isActive === true) as
-		| Record<string, unknown>
-		| undefined;
+		Record<string, unknown> | undefined;
 }
 
 /**
@@ -2968,8 +2967,7 @@ async function readTrashEntry(
 	const payload = await client.listTrash(signal);
 	const items = isRecord(payload) && Array.isArray(payload.items) ? payload.items : [];
 	const row = items.find((item) => isRecord(item) && item.id === id) as
-		| Record<string, unknown>
-		| undefined;
+		Record<string, unknown> | undefined;
 	if (!row) throw new ToolArgError(`Nothing in the trash with id "${id}".`);
 	return {
 		kind: row.kind === "request" ? "request" : "collection",
@@ -5697,8 +5695,7 @@ export const TOOLS: McpTool[] = [
 				const listed = await ctx.client.listEnvironments(signal);
 				const rows = Array.isArray(listed) ? listed : [];
 				active = rows.find((row) => isRecord(row) && row.isActive === true) as
-					| Record<string, unknown>
-					| undefined;
+					Record<string, unknown> | undefined;
 			} catch (err) {
 				return engineErrorResult(err);
 			}

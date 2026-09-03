@@ -486,14 +486,12 @@ describe("createAnomalyDetector - what a commit costs", () => {
 		// Two separate onsets. Trim past the first and the answer becomes the
 		// second - and the scan resumes at the new front rather than restarting,
 		// so it re-reads nothing it had already cleared.
-		const run = healthyRun(
-			80,
-			(i): Partial<LoadTestMetrics> =>
-				i >= 20 && i < 40
-					? { status_codes: { "503": 4 } }
-					: i >= 60
-						? { status_codes: { "500": 9 } }
-						: {}
+		const run = healthyRun(80, (i): Partial<LoadTestMetrics> =>
+			i >= 20 && i < 40
+				? { status_codes: { "503": 4 } }
+				: i >= 60
+					? { status_codes: { "500": 9 } }
+					: {}
 		);
 		const detector = createAnomalyDetector();
 

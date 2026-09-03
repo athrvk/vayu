@@ -358,8 +358,7 @@ export interface ResponseState {
  * a message for. `null` stays reserved for "there was nothing to send".
  */
 export type StreamStartResult =
-	| { ok: true; runId: string; eventsUrl: string }
-	| { ok: false; response: ResponseState };
+	{ ok: true; runId: string; eventsUrl: string } | { ok: false; response: ResponseState };
 
 // ============================================================================
 // Context Types

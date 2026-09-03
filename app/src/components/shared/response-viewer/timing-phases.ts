@@ -50,11 +50,7 @@ export type TimingPhaseTraceKey = "dnsMs" | "connectMs" | "tlsMs" | "firstByteMs
 
 /** Field name on a run report's `timingBreakdown` (per-run averages). */
 export type TimingPhaseAverageKey =
-	| "avgDnsMs"
-	| "avgConnectMs"
-	| "avgTlsMs"
-	| "avgFirstByteMs"
-	| "avgDownloadMs";
+	"avgDnsMs" | "avgConnectMs" | "avgTlsMs" | "avgFirstByteMs" | "avgDownloadMs";
 
 /**
  * Key on a run report's `timingBreakdown.phases` (per-run percentiles).
