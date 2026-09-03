@@ -29,9 +29,11 @@ const names = (script: string) => referencedVariables(script).map((r) => r.name)
 
 describe("the pm API", () => {
 	it.each(["environment", "globals", "collectionVariables"])("reads pm.%s.get", (bucket) => {
-		const scope = { environment: "environment", globals: "global", collectionVariables: "collection" }[
-			bucket
-		];
+		const scope = {
+			environment: "environment",
+			globals: "global",
+			collectionVariables: "collection",
+		}[bucket];
 		expect(referencedVariables(`pm.${bucket}.get("token")`)).toEqual([
 			{ name: "token", via: "pm", reads: "scope", scope },
 		]);
@@ -287,7 +289,9 @@ describe("what a reference says about itself as a column", () => {
  * helper that read them in any other order would agree with the resolver only by
  * accident.
  */
-const origin = (over: Partial<VariableOrigin> & { scope: VariableOrigin["scope"] }): VariableOrigin => ({
+const origin = (
+	over: Partial<VariableOrigin> & { scope: VariableOrigin["scope"] }
+): VariableOrigin => ({
 	value: "",
 	enabled: true,
 	winner: false,
