@@ -98,25 +98,33 @@ function open() {
 
 describe("ScriptSnippets", () => {
 	it("starts collapsed, because the editor is what the panel is for", () => {
-		render(<ScriptSnippets context="pre" onInsert={() => {}} />);
+		render(
+			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
+		);
 
 		expect(screen.queryByPlaceholderText(/filter snippets/i)).not.toBeInTheDocument();
 	});
 
 	it("remembers being opened, in the store that survives the tab unmount", () => {
-		const { unmount } = render(<ScriptSnippets context="pre" onInsert={() => {}} />);
+		const { unmount } = render(
+			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
+		);
 		open();
 
 		expect(useLayoutStore.getState().scriptSnippetsCollapsed).toBe(false);
 
 		// The Radix tab switch: the panel goes away and comes back.
 		unmount();
-		render(<ScriptSnippets context="pre" onInsert={() => {}} />);
+		render(
+			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
+		);
 		expect(screen.getByPlaceholderText(/filter snippets/i)).toBeInTheDocument();
 	});
 
 	it("offers a pre-request editor its own templates and the shared one", () => {
-		render(<ScriptSnippets context="pre" onInsert={() => {}} />);
+		render(
+			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
+		);
 		open();
 
 		expect(screen.getByText("Set a header")).toBeInTheDocument();
@@ -127,7 +135,9 @@ describe("ScriptSnippets", () => {
 	});
 
 	it("offers a test editor the assertions instead", () => {
-		render(<ScriptSnippets context="test" onInsert={() => {}} />);
+		render(
+			<ScriptSnippets context="test" onInsert={() => ({ placement: "cursor" as const })} />
+		);
 		open();
 
 		expect(screen.getByText("Test: Status code")).toBeInTheDocument();
@@ -135,7 +145,7 @@ describe("ScriptSnippets", () => {
 	});
 
 	it("hands the caller the template, placeholders and all", () => {
-		const onInsert = vi.fn();
+		const onInsert = vi.fn(() => ({ placement: "cursor" as const }));
 		render(<ScriptSnippets context="pre" onInsert={onInsert} />);
 		open();
 
@@ -149,16 +159,88 @@ describe("ScriptSnippets", () => {
 		);
 	});
 
+	/*
+	 * The insertion lands out of sight of the list that asked for it, so the
+	 * list says what happened - the GraphQL explorer's pattern, and its wording.
+	 */
+	describe("saying what happened", () => {
+		function insertFirst() {
+			fireEvent.click(screen.getByText("Set a header").closest("[cmdk-item]")!);
+		}
+
+		it("names the template and where it went", () => {
+			render(
+				<ScriptSnippets
+					context="pre"
+					onInsert={() => ({ placement: "end-of-script" as const })}
+				/>
+			);
+			open();
+			insertFirst();
+
+			expect(
+				screen.getByText("Inserted Set a header at the end of the script.")
+			).toBeTruthy();
+		});
+
+		it("speaks again when the same template is inserted twice", () => {
+			render(
+				<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
+			);
+			open();
+			insertFirst();
+			const first = screen.getByText("Inserted Set a header at the cursor.");
+			insertFirst();
+
+			/*
+			 * A live region only announces when its text changes, so the second
+			 * insertion has to arrive as a different node - keyed, as
+			 * `ResponseAnnouncer` and the explorer both are. Same text, new
+			 * element: silence here reads as the click not landing.
+			 */
+			expect(screen.getByText("Inserted Set a header at the cursor.")).not.toBe(first);
+		});
+
+		it("shows a refusal on screen, not only to a screen reader", () => {
+			render(<ScriptSnippets context="pre" onInsert={() => null} />);
+			open();
+			insertFirst();
+
+			// The whole defect this surface was fixed for was a click that, to a
+			// sighted user, did nothing.
+			const notice = screen.getByRole("status");
+			expect(notice.textContent).toMatch(/no editor to go into/i);
+		});
+
+		it("clears the refusal once an insertion lands", () => {
+			let answer: { placement: "cursor" } | null = null;
+			const { rerender } = render(<ScriptSnippets context="pre" onInsert={() => answer} />);
+			open();
+			insertFirst();
+			expect(screen.queryByRole("status")).toBeTruthy();
+
+			answer = { placement: "cursor" };
+			rerender(<ScriptSnippets context="pre" onInsert={() => answer} />);
+			insertFirst();
+
+			expect(screen.queryByRole("status")).toBeNull();
+		});
+	});
+
 	it("says so when the engine is not answering, rather than looking empty", () => {
 		query.value = { data: undefined, isPending: false, isError: true };
-		render(<ScriptSnippets context="pre" onInsert={() => {}} />);
+		render(
+			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
+		);
 		open();
 
 		expect(screen.getByText(/engine, which is not answering/i)).toBeInTheDocument();
 	});
 
 	it("counts what it is holding, so a collapsed header still says there is something", () => {
-		render(<ScriptSnippets context="pre" onInsert={() => {}} />);
+		render(
+			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
+		);
 
 		expect(screen.getByRole("button", { name: /snippets/i }).textContent).toContain("2");
 	});

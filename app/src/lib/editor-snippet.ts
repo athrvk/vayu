@@ -39,6 +39,17 @@ import type * as Monaco from "monaco-editor";
  */
 const SNIPPET_CONTROLLER = "snippetController2";
 
+/**
+ * Where a template ended up, so the caller can say so - the same shape and the
+ * same reason as the GraphQL explorer's `InsertPlacement` (`insert-skeleton.ts`):
+ * an insertion the user cannot see is one they cannot trust landed.
+ */
+export type SnippetPlacement = "cursor" | "end-of-script";
+
+export interface SnippetInsertion {
+	placement: SnippetPlacement;
+}
+
 /** The half of `SnippetController2` this module uses. */
 interface SnippetInserter extends Monaco.editor.IEditorContribution {
 	insert(template: string): void;
@@ -67,18 +78,18 @@ export function snippetLanding(lineText: string): { before: string } {
 }
 
 /**
- * Whether the snippet reached the editor's snippet controller. `false` means it
- * did not - there was no editor, no template, or no controller on it - and the
- * caller decides whether that is worth saying out loud.
+ * Where the snippet landed, or `null` when it could not land at all - there was
+ * no editor, no template, or no controller on it. The caller says so out loud;
+ * this only reports.
  */
 export function insertSnippetAtCursor(
 	editor: Monaco.editor.IStandaloneCodeEditor | null | undefined,
 	snippet: string
-): boolean {
-	if (!editor || !snippet) return false;
+): SnippetInsertion | null {
+	if (!editor || !snippet) return null;
 
 	const controller = editor.getContribution<SnippetInserter>(SNIPPET_CONTROLLER);
-	if (!controller || typeof controller.insert !== "function") return false;
+	if (!controller || typeof controller.insert !== "function") return null;
 
 	/*
 	 * Focus first. The click that asked for this landed on the snippets list, so
@@ -103,12 +114,26 @@ export function insertSnippetAtCursor(
 	const position = selection ? selection.getEndPosition() : editor.getPosition();
 	if (!model || !position) {
 		controller.insert(snippet);
-		return true;
+		return { placement: "cursor" };
 	}
 
-	const line = position.lineNumber;
+	/*
+	 * A caret at the very start of a script nobody has clicked into is not a
+	 * decision, it is Monaco's default - and dropping a template above code the
+	 * author has already written is the least likely thing they meant. The
+	 * GraphQL explorer answers the same question the same way: a cursor outside
+	 * every selection set does not become a splice point at offset 0, the
+	 * insertion is appended to the end of the document as a new operation
+	 * (`insert-skeleton.ts`, placement `new-operation`). This is that rule in
+	 * a language with no selection sets: no caret of the author's own, so the
+	 * template goes after what is already there.
+	 */
+	const untouched = position.lineNumber === 1 && position.column === 1;
+	const line =
+		untouched && model.getValueLength() > 0 ? model.getLineCount() : position.lineNumber;
+
 	const landing = snippetLanding(model.getLineContent(line));
 	editor.setPosition({ lineNumber: line, column: model.getLineMaxColumn(line) });
 	controller.insert(`${landing.before}${snippet}`);
-	return true;
+	return { placement: line === position.lineNumber ? "cursor" : "end-of-script" };
 }

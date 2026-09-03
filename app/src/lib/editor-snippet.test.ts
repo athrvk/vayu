@@ -71,6 +71,8 @@ function fakeEditor({
 		getModel: () => ({
 			getLineContent: (lineNumber: number) => lines[lineNumber - 1] ?? "",
 			getLineMaxColumn: (lineNumber: number) => (lines[lineNumber - 1] ?? "").length + 1,
+			getLineCount: () => lines.length,
+			getValueLength: () => lines.join("\n").length,
 		}),
 		getPosition: () => position,
 		setPosition: (next: { lineNumber: number; column: number }) => {
@@ -90,7 +92,9 @@ describe("insertSnippetAtCursor", () => {
 	it("hands the template to the editor's snippet controller", () => {
 		const { editor, inserted } = fakeEditor();
 
-		expect(insertSnippetAtCursor(editor, 'pm.test("${1:name}", function () {});')).toBe(true);
+		expect(insertSnippetAtCursor(editor, 'pm.test("${1:name}", function () {});')).toEqual({
+			placement: "cursor",
+		});
 
 		// Verbatim: the placeholders are what the controller turns into tab
 		// stops, and expanding them here would defeat the whole point.
@@ -163,13 +167,46 @@ describe("insertSnippetAtCursor", () => {
 			expect(inserted).toEqual(["\npm.environment.set();"]);
 		});
 
+		it("appends to the end when the caret is Monaco's default rather than the author's", () => {
+			const { editor, inserted, positionNow } = fakeEditor({
+				lines: ["const first = 1;", "const second = 2;"],
+				cursor: { lineNumber: 1, column: 1 },
+			});
+
+			const result = insertSnippetAtCursor(editor, "pm.environment.set();");
+
+			/*
+			 * 1:1 on a script nobody has clicked into is Monaco's default, not a
+			 * decision - and the GraphQL explorer answers the same question the
+			 * same way, appending a new operation rather than splicing at offset
+			 * 0 (`insert-skeleton.ts`).
+			 */
+			expect(result).toEqual({ placement: "end-of-script" });
+			expect(positionNow()).toEqual({ lineNumber: 2, column: 18 });
+			expect(inserted).toEqual(["\npm.environment.set();"]);
+		});
+
+		it("takes 1:1 literally in an empty script, where it is the only place to be", () => {
+			const { editor, inserted } = fakeEditor({
+				lines: [""],
+				cursor: { lineNumber: 1, column: 1 },
+			});
+
+			expect(insertSnippetAtCursor(editor, "pm.environment.set();")).toEqual({
+				placement: "cursor",
+			});
+			expect(inserted).toEqual(["pm.environment.set();"]);
+		});
+
 		it("still inserts when the editor can offer no model or position", () => {
 			const { editor, inserted } = fakeEditor();
 			// A stubbed editor in another suite, or one mid-teardown: the
 			// landing rule is a refinement, never a precondition.
 			(editor as unknown as { getModel: () => null }).getModel = () => null;
 
-			expect(insertSnippetAtCursor(editor, "pm.response.json();")).toBe(true);
+			expect(insertSnippetAtCursor(editor, "pm.response.json();")).toEqual({
+				placement: "cursor",
+			});
 			expect(inserted).toEqual(["pm.response.json();"]);
 		});
 	});
@@ -179,19 +216,19 @@ describe("insertSnippetAtCursor", () => {
 
 		// The honest answer for a Monaco build that no longer registers it under
 		// this id - which is what a silent `trigger` could never tell us.
-		expect(insertSnippetAtCursor(editor, "pm.response.json();")).toBe(false);
+		expect(insertSnippetAtCursor(editor, "pm.response.json();")).toBeNull();
 		expect(events).toEqual([]);
 	});
 
 	it("does nothing when no editor has mounted yet", () => {
-		expect(insertSnippetAtCursor(null, "pm.response.json();")).toBe(false);
-		expect(insertSnippetAtCursor(undefined, "pm.response.json();")).toBe(false);
+		expect(insertSnippetAtCursor(null, "pm.response.json();")).toBeNull();
+		expect(insertSnippetAtCursor(undefined, "pm.response.json();")).toBeNull();
 	});
 
 	it("refuses an empty template rather than open an empty snippet session", () => {
 		const { editor, events } = fakeEditor();
 
-		expect(insertSnippetAtCursor(editor, "")).toBe(false);
+		expect(insertSnippetAtCursor(editor, "")).toBeNull();
 		expect(events).toEqual([]);
 	});
 });
