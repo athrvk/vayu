@@ -146,15 +146,31 @@ function mulberry32(seed: number): () => number {
 }
 
 /**
- * One randomized run of appends, reconnect replays and filter changes, with the
- * hook's answer held against `filterSteps` after every round.
+ * One randomized run of appends, reconnect replays, filter changes and - when
+ * `grow` is set - the sentinel being reached, with the hook's answer held
+ * against `filterSteps` after every round.
  *
  * `window` is what the case is really varying: at {@link ALL} the assertion is
  * about the whole matched list, and at a handful of rows it is about the window
  * being the oracle's own prefix - the property a lazily produced window is the
  * easiest thing to get wrong.
+ *
+ * **What `grow` buys that the deterministic growth case cannot.** Growing a
+ * window is the one event that makes the hook resume a scan it had stopped, and
+ * it is interesting precisely where it *interleaves* with the three events that
+ * invalidate what it resumes from - a growth right after a replay threw the
+ * match away, a growth then a narrowing then a growth again. A run whose window
+ * never moves cannot reach those orderings, and one that grows in a straight
+ * line with nothing else happening reaches only the easy one.
+ *
+ * A growing run cannot assert `rows` against a window size it fixed in advance,
+ * so it asserts the characterization instead: `total` exactly, `rows` a prefix
+ * of the oracle, and `hasMore` iff rows are missing from it. That is the whole
+ * observable contract, without this file keeping a second copy of
+ * `useGrowingWindow`'s arithmetic to predict `visible` - which would be a copy
+ * of the thing under test rather than an oracle for it.
  */
-function randomizedRun(seed: number, window: number): void {
+function randomizedRun(seed: number, window: number, grow = false): void {
 	const random = mulberry32(seed);
 	const stream = new Stream();
 	let filter: StepListFilter = { outcome: null, query: "" };
@@ -163,11 +179,19 @@ function randomizedRun(seed: number, window: number): void {
 	let appends = 0;
 	let replays = 0;
 	let narrowings = 0;
+	let growths = 0;
+	let grownPastTheFirstWindow = 0;
 	let step = 0;
 
 	for (let round = 0; round < 220; round += 1) {
 		const roll = random();
-		if (roll < 0.6) {
+		if (grow && roll >= 0.8 && random() < 0.5) {
+			// The sentinel scrolled into view. Deliberately drawn from the same
+			// slice of the roll the filter changes come from, so a growth lands
+			// among them rather than always between two appends.
+			scrollToEnd(view.result.current.sentinelRef);
+			growths += 1;
+		} else if (roll < 0.6) {
 			// A batch of new steps, the ordinary case.
 			const size = 1 + Math.floor(random() * 6);
 			const batch: ScenarioStepEvent[] = [];
@@ -216,20 +240,35 @@ function randomizedRun(seed: number, window: number): void {
 
 		view.rerender({ steps: stream.steps, epoch: stream.epoch, filter });
 
+		const { total, rows, hasMore } = view.result.current;
 		const oracle = filterSteps(stream.steps, filter);
-		expect(view.result.current.total).toBe(oracle.length);
+		expect(total).toBe(oracle.length);
 		// The window is a prefix of the same list, in the same order, and says
 		// so - `hasMore` is what the "showing X of Y" line hangs on.
-		expect(view.result.current.rows).toEqual([...oracle].slice(0, window));
-		expect(view.result.current.hasMore).toBe(oracle.length > window);
+		expect(rows).toEqual([...oracle].slice(0, rows.length));
+		expect(hasMore).toBe(rows.length < oracle.length);
+		if (grow) {
+			// It never shows less than one window's worth of what it has.
+			expect(rows.length).toBeGreaterThanOrEqual(Math.min(window, oracle.length));
+			if (rows.length > window) grownPastTheFirstWindow += 1;
+		} else {
+			// A window that never moved is exactly the size it was given.
+			expect(rows.length).toBe(Math.min(window, oracle.length));
+		}
 	}
 
-	// The sequence has to have exercised all three, or the equivalence above
+	// The sequence has to have exercised all of them, or the equivalence above
 	// is a statement about appends alone.
 	expect(appends).toBeGreaterThan(20);
 	expect(replays).toBeGreaterThan(10);
 	expect(narrowings).toBeGreaterThan(10);
 	expect(stream.steps.length).toBeGreaterThan(200);
+	if (grow) {
+		expect(growths).toBeGreaterThan(10);
+		// And the growing actually reached rows the first window did not hold -
+		// otherwise every assertion above was about an unmoved window.
+		expect(grownPastTheFirstWindow).toBeGreaterThan(10);
+	}
 }
 
 describe("useFilteredSteps against a from-scratch filter", () => {
@@ -239,6 +278,10 @@ describe("useFilteredSteps against a from-scratch filter", () => {
 
 	it("answers the oracle's own prefix when the window is narrower than the match", () => {
 		randomizedRun(20261205, 3);
+	});
+
+	it("stays the oracle's prefix while the window grows among the other events", () => {
+		randomizedRun(20261205, 3, true);
 	});
 
 	it("grows into the rows it had not produced, and stops where the list ends", () => {

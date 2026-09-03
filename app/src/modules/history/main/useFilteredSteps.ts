@@ -81,8 +81,9 @@ export interface FilteredStepWindow {
 	 * The matching rows to render: the first `visible` of them, in plan order.
 	 *
 	 * Held across commits, so the reference is stable while the window is full
-	 * and the list only grows. Never mutated in place - a longer window is a new
-	 * array - so a caller may hold it.
+	 * and the list only grows - that identity is the copy this hook exists to
+	 * avoid, and the cost tests assert it. Never mutated in place: a longer
+	 * window is a new array, so what a caller holds cannot change under it.
 	 */
 	rows: readonly ScenarioStepRow[];
 	/** Attach to an element at the end of the rendered list. */
@@ -91,22 +92,79 @@ export interface FilteredStepWindow {
 	hasMore: boolean;
 }
 
+/** A window of matching rows, and how far into the source list it was read. */
+interface ProducedWindow {
+	/** Every match in `steps[0, produced)` - so, the first `rows.length`. */
+	rows: readonly ScenarioStepRow[];
+	/**
+	 * The source index {@link rows} was produced through. Short of the whole
+	 * list exactly when the window filled first.
+	 */
+	produced: number;
+}
+
 /** What one filter has matched so far, and how far it has read to say so. */
-interface MatchedRows {
+interface MatchedRows extends ProducedWindow {
 	appendKey: unknown;
 	outcome: StepListFilter["outcome"];
 	query: string;
-	/** How many source rows {@link total} counted. */
+	/** How many source rows {@link total} counted. Never below `produced`. */
 	scanned: number;
 	/** How many of `steps[0, scanned)` the filter matched. */
 	total: number;
-	/**
-	 * The source index {@link rows} was produced through. Never past
-	 * {@link scanned}; short of it exactly when the window filled first.
-	 */
-	produced: number;
-	/** Every match in `steps[0, produced)` - so, the first `rows.length`. */
-	rows: readonly ScenarioStepRow[];
+}
+
+/**
+ * How many of `steps[from..]` the predicate matches, added to what was counted
+ * before.
+ *
+ * Allocation-free by construction, which is the point: this is the pass that
+ * has to run to the end of the list every flush, because the total is what the
+ * window is sized against and what the "showing X of Y" line states.
+ */
+function countMatches(
+	steps: readonly ScenarioStepRow[],
+	match: (step: ScenarioStepRow) => boolean,
+	from: number,
+	counted: number
+): number {
+	let total = counted;
+	for (let i = from; i < steps.length; i += 1) {
+		if (match(steps[i])) total += 1;
+	}
+	return total;
+}
+
+/**
+ * `held` extended to `wanted` rows, resuming at the source index it was last
+ * produced through.
+ *
+ * Returns `held` itself once the window is full or the list holds nothing more:
+ * that identity is what makes a flush past a filled window free, and it is what
+ * the cost tests assert. The copy is made only once a row is actually found, so
+ * a batch that matched nothing leaves the array alone rather than duplicating
+ * it. Nothing already in `held.rows` is touched - a longer window is a new
+ * array, so what a caller is holding cannot change under it.
+ */
+function growWindow(
+	steps: readonly ScenarioStepRow[],
+	match: (step: ScenarioStepRow) => boolean,
+	held: ProducedWindow,
+	wanted: number
+): ProducedWindow {
+	if (held.rows.length >= wanted || held.produced >= steps.length) return held;
+
+	let grown: ScenarioStepRow[] | null = null;
+	let have = held.rows.length;
+	let i = held.produced;
+	for (; i < steps.length && have < wanted; i += 1) {
+		if (!match(steps[i])) continue;
+		grown ??= [...held.rows];
+		grown.push(steps[i]);
+		have += 1;
+	}
+	// `i` is one past the row that filled the window, or the end of the list.
+	return { rows: grown ?? held.rows, produced: i };
 }
 
 export function useFilteredSteps(
@@ -159,18 +217,11 @@ export function useFilteredSteps(
 	 */
 	const held = usable ? matched : null;
 
-	// Pass one, the count: the predicate over the rows that arrived since the
-	// last pass and nothing else, adding to what was counted before. No
-	// allocation, and it has to run to the end - the total is what the window is
-	// sized against and what the "showing X of Y" line states.
-	let total = held?.total ?? 0;
-	if (match === null) {
-		total = steps.length;
-	} else {
-		for (let i = held?.scanned ?? 0; i < steps.length; i += 1) {
-			if (match(steps[i])) total += 1;
-		}
-	}
+	// Pass one, the count, over the rows that arrived since the last one.
+	const total =
+		match === null
+			? steps.length
+			: countMatches(steps, match, held?.scanned ?? 0, held?.total ?? 0);
 
 	const growing = useGrowingWindow(
 		total,
@@ -179,30 +230,19 @@ export function useFilteredSteps(
 	);
 	const wanted = growing.visible;
 
-	// Pass two, the window: resumed from where it was produced through, and
-	// stopped as soon as it holds what is on screen. Skipped entirely once the
-	// window is full, which is the copy this hook exists to avoid.
-	let rows = held?.rows ?? NONE;
-	let produced = held?.produced ?? 0;
-	if (match === null) {
-		// A prefix of the list itself, and the list itself when it fits - the
-		// same identity `filterSteps` hands back when nothing narrows.
-		rows = steps.length <= wanted ? steps : steps.slice(0, wanted);
-	} else if (rows.length < wanted && produced < steps.length) {
-		// Built only once a row is actually found, so a batch that matched
-		// nothing leaves the window's array untouched rather than copying it.
-		let grown: ScenarioStepRow[] | null = null;
-		let have = rows.length;
-		let i = produced;
-		for (; i < steps.length && have < wanted; i += 1) {
-			if (!match(steps[i])) continue;
-			grown ??= [...rows];
-			grown.push(steps[i]);
-			have += 1;
-		}
-		if (grown !== null) rows = grown;
-		produced = i;
-	}
+	// Pass two, the window, resumed from where it was produced through. With
+	// nothing narrowing there is no predicate to resume: the window is a prefix
+	// of the list itself, and the list itself when it fits - the same identity
+	// `filterSteps` hands back.
+	const shown: ProducedWindow =
+		match === null
+			? { rows: steps.length <= wanted ? steps : steps.slice(0, wanted), produced: 0 }
+			: growWindow(
+					steps,
+					match,
+					{ rows: held?.rows ?? NONE, produced: held?.produced ?? 0 },
+					wanted
+				);
 
 	/*
 	 * Adjusted during render rather than in an effect - the shape
@@ -213,30 +253,35 @@ export function useFilteredSteps(
 	 */
 	if (match === null) {
 		if (matched !== null) setMatched(null);
-	} else if (held === null || held.scanned !== steps.length || held.produced !== produced) {
+	} else if (held === null || held.scanned !== steps.length || held.produced !== shown.produced) {
 		setMatched({
 			appendKey,
 			outcome: filter.outcome,
 			query: filter.query,
 			scanned: steps.length,
 			total,
-			produced,
-			rows,
+			...shown,
 		});
 	}
 
 	/*
-	 * Longer than the window only when `visible` was reset under rows that are
-	 * still valid - a different list under controls that did not change, which
-	 * is the one case that resets the window without invalidating the match.
-	 * What was found stays found (the cache keeps it, and a sentinel that grows
-	 * `visible` again asks for none of it twice); the view is handed the window
-	 * it asked for, so the rows on screen and the "showing X of Y" line beside
-	 * them cannot disagree.
+	 * Longer than the window only when `visible` was reset under rows that stay
+	 * valid, which takes `listKey` moving while the filter and `appendKey` hold
+	 * still - the window's key carries the filter, so every other reset comes
+	 * with a cache this cannot reuse anyway. That is reachable: `HistoryDetail`
+	 * renders `ScenarioRunView` without a per-run key, so switching the open run
+	 * changes `run.id` without remounting, and two runs that are both idle with
+	 * no stored rows share an `appendKey` (`0`, and the one `EMPTY_STEPS`).
+	 *
+	 * What was found stays found - the cache keeps it, and a sentinel that grows
+	 * `visible` again asks for none of it twice - while the view is handed the
+	 * window it asked for, so the rows on screen and the "showing X of Y" line
+	 * beside them cannot disagree. The re-slice per render that costs is bounded
+	 * by `visible` and lasts until the window grows back past what is held.
 	 */
 	return {
 		total,
-		rows: rows.length > wanted ? rows.slice(0, wanted) : rows,
+		rows: shown.rows.length > wanted ? shown.rows.slice(0, wanted) : shown.rows,
 		sentinelRef: growing.sentinelRef,
 		hasMore: growing.hasMore,
 	};
