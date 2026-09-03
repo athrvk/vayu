@@ -68,7 +68,7 @@ import { useVariableResolver } from "./useVariableResolver";
 import { useActiveCollectionId } from "./useActiveCollectionId";
 import { useDataContract } from "./useDataContract";
 import { scriptVariableCompletionContext } from "@/lib/script-variable-completion";
-import { describeScopedRead } from "@/lib/referenced-variables";
+import { describeScopedRead, sourceLabel } from "@/lib/referenced-variables";
 import type { ResolvedVariable } from "@/types";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 import { ITERATION_VARIABLES } from "@/lib/iteration-variables";
@@ -91,11 +91,6 @@ const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, glo
 /** The value the accessor returns, or the mask a secret gets instead of it. */
 function valueDetail(info: ResolvedVariable): string {
 	return info.secret ? "secret" : info.value || "(empty)";
-}
-
-/** `environment - Staging`, the spelling the chips and the popover already use. */
-function originLabel(info: ResolvedVariable): string {
-	return info.sourceName ? `${info.scope} - ${info.sourceName}` : info.scope;
 }
 
 /**
@@ -227,8 +222,8 @@ export function useScriptVariableCompletionProvider() {
 						// actually checking when you reach for the list.
 						detail: shadowed ? shadowed.description : valueDetail(info),
 						documentation: shadowed
-							? `${originLabel(info)} - ${shadowed.note}`
-							: originLabel(info),
+							? `${sourceLabel(info)} - ${shadowed.note}`
+							: sourceLabel(info),
 						sortText: `${SCOPE_ORDER[info.scope] ?? 9}${name}`,
 						filterText: wrap(name),
 						range,

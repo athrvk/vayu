@@ -42,7 +42,12 @@ import {
 	describeColumnToken,
 	type DataTokenDescription,
 } from "./data-contract";
-import type { DataContractScope, VariableOrigin, VariableScope } from "@/types/domain";
+import type {
+	DataContractScope,
+	VariableOrigin,
+	VariableOriginScope,
+	VariableScope,
+} from "@/types/domain";
 
 /**
  * `pm.<accessor>.get("x")`, for every accessor whose first argument is a name.
@@ -300,8 +305,12 @@ function ladderWinner(origins: readonly VariableOrigin[]): VariableOrigin | null
  *
  * The value is never printed, only the source: the definition may be a secret,
  * and the popover's rule is that a secret shows a mask and never a value.
+ *
+ * Takes the two fields it reads rather than a whole origin, because the
+ * completion list names the same definition from a `ResolvedVariable` (#1302)
+ * and a second spelling of one vocabulary is what this exists to prevent.
  */
-function sourceLabel(origin: VariableOrigin): string {
+export function sourceLabel(origin: { scope: VariableOriginScope; sourceName?: string }): string {
 	return origin.sourceName ? `${origin.scope} - ${origin.sourceName}` : origin.scope;
 }
 
