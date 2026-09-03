@@ -37,6 +37,7 @@ import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import {
 	describeColumnReference,
+	describeScopedRead,
 	referencedVariables,
 	TEMPLATE_IN_SCRIPT_NOTE,
 } from "@/lib/referenced-variables";
@@ -101,7 +102,9 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 	 * chain, which is the chain the engine hands a script running under it.
 	 */
 	const dataColumns = useDataContract(collection.id);
-	const { getAllVariables } = useVariableResolver({ collectionId: collection.id });
+	const { getAllVariables, getVariableOrigins } = useVariableResolver({
+		collectionId: collection.id,
+	});
 	// Once per render, not once per chip: `getAllVariables` spreads a fresh map
 	// on every call, so asking it inside the row would rebuild the scopes for
 	// each name in it.
@@ -217,6 +220,32 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 									}
 								>
 									{via === "pm" ? name : `{{${name}}}`}
+								</Badge>
+							);
+						}
+						/*
+						 * A single-scope read whose own scope answers emptily while
+						 * another scope holds the value (issue #1196). The accent
+						 * below says "a variable answers this", which is true of the
+						 * name and false of this read: an enabled, empty collection
+						 * row makes `pm.collectionVariables.get` return `''` while
+						 * `{{name}}` resolves the environment's value. Amber, and
+						 * `describeScopedRead`'s decision rather than a copy of it,
+						 * so this tab and the request panel cannot come to disagree.
+						 */
+						const scoped = describeScopedRead(reference, getVariableOrigins(name));
+						if (scoped) {
+							return (
+								<Badge
+									key={name}
+									variant="chip"
+									className={cn(
+										"font-mono text-[10px] bg-muted border-0",
+										DATA_TOKEN_TONE_CLASS[scoped.tone]
+									)}
+									title={`${scoped.description} - ${scoped.note}`}
+								>
+									{name}
 								</Badge>
 							);
 						}

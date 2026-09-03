@@ -42,7 +42,7 @@ import {
 	describeColumnToken,
 	type DataTokenDescription,
 } from "./data-contract";
-import type { DataContractScope } from "@/types/domain";
+import type { DataContractScope, VariableOrigin, VariableScope } from "@/types/domain";
 
 /**
  * `pm.<accessor>.get("x")`, for every accessor whose first argument is a name.
@@ -85,12 +85,26 @@ export type ReferenceSyntax = "pm" | "template";
  */
 export type PmRead = "scope" | "merged" | "row";
 
-const PM_READ_BY_ACCESSOR: Record<string, PmRead> = {
-	environment: "scope",
-	globals: "scope",
-	collectionVariables: "scope",
-	variables: "merged",
-	iterationData: "row",
+/**
+ * What each accessor reads, and - for the single-scope three - which scope.
+ *
+ * One table rather than two, because both facts are answers about the same
+ * accessor and a second table keyed by the same five names is how they come to
+ * disagree. `scope` is null exactly where `reads` is not `"scope"`: the merged
+ * read has no single scope to name, and the row is not a scope at all.
+ */
+interface PmAccessor {
+	reads: PmRead;
+	/** The one scope this accessor reads, or null when it does not read one. */
+	scope: VariableScope | null;
+}
+
+const PM_ACCESSORS: Record<string, PmAccessor> = {
+	environment: { reads: "scope", scope: "environment" },
+	globals: { reads: "scope", scope: "global" },
+	collectionVariables: { reads: "scope", scope: "collection" },
+	variables: { reads: "merged", scope: null },
+	iterationData: { reads: "row", scope: null },
 };
 
 /**
@@ -123,6 +137,16 @@ export interface VariableReference {
 	via: ReferenceSyntax;
 	/** What the accessor that named it reads; `null` for a `template` mention. */
 	reads: PmRead | null;
+	/**
+	 * The one scope a single-scope accessor reads, or `null` when the reference
+	 * does not name one (a `template` mention, `pm.variables`, `pm.iterationData`).
+	 *
+	 * Carried because `reads: "scope"` says only *that* one scope answers, never
+	 * *which* - and which is the whole of the question in issue #1196, where a
+	 * collection row that is enabled and empty answers `pm.collectionVariables`
+	 * while the environment holds the value the author is looking at.
+	 */
+	scope: VariableScope | null;
 }
 
 /**
@@ -140,7 +164,12 @@ export interface VariableReference {
  */
 export function referencedVariables(script: string): VariableReference[] {
 	const byName = new Map<string, VariableReference>();
-	const add = (name: string, via: ReferenceSyntax, reads: PmRead | null) => {
+	const add = (
+		name: string,
+		via: ReferenceSyntax,
+		reads: PmRead | null,
+		scope: VariableScope | null
+	) => {
 		if (name.length === 0) return;
 		const existing = byName.get(name);
 		// A repeat never downgrades what is there, so an equal claim keeps the
@@ -151,13 +180,16 @@ export function referencedVariables(script: string): VariableReference[] {
 		) {
 			return;
 		}
-		byName.set(name, { name, via, reads });
+		byName.set(name, { name, via, reads, scope });
 	};
 
 	for (const match of script.matchAll(PM_GET)) {
-		add(match[2], "pm", PM_READ_BY_ACCESSOR[match[1]]);
+		const accessor = PM_ACCESSORS[match[1]];
+		add(match[2], "pm", accessor.reads, accessor.scope);
 	}
-	for (const match of script.matchAll(VARIABLE_PATTERN)) add(match[1].trim(), "template", null);
+	for (const match of script.matchAll(VARIABLE_PATTERN)) {
+		add(match[1].trim(), "template", null, null);
+	}
 
 	return [...byName.values()];
 }
@@ -200,4 +232,100 @@ export function describeColumnReference(
 	if (reads !== "merged" || !contract) return null;
 	if (!contract.columns.includes(name) || definesVariable(name)) return null;
 	return describeBareColumnToken(contract);
+}
+
+/**
+ * The definition a single-scope accessor would actually return, or null.
+ *
+ * Last enabled wins, matching the engine's `lookup_variable`, which walks its
+ * scope's chain leaf-first and stops at the first enabled row - and matching
+ * `useVariableResolver`, which pushes the collection chain root-first and marks
+ * the last enabled definition the winner. A disabled row is looked past here for
+ * the same reason it is there (D17).
+ */
+function ownAnswer(
+	origins: readonly VariableOrigin[],
+	scope: VariableScope
+): VariableOrigin | null {
+	for (let i = origins.length - 1; i >= 0; i--) {
+		const origin = origins[i];
+		if (origin.scope === scope && origin.enabled) return origin;
+	}
+	return null;
+}
+
+/**
+ * The other scopes holding a non-empty value for the name, as the tooltip prints
+ * them - `environment - Staging`, the spelling `monaco-variable-tokens` and the
+ * popover already use, so a reader meets one vocabulary and not a second.
+ *
+ * Values are never printed, only sources: one of these definitions may be a
+ * secret, and the popover's rule is that a secret shows a mask and never a
+ * value. The row is skipped because it is not a scope - `pm.iterationData` is
+ * its accessor and `describeColumnReference` already paints reads of it.
+ */
+function shadowingSources(origins: readonly VariableOrigin[], scope: VariableScope): string[] {
+	const labels: string[] = [];
+	for (const origin of origins) {
+		if (origin.scope === scope || origin.scope === "row") continue;
+		if (!origin.enabled || origin.value === "") continue;
+		const label = origin.sourceName ? `${origin.scope} - ${origin.sourceName}` : origin.scope;
+		if (!labels.includes(label)) labels.push(label);
+	}
+	return labels;
+}
+
+/**
+ * What a **single-scope read** says about itself when its own scope answers
+ * emptily and another scope does not (issue #1196), or null when there is
+ * nothing to warn about.
+ *
+ * The trap this paints is invisible at every other surface: an enabled,
+ * empty `shop_domain` at collection scope makes `pm.collectionVariables.get`
+ * honestly return `''`, while `{{shop_domain}}` in the URL bar resolves the
+ * environment's real value through the full ladder. Both are correct - the
+ * engine was verified right and is untouched here - so the author sees a healthy
+ * token, a healthy chip, and a failing assertion, with nothing connecting them.
+ * A leftover empty row from a Postman import is the usual way in.
+ *
+ * Warning, never destructive: the read works and the name resolves, so this is
+ * "check this" rather than "nothing can ever answer this" - the same line
+ * `describeColumnToken` draws for an undeclared column, and the reason #604 took
+ * destructive off this row in the first place.
+ *
+ * Only the accessor's own scope is checked. `pm.variables` is the merged read
+ * and returns the winning value, so it is correct by construction and must never
+ * warn; a name written through two different single-scope accessors keeps the
+ * first, by the same equal-claim rule that orders the row.
+ *
+ * Takes the origins rather than the resolver so it stays a pure join of "what
+ * did the script write" and "what is defined", the way `describeColumnReference`
+ * takes a predicate rather than the map.
+ */
+export function describeScopedRead(
+	reference: VariableReference,
+	origins: readonly VariableOrigin[]
+): DataTokenDescription | null {
+	const { name, scope } = reference;
+	if (scope === null) return null;
+
+	const own = ownAnswer(origins, scope);
+	// The healthy read: this scope answers, and answers with something.
+	if (own && own.value !== "") return null;
+
+	/*
+	 * Nothing else holds a value either, so there is no contradiction to report.
+	 * A name nothing defines is the destructive chip's business, and one that is
+	 * empty everywhere is empty exactly as the author left it.
+	 */
+	const shadowing = shadowingSources(origins, scope);
+	if (shadowing.length === 0) return null;
+
+	return {
+		tone: "warning",
+		description: own
+			? `Empty at ${scope} scope - this read returns ""`
+			: `Not defined at ${scope} scope - this read returns undefined`,
+		note: `non-empty in ${shadowing.join(", ")}; pm.variables.get("${name}") reads that`,
+	};
 }
