@@ -80,7 +80,7 @@ const LAUNCH_TIMEOUT_MS = 90_000;
 // Same grace the sidecar itself gives the engine before SIGKILL
 // (ENGINE_GRACEFUL_EXIT_TIMEOUT_MS in app/electron/constants.ts).
 const TERMINATE_GRACE_MS = 5_000;
-const STDERR_TAIL_LINES = 20;
+const OUTPUT_TAIL_LINES = 20;
 const TASKLIST_ITERATIONS = 20;
 
 function fail(message) {
@@ -273,7 +273,21 @@ async function launchOnce(spec, repoRoot) {
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 
-	const stderrTail = [];
+	// Both streams, and distinct lines only. The app says why it failed on
+	// stdout - `[Main] Failed to start engine: ...` is a console.log - while
+	// Chromium's own noise goes to stderr and repeats: on a runner with no
+	// session bus, three dbus messages rotate often enough to fill any tail
+	// kept in arrival order, so a stderr-only tail reported the environment's
+	// complaints and dropped the app's. A line seen again moves to the end
+	// rather than taking a second slot.
+	const tail = new Map();
+	const recordLine = (line) => {
+		if (!line.trim()) return;
+		tail.delete(line);
+		tail.set(line, true);
+		if (tail.size > OUTPUT_TAIL_LINES) tail.delete(tail.keys().next().value);
+	};
+
 	const exited = new Promise((resolve) => {
 		child.on("exit", (code, signal) => resolve({ code, signal }));
 	});
@@ -295,13 +309,12 @@ async function launchOnce(spec, repoRoot) {
 			}
 		};
 
-		readLines(child.stdout, scan);
-		readLines(child.stderr, (line) => {
-			scan(line);
-			if (!line.trim()) return;
-			stderrTail.push(line);
-			if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
-		});
+		for (const stream of [child.stdout, child.stderr]) {
+			readLines(stream, (line) => {
+				scan(line);
+				recordLine(line);
+			});
+		}
 	});
 
 	const exitedAsFailure = exited.then(({ code, signal }) => ({
@@ -316,8 +329,8 @@ async function launchOnce(spec, repoRoot) {
 	}));
 
 	let result = await Promise.race([markerFound, exitedAsFailure, timedOut]);
-	if (!result.ok && stderrTail.length > 0) {
-		result = { ...result, reason: `${result.reason} - stderr tail: ${stderrTail.join(" | ")}` };
+	if (!result.ok && tail.size > 0) {
+		result = { ...result, reason: `${result.reason} - output tail: ${[...tail.keys()].join(" | ")}` };
 	}
 
 	await terminateAndWait(child, exited);

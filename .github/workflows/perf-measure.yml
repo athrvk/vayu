@@ -221,6 +221,22 @@ jobs:
         working-directory: app
         run: pnpm exec electron-builder --config electron-builder.json ${{ matrix.pack }} --publish never
 
+      # A package without the engine still launches, and that is the problem:
+      # `startEngine` catches the missing binary and calls `dialog.showErrorBox`,
+      # which blocks the main process on a modal nobody can dismiss on a runner,
+      # so `ready-to-show` never fires and the leg reports a 90-second timeout
+      # with no cause in it. Named here instead, before anything is measured.
+      - name: Check the packaged app carries the engine
+        shell: bash
+        run: |
+          staged="$(find app/release -type f -path '*/resources/bin/vayu-engine*' | head -n 1)"
+          if [ -z "$staged" ]; then
+            echo "::error::the packaged build has no engine under resources/bin - electron-builder's extraResources did not copy app/build/resources/bin"
+            find app/release -maxdepth 3 -name resources -type d
+            exit 1
+          fi
+          ls -l "$staged"
+
       # Not left to the runner image: the first run of this workflow died here
       # with `go: command not found` on macos-latest. Go is documented as
       # preinstalled on all three images and is not actually on PATH for every
