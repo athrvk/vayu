@@ -95,6 +95,13 @@ def packaged_rows(packaged: dict) -> list[tuple[str, str]]:
         ("cold start method", str(packaged.get("method", "-"))),
         ("packaged app ready-to-show (median of 3)", num(packaged.get("medianMs"), " ms", 0)),
     ]
+    # The launches behind the median, because the first one on a fresh machine
+    # is a first run - it creates the user-data directory the others find
+    # waiting - and a reader who cannot see the spread cannot tell that from a
+    # regression.
+    launches = packaged.get("launches")
+    if launches:
+        rows.append(("packaged app launches", " / ".join(num(ms, " ms", 0) for ms in launches)))
     if packaged.get("basis"):
         rows.append(("cold start measured from", str(packaged["basis"])))
     if packaged.get("note"):

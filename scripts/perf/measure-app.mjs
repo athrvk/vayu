@@ -449,16 +449,13 @@ function macExecutableIn(appBundle) {
 }
 
 /**
- * The app executable inside an electron-builder output directory.
+ * The one unpacked build directory inside electron-builder's output.
  *
- * Returns `{ ok: true, executable }` or `{ ok: false, reason }` naming what was
- * found instead - a resolver that guessed wrong would otherwise surface as a
- * spawn error three launches later.
+ * Exactly one, or a reason: a second matching directory means a stale build
+ * from another architecture is sitting beside this one, and picking either
+ * would measure whichever happened to sort first.
  */
-function resolvePackagedExecutable(packagedDir) {
-	const listing = (dir) => (existsSync(dir) ? subdirectories(dir).join(", ") || "no directories" : "missing");
-	const found = (what) => `${what} under ${packagedDir} (holding: ${listing(packagedDir)})`;
-
+function resolveUnpackedDirectory(packagedDir) {
 	if (!existsSync(packagedDir)) {
 		return { ok: false, reason: `no packaged build at ${packagedDir} - was electron-builder run?` };
 	}
@@ -467,29 +464,21 @@ function resolvePackagedExecutable(packagedDir) {
 	if (!pattern) return { ok: false, reason: `no packaged layout known for ${process.platform}` };
 
 	const candidates = subdirectories(packagedDir).filter((name) => pattern.test(name));
-	if (candidates.length !== 1) {
-		return {
-			ok: false,
-			reason: found(
-				candidates.length === 0
-					? "no unpacked build directory"
-					: `${candidates.length} unpacked build directories (${candidates.join(", ")}) - only one can be the answer`
-			),
-		};
-	}
-	const unpacked = path.join(packagedDir, candidates[0]);
+	if (candidates.length === 1) return { ok: true, unpacked: path.join(packagedDir, candidates[0]) };
 
-	if (process.platform === "darwin") {
-		const bundle = subdirectories(unpacked).find((name) => name.endsWith(".app"));
-		if (!bundle) return { ok: false, reason: found("no .app bundle") };
-		const executable = macExecutableIn(path.join(unpacked, bundle));
-		return executable
-			? { ok: true, executable }
-			: { ok: false, reason: `no single executable in ${bundle}/Contents/MacOS` };
-	}
+	const holding = subdirectories(packagedDir).join(", ") || "no directories";
+	const what =
+		candidates.length === 0
+			? "no unpacked build directory"
+			: `${candidates.length} unpacked build directories (${candidates.join(", ")}) - only one can be the answer`;
+	return { ok: false, reason: `${what} under ${packagedDir} (holding: ${holding})` };
+}
 
-	// Linux and Windows put the executable at the top of the unpacked directory,
-	// beside the helpers that are not it.
+/**
+ * The executable inside an unpacked build, on the two platforms that put it at
+ * the top of that directory beside the helpers that are not it.
+ */
+function flatExecutableIn(unpacked) {
 	const wanted = process.platform === "win32" ? /\.exe$/i : /^[^.]+$/;
 	const executables = readdirSync(unpacked, { withFileTypes: true })
 		.filter((entry) => entry.isFile() && !NOT_THE_EXECUTABLE.has(entry.name) && wanted.test(entry.name))
@@ -502,6 +491,33 @@ function resolvePackagedExecutable(packagedDir) {
 		};
 	}
 	return { ok: true, executable: path.join(unpacked, executables[0]) };
+}
+
+/** The macOS executable, which is one bundle deeper than the other two. */
+function bundledExecutableIn(unpacked) {
+	const bundle = subdirectories(unpacked).find((name) => name.endsWith(".app"));
+	if (!bundle) return { ok: false, reason: `no .app bundle under ${unpacked}` };
+
+	const executable = macExecutableIn(path.join(unpacked, bundle));
+	return executable
+		? { ok: true, executable }
+		: { ok: false, reason: `no single executable in ${bundle}/Contents/MacOS` };
+}
+
+/**
+ * The app executable inside an electron-builder output directory.
+ *
+ * Returns `{ ok: true, executable }` or `{ ok: false, reason }` naming what was
+ * found instead - a resolver that guessed wrong would otherwise surface as a
+ * spawn error three launches later.
+ */
+function resolvePackagedExecutable(packagedDir) {
+	const found = resolveUnpackedDirectory(packagedDir);
+	if (!found.ok) return found;
+
+	return process.platform === "darwin"
+		? bundledExecutableIn(found.unpacked)
+		: flatExecutableIn(found.unpacked);
 }
 
 /** Whether anything is listening on the engine's port right now. */

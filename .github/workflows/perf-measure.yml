@@ -69,21 +69,24 @@ jobs:
             preset: linux-prod
             engine: engine/build-release/vayu-engine
             mock: ./mock-server
-            # Platform and architecture are named rather than left to
-            # electron-builder's defaults: `electron-builder.json` declares the
-            # mac targets as universal, which needs two engine arches, and this
-            # job builds one - the runner's own.
-            pack: --linux dir --x64
+            # The platform is named because `electron-builder.json` declares
+            # installer targets - the mac ones universal, which needs two engine
+            # arches this job does not build. The architecture is deliberately
+            # not named: electron-builder defaults to the runner's own, which is
+            # the arch of the engine binary staged inside it, and naming one
+            # would silently produce an app that cannot run the day an image
+            # changes architecture.
+            pack: --linux dir
           - os: windows-latest
             preset: windows-prod
             engine: engine/build-release/vayu-engine.exe
             mock: ./mock-server.exe
-            pack: --win dir --x64
+            pack: --win dir
           - os: macos-latest
             preset: macos-prod
             engine: engine/build-release/vayu-engine
             mock: ./mock-server
-            pack: --mac dir --arm64
+            pack: --mac dir
     env:
       VCPKG_COMMIT: '114d9fe62faf35856b45cf55cb93b57028a45d63'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
@@ -191,17 +194,23 @@ jobs:
           chmod +x app/build/resources/bin/*
           ls -l app/build/resources/bin
 
-      # macOS is the one platform whose `electron-builder.json` block names an
-      # icon (`build/icon.png`), so packaging fails there without one. Linux and
-      # Windows declare none and take Electron's default, which no measurement
-      # reads. release.yml stages the full icon set because an installer ships
-      # it; this needs the one file that makes the build run.
-      - name: Stage the macOS icon
-        if: runner.os == 'macOS'
+      # All three platform blocks in `electron-builder.json` name an icon, but a
+      # `dir` build only reads the two single-file ones: the .app's icon and the
+      # .exe's are written during the pack itself. Linux's `build/icons` is an
+      # icon *set* that only the AppImage and deb targets read for their desktop
+      # entry, so an unpacked Linux build packages without it - measured, not
+      # assumed. release.yml stages all of them, and the license text with them,
+      # because an installer ships what this measurement never builds.
+      - name: Stage the icons a dir build reads
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           mkdir -p app/build
-          cp shared/icon_png/vayu_icon_512x512.png app/build/icon.png
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cp shared/icon_png/vayu_icon_512x512.png app/build/icon.png
+          else
+            cp shared/icon_ico/vayu_icon_256x256.ico app/build/icon.ico
+          fi
 
       # `dir`, not the installers release.yml builds: an unpacked build is the
       # same asar, the same staged engine and the same main process, and it is
@@ -246,38 +255,30 @@ jobs:
       # first green run. This is the remedy that error itself prescribes, and
       # it keeps the sandbox: --no-sandbox would also work and would be turning
       # off a security boundary to make a measurement convenient.
-      - name: Configure Electron's sandbox helper (Linux)
+      #
+      # Two copies of the helper, because two things launch Electron here: the
+      # harness runs the one under node_modules, and the cold-start leg runs the
+      # packaged build's own. One remedy, applied to both - the fix is identical
+      # and a second copy of it is a second place to forget.
+      - name: Configure Electron's sandbox helpers (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        working-directory: app
         run: |
           # tail -n 1 because requiring electron can print "Downloading Electron
           # binary..." to stdout ahead of the path, and the whole two-line
           # capture then gets handed to chown as one filename.
-          sandbox="$(dirname "$(node -p "require('electron')" | tail -n 1)")/chrome-sandbox"
-          if [ ! -f "$sandbox" ]; then
-            echo "::warning::no chrome-sandbox at $sandbox - the startup leg will report unavailable"
-            exit 0
-          fi
-          sudo chown root:root "$sandbox"
-          sudo chmod 4755 "$sandbox"
-          ls -l "$sandbox"
-
-      # The packaged build ships its own copy of that helper, with the same
-      # ownership problem and the same remedy - see the step above for why this
-      # is a chown rather than --no-sandbox.
-      - name: Configure the packaged app's sandbox helper (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          sandbox="app/release/linux-unpacked/chrome-sandbox"
-          if [ ! -f "$sandbox" ]; then
-            echo "::warning::no chrome-sandbox at $sandbox - the packaged leg will report unavailable"
-            exit 0
-          fi
-          sudo chown root:root "$sandbox"
-          sudo chmod 4755 "$sandbox"
-          ls -l "$sandbox"
+          bundled="$(dirname "$(cd app && node -p "require('electron')" | tail -n 1)")/chrome-sandbox"
+          # The glob rather than `linux-unpacked` outright: electron-builder
+          # names the directory for the arch it built, and this job names none.
+          for sandbox in "$bundled" app/release/linux*-unpacked/chrome-sandbox; do
+            if [ ! -f "$sandbox" ]; then
+              echo "::warning::no chrome-sandbox at $sandbox - the leg that launches it will report unavailable"
+              continue
+            fi
+            sudo chown root:root "$sandbox"
+            sudo chmod 4755 "$sandbox"
+            ls -l "$sandbox"
+          done
 
       - name: Measure the app
         shell: bash
