@@ -306,6 +306,7 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 - **Window Controls**: `windowMinimize()`, `windowMaximize()`, `windowClose()`, `windowIsMaximized()`, `onWindowMaximized()` for custom titlebar
 - **Auto-update**: Listeners for `onUpdateAvailable()`, `onUpdateDownloaded()`, plus `restartToInstallUpdate()`, `openReleasePage()`
 - **Menu Integration**: `onOpenSettings()` to receive open-settings commands from the app menu
+- **Navigation History**: `onNavigateHistory()` delivers a `menu:navigate` step, sent by the View menu's Back/Forward items, the mouse's back/forward buttons where the OS reports them as `app-command`, and the macOS three-finger swipe (issue #1245)
 - **Platform & Paths**: `platform` constant and `getAppPaths()` for OS and directory detection
 - **Graceful Shutdown**: `onBeforeQuit()` to allow the renderer to flush state (saves, pending requests) before app termination
 

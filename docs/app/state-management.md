@@ -58,6 +58,8 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   tabFocusedAt: Record<string, number>   // Tab id -> when it was last focused (epoch ms)
   specTabTarget: string | null           // Collection whose Spec tab something pointed at
   dataRowTarget: { requestId, rowIndex } | null  // Request a repro pointed at, and the row
+  navHistory: TabLocation[]              // Visited locations this session, oldest first
+  navIndex: number                       // Cursor into navHistory; -1 before anything is visited
 }
 ```
 
@@ -109,6 +111,22 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   it points into a data file whose rows are deliberately never persisted, so a
   remembered index would name a different row in a file that has since changed.
   A non-integer or negative index throws rather than being stored
+- Navigation history (issue #1245): `navHistory` is a `TabLocation` per visit
+  (a `Tab` without its instance id, so a closed tab's place survives it), with
+  `navIndex` as the cursor - `-1` before anything is visited. `openTab` and
+  `focusTab` record each visit themselves, coalescing a repeat of the current
+  location and truncating the forward half on a new one; capped at 50 entries
+  (`MAX_NAV_HISTORY`), oldest dropped first. `goBack()` / `goForward()` move the
+  cursor and show what it lands on - focusing the open tab if there is one,
+  reopening it through `openTab` otherwise - without recording a step of their
+  own. Closing the *active* tab now activates the most recent history entry
+  whose tab is still open, falling back to the old left-neighbour rule, and
+  leaves the closed location ahead of the cursor so Forward can reopen it;
+  `closeTabsForEntities` prunes history entries for deleted entities, so Back
+  never lands on one. Session-scoped like `tabFocusedAt` and `specTabTarget`
+  (absent from `partialize`), and NOT persisted: tabs *are* restored across
+  launches, and a persisted history would offer a Back that walks yesterday's
+  route through today's window
 - Persistence: `vayu.tabs` (v1), with a pass-through `migrate`. zustand discards
   a payload whose *stamped* version differs from the store's when no `migrate`
   is supplied, so the stub is where the next bump goes; it also refuses a
@@ -121,6 +139,15 @@ openTab({ type: "request", entityId: "req-123" });
 closeTabsForEntities(["req-123"]); // after a delete: closes tabs, drops responses
 openCollectionSpecTab("col-123"); // opens the collection, on its Spec tab
 openRequestWithDataRow("req-123", 500); // opens the request, on row 501 of its data file
+
+const { goBack, goForward } = useTabsStore();
+goBack(); // step back through navHistory; reopens the tab if it was closed
+goForward(); // never records a visit - only openTab/focusTab do that
+
+// canGoBack / canGoForward are exported selectors, not store methods - read
+// by the title-bar buttons and the palette's go-back / go-forward commands
+canGoBack(useTabsStore.getState());
+canGoForward(useTabsStore.getState());
 ```
 
 #### `layout-store.ts` - Drawer, Context Bar, & Split Ratio

@@ -8,6 +8,8 @@
 import { useEffect } from "react";
 import { useAppearanceStore } from "@/stores";
 import { baseCommandContext, commandById } from "@/lib/commands";
+import { isModalOpen } from "@/lib/modal";
+import { navigateHistory } from "@/lib/navigate-history";
 
 /**
  * Bridges native menu items (Preferences… / Settings, View → zoom) to in-app
@@ -28,6 +30,22 @@ export function useMenuActions(): void {
 		return window.electronAPI?.onOpenSettings?.(() =>
 			commandById("open-settings").perform(baseCommandContext())
 		);
+	}, []);
+
+	useEffect(() => {
+		/*
+		 * View → Back / Forward, and the OS gestures the main process forwards
+		 * over the same channel (#1245).
+		 *
+		 * `isModalOpen` for the reason the Shell's chord map asks it: a menu
+		 * accelerator fires wherever focus is, including under a dialog, and
+		 * navigating there unmounts the surface the dialog belongs to
+		 * mid-interaction.
+		 */
+		return window.electronAPI?.onNavigateHistory?.((direction) => {
+			if (isModalOpen()) return;
+			navigateHistory(direction, "os");
+		});
 	}, []);
 
 	useEffect(() => {

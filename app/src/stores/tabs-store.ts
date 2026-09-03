@@ -28,6 +28,19 @@ export interface Tab {
 }
 
 /**
+ * Somewhere the user has been - a `Tab` without its instance id (issue #1245).
+ *
+ * The navigation history is a list of these rather than of tab ids, and that is
+ * the whole reason back can reopen a tab the user closed: an id dies with its
+ * tab, so a history of ids would name nothing the moment a step of it is closed.
+ * A location outlives the tab, and `openTab` takes exactly this shape.
+ */
+export interface TabLocation {
+	type: TabType;
+	entityId: string | null;
+}
+
+/**
  * Exported because `response-store`'s cache bound is derived from it: that
  * store retains the open tabs' responses plus an equal tail, and a guard there
  * fails if the two numbers drift apart.
@@ -48,6 +61,16 @@ const SINGLETON_TYPES: TabType[] = ["welcome", "variables", "settings", "inbox"]
 
 // These tab types are exempt from LRU auto-close
 const LRU_EXEMPT_TYPES: TabType[] = ["dashboard"];
+
+/**
+ * How many places back the history remembers.
+ *
+ * A browser's is unbounded because a browser session ends; this one is a working
+ * set inside a workspace, and fifty steps is well past the "where was I" a user
+ * can still picture. The cap is what keeps a long session's history from being
+ * an ever-growing list of every request ever visited.
+ */
+const MAX_NAV_HISTORY = 50;
 
 interface TabsState {
 	openTabs: Tab[];
@@ -100,6 +123,37 @@ interface TabsState {
 	 * has since changed.
 	 */
 	dataRowTarget: { requestId: string; rowIndex: number } | null;
+	/**
+	 * Every place the user has been in this session, oldest first, with
+	 * `navIndex` marking where they are in it (issue #1245).
+	 *
+	 * A browser's model, and for the browser's reason: "where was I before this"
+	 * is a question `tabFocusedAt` cannot answer past one step - it is a set of
+	 * stamps, so the second Back has nothing to read - and one that no ordering
+	 * of `openTabs` can answer at all, that array being insertion order.
+	 *
+	 * Here rather than in a store of its own, though it is only read by the
+	 * navigation controls: it is derived from the very activations this store
+	 * performs, and a second store would have to be told about every one of them
+	 * by every caller. `openTab`, `focusTab` and `closeTab` are where a location
+	 * changes, so they are where it is recorded.
+	 *
+	 * Session-scoped by design (absent from `partialize`), like `tabFocusedAt`.
+	 * Tabs *are* restored across launches, and a restored history would offer a
+	 * Back that walks yesterday's route through today's window - or reopens a
+	 * request deleted since. An empty history disables both buttons until the
+	 * user goes somewhere, which is what a fresh session should say.
+	 */
+	navHistory: TabLocation[];
+	/**
+	 * Where in `navHistory` the user is: the index of the current location, or
+	 * `-1` before anything has been visited.
+	 *
+	 * A cursor rather than two stacks. The forward half is simply the entries
+	 * after this index, so nothing has to be moved from one stack to the other on
+	 * every step, and the two halves cannot disagree about the present.
+	 */
+	navIndex: number;
 
 	openTab: (tab: Omit<Tab, "id">) => void;
 	/** Show a collection, on its Spec tab - see `specTabTarget`. */
@@ -139,6 +193,92 @@ interface TabsState {
 	 * from `openTabs` and disagree about what happens at the ends.
 	 */
 	focusAdjacentTab: (step: 1 | -1) => void;
+	/**
+	 * Go to the previous place in `navHistory` - and, for `goForward`, the next.
+	 *
+	 * A location whose tab is still open is focused; one whose tab was closed is
+	 * reopened, which is what makes Back answer "put back what I just closed".
+	 * Neither records a visit: they move the cursor, they do not extend the
+	 * history, exactly as a browser's do.
+	 */
+	goBack: () => void;
+	goForward: () => void;
+}
+
+/** Is there anywhere to go back to? Read by the buttons, the palette and the menu. */
+export function canGoBack(state: Pick<TabsState, "navIndex">): boolean {
+	return state.navIndex > 0;
+}
+
+/** Is there anywhere to go forward to? */
+export function canGoForward(state: Pick<TabsState, "navHistory" | "navIndex">): boolean {
+	return state.navIndex >= 0 && state.navIndex < state.navHistory.length - 1;
+}
+
+function sameLocation(a: TabLocation, b: TabLocation): boolean {
+	return a.type === b.type && a.entityId === b.entityId;
+}
+
+/**
+ * Is an activation happening *because* of Back or Forward?
+ *
+ * Those two navigate by calling `focusTab` / `openTab` - the same paths every
+ * other navigation takes, deliberately, so a reopened tab is opened exactly the
+ * way anything else opens it - and a recorded visit there would rewrite the
+ * history the user is walking through: every Back would truncate the forward
+ * half it had just created, and the stack would grow by one on every step
+ * instead of the cursor moving through it.
+ *
+ * A module-level flag rather than a parameter threaded through both actions:
+ * the store's actions are synchronous, so the window is one call, and every
+ * caller of `openTab` would otherwise have to carry an argument that means
+ * nothing to it.
+ */
+let traversingHistory = false;
+
+/**
+ * Record arriving at `location`, browser-style: coalesce a repeat of where we
+ * already are, drop the forward half, append, and hold the cap.
+ */
+function recordVisit(
+	history: TabLocation[],
+	index: number,
+	location: TabLocation
+): Pick<TabsState, "navHistory" | "navIndex"> {
+	if (traversingHistory) return { navHistory: history, navIndex: index };
+	if (index >= 0 && sameLocation(history[index], location)) {
+		return { navHistory: history, navIndex: index };
+	}
+	const next = [...history.slice(0, index + 1), location];
+	const overflow = Math.max(0, next.length - MAX_NAV_HISTORY);
+	return { navHistory: next.slice(overflow), navIndex: next.length - overflow - 1 };
+}
+
+/**
+ * Drop every entry the predicate names, keeping the cursor on the same place -
+ * or, when that place was one of the dropped ones, on the nearest surviving
+ * entry behind it, and failing that the first one ahead.
+ *
+ * That last fallback is what keeps `-1` meaning one thing. It is reached when
+ * everything at or before the cursor was deleted while places ahead survived,
+ * and a `-1` there would say "nowhere" about a history that still holds open
+ * tabs - after which the next recorded visit would truncate them as though they
+ * were a forward half the user had left.
+ */
+function forgetLocations(
+	history: TabLocation[],
+	index: number,
+	drop: (location: TabLocation) => boolean
+): Pick<TabsState, "navHistory" | "navIndex"> {
+	const kept: TabLocation[] = [];
+	let nextIndex = -1;
+	history.forEach((location, i) => {
+		if (drop(location)) return;
+		kept.push(location);
+		if (i <= index) nextIndex = kept.length - 1;
+	});
+	if (nextIndex === -1 && kept.length > 0) nextIndex = 0;
+	return { navHistory: kept, navIndex: nextIndex };
 }
 
 /**
@@ -256,6 +396,37 @@ function stampFocus(
 	return live;
 }
 
+/**
+ * Move the cursor one step and show what it lands on.
+ *
+ * The activation goes through `focusTab` / `openTab` rather than setting
+ * `activeTabId` here, so a location arrived at by Back is opened exactly the way
+ * it was opened the first time - the singleton dedupe, the LRU cap and the focus
+ * stamp all apply, and there is no second definition of what showing a place
+ * means. `traversingHistory` is what stops those calls from recording the step
+ * as a new visit.
+ */
+function traverse(
+	get: () => TabsState,
+	set: (partial: Partial<TabsState>) => void,
+	step: -1 | 1
+): void {
+	const { navHistory, navIndex } = get();
+	const target = navIndex + step;
+	if (target < 0 || target >= navHistory.length) return;
+
+	const location = navHistory[target];
+	set({ navIndex: target });
+	traversingHistory = true;
+	try {
+		const open = get().openTabs.find((t) => sameLocation(t, location));
+		if (open) get().focusTab(open.id);
+		else get().openTab(location);
+	} finally {
+		traversingHistory = false;
+	}
+}
+
 function makeId() {
 	return typeof crypto !== "undefined" && crypto.randomUUID
 		? crypto.randomUUID()
@@ -270,9 +441,17 @@ export const useTabsStore = create<TabsState>()(
 			tabFocusedAt: {},
 			specTabTarget: null,
 			dataRowTarget: null,
+			navHistory: [],
+			navIndex: -1,
 
 			openTab: (tabDef) => {
-				const { openTabs, activeTabId, tabFocusedAt } = get();
+				const { openTabs, activeTabId, tabFocusedAt, navHistory, navIndex } = get();
+				// One location for both branches below: a singleton that retargets
+				// shows what was asked for, not what it was showing.
+				const visited = recordVisit(navHistory, navIndex, {
+					type: tabDef.type,
+					entityId: tabDef.entityId,
+				});
 
 				// Dedupe: singletons and entity-keyed tabs
 				const isSingleton = SINGLETON_TYPES.includes(tabDef.type);
@@ -294,6 +473,7 @@ export const useTabsStore = create<TabsState>()(
 						openTabs: tabs,
 						activeTabId: existing.id,
 						tabFocusedAt: stampFocus(tabFocusedAt, tabs, existing.id),
+						...visited,
 					});
 					return;
 				}
@@ -323,6 +503,7 @@ export const useTabsStore = create<TabsState>()(
 					openTabs: tabs,
 					activeTabId: newTab.id,
 					tabFocusedAt: stampFocus(tabFocusedAt, tabs, newTab.id),
+					...visited,
 				});
 			},
 
@@ -351,20 +532,60 @@ export const useTabsStore = create<TabsState>()(
 			clearDataRowTarget: () => set({ dataRowTarget: null }),
 
 			closeTab: (tabId) => {
-				const { openTabs, activeTabId } = get();
+				const { openTabs, activeTabId, navHistory, navIndex } = get();
 				const idx = openTabs.findIndex((t) => t.id === tabId);
 				if (idx === -1) return;
 
 				const remaining = openTabs.filter((t) => t.id !== tabId);
-				let nextActiveId = activeTabId;
 
-				if (activeTabId === tabId) {
-					// Focus the tab to the left, or the new last tab
-					const newFocus = remaining[Math.max(0, idx - 1)];
-					nextActiveId = newFocus?.id ?? null;
+				if (activeTabId !== tabId) {
+					set({ openTabs: remaining });
+					return;
 				}
 
-				set({ openTabs: remaining, activeTabId: nextActiveId });
+				/*
+				 * The active tab is going, so something has to take its place, and
+				 * the history is what knows where the user came from - which is where
+				 * a browser lands you when you close the page you are on (#1245). The
+				 * strip's left neighbour is the fallback, not the rule: it is the
+				 * answer to "which tab is beside this one", and the user asked to
+				 * leave, not to move one step left.
+				 *
+				 * The cursor lands on that earlier entry rather than dropping the
+				 * ones it passed, so the closed tab stays ahead of it: Forward
+				 * reopens what was just closed, for free and by the same rule Back
+				 * reopens anything else.
+				 */
+				for (let i = navIndex - 1; i >= 0; i--) {
+					const open = remaining.find((t) => sameLocation(t, navHistory[i]));
+					if (open) {
+						set({ openTabs: remaining, activeTabId: open.id, navIndex: i });
+						return;
+					}
+				}
+
+				/*
+				 * Nothing behind is open, so the strip's own rule answers: the tab
+				 * to the left, or the new last tab.
+				 *
+				 * Recorded as a visit, because the user is now somewhere the history
+				 * did not send them. The cursor always names where they are - the
+				 * invariant every other path here holds - and the place just closed
+				 * stays behind it, so Back is what reopens it.
+				 */
+				const newFocus = remaining[Math.max(0, idx - 1)];
+				if (!newFocus) {
+					set({ openTabs: remaining, activeTabId: null });
+					return;
+				}
+				set({
+					openTabs: remaining,
+					activeTabId: newFocus.id,
+					...recordVisit(navHistory, navIndex, {
+						type: newFocus.type,
+						entityId: newFocus.entityId,
+					}),
+				});
 			},
 
 			closeTabsForEntities: (entityIds, type) => {
@@ -386,16 +607,33 @@ export const useTabsStore = create<TabsState>()(
 					for (const id of ids) clearResponse(id);
 				}
 
-				const { openTabs, activeTabId } = get();
-				const shouldClose = (t: Tab) =>
+				const { openTabs, activeTabId, navHistory, navIndex } = get();
+				const shouldClose = (t: TabLocation) =>
 					t.entityId !== null &&
 					ids.has(t.entityId) &&
 					(type === undefined || t.type === type);
 
+				/*
+				 * A deleted entity leaves the history too, and this is the moment it
+				 * can: deletion is the one point where the app knows an entity is
+				 * gone, everywhere else finding out lazily from a 404 when a pane
+				 * renders. Pruning here is what makes Back never land on a request
+				 * that no longer exists - it is not there to land on - rather than
+				 * reopening a tab whose only content is an error.
+				 *
+				 * Before the early return below: an entity with no open tab can
+				 * still be somewhere the user has been.
+				 */
+				const forgotten = forgetLocations(navHistory, navIndex, shouldClose);
+
 				const remaining = openTabs.filter((t) => !shouldClose(t));
-				if (remaining.length === openTabs.length) return; // nothing matched
+				if (remaining.length === openTabs.length) {
+					set(forgotten);
+					return; // no tab matched
+				}
 
 				let nextActiveId = activeTabId;
+				let navigation = forgotten;
 				const activeIdx = openTabs.findIndex((t) => t.id === activeTabId);
 				if (activeIdx !== -1 && shouldClose(openTabs[activeIdx])) {
 					// Active tab is closing: focus the nearest survivor, preferring the
@@ -408,20 +646,40 @@ export const useTabsStore = create<TabsState>()(
 						if (!shouldClose(openTabs[i])) pick = openTabs[i];
 					}
 					nextActiveId = pick?.id ?? null;
+					/*
+					 * The survivor is where the user now is, so the history says so -
+					 * the same invariant `closeTab` holds. `recordVisit` coalesces when
+					 * the pruned cursor already names it, which is the usual case: the
+					 * survivor is normally somewhere they have been.
+					 */
+					if (pick) {
+						navigation = recordVisit(forgotten.navHistory, forgotten.navIndex, {
+							type: pick.type,
+							entityId: pick.entityId,
+						});
+					}
 				}
 
-				set({ openTabs: remaining, activeTabId: nextActiveId });
+				set({ openTabs: remaining, activeTabId: nextActiveId, ...navigation });
 			},
 
 			focusTab: (tabId) => {
-				const { openTabs, tabFocusedAt } = get();
-				if (openTabs.find((t) => t.id === tabId)) {
+				const { openTabs, tabFocusedAt, navHistory, navIndex } = get();
+				const tab = openTabs.find((t) => t.id === tabId);
+				if (tab) {
 					set({
 						activeTabId: tabId,
 						tabFocusedAt: stampFocus(tabFocusedAt, openTabs, tabId),
+						...recordVisit(navHistory, navIndex, {
+							type: tab.type,
+							entityId: tab.entityId,
+						}),
 					});
 				}
 			},
+
+			goBack: () => traverse(get, set, -1),
+			goForward: () => traverse(get, set, 1),
 
 			focusAdjacentTab: (step) => {
 				const { openTabs, activeTabId } = get();

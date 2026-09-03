@@ -27,6 +27,8 @@
 // `Zap` is the load-test mark throughout the app - the dashboard tab, a finished
 // load run in the strip (`tab-descriptors.ts`). The palette uses the same bolt.
 import {
+	ArrowLeft,
+	ArrowRight,
 	Download,
 	PanelLeft,
 	PanelRight,
@@ -42,6 +44,8 @@ import {
 import {
 	CLOSE_TAB_CHORD,
 	DRAWER_VIEW_CHORDS,
+	GO_BACK_CHORD,
+	GO_FORWARD_CHORD,
 	LOAD_TEST_CHORD,
 	NEW_REQUEST_CHORD,
 	SAVE_CHORD,
@@ -51,11 +55,19 @@ import {
 	TOGGLE_DRAWER_CHORD,
 } from "@/constants/shortcuts";
 import { DRAWER_VIEWS } from "@/constants/drawer-views";
-import { useImportModalStore, useLayoutStore, useSaveStore, useTabsStore } from "@/stores";
+import {
+	canGoBack,
+	canGoForward,
+	useImportModalStore,
+	useLayoutStore,
+	useSaveStore,
+	useTabsStore,
+} from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import type { SettingsCategory } from "@/types";
+import { navigateHistory } from "@/lib/navigate-history";
 import type { Command, CommandContext } from "./types";
 
 /** Open the Settings tab. The Shell's own effect brings its drawer view with it. */
@@ -168,6 +180,28 @@ const ACTION_COMMANDS: readonly Command[] = [
 		perform: (ctx) => {
 			if (ctx.activeTab) useTabsStore.getState().closeTab(ctx.activeTab.id);
 		},
+	},
+	{
+		id: "go-back",
+		title: "Go back",
+		keywords: ["previous", "history", "navigate", "return"],
+		group: "action",
+		icon: ArrowLeft,
+		// Through the same funnel the chord, the title bar's buttons, the View
+		// menu and the mouse go through - see `lib/navigate-history.ts`.
+		shortcut: GO_BACK_CHORD,
+		available: () => canGoBack(useTabsStore.getState()),
+		perform: () => navigateHistory("back", "ui"),
+	},
+	{
+		id: "go-forward",
+		title: "Go forward",
+		keywords: ["next", "history", "navigate"],
+		group: "action",
+		icon: ArrowRight,
+		shortcut: GO_FORWARD_CHORD,
+		available: () => canGoForward(useTabsStore.getState()),
+		perform: () => navigateHistory("forward", "ui"),
 	},
 	{
 		id: "save",

@@ -32,6 +32,7 @@ import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
+import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
 import { createSaveFlusher } from "./save-flush.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
@@ -345,6 +346,10 @@ function createWindow() {
 		});
 	});
 
+	// The mouse's back/forward buttons as the OS reports them, and the macOS
+	// swipe - neither of which reaches the renderer. See nav-history.ts.
+	watchNavigationGestures(mainWindow, sendNavigationCommand);
+
 	mainWindow.on("closed", () => {
 		mainWindow = null;
 	});
@@ -365,6 +370,19 @@ function openSettings() {
  */
 function sendZoomCommand(command: "in" | "out" | "reset") {
 	mainWindow?.webContents.send("menu:zoom", command);
+}
+
+/**
+ * Ask the renderer to step through its navigation history (#1245).
+ *
+ * The renderer owns the history - it is a history of *tabs*, which are its
+ * state - so the menu items and the OS gestures both only report the step, the
+ * way the zoom items report a nudge. One channel carrying the direction rather
+ * than a channel each: the renderer subscribes once, and a third direction (a
+ * future "back to where the run started") would not need a third channel.
+ */
+function sendNavigationCommand(direction: NavDirection) {
+	mainWindow?.webContents.send("menu:navigate", direction);
 }
 
 function createMenu() {
@@ -445,6 +463,21 @@ function createMenu() {
 		{
 			label: "View",
 			submenu: [
+				// The platform's own back/forward chords, so the menu advertises
+				// what the renderer already listens for: ⌘[ / ⌘] on macOS, where
+				// Safari and Chrome bind them, and Alt+←/→ everywhere else, where
+				// every browser does.
+				{
+					label: "Back",
+					accelerator: isMac ? "Cmd+[" : "Alt+Left",
+					click: () => sendNavigationCommand("back"),
+				},
+				{
+					label: "Forward",
+					accelerator: isMac ? "Cmd+]" : "Alt+Right",
+					click: () => sendNavigationCommand("forward"),
+				},
+				{ type: "separator" as const },
 				// Reload / force-reload / DevTools are developer affordances -
 				// only surfaced in development builds, not in shipped releases.
 				...(isDev
