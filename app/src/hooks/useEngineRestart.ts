@@ -10,10 +10,11 @@
  *
  * Two places offer the action - the Settings banner beside the setting that
  * asked for it, and the Dock, which is on screen when Settings is not - and the
- * sequence is the same either way: restart, wait for the daemon to come back,
+ * sequence is the same either way: open a start window so the health poll reads
+ * the coming silence as a cold start, restart, wait for the daemon to come back,
  * refetch everything the old instance answered, then lower the pending flag.
- * A second copy of that would be a second place for the invalidate or the flag
- * to be forgotten.
+ * A second copy of that would be a second place for the invalidate, the window
+ * or the flag to be forgotten.
  *
  * Failure is a toast, not a `window.alert`. The alert this replaced blocked the
  * whole renderer on a modal the user could only dismiss, and from the Dock it
@@ -30,6 +31,8 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 	const [isRestarting, setIsRestarting] = useState(false);
 	const queryClient = useQueryClient();
 	const clearRestartRequired = useEngineStore((s) => s.clearRestartRequired);
+	const openEngineStartWindow = useEngineStore((s) => s.openEngineStartWindow);
+	const closeEngineStartWindow = useEngineStore((s) => s.closeEngineStartWindow);
 	const showToast = useToastStore((s) => s.showToast);
 
 	const restart = useCallback(async () => {
@@ -45,9 +48,25 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 		}
 
 		setIsRestarting(true);
+		// The engine the health poll is watching is about to be killed and replaced
+		// by one that repeats the whole cold start - orphan reconciliation, inbox
+		// cleanup, the page-reclaim rewrite - with the port down for all of it. Say
+		// so before it happens: without a start window the poll reads that silence
+		// as an engine that answered and stopped, and paints "Disconnected" with a
+		// transport error beside this very button's "Restarting…" (#1227).
+		//
+		// Evidence, not a status. `useHealthQuery` remains the only thing that
+		// classifies, so a restart whose engine never comes back still spends the
+		// window and reaches `unreachable` with its reason, on a cold launch's
+		// budget.
+		openEngineStartWindow(Date.now());
 		try {
 			const result = await window.electronAPI.restartEngine();
 			if (!result.success) {
+				// Nothing is coming up after all. Closing the window puts the next
+				// failed poll back on the unreachable path, so the strip cannot sit
+				// on "Starting…" over an engine nobody is starting.
+				closeEngineStartWindow();
 				showToast({
 					message: `Failed to restart engine: ${result.error ?? "unknown error"}`,
 					variant: "error",
@@ -66,7 +85,13 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 		} finally {
 			setIsRestarting(false);
 		}
-	}, [queryClient, clearRestartRequired, showToast]);
+	}, [
+		queryClient,
+		clearRestartRequired,
+		openEngineStartWindow,
+		closeEngineStartWindow,
+		showToast,
+	]);
 
 	return { restart, isRestarting };
 }

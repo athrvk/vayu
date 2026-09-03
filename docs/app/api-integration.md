@@ -1420,11 +1420,23 @@ localhost never changes - so nothing else would ever revisit their error state
 once the engine came back.
 
 A failed poll does not mean `engineStatus` becomes `unreachable` outright:
-`engineStatusAfterFailedPoll` (`queries/health.ts`) reads `starting` for a
-launch whose engine has never yet answered and is still inside
-`TIMING.ENGINE_STARTUP_GRACE_MS` (45s) of its own mount, and `unreachable`
+`engineStatusAfterFailedPoll` (`queries/health.ts`) reads `starting` while an
+engine is known to be coming up and is still inside
+`TIMING.ENGINE_STARTUP_GRACE_MS` (45s) of the moment it began, and `unreachable`
 otherwise - past that window, or after an engine that had answered stops
-answering. That 45s is the same budget the main process spends on a cold
+answering with nothing starting. The moment it began is `engineStartWindow` on
+`engine-store`, opened by this hook on mount - which is when the main process
+spawns the engine and starts spending its own budget on the same wait - and
+again by `useEngineRestart` before it invokes the restart IPC, because a restart
+kills the daemon and spawns a fresh one that repeats the whole cold start with
+the port down for all of it (#1227). Measuring from the hook's mount alone
+called every such restart a failure, since an engine had answered: the one this
+one replaced. The restart opens the window and never writes `engineStatus`, so
+this hook remains the only thing that classifies; a restart the main process
+reports as failed closes the window again, and the next failed poll goes back
+to owing the user its reason.
+
+That 45s is the same budget the main process spends on a cold
 engine before it gives up and logs `EngineNotReadyError`
 (`ENGINE_HEALTH_POLL_BUDGET_MS` in `electron/constants.ts`) - it is the same
 question asked from the other side of the process boundary - and since the
