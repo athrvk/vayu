@@ -16,6 +16,23 @@
  *
  * The collection and run sections arrived as entries in this array and nothing
  * else - no framework change, which is what the registry was for.
+ *
+ * `appliesTo` is still a pure, synchronous function of the tab and nothing else,
+ * because the Dock's toggle calls it on every render through
+ * `contextBarHasContent`, and a predicate that read a query could not be called
+ * from there at all. The entry for `graphql` used to record the consequence -
+ * that narrowing it to the body mode "would mean the registry could read a
+ * query, which is the framework change the registry exists to avoid" - and that
+ * was the right call while the bar had three sections. At seven it was not: a
+ * plain REST request opened a bar in which three sections existed only to say
+ * they did not apply, so the reader scanned past all seven headers to find the
+ * two that meant something (#1310).
+ *
+ * So the data-level question got a second, orthogonal answer rather than a wider
+ * `appliesTo`: `useRelevance`, a hook a section opts into, called by the bar and
+ * only by the bar. Structure stays cheap and answerable anywhere; relevance
+ * costs what the section already spends, and is asked only where the bar is
+ * actually drawing. See `types.ts` for the contract.
  */
 
 import { lazy } from "react";
@@ -27,8 +44,13 @@ import { CollectionContentsSection } from "./CollectionContentsSection";
 import { CollectionLastRunSection } from "./CollectionLastRunSection";
 import { CollectionVariablesSection } from "./CollectionVariablesSection";
 import { CookiesSection } from "./CookiesSection";
-import { EnvironmentSection } from "./EnvironmentSection";
 import { RecentSendsSection } from "./RecentSendsSection";
+import {
+	useCookiesRelevance,
+	useGraphQLRelevance,
+	useRecentSendsRelevance,
+	useVariablesRelevance,
+} from "./relevance";
 import { RunConfigSection } from "./RunConfigSection";
 import { RunSourceSection } from "./RunSourceSection";
 import { VariablesSection } from "./VariablesSection";
@@ -42,9 +64,17 @@ import type { ContextBarSection } from "./types";
  * and the schema cache builds a client schema - which is ~320KB of source, and
  * the context bar is mounted on every tab, so that arrived before the window
  * could appear for everyone who has never opened a GraphQL request. `lazy`
- * rather than a narrower `appliesTo` because when the section applies is a
- * product question this registry deliberately does not ask (see the entry
- * below); when its code loads is not.
+ * rather than a narrower `appliesTo`, which sees the tab and so could never see
+ * a body mode; when the section's code loads is a separate question from when
+ * the section applies.
+ *
+ * The two now agree. `useGraphQLRelevance` hides the section outright off a
+ * GraphQL body, so the chunk is not requested at all on a REST tab, where it
+ * used to arrive the moment the expanded section mounted to say the request was
+ * not GraphQL. That hook lives in `relevance.ts` rather than beside the section
+ * precisely because this file has to name it eagerly: importing it from
+ * `GraphQLSection.tsx` would pull the parser into the startup chunk through the
+ * back door and undo the split. `startup-eager-graph.test.ts` guards both halves.
  *
  * `ContextBar` renders each section inside a Suspense boundary, so this needs
  * nothing else from the registry's shape - a `LazyExoticComponent` is a
@@ -89,6 +119,7 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 		id: "variables",
 		title: "Variables used",
 		appliesTo: onRequestTab,
+		useRelevance: useVariablesRelevance,
 		Component: VariablesSection,
 	},
 	{ id: "auth", title: "Auth", appliesTo: onRequestTab, Component: AuthContextSection },
@@ -96,28 +127,29 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 		id: "cookies",
 		title: "Cookies for this host",
 		appliesTo: onRequestTab,
+		useRelevance: useCookiesRelevance,
 		Component: CookiesSection,
 	},
+	/*
+	 * No `useRelevance`, deliberately: it is the one section whose answer costs a
+	 * server round trip (`POST /compose`), so a hook that decided whether it had
+	 * anything to say would have to compose in order to find out - on every
+	 * request tab, for a section that is collapsed by default. There is nothing
+	 * to report empty anyway; a request always composes into something.
+	 */
 	{ id: "code", title: "Code", appliesTo: onRequestTab, Component: CodeSection },
 	{
-		id: "environment",
-		title: "Environment",
+		id: "graphql",
+		title: "GraphQL",
 		appliesTo: onRequestTab,
-		Component: EnvironmentSection,
+		useRelevance: useGraphQLRelevance,
+		Component: GraphQLSection,
 	},
-	/*
-	 * `appliesTo` is a function of the *tab*, and a tab carries only a type and
-	 * an entity id - nothing that says which body mode the request uses. So this
-	 * applies to every request tab and says "not a GraphQL body" for the rest,
-	 * the same shape `cookies` already has for a host with no cookies. Narrowing
-	 * it properly would mean the registry could read a query, which is the
-	 * framework change the registry exists to avoid.
-	 */
-	{ id: "graphql", title: "GraphQL", appliesTo: onRequestTab, Component: GraphQLSection },
 	{
 		id: "recent-sends",
 		title: "Recent sends",
 		appliesTo: onRequestTab,
+		useRelevance: useRecentSendsRelevance,
 		Component: RecentSendsSection,
 	},
 

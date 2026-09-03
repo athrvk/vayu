@@ -17,6 +17,10 @@
  * A section's component is mounted only while its section is expanded, so a
  * collapsed section runs no queries - see `Section.tsx`. Collapse state is
  * persisted per section id in `layout-store`, beside `contextBarWidth`.
+ *
+ * What each section says it has to say - `useRelevance` - is read here too, in
+ * `ContextBarSectionSlot` below, which is the only part of the bar that knows a
+ * section can be quiet or absent.
  */
 
 import { Suspense } from "react";
@@ -29,10 +33,73 @@ import { TooltipIconButton } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
 import { regionProps } from "./region-focus";
 import { sectionsForTab } from "./context-bar/registry";
-import { ContextBarSectionFrame, SectionLoading } from "./context-bar/Section";
+import {
+	ContextBarSectionEmptyHeader,
+	ContextBarSectionFrame,
+	SectionLoading,
+} from "./context-bar/Section";
+import type { ContextBarSection, SectionRelevance } from "./context-bar/types";
+import type { Tab } from "@/stores";
 
 interface ContextBarProps {
 	mode?: "push" | "overlay";
+}
+
+/**
+ * The relevance of a section that declares none: it always has content.
+ *
+ * A hook rather than a constant so that the one call site below stays
+ * unconditional.
+ */
+function useAlwaysContent(): SectionRelevance {
+	return "content";
+}
+
+interface ContextBarSectionSlotProps {
+	section: ContextBarSection;
+	tab: Tab;
+	expanded: boolean;
+	onToggle: () => void;
+}
+
+/**
+ * One section's slot: what it has to say, and the frame that goes with the
+ * answer.
+ *
+ * The `useRelevance` call lives in a component of its own rather than in the
+ * loop above it because the applicable section list changes with the tab, and a
+ * hook called once per member of a list whose length changes is the rules of
+ * hooks broken. A component per section, keyed by the section id - unique, and
+ * pinned so by `registry.test.tsx` - gives every hook a mount of its own:
+ * React unmounts the slot when its id leaves the list, so no instance ever ends
+ * up calling a different section's hook in the same position.
+ */
+function ContextBarSectionSlot({ section, tab, expanded, onToggle }: ContextBarSectionSlotProps) {
+	// A section that declares no relevance has content by definition. The
+	// fallback is itself a hook so that this call is unconditional; which hook it
+	// is cannot change for the life of the slot, because the id it is keyed by
+	// cannot.
+	const useRelevance = section.useRelevance ?? useAlwaysContent;
+	const relevance = useRelevance(tab);
+
+	if (relevance === "hidden") return null;
+	if (relevance !== "content") {
+		return <ContextBarSectionEmptyHeader title={section.title} note={relevance.empty} />;
+	}
+
+	const { Component } = section;
+	return (
+		<ContextBarSectionFrame title={section.title} expanded={expanded} onToggle={onToggle}>
+			{/* Per section, not around the list: a section whose code is still
+			    arriving must not blank the ones already on screen. `SectionLoading`
+			    is what a section shows while its own query is in flight, so a
+			    loading chunk reads the same as loading data - which, to the reader,
+			    it is. */}
+			<Suspense fallback={<SectionLoading />}>
+				<Component tab={tab} />
+			</Suspense>
+		</ContextBarSectionFrame>
+	);
 }
 
 export function ContextBar({ mode = "push" }: ContextBarProps) {
@@ -103,22 +170,14 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 			    `min-height: auto` refuses to shrink below its content, which would
 			    push the overflow back up to the root. */}
 			<div className="flex-1 min-h-0 overflow-y-auto px-3 py-1 divide-y divide-border">
-				{sections.map(({ id, title, Component }) => (
-					<ContextBarSectionFrame
-						key={id}
-						title={title}
-						expanded={!contextBarCollapsedSections.includes(id)}
-						onToggle={() => toggleContextBarSection(id)}
-					>
-						{/* Per section, not around the list: a section whose code
-						    is still arriving must not blank the ones already on
-						    screen. `SectionLoading` is what a section shows while
-						    its own query is in flight, so a loading chunk reads the
-						    same as loading data - which, to the reader, it is. */}
-						<Suspense fallback={<SectionLoading />}>
-							<Component tab={tab} />
-						</Suspense>
-					</ContextBarSectionFrame>
+				{sections.map((section) => (
+					<ContextBarSectionSlot
+						key={section.id}
+						section={section}
+						tab={tab}
+						expanded={!contextBarCollapsedSections.includes(section.id)}
+						onToggle={() => toggleContextBarSection(section.id)}
+					/>
 				))}
 			</div>
 		</aside>
