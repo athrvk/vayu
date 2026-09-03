@@ -12,6 +12,7 @@
  */
 
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context";
 import type { RequestTab, TabInfo } from "../../types";
 import InfoPanel from "./panels/InfoPanel";
@@ -23,6 +24,17 @@ import ScriptPanel from "./panels/script/ScriptPanel";
 import ExamplesPanel from "./panels/ExamplesPanel";
 import SettingsPanel from "./panels/SettingsPanel";
 import { isRequestSettingsNonDefault } from "../../utils/request-state";
+
+/**
+ * The tabs whose panel is an editor rather than a form.
+ *
+ * Their content is a column that fills the pane - the editor takes whatever the
+ * controls above it leave - so the panel is a flex container as well as the
+ * scroller it already was. The scroll still serves them: an editor at its
+ * `min-h-40` floor in a short window overflows, as do the form-data and
+ * urlencoded tables on the same tab.
+ */
+const EDITOR_TABS = new Set<RequestTab>(["body", "pre-script", "test-script"]);
 
 export default function RequestTabs() {
 	const { request, activeTab, setActiveTab } = useRequestBuilderContext();
@@ -119,7 +131,10 @@ export default function RequestTabs() {
 				<TabsContent
 					key={tab.id}
 					value={tab.id}
-					className="mt-0 flex-1 overflow-y-auto p-4"
+					className={cn(
+						"mt-0 flex-1 overflow-y-auto p-4",
+						EDITOR_TABS.has(tab.id) && "flex flex-col"
+					)}
 				>
 					<TabContent />
 				</TabsContent>

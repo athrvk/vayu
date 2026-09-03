@@ -19,7 +19,14 @@ export { useBoundRowStore, boundRowFor, type BoundDataRow } from "./bound-row-st
 export { useSpecFileStore, type SpecFileLocation } from "./spec-file-store";
 export { useSaveStore, type SaveStatus } from "./save-store";
 export { useResponseStore, type StoredResponse } from "./response-store";
-export { useTabsStore, type Tab, type TabType } from "./tabs-store";
+export {
+	useTabsStore,
+	canGoBack,
+	canGoForward,
+	type Tab,
+	type TabType,
+	type TabLocation,
+} from "./tabs-store";
 export { useLayoutStore, type DrawerView } from "./layout-store";
 export { useClientSettingsStore, SETTINGS_STORAGE_KEYS } from "./client-settings-store";
 export { useAppearanceStore } from "./appearance-store";

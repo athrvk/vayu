@@ -97,7 +97,6 @@ function mount(query: string, requestId: string | null = "r1") {
 					onBodyChange={setBody}
 					requestId={requestId}
 					schemaTarget={TARGET}
-					onEditorMount={() => {}}
 					method="POST"
 					variablesDraft={draft}
 					onVariablesDraftChange={setDraft}

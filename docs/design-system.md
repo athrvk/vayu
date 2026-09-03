@@ -1407,7 +1407,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **16 directives across 12 files**, listed
+file that provides the missing half. **15 directives across 11 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1454,8 +1454,6 @@ not rule names - two of these lines silence two rules at once.
   (1) - `jsx-a11y/interactive-supports-focus`: a radiogroup, where the selected
   `role="radio"` holds the stop and the `onKeyDown` moves selection and focus
   together.
-- `modules/request-builder/components/RequestTabs/panels/BodyPanel.tsx` (1) -
-  `jsx-a11y/no-noninteractive-element-interactions`, the second window splitter.
 - `modules/request-builder/components/RequestTabs/panels/body/graphql-explorer/SchemaExplorer.tsx`
   (2) - `jsx-a11y/interactive-supports-focus` on the tree, and
   `jsx-a11y/role-has-required-aria-props` because this tree has no selection
@@ -2037,46 +2035,37 @@ the only one.
 ## Layout Structure
 
 ```
-Shell
-├── Resizable sidebar container  (280–600px, default 320px - useResizable hook)
-│   └── Sidebar
-│       ├── ActivityBar     w-11 (44px)  bg-panel border-r border-border
-│       └── SidebarPanel    w-60 (240px) bg-panel border-r border-border  (collapsible)
-├── Resize handle            w-1  bg-border hover:bg-primary cursor-col-resize
-└── main (flex-1)            routes render here
+Shell                            flex flex-col h-full bg-background
+├── row (flex-1)
+│   ├── Drawer (aside)       220–480px, default 260px, bg-panel - one of the six
+│   │                        views, plus its PanelResizeHandle on the right edge
+│   └── content column       TabStrip, then main beside the ContextBar
+│                            (220–480px, its handle on the left edge)
+└── Dock                     h-[var(--dock-height)] border-t border-border - the
+                             view switcher, along the bottom of the window
 ```
 
-### Resizable Sidebar
+### The panels that resize, and the one handle that resizes them
 
-Shell uses `useResizable` from `app/src/hooks/useResizable.ts`:
+The drawer and the context bar are the two panels a user drags, and both use
+`PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`): one
+focusable `role="separator"` where each panel used to carry its own mouse-only
+copy. `side` sets the direction, so the drawer's right-edge handle widens on
+ArrowRight and the context bar's left-edge one widens on ArrowLeft; Page keys
+jump, Home and End take the bounds, and Enter or Space resets to the default -
+the keyboard equivalent of the double-click that was already there.
 
-```tsx
-const { size: sidebarWidth, isResizing, startResizing } = useResizable({
-  defaultSize: 320,
-  min: 280,
-  max: 600,
-});
+The width itself is a preference, not component state: `drawerWidth` and
+`contextBarWidth` live in `layout-store`, clamped to `PANEL_MIN_WIDTH` (220) and
+`PANEL_MAX_WIDTH` (480) from `app/src/constants/layout.ts`, and survive a
+restart. The request/response split is `react-resizable-panels` through
+`components/ui/resizable.tsx`, with its ratio in the same store.
 
-// Sidebar container:
-<div style={{ width: `${sidebarWidth}px`, minWidth: "280px", maxWidth: "600px" }} className="flex-shrink-0 ...">
-  <Sidebar />
-</div>
-
-// Drag handle:
-<div
-  onMouseDown={startResizing}
-  className={cn("w-1 bg-border hover:bg-primary cursor-col-resize transition-colors shrink-0", isResizing && "bg-primary")}
-/>
-```
-
-**`useResizable` API:**
-
-```ts
-useResizable({ defaultSize, min, max, direction?: "horizontal" | "vertical" })
-// → { size: number, isResizing: boolean, startResizing: (e: React.MouseEvent) => void }
-```
-
-`startResizing` takes a `React.MouseEvent` (wire directly to `onMouseDown`). Uses delta-based calculation - captures drag origin on mousedown, computes `newSize = startSize + delta` - so it works for panels that don't start at the viewport origin.
+**An editor inside a pane is not one of them.** The Body and script editors fill
+the pane they sit in - a `flex-1` box with a `min-h-40` floor and no ceiling -
+because a drag there resized a box inside a pane the user had already sized, and
+held that size in component state that Radix threw away on the next tab switch
+(#1323). The pane's own splitter is the one control for how tall an editor is.
 
 ### ActivityBar
 
@@ -2686,6 +2675,6 @@ opt-out.
 | `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
 | `app/src/components/layout/Shell.tsx` | Root layout - resizable sidebar + drag handle + main |
 | `app/src/components/layout/Sidebar.tsx` | ActivityBar + SidebarPanel |
-| `app/src/hooks/useResizable.ts` | Drag-to-resize hook (delta-based, horizontal/vertical) |
+| `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
 | `app/src/utils/helpers.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |

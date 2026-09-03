@@ -28,10 +28,14 @@ import {
 	PREVIOUS_TAB_CHORD,
 	NEXT_REGION_CHORD,
 	PREVIOUS_REGION_CHORD,
+	GO_BACK_CHORD,
+	GO_FORWARD_CHORD,
 	DRAWER_VIEW_CHORDS,
 	TAB_CHORDS,
 	matchesChord,
 } from "@/constants/shortcuts";
+import { ownsEnterKey } from "@/lib/keyboard";
+import { navigateHistory, type NavDirection } from "@/lib/navigate-history";
 import { useNewRequest } from "@/hooks/useNewRequest";
 import { ImportModal } from "@/modules/collections/ImportModal";
 import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
@@ -119,6 +123,42 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 function regionStep(e: KeyboardEvent): 1 | -1 | null {
 	if (matchesChord(e, NEXT_REGION_CHORD)) return 1;
 	if (matchesChord(e, PREVIOUS_REGION_CHORD)) return -1;
+	return null;
+}
+
+/**
+ * Which way this key navigates the history, or `null` when it is neither chord.
+ *
+ * Asked before the modifier gate for the same reason F6 is: off macOS the pair
+ * is Alt+←/→, which carries no ⌘ or Ctrl (#1245).
+ *
+ * A code editor keeps the chord, because it is the one place either pair means
+ * something else: Monaco binds CtrlCmd+[ and +] to outdent and indent, so on
+ * macOS - where the chord *is* that pair - navigating would break editing to
+ * offer navigation. `ownsEnterKey` rather than `isTextEntryTarget`, so a plain
+ * input keeps it: Back from the URL bar is what a browser does, and neither ⌘[
+ * nor Alt+← edits text in a field.
+ *
+ * The collection tree's Alt+Arrow reorder needs no check here: its handler stops
+ * the event at the tree, so it never reaches this listener.
+ */
+function navigationStep(e: KeyboardEvent): NavDirection | null {
+	if (e.target instanceof HTMLElement && ownsEnterKey(e.target)) return null;
+	if (matchesChord(e, GO_BACK_CHORD)) return "back";
+	if (matchesChord(e, GO_FORWARD_CHORD)) return "forward";
+	return null;
+}
+
+/**
+ * Which way this pointer button navigates, or `null` for an ordinary button.
+ *
+ * Chromium reports the mouse's thumb buttons as 3 and 4 on every platform, which
+ * is the only route to them in the renderer: they produce no key event and no
+ * click on the element under the pointer.
+ */
+function pointerNavigationStep(button: number): NavDirection | null {
+	if (button === 3) return "back";
+	if (button === 4) return "forward";
 	return null;
 }
 
@@ -212,7 +252,8 @@ export default function Shell() {
 			// they are settled before the gate that lets every other key go by
 			// untouched - the gate is what keeps this listener off the typing path.
 			const region = regionStep(e);
-			if (region === null && !(e.metaKey || e.ctrlKey)) return;
+			const navigation = navigationStep(e);
+			if (region === null && navigation === null && !(e.metaKey || e.ctrlKey)) return;
 			/*
 			 * Nothing here acts while a modal is up (#935). Every chord below
 			 * moves or destroys the thing the dialog is attached to - ⌘W closed
@@ -229,6 +270,11 @@ export default function Shell() {
 			if (region !== null) {
 				e.preventDefault();
 				cycleRegionFocus(region);
+				return;
+			}
+			if (navigation !== null) {
+				e.preventDefault();
+				navigateHistory(navigation, "chord");
 				return;
 			}
 			if (matchesChord(e, NEW_REQUEST_CHORD)) {
@@ -317,6 +363,34 @@ export default function Shell() {
 		activeTabId,
 		openTabs,
 	]);
+
+	useEffect(() => {
+		/*
+		 * The mouse's own back and forward buttons (#1245).
+		 *
+		 * On `mouseup` rather than `mousedown`, matching what a button press means
+		 * everywhere else, and on `window` rather than a container because these
+		 * buttons are aimed at the app, not at whatever the pointer happens to be
+		 * over. `preventDefault` because Chromium's own default for them is to
+		 * navigate the *document* - which in a packaged app means leaving the app's
+		 * page for whatever it was loaded from.
+		 *
+		 * `isModalOpen` for the reason the chord map asks it (#935): a dialog is
+		 * *visually* on top, but it is portalled into `document.body` and stops
+		 * nothing, so a press on it bubbles to this window listener like any
+		 * other - and navigating there unmounts the surface the dialog belongs to
+		 * mid-interaction.
+		 */
+		const handleMouseUp = (e: MouseEvent) => {
+			const direction = pointerNavigationStep(e.button);
+			if (direction === null) return;
+			if (isModalOpen()) return;
+			e.preventDefault();
+			navigateHistory(direction, "pointer");
+		};
+		window.addEventListener("mouseup", handleMouseUp);
+		return () => window.removeEventListener("mouseup", handleMouseUp);
+	}, []);
 
 	return (
 		<div className="flex flex-col h-full bg-background overflow-hidden">

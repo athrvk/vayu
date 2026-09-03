@@ -42,17 +42,10 @@ import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import ScriptPanel from "./script/ScriptPanel";
 
-/**
- * Monaco does not run under jsdom; nothing here tests the editor itself. The
- * stub does echo the height it was given, because that height is a claim this
- * panel makes: the editor fills the panel rather than sitting at a fixed 350px
- * with reference prose taking the rest (#1223).
- */
+/** Monaco does not run under jsdom; nothing here tests the editor. */
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
-	CodeEditor: ({ height }: { height?: string | number }) => (
-		<div data-testid="code-editor" data-height={String(height)} />
-	),
+	CodeEditor: () => <div data-testid="code-editor" />,
 }));
 
 /**
@@ -138,6 +131,24 @@ function openFullList(container: HTMLElement) {
 
 describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegacy) => {
 	const Panel = () => <ScriptPanel variant={variant} />;
+
+	/*
+	 * The editor was a fixed 350px box in a pane with the window's height, the
+	 * third copy of one shape at a third size (#1323). jsdom has no layout, so
+	 * the fill is a class assertion. Mutation check: put `height="350px"` back on
+	 * the `CodeEditor` and drop `flex-1` from its wrapper - both cases fail.
+	 */
+	it("gives the editor the panel's remaining height, with a floor", () => {
+		const { container, getByTestId } = render(<Panel />);
+		const box = getByTestId("code-editor").parentElement!;
+		expect(box.className).toContain("flex-1");
+		expect(box.className).toContain("min-h-40");
+
+		const root = container.firstElementChild!;
+		for (const cls of ["flex", "flex-col", "flex-1", "min-h-0"]) {
+			expect(root.className, `root is missing ${cls}`).toContain(cls);
+		}
+	});
 
 	it("lists the variables the script references", () => {
 		const { container } = render(<Panel />);
@@ -257,14 +268,6 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 		);
 		expect(reference).toHaveLength(0);
 		expect(container.querySelectorAll("ul li").length).toBe(0);
-	});
-
-	it("gives the editor the panel instead of a fixed 350px", () => {
-		const { container } = render(<Panel />);
-		const editor = container.querySelector('[data-testid="code-editor"]');
-
-		expect(editor?.getAttribute("data-height")).toBe("100%");
-		expect(editor?.parentElement?.className).toContain("flex-1");
 	});
 
 	it("offers the snippets list under the editor", () => {
