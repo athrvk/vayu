@@ -10,22 +10,31 @@
  */
 
 /**
- * The filtered step list, kept across a live run's commits (issue #1205).
+ * The filtered step window, kept across a live run's commits (issues #1205,
+ * #1297).
  *
- * Two things have to hold and neither is visible from the rendered output:
- * that it answers exactly what a from-scratch `filterSteps` answers for the
- * same rows and the same controls, and that it gets there without running the
- * predicate over rows it has already tested. The first is proved by
- * equivalence over a randomized stream of appends, replays and filter changes
- * - the shape `detectAnomalies.test.ts` uses for the same class of problem -
- * and the second by counting the work the keeping exists to avoid.
+ * Three things have to hold and none is visible from the rendered output: that
+ * it answers exactly what a from-scratch `filterSteps` answers for the same
+ * rows and the same controls, that it gets there without running the predicate
+ * over rows it has already tested, and that what it *builds* per commit is the
+ * window rather than everything that has ever matched. The first is proved by
+ * equivalence over a randomized stream of appends, replays and filter changes -
+ * the shape `detectAnomalies.test.ts` uses for the same class of problem, run
+ * at two window sizes so the window itself is part of what is checked - and the
+ * other two by counting the work the keeping exists to avoid.
  *
  * The rows and the epoch come from `foldStepEvents` rather than being built by
  * hand, because what the hook is trusting is precisely what that fold reports.
+ *
+ * **The observer is stubbed and never intersects.** jsdom has none, and the
+ * hook's honest degradation with no observer is to show everything - which
+ * would make every window here the whole list and quietly delete the property
+ * under test. A stub that only fires when a case says so is what lets the
+ * window be a window.
  */
 
-import { describe, it, expect } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { renderHook, act } from "@testing-library/react";
 import { useFilteredSteps } from "./useFilteredSteps";
 import {
 	filterSteps,
@@ -65,13 +74,51 @@ class Stream {
 	}
 }
 
+/**
+ * A window wide enough that it never narrows anything, so a case can hold the
+ * whole matched list against the oracle. Not `Infinity`: the hook sizes real
+ * arrays against it.
+ */
 const ALL = 1_000_000;
+
+/** The observer the hook attaches to its sentinel, held so a case can fire it. */
+let intersect: (() => void) | null = null;
+
+beforeEach(() => {
+	intersect = null;
+	vi.stubGlobal(
+		"IntersectionObserver",
+		class {
+			constructor(private readonly callback: IntersectionObserverCallback) {}
+			observe() {
+				intersect = () =>
+					this.callback(
+						[{ isIntersecting: true } as IntersectionObserverEntry],
+						this as unknown as IntersectionObserver
+					);
+			}
+			disconnect() {
+				intersect = null;
+			}
+		}
+	);
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
+/** Attach the sentinel and reach it once, the way scrolling to the end does. */
+function scrollToEnd(sentinelRef: (node: HTMLElement | null) => void): void {
+	act(() => sentinelRef(document.createElement("p")));
+	act(() => intersect?.());
+}
 
 /**
  * Every render of the hook, driven the way the view drives it: the rows and
- * the epoch of the moment, and whatever the two controls say.
+ * the epoch of the moment, whatever the two controls say, and one window size.
  */
-function driveHook(stream: Stream, filter: StepListFilter) {
+function driveHook(stream: Stream, filter: StepListFilter, step = ALL) {
 	return renderHook(
 		({
 			steps,
@@ -81,7 +128,7 @@ function driveHook(stream: Stream, filter: StepListFilter) {
 			steps: ScenarioStepRow[];
 			epoch: number;
 			filter: StepListFilter;
-		}) => useFilteredSteps(steps, f, epoch),
+		}) => useFilteredSteps(steps, f, epoch, "run_1", step),
 		{ initialProps: { steps: stream.steps, epoch: stream.epoch, filter } }
 	);
 }
@@ -98,82 +145,133 @@ function mulberry32(seed: number): () => number {
 	};
 }
 
-describe("useFilteredSteps against a from-scratch filter", () => {
-	it("answers what filterSteps answers, over a randomized run", () => {
-		const random = mulberry32(20261205);
-		const stream = new Stream();
-		let filter: StepListFilter = { outcome: null, query: "" };
-		const view = driveHook(stream, filter);
+/**
+ * One randomized run of appends, reconnect replays and filter changes, with the
+ * hook's answer held against `filterSteps` after every round.
+ *
+ * `window` is what the case is really varying: at {@link ALL} the assertion is
+ * about the whole matched list, and at a handful of rows it is about the window
+ * being the oracle's own prefix - the property a lazily produced window is the
+ * easiest thing to get wrong.
+ */
+function randomizedRun(seed: number, window: number): void {
+	const random = mulberry32(seed);
+	const stream = new Stream();
+	let filter: StepListFilter = { outcome: null, query: "" };
+	const view = driveHook(stream, filter, window);
 
-		let appends = 0;
-		let replays = 0;
-		let narrowings = 0;
-		let step = 0;
+	let appends = 0;
+	let replays = 0;
+	let narrowings = 0;
+	let step = 0;
 
-		for (let round = 0; round < 220; round += 1) {
-			const roll = random();
-			if (roll < 0.6) {
-				// A batch of new steps, the ordinary case.
-				const size = 1 + Math.floor(random() * 6);
-				const batch: ScenarioStepEvent[] = [];
-				for (let i = 0; i < size; i += 1, step += 1) {
-					batch.push(
-						event(
-							Math.floor(step / NAMES.length),
-							step % NAMES.length,
-							OUTCOMES[Math.floor(random() * OUTCOMES.length)]
-						)
-					);
-				}
-				stream.commit(batch);
-				appends += 1;
-			} else if (roll < 0.8 && stream.steps.length > 0) {
-				// A reconnect's replay, landing on a row already held and
-				// changing it - the case that must throw the kept rows away.
-				const at = Math.floor(random() * stream.steps.length);
-				const row = stream.steps[at];
-				stream.commit([
+	for (let round = 0; round < 220; round += 1) {
+		const roll = random();
+		if (roll < 0.6) {
+			// A batch of new steps, the ordinary case.
+			const size = 1 + Math.floor(random() * 6);
+			const batch: ScenarioStepEvent[] = [];
+			for (let i = 0; i < size; i += 1, step += 1) {
+				batch.push(
 					event(
-						row.iteration,
-						row.stepIndex,
-						OUTCOMES[Math.floor(random() * OUTCOMES.length)],
-						row.name
-					),
-				]);
-				replays += 1;
-			} else {
-				// A chip pressed, a search typed, cleared, or left holding the
-				// whitespace a cleared box can be left with - which narrows
-				// nothing, and is the one query that must not be taken at its
-				// word.
-				const typed = random();
-				filter = {
-					outcome: random() < 0.5 ? OUTCOMES[Math.floor(random() * 4)] : null,
-					query:
-						typed < 0.5
-							? NAMES[Math.floor(random() * NAMES.length)].slice(0, 6)
-							: typed < 0.65
-								? "  "
-								: "",
-				};
-				narrowings += 1;
+						Math.floor(step / NAMES.length),
+						step % NAMES.length,
+						OUTCOMES[Math.floor(random() * OUTCOMES.length)]
+					)
+				);
 			}
-
-			view.rerender({ steps: stream.steps, epoch: stream.epoch, filter });
-
-			const oracle = filterSteps(stream.steps, filter);
-			expect(view.result.current.total).toBe(oracle.length);
-			expect(view.result.current.take(ALL)).toEqual([...oracle]);
-			// The window is a prefix of the same list, in the same order.
-			expect(view.result.current.take(7)).toEqual([...oracle].slice(0, 7));
+			stream.commit(batch);
+			appends += 1;
+		} else if (roll < 0.8 && stream.steps.length > 0) {
+			// A reconnect's replay, landing on a row already held and
+			// changing it - the case that must throw the kept rows away.
+			const at = Math.floor(random() * stream.steps.length);
+			const row = stream.steps[at];
+			stream.commit([
+				event(
+					row.iteration,
+					row.stepIndex,
+					OUTCOMES[Math.floor(random() * OUTCOMES.length)],
+					row.name
+				),
+			]);
+			replays += 1;
+		} else {
+			// A chip pressed, a search typed, cleared, or left holding the
+			// whitespace a cleared box can be left with - which narrows
+			// nothing, and is the one query that must not be taken at its
+			// word.
+			const typed = random();
+			filter = {
+				outcome: random() < 0.5 ? OUTCOMES[Math.floor(random() * 4)] : null,
+				query:
+					typed < 0.5
+						? NAMES[Math.floor(random() * NAMES.length)].slice(0, 6)
+						: typed < 0.65
+							? "  "
+							: "",
+			};
+			narrowings += 1;
 		}
 
-		// The sequence has to have exercised all three, or the equivalence above
-		// is a statement about appends alone.
-		expect(appends).toBeGreaterThan(20);
-		expect(replays).toBeGreaterThan(10);
-		expect(narrowings).toBeGreaterThan(10);
-		expect(stream.steps.length).toBeGreaterThan(200);
+		view.rerender({ steps: stream.steps, epoch: stream.epoch, filter });
+
+		const oracle = filterSteps(stream.steps, filter);
+		expect(view.result.current.total).toBe(oracle.length);
+		// The window is a prefix of the same list, in the same order, and says
+		// so - `hasMore` is what the "showing X of Y" line hangs on.
+		expect(view.result.current.rows).toEqual([...oracle].slice(0, window));
+		expect(view.result.current.hasMore).toBe(oracle.length > window);
+	}
+
+	// The sequence has to have exercised all three, or the equivalence above
+	// is a statement about appends alone.
+	expect(appends).toBeGreaterThan(20);
+	expect(replays).toBeGreaterThan(10);
+	expect(narrowings).toBeGreaterThan(10);
+	expect(stream.steps.length).toBeGreaterThan(200);
+}
+
+describe("useFilteredSteps against a from-scratch filter", () => {
+	it("answers what filterSteps answers, over a randomized run", () => {
+		randomizedRun(20261205, ALL);
+	});
+
+	it("answers the oracle's own prefix when the window is narrower than the match", () => {
+		randomizedRun(20261205, 3);
+	});
+
+	it("grows into the rows it had not produced, and stops where the list ends", () => {
+		const stream = new Stream();
+		for (let step = 0; step < 40; step += 1) {
+			stream.commit([event(Math.floor(step / NAMES.length), step % NAMES.length, "failed")]);
+		}
+		const filter: StepListFilter = { outcome: "failed", query: "" };
+		const view = driveHook(stream, filter, 10);
+		const oracle = filterSteps(stream.steps, filter);
+
+		expect(view.result.current.rows).toEqual([...oracle].slice(0, 10));
+		expect(view.result.current.hasMore).toBe(true);
+
+		// Reaching the end asks for the next slice, which resumes from where the
+		// window stopped rather than re-matching the list.
+		scrollToEnd(view.result.current.sentinelRef);
+		expect(view.result.current.rows).toEqual([...oracle].slice(0, 20));
+
+		// And rows that arrive after the window grew still land in it.
+		stream.commit([event(500, 0, "failed"), event(500, 1, "failed")]);
+		view.rerender({ steps: stream.steps, epoch: stream.epoch, filter });
+		expect(view.result.current.total).toBe(42);
+		expect(view.result.current.rows).toEqual(
+			[...filterSteps(stream.steps, filter)].slice(0, 20)
+		);
+
+		for (let reached = 0; reached < 3; reached += 1) {
+			scrollToEnd(view.result.current.sentinelRef);
+		}
+		// The whole list, and nothing invented past its end.
+		expect(view.result.current.rows).toHaveLength(42);
+		expect(view.result.current.hasMore).toBe(false);
 	});
 
 	it("rebuilds when a filter is cleared and pressed again", () => {
@@ -194,7 +292,7 @@ describe("useFilteredSteps against a from-scratch filter", () => {
 		// Two failed rows, not one kept from before the filter was cleared plus
 		// whatever arrived while it was off.
 		expect(view.result.current.total).toBe(2);
-		expect(view.result.current.take(ALL)).toEqual([...filterSteps(stream.steps, failed)]);
+		expect(view.result.current.rows).toEqual([...filterSteps(stream.steps, failed)]);
 	});
 
 	it("hands the list itself back when neither control narrows", () => {
@@ -203,7 +301,19 @@ describe("useFilteredSteps against a from-scratch filter", () => {
 		const view = driveHook(stream, { outcome: null, query: "" });
 
 		expect(view.result.current.total).toBe(2);
-		expect(view.result.current.take(ALL)).toEqual(stream.steps);
+		expect(view.result.current.rows).toBe(stream.steps);
+	});
+
+	it("windows an unnarrowed list without copying more than it shows", () => {
+		const stream = new Stream();
+		for (let step = 0; step < 50; step += 1) {
+			stream.commit([event(Math.floor(step / NAMES.length), step % NAMES.length)]);
+		}
+		const view = driveHook(stream, { outcome: null, query: "" }, 10);
+
+		expect(view.result.current.total).toBe(50);
+		expect(view.result.current.rows).toEqual(stream.steps.slice(0, 10));
+		expect(view.result.current.hasMore).toBe(true);
 	});
 
 	it("starts over when the list it was reading is replaced", () => {
@@ -227,7 +337,7 @@ describe("useFilteredSteps against a from-scratch filter", () => {
 		view.rerender({ steps: second.steps, epoch: second.epoch, filter });
 
 		expect(view.result.current.total).toBe(1);
-		expect(view.result.current.take(ALL)).toEqual([...filterSteps(second.steps, filter)]);
+		expect(view.result.current.rows).toEqual([...filterSteps(second.steps, filter)]);
 	});
 });
 
@@ -260,7 +370,7 @@ describe("what a commit costs a filtered list", () => {
 			stream.commit([event(Math.floor(step / NAMES.length), step % NAMES.length)]);
 		}
 
-		const view = driveHook(stream, filter);
+		const view = driveHook(stream, filter, 200);
 		const before = view.result.current.total;
 
 		const batch = 20;
@@ -284,20 +394,70 @@ describe("what a commit costs a filtered list", () => {
 		expect(flush.rowsTested).toBeLessThanOrEqual(batch + 5);
 		expect(scratch.rowsTested).toBeGreaterThan(stream.steps.length);
 		expect(view.result.current.total).toBe(before + batch);
-		expect(view.result.current.take(ALL)).toEqual([...filterSteps(stream.steps, filter)]);
+		expect(view.result.current.rows).toEqual(
+			[...filterSteps(stream.steps, filter)].slice(0, 200)
+		);
 	});
 
-	it("copies the window it was asked for, not the whole match", () => {
+	it("builds the window it shows, not everything that has matched", () => {
 		const stream = new Stream();
+		const filter: StepListFilter = { outcome: "failed", query: "" };
 		for (let step = 0; step < 1_200; step += 1) {
 			stream.commit([event(Math.floor(step / NAMES.length), step % NAMES.length, "failed")]);
 		}
-		const view = driveHook(stream, { outcome: "failed", query: "" });
+		const view = driveHook(stream, filter, 200);
 
 		expect(view.result.current.total).toBe(1_200);
-		expect(view.result.current.take(200)).toHaveLength(200);
-		// A fresh array each time, so nothing downstream holds a list that
-		// changes under it.
-		expect(view.result.current.take(200)).not.toBe(view.result.current.take(200));
+		expect(view.result.current.rows).toHaveLength(200);
+
+		/*
+		 * The array work, measured rather than assumed. Every one of these
+		 * commits matches, so the pre-#1297 hook rebuilt a 200-, then 400-, then
+		 * 1,200-and-rising-element array on each of them; a window-bounded one
+		 * builds nothing, because the first 200 matches were found long ago and
+		 * a live list only appends after them. Identity is the whole assertion:
+		 * a rebuilt array cannot be the same reference, and a reference that
+		 * never changes cannot have been rebuilt.
+		 *
+		 * Revert to the whole-match copy and this fails on the first commit,
+		 * which is the mutation check.
+		 */
+		const held = view.result.current.rows;
+		for (let i = 0; i < 20; i += 1) {
+			stream.commit([event(600 + i, 0, "failed")]);
+			view.rerender({ steps: stream.steps, epoch: stream.epoch, filter });
+			expect(view.result.current.rows).toBe(held);
+		}
+		// The total is still exact, which is what the count pass is for: the
+		// window stopped growing, the number behind it did not.
+		expect(view.result.current.total).toBe(1_220);
+		expect(view.result.current.hasMore).toBe(true);
+
+		// And the rows are still the oracle's prefix, not a stale array that
+		// merely kept its identity.
+		expect(view.result.current.rows).toEqual(
+			[...filterSteps(stream.steps, filter)].slice(0, 200)
+		);
+	});
+
+	it("leaves the window alone when a batch matches nothing", () => {
+		const stream = new Stream();
+		const filter: StepListFilter = { outcome: "failed", query: "" };
+		for (let step = 0; step < 20; step += 1) {
+			stream.commit([event(Math.floor(step / NAMES.length), step % NAMES.length, "failed")]);
+		}
+		// A window wider than the match, so the window pass is still live: this
+		// is the case where an eager rebuild would be invisible to the identity
+		// check above.
+		const view = driveHook(stream, filter, 200);
+		const held = view.result.current.rows;
+		expect(held).toHaveLength(20);
+
+		stream.commit([event(700, 0, "passed"), event(700, 1, "skipped")]);
+		view.rerender({ steps: stream.steps, epoch: stream.epoch, filter });
+
+		expect(view.result.current.rows).toBe(held);
+		expect(view.result.current.total).toBe(20);
+		expect(view.result.current.hasMore).toBe(false);
 	});
 });

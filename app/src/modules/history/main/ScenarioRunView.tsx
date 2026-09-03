@@ -30,9 +30,9 @@
  * card. Two things keep that usable and neither drops a step: the four count
  * chips are buttons that filter by outcome - the reader after a failure wants
  * the failures, and the numbers were already sitting there - and the rows
- * arrive through `useGrowingWindow`, the same growing list the response pane's
- * console output uses, rather than a virtualiser this repo would then have to
- * maintain a scroll map for.
+ * arrive through a growing window, the same one the response pane's console
+ * output uses (`useGrowingWindow`, held here by `useFilteredSteps`), rather
+ * than a virtualiser this repo would then have to maintain a scroll map for.
  *
  * **Two controls, one predicate** (issue #832). The chips narrow by outcome and
  * the search box narrows by step name, and `filterSteps` applies both at once -
@@ -41,12 +41,12 @@
  * name is repeated once per iteration. One predicate also means one empty
  * state, which names whichever combination emptied the list. A live run runs
  * that predicate over the batch that just arrived rather than over the whole
- * run per commit - `useFilteredSteps` keeps what it has matched (issue #1205).
+ * run per commit, and produces only as many rows as the window shows -
+ * `useFilteredSteps` keeps what it has matched (issues #1205, #1297).
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { ListOrdered, Loader2, Search } from "lucide-react";
-import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useRunReportQuery } from "@/queries";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
@@ -247,21 +247,38 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 */
 	const [query, setQuery] = useState("");
 	/*
-	 * Held across commits rather than recomputed per commit (issue #1205). A
-	 * narrowing filter ran its predicate over every row the run had produced on
-	 * every batch that arrived - the search lowercasing each step's name as it
-	 * went - because the store hands the view a new array each time. The rows
-	 * already matched cannot stop matching when more arrive at the end, so
-	 * `useFilteredSteps` keeps them and filters the batch alone; `appendKey` is
-	 * what tells it this is the same list only longer, and the store's epoch is
-	 * the only thing that knows (a replaced row and an appended one look alike
-	 * from here). The stored rows are their own key: they arrive complete and
-	 * change only when the report does.
+	 * Held across commits rather than recomputed per commit (issues #1205,
+	 * #1297). A narrowing filter ran its predicate over every row the run had
+	 * produced on every batch that arrived - the search lowercasing each step's
+	 * name as it went - because the store hands the view a new array each time.
+	 * The rows already matched cannot stop matching when more arrive at the end,
+	 * so `useFilteredSteps` counts the batch alone and produces only as much of
+	 * the window as is on screen; `appendKey` is what tells it this is the same
+	 * list only longer, and the store's epoch is the only thing that knows (a
+	 * replaced row and an appended one look alike from here). The stored rows
+	 * are their own key: they arrive complete and change only when the report
+	 * does.
+	 *
+	 * It owns the growing window too, because the two are one ordering: the
+	 * window is sized against the count, and the count is what says how far the
+	 * window has to be produced. The rows arrive as the list is scrolled and
+	 * nothing is withheld - `hasMore` drives a line saying how many are still to
+	 * come, and reaching the sentinel renders the next slice.
+	 *
+	 * `run.id` and not the epoch is what keys that window (issue #1153). A
+	 * narrowed list is a new list and starts at its own top, which is what the
+	 * chips and the search box change, and the hook adds them to the key itself;
+	 * a live run's list is the *same* list getting longer, and resetting on its
+	 * length threw the reader back to the first 200 rows on every batch of steps
+	 * that arrived. The changeover to stored rows at run end is deliberately not
+	 * part of the key: the rows are the same ones, and snapping the window there
+	 * would undo a scroll at the exact moment the run finished.
 	 */
 	const shownSteps = useFilteredSteps(
 		steps,
 		{ outcome: outcomeFilter, query },
-		usingStored ? storedSteps : liveAppendEpoch
+		usingStored ? storedSteps : liveAppendEpoch,
+		run.id
 	);
 
 	/*
@@ -277,26 +294,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 			? emptyStepListReason({ outcome: outcomeFilter, query }, thinned)
 			: null;
 
-	/*
-	 * The rows arrive as the list is scrolled - see the header note. Nothing is
-	 * withheld: `hasMore` drives a line saying how many are still to come, and
-	 * reaching the sentinel renders the next slice.
-	 *
-	 * Keyed on which list this is, not on how long it is (issue #1153). A
-	 * narrowed list is a new list and starts at its own top, which is what the
-	 * chips and the search box change; a live run's list is the *same* list
-	 * getting longer, and resetting on its length threw the reader back to the
-	 * first 200 rows on every batch of steps that arrived. The changeover to
-	 * stored rows at run end is deliberately not part of the key: the rows are
-	 * the same ones, and snapping the window there would undo a scroll at the
-	 * exact moment the run finished.
-	 */
-	const { visible, sentinelRef, hasMore } = useGrowingWindow(
-		shownSteps.total,
-		undefined,
-		`${run.id}:${outcomeFilter ?? ""}:${query}`
-	);
-	const rendered = shownSteps.take(visible);
+	const { rows: rendered, sentinelRef, hasMore } = shownSteps;
 
 	return (
 		<div className="flex flex-col h-full overflow-hidden">
