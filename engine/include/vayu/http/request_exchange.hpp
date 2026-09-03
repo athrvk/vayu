@@ -33,6 +33,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
@@ -238,6 +239,12 @@ struct ExchangeInputs {
     /// callers that do (the design route and the scenario runner) resolve it
     /// once and hand it down.
     vayu::http::TransportPolicy transport;
+    /// What the engine adds to this exchange's send that the request itself
+    /// does not name (issue #1229). Carried here for the reason @ref transport
+    /// is: `execute_exchange` holds no `Database`, and the two callers that do
+    /// resolve the policy once and hand it down, so a design send and a
+    /// collection run cannot add different sets.
+    vayu::http::DefaultHeaderPolicy default_headers;
     /**
      * @brief Largest response body this exchange's send reads into memory,
      *        0 = unbounded (issue #1157).

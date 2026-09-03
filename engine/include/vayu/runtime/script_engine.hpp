@@ -25,6 +25,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -270,6 +271,17 @@ struct ScriptContext {
      * policy existed.
      */
     vayu::http::TransportPolicy transport;
+
+    /**
+     * @brief What the engine adds to a `pm.sendRequest` the script did not
+     *        write itself (issue #1229).
+     *
+     * The same set the enclosing exchange's own send adds, carried in for the
+     * reason `transport` is: the script engine holds no `Database`, and a
+     * script's auxiliary send is still a send Vayu made. A context built by
+     * hand keeps the built-in default, the `User-Agent` alone.
+     */
+    vayu::http::DefaultHeaderPolicy default_headers;
 
     /**
      * @brief How much of a `pm.sendRequest` response body the engine will read

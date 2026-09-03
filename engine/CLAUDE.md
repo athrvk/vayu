@@ -249,6 +249,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
+| GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding` and an opt-in correlation id, so a client renders them instead of re-deriving them |
 | POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (#987); no restore endpoint, see `docs/engine/architecture.md` |
 | GET | `/trash` | What deleting a collection or request left recoverable (#988): roots only, each with what its cascade took; `POST /trash/:id/restore` puts one back, `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
 | POST | `/import/parse` | Read a raw import document (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4) into the tree `/import/apply` persists (#877); reads only |
@@ -461,6 +462,19 @@ logged as a warning: it means a client skipped composition.
   rather than eliding defaults, because the engine defaults to following and
   verifying: an omitted `false` would follow the 3xx the user asked to see, or
   verify the certificate they opted out for.
+- **What Vayu adds to a request nobody wrote it into is the engine's, and one
+  set** (#1229, `include/vayu/http/default_headers.hpp`): a `User-Agent`, a
+  negotiated `Accept-Encoding`, and an opt-in correlation id namespaced to
+  `X-Vayu-Request-Id` and generated per *transfer*. `DefaultHeaderPolicy` is
+  resolved from config at the top of a request or a run (the load scope reads
+  its own compression key, because compression changes what a run measures) and
+  applied in `build_request_header_list`, so every driver adds the same set. A
+  header the request names always wins, `Request::suppressed_default_headers`
+  refuses one per send, and none of it is stored - the renderer used to write
+  `X-Vayu-Version` and a frozen `X-Request-ID` into the saved request, which a
+  load run then replayed. `Accept-Encoding` is the one recorded without being
+  appended: libcurl writes that line itself from `CURLOPT_ACCEPT_ENCODING`,
+  which is what makes it decode. Add a default there, never in a driver.
 - **Every outbound transfer leaves through one `TransportPolicy`** (#705,
   `include/vayu/http/transport_policy.hpp`), resolved from `proxyMode` /
   `proxyUrl` / `proxyBypass` at the point of use (run-scoped on the load and

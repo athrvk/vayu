@@ -441,6 +441,7 @@ add_library(vayu_core STATIC
     src/http/sse_stream.cpp
     src/http/transport_policy.cpp
     src/http/cookie_jar.cpp
+    src/http/default_headers.cpp
     src/http/form_body.cpp
     src/http/header_text.cpp
     src/http/header_names.cpp

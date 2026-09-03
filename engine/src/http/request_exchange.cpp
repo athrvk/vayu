@@ -530,6 +530,7 @@ bool verbose) {
         // what differs is the answer at it, which the script's own send has to
         // refuse rather than truncate - see ScriptContext::max_response_bytes.
         ctx.transport          = inputs.transport;
+        ctx.default_headers    = inputs.default_headers;
         ctx.max_response_bytes = inputs.max_response_bytes;
         // Both scripts of a step read the same row: they are the same
         // iteration, and a test script asserting against the row its request
@@ -574,11 +575,12 @@ bool verbose) {
         outcome.response.request_headers = outcome.request.headers;
     } else {
         vayu::http::ClientConfig config;
-        config.verbose       = verbose;
-        config.cookie_jar    = &jar;
-        config.cookie_scope  = cookie_scope;
-        config.cookie_writes = std::move (pre_cookie_writes);
-        config.transport     = inputs.transport;
+        config.default_headers = inputs.default_headers;
+        config.verbose         = verbose;
+        config.cookie_jar      = &jar;
+        config.cookie_scope    = cookie_scope;
+        config.cookie_writes   = std::move (pre_cookie_writes);
+        config.transport       = inputs.transport;
         // Design mode's own bound, and the reading of it that keeps the prefix
         // (issue #1157). A body past it stops being read here rather than
         // being buffered whole and then found to be too large downstream - the

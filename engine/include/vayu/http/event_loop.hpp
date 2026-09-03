@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -62,8 +63,9 @@ struct EventLoopConfig {
     /// Maximum connections per host (default: 100)
     size_t max_per_host = vayu::core::constants::event_loop::MAX_PER_HOST;
 
-    /// Default user agent string
-    std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
+    /// What this run adds to a request that names none of it (issue #1229),
+    /// resolved once at run start like the transport policy beside it.
+    DefaultHeaderPolicy default_headers;
 
     /// Enable verbose curl output for debugging
     bool verbose = vayu::core::constants::defaults::VERBOSE;

@@ -728,7 +728,10 @@ and the set the write-back applies back onto the request. A test script sees the
 means the ones the engine derives at send time are there too - the body-implied
 `Content-Type` (`graphql` and `jsonrpc` -> `application/json`, `xml` ->
 `application/xml`, `x-www-form-urlencoded` ->
-`application/x-www-form-urlencoded`) and the default `User-Agent`. So a test
+`application/x-www-form-urlencoded`) and the
+[default headers](api-reference.md#default-request-headers) the send added - the
+`User-Agent`, a negotiated `Accept-Encoding`, and a correlation id where one is
+switched on. So a test
 asserting on the Content-Type a GraphQL request sent reads the header the engine
 supplied, rather than the `undefined` it read before (#483) - with one exception
 the method decides: a `graphql` body on a **GET** travels as query parameters

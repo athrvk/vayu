@@ -1120,6 +1120,11 @@ int default_max_per_host) {
     // per change. Matching per transfer stays cheap because it reads this
     // snapshot, never the database.
     loop_config.transport = vayu::http::resolve_transport_policy (db);
+    // Run-scoped like the transport beside it (issue #1229). The load scope's
+    // own compression setting is read here, because negotiating a compressed
+    // response changes what the run measures.
+    loop_config.default_headers = vayu::http::resolve_default_header_policy (
+    db, vayu::http::DefaultHeaderScope::Load);
     // The same snapshot, kept for the deferred script pass at the other end of
     // the run (issue #1256): a `pm.sendRequest` out of a `tests` script must
     // leave the way the transfers it is asserting on left, and this is the one

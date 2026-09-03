@@ -433,10 +433,11 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     curl_mime* mime = detail::apply_method_and_body (curl, request.request);
 
     struct curl_slist* headers_list = detail::build_request_header_list (
-    request.request, request.user_agent, &response.request_headers);
+    request.request, request.default_headers, &response.request_headers);
     if (headers_list) {
         set_opt<CURLOPT_HTTPHEADER> (curl, headers_list);
     }
+    detail::apply_default_header_options (curl, request.request, request.default_headers);
 
     set_opt<CURLOPT_WRITEFUNCTION> (curl, stream_write_callback);
     set_opt<CURLOPT_WRITEDATA> (curl, &state);

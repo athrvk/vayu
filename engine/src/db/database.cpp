@@ -55,6 +55,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/spec_binding.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
@@ -1164,6 +1165,19 @@ void Database::init () {
         "Startup spec-binding repair failed: " + std::string (e.what ()));
     }
 
+    // The headers a pre-#1229 client saved into the request document itself
+    // (issue #1229). Best-effort, like the passes around it: a repair that
+    // fails must not cost the user their engine.
+    try {
+        if (const int64_t stripped = strip_stored_managed_headers (); stripped > 0) {
+            vayu::utils::log_info ("Removed Vayu's own headers from " +
+            std::to_string (stripped) + " stored request(s); they are added at send time");
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup managed-header cleanup failed: " + std::string (e.what ()));
+    }
+
     // No webhook inbox survives the process that opened it, so any capture row
     // still here belongs to an inbox nothing can list. Best-effort, like the
     // two passes around it.
@@ -2006,6 +2020,25 @@ int64_t Database::stamp_hashless_spec_bindings () {
         ++stamped;
     }
     return stamped;
+}
+
+int64_t Database::strip_stored_managed_headers () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    int64_t stripped = 0;
+    for (auto& request : impl_->storage.get_all<Request> ()) {
+        auto rewritten = vayu::http::strip_legacy_managed_headers (request.headers);
+        if (!rewritten) {
+            continue;
+        }
+        request.headers = std::move (*rewritten);
+        // `updated_at` is left alone, as the spec-binding repair leaves it:
+        // this removes what the app wrote on its own behalf, not an edit
+        // anybody made, and touching the timestamp would sort every request a
+        // user owns to the top of "recently changed" on one upgrade.
+        impl_->storage.replace (request);
+        ++stripped;
+    }
+    return stripped;
 }
 
 // ============================================================================
@@ -3615,6 +3648,53 @@ void Database::seed_default_config () {
     "variable when set, and defers to it when empty. Under From system it "
     "follows whichever of those two that mode resolved to.",
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
+
+    // What the engine adds to a request nobody wrote it into (issue #1229).
+    // Four entries, read together by `resolve_default_header_policy` at the top
+    // of a request or a run, so a change applies to the next send rather than
+    // the next restart - the shape the proxy entries above use, and for the
+    // same reason. What each of them adds is shown in the Headers tab as a row
+    // the request can switch off; none of them is stored in the request.
+    upsert_config (keywords ({ "gzip", "brotli", "deflate", "zstd" }) (
+    ConfigEntry{ "negotiateCompression", "true", "boolean", "Negotiate Compressed Responses",
+    "Asks servers for a compressed response - the Accept-Encoding header a "
+    "browser, Postman and curl --compressed all send - and decodes it before "
+    "you see it. Response sizes and times then describe what production does. "
+    "Off sends no Accept-Encoding at all, so a server that would have "
+    "compressed answers with the identity bytes instead. Applies to a Send, a "
+    "collection run and a script's own request; a load run has its own setting "
+    "below. A request that carries its own Accept-Encoding header is left "
+    "alone, and its response is not decoded.",
+    "network_performance", "true", std::nullopt, std::nullopt, std::nullopt, now }));
+
+    upsert_config (keywords ({ "gzip", "brotli", "zstd", "throughput" }) (
+    ConfigEntry{ "loadNegotiateCompression", "true", "boolean", "Negotiate Compressed Responses (Load Tests)",
+    "The same decision for a load run, kept separate because compression is "
+    "part of what a load test measures: with it on, the bytes counted are what "
+    "the server sent and the sizes reported are what Vayu decoded; with it "
+    "off, both are the identity response. Turn it off to measure a server's "
+    "uncompressed ceiling, on to measure what its clients actually get.",
+    "network_performance", "true", std::nullopt, std::nullopt, std::nullopt, now }));
+
+    upsert_config (keywords ({ "tracing", "x-request-id", "debugging" }) (
+    ConfigEntry{ "correlationIdEnabled", "false", "boolean", "Send a Correlation Id",
+    "Adds a header carrying a fresh identifier to every request, so one send "
+    "or one iteration of a load run can be found in a server's logs. Off by "
+    "default: it is a header your server did not ask for, and a gateway that "
+    "gives the name its own meaning would see one it did not expect. A request "
+    "that carries the header itself is left alone.",
+    "network_performance", "false", std::nullopt, std::nullopt, std::nullopt, now }));
+
+    upsert_config (
+    keywords ({ "tracing", "distributed" }) (ConfigEntry{ "correlationIdHeader",
+    std::string (vayu::http::DEFAULT_CORRELATION_HEADER), "string", "Correlation Id Header",
+    "Which header the correlation id goes out under, when it is switched on. "
+    "The default is namespaced to Vayu so it collides with nothing; set it to "
+    "the name your own infrastructure reads - X-Request-ID and "
+    "X-Correlation-ID are the common ones - if you want Vayu's id to land "
+    "there instead.",
+    "network_performance", std::string (vayu::http::DEFAULT_CORRELATION_HEADER),
+    std::nullopt, std::nullopt, std::nullopt, now }));
 
     // Custom trust anchors (issue #706). `text` rather than `string` because
     // what goes in it is a pasted PEM block: the single-line input every other

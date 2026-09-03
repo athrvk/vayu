@@ -27,6 +27,7 @@
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -337,7 +338,7 @@ bool header_value_reaches_wire (std::string_view value) {
 }
 
 curl_slist* build_request_header_list (const Request& request,
-const std::string& user_agent,
+const DefaultHeaderPolicy& policy,
 Headers* sent) {
     curl_slist* list = nullptr;
     if (sent != nullptr) {
@@ -347,15 +348,24 @@ Headers* sent) {
     // Every header goes out through here, so the wire and the sent record are
     // the same decision made once. A value libcurl would read as a removal is
     // neither appended nor reported.
+    const auto record = [&] (const std::string& key, const std::string& value) {
+        if (sent != nullptr) {
+            (*sent)[key] = value;
+        }
+    };
     const auto append = [&] (const std::string& key, const std::string& value) {
         if (!header_value_reaches_wire (value)) {
             return;
         }
         const std::string line = key + ": " + value;
         list                   = curl_slist_append (list, line.c_str ());
-        if (sent != nullptr) {
-            (*sent)[key] = value;
-        }
+        record (key, value);
+    };
+    // A default the request already names is not added: someone who typed the
+    // header means it, the same rule the body-implied Content-Type follows.
+    const auto adds_default = [&] (std::string_view name) {
+        return !request.headers.contains (std::string (name)) &&
+        !suppresses_default_header (request, name);
     };
 
     for (const auto& [key, value] : request.headers) {
@@ -372,11 +382,37 @@ Headers* sent) {
     // value-less header.
     append ("Content-Type", body_content_type_value (request));
 
-    if (!request.headers.contains ("User-Agent")) {
-        append ("User-Agent", user_agent);
+    if (adds_default ("User-Agent")) {
+        append ("User-Agent", policy.user_agent);
+    }
+
+    if (!policy.correlation_header.empty () && adds_default (policy.correlation_header)) {
+        // Generated here rather than resolved with the policy, so every
+        // transfer of a load run carries its own id instead of replaying the
+        // one that was stored - the defect issue #1229 was filed for.
+        append (policy.correlation_header, vayu::utils::generate_id (""));
+    }
+
+    if (negotiates_compression (request, policy)) {
+        // Recorded, not appended: libcurl writes this line itself from
+        // `CURLOPT_ACCEPT_ENCODING` (see apply_default_header_options), which
+        // is what makes it decode the response. Appending it here as well
+        // would put the header on the wire twice.
+        record ("Accept-Encoding", policy.accept_encoding);
     }
 
     return list;
+}
+
+void apply_default_header_options (CURL* curl,
+const Request& request,
+const DefaultHeaderPolicy& policy) {
+    const char* encodings =
+    negotiates_compression (request, policy) ? policy.accept_encoding.c_str () : nullptr;
+    // Set either way: the load driver's handles are pooled, so leaving the
+    // option alone would carry the previous transfer's negotiation into one
+    // that refused it.
+    set_opt<CURLOPT_ACCEPT_ENCODING> (curl, encodings);
 }
 
 void ingest_header_line (std::string_view line, Headers& headers) {
@@ -832,11 +868,16 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // Set headers. No sent record is kept on this path - a load run's captures
     // record none, and `script_request_header_view` reads the composed map
     // instead - so the map is not built per transfer.
-    data->headers_list = build_request_header_list (request, config.user_agent, nullptr);
+    data->headers_list =
+    build_request_header_list (request, config.default_headers, nullptr);
 
     if (data->headers_list) {
         set_opt<CURLOPT_HTTPHEADER> (curl, data->headers_list);
     }
+
+    // Always set, never skipped: these handles are pooled, so an encoding the
+    // previous transfer negotiated would otherwise carry into this one.
+    apply_default_header_options (curl, request, config.default_headers);
 
     // Per-transfer cookie state, for the scenario load path's virtual users.
     // Enable the engine, flush, then seed - the ordering

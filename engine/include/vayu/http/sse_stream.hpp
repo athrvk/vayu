@@ -51,6 +51,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/live_claim.hpp"
 #include "vayu/http/sse_parser.hpp"
 #include "vayu/http/transport_policy.hpp"
@@ -313,7 +314,9 @@ struct SseStreamRequest {
     /// starts, so a settings change applies to the next stream and one
     /// transfer is never reconfigured underneath itself.
     TransportPolicy transport;
-    std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
+    /// What this stream adds to a request that names none of it (issue #1229),
+    /// resolved by the route alongside `transport` and for the same reason.
+    DefaultHeaderPolicy default_headers;
     /**
      * Called on the worker thread once the stream has terminated, with the
      * request as sent and the response the exchange produced.

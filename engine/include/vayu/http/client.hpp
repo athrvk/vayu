@@ -19,6 +19,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -45,7 +46,11 @@ std::function<bool (uint64_t received, std::optional<uint64_t> declared_total)>;
  * @brief HTTP Client configuration
  */
 struct ClientConfig {
-    std::string user_agent = vayu::core::constants::defaults::DEFAULT_USER_AGENT;
+    /// What this send adds to a request that names none of it (issue #1229).
+    /// Resolved from config by the route; the built-in default is the
+    /// `User-Agent` alone, which is what a `Client` added before the policy
+    /// existed.
+    DefaultHeaderPolicy default_headers;
     bool verbose = vayu::core::constants::defaults::VERBOSE;
 
     /**
