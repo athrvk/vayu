@@ -713,10 +713,13 @@ describe("insertionForNode - a type row", () => {
 describe("insertionForNode - an argument row", () => {
 	/** The Arguments row under a field, reached the way a user opens to it. */
 	function argumentRow(path: string[], argument: string): SchemaTreeNode {
-		let node = schemaBranches(schema).find((b) => b.branch === path[0]);
-		if (!node) throw new Error(`no ${path[0]} branch`);
+		const root = schemaBranches(schema).find((b) => b.branch === path[0]);
+		if (!root) throw new Error(`no ${path[0]} branch`);
+		let node: SchemaTreeNode = root;
 		for (const step of path.slice(1)) {
-			const next = childNodes(schema, node).find((c) => c.name === step);
+			const next: SchemaTreeNode | undefined = childNodes(schema, node).find(
+				(c) => c.name === step
+			);
 			if (!next) throw new Error(`no ${step} under ${node.name}`);
 			node = next;
 		}
@@ -776,6 +779,26 @@ describe("insertionForNode - an argument row", () => {
 		// An enum takes its first value: any of them parses and none is more
 		// correct than another.
 		expect(result.variables).toEqual({ ranking: "RELEVANCE" });
+	});
+
+	it("writes past a comment in the argument list rather than into it", () => {
+		/*
+		 * Mutation check: place the edit in front of the `)` found by searching
+		 * the text, and the `)` inside this comment is found first - the argument
+		 * lands in the comment, added to nothing, and this reddens.
+		 */
+		const doc = `query E($term: String!) {\n  search(term: $term # (see)\n  ) {\n    __typename\n  }\n}\n`;
+		const result = inserted(
+			insertionForNode(
+				schema,
+				argumentRow(["query", "search"], "ranking"),
+				doc,
+				doc.indexOf("__typename")
+			)!
+		);
+
+		expect(result.text).toContain("term: $term, ranking: $ranking");
+		expectValid(result.text);
 	});
 
 	it("writes the field first when the document does not have it", () => {

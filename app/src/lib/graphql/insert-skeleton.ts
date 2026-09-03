@@ -739,7 +739,7 @@ function writeArgument(
 		placeholderFor(getNamedType(argument.type), type.includes("["))
 	);
 
-	const edits: Edit[] = [argumentEdit(text, field, `${argument.name}: $${variable}${CARET}`)];
+	const edits: Edit[] = [argumentEdit(field, `${argument.name}: $${variable}${CARET}`)];
 	const declaration = declareVariables(text, operation, namer.declarations);
 	if (declaration) edits.push(declaration);
 
@@ -758,17 +758,20 @@ function writeArgument(
  * than at the end of the document - which is where `applyEdits` puts it for an
  * edit carrying no marker.
  */
-function argumentEdit(text: string, field: FieldNode, argument: string): Edit {
+function argumentEdit(field: FieldNode, argument: string): Edit {
 	const args = field.arguments ?? [];
 	if (args.length === 0) {
 		const at = field.name.loc!.end;
 		return { start: at, end: at, text: `(${argument})` };
 	}
-	const last = args[args.length - 1];
-	// The document parsed, so the list closes; the last argument's end is the
-	// honest fallback rather than an offset guessed from further away.
-	const close = text.indexOf(")", last.loc!.end);
-	const at = close === -1 ? last.loc!.end : close;
+	/*
+	 * Straight after the last argument, rather than in front of the closing
+	 * paren found by searching for one: a `)` inside a comment in the argument
+	 * list (`search(term: $term # (see)`) is found first, and the argument would
+	 * be written into the comment - added to nothing, silently. This is also the
+	 * tidier edit on a list spread over several lines.
+	 */
+	const at = args[args.length - 1].loc!.end;
 	return { start: at, end: at, text: `, ${argument}` };
 }
 
