@@ -1687,6 +1687,21 @@ set**, or to the **parent** when that row was the last in it: chosen while the
 row is still on screen, since afterwards the DOM cannot say what followed it.
 Focus moves through `focusTreeRow`, so the tree's one tab stop travels with it.
 
+**A tree that runs out of rows still has to name somewhere.** The rules above
+answer for every row but one: a root falls back to the root before it, so it
+takes the *whole tree emptying* - the deleted row was the only one there was -
+for the honest answer to "which row now" to be *none*, which is `<body>` again
+unless the caller says otherwise. So the last resort is the caller's to name,
+and it is a control
+rather than a row: the collection tree hands focus to **Add collection**, the
+one thing left to do on an emptied tree, and the Trash view - flat, with no
+create control of its own - to its **list container**, which stays mounted
+holding the empty state. The variables sidebar names none, and needs none:
+every environment row is a level-2 child of the Environments header, so the
+parent rule above always answers. A last resort is not a row, so it does not
+travel through `focusTreeRow` - moving the roving tab stop onto it would take
+that stop off the tree altogether.
+
 **Which of the two it is, is read from the outcome and never from the confirm
 click.** The dialog closes on a failure as much as on a success, and nothing at
 close time can say which happened - `confirmDelete` returns `void`, and an
@@ -1699,7 +1714,10 @@ has moved focus on in the meantime keeps it; the move only happens out of
 `<body>`, where the removal itself left it. The waiting is
 `useRemovalRefocus` (`app/src/hooks/`), shared with the Trash view's permanent
 delete - a flat list, so its rule is the next row, or the previous one when the
-purged row was last.
+purged row was last. Both trees that can delete a row - the collection tree and
+the variables sidebar, which grew its Delete key in #1217, after the rule was
+written - reach it through the one `useDeleteRefocus`, which each tells only
+which attribute identifies its rows and where its last resort is (#1279).
 
 **Order comes from the DOM; hierarchy comes from `aria-level`.** Order the DOM
 states plainly - `[role="treeitem"]` in document order is exactly the rows a

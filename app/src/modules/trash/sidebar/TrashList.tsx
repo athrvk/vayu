@@ -117,7 +117,10 @@ export default function TrashList() {
 
 		capture({
 			doomed: () => rowFor(purgeTarget.id),
-			successor: () => (successor ? rowFor(successor.id) : null),
+			// Purging the last entry leaves no row to move to, and Trash has no
+			// create control to fall back on the way the trees do - so focus goes
+			// to the list itself, which is still there holding the empty state.
+			successor: () => (successor ? rowFor(successor.id) : listRef.current),
 			focus: (row) => row.focus(),
 		});
 	}, [capture, entries, purgeTarget]);
@@ -145,7 +148,15 @@ export default function TrashList() {
 				)}
 
 				<div className="flex-1 min-h-0 overflow-hidden">
-					<div ref={listRef} className="h-full space-y-2 overflow-y-auto pr-1">
+					{/* tabIndex -1: not a tab stop in front of the rows, but a target
+					    focus can be *put* on - where it goes when the purged row was
+					    the last one there was. */}
+					<div
+						ref={listRef}
+						data-trash-list
+						tabIndex={-1}
+						className="h-full space-y-2 overflow-y-auto pr-1"
+					>
 						{isLoading && <ListSkeleton rows={4} leading />}
 
 						{!isLoading && showError && (

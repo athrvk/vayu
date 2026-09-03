@@ -7,11 +7,10 @@
 
 import { useEffect, type RefObject } from "react";
 import { useRemovalRefocus } from "@/hooks/useRemovalRefocus";
-import { focusTreeRow, rowAfterRemoving } from "./tree-focus";
-import type { DeleteConfirmTarget } from "./useTreeCrud";
+import { TREE_ITEM, focusTreeRow, rowAfterRemoving } from "./tree-focus";
 
 /**
- * Where focus goes after a row is deleted from the tree.
+ * Where focus goes after a row is deleted from a tree.
  *
  * The tree's half of `useRemovalRefocus`, which holds the timing and the rule:
  * this names the rows and how the tree moves focus onto one. Cancel and a
@@ -21,30 +20,49 @@ import type { DeleteConfirmTarget } from "./useTreeCrud";
  *
  * `rowAfterRemoving` runs while the row is still mounted - once it is gone,
  * "the row after the one that was there" is not a question the DOM can answer.
+ *
+ * Shared by both trees that can delete a row, rather than re-wired per tree:
+ * the variables sidebar acquired a keyboard Delete in #1217, after this was
+ * written, and hand-rolling its own would have been the third copy of a timing
+ * rule this repo has already watched drift twice. What differs between them is
+ * which attribute identifies a row and where an emptied tree hands focus, so
+ * those are the parameters.
+ *
+ * @param doomedSelector matches the row the open dialog would remove, `null`
+ *   when no dialog is open. The caller spells it, because only the caller knows
+ *   which attribute carries its ids.
+ * @param lastResort where focus goes when the tree can name no successor at all
+ *   - the row deleted was the only one left. `null` says the tree cannot reach
+ *   that state, which is the answer for a tree whose rows all sit under a
+ *   section header that survives them.
  */
 export function useDeleteRefocus(
 	treeRef: RefObject<HTMLElement | null>,
-	deleteConfirm: DeleteConfirmTarget | null
+	doomedSelector: string | null,
+	lastResort: RefObject<HTMLElement | null> | null
 ) {
 	const { capture, onCloseAutoFocus } = useRemovalRefocus();
 
 	useEffect(() => {
-		if (!deleteConfirm) return;
+		if (!doomedSelector) return;
 		const tree = treeRef.current;
-		const attribute =
-			deleteConfirm.type === "collection" ? "data-collection-id" : "data-request-id";
-		const selector = `[${attribute}="${CSS.escape(deleteConfirm.id)}"]`;
-		const doomed = tree?.querySelector<HTMLElement>(selector) ?? null;
+		const doomed = tree?.querySelector<HTMLElement>(doomedSelector) ?? null;
 		const successor = doomed ? rowAfterRemoving(tree, doomed) : null;
 
 		capture({
 			// Re-queried rather than held: a refetch can replace the element while
 			// the dialog is up, and the id is what identifies the row.
-			doomed: () => tree?.querySelector<HTMLElement>(selector) ?? null,
-			successor: () => (successor?.isConnected ? successor : null),
-			focus: (row) => focusTreeRow(tree, row),
+			doomed: () => tree?.querySelector<HTMLElement>(doomedSelector) ?? null,
+			// A successor that went with the row it followed is no more usable than
+			// no successor at all, so both end on the last resort.
+			successor: () => (successor?.isConnected ? successor : (lastResort?.current ?? null)),
+			// The last resort is not a row, and moving the tree's one tab stop onto
+			// it would take that stop off the tree entirely - so only a row travels
+			// through `focusTreeRow`.
+			focus: (element) =>
+				element.matches(TREE_ITEM) ? focusTreeRow(tree, element) : element.focus(),
 		});
-	}, [capture, deleteConfirm, treeRef]);
+	}, [capture, doomedSelector, lastResort, treeRef]);
 
 	return { onCloseAutoFocus };
 }

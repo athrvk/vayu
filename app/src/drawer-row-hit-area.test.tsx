@@ -115,7 +115,11 @@ vi.mock("@/queries", () => ({
 // stub the two stores it touches to get the same kind of spy the other rows
 // take as a prop. `VariableCategory` is a type-only import and is erased.
 const setSelectedCategory = vi.fn();
-vi.mock("@/stores", () => ({ useTabsStore: () => ({ openTab: vi.fn() }) }));
+vi.mock("@/stores", () => ({
+	useTabsStore: () => ({ openTab: vi.fn() }),
+	// The environment tree reports a failed delete through the Dock's save status.
+	useSaveStore: () => ({ failSave: vi.fn() }),
+}));
 vi.mock("@/modules/variables/variables-store", () => ({
 	useVariablesStore: () => ({ selectedCategory: null, setSelectedCategory }),
 }));
