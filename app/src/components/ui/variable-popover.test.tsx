@@ -171,19 +171,52 @@ describe("where the value came from", () => {
 		expect(within(panel).getByText("Environment")).toBeInTheDocument();
 	});
 
-	it("shows the keys that already worked but were never mentioned", () => {
-		// Real keycaps via the `Kbd` primitive - the footer sits on `bg-popover`,
-		// which is the surface that primitive is built for.
-		const panel = (renderPopover(), open());
-		const caps = panel.querySelectorAll('[data-slot="kbd"]');
-		expect([...caps].map((c) => c.textContent)).toEqual(["↵", "esc"]);
-		expect(within(panel).getByText("save")).toBeInTheDocument();
-		expect(within(panel).getByText("cancel")).toBeInTheDocument();
+	/**
+	 * The defect this rule exists to prevent, at the width the card actually
+	 * has: a source name that shares its row with something unshrinkable is a
+	 * source name the reader cannot finish (issue #1320, and #1195 before it in
+	 * the tooltips). Mutation check: put the name back in a flex row beside the
+	 * keycaps - `<span className="truncate">` and a `shrink-0` sibling - and the
+	 * class assertions below fail.
+	 */
+	const LONG_SOURCE = "Shopify QA - expiring tokens, do not use for demos";
+
+	it("shows a long source name whole, on a line of its own", () => {
+		renderPopover({
+			varInfo: { value: "x", scope: "environment", sourceName: LONG_SOURCE },
+		});
+		const source = within(open()).getByText(LONG_SOURCE);
+		expect(source.className).not.toContain("truncate");
+		// The whole line, not just the name: a truncating ancestor clips it too.
+		const line = source.parentElement as HTMLElement;
+		expect(line.textContent).toBe(`in ${LONG_SOURCE}`);
+		expect(line.className).not.toContain("truncate");
+		expect(line.querySelector(".shrink-0")).toBeNull();
+		// The full name is reachable without measuring the card.
+		expect(line).toHaveAttribute("title", LONG_SOURCE);
 	});
 
-	it("falls back to the old hint for a global, which has no source name", () => {
+	it("names the scope where there is no source name, so the line never goes missing", () => {
+		// A global has nothing to name. The line stays, holding the scope word,
+		// rather than the card changing height between one variable and the next.
 		renderPopover({ varInfo: { value: "x", scope: "global" } });
-		expect(within(open()).getByText(/saves when you click away/)).toBeInTheDocument();
+		// The badge beside the name says "Global" too, so read the source line
+		// itself rather than the first element carrying the word.
+		const line = within(open()).getByText("Global", { selector: "p > span" });
+		expect(line.parentElement?.textContent).toBe("in Global");
+	});
+
+	it("states what saves the edit, instead of keycaps that pointed at it", () => {
+		const panel = (renderPopover(), open());
+		expect(panel.querySelectorAll('[data-slot="kbd"]')).toHaveLength(0);
+		expect(within(panel).getByText(/Saves when you click away\. Esc discards\./)).toBeInTheDocument();
+	});
+
+	it("leaves that sentence out of manual mode, which saves on a button", () => {
+		renderPopover({ saveMode: "manual" });
+		const panel = open();
+		expect(within(panel).queryByText(/Saves when you click away/)).not.toBeInTheDocument();
+		expect(within(panel).getByRole("button", { name: "Save" })).toBeInTheDocument();
 	});
 });
 
