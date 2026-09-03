@@ -47,7 +47,6 @@ function renderWith(method: HttpMethod) {
 				onBodyChange={() => {}}
 				requestId="r1"
 				schemaTarget={TARGET}
-				onEditorMount={() => {}}
 				method={method}
 				variablesDraft={null}
 				onVariablesDraftChange={() => {}}

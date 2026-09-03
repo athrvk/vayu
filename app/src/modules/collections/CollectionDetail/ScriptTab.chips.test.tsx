@@ -108,6 +108,28 @@ beforeEach(() => {
 });
 
 describe.each(["pre", "post"] as const)("%s-request script tab", (kind) => {
+	/*
+	 * The editor was a fixed 320px box inside a tab panel with the window's
+	 * height (#1323) - the same shape the request builder's Body and script
+	 * editors carried, at a third size. jsdom computes no layout, so the fill is
+	 * a class assertion. Mutation check: restore `height="320px"` on the
+	 * `CodeEditor` and the box loses `flex-1`, failing the first expectation.
+	 */
+	it("gives the editor the column's remaining height, with a floor", () => {
+		const { container } = render(<ScriptTab collection={makeCollection(SCRIPT)} kind={kind} />);
+
+		const box = screen.getByTestId("code-editor").parentElement!;
+		expect(box.className).toContain("flex-1");
+		expect(box.className).toContain("min-h-0");
+
+		// The band naming the file keeps its own height above it, so the frame
+		// around both is the column that fills the pane.
+		const frame = box.parentElement!;
+		expect(frame.className).toContain("flex-col");
+		expect(frame.className).toContain("min-h-40");
+		expect(container.firstElementChild!.className).toContain("h-full");
+	});
+
 	it("chips both syntaxes, pm references first and in the syntax each was written in", () => {
 		const { container } = render(<ScriptTab collection={makeCollection(SCRIPT)} kind={kind} />);
 

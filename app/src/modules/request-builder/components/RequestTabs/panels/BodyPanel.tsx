@@ -47,10 +47,17 @@
  * editing gave up half its width - about 250px each on a narrow response split.
  * A resolved body is something you glance at to confirm, not something you read
  * alongside, so the two share one full-width surface.
+ *
+ * **The editor fills the pane rather than a fixed box.** It was 320px of
+ * `useResizable` in component state with a drag handle under it, inside a tab
+ * panel that already has the request pane's full height - so a 1440px window
+ * showed a third of an editor over empty panel, and the drag that fixed it was
+ * forgotten on the next tab switch (Radix unmounts the inactive tab). The box
+ * is a `flex-1` child with a `min-h-40` floor now; the height a user wants
+ * comes from the request/response splitter, which persists.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import type { OnMount } from "@monaco-editor/react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import {
 	Select,
 	SelectContent,
@@ -69,10 +76,8 @@ import type { KeyValueItem } from "@/types";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
 import { toFlatHeaders } from "../../../utils/key-value";
 import { containsVariableToken } from "@/constants/variables";
-import { useResizable } from "@/hooks/useResizable";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
-import { cn } from "@/lib/utils";
 import { BODY_MODES } from "./body/body-modes";
 import { switchContentType, withoutContentType } from "./body/content-type";
 import { switchGraphQLMethod } from "./body/graphql-method";
@@ -87,84 +92,13 @@ import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
  */
 const GraphQLBody = lazy(() => import("./body/GraphQLBody"));
 
-/** One arrow press. A shade over a text line, so it moves visibly. */
-const RESIZE_STEP = 24;
-
 /**
- * The handle that resizes the whole editor.
+ * The floor the editor never shrinks past, as a class rather than a number.
  *
- * It was `role="separator"` with an `onMouseDown` and nothing else: not
- * focusable, no key handling, so the editor's height was mouse-only. A
- * focusable separator is a window splitter, and the keys below are that
- * pattern - arrows to nudge, Page keys for a coarse jump, Home/End for the
- * extremes (which `resizeBy` handles via ±Infinity, since it clamps).
- *
- * It carries a **grip**, and the GraphQL query/variables splitter inside the box
- * is a hairline. The two used to be identical - both `h-1.5 bg-border
- * hover:bg-primary cursor-row-resize` - so a GraphQL body showed two matching
- * grey bars doing different jobs. The grip is the same one the request/response
- * splitter uses, and it says "this whole thing" rather than "this seam".
+ * A short window still shows a usable editor, and what does not fit scrolls in
+ * the tab panel above it. There is no ceiling: the pane is the ceiling.
  */
-function ResizeHandle({
-	onMouseDown,
-	onResize,
-	active,
-	size,
-	min,
-	max,
-}: {
-	onMouseDown: (e: React.MouseEvent) => void;
-	onResize: (delta: number) => void;
-	active: boolean;
-	size: number;
-	min: number;
-	max: number;
-}) {
-	return (
-		// eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- WAI-ARIA window splitter - a focusable `role="separator"` is its sanctioned interactive form, with the arrow/Page/Home/End handling in the onKeyDown just below
-		<div
-			role="separator"
-			aria-orientation="horizontal"
-			aria-label="Resize editor"
-			aria-valuenow={Math.round(size)}
-			aria-valuemin={min}
-			aria-valuemax={max}
-			tabIndex={0}
-			onMouseDown={onMouseDown}
-			onKeyDown={(e) => {
-				const step =
-					e.key === "ArrowUp" || e.key === "PageUp"
-						? -1
-						: e.key === "ArrowDown" || e.key === "PageDown"
-							? 1
-							: 0;
-				if (step !== 0) {
-					// Otherwise the panel scrolls under the handle as it moves.
-					e.preventDefault();
-					const coarse = e.key === "PageUp" || e.key === "PageDown";
-					onResize(step * RESIZE_STEP * (coarse ? 4 : 1));
-					return;
-				}
-				if (e.key === "Home" || e.key === "End") {
-					e.preventDefault();
-					onResize(e.key === "Home" ? -Infinity : Infinity);
-				}
-			}}
-			className={cn(
-				"group flex h-3 cursor-row-resize items-center justify-center",
-				"focus-visible:outline-none"
-			)}
-		>
-			<div
-				className={cn(
-					"h-1 w-7 rounded-full bg-border-strong transition-colors",
-					"group-hover:bg-primary group-focus-visible:bg-primary",
-					active && "bg-primary"
-				)}
-			/>
-		</div>
-	);
-}
+const EDITOR_BOX = "min-h-40 flex-1 overflow-hidden rounded-md border border-input";
 
 export default function BodyPanel() {
 	const {
@@ -196,29 +130,6 @@ export default function BodyPanel() {
 		(text: string) => setVariablesDraft({ requestId: request.id ?? null, text }),
 		[setVariablesDraft, request.id]
 	);
-
-	// Drag-to-resize editor height, shared across body modes that host an editor.
-	const {
-		size: editorHeight,
-		isResizing,
-		startResizing,
-		resizeBy,
-		min: editorMin,
-		max: editorMax,
-	} = useResizable({ defaultSize: 320, min: 160, max: 800, direction: "vertical" });
-
-	// Monaco's automaticLayout doesn't reliably catch the container shrinking via
-	// the drag handle, leaving the editor's viewport stuck at its old height (so
-	// scrolling appears broken). Relayout every mounted editor when the height
-	// changes.
-	const editorsRef = useRef(new Set<Parameters<OnMount>[0]>());
-	const handleEditorMount: OnMount = (editorInstance) => {
-		editorsRef.current.add(editorInstance);
-		editorInstance.onDidDispose(() => editorsRef.current.delete(editorInstance));
-	};
-	useEffect(() => {
-		for (const editorInstance of editorsRef.current) editorInstance.layout();
-	}, [editorHeight]);
 
 	/*
 	 * The Content-Type this mode change added, for the notice.
@@ -351,7 +262,14 @@ export default function BodyPanel() {
 		updateField(request.bodyMode === "form-data" ? "formData" : "urlEncoded", items);
 
 	return (
-		<div className="space-y-3">
+		/*
+		 * A column that fills the tab panel: the picker, the notice and the
+		 * Source/Resolved swap keep their intrinsic height, the editor takes the
+		 * rest. `min-h-0` is what lets it take *less* than its content too - a
+		 * flex child refuses to shrink below its content without it, which is the
+		 * two-scrollbars bug in `docs/design-system.md`.
+		 */
+		<div className="flex min-h-0 flex-1 flex-col gap-3">
 			<div className="flex items-center justify-between gap-3">
 				<div className="flex items-center gap-2 min-w-0">
 					<Select value={request.bodyMode} onValueChange={handleModeChange}>
@@ -419,85 +337,57 @@ export default function BodyPanel() {
 			)}
 
 			{isCodeMode && (
-				<div>
-					<div
-						className="overflow-hidden rounded-md border border-input"
-						style={{ height: editorHeight }}
-					>
-						{showResolved ? (
-							<pre className="h-full overflow-auto whitespace-pre-wrap bg-muted/50 p-3 font-mono text-sm">
-								{resolvedBody || (
-									<span className="italic text-muted-foreground">Empty body</span>
-								)}
-							</pre>
-						) : (
-							<CodeEditor
-								height="100%"
-								language={
-									request.bodyMode === "json" || request.bodyMode === "jsonrpc"
-										? "json"
-										: request.bodyMode === "xml"
-											? "xml"
-											: "plaintext"
-								}
-								ariaLabel="Request body"
-								value={request.body || ""}
-								onChange={(v) => updateField("body", v ?? "")}
-								onMount={handleEditorMount}
-							/>
-						)}
-					</div>
-					<ResizeHandle
-						onMouseDown={startResizing}
-						onResize={resizeBy}
-						active={isResizing}
-						size={editorHeight}
-						min={editorMin}
-						max={editorMax}
-					/>
+				<div className={EDITOR_BOX}>
+					{showResolved ? (
+						<pre className="h-full overflow-auto whitespace-pre-wrap bg-muted/50 p-3 font-mono text-sm">
+							{resolvedBody || (
+								<span className="italic text-muted-foreground">Empty body</span>
+							)}
+						</pre>
+					) : (
+						<CodeEditor
+							height="100%"
+							language={
+								request.bodyMode === "json" || request.bodyMode === "jsonrpc"
+									? "json"
+									: request.bodyMode === "xml"
+										? "xml"
+										: "plaintext"
+							}
+							ariaLabel="Request body"
+							value={request.body || ""}
+							onChange={(v) => updateField("body", v ?? "")}
+						/>
+					)}
 				</div>
 			)}
 
 			{request.bodyMode === "graphql" && (
-				<div>
-					<div
-						className="overflow-hidden rounded-md border border-input"
-						style={{ height: editorHeight }}
+				<div className={EDITOR_BOX}>
+					<Suspense
+						fallback={
+							<div
+								className="h-full w-full p-2"
+								role="status"
+								aria-label="Loading GraphQL editor"
+							>
+								<Skeleton className="h-full w-full rounded-md" />
+							</div>
+						}
 					>
-						<Suspense
-							fallback={
-								<div
-									className="h-full w-full p-2"
-									role="status"
-									aria-label="Loading GraphQL editor"
-								>
-									<Skeleton className="h-full w-full rounded-md" />
-								</div>
-							}
-						>
-							<GraphQLBody
-								body={request.body || ""}
-								method={request.method}
-								onBodyChange={(b) => updateField("body", b)}
-								requestId={request.id ?? null}
-								schemaTarget={gqlSchemaTarget}
-								onEditorMount={handleEditorMount}
-								variablesDraft={ownVariablesDraft(
-									getVariablesDraft(),
-									request.id ?? null
-								)}
-								onVariablesDraftChange={handleVariablesDraftChange}
-							/>
-						</Suspense>
-					</div>
-					<ResizeHandle
-						onMouseDown={startResizing}
-						onResize={resizeBy}
-						active={isResizing}
-						size={editorHeight}
-						min={editorMin}
-						max={editorMax}
-					/>
+						<GraphQLBody
+							body={request.body || ""}
+							method={request.method}
+							onBodyChange={(b) => updateField("body", b)}
+							requestId={request.id ?? null}
+							schemaTarget={gqlSchemaTarget}
+							variablesDraft={ownVariablesDraft(
+								getVariablesDraft(),
+								request.id ?? null
+							)}
+							onVariablesDraftChange={handleVariablesDraftChange}
+						/>
+					</Suspense>
 				</div>
 			)}
 

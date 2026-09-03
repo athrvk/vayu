@@ -64,6 +64,10 @@ function renderPanel(overrides: Partial<RequestState> = {}) {
 		// And remembers the Content-Type row it wrote through these.
 		getAutoContentType: () => null,
 		setAutoContentType: () => {},
+		// The GraphQL pane's Variables text outlives the panel in the provider,
+		// so the graphql mode reads these on its first render.
+		getVariablesDraft: () => null,
+		setVariablesDraft: () => {},
 		resolveString: (s: string) => s.replace(VARIABLE_PATTERN, (_m, n) => `resolved-${n}`),
 		// The form-data / urlencoded modes render the key/value table, which
 		// reaches VariableInput for every cell.
@@ -212,14 +216,52 @@ describe("the resolved preview swaps rather than splits", () => {
 	});
 });
 
-describe("the editor's resize handle", () => {
-	it("is reachable and operable from the keyboard", () => {
-		// It was `role="separator"` with an onMouseDown and nothing else, so the
-		// editor height was mouse-only.
+/*
+ * The editor was a 320px box with a drag handle under it, inside a tab panel
+ * that has the request pane's whole height - so a tall window showed a third of
+ * an editor over empty panel, and the drag that fixed it lived in component
+ * state that Radix threw away on the next tab switch.
+ *
+ * jsdom computes no layout, so the fill is asserted as classes on the box, per
+ * `app/CLAUDE.md`. Mutation check: restore `style={{ height: editorHeight }}`
+ * and the inline-height case fails; drop `flex-1` and the first case fails.
+ */
+describe("the editor fills the pane", () => {
+	const editorBox = () => screen.getByTestId("code-editor").parentElement!;
+
+	it("grows into the panel with a floor, in place of a fixed height", () => {
 		renderPanel({ bodyMode: "json" });
-		const handle = screen.getByRole("separator", { name: "Resize editor" });
-		expect(handle).toHaveAttribute("tabindex", "0");
-		expect(handle).toHaveAttribute("aria-valuenow");
+		expect(editorBox().className).toContain("flex-1");
+		expect(editorBox().className).toContain("min-h-40");
+	});
+
+	it("carries no inline height", () => {
+		renderPanel({ bodyMode: "json" });
+		expect(editorBox().getAttribute("style")).toBeNull();
+	});
+
+	it("is a column that fills its panel, so the box has room to grow into", () => {
+		const { container } = renderPanel({ bodyMode: "json" });
+		const root = container.firstElementChild!;
+		// `min-h-0` is the half that lets it shrink too - see the flex-shrink rule
+		// in docs/design-system.md.
+		for (const cls of ["flex", "flex-col", "flex-1", "min-h-0"]) {
+			expect(root.className, `root is missing ${cls}`).toContain(cls);
+		}
+	});
+
+	it("has no resize handle left to drag", () => {
+		renderPanel({ bodyMode: "json" });
+		expect(screen.queryByRole("separator", { name: "Resize editor" })).toBeNull();
+	});
+
+	// `await`, because the pane is lazy: the box holds the Suspense fallback
+	// until the chunk resolves, and it is the same box either way.
+	it("gives the GraphQL pane the same box", async () => {
+		renderPanel({ bodyMode: "graphql" });
+		const box = (await screen.findByTestId("graphql-body")).closest("div.flex-1")!;
+		expect(box.className).toContain("min-h-40");
+		expect(box.getAttribute("style")).toBeNull();
 	});
 });
 
