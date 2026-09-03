@@ -162,7 +162,7 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   drawerWidth: number                    // One width for every view
   contextBarOpen: boolean                // Is the right context bar visible?
   contextBarWidth: number
-  contextBarCollapsedSections: string[]  // Section ids the user collapsed
+  contextBarCollapsedSections: string[]  // Section ids the user collapsed (`code` by default)
   requestSplitRatio: number              // 0–1; left/request pane fraction
   paletteOpen: boolean                   // Is the ⌘K command palette showing?
 }
@@ -202,11 +202,26 @@ consequences worth keeping: a section added in a later release ships *expanded*
 for existing users, because a blob written before it existed cannot name it; and
 it is an array rather than a `Set` because `persist` serializes with JSON, which
 writes a `Set` as `{}` - a collapse would survive exactly until the next launch.
-No migration was needed for the field: `persist` merges a missing key onto the
-initial state, which is `[]`.
 
-**Persistence:** `vayu.layout` (v3, with real migrations for both bumps - the one
-store in the app doing persistence versioning end to end)
+`code` is the one section allowed to break the ships-expanded rule
+(`CONTEXT_BAR_DEFAULT_COLLAPSED`, `constants/layout.ts`, currently `["code"]`):
+an expanded Code section issues a `POST /compose` on mount, so with the bar open
+the app composed a snippet on every request tab opened, whether or not anyone
+looked at it. That default needs both the initial state *and* the v3 -> v4
+migration to actually reach an existing user, and neither alone is enough:
+`persist` merges a missing *key* onto the initial state, never a missing
+*element* into an array that is already there, so seeding
+`contextBarCollapsedSections: ["code"]` in the initial state only reaches a
+fresh install - a user who has ever collapsed anything already has the key, with
+an array `persist` treats as complete. The migration writes `code` into that
+array directly, and at the same time prunes any id in
+`RETIRED_CONTEXT_BAR_SECTIONS` (`environment`, retired the same release), so a
+persisted collapse list never keeps naming a section that no longer exists. It
+is a default, not a policy: once migrated, a user's own toggle on `code`
+overrides it exactly like any other section.
+
+**Persistence:** `vayu.layout` (v4, with real migrations for all three bumps -
+the one store in the app doing persistence versioning end to end)
 
 #### `session-store.ts` - Active Environment
 
@@ -1425,7 +1440,9 @@ into a pane that can never load on every restart.
   composes differently per environment and one key for both would serve the
   wrong snippet after a switch. `staleTime: Infinity` with an explicit
   recompose: the section is only mounted while expanded, so this is the "compose
-  on expand, not per keystroke" rule
+  on expand, not per keystroke" rule. The section also ships collapsed by
+  default (`CONTEXT_BAR_DEFAULT_COLLAPSED`), so that round trip now happens on
+  first expansion rather than on every request tab opened (#1310)
 
 ### Query Keys & Cache Invalidation
 

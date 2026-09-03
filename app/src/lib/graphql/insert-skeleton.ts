@@ -8,8 +8,15 @@
 /**
  * Turning a row of the schema explorer into an edit of the query document.
  *
- * **The contract is that the document still parses afterwards.** Everything
- * awkward in here follows from it:
+ * **The contract is that the document still parses afterwards *and* can be
+ * run.** A document that parses is not necessarily one the endpoint will
+ * accept: a lone `fragment PostFields on Post { … }` is valid GraphQL and holds
+ * no operation, so pressing Send on it gets nothing back. A click has to leave
+ * behind something the user can run, which is why a type row inserts the query
+ * that reaches it and falls back to a fragment only when the document already
+ * carries an operation for that fragment to live beside.
+ *
+ * Everything awkward in here follows from the parses half of it:
  *
  * - A field is inserted into the selection set the cursor is in *only* when
  *   that set's type is the one that owns the field. No inline-fragment
@@ -40,7 +47,9 @@
 
 import {
 	Kind,
+	doTypesOverlap,
 	getNamedType,
+	isCompositeType,
 	isEnumType,
 	isInterfaceType,
 	isNonNullType,
@@ -49,6 +58,7 @@ import {
 	isUnionType,
 	parse,
 	type FieldNode,
+	type GraphQLCompositeType,
 	type GraphQLField,
 	type GraphQLNamedType,
 	type GraphQLSchema,
@@ -56,7 +66,7 @@ import {
 	type SelectionSetNode,
 } from "graphql";
 import { maskGraphqlTemplates } from "./templates";
-import type { FieldStep, SchemaTreeNode } from "./schema-tree";
+import { rootPathsToType, type FieldStep, type SchemaTreeNode } from "./schema-tree";
 
 /** One indent level. Matches `CodeEditor`'s `tabSize: 2`. */
 const INDENT = "  ";
@@ -290,16 +300,30 @@ function renderSteps(
 
 	const head = `${field.name}${renderArguments(field, namer)}`;
 
+	let body: string | null;
 	if (rest.length > 0) {
-		const inner = renderSteps(schema, rest, namer);
-		if (inner === null) return null;
-		return `${head} {\n${indentBlock(inner)}\n}`;
+		body = renderSteps(schema, rest, namer);
+		if (body === null) return null;
+	} else {
+		/*
+		 * The narrowing decides what to select, not just how to wrap it: the
+		 * step wants `Post`'s scalars, and the field's own type is the `Node`
+		 * they are not on.
+		 */
+		const target = step.narrowTo ? schema.getType(step.narrowTo) : getNamedType(field.type);
+		if (!target) return null;
+		const leaves = leafSelection(target);
+		if (!leaves) return `${head}${CARET}`;
+		body = `${leaves}${CARET}`;
 	}
 
-	const named = getNamedType(field.type);
-	const body = leafSelection(named);
-	if (!body) return `${head}${CARET}`;
-	return `${head} {\n${indentBlock(`${body}${CARET}`)}\n}`;
+	/*
+	 * An inline fragment, and only where the route the user opened named one -
+	 * this is not the "probably compatible" guessing the header refuses, it is
+	 * the narrowing without which the selection would not be legal at all.
+	 */
+	if (step.narrowTo) body = `... on ${step.narrowTo} {\n${indentBlock(body)}\n}`;
+	return `${head} {\n${indentBlock(body)}\n}`;
 }
 
 /** Shift every line of `block` one level in. */
@@ -631,10 +655,56 @@ function appendOperation(
 	};
 }
 
-/** A fragment definition on `typeName`, appended to the document. */
+/**
+ * A fragment definition on `typeName`, **and the spread that uses it**.
+ *
+ * The two are one edit because a fragment nothing spreads is not merely
+ * useless, it is invalid: `Fragment "X" is never used` is a validation rule
+ * every spec-conformant server enforces, and it rejects the *whole* request -
+ * including the operation the user already had and did not touch. Appending a
+ * definition on its own therefore breaks a working document, which is the
+ * opposite of what a click should do.
+ *
+ * So the spread decides where a fragment can go at all: the cursor has to be in
+ * a selection set the fragment applies to. Anywhere else is refused, which is
+ * the same honest end as every other placement this module cannot make.
+ */
+/**
+ * The selection set a fragment on `type` can be spread into, innermost first.
+ *
+ * **Compatibility, not equality.** A fragment on a concrete type belongs
+ * inside a selection of the interface it implements or the union it joins -
+ * `fragment PostFields on Post` spread into a `Query.node: Node` selection is
+ * the case named fragments exist for, and an equality test refuses it while
+ * the user is looking straight at the set it goes in.
+ *
+ * The predicate is `doTypesOverlap`, the one `PossibleFragmentSpreadsRule`
+ * validates with, so this cannot write a spread the server then rejects - the
+ * failure a hand-rolled subtype walk would eventually produce. An exact match
+ * still wins over an overlapping one: it is the set the user is in, not merely
+ * one the spread is legal in.
+ */
+function spreadHost(
+	schema: GraphQLSchema,
+	type: GraphQLCompositeType,
+	chain: EnclosingSet[]
+): EnclosingSet | null {
+	let overlapping: EnclosingSet | null = null;
+	for (let depth = chain.length - 1; depth >= 0; depth--) {
+		const host = chain[depth];
+		if (host.typeName === type.name) return host;
+		const hostType = schema.getType(host.typeName);
+		if (!overlapping && isCompositeType(hostType) && doTypesOverlap(schema, type, hostType)) {
+			overlapping = host;
+		}
+	}
+	return overlapping;
+}
+
 export function insertFragment(
 	schema: GraphQLSchema,
 	text: string,
+	cursor: number,
 	typeName: string
 ): InsertResult {
 	const type = schema.getType(typeName);
@@ -642,6 +712,14 @@ export function insertFragment(
 		return {
 			refused: true,
 			reason: `A fragment needs an object, interface or union type. ${typeName} is neither.`,
+		};
+	}
+
+	const host = spreadHost(schema, type, enclosingSets(schema, text, cursor)?.chain ?? []);
+	if (!host) {
+		return {
+			refused: true,
+			reason: `Nothing here can hold a fragment on ${typeName}. Put the cursor inside a selection that can - a fragment nothing spreads is rejected with the rest of the document.`,
 		};
 	}
 
@@ -660,8 +738,17 @@ export function insertFragment(
 	for (let n = 2; taken.has(name); n++) name = `${typeName}Fields${n}`;
 
 	const body = leafSelection(type) ?? "__typename";
-	const fragment = `fragment ${name} on ${typeName} {\n${indentBlock(`${body}${CARET}`)}\n}`;
-	const applied = applyEdits(withBlankLine(text) + fragment + "\n", []);
+	const definition = `fragment ${name} on ${typeName} {\n${indentBlock(`${body}${CARET}`)}\n}`;
+	/*
+	 * The definition goes after everything, the spread where the cursor is, and
+	 * `applyEdits` commits them last-first so the spread's offsets are still the
+	 * ones it was computed against.
+	 */
+	const gap = text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+	const applied = applyEdits(text, [
+		insertIntoSet(text, host.selectionSet, `...${name}`),
+		{ start: text.length, end: text.length, text: `${gap}${definition}\n` },
+	]);
 	return { ...applied, variables: {}, placement: "fragment", label: `fragment ${name}` };
 }
 
@@ -731,9 +818,9 @@ export function insertionForNode(
 	query: string,
 	cursor: number
 ): InsertResult | null {
-	// A branch is a container. Activating it is the toggle, which the row
-	// already handles; there is nothing to write.
-	if (node.kind === "branch") return null;
+	// A branch and a "Returned by" heading are containers. Activating one is the
+	// toggle, which the row already handles; there is nothing to write.
+	if (node.kind === "branch" || node.kind === "returned-by") return null;
 
 	if (node.kind === "input-field" || node.kind === "enum-value") {
 		return {
@@ -742,7 +829,7 @@ export function insertionForNode(
 		};
 	}
 
-	if (node.kind === "type") return insertFragment(schema, query, node.name);
+	if (node.kind === "type") return insertTypeSelection(schema, query, cursor, node.name);
 
 	if (node.branch === "subscription") {
 		return {
@@ -754,6 +841,59 @@ export function insertionForNode(
 	return insertField(schema, query, cursor, {
 		parentTypeName: node.ownerTypeName ?? "",
 		fieldName: node.name,
-		rootPath: node.rootPath,
+		rootPath: rootedPath(schema, node),
+	});
+}
+
+/**
+ * The route to a row, borrowing one to its owner when the row has none.
+ *
+ * A field found by search under a non-root type carries no path - `Post.title`
+ * says nothing about how a `Post` is reached - and until now that made the
+ * commonest search result un-insertable: clicking it produced a refusal
+ * whenever the cursor was not already inside a `Post`. It is only un-insertable
+ * if nothing is allowed to say how a `Post` is reached, and the schema does say:
+ * `rootPathsToType` reads the root fields that answer with one. Borrowing the
+ * best of those and appending this field is the same path the user would have
+ * built by expanding the tree, arrived at without the expanding.
+ *
+ * Still null when nothing returns the owner type, which is the honest answer and
+ * the case `insertField` refuses out loud.
+ */
+function rootedPath(schema: GraphQLSchema, node: SchemaTreeNode): FieldStep[] | null {
+	if (node.rootPath) return node.rootPath;
+	if (!node.ownerTypeName) return null;
+	const [best] = rootPathsToType(schema, node.ownerTypeName);
+	if (!best) return null;
+	return [...best, { parentTypeName: node.ownerTypeName, fieldName: node.name }];
+}
+
+/**
+ * What activating a *type* row writes.
+ *
+ * A type row used to write a fragment unconditionally, which on an empty
+ * document left `fragment PostFields on Post { … }` and nothing else: a
+ * document that parses, holds no operation, and cannot be sent. A user clicking
+ * a type in a schema browser is asking "give me one of these", and the answer
+ * to that is the query that returns one.
+ *
+ * So: the best route from a root field, when the schema has one. Otherwise a
+ * fragment, which `insertFragment` writes only where its spread can go and
+ * refuses everywhere else. Never a fragment alone.
+ */
+function insertTypeSelection(
+	schema: GraphQLSchema,
+	text: string,
+	cursor: number,
+	typeName: string
+): InsertResult {
+	const [best] = rootPathsToType(schema, typeName);
+	if (!best) return insertFragment(schema, text, cursor, typeName);
+
+	const last = best[best.length - 1];
+	return insertField(schema, text, cursor, {
+		parentTypeName: last.parentTypeName,
+		fieldName: last.fieldName,
+		rootPath: best,
 	});
 }

@@ -62,8 +62,15 @@ when the pane appears.
   arguments and result type; descriptions sit beside them; a deprecated field or
   enum value is struck through, with the reason in its tooltip.
 - **Search** filters across every field and type in the schema at once. Press
-  `/` from anywhere in the tree to jump to the search box.
-- **Insert** a row by clicking it, or by pressing Enter with it focused.
+  `/` from anywhere in the tree to jump to the search box. Results are grouped
+  under the same Query / Mutation / Subscription / Types headings the tree uses,
+  and a field names the type that declares it - `User.handle`, so three types
+  that each declare an `id` are three rows you can tell apart. The control at
+  the left of a result **shows that row in the tree**: it opens the path, clears
+  the search and lands on the row.
+- **Insert** a row by clicking it, or by pressing Enter with it focused. Every
+  activation answers: it inserts, it selects the line you already have, or it
+  says in the pane why it could not.
 
 The tree is a full keyboard surface: arrows move, Right opens a row, Left closes
 it or steps out, Home and End jump to the ends, and typing letters jumps to the
@@ -71,8 +78,8 @@ row that starts with them.
 
 ### What insertion writes
 
-Inserting always leaves a document that parses. Where a field lands depends on
-where your cursor is:
+Inserting always leaves a document that parses **and can be sent**. Where a
+field lands depends on where your cursor is:
 
 - **Inside a selection set that can hold the field** - it is added there, as a
   sibling of what is already selected.
@@ -88,7 +95,25 @@ same edit. Object-typed fields arrive with their scalar fields selected and the
 cursor inside the braces; deprecated fields are browsable but are never selected
 for you.
 
-Selecting a **type** inserts a fragment definition on it instead.
+Selecting a **type** inserts the operation that returns it - `Post` writes the
+`createPost` mutation that answers with one, following the shortest route the
+schema offers and never a deprecated one. A route through a field that returns
+an interface or a union counts: `Query.node: Node` reaches a `Post`, and Vayu
+writes the `... on Post` the selection needs to be legal.
+
+Where nothing in Query or Mutation returns the type at all - one reachable only
+through its parent - Vayu writes a fragment on it **and the spread that uses
+it**, into a selection on screen that can hold it, including an interface or
+union selection the type belongs to. It needs that: a fragment nothing spreads
+is rejected along with the rest of the document, so with nowhere to put the
+spread Vayu says so rather than handing you a request the server will refuse.
+Under a type row, **Returned by** lists the root fields that answer with it, so
+you can pick a different route than the one a click takes. A route that gets
+there through an interface or union says so - `node(id: ID!): Node → Post`.
+
+A field found by **search** under a type you have not opened - `User.handle`,
+say - is inserted through that same route, so it no longer needs your cursor to
+already be inside a `User`.
 
 **Subscriptions are shown and cannot be inserted.** Vayu sends one HTTP request
 and reads one response, so a subscription has no transport here. Hiding the
@@ -137,6 +162,14 @@ request defines. Refreshing is not part of it - there is one Refresh, in the
 Query pane's header, on screen whether the explorer is open or closed. Browsing
 belongs beside the cursor that inserts, which is why the tree lives in the
 editor pane and not here.
+
+The section is hidden outright off a non-GraphQL body (`useGraphQLRelevance`),
+rather than rendering to say the request does not send one - a header every REST
+request used to carry and the reader scanned past on the way to the two sections
+that meant something (#1310). That verdict answers from the same
+`useRequestQuery` data the section itself reads, so a REST tab never even
+requests the section's own lazy ~320KB chunk (#1146): it used to arrive the
+moment the expanded section mounted just to say the request was not GraphQL.
 
 The outline reads the saved request, so it follows the editor as autosave
 catches up rather than keystroke by keystroke.

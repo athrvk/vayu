@@ -183,17 +183,28 @@ The app uses a dual-state management approach:
 
 The right-hand context bar renders a list rather than a component tree it owns:
 `components/layout/context-bar/registry.ts` holds one ordered array of
-`{ id, title, appliesTo(tab), Component }`, and both the bar (what to draw) and
-the Dock's toggle (whether the button has anything to light up for) read it
-through the same `sectionsForTab` / `contextBarHasContent` pair. Keeping those
-two answers in one place is the point: they were a hardcoded tab type in one file
-and a `return null` in another, and they drifted.
+`{ id, title, appliesTo(tab), useRelevance?(tab), Component }`, and both the bar
+(what to draw) and the Dock's toggle (whether the button has anything to light up
+for) read `appliesTo` through the same `sectionsForTab` / `contextBarHasContent`
+pair. Keeping those two answers in one place is the point: they were a hardcoded
+tab type in one file and a `return null` in another, and they drifted.
+`appliesTo` stays a pure, synchronous function of the tab alone: the Dock's
+toggle calls it on every render, including while the bar is closed, so it can
+never read a query.
+
+`useRelevance` is a second, orthogonal function a section can opt into, asked
+only by the bar and only while it is open: whether the section has anything to
+say about *this* request, once its own data is in, rather than just this tab
+type. See `docs/app/COMPONENTS.md` for the three verdicts it can return and why
+the question was split off `appliesTo` rather than widening it (#1310).
 
 A section is a leaf component over the ordinary query layer - no bar-wide shared
 state - and is **mounted only while its section is expanded**, so a collapsed
-section registers no queries. That is what makes it safe for the bar to stay open
-on every tab the registry has entries for - request, collection and run. See
-`docs/app/COMPONENTS.md` for the sections themselves.
+section registers no queries; its `useRelevance` hook is the one thing that still
+runs collapsed, and only for a query its section already makes. That is what
+makes it safe for the bar to stay open on every tab the registry has entries
+for - request, collection and run. See `docs/app/COMPONENTS.md` for the
+sections themselves.
 
 #### Services Layer
 

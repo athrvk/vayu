@@ -21,32 +21,23 @@
  */
 
 import { Cookie as CookieIcon } from "lucide-react";
-import { useCookiesQuery, useClearCookiesMutation } from "@/queries/cookies";
-import { useRequestQuery } from "@/queries";
-import { useVariableResolver } from "@/hooks/useVariableResolver";
-import { useSessionStore } from "@/stores";
+import { useClearCookiesMutation } from "@/queries/cookies";
 import { Button } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
-import { cookieMatchesHost, hostOf } from "./cookie-host";
+import { useHostCookies } from "./relevance";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
 
 export function CookiesSection({ tab }: ContextBarSectionProps) {
-	const { data: request } = useRequestQuery(tab.entityId);
-	const { resolveString } = useVariableResolver({
-		collectionId: request?.collectionId || undefined,
-	});
-	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
-	const { data, isLoading } = useCookiesQuery();
+	const { isLoading, host, matches, activeEnvironmentId } = useHostCookies(tab);
 	const clearCookies = useClearCookiesMutation();
 
 	if (isLoading) return <SectionLoading />;
-
-	const host = request ? hostOf(resolveString(request.url)) : null;
+	// `useCookiesRelevance` takes both of this section's empty answers before the
+	// bar mounts it - no host is `hidden`, an empty jar is a dimmed header - so
+	// these bodies are what a caller that mounts the section directly sees, and
+	// the honest answer in the render where the last cookie goes away.
 	if (!host) return <SectionEmpty>This request has no host yet</SectionEmpty>;
-
-	const scope = data?.scopes.find((s) => (s.environmentId ?? null) === activeEnvironmentId);
-	const matches = (scope?.cookies ?? []).filter((c) => cookieMatchesHost(c, host));
 
 	return (
 		<div className="space-y-2">

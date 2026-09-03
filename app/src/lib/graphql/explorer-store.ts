@@ -63,6 +63,16 @@ interface ExplorerState {
 	view: (key: string) => ExplorerViewState;
 	setSearch: (key: string, search: string) => void;
 	toggleExpanded: (key: string, id: string) => void;
+	/**
+	 * Open every row on a path and clear the search, so a result found by name
+	 * can be shown where it lives.
+	 *
+	 * A union rather than a toggle, and one write rather than one per ancestor:
+	 * revealing a row already half-open must not close the half that was open,
+	 * and a per-ancestor loop would render the tree once per level on its way
+	 * down.
+	 */
+	revealPath: (key: string, ids: string[]) => void;
 	setScrollTop: (key: string, scrollTop: number) => void;
 	toggleDescriptions: (key: string) => void;
 }
@@ -100,6 +110,14 @@ export const useExplorerStore = create<ExplorerState>((set, get) => ({
 				? current.expanded.filter((e) => e !== id)
 				: [...current.expanded, id];
 			return withView(s, key, { ...current, expanded });
+		}),
+
+	revealPath: (key, ids) =>
+		set((s) => {
+			const current = s.view(key);
+			const expanded = [...current.expanded];
+			for (const id of ids) if (!expanded.includes(id)) expanded.push(id);
+			return withView(s, key, { ...current, expanded, search: "" });
 		}),
 
 	setScrollTop: (key, scrollTop) => set((s) => withView(s, key, { ...s.view(key), scrollTop })),

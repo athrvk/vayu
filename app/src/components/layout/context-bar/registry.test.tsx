@@ -18,11 +18,18 @@
  * collection tabs lights the toggle there with no second edit. This file pins
  * that derivation: change the predicate back to a literal tab type and the last
  * case here reddens.
+ *
+ * This file renders nothing, deliberately - it is about the registry's shape.
+ * What the bar *does* with a `useRelevance` verdict (hidden draws nothing, empty
+ * draws a header with no trigger) is `../ContextBar.relevance.test.tsx`, and what
+ * the real registry costs on a real request tab is
+ * `../ContextBar.compose-cost.test.tsx`.
  */
 
 import { describe, it, expect } from "vitest";
 import { CONTEXT_BAR_SECTIONS, sectionsForTab } from "./registry";
 import { contextBarHasContent } from "../context-bar-content";
+import { RETIRED_CONTEXT_BAR_SECTIONS } from "@/constants/layout";
 import type { Tab, TabType } from "@/stores";
 
 const ENTITY_TYPES: TabType[] = ["request", "collection", "run"];
@@ -58,10 +65,20 @@ describe("the context-bar section registry", () => {
 			"auth",
 			"cookies",
 			"code",
-			"environment",
 			"graphql",
 			"recent-sends",
 		]);
+	});
+
+	it("has no environment section, which the title bar already is", () => {
+		// It showed the active environment's name and a Manage button, next to a
+		// title-bar selector that shows the same name and switches it, one click
+		// away on the same screen - the "duplicate, not a summary" case the
+		// last-result guard below is also about. `RETIRED_CONTEXT_BAR_SECTIONS`
+		// prunes the id from a persisted collapse list; this stops the section
+		// coming back without that decision being made again.
+		expect(CONTEXT_BAR_SECTIONS.map((s) => s.id)).not.toContain("environment");
+		expect(RETIRED_CONTEXT_BAR_SECTIONS).toContain("environment");
 	});
 
 	it("ships the collection sections for a collection tab, in reading order", () => {
@@ -146,6 +163,39 @@ describe("contextBarHasContent reads the registry", () => {
 			expect(contextBarHasContent(tab(type))).toBe(false);
 		}
 		expect(contextBarHasContent(undefined)).toBe(false);
+	});
+
+	/*
+	 * The one thing that keeps this predicate honest now that a section can take
+	 * itself off the screen.
+	 *
+	 * `contextBarHasContent` is deliberately still structural - it is called by
+	 * the Dock on every render, including with the bar shut, and relevance costs
+	 * queries a shut bar must not make. That is only sound while "the registry
+	 * has sections for this tab" implies "the bar will draw something", so every
+	 * tab type keeps at least one section that cannot hide: one with no
+	 * `useRelevance` at all, which is `"content"` by definition.
+	 *
+	 * Give every request-tab section a relevance hook and this reddens, which is
+	 * the moment the Dock's toggle would start lighting up over an empty bar.
+	 */
+	it("keeps a section that cannot hide on every tab type it lights up for", () => {
+		for (const type of ENTITY_TYPES) {
+			const sections = sectionsForTab(tab(type));
+			expect(sections.length).toBeGreaterThan(0);
+			expect(sections.some((s) => s.useRelevance === undefined)).toBe(true);
+		}
+	});
+
+	it("gives every relevance hook a section that declares it", () => {
+		for (const section of CONTEXT_BAR_SECTIONS) {
+			if (section.useRelevance === undefined) continue;
+			expect(typeof section.useRelevance).toBe("function");
+			// A relevance hook off a request tab would run against a tab carrying
+			// no request: every one written so far reads `tab.entityId` as a
+			// request id.
+			expect(section.appliesTo(tab("request"))).toBe(true);
+		}
 	});
 
 	it("agrees with the registry rather than restating it", () => {

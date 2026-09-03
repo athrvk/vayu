@@ -60,6 +60,9 @@ export function RecentSendsSection({ tab }: ContextBarSectionProps) {
 	if (isLoading && !data) return <SectionLoading />;
 
 	const runs = data?.data ?? [];
+	// `useRecentSendsRelevance` reduces this section to a dimmed header before the
+	// bar mounts it, so this body is what a caller that mounts the section
+	// directly sees, and the honest answer in the render where the last run goes.
 	if (runs.length === 0) {
 		return <SectionEmpty>This request has not been sent yet</SectionEmpty>;
 	}
