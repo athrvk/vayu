@@ -137,6 +137,133 @@ describe("the tree", () => {
 	});
 });
 
+/**
+ * A row's arguments: off the line, counted on it, whole on the hover, and
+ * clickable one level down.
+ *
+ * The pane is 34% of the body by default, and an argument list drawn inline
+ * took the width the result type needed - so the row said what it asked for and
+ * never what it answered with.
+ */
+describe("a field's arguments", () => {
+	/** The Query branch open, which is where every row below hangs. */
+	function openQuery() {
+		renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+	}
+
+	it("keeps the result type on the row and the argument list off it", () => {
+		openQuery();
+		const row = rowNamed("search")!;
+
+		expect(row.textContent).toContain(": [SearchResult!]!");
+		expect(row.textContent).not.toContain("term: String!");
+		// The description takes what is left rather than competing for it, so a
+		// documented field is not a field whose type is cut off. jsdom lays
+		// nothing out, so the rule is read off the class that carries it.
+		expect(descriptionOf(row)!.className).toContain("flex-1");
+	});
+
+	it("counts the arguments where the list used to be", () => {
+		renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+		expect(rowNamed("search")!.querySelector("[data-tree-args]")!.textContent).toBe("(2 args)");
+
+		fireEvent.click(rowNamed("Mutation")!.querySelector("[data-tree-toggle]")!);
+		// One argument is one arg. A count that reads "(1 args)" is the kind of
+		// thing a reader stops on.
+		expect(rowNamed("deletePost")!.querySelector("[data-tree-args]")!.textContent).toBe(
+			"(1 arg)"
+		);
+	});
+
+	it("leaves a field with no arguments drawing its whole signature", () => {
+		openQuery();
+		fireEvent.click(rowNamed("search")!.querySelector("[data-tree-toggle]")!);
+		fireEvent.click(rowNamed("User")!.querySelector("[data-tree-toggle]")!);
+
+		const handle = rowNamed("handle")!;
+		expect(handle.querySelector("[data-tree-args]")).toBeNull();
+		expect(handle.querySelector("[data-tree-signature]")!.textContent).toBe(": String");
+	});
+
+	it("puts the whole signature first on the row's hover", () => {
+		openQuery();
+		const title = rowNamed("search")!.getAttribute("title")!;
+
+		// Mutation check: drop the signature line from the row's title and this
+		// reddens - the row would say what it returns and nowhere say what it
+		// takes, which is the state this issue was filed against.
+		expect(title.split("\n")[0]).toBe(
+			"search(term: String!, ranking: Ranking = RELEVANCE): [SearchResult!]!"
+		);
+		expect(title).toContain("Search across users and posts.");
+	});
+
+	it("lists the arguments under the field, above what it returns", () => {
+		openQuery();
+		fireEvent.click(rowNamed("search")!.querySelector("[data-tree-toggle]")!);
+
+		const labels = rows().map((r) => r.getAttribute("data-tree-label"));
+		expect(labels.slice(labels.indexOf("search"), labels.indexOf("search") + 4)).toEqual([
+			"search",
+			"Arguments",
+			"User",
+			"Post",
+		]);
+	});
+
+	it("draws the Arguments heading as a heading and nothing else", () => {
+		openQuery();
+		fireEvent.click(rowNamed("search")!.querySelector("[data-tree-toggle]")!);
+		const heading = rowNamed("Arguments")!;
+
+		// A container answers with nothing and asks for nothing: carrying the
+		// field's arguments on it drew a second "(2 args)" a line under the
+		// first, and an empty ": " after the word Arguments.
+		expect(heading.textContent).toBe("Arguments");
+		expect(heading.querySelector("[data-tree-args]")).toBeNull();
+		expect(heading.querySelector("[data-tree-signature]")).toBeNull();
+	});
+
+	it("draws an argument the way the schema declares it", () => {
+		openQuery();
+		fireEvent.click(rowNamed("search")!.querySelector("[data-tree-toggle]")!);
+		fireEvent.click(rowNamed("Arguments")!.querySelector("[data-tree-toggle]")!);
+
+		expect(rowNamed("ranking")!.querySelector("[data-tree-signature]")!.textContent).toBe(
+			": Ranking = RELEVANCE"
+		);
+	});
+
+	it("hands an activated argument to the caller, with the field it belongs to", () => {
+		const { onInsert } = renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+		fireEvent.click(rowNamed("search")!.querySelector("[data-tree-toggle]")!);
+		fireEvent.click(rowNamed("Arguments")!.querySelector("[data-tree-toggle]")!);
+		fireEvent.click(rowNamed("term")!.querySelector("[data-tree-activate]")!);
+
+		const node = onInsert.mock.calls[0][0] as SchemaTreeNode;
+		expect(node.name).toBe("term");
+		expect(node.argumentOwner).toEqual({
+			parentTypeName: "Query",
+			fieldName: "search",
+			rootPath: [{ parentTypeName: "Query", fieldName: "search" }],
+		});
+	});
+
+	it("opens the Arguments heading rather than inserting it", () => {
+		const { onInsert } = renderExplorer();
+		fireEvent.click(rowNamed("Query")!.querySelector("[data-tree-toggle]")!);
+		fireEvent.click(rowNamed("search")!.querySelector("[data-tree-toggle]")!);
+		fireEvent.click(rowNamed("Arguments")!.querySelector("[data-tree-activate]")!);
+
+		// A container writes nothing, so its activator does what its chevron does.
+		expect(onInsert).not.toHaveBeenCalled();
+		expect(rows().map((r) => r.getAttribute("data-tree-label"))).toContain("term");
+	});
+});
+
 describe("search", () => {
 	it("replaces the tree with matches from across the schema", () => {
 		renderExplorer();

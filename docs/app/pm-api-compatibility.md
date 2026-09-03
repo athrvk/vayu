@@ -1072,6 +1072,15 @@ registration is global per language, so one call covers every script editor inst
 > values (Function = 1, Field = 3, Variable = 4, Snippet = 28); changing the engine
 > constants requires an engine rebuild for new icons to take effect.
 
+A `kind: 28` (Snippet) entry carries two members no other entry does:
+`context` (`"pre"`, `"test"` or `"both"`) says which script kind the template
+belongs in, and `group` (`"Variables"`, `"Request"`, `"Response"`, `"Tests"`,
+`"Signing"` or `"Logging"`) is the heading it is listed under. These are what
+the script panels' insertable snippets surface is built from, so a template
+added to the engine table is what a script author finds there - reachable
+from the panel it actually runs in, filed under its heading, with nothing
+maintained twice.
+
 ### Type declarations (hover, signature help)
 
 A completion list can only fill a dropdown. Hover documentation over an existing call and

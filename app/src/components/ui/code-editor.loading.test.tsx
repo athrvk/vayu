@@ -27,7 +27,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 
-const fakeMonaco = { languages: {} } as unknown as typeof import("monaco-editor");
+// `editor.defineTheme` is here because the wrapper registers the app's theme
+// on the instance it is handed (#1321); this suite is about the load boundary,
+// so the call only has to land somewhere.
+const fakeMonaco = {
+	languages: {},
+	editor: { defineTheme: () => {} },
+} as unknown as typeof import("monaco-editor");
 
 vi.mock("@monaco-editor/react", () => ({
 	Editor: () => <div data-testid="editor" />,

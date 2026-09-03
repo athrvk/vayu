@@ -436,7 +436,7 @@ fainter still, 1.11 against 1.16, and neither is visible. In light the pair
 inverts, 1.11 and 1.32, so whichever token is chosen one theme gets no edge at
 all. A `bg-muted` block has to be defined by its fill instead, which separates
 from a card at 1.18 light / 1.15 dark - the treatment the console log slabs and
-the script panels' Quick Reference blocks use. `--accent` carries the same value
+the response viewer's boxed metadata use. `--accent` carries the same value
 as `--muted` in both themes and behaves identically.
 
 That fill-not-border guidance is about a *block* separating from its parent. An
@@ -893,6 +893,17 @@ value plus a truncated hint - was rejected, because a clipped source name loses
 the answer to "which environment". A short label beside a short one
 (`TooltipIconButton`'s shortcut hint) has neither ingredient and stays a row.
 → `tooltip-value-layout.test.ts` reads every tooltip block for the shape.
+
+`VariablePopover`'s source line is the same rule, one primitive over (issue
+#1320). It used to share the footer with the Enter and Esc keycaps - a
+`truncate` span beside a `shrink-0` chip group - so "Shopify QA - expiring
+tokens" clipped exactly as an unbroken tooltip value would. The source now
+stacks under the header, full width, with nothing beside it to hand its space
+away: a source name never shares a row with something that will not shrink,
+whether the row is a tooltip's or a popover's. Because `TooltipContent`
+cannot see inside a `Popover`, this one is guarded by a rendered-class check
+in `variable-popover.test.tsx` rather than by `tooltip-value-layout.test.ts`'s
+block scan.
 
 | Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
 |--------|-----------|----------|----------|
@@ -1407,7 +1418,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **16 directives across 12 files**, listed
+file that provides the missing half. **15 directives across 11 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1454,8 +1465,6 @@ not rule names - two of these lines silence two rules at once.
   (1) - `jsx-a11y/interactive-supports-focus`: a radiogroup, where the selected
   `role="radio"` holds the stop and the `onKeyDown` moves selection and focus
   together.
-- `modules/request-builder/components/RequestTabs/panels/BodyPanel.tsx` (1) -
-  `jsx-a11y/no-noninteractive-element-interactions`, the second window splitter.
 - `modules/request-builder/components/RequestTabs/panels/body/graphql-explorer/SchemaExplorer.tsx`
   (2) - `jsx-a11y/interactive-supports-focus` on the tree, and
   `jsx-a11y/role-has-required-aria-props` because this tree has no selection
@@ -2037,68 +2046,87 @@ the only one.
 ## Layout Structure
 
 ```
-Shell
-├── Resizable sidebar container  (280–600px, default 320px - useResizable hook)
-│   └── Sidebar
-│       ├── ActivityBar     w-11 (44px)  bg-panel border-r border-border
-│       └── SidebarPanel    w-60 (240px) bg-panel border-r border-border  (collapsible)
-├── Resize handle            w-1  bg-border hover:bg-primary cursor-col-resize
-└── main (flex-1)            routes render here
+Shell                            flex flex-col h-full bg-background
+├── row (flex-1)
+│   ├── Drawer (aside)       220–480px, default 260px, bg-panel - one of the six
+│   │                        views, plus its PanelResizeHandle on the right edge
+│   └── content column       TabStrip, then main beside the ContextBar
+│                            (220–480px, its handle on the left edge)
+└── Dock                     h-[var(--dock-height)] border-t border-border - the
+                             view switcher, along the bottom of the window
 ```
 
-### Resizable Sidebar
+### The panels that resize, and the one handle that resizes them
 
-Shell uses `useResizable` from `app/src/hooks/useResizable.ts`:
+The drawer and the context bar are the two panels a user drags, and both use
+`PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`): one
+focusable `role="separator"` where each panel used to carry its own mouse-only
+copy. `side` sets the direction, so the drawer's right-edge handle widens on
+ArrowRight and the context bar's left-edge one widens on ArrowLeft; Page keys
+jump, Home and End take the bounds, and Enter or Space resets to the default -
+the keyboard equivalent of the double-click that was already there.
 
-```tsx
-const { size: sidebarWidth, isResizing, startResizing } = useResizable({
-  defaultSize: 320,
-  min: 280,
-  max: 600,
-});
+The width itself is a preference, not component state: `drawerWidth` and
+`contextBarWidth` live in `layout-store`, clamped to `PANEL_MIN_WIDTH` (220) and
+`PANEL_MAX_WIDTH` (480) from `app/src/constants/layout.ts`, and survive a
+restart. The request/response split is `react-resizable-panels` through
+`components/ui/resizable.tsx`, with its ratio in the same store.
 
-// Sidebar container:
-<div style={{ width: `${sidebarWidth}px`, minWidth: "280px", maxWidth: "600px" }} className="flex-shrink-0 ...">
-  <Sidebar />
-</div>
+**An editor inside a pane is not one of them.** The Body and script editors fill
+the pane they sit in - a `flex-1` box with a `min-h-40` floor and no ceiling -
+because a drag there resized a box inside a pane the user had already sized, and
+held that size in component state that Radix threw away on the next tab switch
+(#1323). The pane's own splitter is the one control for how tall an editor is.
 
-// Drag handle:
-<div
-  onMouseDown={startResizing}
-  className={cn("w-1 bg-border hover:bg-primary cursor-col-resize transition-colors shrink-0", isResizing && "bg-primary")}
-/>
-```
+### Dock
 
-**`useResizable` API:**
+The view switcher runs along the bottom of the window, not down its left edge:
+`Dock` (`app/src/components/layout/Dock.tsx`) is one flex row,
+`h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0`. The
+height is that token rather than a bare `h-8` because the toast viewport is
+`fixed` and offsets itself above this strip by the same value - the token is what
+keeps the two from drifting apart.
 
-```ts
-useResizable({ defaultSize, min, max, direction?: "horizontal" | "vertical" })
-// → { size: number, isResizing: boolean, startResizing: (e: React.MouseEvent) => void }
-```
+- **Left - the six view buttons.** A `<nav aria-label="Sidebar views">`, its
+  names, marks and order read from `constants/drawer-views.ts` and its chords
+  from `constants/shortcuts.ts`, so the palette offering the same six cannot name
+  them differently. Deliberately not `role="toolbar"`: that promises arrow-key
+  traversal between the buttons, which this does not implement.
+- **A button is `w-7 h-7 rounded-md text-xs` with a `w-4 h-4` icon** -
+  `bg-accent text-accent-foreground` while its view is the open one, and
+  `text-muted-foreground hover:bg-muted/50 hover:text-foreground` otherwise. It
+  is icon-only, so its `aria-label` is the accessible name and the chord stays
+  out of it: a tooltip supplies `aria-describedby` while open, never a name.
+- **Middle - ambient status.** The engine connection light (a `bg-current` dot
+  plus Starting… / Connected / Disconnected, on `status-success-text` when
+  connected and `--muted-foreground` otherwise), a running-services button and a
+  pending-restart button that render only when there is something to report, the
+  save status, and the version string. **This strip is where the connection
+  state lives** - no sidebar footer carries a second copy.
+- **Right - the context bar toggle**, the same button component again, pressed
+  on what is visible rather than on the stored open flag.
+- **Clicking the open view's button closes the drawer.** The buttons call
+  `activateDrawerView`, which switches the view and toggles `drawerOpen` only
+  when that view is already showing; an ambient chip pointing at a view calls
+  `revealDrawerView`, which opens and never closes.
 
-`startResizing` takes a `React.MouseEvent` (wire directly to `onMouseDown`). Uses delta-based calculation - captures drag origin on mousedown, computes `newSize = startSize + delta` - so it works for panels that don't start at the viewport origin.
+### Drawer
 
-### ActivityBar
+The sidebar is `Drawer` (`app/src/components/layout/Drawer.tsx`): an
+`<aside className="relative flex shrink-0 bg-panel">` whose width is `drawerWidth`
+from `layout-store` and whose right edge carries its own `PanelResizeHandle`. It
+renders nothing while `drawerOpen` is false, and it is labelled by the view
+showing ("Collections sidebar") because one landmark hosts six panels -
+collections, history, variables, services, trash and settings - and
+"Complementary" alone would not say which.
 
-- **Width:** `w-11` (44px), full height, `bg-panel border-r border-border`
-- **Tab buttons:** `w-10 h-10 flex items-center justify-center rounded-md`
-- **Active state:** `bg-primary/10 text-primary` + 2px left accent bar
-  ```tsx
-  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-sm" />
-  ```
-- **Inactive hover:** `hover:bg-accent hover:text-foreground`
-- **Icon size:** `w-4 h-4`
-- **Tabs (top):** Collections (Folder), History (Clock), Variables (Code2)
-- **Tab (bottom, pinned):** Settings (Settings2) - pushed down with `flex-1` spacer
-- **Collapse:** clicking active tab while panel open → `setPanelOpen(false)`
-- **Tooltips:** `side="right"` via `TooltipContent`
-
-### SidebarPanel
-
-- **Width:** `w-60` (240px) internal - the outer resizable container starts at 320px
-- `bg-panel border-r border-border overflow-hidden`
-- **Content:** `ScrollArea` fills available space
-- **Footer:** `ConnectionStatus` pinned to bottom with `border-t border-border`
+**The Drawer wraps no view in a scroll region.** Each view supplies its own
+`DrawerPanel` (`app/src/components/shared/DrawerPanel.tsx`), which owns the
+header - `h-[var(--tabstrip-height)]`, so it lines up with the TabStrip across
+the resize handle - and the single `overflow-y-auto overflow-x-hidden` body
+below it. That frame, not the shell, is what a new view needs: switching views
+changes the content and nothing else. The body is flush, so rows run edge to
+edge and bring their own padding.
 
 ### Pane Toggles
 
@@ -2532,6 +2560,107 @@ Planned / pending implementation. Intended colors for the JSON pretty-printer:
 
 ---
 
+## Monaco Editor Widgets
+
+`CodeEditor` used to hand Monaco its own built-in theme names (`vs` /
+`vs-dark`), so every widget Monaco draws around the text - the suggest list,
+the find and replace widget, the hover card, the context menu - painted VS
+Code's palette next to the app's Radix popovers and tokens. `lib/monaco-theme.ts`
+now defines `vayu-light` and `vayu-dark` through `monaco.editor.defineTheme`:
+each inherits the built-in theme's syntax colours and replaces only the
+chrome, so a token change reaches the editor the same way it reaches every
+other surface. `WIDGET_COLORS` in that file is the mapping below; a key it
+does not name keeps whatever the base theme says, which is correct for
+anything the tokens have no opinion about (bracket-pair colours, the diff
+editor).
+
+**The editor canvas itself**, so it reads as the app's surface rather than
+Monaco's own near-black default in dark mode:
+
+| Monaco colour key | Token |
+|---|---|
+| `editor.background`, `editorGutter.background` | `background` |
+| `editor.foreground`, `editorLineNumber.activeForeground`, `editorCursor.foreground` | `foreground` |
+| `editorLineNumber.foreground` | `muted-foreground` |
+
+**Selection and find matches**, painted on Monaco's own canvas rather than as
+DOM the app's CSS could reach:
+
+| Monaco colour key | Token |
+|---|---|
+| `editor.selectionBackground`, `editor.inactiveSelectionBackground`, `editor.selectionHighlightBackground` | `primary` |
+| `editor.findMatchBackground`, `editor.findMatchHighlightBackground` | `primary` |
+
+**The floating surfaces** - the suggest widget, the hover card, the context
+menu, and the generic editor widget - take the same three roles a Radix
+popover uses:
+
+| Monaco colour key | Token |
+|---|---|
+| `focusBorder` | `primary` |
+| `editorWidget.background`, `editorSuggestWidget.background`, `editorHoverWidget.background`, `menu.background` | `popover` |
+| `editorWidget.foreground`, `editorSuggestWidget.foreground`, `editorHoverWidget.foreground`, `menu.foreground` | `popover-foreground` |
+| `editorWidget.border`, `editorSuggestWidget.border`, `editorHoverWidget.border`, `menu.border` | `border` |
+
+**The rows inside them** - the suggest list and the context menu are both
+Monaco lists:
+
+| Monaco colour key | Token |
+|---|---|
+| `editorSuggestWidget.selectedBackground`, `list.hoverBackground`, `list.focusBackground`, `menu.selectionBackground` | `accent` |
+| `editorSuggestWidget.selectedForeground`, `list.hoverForeground`, `list.focusForeground`, `menu.selectionForeground` | `accent-foreground` |
+| `editorSuggestWidget.highlightForeground`, `editorSuggestWidget.focusHighlightForeground`, `list.highlightForeground` | `primary` |
+
+**The find widget's input**, a plain box in VS Code's palette:
+
+| Monaco colour key | Token |
+|---|---|
+| `input.background` | `background` |
+| `input.foreground` | `foreground` |
+| `input.border` | `border` |
+| `inputOption.activeBorder` | `primary` |
+
+**The scrollbar slider** carries the same two alphas as
+`::-webkit-scrollbar-thumb`'s rest and hover states (see
+[Scrollbar](#scrollbar)), plus a third for the pressed state Monaco has and
+the native bar does not:
+
+| Monaco colour key | Token |
+|---|---|
+| `scrollbarSlider.background` | `muted-foreground` |
+| `scrollbarSlider.hoverBackground` | `muted-foreground` |
+| `scrollbarSlider.activeBackground` | `muted-foreground` |
+
+Two constraints follow from how the theme is built. **Only the mode the
+document is currently wearing can be defined** - `getComputedStyle` reports
+the live values, so the light palette is unreadable while `.dark` is on
+`<html>`, and the reverse. And **the theme is registered during Monaco's
+composition, before any editor is created, and redefined from a
+`MutationObserver` on `<html>`'s `class` and `data-color-scheme`, never from a
+React effect** - a child's effects run before its parent's, `<Editor>` is the
+child, and Monaco answers a theme name it does not know by silently falling
+back to `vs` and never revisiting it. Redefining the theme that is currently
+showing is what lets a colour-scheme change reach an open editor without a
+reload.
+
+`IStandaloneThemeData` has no key for font or corner radius, so those two
+still live in `index.css`, scoped under `.monaco-editor` - and, unlike every
+other rule in that file, **outside `@layer` and prefixed with `html`**. Monaco
+ships unlayered CSS that declares both properties on the same two-class
+selectors, and an unlayered declaration beats a layered one at any
+specificity, so the same rule inside `@layer utilities` never applies at all;
+unlayered it merely ties, and Monaco's stylesheet arrives after this one with
+the lazily loaded editor chunk. Any future rule that has to win against a
+widget Monaco styles itself needs both halves. `monaco-theme.test.ts` reads
+them back out of the stylesheet and fails if either is dropped.
+
+Guarded by `lib/monaco-theme.test.ts` (the builder, plus a source scan that no
+file outside the theme module passes `"vs"` / `"vs-dark"`),
+`components/ui/code-editor.theme.test.tsx`, and the sixth concern in
+`lib/monaco-setup.contributions.test.ts`.
+
+---
+
 ## Scrollbar
 
 **Thin scrollbars are a global baseline, not a utility.** Every scroll
@@ -2684,8 +2813,10 @@ opt-out.
 | `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
 | `app/index.html` | Pre-paint appearance script; no font `<link>` (see `fonts.css`) |
 | `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
-| `app/src/components/layout/Shell.tsx` | Root layout - resizable sidebar + drag handle + main |
-| `app/src/components/layout/Sidebar.tsx` | ActivityBar + SidebarPanel |
-| `app/src/hooks/useResizable.ts` | Drag-to-resize hook (delta-based, horizontal/vertical) |
+| `app/src/components/layout/Shell.tsx` | Root layout - the drawer row, the content column (TabStrip, main, ContextBar), the Dock, and the window chords |
+| `app/src/components/layout/Dock.tsx` | The bottom strip - six view buttons, ambient status, context bar toggle |
+| `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
+| `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
+| `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
 | `app/src/utils/helpers.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |

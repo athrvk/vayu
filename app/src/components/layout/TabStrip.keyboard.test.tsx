@@ -58,7 +58,15 @@ const TABS = [
 ];
 
 beforeEach(() => {
-	useTabsStore.setState({ openTabs: [...TABS], activeTabId: "t1" });
+	// The navigation history is reset with the tabs: `focusTab` records into it
+	// (#1245), so a case that arrows along the strip would otherwise leave the
+	// next case's close with somewhere to go back to.
+	useTabsStore.setState({
+		openTabs: [...TABS],
+		activeTabId: "t1",
+		navHistory: [],
+		navIndex: -1,
+	});
 });
 
 describe("TabStrip keyboard navigation", () => {
@@ -208,6 +216,31 @@ describe("TabStrip keyboard navigation", () => {
 
 		expect(useTabsStore.getState().activeTabId).toBe("t2");
 		expect(document.activeElement).toBe(document.getElementById(tabElementId("t2")));
+	});
+
+	/*
+	 * Where a close lands once the user has been somewhere: the place they came
+	 * from, not the tab beside the one they closed (#1245). The two differ here
+	 * on purpose - t2 is t3's left neighbour, and t1 is where the history says
+	 * the user was.
+	 */
+	it("returns to the previous place in the history, and takes focus with it", () => {
+		useTabsStore.setState({
+			openTabs: [...TABS],
+			activeTabId: "t3",
+			navHistory: [
+				{ type: "welcome", entityId: null },
+				{ type: "variables", entityId: null },
+			],
+			navIndex: 1,
+		});
+		renderStrip();
+		screen.getAllByRole("tab")[2].focus();
+
+		press("Delete");
+
+		expect(useTabsStore.getState().activeTabId).toBe("t1");
+		expect(document.activeElement).toBe(document.getElementById(tabElementId("t1")));
 	});
 
 	it("leaves focus on the active tab when the closed one was not active", () => {

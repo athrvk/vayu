@@ -25,7 +25,7 @@
  * list" reds; drop the aria wiring and the semantics block does.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useState } from "react";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { Command, CommandList, CommandGroup, CommandItem, TooltipProvider } from "@/components/ui";
@@ -153,6 +153,23 @@ describe("the suggestion list the arrows steer", () => {
 		expect(input.value).toBe("{{");
 	});
 
+	/*
+	 * Closing is this component's state rather than the list's, so Escape is
+	 * answered even where there is nothing to navigate - and nothing mounted
+	 * inside the list, the scroll probe included, has a say in it. Untested
+	 * until issue #1333 went looking for it.
+	 */
+	it("closes the list on Escape", () => {
+		const { container, input } = renderHarness();
+
+		type(input, "{{");
+		expect(container.querySelectorAll("[cmdk-list]")).toHaveLength(1);
+
+		fireEvent.keyDown(input, { key: "Escape" });
+
+		expect(container.querySelectorAll("[cmdk-list]")).toHaveLength(0);
+	});
+
 	it("navigates the plain suggestion list the same way", () => {
 		const { input } = renderHarness({
 			scoped: false,
@@ -166,6 +183,123 @@ describe("the suggestion list the arrows steer", () => {
 		expect(input.value).toBe("Accept-Encoding");
 	});
 });
+
+/**
+ * The other half of steering a list from outside it (issue #1333).
+ *
+ * `cmdk` schedules its scroll inside `setState("value", …)`, the path its own
+ * `Command.Input` arrow handling takes. A highlight arriving through the
+ * controlled `value` *prop* lands in a layout effect that assigns and emits
+ * instead, so `[data-selected]` moved to the right row and the scroll container
+ * never followed - past the eighth entry the highlight was below the fold of
+ * `CommandList`'s `max-h-[300px]`, and the only way to see what Enter would
+ * insert was the mouse.
+ *
+ * jsdom has no layout and so no scrolling: the observable fact is *which*
+ * element `scrollIntoView` was called on, which is exactly the thing that was
+ * wrong. Drop `CommandScrollIntoView` from either list and every case below
+ * reds; the decoy keeps a document-wide query from passing them.
+ */
+describe("the list scrolls to the highlight the field moves", () => {
+	/** In call order, the elements `scrollIntoView` was invoked on. */
+	const scrolled: Element[] = [];
+
+	beforeEach(() => {
+		scrolled.length = 0;
+		Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+			scrolled.push(this);
+		});
+	});
+
+	it("scrolls every row the arrows reach, past the fold and back", () => {
+		const { container, input } = renderHarness({ decoy: true });
+
+		type(input, "{{");
+		const list = ownList(container);
+		// The stored variables, the iteration identities and the generators: more
+		// rows than the list can show, which is what the report needed.
+		const rows = list.querySelectorAll<HTMLElement>("[cmdk-item]");
+		expect(rows.length).toBeGreaterThan(8);
+
+		for (const key of ["ArrowDown", "ArrowUp"]) {
+			for (let step = 0; step < 10; step++) {
+				scrolled.length = 0;
+				fireEvent.keyDown(input, { key });
+				expect(scrolled).toContain(highlighted(list));
+			}
+		}
+
+		// And never a row of the list that merely happens to be first in the
+		// document - the defect this whole file exists for.
+		expect(scrolled.every((el) => list.contains(el))).toBe(true);
+	});
+
+	it("scrolls a row the pointer highlighted the same way", () => {
+		/*
+		 * cmdk opts its own pointer handler out of scrolling - it passes the flag
+		 * that skips the scheduled scroll - so this is the probe's doing, not
+		 * cmdk's. Reading the highlight from cmdk's store rather than from the
+		 * props coming down is what makes the two one code path, and
+		 * `block: "nearest"` is why it costs nothing: a row under the pointer is
+		 * on screen already and does not move.
+		 */
+		const { container, input } = renderHarness();
+
+		type(input, "{{");
+		const list = ownList(container);
+		const rows = list.querySelectorAll<HTMLElement>("[cmdk-item]");
+		scrolled.length = 0;
+		fireEvent.pointerMove(rows[2]);
+
+		expect(highlighted(list)).toBe(rows[2]);
+		expect(scrolled).toContain(rows[2]);
+	});
+
+	it("scrolls the plain suggestion list too, which is the same defect twice", () => {
+		// Both lists are steered through the controlled `value`, so both need the
+		// probe; mounting it in one only leaves the header list exactly as it was.
+		const { container, input } = renderHarness({
+			scoped: false,
+			suggestions: ["Accept", "Accept-Encoding", "Accept-Language"],
+		});
+
+		fireEvent.focus(input);
+		const list = ownList(container);
+		scrolled.length = 0;
+		fireEvent.keyDown(input, { key: "ArrowDown" });
+
+		expect(highlighted(list)).toHaveTextContent("Accept-Encoding");
+		expect(scrolled).toContain(highlighted(list));
+	});
+
+	it("brings a group's heading in with the first row of that group", () => {
+		const { container, input } = renderHarness();
+
+		type(input, "{{");
+		const list = ownList(container);
+		const groups = list.querySelectorAll<HTMLElement>("[cmdk-group]");
+		// The headings are what tells a generator from a stored variable, so the
+		// first row of a group arriving without its heading says less than it
+		// should. Needs a second group to be a test at all.
+		expect(groups.length).toBeGreaterThan(1);
+
+		const firstOfSecond = groups[1].querySelector<HTMLElement>("[cmdk-item]")!;
+		const heading = groups[1].querySelector<HTMLElement>("[cmdk-group-heading]")!;
+		for (let step = 0; step < rowsBefore(list, firstOfSecond); step++) {
+			scrolled.length = 0;
+			fireEvent.keyDown(input, { key: "ArrowDown" });
+		}
+
+		expect(highlighted(list)).toBe(firstOfSecond);
+		expect(scrolled.indexOf(heading)).toBeGreaterThanOrEqual(0);
+		expect(scrolled.indexOf(heading)).toBeLessThan(scrolled.indexOf(firstOfSecond));
+	});
+});
+
+/** How many ArrowDowns from the top of the list it takes to reach `row`. */
+function rowsBefore(list: HTMLElement, row: HTMLElement): number {
+	return Array.from(list.querySelectorAll<HTMLElement>("[cmdk-item]")).indexOf(row);
+}
 
 describe("the field's combobox semantics", () => {
 	it("names the open list and the row the arrows are on", () => {

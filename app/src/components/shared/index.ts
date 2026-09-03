@@ -76,3 +76,6 @@ export * from "./ListSkeleton";
 
 // Loading placeholder for a detail pane
 export * from "./DetailSkeleton";
+
+// The insertable templates under a script editor, for both script hosts
+export * from "./ScriptSnippets";

@@ -150,7 +150,10 @@ conclusion about a combination the app never renders is not a finding.
   row.** `TooltipContent` is capped at `max-w-xs`, a `break-all` value has a
   min-content width of about one character, and a `shrink-0` hint keeps its
   intrinsic width, so one long source name leaves the value a vertical strip of
-  letter fragments. Write `TooltipValue`, which holds the stacked shape.
+  letter fragments. Write `TooltipValue`, which holds the stacked shape. The
+  variable popover's source line follows the same rule (#1320); the block scan
+  below reads `TooltipContent` blocks only and a popover is not one, so that
+  line is guarded by a rendered-class check in `variable-popover.test.tsx`.
   → `tooltip-value-layout.test.ts` (the same block scan, from
   `tooltip-blocks.testkit.ts`), plus rendered-class guards in `VariableInput/`
 - **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both
@@ -159,9 +162,11 @@ conclusion about a combination the app never renders is not a finding.
   variant pairs `bg-x` with `hover:bg-x/80`, and `cn()` (tailwind-merge)
   replaces `bg-*` but not `hover:bg-*`, so the caller's fill wins at rest and
   the variant's hover wins on hover. → `badge-hover.test.tsx`
-- **`docs/design-system.md` values are checked against `index.css`**
+- **`docs/design-system.md` values are checked against `index.css`**, and the
+  paths its Source Files table names are checked to exist
   → `design-system-doc.test.ts`. Prose is not: if you change a value, read the
-  sentence around it.
+  sentence around it, and if you rename a component the doc describes, the table
+  row fails but the section around it will not.
 - **Accessibility has a section of its own** in `docs/design-system.md`
   ("Accessibility", after Focus & Interaction States): which check holds which
   rule, why a tooltip is not a name, why `outline-none` needs a replacement in

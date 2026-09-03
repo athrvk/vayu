@@ -53,7 +53,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
-import { Kbd } from "./kbd";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
 import { VARIABLE_SCOPE_CONFIG, VARIABLE_SCOPE_DOT } from "@/constants/variables";
 import { cn } from "@/lib/utils";
@@ -496,6 +495,36 @@ export function VariablePopover({
 					{resolved && varInfo ? (
 						<>
 							{/*
+							 * Where the value lives, on a line of its own (issue #1320).
+							 *
+							 * It used to share the footer with the Enter and Esc keycaps:
+							 * a `truncate` span beside a `shrink-0` chip group inside a
+							 * `w-72` card, so "Shopify QA - expiring tokens" rendered as
+							 * "Shopify QA - expiring…" and the popover clipped the one
+							 * fact it was opened to give. That is the shape the tooltips
+							 * already ruled out (issue #1195, `docs/design-system.md`);
+							 * this is the same shape one primitive over, so it takes the
+							 * same answer - the source stacks, full width, nothing
+							 * competing with it horizontally.
+							 *
+							 * Two lines at most, with the whole name on `title` for the
+							 * environment named at essay length. A definition with no
+							 * source name - a global - prints its scope word instead, so
+							 * the line is always here and the card does not change height
+							 * between scopes.
+							 */}
+							<p
+								className="line-clamp-2 text-[11px] leading-snug text-muted-foreground"
+								title={varInfo.sourceName || undefined}
+							>
+								in{" "}
+								<span className="font-medium text-foreground">
+									{varInfo.sourceName ||
+										VARIABLE_SCOPE_CONFIG[varInfo.scope].full}
+								</span>
+							</p>
+
+							{/*
 							 * One field for a secret too.
 							 *
 							 * It used to be two, and they disagreed: a read-only box
@@ -586,42 +615,20 @@ export function VariablePopover({
 							)}
 
 							{/*
-							 * Source and keyboard hints on one line. This replaces
-							 * "Auto-saves when you click away" - a permanent sentence
-							 * for a behaviour that is only surprising once - with the
-							 * two facts that stay useful: where the value lives, and
-							 * the keys that already worked but were never shown.
+							 * What the two keys did, as a sentence rather than as chips.
+							 *
+							 * The chips were `↵ save` and `esc cancel`, pinned right and
+							 * unshrinkable, and they cost the source name its width. They
+							 * also said less than they looked: Enter is not what saves an
+							 * auto-mode edit - clicking away does, and Enter is one way of
+							 * doing that - so the keycaps advertised a commit key beside a
+							 * mode that commits on blur. The sentence states the behaviour
+							 * the chips only pointed at, and leaves the row to itself.
 							 */}
 							{canEdit && saveMode === "auto" && (
-								<div className="flex items-baseline justify-between gap-2 text-[10px] text-muted-foreground">
-									<span className="truncate">
-										{varInfo.sourceName ? (
-											<>
-												from{" "}
-												<span className="font-medium text-foreground">
-													{varInfo.sourceName}
-												</span>
-											</>
-										) : (
-											"saves when you click away"
-										)}
-									</span>
-									{/*
-									 * Real keycaps here, unlike the URL bar's buttons. This footer
-									 * sits on `bg-popover` - a surface - which is what `Kbd`'s
-									 * default tone is built for. The buttons could not use it:
-									 * they paint their own accent, and a `--muted` cap stamped on
-									 * that reads as a grey chip.
-									 */}
-									<span className="flex shrink-0 items-center gap-1">
-										<Kbd size="sm">↵</Kbd>
-										<span>save</span>
-										<Kbd size="sm" className="ml-1">
-											esc
-										</Kbd>
-										<span>cancel</span>
-									</span>
-								</div>
+								<p className="text-[10px] text-muted-foreground">
+									Saves when you click away. Esc discards.
+								</p>
 							)}
 
 							{/* Action Buttons (manual mode only) */}

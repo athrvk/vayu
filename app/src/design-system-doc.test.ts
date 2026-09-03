@@ -15,12 +15,13 @@
  * `24 90% 46%`, named a default that had since changed, and quoted
  * `--muted-foreground` at 44% two points after the CSS moved to 42%.
  *
- * This checks the values only. Prose, ratios and rationale still need a human -
- * a number here being right does not make the sentence around it right.
+ * This checks the values, and the source files the doc's own table sends a
+ * reader to. Prose, ratios and rationale still need a human - a number here
+ * being right does not make the sentence around it right.
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { declaredValues, indexCss as css } from "@/lib/css-tokens.testkit";
 
@@ -98,6 +99,29 @@ describe("design-system.md token values", () => {
 				token(block(scheme, true), "primary"),
 				token(block(scheme, true), "primary-fill"),
 			]);
+		}
+	});
+
+	// The Source Files table is the doc telling a reader where to go and look.
+	// A row for `layout/Sidebar.tsx` sat there describing an "ActivityBar +
+	// SidebarPanel" the tree never held, which is how a doc sends the next
+	// session hunting for a component and then guessing (#1329). A path is
+	// checkable where the prose around it is not, and this cannot go stale
+	// itself: it reads whatever the table currently names.
+	it("names source files that exist on disk", () => {
+		const start = doc.indexOf("\n## Source Files\n");
+		expect(start, "the Source Files heading has moved").toBeGreaterThan(-1);
+
+		const section = doc.slice(start + 1);
+		const next = section.indexOf("\n## ", 1);
+		const table = next === -1 ? section : section.slice(0, next);
+
+		// First column only, backtick-quoted: `| \`app/src/index.css\` | … |`.
+		const paths = [...table.matchAll(/^\| `([^`]+)` \|/gm)].map((m) => m[1]);
+		expect(paths.length, "no source-file rows found - has the table moved?").toBeGreaterThan(5);
+
+		for (const path of paths) {
+			expect(existsSync(fromRepoRoot(path)), path).toBe(true);
 		}
 	});
 });

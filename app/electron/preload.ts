@@ -151,6 +151,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("menu:zoom", handler);
 	},
 
+	// View → Back / Forward, the mouse's back/forward buttons as the OS reports
+	// them, and the macOS swipe. The renderer owns the history these step
+	// through - see nav-history.ts and stores/tabs-store.ts.
+	onNavigateHistory: (callback: (direction: "back" | "forward") => void) => {
+		const handler = (_event: unknown, direction: "back" | "forward") => callback(direction);
+		ipcRenderer.on("menu:navigate", handler);
+		return () => ipcRenderer.removeListener("menu:navigate", handler);
+	},
+
 	// Platform info
 	platform: process.platform,
 

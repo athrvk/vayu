@@ -746,7 +746,7 @@ declare const pm: {
 	/**
 	 * Access the HTTP request data including URL, method, headers, and body.
 	 * 
-	 * In a **pre-request** script these are writable: whatever pm.request holds when the script ends is what is sent, and a script-set header overrides the one the Auth tab applied. In a **test** script it is a read-only record of what was already sent.
+	 * In a **pre-request** script these are writable: whatever pm.request holds when the script ends is what is sent, and a script-set header overrides the one the Auth tab applied. A value the engine cannot send - an empty URL, an unrecognised method - rejects the whole edit rather than part of it: the request goes out exactly as it was before the script ran, and the reason is reported in the Console tab. In a **test** script it is a read-only record of what was already sent - a write to it does nothing, the script's own copy changes but nothing carries it back to the request that was sent.
 	 */
 	request: {
 		/**
@@ -968,6 +968,8 @@ declare const pm: {
 	};
 	/**
 	 * Access the HTTP response data including status code, headers, body, and timing information.
+	 * 
+	 * A **test** script only: the response does not exist yet while a pre-request script runs, so reading through it there throws "No response available" rather than answering undefined.
 	 */
 	response: {
 		/**

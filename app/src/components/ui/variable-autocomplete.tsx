@@ -28,6 +28,7 @@ import {
 	CommandGroup,
 	CommandItem,
 	CommandListboxProbe,
+	CommandScrollIntoView,
 	type CommandListboxState,
 } from "./command";
 import { VariableScopeBadge } from "./variable-scope-badge";
@@ -127,6 +128,7 @@ export function VariableAutocomplete({
 			<Command shouldFilter={false} value={value} onValueChange={onValueChange}>
 				<CommandList>
 					{onListboxState && <CommandListboxProbe onChange={onListboxState} />}
+					<CommandScrollIntoView />
 					<CommandEmpty>No variables found.</CommandEmpty>
 					{groups.map(({ group, heading, items }) => (
 						<CommandGroup key={group} heading={heading}>

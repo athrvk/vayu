@@ -67,17 +67,28 @@ function stubPlatform(platform: string) {
 async function renderFor(platform: string) {
 	stubPlatform(platform);
 	vi.resetModules();
-	const { default: TitleBar } = await import("./TitleBar");
-	renderTitleBar(TitleBar);
+	const [{ default: TitleBar }, { TooltipProvider }] = await Promise.all([
+		import("./TitleBar"),
+		import("@/components/ui"),
+	]);
+	renderTitleBar(TitleBar, TooltipProvider);
 }
 
 /** The environment switcher's mutation runs through react-query, so the title
  *  bar needs a client even when the test is about the icon. */
-function renderTitleBar(TitleBar: () => React.ReactNode) {
+function renderTitleBar(
+	TitleBar: () => React.ReactNode,
+	// From the same fresh graph as the bar: after `resetModules` a statically
+	// imported provider is a different Radix instance, and the tooltips the
+	// navigation buttons carry would find no context.
+	TooltipProvider: typeof import("@/components/ui").TooltipProvider
+) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
 		<QueryClientProvider client={client}>
-			<TitleBar />
+			<TooltipProvider>
+				<TitleBar />
+			</TooltipProvider>
 		</QueryClientProvider>
 	);
 }

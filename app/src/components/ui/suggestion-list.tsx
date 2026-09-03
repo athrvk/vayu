@@ -40,6 +40,7 @@ import {
 	CommandGroup,
 	CommandItem,
 	CommandListboxProbe,
+	CommandScrollIntoView,
 	type CommandListboxState,
 } from "./command";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,7 @@ export function SuggestionList({
 			<Command shouldFilter={false} value={value} onValueChange={onValueChange}>
 				<CommandList>
 					{onListboxState && <CommandListboxProbe onChange={onListboxState} />}
+					<CommandScrollIntoView />
 					<CommandGroup>
 						{items.slice(0, limit).map((item) => (
 							<CommandItem

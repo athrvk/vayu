@@ -30,7 +30,9 @@ import {
 	EditorVariableTokensContext,
 	type EditorVariableTokensValue,
 	type TokenEditRequest,
+	type TokenHoverRequest,
 } from "./context";
+import { TokenHoverCard } from "./TokenHoverCard";
 
 /**
  * The open request, plus the sequence number that makes each open a fresh
@@ -45,6 +47,7 @@ interface ActiveRequest extends TokenEditRequest {
 export function EditorVariableTokensProvider({ children }: { children: React.ReactNode }) {
 	const variables = useVariableSupport();
 	const [active, setActive] = useState<ActiveRequest | null>(null);
+	const [hovered, setHovered] = useState<TokenHoverRequest | null>(null);
 
 	/*
 	 * One snapshot per change, not one per token: `getAllVariables` copies the
@@ -61,6 +64,11 @@ export function EditorVariableTokensProvider({ children }: { children: React.Rea
 	);
 
 	const openTokenEditor = useCallback((request: TokenEditRequest) => {
+		// Opening takes the hover down: the popover says everything the tooltip
+		// does, over the same rectangle, and two cards on one token is one too
+		// many. The editor cancels its own timer; this covers the chord, which
+		// opens with no pointer involved.
+		setHovered(null);
 		setActive((previous) => ({ ...request, key: (previous?.key ?? 0) + 1 }));
 	}, []);
 
@@ -69,6 +77,7 @@ export function EditorVariableTokensProvider({ children }: { children: React.Rea
 			classify,
 			getVariableOrigins: variables.getVariableOrigins,
 			openTokenEditor,
+			setHoveredToken: setHovered,
 		}),
 		[classify, variables.getVariableOrigins, openTokenEditor]
 	);
@@ -89,6 +98,16 @@ export function EditorVariableTokensProvider({ children }: { children: React.Rea
 	return (
 		<EditorVariableTokensContext.Provider value={value}>
 			{children}
+			{hovered && (
+				<TokenHoverCard
+					// A fresh card per token, so Radix positions against the new
+					// rectangle rather than animating the old one across the editor.
+					key={`${hovered.name}:${hovered.rect.left}:${hovered.rect.top}`}
+					request={hovered}
+					kind={classify(hovered.name)}
+					origins={variables.getVariableOrigins(hovered.name)}
+				/>
+			)}
 			{active && scoped && (
 				<div
 					// Fixed, because the rectangle came from `getBoundingClientRect`
