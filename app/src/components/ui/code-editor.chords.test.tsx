@@ -35,10 +35,16 @@ import { chordKeys } from "@/lib/platform";
 const addCommand = vi.fn();
 const getContainerDomNode = vi.fn(() => document.createElement("div"));
 
-/** Monaco's two enums, with the real values for the keys in play. */
+/**
+ * Monaco's two enums, with the real values for the keys in play, plus the one
+ * `editor` member the wrapper reaches for: it registers the app's theme on the
+ * instance it is handed (#1321). `code-editor.theme.test.tsx` is what asserts
+ * on that call; here it only has to exist.
+ */
 const monaco = {
 	KeyMod: { CtrlCmd: 2048, Shift: 1024, Alt: 512 },
 	KeyCode: { Enter: 3, Digit1: 22, KeyA: 31 },
+	editor: { defineTheme: vi.fn() },
 } as unknown as typeof Monaco;
 
 /** Options the wrapper handed Monaco on the last render. */

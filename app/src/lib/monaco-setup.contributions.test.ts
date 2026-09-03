@@ -27,7 +27,7 @@
  * `fonts-woff2-only.test.ts` proves what `dist/` gets rather than reasoning
  * about the CSS that requests it.
  *
- * Five things are guarded here, each catching a different way the
+ * Six things are guarded here, each catching a different way the
  * composition could regress:
  *
  * 1. The two `as unknown as` casts in `monaco-setup.ts` are honest - the
@@ -49,13 +49,17 @@
  *    Monarch grammars, which stay) - are absent from the file.
  * 5. The emitted worker set, from an actual build, is exactly what
  *    `getWorker` in `monaco-setup.ts` constructs: editor, json, ts.
+ * 6. The app's Monaco theme is defined during that composition (#1321).
+ *    Registering it later is the same silent class of failure as 3: Monaco
+ *    falls back to `vs` for a name it does not know and never revisits it.
  */
 
 import { readFileSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { build } from "vite";
+import { MONACO_THEME_NAMES, currentEditorMode } from "./monaco-theme";
 
 const MONACO_SETUP_PATH = path.resolve(__dirname, "monaco-setup.ts");
 const RESPONSE_VIEWER_UTILS_PATH = path.resolve(
@@ -407,5 +411,36 @@ describe("the emitted worker set, from a real build", () => {
 		expect(workerFiles.some((f) => f.startsWith("css.worker"))).toBe(false);
 		expect(workerFiles.some((f) => f.startsWith("html.worker"))).toBe(false);
 		expect(workerStems).toEqual(new Set(["editor", "json", "ts"]));
+	});
+});
+
+describe("the composed entry registers the app's theme", () => {
+	/*
+	 * Monaco answers a theme name it does not know by falling back to `vs` in
+	 * silence, and a later `defineTheme` re-applies only the theme already
+	 * showing - so an editor created before the registration keeps VS Code's
+	 * palette for the rest of the session (#1321). That is why `monaco-setup`
+	 * defines the theme as it composes the instance, rather than a React effect
+	 * doing it, and why deleting that one line has to be a failing test.
+	 *
+	 * There is no public way to ask Monaco which themes it knows (`defineTheme`
+	 * validates a *base* against the built-ins only, so a probe theme cannot ask
+	 * either), so the call itself is what is observed: `monaco-setup` spreads
+	 * `editor.api`'s own `editor` namespace into what it exports, so a spy
+	 * installed on that namespace before the module is evaluated sees the call
+	 * it makes. The module registry is reset first because an earlier case in
+	 * this file has already imported the setup module, and a cached module
+	 * evaluates nothing.
+	 */
+	it("defines it while composing, before any editor exists", { timeout: 40_000 }, async () => {
+		vi.resetModules();
+		const editorApi = await import("monaco-editor/esm/vs/editor/editor.api.js");
+		const defineTheme = vi.spyOn(editorApi.editor, "defineTheme");
+
+		await import("./monaco-setup");
+
+		const names = defineTheme.mock.calls.map(([name]) => name);
+		expect(names).toContain(MONACO_THEME_NAMES[currentEditorMode()]);
+		defineTheme.mockRestore();
 	});
 });

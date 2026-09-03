@@ -2521,6 +2521,107 @@ Planned / pending implementation. Intended colors for the JSON pretty-printer:
 
 ---
 
+## Monaco Editor Widgets
+
+`CodeEditor` used to hand Monaco its own built-in theme names (`vs` /
+`vs-dark`), so every widget Monaco draws around the text - the suggest list,
+the find and replace widget, the hover card, the context menu - painted VS
+Code's palette next to the app's Radix popovers and tokens. `lib/monaco-theme.ts`
+now defines `vayu-light` and `vayu-dark` through `monaco.editor.defineTheme`:
+each inherits the built-in theme's syntax colours and replaces only the
+chrome, so a token change reaches the editor the same way it reaches every
+other surface. `WIDGET_COLORS` in that file is the mapping below; a key it
+does not name keeps whatever the base theme says, which is correct for
+anything the tokens have no opinion about (bracket-pair colours, the diff
+editor).
+
+**The editor canvas itself**, so it reads as the app's surface rather than
+Monaco's own near-black default in dark mode:
+
+| Monaco colour key | Token |
+|---|---|
+| `editor.background`, `editorGutter.background` | `background` |
+| `editor.foreground`, `editorLineNumber.activeForeground`, `editorCursor.foreground` | `foreground` |
+| `editorLineNumber.foreground` | `muted-foreground` |
+
+**Selection and find matches**, painted on Monaco's own canvas rather than as
+DOM the app's CSS could reach:
+
+| Monaco colour key | Token |
+|---|---|
+| `editor.selectionBackground`, `editor.inactiveSelectionBackground`, `editor.selectionHighlightBackground` | `primary` |
+| `editor.findMatchBackground`, `editor.findMatchHighlightBackground` | `primary` |
+
+**The floating surfaces** - the suggest widget, the hover card, the context
+menu, and the generic editor widget - take the same three roles a Radix
+popover uses:
+
+| Monaco colour key | Token |
+|---|---|
+| `focusBorder` | `primary` |
+| `editorWidget.background`, `editorSuggestWidget.background`, `editorHoverWidget.background`, `menu.background` | `popover` |
+| `editorWidget.foreground`, `editorSuggestWidget.foreground`, `editorHoverWidget.foreground`, `menu.foreground` | `popover-foreground` |
+| `editorWidget.border`, `editorSuggestWidget.border`, `editorHoverWidget.border`, `menu.border` | `border` |
+
+**The rows inside them** - the suggest list and the context menu are both
+Monaco lists:
+
+| Monaco colour key | Token |
+|---|---|
+| `editorSuggestWidget.selectedBackground`, `list.hoverBackground`, `list.focusBackground`, `menu.selectionBackground` | `accent` |
+| `editorSuggestWidget.selectedForeground`, `list.hoverForeground`, `list.focusForeground`, `menu.selectionForeground` | `accent-foreground` |
+| `editorSuggestWidget.highlightForeground`, `editorSuggestWidget.focusHighlightForeground`, `list.highlightForeground` | `primary` |
+
+**The find widget's input**, a plain box in VS Code's palette:
+
+| Monaco colour key | Token |
+|---|---|
+| `input.background` | `background` |
+| `input.foreground` | `foreground` |
+| `input.border` | `border` |
+| `inputOption.activeBorder` | `primary` |
+
+**The scrollbar slider** carries the same two alphas as
+`::-webkit-scrollbar-thumb`'s rest and hover states (see
+[Scrollbar](#scrollbar)), plus a third for the pressed state Monaco has and
+the native bar does not:
+
+| Monaco colour key | Token |
+|---|---|
+| `scrollbarSlider.background` | `muted-foreground` |
+| `scrollbarSlider.hoverBackground` | `muted-foreground` |
+| `scrollbarSlider.activeBackground` | `muted-foreground` |
+
+Two constraints follow from how the theme is built. **Only the mode the
+document is currently wearing can be defined** - `getComputedStyle` reports
+the live values, so the light palette is unreadable while `.dark` is on
+`<html>`, and the reverse. And **the theme is registered during Monaco's
+composition, before any editor is created, and redefined from a
+`MutationObserver` on `<html>`'s `class` and `data-color-scheme`, never from a
+React effect** - a child's effects run before its parent's, `<Editor>` is the
+child, and Monaco answers a theme name it does not know by silently falling
+back to `vs` and never revisiting it. Redefining the theme that is currently
+showing is what lets a colour-scheme change reach an open editor without a
+reload.
+
+`IStandaloneThemeData` has no key for font or corner radius, so those two
+still live in `index.css`, scoped under `.monaco-editor` - and, unlike every
+other rule in that file, **outside `@layer` and prefixed with `html`**. Monaco
+ships unlayered CSS that declares both properties on the same two-class
+selectors, and an unlayered declaration beats a layered one at any
+specificity, so the same rule inside `@layer utilities` never applies at all;
+unlayered it merely ties, and Monaco's stylesheet arrives after this one with
+the lazily loaded editor chunk. Any future rule that has to win against a
+widget Monaco styles itself needs both halves. `monaco-theme.test.ts` reads
+them back out of the stylesheet and fails if either is dropped.
+
+Guarded by `lib/monaco-theme.test.ts` (the builder, plus a source scan that no
+file outside the theme module passes `"vs"` / `"vs-dark"`),
+`components/ui/code-editor.theme.test.tsx`, and the sixth concern in
+`lib/monaco-setup.contributions.test.ts`.
+
+---
+
 ## Scrollbar
 
 **Thin scrollbars are a global baseline, not a utility.** Every scroll

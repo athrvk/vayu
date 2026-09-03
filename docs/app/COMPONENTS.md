@@ -306,7 +306,7 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 | `variables-schema.ts` | Derives a JSON Schema from the query's `$variable` definitions + the introspected schema via `getVariablesJSONSchema`, then applies it to the variables editor through `monaco.json.jsonDefaults` so variable values are validated and autocompleted. The query is masked before it is parsed - one `{{token}}` anywhere used to cost the pane the schema for every variable the query declares - and the schema is registered against the pane's masked twin as well as the pane itself. |
 | `variables-diagnostics.ts` | What the Variables pane's JSON markers are computed from: a hidden twin model holding the pane's text with every out-of-string token masked to a same-length JSON string. Monaco's JSON worker validates the twin, and its markers are republished on the visible model minus the ones that land on a token - so a `{{token}}` no longer reads as a syntax error while a genuine mistake beside it, which the aborted parse used to swallow, now does. Filtering the worker's markers on the pane itself cannot do this: one token also earns an `End of file expected.` on the character *after* it. |
 
-`lib/monaco-setup.ts` (sibling of `lib/graphql/`) configures `@monaco-editor/react` to use the locally bundled `monaco-editor` instead of the jsDelivr CDN, wires language web workers via Vite `?worker` imports, and calls `registerGraphqlProviders`. It is a side-effecting module, and `lib/monaco-loader.ts` is its only importer: `ensureMonaco()` pulls it in when the first `CodeEditor` mounts rather than at startup, and `CodeEditor` renders a placeholder until it resolves (#1146). That order is the requirement, not an optimisation - `loader.init()` running before `loader.config({ monaco })` sends the app to the CDN for a copy it already ships. Anything that needs the instance without wanting to load it (the `pm.*`, `{{variable}}` completion, `{{variable}}` hover, and script-type providers registered from `App`) subscribes with `useLoadedMonaco()`.
+`lib/monaco-setup.ts` (sibling of `lib/graphql/`) configures `@monaco-editor/react` to use the locally bundled `monaco-editor` instead of the jsDelivr CDN, wires language web workers via Vite `?worker` imports, and calls `registerGraphqlProviders`. It is a side-effecting module, and `lib/monaco-loader.ts` is its only importer: `ensureMonaco()` pulls it in when the first `CodeEditor` mounts rather than at startup, and `CodeEditor` renders a placeholder until it resolves (#1146). That order is the requirement, not an optimisation - `loader.init()` running before `loader.config({ monaco })` sends the app to the CDN for a copy it already ships. Anything that needs the instance without wanting to load it (the `pm.*`, `{{variable}}` completion, `{{variable}}` hover, and script-type providers registered from `App`) subscribes with `useLoadedMonaco()`. That same composition also defines the app's Monaco theme (`vayu-light` / `vayu-dark`, #1321), because it has to precede the first `editor.create` - a theme name Monaco does not yet know falls back to `vs` and never revisits it, so registering later, from a React effect, would be too late for the editor that mounts first.
 
 ## Collections (`modules/collections/`)
 
@@ -1958,6 +1958,19 @@ broken scan cannot pass vacuously. The two script panels take theirs from
 `SCRIPT_VARIANTS`, the collection script tab from its `kind` - a scan cannot
 follow either, which is the same limit that applies to class names arriving in
 a variable.
+
+**Themed, not Monaco's default.** `theme` is `vayu-light` or `vayu-dark`
+(#1321), never Monaco's own `vs` / `vs-dark` - both are defined once in
+`lib/monaco-theme.ts`, inheriting the built-in theme's syntax colours and
+repainting only the chrome (suggest list, find widget, hover card, context
+menu) from the app's own tokens. Registration happens as Monaco composes
+(`lib/monaco-setup.ts`, above), because an editor created before the app's
+theme is defined falls back to `vs` and never revisits it; `useMonacoTheme`
+then redefines the active theme whenever the mode or accent scheme changes,
+from a `MutationObserver` on `<html>` rather than a React effect - `<Editor>`
+is this component's child, and a child's effects run before its parent's.
+`lib/monaco-theme.test.ts`, `code-editor.theme.test.tsx`, and the sixth case in
+`monaco-setup.contributions.test.ts` guard it.
 
 ### Markdown (`markdown-view`, `markdown-editor`)
 

@@ -73,6 +73,7 @@ import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker"
 import type { MonacoApi } from "./monaco-api";
 import { registerGraphqlProviders } from "./graphql/language-providers";
 import { registerHttpLanguage } from "./http-language";
+import { registerMonacoTheme } from "./monaco-theme";
 
 /**
  * The composed namespace, in the shape the package root exports. Annotated
@@ -113,6 +114,14 @@ loader.config({ monaco });
 registerGraphqlProviders(monaco);
 // The Raw tab asks for `http`; Monaco ships no such language, so it is ours.
 registerHttpLanguage(monaco);
+/*
+ * The app's own theme, before any editor exists (#1321). An editor created
+ * with a theme name Monaco does not know falls back to `vs` and stays there -
+ * a later `defineTheme` re-applies only the theme already showing - so this
+ * registration has to precede the first `editor.create`, which is why it is
+ * here and not in a React effect. `useMonacoTheme` keeps it in step after that.
+ */
+registerMonacoTheme(monaco);
 
 /**
  * The configured instance, for callers that need Monaco's own APIs (the
