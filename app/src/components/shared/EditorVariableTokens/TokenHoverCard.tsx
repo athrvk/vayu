@@ -17,13 +17,20 @@
  * editor measured, which is exactly how `VariablePopover` already reaches a
  * token that has no DOM node of its own.
  *
- * **What it says is the field tooltip's three lines and no more** (`Editable-
- * Variable`): what the send will use, and where that came from. The list of
- * definitions that lost stays in the popover, one ⌘-click away, where it was
- * already drawn and where there is room to strike them through.
+ * **What it says is the field tooltip's answer** (`EditableVariable`): what the
+ * send will use, and where that came from - plus the one line a field does not
+ * need, saying the token opens on a click. The list of definitions that lost
+ * stays in the popover that click opens, where it was already drawn and where
+ * there is room to strike them through.
  */
 
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipValue } from "@/components/ui";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipHint,
+	TooltipTrigger,
+	TooltipValue,
+} from "@/components/ui";
 import type { VariableTokenKind } from "@/lib/variable-token-kind";
 import type { VariableOrigin } from "@/types";
 import type { TokenHoverRequest } from "./context";
@@ -79,7 +86,7 @@ export function TokenHoverCard({
 			// Fixed and inert, for the same reason the popover's anchor is: the
 			// rectangle came from `getBoundingClientRect` on the editor, and a box
 			// over Monaco's canvas that took the pointer would end the hover it was
-			// drawn for - and swallow the ⌘-click that opens the popover.
+			// drawn for - and swallow the click that opens the popover.
 			style={{
 				position: "fixed",
 				left: request.rect.left,
@@ -107,7 +114,18 @@ export function TokenHoverCard({
 					</span>
 				</TooltipTrigger>
 				<TooltipContent side="bottom" className="max-w-xs">
-					<HoverAnswer kind={kind} origins={origins} />
+					<span className="flex flex-col gap-1">
+						<HoverAnswer kind={kind} origins={origins} />
+						{/*
+						 * What to do about it, for the one class of token that has
+						 * something to do. A field's token is a real element and
+						 * looks pressable; this one is painted text on a canvas, and
+						 * the affordance used to be spelled out by the Monaco hover
+						 * ("⌘-click or ⇧⌘D to edit") this card replaced. A generator
+						 * has no stored variable behind it, so it says nothing.
+						 */}
+						{kind.state !== "runtime" && <TooltipHint>Click to edit</TooltipHint>}
+					</span>
 				</TooltipContent>
 			</Tooltip>
 		</div>

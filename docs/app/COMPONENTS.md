@@ -1550,7 +1550,7 @@ makes it, for every surface (see below):
 |-------|-----------|------------|
 | `{{data.email}}` - the reserved `data.*` namespace (issue #402) | `RuntimeToken`, or a decoration in an editor | muted or amber, depending on the declared contract - see below |
 | `{{$vu}}`, `{{$iteration}}` - the reserved identity namespace (issues #994, #1101) | `RuntimeToken`, or a decoration in an editor | muted, "not generated here", no popover |
-| `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable`, or a decoration in an editor | accent when it resolves, **red** when it does not; hover reads, and click or Enter - ⌘-click or ⇧⌘D in an editor - edits or creates |
+| `{{merchantId}}` - a stored variable, or a name nothing defines | `EditableVariable`, or a decoration in an editor | accent when it resolves, **red** when it does not; hover reads, and click or Enter - or ⇧⌘D in an editor - edits or creates |
 | `{{$guid}}` - a generator | `RuntimeToken`, or a decoration in an editor | muted, "generated per use", no popover |
 
 The two reserved rows sit above the scopes for the same reason and the generator
@@ -1565,7 +1565,7 @@ too** (issue #1220), as decorations rather than DOM tokens - there is no
 `<input>` behind that text to overlay. Hovering opens the app's own tooltip
 card over the token's screen rectangle, saying what the overlay's tooltip
 says - not Monaco's own hover widget, which is what answered until issue
-#1320 - and ⌘/Ctrl-click or the `EDIT_VARIABLE_CHORD` opens the same
+#1320 - and a click or the `EDIT_VARIABLE_CHORD` opens the same
 `VariablePopover`, positioned over that same rectangle. The decision of *what
 a token is* is shared: `classifyVariableToken` (`lib/variable-token-kind.ts`)
 lifts the same ladder this section describes out of the paint, so the editors
