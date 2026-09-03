@@ -98,4 +98,11 @@ race:crypto/hashtable/hashtable.c
 # `./vayu_tests --gtest_filter=TransportPolicyPaths.LoadRunTraversesManualProxy`
 # raced without the line, 10 of 10 passed with it. That is the cheap way to
 # re-measure it; the suite run is only needed to confirm nothing else moved.
+#
+# Re-measured that way at dc25029 (2026-09-03), because the vcpkg baseline has
+# since moved to cpp-httplib 0.53.1, which the inbox pins by `static_assert`.
+# `parse_status_line` is byte-identical on it and so is the outcome: 8 of 10
+# runs of that test raced without the line, 10 of 10 passed with it, and the
+# report was the stack above with the same libstdc++ and httplib frames. The
+# entry still earns its place on the version the engine now pins.
 race:std::ctype<char>::narrow
