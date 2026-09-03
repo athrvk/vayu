@@ -119,6 +119,7 @@ export {
 	CommandItem,
 	CommandSeparator,
 	CommandListboxProbe,
+	CommandScrollIntoView,
 } from "./command";
 export type { CommandListboxState } from "./command";
 

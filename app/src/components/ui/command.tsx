@@ -91,6 +91,61 @@ export function CommandListboxProbe({ onChange }: { onChange: (s: CommandListbox
 	return <span ref={ref} hidden />;
 }
 
+/**
+ * Scrolls the highlighted row into view, for a list steered from outside.
+ *
+ * `cmdk` scrolls on its own state path only. Its `setState("value", …)`
+ * schedules the scroll before it emits, which is the path its `Command.Input`
+ * arrow handling takes; a highlight arriving through the controlled `value`
+ * *prop* lands somewhere else entirely - a layout effect that assigns the value
+ * and emits, with no scroll and no `selectedItemId`. So a list driven the way
+ * `CommandListboxProbe` exists to serve moves `[data-selected]` onto a row it
+ * never brings into view, and past the eighth entry the highlight is below the
+ * fold of `CommandList`'s own `max-h-[300px] overflow-y-auto` (issue #1333).
+ *
+ * Read from `cmdk`'s store rather than from a prop, so a highlight the pointer
+ * moved and one the arrows moved are one code path - `cmdk` opts its own
+ * pointer handler out of scrolling, and `block: "nearest"` is why that costs
+ * nothing: a row already on screen, which every row the pointer can reach is,
+ * does not move.
+ *
+ * The group heading rides along, matching what `cmdk` does for the first row of
+ * a group: here the headings are what tells a generator from a stored variable.
+ *
+ * Render it inside a `CommandList`; anything driving a `Command` from a
+ * controlled `value` wants it, which is why it lives beside the primitive
+ * rather than in either caller.
+ */
+export function CommandScrollIntoView() {
+	const highlight = useCommandState((state) => state.value);
+	const ref = React.useRef<HTMLSpanElement>(null);
+
+	React.useEffect(() => {
+		const list = ref.current?.closest<HTMLElement>("[cmdk-list]");
+		/*
+		 * Scoped to this list, never across the document: the app mounts several
+		 * of these and the highlight being scrolled to is this one's.
+		 *
+		 * On `aria-selected`, where `CommandListboxProbe` above deliberately reads
+		 * `data-value` instead: that probe has to name a row on the list's first
+		 * paint, when the rendered `aria-selected` still lags a layout effect.
+		 * This one has nothing to say about a paint that has not scrolled yet, so
+		 * it can use the selector `cmdk` uses for this job itself - which is the
+		 * point, since the scroll it is standing in for is `cmdk`'s.
+		 */
+		const row = list?.querySelector<HTMLElement>('[cmdk-item][aria-selected="true"]');
+		if (!row) return;
+		if (row.parentElement?.firstChild === row) {
+			row.closest("[cmdk-group]")
+				?.querySelector<HTMLElement>("[cmdk-group-heading]")
+				?.scrollIntoView({ block: "nearest" });
+		}
+		row.scrollIntoView({ block: "nearest" });
+	}, [highlight]);
+
+	return <span ref={ref} hidden />;
+}
+
 function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
 	return (
 		<CommandPrimitive
