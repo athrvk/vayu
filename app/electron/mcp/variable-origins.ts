@@ -7,11 +7,17 @@
 
 /**
  * @file variable-origins.ts
- * @brief Which definition of a variable name wins, and which ones it beat (the
- *        `resolve_variables` tool's core). The app answers this in the variable
- *        popover's origin list; before this module an agent could not ask it at
- *        all, and had to reconstruct the resolution order from a rule no tool
- *        stated (issue #1207).
+ * @brief The variable resolution model as the MCP surface states it, and which
+ *        definition of a name wins (the `resolve_variables` tool's core). The
+ *        app answers the second question in the variable popover's origin list;
+ *        before this module an agent could not ask it at all, and had to
+ *        reconstruct the resolution order from a rule no tool stated
+ *        (issue #1207).
+ *
+ * The prose and the computation live together on purpose: a tool description
+ * that paraphrases the order and a resolver that implements it are exactly the
+ * two copies that drift. Here the sentence every variable tool carries and the
+ * loop that picks the winner are one edit apart.
  *
  * The order is the one `docs/app/variable-resolution.md` defines and the engine
  * executes: globals < collection chain (root -> leaf) < active environment.
@@ -173,10 +179,7 @@ export interface CollectionLike {
  * throwing: whether that is an error is the caller's to decide, because
  * `resolve_variables` refuses it and other callers may not.
  */
-export function collectionChain(
-	rows: readonly CollectionLike[],
-	leafId: string
-): VariableSource[] {
+export function collectionChain(rows: readonly CollectionLike[], leafId: string): VariableSource[] {
 	const byId = new Map<string, CollectionLike>();
 	for (const row of rows) {
 		if (typeof row?.id === "string") byId.set(row.id, row);
@@ -259,7 +262,10 @@ function withValue(
  * value - absent, not present-and-empty, because a present-and-empty answer
  * would read as "it resolves to the empty string", which is a different fact.
  */
-export function reportForName(name: string, origins: readonly VariableOrigin[]): ResolvedVariableReport {
+export function reportForName(
+	name: string,
+	origins: readonly VariableOrigin[]
+): ResolvedVariableReport {
 	const winner = origins.find((o) => o.winner);
 	const ranked = [...origins].reverse();
 	const shadowedBy: ShadowedDefinition[] = ranked
@@ -305,3 +311,109 @@ export function resolveVariableReports(
 	const wanted = names && names.length > 0 ? [...new Set(names)] : Object.keys(origins).sort();
 	return wanted.map((name) => reportForName(name, origins[name] ?? []));
 }
+
+// --- The model, as the MCP surface states it ---------------------------------
+
+/**
+ * The resource that carries the full model. Every variable-writing tool points
+ * at this rather than paraphrasing the rules a second time, which is what
+ * `tools.test.ts`'s table-driven scan checks.
+ */
+export const VARIABLE_RESOLUTION_URI = "vayu://variables/resolution";
+
+/**
+ * The one sentence. It appears verbatim in every tool that writes or lists
+ * variables; a new such tool that omits it fails the scan.
+ *
+ * Spelled with `<` rather than `>` because that is the direction
+ * `docs/app/variable-resolution.md` states the ladder in, and the two spellings
+ * in one surface were half of what made the order hard to learn.
+ */
+export const VARIABLE_PRECEDENCE_SENTENCE =
+	"Resolution order (lowest to highest): globals < collection chain (root to leaf) < active environment, with a bound data row's bare column names above all three.";
+
+/**
+ * The precedence sentence, this tier's own position in it, and the pointer to
+ * the full model - the three things every variable tool's description owes an
+ * agent that is about to change a value.
+ */
+export function precedenceNote(tierPosition: string): string {
+	return `${VARIABLE_PRECEDENCE_SENTENCE} ${tierPosition} Full model, including the reserved namespaces and what a script sees: ${VARIABLE_RESOLUTION_URI}.`;
+}
+
+/**
+ * The rule set from `docs/app/variable-resolution.md`, in the form an agent
+ * reads. Structured rather than one prose blob so a client can render or search
+ * it, and so the tiers cannot be listed in one order here and another there.
+ *
+ * This is a statement of a contract the engine executes, not a second
+ * implementation of it: nothing here resolves anything. The contract itself is
+ * pinned by `engine/tests/fixtures/variable-resolution-conformance.json`, which
+ * the engine's suite, the renderer's and this module's conformance guard all
+ * replay.
+ */
+export const VARIABLE_RESOLUTION_MODEL = {
+	summary: VARIABLE_PRECEDENCE_SENTENCE,
+	resolvedBy:
+		"The engine resolves at execution time (POST /compose); the app keeps a preview-only copy of the same rules. Both answer one shared conformance fixture, so what an agent is told here is what a send actually does.",
+	tiers: [
+		{
+			scope: "global",
+			rank: 1,
+			description:
+				"App-wide variables, read by every request whatever environment is active. The base layer - any tier above shadows a global of the same name.",
+			writtenBy: ["update_globals"],
+			readBy: ["get_globals"],
+		},
+		{
+			scope: "collection",
+			rank: 2,
+			description:
+				"The collection chain, merged root-first so a child collection's variable outranks an ancestor's of the same name. Each collection in the chain is its own definition, not one merged 'collection' value.",
+			writtenBy: ["create_collection", "update_collection"],
+			readBy: ["list_collections"],
+		},
+		{
+			scope: "environment",
+			rank: 3,
+			description:
+				"The active environment (or whichever environmentId a call names). The intended override point for per-environment values like base URLs and API keys; it beats every collection and global of the same name.",
+			writtenBy: ["create_environment", "update_environment", "activate_environment"],
+			readBy: ["list_environments"],
+		},
+		{
+			scope: "row",
+			rank: 4,
+			description:
+				"A bound data row's bare column names, and only while a row is bound (a data-driven collection run, a load run given rows, or a send bound to one row). With no dataset the ladder is the three tiers above. A column the row does not carry falls through to the scopes rather than failing.",
+			writtenBy: [],
+			readBy: [],
+		},
+	],
+	rules: [
+		"Only an explicit `enabled: false` disables a definition. Absent or malformed `enabled` counts as enabled.",
+		"A non-string stored `value` reads as the empty string rather than being stringified.",
+		'A name whose every definition is disabled resolves to nothing at all - it is absent, not present-and-empty, so the placeholder stays unresolved rather than substituting "".',
+		"Within one scope the last write wins; across scopes the highest tier that has the name enabled wins.",
+		"A disabled definition in a higher tier does not shadow an enabled one beneath it - the lower value is used.",
+	],
+	reservedNamespaces: [
+		{
+			pattern: "data.*",
+			rule: "`{{data.column}}` addresses a column of a run's data file. It is disjoint from the tiers, not a tier above them: `{{data.id}}` and `{{id}}` are different names, so a data set can neither shadow nor be shadowed by a variable.",
+		},
+		{
+			pattern: "$vu, $iteration",
+			rule: "Run identity. Both compose-time resolvers leave them written as they stand and the executor substitutes them immediately before each send, so a variable someone happens to name `$vu` does not answer for the identity.",
+		},
+		{
+			pattern: "$guid, $timestamp, $randomInt, ...",
+			rule: "Dynamic generators. Unlike `$vu`, a variable of the same name DOES win over the generator - a scope that defines `$guid` shadows it. `vayu://scripting/completions` carries the full generator list.",
+		},
+	],
+	fromAScript: {
+		scoped: "pm.environment.get, pm.collectionVariables.get and pm.globals.get each read one scope only, and answer emptily when that scope has no such name - they do not fall through.",
+		merged: "pm.variables.get reads across scopes in this page's order, top down: environment, then the collection chain, then globals, stopping at the first scope that has the name enabled. While a row is bound its bare column names are checked first, above all three.",
+		chain: "The collection scope a script reads is the whole chain, the same one {{name}} merges - not just the request's own collection.",
+	},
+} as const;

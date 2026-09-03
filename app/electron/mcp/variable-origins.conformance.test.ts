@@ -63,7 +63,9 @@ function asOriginScopes(scopes: ConformanceCase["scopes"]): OriginScopes {
 			name: `Collection ${i}`,
 			variables,
 		})),
-		...(scopes.environment ? { environment: { id: "e", name: "Env", variables: scopes.environment } } : {}),
+		...(scopes.environment
+			? { environment: { id: "e", name: "Env", variables: scopes.environment } }
+			: {}),
 	};
 }
 
@@ -220,7 +222,11 @@ describe("origin accumulation", () => {
 	test("marks the winner rather than inferring it from position", () => {
 		const origins = buildVariableOrigins({
 			globals: { host: { value: "g", enabled: true } },
-			environment: { id: "e", name: "E", variables: { host: { value: "e", enabled: false } } },
+			environment: {
+				id: "e",
+				name: "E",
+				variables: { host: { value: "e", enabled: false } },
+			},
 		});
 		// The last entry is the environment's, and it is not the winner.
 		expect(origins.host.map((o) => [o.scope, o.winner])).toEqual([

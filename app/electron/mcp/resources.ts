@@ -21,6 +21,11 @@
  */
 
 import type { ToolContext } from "./tools.js";
+import {
+	VARIABLE_PRECEDENCE_SENTENCE,
+	VARIABLE_RESOLUTION_MODEL,
+	VARIABLE_RESOLUTION_URI,
+} from "./variable-origins.js";
 
 export interface StaticResourceDef {
 	name: string;
@@ -61,8 +66,27 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		name: "environments",
 		uri: "vayu://environments",
 		title: "Environments",
-		description: "All environments (named variable sets).",
+		// Which one is active matters more than the list does: it is the tier
+		// that shadows every collection and global, and `isActive` on a row is
+		// the only thing that says which. An agent that reads this as an
+		// unordered set of "named variable sets" writes to the wrong one.
+		description:
+			"All environments (named variable sets). The row with `isActive: true` is the one requests resolve against when a call names no environmentId, and it outranks the collection chain and globals. " +
+			VARIABLE_PRECEDENCE_SENTENCE +
+			` Full model: ${VARIABLE_RESOLUTION_URI}.`,
 		read: (ctx, signal) => ctx.client.listEnvironments(signal),
+	},
+	{
+		name: "variable-resolution",
+		uri: VARIABLE_RESOLUTION_URI,
+		title: "Variable resolution model",
+		// The one resource here that describes rules rather than current state.
+		// It exists because the rules were discoverable only by reading two tool
+		// descriptions that happened to mention them, and never at the tools
+		// that change a value (issue #1207).
+		description:
+			"How {{variables}} resolve: the tier order, what a disabled or non-string definition does, the reserved namespaces (data.*, $vu/$iteration, the dynamic generators), and what a script's scoped and merged reads see. Read this before writing a variable - the tier you write to may be shadowed by one above it.",
+		read: async () => VARIABLE_RESOLUTION_MODEL,
 	},
 	{
 		name: "engine-config",

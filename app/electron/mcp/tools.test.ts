@@ -29,6 +29,7 @@ import {
 	type ToolContext,
 } from "./tools.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
+import { VARIABLE_PRECEDENCE_SENTENCE, VARIABLE_RESOLUTION_URI } from "./variable-origins.js";
 import {
 	DEFAULT_RUN_PAGE_LIMIT,
 	EngineRequestError,
@@ -8114,5 +8115,265 @@ describe("OpenAPI spec binding tools", () => {
 		// Each call mints a new document row, so the same arguments twice is not
 		// the same call twice.
 		expect(tools.get("bind_spec")?.annotations.idempotentHint).toBe(false);
+	});
+});
+
+describe("variable precedence is stated wherever a variable is written or listed", () => {
+	/**
+	 * The surfaces an agent reaches when it changes or surveys a value. Before
+	 * issue #1207 the resolution order appeared in `run_request` and
+	 * `get_globals` alone - never at a tool that writes one - so an agent
+	 * "fixed" a value in a tier something above it shadowed and saw no effect
+	 * and no explanation.
+	 *
+	 * Table-driven so a new variable tool cannot quietly omit the sentence: add
+	 * one to this list and it is checked, and the list is what a reviewer reads
+	 * to see whether it is complete.
+	 */
+	const VARIABLE_SURFACES = [
+		"get_globals",
+		"update_globals",
+		"list_environments",
+		"create_environment",
+		"update_environment",
+		"create_collection",
+		"update_collection",
+		"resolve_variables",
+	] as const;
+
+	test.each(VARIABLE_SURFACES)("%s states the order and links the model", (name) => {
+		const tool = TOOLS.find((t) => t.name === name);
+		expect(tool, `${name} is missing from TOOLS`).toBeDefined();
+		// Mutation check: drop the precedenceNote() call from any one of these
+		// descriptions and that row fails.
+		expect(tool!.description).toContain(VARIABLE_PRECEDENCE_SENTENCE);
+		expect(tool!.description).toContain(VARIABLE_RESOLUTION_URI);
+	});
+
+	test("each surface names its own tier's position, not just the ladder", () => {
+		const byName = new Map(TOOLS.map((t) => [t.name, t]));
+		// A shared sentence alone would pass the scan above while telling an
+		// agent nothing about the tier it is writing to.
+		expect(byName.get("update_globals")?.description).toMatch(/bottom tier/);
+		expect(byName.get("update_environment")?.description).toMatch(/top scope tier/);
+		expect(byName.get("create_collection")?.description).toMatch(
+			/between globals and the active environment/
+		);
+	});
+
+	test("the variablesInput helper carries it too, at the field an agent fills", () => {
+		// Reached through the schema rather than the description: a client that
+		// renders per-field docs shows this and not the tool blurb.
+		const schema = TOOLS.find((t) => t.name === "update_environment")?.inputSchema.variables;
+		expect(schema?.description).toContain(VARIABLE_PRECEDENCE_SENTENCE);
+		expect(schema?.description).toContain(VARIABLE_RESOLUTION_URI);
+	});
+});
+
+describe("resolve_variables", () => {
+	const GLOBALS = {
+		variables: {
+			host: { value: "globals.test", enabled: true },
+			onlyGlobal: { value: "g", enabled: true },
+		},
+	};
+	const COLLECTIONS = [
+		{
+			id: "root",
+			name: "Root",
+			parentId: null,
+			variables: { host: { value: "root.test", enabled: true } },
+		},
+		{
+			id: "leaf",
+			name: "Leaf",
+			parentId: "root",
+			variables: { host: { value: "leaf.test", enabled: true } },
+		},
+	];
+	const ENVIRONMENTS = [
+		{
+			id: "env_active",
+			name: "Staging",
+			isActive: true,
+			variables: { host: { value: "staging.test", enabled: true } },
+		},
+		{
+			id: "env_other",
+			name: "Prod",
+			isActive: false,
+			variables: { host: { value: "prod.test", enabled: true } },
+		},
+	];
+
+	const variableClient = (overrides = {}) =>
+		fakeClient({
+			getGlobals: vi.fn().mockResolvedValue(GLOBALS),
+			listCollections: vi.fn().mockResolvedValue(COLLECTIONS),
+			listEnvironments: vi.fn().mockResolvedValue(ENVIRONMENTS),
+			...overrides,
+		});
+
+	const resolve = async (args: Record<string, unknown>, client = variableClient()) =>
+		JSON.parse(
+			firstText(
+				(await dispatchTool("resolve_variables", args, ctxWith(client))) as {
+					content: Array<{ text: string }>;
+				}
+			)
+		);
+
+	test("is a read tool that changes nothing", () => {
+		const tool = TOOLS.find((t) => t.name === "resolve_variables");
+		expect(tool?.category).toBe("read");
+		expect(tool?.invalidates).toEqual([]);
+		expect(tool?.annotations.readOnlyHint).toBe(true);
+	});
+
+	test("the active environment wins, and every loser is named with its reason", async () => {
+		const out = await resolve({ collectionId: "leaf" });
+		const host = out.variables.find((v: { name: string }) => v.name === "host");
+
+		expect(host.value).toBe("staging.test");
+		expect(host.scope).toBe("environment");
+		expect(host.sourceName).toBe("Staging");
+		// Highest precedence first: the nearest miss is the one to read first.
+		expect(host.shadowedBy).toEqual([
+			{
+				scope: "collection",
+				sourceId: "leaf",
+				sourceName: "Leaf",
+				value: "leaf.test",
+				enabled: true,
+				reason: "outranked",
+			},
+			{
+				scope: "collection",
+				sourceId: "root",
+				sourceName: "Root",
+				value: "root.test",
+				enabled: true,
+				reason: "outranked",
+			},
+			{ scope: "global", value: "globals.test", enabled: true, reason: "outranked" },
+		]);
+	});
+
+	test("the collection chain is only in play when a collectionId is given", async () => {
+		const out = await resolve({});
+		const host = out.variables.find((v: { name: string }) => v.name === "host");
+		expect(host.value).toBe("staging.test");
+		// Two definitions, not four: no chain was asked for.
+		expect(host.shadowedBy).toEqual([
+			{ scope: "global", value: "globals.test", enabled: true, reason: "outranked" },
+		]);
+		expect(out.context.collectionChain).toEqual([]);
+	});
+
+	test('"none" resolves as if no environment were active', async () => {
+		const out = await resolve({ collectionId: "leaf", environmentId: "none" });
+		const host = out.variables.find((v: { name: string }) => v.name === "host");
+		expect(host.value).toBe("leaf.test");
+		expect(host.scope).toBe("collection");
+		expect(out.context.environmentSelection).toBe("explicitly none");
+		expect(out.context.environmentId).toBeNull();
+	});
+
+	test("a named environment is used over the active one", async () => {
+		const out = await resolve({ environmentId: "env_other" });
+		const host = out.variables.find((v: { name: string }) => v.name === "host");
+		expect(host.value).toBe("prod.test");
+		expect(out.context.environmentSelection).toBe("named by the caller");
+	});
+
+	test("an id that names nothing is refused, not resolved as empty", async () => {
+		// The whole point: silently resolving a typo'd collection against globals
+		// alone would report confident, wrong answers.
+		const missingCollection = await dispatchTool(
+			"resolve_variables",
+			{ collectionId: "ghost" },
+			ctxWith(variableClient())
+		);
+		expect(missingCollection.isError).toBe(true);
+		expect(firstText(missingCollection)).toContain('No collection with id "ghost"');
+
+		const missingEnv = await dispatchTool(
+			"resolve_variables",
+			{ environmentId: "ghost" },
+			ctxWith(variableClient())
+		);
+		expect(missingEnv.isError).toBe(true);
+		expect(firstText(missingEnv)).toContain('No environment with id "ghost"');
+	});
+
+	test("names selects, and a name nothing defines is reported rather than omitted", async () => {
+		const out = await resolve({ names: ["onlyGlobal", "nowhere"] });
+		expect(out.variables.map((v: { name: string }) => v.name)).toEqual([
+			"onlyGlobal",
+			"nowhere",
+		]);
+		const nowhere = out.variables[1];
+		expect(nowhere.resolved).toBe(false);
+		expect(nowhere.shadowedBy).toEqual([]);
+	});
+
+	test("a malformed names argument is an argument error, not an empty answer", async () => {
+		const res = await dispatchTool(
+			"resolve_variables",
+			{ names: ["ok", 7] },
+			ctxWith(variableClient())
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain('"names" must be an array of strings');
+	});
+
+	test("a secret's value is withheld while the rest of the report stands", async () => {
+		const client = variableClient({
+			getGlobals: vi.fn().mockResolvedValue({
+				variables: { token: { value: "s3cret", enabled: true, secret: true } },
+			}),
+			listEnvironments: vi.fn().mockResolvedValue([]),
+		});
+		const out = await resolve({}, client);
+		const token = out.variables.find((v: { name: string }) => v.name === "token");
+		expect(token.resolved).toBe(true);
+		expect(token.valueWithheld).toBe(true);
+		expect(token).not.toHaveProperty("value");
+		expect(JSON.stringify(out)).not.toContain("s3cret");
+	});
+
+	test("a disabled winner falls through, and says it was switched off", async () => {
+		const client = variableClient({
+			listEnvironments: vi.fn().mockResolvedValue([
+				{
+					id: "env_active",
+					name: "Staging",
+					isActive: true,
+					variables: { host: { value: "staging.test", enabled: false } },
+				},
+			]),
+		});
+		const out = await resolve({}, client);
+		const host = out.variables.find((v: { name: string }) => v.name === "host");
+		expect(host.value).toBe("globals.test");
+		expect(host.shadowedBy[0]).toMatchObject({ scope: "environment", reason: "disabled" });
+	});
+
+	test("summary counts what the report holds", async () => {
+		const out = await resolve({ collectionId: "leaf" });
+		expect(out.summary.reported).toBe(out.variables.length);
+		expect(out.summary.resolved).toBe(
+			out.variables.filter((v: { resolved: boolean }) => v.resolved).length
+		);
+		expect(out.summary.shadowed).toBe(1); // `host` only; `onlyGlobal` is unopposed
+	});
+
+	test("an engine failure reads as an engine failure, not a bad argument", async () => {
+		const client = variableClient({
+			getGlobals: vi.fn().mockRejectedValue(new Error("fetch failed")),
+		});
+		const res = await dispatchTool("resolve_variables", {}, ctxWith(client));
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).not.toContain("must be an array");
 	});
 });

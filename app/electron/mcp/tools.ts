@@ -34,6 +34,16 @@ import {
 	defaultDurationUnderCap,
 } from "./safety.js";
 import { compareReports } from "./compare.js";
+import {
+	collectionChain,
+	precedenceNote,
+	resolveVariableReports,
+	VARIABLE_PRECEDENCE_SENTENCE,
+	VARIABLE_RESOLUTION_URI,
+	type CollectionLike,
+	type OriginScopes,
+	type StoredVariableBag,
+} from "./variable-origins.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 
 /** An auth block as stored/forwarded (discriminated by `mode`). */
@@ -762,6 +772,21 @@ function requireStr(args: Record<string, unknown>, key: string): string {
 	return v;
 }
 
+/**
+ * An optional array-of-strings argument. A non-array, or an array carrying
+ * anything but strings, is the caller's mistake rather than an empty selection:
+ * silently dropping the bad entries would answer a different question than the
+ * one asked and look like the names simply were not defined.
+ */
+function stringArray(args: Record<string, unknown>, key: string): string[] | undefined {
+	const v = args[key];
+	if (v === undefined) return undefined;
+	if (!Array.isArray(v) || v.some((entry) => typeof entry !== "string")) {
+		throw new ToolArgError(`"${key}" must be an array of strings.`);
+	}
+	return v as string[];
+}
+
 class ToolArgError extends Error {}
 
 /**
@@ -1043,8 +1068,106 @@ function variablesInput(subject: string) {
 		.record(VARIABLE_INPUT)
 		.optional()
 		.describe(
-			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. Merges: variables not named here are left alone.`
+			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
 		);
+}
+
+/** The stored `variables` blob off a collection / environment / globals row. */
+function variableBagOf(row: unknown): StoredVariableBag | undefined {
+	if (!isRecord(row)) return undefined;
+	const bag = row.variables;
+	return isRecord(bag) ? (bag as StoredVariableBag) : undefined;
+}
+
+/**
+ * The environment `resolve_variables` should resolve against.
+ *
+ * Three cases, deliberately distinct: a named id must exist (a typo resolving
+ * silently against the active environment would report confident, wrong
+ * answers), `"none"` is the explicit no-environment case that
+ * `activate_environment` already spells that way, and an omitted id means the
+ * active row - the same default a send takes.
+ */
+function pickEnvironment(rows: readonly unknown[], environmentId: string | undefined) {
+	if (environmentId === "none") return undefined;
+	if (environmentId !== undefined && environmentId !== "") {
+		const found = rows.find((row) => isRecord(row) && row.id === environmentId);
+		if (!found) throw new ToolArgError(`No environment with id "${environmentId}".`);
+		return found as Record<string, unknown>;
+	}
+	return rows.find((row) => isRecord(row) && row.isActive === true) as
+		| Record<string, unknown>
+		| undefined;
+}
+
+/**
+ * Read every scope `resolve_variables` needs, in one pass over the engine's
+ * lists. Globals are always read; the collection chain and the environment only
+ * when the context names them.
+ *
+ * A `collectionId` that names nothing is refused rather than resolved as an
+ * empty chain: "this collection defines none of these" and "there is no such
+ * collection" are different answers, and an agent acting on the first when the
+ * second is true writes to a collection that does not exist.
+ */
+async function gatherVariableScopes(
+	ctx: ToolContext,
+	collectionId: string | undefined,
+	environmentId: string | undefined,
+	signal?: AbortSignal
+): Promise<OriginScopes> {
+	const globals = variableBagOf(await ctx.client.getGlobals(signal));
+
+	let chain: OriginScopes["chain"];
+	if (collectionId !== undefined && collectionId !== "") {
+		const listed = await ctx.client.listCollections(signal);
+		const rows = (Array.isArray(listed) ? listed : []) as CollectionLike[];
+		chain = collectionChain(rows, collectionId);
+		if (chain.length === 0) throw new ToolArgError(`No collection with id "${collectionId}".`);
+	}
+
+	let environment: OriginScopes["environment"];
+	if (environmentId !== "none") {
+		const listed = await ctx.client.listEnvironments(signal);
+		const rows = Array.isArray(listed) ? listed : [];
+		const row = pickEnvironment(rows, environmentId);
+		if (row) {
+			environment = {
+				id: typeof row.id === "string" ? row.id : undefined,
+				name: typeof row.name === "string" ? row.name : undefined,
+				variables: variableBagOf(row),
+			};
+		}
+	}
+
+	return { globals, chain, environment };
+}
+
+/**
+ * What context the answer was computed in, echoed back so a report can be read
+ * without re-deriving it. The environment is stated even when there is none:
+ * "no environment was active" is why a value came from a collection, and an
+ * omitted key would leave that to be guessed.
+ */
+function describeScopes(
+	scopes: OriginScopes,
+	collectionId: string | undefined,
+	environmentId: string | undefined
+): Record<string, unknown> {
+	return {
+		collectionId: collectionId ?? null,
+		collectionChain: (scopes.chain ?? []).map((c) => ({ id: c.id, name: c.name })),
+		environmentId: scopes.environment?.id ?? null,
+		environmentName: scopes.environment?.name ?? null,
+		environmentSelection:
+			environmentId === "none"
+				? "explicitly none"
+				: environmentId
+					? "named by the caller"
+					: scopes.environment
+						? "the active environment"
+						: "no environment is active",
+	};
 }
 
 /** The `removeVariables` argument - the delete a blank value cannot express. */
@@ -3638,7 +3761,11 @@ export const TOOLS: McpTool[] = [
 		name: "list_environments",
 		category: "read",
 		invalidates: [],
-		description: "List all environments (named sets of variables like baseUrl, apiKey).",
+		description:
+			"List all environments (named sets of variables like baseUrl, apiKey). The row with `isActive: true` is the one requests resolve against when a call names no environmentId. " +
+			precedenceNote(
+				"An environment's variables are the top scope tier: they shadow every collection and global of the same name."
+			),
 		annotations: {
 			title: "List environments",
 			readOnlyHint: true,
@@ -4081,7 +4208,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Create a collection (the folder saved requests live in), with the variables, auth and pre/post-request scripts every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`.",
+			"Create a collection (the folder saved requests live in), with the variables, auth and pre/post-request scripts every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`. " +
+			precedenceNote(
+				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
+			),
 		annotations: {
 			title: "Create collection",
 			readOnlyHint: false,
@@ -4128,7 +4258,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Change a collection: its name, description, variables, auth or pre/post-request scripts - the state every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth replaces the stored block whole. This is not a move - to re-parent a collection, use move_item.",
+			"Change a collection: its name, description, variables, auth or pre/post-request scripts - the state every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth replaces the stored block whole. This is not a move - to re-parent a collection, use move_item. " +
+			precedenceNote(
+				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
+			),
 		annotations: {
 			title: "Update collection",
 			readOnlyHint: false,
@@ -5411,7 +5544,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			precedenceNote(
+				"An environment's variables are the top scope tier: once this one is active they shadow every collection and global of the same name."
+			),
 		annotations: {
 			title: "Create environment",
 			readOnlyHint: false,
@@ -5449,7 +5585,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			precedenceNote(
+				"An environment's variables are the top scope tier: while this environment is active they shadow every collection and global of the same name. Writing here to an inactive environment changes nothing a request resolves until activate_environment makes it current."
+			),
 		annotations: {
 			title: "Update environment",
 			readOnlyHint: false,
@@ -5616,7 +5755,10 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Read the global variables - the bottom of the resolution order, used by every request whatever environment is active (environment > collection chain > globals). An engine that has never had any answers an empty set rather than an error.",
+			"Read the global variables - used by every request whatever environment is active. An engine that has never had any answers an empty set rather than an error. " +
+			precedenceNote(
+				"Globals are the bottom tier, so a value read back here is not necessarily the one a request resolves: use resolve_variables to see which definition actually wins."
+			),
 		annotations: {
 			title: "Get global variables",
 			readOnlyHint: true,
@@ -5627,11 +5769,79 @@ export const TOOLS: McpTool[] = [
 		handler: (_args, ctx, signal) => callEngine(() => ctx.client.getGlobals(signal)),
 	},
 	{
+		name: "resolve_variables",
+		category: "read",
+		invalidates: [],
+		description:
+			'Answer which definition of a variable name actually wins in a given context, and list the ones it beat - the question get_globals and list_environments cannot, because each shows one tier in isolation. For every name it reports the winning value with the scope and source that supplied it, then every shadowed definition highest-precedence-first, each saying whether it was outranked by a higher tier or simply switched off (`enabled: false`). A switched-off row is the more common answer to "why is this not the value I set?", and a name whose every definition is disabled resolves to nothing at all rather than to an empty string. ' +
+			precedenceNote(
+				"Pass no environmentId to use the active environment, the same default a send takes; pass a collectionId to include its chain."
+			) +
+			" Secret values are withheld here (`valueWithheld: true`) to match the app's popover - note that list_environments, get_globals and vayu://environments still return every value in full, so this is not a security boundary. Reports what is stored: it resolves nothing on the wire and starts no run.",
+		annotations: {
+			title: "Resolve variables",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.optional()
+				.describe(
+					"Optional collection ID. Includes that collection's chain, merged root-first, between globals and the environment."
+				),
+			environmentId: z
+				.string()
+				.optional()
+				.describe(
+					'Optional environment ID. Omit for the active environment (the default a send takes); pass "none" to resolve as if no environment were active.'
+				),
+			names: z
+				.array(z.string())
+				.optional()
+				.describe(
+					"Optional variable names to report. Omit for every name defined anywhere in the context. A name nothing defines is reported as unresolved rather than omitted."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const collectionId = str(args, "collectionId");
+			const environmentId = str(args, "environmentId");
+			const names = stringArray(args, "names");
+
+			let scopes: OriginScopes;
+			let context: Record<string, unknown>;
+			try {
+				scopes = await gatherVariableScopes(ctx, collectionId, environmentId, signal);
+				context = describeScopes(scopes, collectionId, environmentId);
+			} catch (err) {
+				// A bad id is the caller's mistake and must not be reported as an
+				// engine failure - the same split `pagedRead`'s callers keep.
+				if (err instanceof ToolArgError) return errorResult(err.message);
+				return engineErrorResult(err);
+			}
+
+			const variables = resolveVariableReports(scopes, names);
+			return structuredResult({
+				context,
+				variables,
+				summary: {
+					reported: variables.length,
+					resolved: variables.filter((v) => v.resolved).length,
+					shadowed: variables.filter((v) => v.shadowedBy.length > 0).length,
+				},
+			});
+		},
+	},
+	{
 		name: "update_globals",
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			precedenceNote(
+				"Globals are the bottom tier: any collection or active-environment definition of the same name shadows what you write here, so a request whose value does not change after this call is usually shadowed rather than unwritten - resolve_variables names the definition that won."
+			),
 		annotations: {
 			title: "Update global variables",
 			readOnlyHint: false,
