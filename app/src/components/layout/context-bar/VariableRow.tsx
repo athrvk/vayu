@@ -16,7 +16,7 @@
  * save relies on) is the same act on both, so it is written once.
  */
 
-import { Input } from "@/components/ui";
+import { Input, SecretInput } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import type { ReactNode } from "react";
 import type { ResolvedVariable } from "@/types";
@@ -43,12 +43,24 @@ export function VariableRow({ name, resolved, marker, onCommit }: VariableRowPro
 				{marker}
 			</div>
 			{resolved.secret ? (
-				<Input
-					value="••••••"
+				/*
+				 * The shared masked field with its eye toggle, not a hand-rolled
+				 * `••••••` that can never be looked at (#1308) - a hand-rolled copy of
+				 * a primitive does not receive the primitive's fixes. Read-only here:
+				 * the request tab shows what resolved, and a secret's edit lands on
+				 * the Variables page, so revealing is the whole of what this row adds.
+				 * Reveal state lives inside `SecretInput`, so it is keyed by the
+				 * definition's identity (name:scope:source, not its value) - an
+				 * environment or tab switch remounts it and re-masks, the defect #621
+				 * names when reveal is keyed by position.
+				 */
+				<SecretInput
+					key={`${name}:${resolved.scope}:${resolved.sourceId}`}
+					value={resolved.value}
+					onChange={() => {}}
 					readOnly
 					aria-label={`Value of ${name}`}
-					className="h-7 text-xs font-mono text-muted-foreground"
-					title="Secret values can be edited from the Variables page"
+					className="h-7 text-xs"
 				/>
 			) : (
 				<Input

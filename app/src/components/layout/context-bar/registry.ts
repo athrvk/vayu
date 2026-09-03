@@ -83,8 +83,11 @@ const onRunTab = (tab: Tab) => tab.type === "run" && tab.entityId !== null;
  */
 export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 	{
+		// The id stays `variables` - it is the key the collapsed state persists
+		// under - but the title says what the section now leads with: the variables
+		// this request uses, not every name in scope (#1308).
 		id: "variables",
-		title: "Variables in scope",
+		title: "Variables used",
 		appliesTo: onRequestTab,
 		Component: VariablesSection,
 	},

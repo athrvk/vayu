@@ -61,22 +61,19 @@
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { dataColumnName } from "@/lib/variable-resolution";
-import type { KeyValueEntry, Request, RequestAuth, RequestBody } from "@/types";
+import { bindableStrings, type RequestReferenceSource } from "@/lib/request-references";
 
 /**
- * What the audit needs from a request.
+ * What the audit needs from a request - the same shape every request-reference
+ * walk needs (`lib/request-references`), aliased here because the audit is one
+ * of its consumers and its callers import this name.
  *
  * `resolvedAuth` is not `Request["auth"]`: it is the auth the request will
- * actually send, with `inherit` already walked through the collection chain.
- * Required, and typed to exclude `inherit`, so a caller holding raw rows has to
- * resolve rather than accidentally hand over an `inherit` that walks nothing.
+ * actually send, with `inherit` already walked through the collection chain,
+ * so a caller holding raw rows has to resolve rather than hand over an `inherit`
+ * that walks nothing.
  */
-export type AuditableRequest = Pick<
-	Request,
-	"url" | "params" | "headers" | "body" | "preRequestScript" | "postRequestScript"
-> & {
-	resolvedAuth: Exclude<RequestAuth, { mode: "inherit" }>;
-};
+export type AuditableRequest = RequestReferenceSource;
 
 export interface ColumnAudit {
 	/** Declared columns a request field references. */
@@ -101,63 +98,6 @@ export interface ColumnAudit {
  * cannot see is exactly why the result is labeled rather than claimed.
  */
 const SCRIPT_COLUMN_PATTERN = /iterationData\s*\??\.\s*(?:get|has)\s*\(\s*(['"`])([^'"`\\]*)\1/g;
-
-/**
- * The credential strings a data row can bind, per auth mode.
- *
- * Mirrors the engine's `walk_auth_credentials` field for field. The switch is
- * exhaustive on purpose: a mode added to `RequestAuth` without a decision here
- * is a type error rather than a credential this silently stops walking.
- */
-function authCredentials(auth: Exclude<RequestAuth, { mode: "inherit" }>): string[] {
-	switch (auth.mode) {
-		case "bearer":
-			return [auth.token];
-		case "basic":
-			return [auth.username, auth.password];
-		case "apikey":
-			return [auth.key, auth.value];
-		case "oauth2":
-			// The config is not a credential the request carries - see the module
-			// comment - so a token in it binds nothing and is not a reference.
-			return [];
-		case "inherit":
-			// Unreachable through a caller that resolved, which is every caller:
-			// `Exclude<RequestAuth, { mode: "inherit" }>` cannot actually remove
-			// this mode, because it shares a union member with `none` and
-			// `noauth` (the same reason `Collection.auth` carries it too). Walking
-			// nothing is the honest answer for an auth whose credentials live
-			// somewhere this function was not given.
-			return [];
-		case "none":
-		case "noauth":
-		case "digest":
-		case "aws":
-		case "ntlm":
-			return [];
-	}
-}
-
-/** Every string a data row can bind in one request, in the binder's own order. */
-function bindableStrings(request: AuditableRequest): string[] {
-	const strings: string[] = [request.url];
-	const entries = (rows: readonly KeyValueEntry[] | undefined) => {
-		for (const row of rows ?? []) {
-			strings.push(row.key, row.value);
-		}
-	};
-	// Params are folded into the URL by composition, before the binder runs, so
-	// a token in one binds exactly as a token in the URL does.
-	entries(request.params);
-	entries(request.headers);
-	const body: RequestBody | undefined = request.body;
-	if (body && "content" in body) strings.push(body.content);
-	if (body && "fields" in body) entries(body.fields);
-	// Bound per iteration since #591, and applied (base64, percent-encoding)
-	// only after the bind - so what a token sits in is the credential itself.
-	strings.push(...authCredentials(request.resolvedAuth));
-	return strings;
-}
 
 /**
  * The columns a string references, in the order they appear - both spellings

@@ -45,8 +45,25 @@ const globalsMutate = vi.fn();
 const environmentMutate = vi.fn();
 const collectionMutate = vi.fn();
 
+// The request references every resolved name (#1308), so each winner renders as a
+// row at the top of the section - which is the row these commit cases edit.
 vi.mock("@/queries", () => ({
-	useRequestQuery: () => ({ data: { id: "req_1", collectionId: "col_leaf" } }),
+	useRequestQuery: () => ({
+		data: {
+			id: "req_1",
+			collectionId: "col_leaf",
+			url: Object.keys(resolved)
+				.map((name) => `{{${name}}}`)
+				.join(" "),
+			params: [],
+			headers: [],
+			body: { mode: "none" },
+			auth: { mode: "none" },
+			preRequestScript: "",
+			postRequestScript: "",
+		},
+	}),
+	useCollectionAncestors: () => [],
 	useUpdateGlobalsMutation: () => ({ mutate: globalsMutate }),
 	useUpdateEnvironmentMutation: () => ({ mutate: environmentMutate }),
 	useUpdateCollectionMutation: () => ({ mutate: collectionMutate }),
@@ -56,7 +73,10 @@ vi.mock("@/queries", () => ({
 let resolved: Record<string, ResolvedVariable> = {};
 
 vi.mock("@/hooks/useVariableResolver", () => ({
-	useVariableResolver: () => ({ getAllVariables: () => resolved }),
+	useVariableResolver: () => ({
+		getAllVariables: () => resolved,
+		getVariable: (name: string) => resolved[name] ?? null,
+	}),
 }));
 
 // The section reads only the save store from `@/stores`; the real one is kept
@@ -348,10 +368,13 @@ describe("VariablesSection - the input itself", () => {
 		};
 
 		renderSection();
-		const masked = screen.getByDisplayValue("••••••") as HTMLInputElement;
+		// The secret is the shared `SecretInput` (#1308): read-only and masked
+		// (`type=password`), holding the real value so the eye can reveal it. Blur
+		// still commits nothing, because the field is read-only.
+		const masked = screen.getByLabelText("Value of apiKey") as HTMLInputElement;
 
 		expect(masked.readOnly).toBe(true);
-		expect(screen.queryByDisplayValue("leaf-key")).toBeNull();
+		expect(masked).toHaveAttribute("type", "password");
 
 		act(() => {
 			fireEvent.blur(masked);
