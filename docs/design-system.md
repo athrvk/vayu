@@ -1329,6 +1329,8 @@ see.
 | A hand-rolled `role="button"` is focusable and answers Enter/Space | `jsx-a11y/interactive-supports-focus`, `jsx-a11y/click-events-have-key-events` |
 | A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
 | A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
+| Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
+| A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
 
 **A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
 open, which is a description; before it opens - and to a screen reader reading
@@ -1374,7 +1376,64 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half.
+file that provides the missing half. **16 directives across 12 files**, listed
+here because a rule-level configuration is visible in one place and a line-level
+one is visible only to whoever opens that file - and because nothing otherwise
+stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
+reads this list and the sources together: a site added, moved or removed without
+the list following fails, an unreasoned directive fails, and the count is a
+ceiling that comes down when a suppression goes rather than a budget to spend.
+
+Paths are relative to `app/src`, and the count in brackets is directive lines,
+not rule names - two of these lines silence two rules at once.
+
+- `components/layout/TabStrip.tsx` (2) - `jsx-a11y/interactive-supports-focus`
+  on the tablist, whose tab stop is the active tab;
+  `jsx-a11y/click-events-have-key-events` on the close affordance, which is
+  Delete or Backspace on the focused row and a `tabIndex={-1}` pointer target
+  here.
+- `components/layout/Dock.tsx` (1) - `jsx-a11y/no-noninteractive-tabindex`: the
+  Radix `TooltipTrigger` wires focus and blur to the tooltip holding the engine
+  error text, which is the only keyboard path to it.
+- `components/layout/PanelResizeHandle.tsx` (1) -
+  `jsx-a11y/no-noninteractive-element-interactions`: the window splitter, with
+  its arrow/Page/Home/End handling in the `onKeyDown` beside it.
+- `components/shared/VariableInput/index.tsx` (2) -
+  `jsx-a11y/click-events-have-key-events` and
+  `jsx-a11y/no-static-element-interactions` on the box that widens the hit area
+  around a native input, and `no-static-element-interactions` again on the
+  `pointerEvents: none` overlay whose keydown delegates for the tokens inside it.
+- `modules/collections/CollectionTree.tsx` (1) -
+  `jsx-a11y/interactive-supports-focus`, the roving tab stop seeded by
+  `useRovingTreeFocus`.
+- `modules/collections/CollectionItem.tsx` (1) -
+  `jsx-a11y/click-events-have-key-events`: Enter and Space arrive through the
+  tree, which clicks the row's `[data-tree-activate]` button.
+- `modules/collections/RequestItem.tsx` (1) -
+  `jsx-a11y/click-events-have-key-events`, the same tree path as its sibling
+  above.
+- `modules/variables/sidebar/VariablesCategoryTree.tsx` (2) -
+  `jsx-a11y/interactive-supports-focus` on the tree and
+  `jsx-a11y/click-events-have-key-events` on its rows.
+- `modules/services/ServicesPanel.tsx` (1) -
+  `jsx-a11y/click-events-have-key-events` and
+  `jsx-a11y/no-static-element-interactions`: the drawer-row hit area, which
+  delegates only the clicks landing on the row's own padding.
+- `modules/request-builder/components/LoadTestConfigDialog/ProfilePicker.tsx`
+  (1) - `jsx-a11y/interactive-supports-focus`: a radiogroup, where the selected
+  `role="radio"` holds the stop and the `onKeyDown` moves selection and focus
+  together.
+- `modules/request-builder/components/RequestTabs/panels/BodyPanel.tsx` (1) -
+  `jsx-a11y/no-noninteractive-element-interactions`, the second window splitter.
+- `modules/request-builder/components/RequestTabs/panels/body/graphql-explorer/SchemaExplorer.tsx`
+  (2) - `jsx-a11y/interactive-supports-focus` on the tree, and
+  `jsx-a11y/role-has-required-aria-props` because this tree has no selection
+  model: a row inserts into the query and nothing stays selected, so
+  `aria-selected` is omitted rather than faked.
+
+Test files are outside the count. Four directives live in two of them, each a
+fixture modelling one of the patterns above rather than a component the app
+ships.
 
 ---
 
