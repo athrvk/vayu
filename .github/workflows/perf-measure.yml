@@ -109,7 +109,8 @@ jobs:
             autoconf-archive \
             automake \
             libtool \
-            xvfb
+            xvfb \
+            openbox
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
@@ -299,16 +300,26 @@ jobs:
             ls -l "$sandbox"
           done
 
+      # The Windows and macOS runners have a desktop session and launch the app
+      # directly. The Linux runner has no display at all, so Xvfb supplies one -
+      # and, since #1165, a window manager on top of it. A bare X server maps
+      # and focuses nothing: measured on this workflow's own runner, the
+      # packaged app came up whole - engine listening, MCP up, the renderer
+      # fetching from it - and never produced a frame, so `ready-to-show` never
+      # fired and the leg reported a 90-second timeout. The harness's plain
+      # window became showable in the same session, which is what makes this a
+      # property of the app's window rather than of Electron here.
       - name: Measure the app
         shell: bash
-        env:
-          # xvfb on the Linux runner, which has no display; the Windows and
-          # macOS runners have a desktop session and launch the app directly.
-          LAUNCHER: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }}
         run: |
-          $LAUNCHER node scripts/perf/measure-app.mjs \
-            --out perf-app.json \
-            --packaged-dir app/release
+          measure="node scripts/perf/measure-app.mjs --out perf-app.json --packaged-dir app/release"
+          if [ "${{ runner.os }}" != "Linux" ]; then
+            $measure
+            exit
+          fi
+          # openbox inside the session, not beside it: the display only exists
+          # for the length of xvfb-run's command, and it exits with it.
+          xvfb-run -a bash -c "openbox --sm-disable & $measure"
 
       # tee, not a plain redirect: a leg that reports "unavailable" is a green
       # job with a note in it, so the log has to carry the table too. That is
