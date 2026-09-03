@@ -185,6 +185,19 @@ describe("layout-store context-bar sections", () => {
 			expect(migrated.contextBarCollapsedSections).toEqual(["auth", "code"]);
 		});
 
+		it("survives a collapse list that is not a list", () => {
+			// localStorage is a text file a user can edit and a bad release can
+			// corrupt. A migration that throws here takes every layout preference
+			// down with it, so the guard is `Array.isArray`, not a cast.
+			for (const junk of ["code", 7, null]) {
+				const migrated = migrate(
+					{ contextBarCollapsedSections: junk as unknown as string[] },
+					3
+				);
+				expect(migrated.contextBarCollapsedSections).toEqual(["code"]);
+			}
+		});
+
 		it("survives a blob with no collapse list at all", () => {
 			// Every field here is optional in a hand-edited or truncated blob, and
 			// a migration that throws takes the whole store down to its defaults.

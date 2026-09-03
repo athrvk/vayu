@@ -18,6 +18,12 @@
  * collection tabs lights the toggle there with no second edit. This file pins
  * that derivation: change the predicate back to a literal tab type and the last
  * case here reddens.
+ *
+ * This file renders nothing, deliberately - it is about the registry's shape.
+ * What the bar *does* with a `useRelevance` verdict (hidden draws nothing, empty
+ * draws a header with no trigger) is `../ContextBar.relevance.test.tsx`, and what
+ * the real registry costs on a real request tab is
+ * `../ContextBar.compose-cost.test.tsx`.
  */
 
 import { describe, it, expect } from "vitest";
