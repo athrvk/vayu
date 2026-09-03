@@ -188,6 +188,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction |
 | `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count) |
 | `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404) |
+| `resolve_variables`    | read     | `GET /globals` + `GET /collections` + `GET /environments` - composes, no single endpoint answers it | - (secret values withheld from the report) |
 | `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge) | write toggle; `POST` replaces the blob, so the read is what makes it a merge |
 | `get_cookies`          | read     | `GET /cookies`                               | - (values included, as the Settings card shows them) |
 | `clear_cookies`        | write    | `DELETE /cookies[?environmentId=]`           | write toggle; omitted clears every jar, `null` the no-environment jar, an id that environment's |
@@ -1102,6 +1103,72 @@ scenario load run gives each virtual user cookies of its own.
 > resolver is preview-only. Do not reintroduce client-side composition here -
 > a new engine client should call `POST /compose`.
 
+### Variables
+
+The resolution order is stated once rather than reworded per tool: **globals
+< collection chain (root to leaf) < active environment**, with a bound data
+row's bare column names above all three. That is the ladder
+[Variable Resolution](../app/variable-resolution.md) defines and the engine
+executes; before issue #1207 it lived only inside two tool descriptions that
+happened to mention it, and nowhere a caller about to write a value could ask
+for it directly.
+
+The model itself is served once, as a resource
+(`vayu://variables/resolution`, backed by `variable-origins.ts`'s
+`VARIABLE_RESOLUTION_MODEL`), rather than restated per tool. Every
+variable-writing or -listing tool - `get_globals`, `update_globals`,
+`list_environments`, `create_environment`, `update_environment`,
+`create_collection`, `update_collection` - carries one shared sentence
+(`VARIABLE_PRECEDENCE_SENTENCE`) plus that tier's own position in the order and
+a pointer to the resource; `precedenceNote()` builds both pieces from one
+place. A table-driven scan in `tools.test.ts` runs over every variable tool's
+description and fails on one that omits the sentence, so a new variable tool
+cannot ship silent about where its tier sits.
+
+**`resolve_variables`** answers what the per-tier reads cannot: which
+definition of a name actually wins in a given collection/environment context,
+and everything it beat. It reports the winning value with its scope and
+source, then every other definition highest-precedence-first, each labelled
+`outranked` (a higher-ranked definition - a later link in the chain, or a
+tier above - is enabled and wins instead) or `disabled` (`enabled: false`).
+The second is the more common answer to "why is this not the value I set?",
+and a list built by skipping disabled rows could not give it. A name whose
+every definition is disabled resolves to nothing at all, not to an empty
+string: the tool reports `resolved: false` with no value, because a
+present-and-empty answer would read as a different fact.
+
+Secret values are withheld from `resolve_variables`'s report
+(`valueWithheld: true`) to match the app's variable popover. That withholding
+is consistency with the app, not a security boundary: `list_environments`,
+`get_globals` and `vayu://environments` still return every value in full -
+the same recorded pre-1.0 item the app-side-masking note above (under
+`update_environment`) already names.
+
+**The model is duplicated on purpose, and pinned so the copies cannot drift.**
+Neither process can import the other's resolver: the main process emits with
+`rootDir: "electron"` and cannot compile a file under `src/` (TS6059), and the
+renderer cannot import from here, because this is a referenced composite
+project (TS6305). So `electron/mcp/variable-origins.ts` mirrors
+`app/src/lib/variable-resolution.ts` the way `compare.ts` mirrors
+`src/lib/run-compare.ts` (see the file map below), and
+`variable-origins.conformance.test.ts` replays the engine's own fixture
+(`engine/tests/fixtures/variable-resolution-conformance.json`) through both, so
+a divergence fails a test rather than surfacing as a wrong answer months
+later. The fixture supplies a pre-flattened chain, so it cannot exercise the
+`parentId` walk; that half is pinned separately, by running `collectionChain()`
+and the renderer's `walkAncestors()` over the same rows - including the
+malformed ones (a self-parent, a two-node loop, a parent that does not exist) -
+and asserting they agree.
+
+Call this what it is: a second implementation of the resolution order, kept
+honest rather than avoided. Importing the renderer's resolver is the option
+that would have avoided it and the build forbids it; an engine endpoint
+reporting origins is the other, and it would mean new C++ for a question the
+engine has no use for (execution needs the winner, never the losers). This
+does not make MCP a second **composition** path, which is the split that is
+load-bearing: `resolve_variables` reports stored definitions and substitutes no
+`{{tokens}}` - `POST /compose` remains the only place a request is composed.
+
 ## Resources
 
 Read-only Vayu data an agent can attach as context (`resources.ts`):
@@ -1111,6 +1178,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | `vayu://runs`               | The most recent 100 runs (first page), newest first; `pagination.total` / `hasMore` in the content carry the full count. A resource takes no arguments, so filtering and paging beyond this page is the `list_runs` tool's job. |
 | `vayu://collections`        | All request collections.         |
 | `vayu://environments`       | All environments.                |
+| `vayu://variables/resolution` | The resolution rule set: tier order, disabled/non-string handling, reserved namespaces, and what a script's scoped and merged reads see. See [Variables](#variables). |
 | `vayu://config`             | Engine configuration entries.    |
 | `vayu://scripting/completions` | The script sandbox's full API surface (see below). |
 | `vayu://scripting/types`    | The same surface as TypeScript declarations - the `.d.ts` the app's editor loads, so a call's parameters and return type are the running engine's. |
@@ -1383,6 +1451,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                        |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
 | `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source); `compare.conformance.test.ts` fails on any divergence. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
+| `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry (schemas, annotations, handlers) + `dispatchTool`, the one dispatch path `server.ts` and the tests share. |
 | `resources.ts`     | Static + templated resource definitions.                                    |

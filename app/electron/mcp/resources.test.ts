@@ -16,7 +16,12 @@
 
 import { describe, expect, test, vi } from "vitest";
 import { STATIC_RESOURCES, projectScriptingSurface, projectScriptingTypes } from "./resources.js";
-import type { ToolContext } from "./tools.js";
+import { TOOLS, type ToolContext } from "./tools.js";
+import {
+	VARIABLE_PRECEDENCE_SENTENCE,
+	VARIABLE_RESOLUTION_MODEL,
+	VARIABLE_RESOLUTION_URI,
+} from "./variable-origins.js";
 import type { EngineClient } from "./engine-client.js";
 
 /** One completion in the engine's shape - Monaco fields and all. */
@@ -275,5 +280,96 @@ describe("vayu://runs description", () => {
 
 	test("points at the pagination fields that carry the real count", () => {
 		expect(runsResource().description).toMatch(/pagination\.total/);
+	});
+});
+
+describe("the variable resolution resource", () => {
+	const resource = () => {
+		const r = STATIC_RESOURCES.find((s) => s.uri === VARIABLE_RESOLUTION_URI);
+		if (!r) throw new Error("variable resolution resource is not registered");
+		return r;
+	};
+
+	const read = async () =>
+		(await resource().read({} as ToolContext)) as typeof VARIABLE_RESOLUTION_MODEL;
+
+	test("is registered and needs no engine call to answer", async () => {
+		// A rules document, not current state: it must not fail with the engine
+		// down, which is exactly when an agent is reading about resolution.
+		await expect(resource().read({} as ToolContext)).resolves.toBeDefined();
+	});
+
+	test("states the four tiers, in order, once", async () => {
+		const model = await read();
+		expect(model.tiers.map((t) => t.scope)).toEqual([
+			"global",
+			"collection",
+			"environment",
+			"row",
+		]);
+		// Ranks ascend with precedence, so a client sorting by rank gets the
+		// ladder rather than declaration order.
+		expect(model.tiers.map((t) => t.rank)).toEqual([1, 2, 3, 4]);
+	});
+
+	test("every tier names the tools that write it, and those tools exist", async () => {
+		const model = await read();
+		const toolNames = new Set(TOOLS.map((t) => t.name));
+		const named = model.tiers.flatMap((t) => [...t.writtenBy, ...t.readBy]);
+		// "Written but never read" in reverse: a tool named here that no longer
+		// exists sends an agent to a call it cannot make.
+		expect(named.length).toBeGreaterThan(0);
+		for (const name of named) expect(toolNames, name).toContain(name);
+	});
+
+	test("names where resolution actually runs, so the model is not read as MCP's own", async () => {
+		const model = await read();
+		expect(model.resolvedBy).toMatch(/POST \/compose/);
+		expect(model.resolvedBy).toMatch(/conformance fixture|shared conformance/i);
+	});
+
+	test("the collections resource points at the model too, not just environments", () => {
+		const collections = STATIC_RESOURCES.find((s) => s.uri === "vayu://collections");
+		expect(collections?.description).toContain(VARIABLE_PRECEDENCE_SENTENCE);
+		expect(collections?.description).toContain(VARIABLE_RESOLUTION_URI);
+	});
+
+	test("carries the rules a winner alone cannot express", async () => {
+		const model = await read();
+		const rules = model.rules.join(" ");
+		// Mutation check: drop any one of these rules and its line fails.
+		expect(rules).toMatch(/only an explicit `enabled: false` disables/i);
+		expect(rules).toMatch(/non-string stored `value` reads as the empty string/i);
+		expect(rules).toMatch(/absent, not present-and-empty/i);
+	});
+
+	test("names the reserved namespaces, and the $vu / $guid split", async () => {
+		const model = await read();
+		const patterns = model.reservedNamespaces.map((n) => n.pattern);
+		expect(patterns.some((p) => p.includes("data."))).toBe(true);
+		expect(patterns.some((p) => p.includes("$vu"))).toBe(true);
+
+		const vu = model.reservedNamespaces.find((n) => n.pattern.includes("$vu"))!;
+		const guid = model.reservedNamespaces.find((n) => n.pattern.includes("$guid"))!;
+		// The two behave oppositely and the docs say so: a variable named $vu
+		// does not answer for the identity, a variable named $guid does win.
+		expect(vu.rule).toMatch(/does not answer/i);
+		expect(guid.rule).toMatch(/DOES win|does win/i);
+	});
+
+	test("describes the scoped-vs-merged script read, the #1196 footgun", async () => {
+		const model = await read();
+		expect(model.fromAScript.scoped).toMatch(/do not fall through/i);
+		expect(model.fromAScript.merged).toMatch(/stopping at the first scope/i);
+		expect(model.fromAScript.chain).toMatch(/whole chain/i);
+	});
+
+	test("the environments resource points at the model rather than restating it", () => {
+		const environments = STATIC_RESOURCES.find((s) => s.uri === "vayu://environments");
+		expect(environments?.description).toContain(VARIABLE_PRECEDENCE_SENTENCE);
+		expect(environments?.description).toContain(VARIABLE_RESOLUTION_URI);
+		// The fact the old one-liner omitted, and the reason an agent wrote to
+		// the wrong environment.
+		expect(environments?.description).toMatch(/isActive/);
 	});
 });
