@@ -5,368 +5,235 @@ The load-testing and request-execution engine. AGPL-3.0. See the repo root
 
 ```
 engine/
-├── src/core/      # load_strategy, metrics_collector, run_manager
-├── src/http/      # HTTP server, SSE, routes, thread_pool, rate_limiter
+├── src/core/      # load_strategy, metrics_collector, run_manager, import, openapi
+├── src/http/      # HTTP server, SSE, routes, thread_pool, rate_limiter, transport
 ├── src/db/        # SQLite persistence
 ├── src/runtime/   # QuickJS scripting engine
+├── src/platform/  # per-OS code (timer resolution, process, paths)
+├── src/utils/     # shared primitives (encoding, ascii_case, parse, reentrant)
 ├── include/vayu/  # Public headers
-├── tests/         # Google Test suite
+├── tests/         # Google Test suite; tests/fixtures/ holds the conformance tables
 └── vendor/        # quickjs-ng, hdrhistogram
 ```
 
 ## Conventions
 
-- Standard: C++23 (#901), `-Wall -Wextra -Wpedantic`. What a standard offers on
-  each platform is measured, not remembered: `scripts/cxx-feature-probe/` is a
-  standalone CMake project that compiles and links one tiny translation unit per
-  feature, and the `C++ feature probe` workflow runs it on all three platforms
-  plus `g++-14`. It gates nothing - see `docs/engine/building.md`, and #901 for
-  the recorded results. The one measurement that shapes the code: **libc++ has no
-  `std::move_only_function`**, so `thread_pool.hpp`'s queue stays
-  `std::function` and every queued task stays copyable. Run the probe before
-  reaching for a C++23 library feature the engine does not already use.
-- An error-or-nothing API is `RouteResult` (`std::expected<void, RouteError>`),
-  never `std::optional<...>` with an empty optional for success - that shape
-  reads backwards at every call site and lets a dropped return pass for "fine".
-  `route_error` builds the refusal, `as_response` converts one to the pair a
-  testable core answers with.
+Each rule below names the primitive that holds it and the test that guards it.
+Several guards are source scans over `engine/{src,include,tests}` with a
+per-file exemption list; they exist because the lint gates read only the files
+a change touches (#946), so nothing else holds an untouched file at zero.
+
+- **Standard: C++23** (#901), `-Wall -Wextra -Wpedantic`. What a standard offers
+  on each platform is measured: `scripts/cxx-feature-probe/` compiles one tiny
+  translation unit per feature and the `C++ feature probe` workflow runs it on
+  all three platforms plus `g++-14`; it gates nothing (`docs/engine/building.md`).
+  The one measurement that shapes the code: libc++ has no
+  `std::move_only_function`, so `thread_pool.hpp`'s queue stays `std::function`
+  and every queued task stays copyable. Run the probe before reaching for a
+  C++23 library feature the engine does not already use.
+- **An error-or-nothing API is `RouteResult`** (`std::expected<void, RouteError>`),
+  never an `std::optional` whose empty state means success. `route_error` builds
+  the refusal; `as_response` converts one to the pair a testable core answers.
 - **An optional a guard has already proved is read through one binding**, not
   re-derived: `const auto& shape = shapes[i]; if (!shape) { continue; }
   use (*shape);`. `shapes[i]` written twice is two expressions, so
-  `bugprone-unchecked-optional-access` cannot connect the guard to the use - and
-  neither can a reader. Where what makes the access safe lives in *another*
-  function (a producer that sets two fields together, a validation pass that ran
-  under the same held DB mutex, a list built only from the rows that had an
-  identity), the access goes through
+  `bugprone-unchecked-optional-access` cannot connect the guard to the use, and
+  neither can a reader. Where the rule that makes the access safe lives in
+  *another* function (a producer that sets two fields together, a validation
+  pass under the same held DB mutex), read it through
   **`vayu::utils::invariant_value`** (`utils/invariant.hpp`, #943), which takes
-  the rule as a string: a broken rule throws `std::logic_error` naming it,
-  instead of reading an empty optional. `.value()` is *not* the way to say this
-  - it names no rule, and the check reports it too, so it buys a `NOLINT` per
-  site. That helper is for invariants only: an optional a client can empty is
-  still handled, with its `if`, its 404 and its default.
+  the rule as a string and throws `std::logic_error` naming it when broken.
+  `.value()` is not the way to say this: it names no rule and the check reports
+  it. The helper is for invariants only; an optional a client can empty keeps
+  its `if`, its 404 and its default.
 - **In a test the guard is `ASSERT_HAS_VALUE`** (`tests/optional_assert.hpp`,
-  #980), never `ASSERT_TRUE (opt.has_value ())`. The gtest spelling guards the
-  reads under it perfectly well at run time and the check cannot see it: the
-  condition goes through an `::testing::AssertionResult`, and the dataflow model
-  follows `has_value ()` only into a branch condition, which is where 561 of
-  `engine/tests`' findings came from. Nor can the near misses -
-  `ASSERT_TRUE (...) << "why"`, `ASSERT_NE (opt, std::nullopt)` and `.value ()`
-  are each still reported. The macro is the one `if` the model does follow, with
-  `FAIL ()`'s `return` in its failing branch, so the failure stays gtest's -
-  located at the call site, naming the expression, and streamable
-  (`ASSERT_HAS_VALUE (row) << "after the second write"`). It is a guard, not a
-  silencer: an optional the code under test may legitimately leave empty is
-  still tested over both outcomes, and `invariant_value` remains the answer for
-  a rule that lives in another function. Two shapes the macro does not cover:
-  an optional read *through* a guarded row (`row->parent_id`, a reassigned
-  `verdict.reason`) needs its own guard, since the outer one says nothing about
-  it, and a non-void test helper cannot use the macro at all - `FAIL ()`
-  returns - so it states the absent case as an `if` that `ADD_FAILURE ()`s and
-  returns something harmless. `optional_assert_test.cpp` scans `tests/` for the
-  spelling this replaced and fails naming the file, because the gates lint only
-  the files a change touches (#946) and nothing else holds an *untouched* file
-  at zero.
+  #980), never `ASSERT_TRUE (opt.has_value ())`: the gtest spelling goes through
+  an `AssertionResult` the analyzer's dataflow cannot follow, so every read
+  under it is reported. The macro is one `if` with `FAIL ()` in the failing
+  branch, so the failure stays gtest's and streamable
+  (`ASSERT_HAS_VALUE (row) << "after the second write"`). An optional read
+  *through* a guarded row (`row->parent_id`) needs its own guard; a non-void
+  helper cannot use the macro and states the absent case as an `if` that
+  `ADD_FAILURE ()`s and returns something harmless. Guard:
+  `optional_assert_test.cpp` scans `tests/` for the replaced spelling.
 - **The reentrant spelling of a C call, always** (#945). `std::localtime` and
-  `std::strerror` hand back a pointer into storage the whole process shares, so
-  with a worker thread per connection what comes back is a timestamp or an
-  error message describing *another* call's subject - not a crash, which is why
-  it survived this long. `vayu/utils/reentrant.hpp` is the one place that
-  spells them safely (`format_local_time`, `format_utc_time`, `errno_message`), and
-  `tests/reentrant_test.cpp` scans `src` and `include` for the classic names,
-  plus for the `setenv`/`putenv` that would make the single exempted `getenv`
-  (`transport_policy.cpp`, no reentrant spelling to move to) unsafe. The
-  daemon's force-shutdown branch is `std::_Exit` for the same family of reason:
-  it runs *inside* the signal handler, and `exit` there runs every static
-  destructor while the worker threads are still using what they destroy.
+  `std::strerror` return pointers into process-shared storage, so with a worker
+  thread per connection the result can describe another call's subject.
+  `vayu/utils/reentrant.hpp` is the one place that spells them safely
+  (`format_local_time`, `format_utc_time`, `errno_message`). The daemon's
+  force-shutdown branch is `std::_Exit`: it runs inside the signal handler,
+  where `exit` would run every static destructor under live worker threads.
+  Guard: `tests/reentrant_test.cpp` scans `src` and `include` for the classic
+  names and for `setenv`/`putenv`, which would make the single exempted
+  `getenv` (`transport_policy.cpp`) unsafe.
 - **Nothing at namespace scope is built at run time** (#945, `cert-err58-cpp`).
-  A constant is `constexpr` - `std::string_view` for text, `std::array` for a
-  list, `const char*` for a path a `std::string` parameter will take anyway -
-  and an object that cannot be one (a `std::regex`, an `nlohmann::json`, a
-  `std::mt19937`, anything holding a `std::string`) lives inside a function as
-  a `static` the accessor returns a reference to. Both spellings answer the
-  same two questions: dynamic initialisation runs before `main`, where a throw
-  has no frame to land in and terminates the process, and its order against
-  another translation unit's statics is unspecified. A function-local static is
-  built on the first caller's stack, exactly once, thread-safely, and after
-  everything it depends on. `token_pattern` in `request_composer.cpp` is the
-  shape; the same file's `PASSWORD_CHARS` is what to do when a constant was
-  *derived* from another - spell it out and pin the two together with a
-  `static_assert`, rather than concatenating before `main`. A test-only
-  constant is held to this too: the gate does not read `tests/` differently.
+  A constant is `constexpr` (`std::string_view`, `std::array`, `const char*`);
+  an object that cannot be one (`std::regex`, `nlohmann::json`, `std::mt19937`,
+  anything holding a `std::string`) is a function-local `static` an accessor
+  returns a reference to. Dynamic initialisation before `main` has no frame to
+  throw into and an unspecified order against other translation units; a
+  function-local static is built once, thread-safely, after what it depends on.
+  `token_pattern` in `request_composer.cpp` is the shape; its `PASSWORD_CHARS`
+  is what to do when a constant was *derived* from another: spell it out and
+  pin the two with a `static_assert`. Test-only constants are held to this too.
 - **Bytes become characters in one place, never at the site** (#945,
-  `cppcoreguidelines-pro-type-reinterpret-cast`). Reinterpreting a pointer
-  between character types is defined behaviour - [basic.lval] lets any object be
-  read through a `char`, `unsigned char` or `std::byte` lvalue - so a
-  hand-rolled copy *works*, which is exactly why eight of them accumulated. Two
-  primitives own the conversion now and a third owns its inverse:
-  **`vayu::utils::byte_view`** (`utils/encoding.hpp`) for a `std::span` of bytes
-  as the `std::string_view` every encoder here takes - a `sha256` /
-  `hmac_sha256` digest, and the six sites that spelled that themselves;
+  `cppcoreguidelines-pro-type-reinterpret-cast`). Reinterpreting between
+  character types is defined behaviour, which is why hand-rolled copies
+  accumulate. The primitives: **`vayu::utils::byte_view`** (`utils/encoding.hpp`)
+  for a `std::span` of bytes as the `std::string_view` every encoder takes;
   **`vayu::db::column_text`** (`db/database.hpp`) for a sqlite TEXT column,
-  which `sqlite3_column_text` hands back as `const unsigned char*` and nothing
-  consumes as one; **`vayu::utils::detail::sodium_bytes`**
-  (`utils/sodium_init.hpp`) going the other way, for libsodium; and
-  **`tls_detail::openssl_bytes`** (`tests/tls_server.hpp`, #1013) going the same
-  way for OpenSSL, whose parameters are `const unsigned char*` with no
-  `string_view` seam. A SQL NULL stays
-  a null pointer through `column_text` on purpose - absent and empty are
-  different answers, and defaulting one to the other erases the distinction its
-  callers read. `tests/character_cast_test.cpp` scans `engine/{src,include,tests}`
-  and names any file spelling one itself, with a per-file exemption list, because
-  the gates lint only the files a change touches (#946) and so hold an
-  *untouched* file at nothing. The casts that are *not* this rule - a
-  `sockaddr_in*` off an `addrinfo`, a Windows function pointer off
-  `GetProcAddress` - have no primitive to route through and the scan does not
-  look at them.
+  keeping SQL NULL as a null pointer because absent and empty are different
+  answers; **`vayu::utils::detail::sodium_bytes`** (`utils/sodium_init.hpp`)
+  and **`tls_detail::openssl_bytes`** (`tests/tls_server.hpp`, #1013) going the
+  other way. A `sockaddr_in*` off an `addrinfo` or a Windows function pointer
+  off `GetProcAddress` is not this rule and the scan does not look at them.
+  Guard: `tests/character_cast_test.cpp`.
 - **A case-insensitive comparison folds through one primitive** (#1060).
-  Lower-casing a string for a comparison had no primitive, so all 29 sites
-  across 19 files wrote it themselves in four spellings - and the copy that had
-  not received the others' fix passed a plain `char` to `::tolower`, which is
-  undefined for a byte above 127 where `char` is signed.
-  **`vayu::utils::ascii_lower`** (`utils/ascii_case.hpp`) is the fold, for a
-  character or a whole string, and **`ascii_lower_equal`** is the answer for
-  the callers that compare without building a lowered copy -
-  `vayu::CaseInsensitiveLess` included, whose `equal` used to derive an answer
-  from the ordering by comparing twice (`!less (a, b) && !less (b, a)`) and now
-  folds through the same helper in one pass. ASCII is in the name because it is
-  the contract:
-  every caller folds a header name, a scheme, a MIME type, a hostname or a
-  log-level word, all ASCII by their own specifications, and `std::tolower`
-  would answer for a byte above 127 out of whatever the process last set as its
-  C locale. The fold is a range test on the character, so nothing here calls
-  `std::tolower` at all and the exemption list is empty.
-  `tests/ascii_case_test.cpp` scans `engine/{src,include}` and names any file
-  that spells the fold itself, on the same reasoning as the two scans above. Its
-  matcher is its own rather than `source_scan.hpp`'s `names_call`, and that is
-  the point: the sites that were undefined wrote
-  `std::transform (b, e, b, ::tolower)`, passing the function rather than
-  calling it, so a guard that requires a `(` after the name reads the one
-  spelling worth catching as a clean tree.
+  **`vayu::utils::ascii_lower`** (`utils/ascii_case.hpp`) folds a character or a
+  whole string; **`ascii_lower_equal`** compares without building a lowered
+  copy (`vayu::CaseInsensitiveLess` folds through it in one pass). ASCII is in
+  the name because it is the contract: every caller folds a header name, a
+  scheme, a MIME type, a hostname or a log-level word, all ASCII by their own
+  specifications, and `std::tolower` on a byte above 127 is undefined where
+  `char` is signed and locale-dependent otherwise. Nothing here calls
+  `std::tolower`. Guard: `tests/ascii_case_test.cpp`, whose matcher catches the
+  function *passed* (`std::transform (b, e, b, ::tolower)`) as well as called.
 - **A class with a destructor states all five** (#945,
-  `cppcoreguidelines-special-member-functions`). Writing one of the five and
-  leaving the rest implicit is how a fixture that owns a listener and a thread
-  stays copyable: the copy compiles, both objects stop the same server, and
-  nothing says it was not meant to. Every RAII holder here - the `Impl` behind a
-  pImpl, `Database`, the ~20 in-process mock servers in `tests/`, and (#1013)
-  every manager and listener in `include/`: `Server`, `ManagedListener`,
-  `SseStreamManager`, `InboxManager`, `RunManager`, `EventLoopWorker`, `Logger`
-  and their kin - deletes copy *and* move beside its destructor, in the spelling
-  `client.hpp` uses (`Foo (const Foo&) = delete;` and the three that follow).
-  Deleting is the
-  default answer, not defaulting: none of these is meaningfully movable, and a
-  move would leave a hollow object whose methods still compile. **Declaring the
-  four suppresses the implicit default constructor**, so a class that had no
-  other constructor gains `Foo () = default;` beside them - `TransferData`,
-  `RunManager` and the `LoadStrategy` interface each needed it, and the build is
-  what says so. A mock server's
-  thread pool is `vayu::tests::pooled_task_queue`
-  (`tests/task_queue.hpp`) - httplib's `new_task_queue` hook takes a raw owning
-  pointer, which is its contract and not a leak, said once there rather than at
-  each fixture.
+  `cppcoreguidelines-special-member-functions`). Every RAII holder (the `Impl`
+  behind a pImpl, `Database`, the in-process mock servers in `tests/`, and every
+  manager and listener in `include/`: `Server`, `ManagedListener`,
+  `SseStreamManager`, `InboxManager`, `RunManager`, `EventLoopWorker`, `Logger`)
+  deletes copy *and* move beside its destructor, in the spelling `server.hpp`
+  uses. Deleting is the default answer: none of these is meaningfully movable,
+  and a move would leave a hollow object whose methods still compile. (`Client`
+  in `client.hpp` is the deliberate exception: it deletes copy and declares
+  move.) Declaring the four suppresses the implicit default constructor, so a
+  class with no other constructor gains `Foo () = default;` beside them. A mock
+  server's thread pool is `vayu::tests::pooled_task_queue`
+  (`tests/task_queue.hpp`); httplib's `new_task_queue` hook takes a raw owning
+  pointer by contract.
 - **A length is kept, never re-derived** (#945, `cppcoreguidelines-pro-bounds-*`).
-  Every finding in this family is a place where a bound was thrown away and then
-  written out again by hand, and the answer is almost never a `NOLINT`: a
-  subrange of a string is `substr` on a view, not `data () + offset`; a fixed
-  table is a `constexpr std::array` (`std::to_array` so the count is not
-  restated) or a `std::string_view`, not a C array; `argv` is a
-  `std::span<char* const>` built from `argc`; and an index a caller computed
-  goes through **`.at ()`**, which costs one predictable compare and turns a
-  wrong index into a throw instead of a read past the end. Two shapes had grown
-  hand-rolled copies and now have primitives: **`vayu::utils::parse_number`**
-  (`utils/parse.hpp`) is a whole `std::string_view` as an integer or nothing -
-  the five sites that spelled `from_chars`'s pointer range themselves each had
-  to remember the `ptr != end` half that separates "42abc is 42" from "42abc is
-  not a number". **`vayu::core::parse_numeric_flag`**
-  (`core/numeric_flag.hpp`, #1028) is the layer above it for a *flag*: it holds
-  the value to the range the flag documents and answers a refusal naming the
-  flag, the range and what was typed, because the two argument loops used to
-  reach for `std::stoi` and answer `vayu-engine: stoi`. A new numeric flag is
-  described there, never parsed at the site. **`core/flag_value.hpp`** (#1031)
-  is the rule that runs before either: a flag with nothing after it, and a value
-  beginning with `-`, are refused rather than defaulted or taken - `--data-dir
-  --port 9999` used to create a data directory named `--port`. Both argument
-  loops live in headers now (`core/daemon_args.hpp`, `core/cli_args.hpp`)
-  because a rule is only worth the loop wired to it, and the loop is what
-  `tests/argument_rules_test.cpp` has to be able to call - and
-  **`vayu::http::CurlErrorBuffer`**
-  (`http/curl_error_buffer.hpp`) owns `CURLOPT_ERRORBUFFER`, whose three rules
-  (at least `CURL_ERROR_SIZE` bytes, alive for the whole transfer, written only
-  on failure so a reused handle must be cleared between transfers) a bare
-  `char[CURL_ERROR_SIZE]` states none of. `tests/bounds_primitives_test.cpp`
-  scans `engine/{src,include,tests}` for both spellings with a per-(file, token)
-  exemption list, on batch 1's reasoning: the gates lint only the files a
-  change touches (#946) and so hold an *untouched* file at nothing.
-  The rest of the family is a subscript, which is not a token - there the gate
-  is the whole of the guard, decided rather than omitted, and since #946 the
-  gate re-checks the whole of every file an edit opens.
+  A subrange of a string is `substr` on a view, not `data () + offset`; a fixed
+  table is a `constexpr std::array` (`std::to_array`, so the count is not
+  restated) or a `std::string_view`; `argv` is a `std::span<char* const>`; an
+  index a caller computed goes through `.at ()`. Primitives:
+  **`vayu::utils::parse_number`** (`utils/parse.hpp`), a whole
+  `std::string_view` as an integer or nothing (the `ptr != end` half of
+  `from_chars` that separates "42abc is 42" from "42abc is not a number");
+  **`vayu::core::parse_numeric_flag`** (`core/numeric_flag.hpp`, #1028) above
+  it for a *flag*, holding the value to its documented range and refusing with
+  the flag, the range and what was typed; **`core/flag_value.hpp`** (#1031)
+  before either, refusing a flag with nothing after it or a value beginning
+  with `-`. Both argument loops live in headers (`core/daemon_args.hpp`,
+  `core/cli_args.hpp`) so `tests/argument_rules_test.cpp` can call them.
+  **`vayu::http::CurlErrorBuffer`** (`http/curl_error_buffer.hpp`) owns
+  `CURLOPT_ERRORBUFFER` and its three rules (at least `CURL_ERROR_SIZE` bytes,
+  alive for the whole transfer, cleared between transfers on a reused handle).
+  Guard: `tests/bounds_primitives_test.cpp`. A subscript is not a token, so for
+  the rest of the family the lint gate is the whole guard.
 - **libcurl's variadic calls go through `set_opt` / `get_info`** (#1023,
-  `cppcoreguidelines-pro-type-vararg`). `curl_easy_setopt`,
-  `curl_multi_setopt` and `curl_easy_getinfo` read their third argument back as
-  whatever the constant says, and nothing checks that the caller passed that -
-  an `int` for a `long` option is read out of the wrong promotion slot, and an
-  `int*` where `CURLINFO_RESPONSE_CODE` writes a `long` is a write past the
-  object. **`vayu::http::set_opt<CURLOPT_...>` and
-  `vayu::http::get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the
-  constant as a template argument, decode the argument category libcurl encodes
-  in it, and `static_assert` the value against it; the three vararg calls left
-  in the engine are the ones inside those wrappers, holding the one `NOLINT`
-  between them. Only the Windows leg ever reported this: libcurl's
-  type-checking macros are `#if !defined(__cplusplus)`, so what C++ gets is
-  `curl_exactly_three_arguments`, defined only under `__STDC__` - which GCC and
-  Clang define and MSVC does not, so the call is inside a system-header macro
-  on Linux and a plain call on Windows. `clang-tidy --extra-arg=-U__STDC__`
-  reproduces the Windows reading anywhere.
+  `cppcoreguidelines-pro-type-vararg`). **`vayu::http::set_opt<CURLOPT_...>`**
+  and **`get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the constant as
+  a template argument and `static_assert` the value against the category
+  libcurl encodes in it; the vararg calls inside those wrappers are the only
+  ones in the engine, each under its own `NOLINT`. Only the Windows leg reports
+  the raw call: libcurl's type-checking macros are C-only and MSVC does not
+  define `__STDC__`. `clang-tidy --extra-arg=-U__STDC__` reproduces that reading
+  anywhere.
 - **A row struct's scalars all carry a default** (#1013,
   `cppcoreguidelines-pro-type-member-init`). The `vayu::db` structs in
-  `types.hpp` are aggregates an insert site fills field by field, so one it
-  forgets is *indeterminate* rather than zero - and sqlite_orm binds and stores
-  whatever that was. `Run::end_time` had already made the argument for itself;
-  it now holds for every scalar in the namespace. The three enums
-  (`Request::method`, `Run::type`, `Run::status`) default to what
-  `database.cpp`'s `row_extractor` already falls back to for a stored value it
-  cannot parse, so the struct and the reader agree about an unset field rather
-  than each picking an answer. A default is not a substitute for setting the
-  field: it bounds what a wrong insert can persist, and stops an indeterminate
-  `bool` or enum being read at all.
-- **A whole-tree tidy measurement passes `-header-filter` itself** (#1013). The
-  `HeaderFilterRegex` in `engine/.clang-tidy` is *not* read by a
-  `run-clang-tidy` invocation that omits the command-line flag, so a scan
-  without it reports nothing found in a header - which is how 50 findings went
-  uncounted through four measurement rounds. Deduplicate the result by
-  (file, line, column, check): a header finding is reported once per including
-  translation unit. `docs/engine/building.md` carries the command.
-- Formatter: clang-format, **19 exactly** (`.clang-format` at repo root; the
-  version is pinned because 39 of the 285 engine sources format differently
-  under 18). **A patch-level difference inside 19 is enough to matter**: Ubuntu
-  24.04's 19.1.1 and the CI runner's later 19.1.x disagree about three
-  continuation lines in `script_engine.cpp`, so `clang-format -i` over a whole
-  file rewrites regions the change never touched and the gate fails on them.
-  Format, then read `git diff` for reindentation you did not intend and put it
-  back - the tree as committed is what CI's binary accepts.
-  **A difference is a failure now** (#886): the `Engine formatting`
-  job in `pr-tests.yml` runs `--dry-run -Werror` over the whole of
-  `engine/{src,include,tests}` - whole tree, unlike the clang-tidy gate, because
-  the bulk-format commit left no backlog to grandfather. `scripts/pre-commit`
-  runs the same check over the engine sources a commit stages and refuses it on
-  a difference (#908), so the two agree on scope; without a clang-format 19 it
-  skips loudly rather than answering from another major. The config was derived
-  by measuring the bulk diff each setting produces, so its two odd-looking
-  settings (`ColumnLimit: 80` with `PenaltyExcessCharacter: 1`, and
-  `ContinuationIndentWidth: 0`) are what the code is written to, not oversights;
-  both are commented in the file. `engine/vendor/` sets `DisableFormat: true`.
-  **Includes are sorted**, with exactly one pinned exemption: the
-  `<windows.h>` / `<timeapi.h>` pair in
-  `src/platform/high_resolution_timer.cpp` (it moved there with the 1ms timer
-  request in #1161), wrapped in `// clang-format off` because timeapi.h needs
-  windows.h's types and sorts first alphabetically. If you hit a second such case, pin it at the
-  site the same way - do not turn the sorter off for the tree.
-  Before editing the config, read the note at the top of it - a "tidier" value
-  costs a five-figure-line rewrite.
-- Linter: clang-tidy (`.clang-tidy` configs in `engine/`, `engine/src/runtime/`,
-  `engine/tests/`), **19 or newer** - the root config uses
-  `ExcludeHeaderFilterRegex`, which an older binary rejects outright. The hook
-  finds it under `clang-tidy-19` or a plain `clang-tidy`, through the same
-  `find_llvm_tool` the formatter uses (`exact` there, `minimum` here) - apt
-  splits the names and Homebrew does not, and probing the plain name alone made
-  the hook skip on the setup CONTRIBUTING.md prescribes (#918). **A
-  finding is a failure now** (#885): `WarningsAsErrors: '*'` in
-  `engine/.clang-tidy` is the one place that says so, and both consumers read
-  their verdict from clang-tidy's exit status - the pre-commit hook refuses the
-  commit, and the `Lint changed engine sources` step in `pr-tests.yml` fails the
-  engine job **on Linux and Windows** - a `#ifdef _WIN32` branch is
-  preprocessed away before a Linux run sees it, so gating Linux alone left
-  `platform.hpp`'s per-OS split and the Windows-only blocks in `client.cpp` /
-  `event_loop_worker.cpp` / `temp_database.hpp` unlinted. macOS is excluded
-  because clang-tidy 19 *and* 20 both SIGILL there on the AppleClang 21 SDK -
-  a settled decision (#940), not an open bug; the only macOS-conditional code is
-  four `#define`s, so what is lost is `clang-analyzer-*` over shared code under
-  libc++, and it comes back only if a Homebrew LLVM survives that SDK. A pull
-  request that is nothing but a bulk reformat carries the **`reformat-pr`**
-  label, which is the whole of the CI gate's escape hatch - the gate's unit of
-  cost is the translation-unit parse, and a reformat asks for one per file it
-  rewrites. **CI lints translation units, never a header as an input** (#940):
-  a header has no `compile_commands.json` entry, so clang-tidy guesses a
-  command for it, and a guess that parses the wrong STL emits
-  `clang-diagnostic-error`s from files nobody touched. A header's findings
-  surface through every changed translation unit that includes it (#946); a
-  header-only change relies on the hook, which lints a staged header directly
-  against the local build tree.
-  **The hook and CI's Linux leg gate whole files** (#946, the promotion that
-  closed the #928 backlog paydown). Changed-lines scoping existed only to
-  quarantine a backlog older than any diff, and went with the backlog *where
-  the zero was measured* - the Linux toolchain: a finding anywhere in a file a
-  commit stages or a Linux-visible pull request change is that change's to
-  fix, or to NOLINT with the reason at the site; the `VAYU_TIDY_FULL` opt-in
-  and the hook's line-filter machinery are gone. **CI's Windows leg followed**
-  (#1023): its clang-tidy 20 over MSVC saw a backlog no Linux scan could
-  (`pro-type-vararg` on every libcurl option call, 20-only checks, Windows-only
-  code), measured at ~85 findings by #946's own PR, and it gates whole files
-  now that that backlog is paid down - `clang-tidy-diff.py` went with the
-  promotion. The whole-tree scan is what says the payment landed, per leg and
-  by number rather than by assertion. `.github/workflows/engine-tidy-scan.yml` is how either leg is
-  re-measured, weekly on both plus `workflow_dispatch`.
-  **The scan is the only thing that reads a header**, which is why its zero is
-  not the gate's zero restated: the gate lints translation units and never a
-  header (#940), so a header-only change is linted by no CI job at all. Two
-  false greens came out of building it, both the same shape - a real diagnostic
-  in a form the report's regex did not anticipate, counted as nothing - and the
-  second one (a Windows drive letter, `D:\a\...`, against a file pattern that
-  forbade colons) reported `0 findings` for a log holding 679. So the report now
-  fails when it parses no finding out of a log that holds diagnostic-shaped
-  lines: a zero is reported only where a zero was measured.
-
-  Nothing lints at *build* time: the commented-out `CMAKE_CXX_CLANG_TIDY` block went with #885, because a
-  lint that runs when someone uncomments it never runs. See
-  `docs/engine/building.md`.
-- **A destructor and a `main` are total, and no linter is what says so**
-  (#1023). `bugprone-exception-escape` is declined in `engine/.clang-tidy` -
-  it fires only on a `throw` it can *see*, so it answers about the standard
-  library being read rather than about this code: 33 findings on the Windows
-  leg against 0 on Linux, same commit, landing on the implicit destructors of
-  ordinary aggregates, and reporting `cli.cpp`'s `main` even though it already
-  catches `...`. The rule it was reporting is real and stays: a throw out of a
-  destructor terminates, and so does one out of a thread entry function or
-  `main`. `~SseStreamManager` and `~Logger` are the shape - a `try` around the
-  whole body, `catch (...)` at the end, and where it can report at all it goes
-  through a `noexcept` helper (`log_unrecoverable`) so the reporting cannot
-  throw either. `~Logger` is the exception that proves it: it reports nothing,
-  because the logger is what is being destroyed.
+  `types.hpp` are aggregates an insert site fills field by field, so a
+  forgotten one is indeterminate and sqlite_orm stores whatever that was. The
+  three enums (`Request::method`, `Run::type`, `Run::status`) default to what
+  `database.cpp`'s `row_extractor` falls back to for an unparsable stored
+  value, so struct and reader agree. A default bounds a wrong insert; it is not
+  a substitute for setting the field.
+- **A destructor, a thread entry and `main` are total, and no linter says so**
+  (#1023). `bugprone-exception-escape` is declined in `engine/.clang-tidy`
+  because it fires only on a `throw` it can see and so answers about the
+  standard library rather than this code. The rule stays: `~SseStreamManager`
+  and `~Logger` are the shape, a `try` around the whole body, `catch (...)` at
+  the end, reporting through a `noexcept` helper (`log_unrecoverable`);
+  `~Logger` reports nothing because the logger is what is being destroyed.
 - **An empty `catch` opens with `@deliberate` and then says why** (#944).
-  `bugprone-empty-catch` is enabled and a plain comment does not satisfy it - the
-  check reads only the keywords in `IgnoreCatchWithKeywords`, which
-  `engine/.clang-tidy` sets to `@TODO;@FIXME;@deliberate`. Write what the
-  recovery is and what the caller gets instead of the exception; the keyword is
-  the marker, the sentence after it is the argument. It is not a way past the
-  check: a `catch` with no reason to give is swallowing an error, and that one
+  `bugprone-empty-catch` reads only the keywords in `IgnoreCatchWithKeywords`
+  (`@TODO;@FIXME;@deliberate` in `engine/.clang-tidy`). The keyword is the
+  marker, the sentence after it is the argument: what the recovery is and what
+  the caller gets instead of the exception. A `catch` with no reason to give
   gets a fix or a log line, not a keyword.
-- Install the git pre-commit hook: `bash scripts/install-git-hooks.sh`
-- vcpkg manages all C++ dependencies - do not add one without updating
-  `engine/vcpkg.json`. **In the cloud dev environment, adding one needs a second
-  step**: its egress policy answers GitHub *source archives* with `403` while
-  allowing git-over-https, so a port fetched by `vcpkg_from_github` fails on a
-  cold cache with `curl operation failed with response code 403`. That is not
-  the dependency being unavailable - run `vcpkg-fix-port <port>` (no arguments
-  re-does the whole manifest), which rewrites the port to `vcpkg_from_git` as an
-  overlay, then build again. A session read that 403 as a policy wall and
-  abandoned a phase of #625 over it. **A port whose portfile pulls extra
-  archives of its own needs a hand** - `c4core` (under `ryml`) fetches three
-  `vcpkg_download_distfile` sub-archives that the fixer, which only rewrites
-  `vcpkg_from_github`, leaves alone; rewriting those three to `vcpkg_from_git`
-  in the overlay is a two-minute edit and only ever needed in this environment,
-  since CI reaches the archives.
-- A new `tests/*_test.cpp` must be listed in `add_executable(vayu_tests ...)`
-  in **`engine/tests/CMakeLists.txt`** - the source list is explicit, never a
-  glob. A guard beside it fails configure naming any unregistered file, because
-  an unbuilt test file reports nothing at all (#668: a 16-test suite sat unbuilt
-  for ~140 commits). The list sits in its own file rather than in
-  `engine/CMakeLists.txt` because that one is a `sanitizers.yml` trigger path
-  (#970): while the two shared a file, adding a test ran the five-leg sanitizer
-  matrix. **Do not move the list back**, and think before putting anything else
-  a routine pull request edits into `engine/CMakeLists.txt`.
-- A fixture that opens a scratch `Database` cleans up with
-  `vayu::tests::remove_database_files` (`engine/tests/temp_database.hpp`) - never
-  a hand-written suffix list. An opened database writes six files, not the four
-  the old copies listed, and eight of those twenty-two copies were wrong (#413).
+- **A whole-tree tidy measurement passes `-header-filter` itself** (#1013).
+  `run-clang-tidy` does not read `HeaderFilterRegex` from the config, so a scan
+  without the flag reports nothing in headers. Deduplicate by
+  (file, line, column, check): a header finding repeats per including
+  translation unit. `docs/engine/building.md` carries the command.
+- **A new `tests/*_test.cpp` is listed in `add_executable(vayu_tests ...)`**
+  in `engine/tests/CMakeLists.txt`; the list is explicit, never a glob, and a
+  guard beside it fails configure naming any unregistered file, because an
+  unbuilt test file reports nothing (#668). The list lives there and not in
+  `engine/CMakeLists.txt` because that file is a `sanitizers.yml` trigger
+  path (#970); keep routine edits out of it.
+- **A fixture that opens a scratch `Database` cleans up with
+  `vayu::tests::remove_database_files`** (`engine/tests/temp_database.hpp`),
+  never a hand-written suffix list: an opened database writes six files (#413).
+- **vcpkg manages every C++ dependency**: add one in `engine/vcpkg.json`. In
+  the cloud dev environment a port fetched by `vcpkg_from_github` fails on a
+  cold cache with `curl operation failed with response code 403` (the egress
+  policy refuses GitHub source archives and allows git-over-https). Run
+  `vcpkg-fix-port <port>` (no arguments re-does the whole manifest), which
+  rewrites the port to `vcpkg_from_git` as an overlay, then build again. A port
+  whose portfile pulls extra archives of its own needs a hand: `c4core` (under
+  `ryml`) fetches three `vcpkg_download_distfile` sub-archives the fixer leaves
+  alone; rewrite those to `vcpkg_from_git` in the overlay. Only this
+  environment needs it; CI reaches the archives.
+- Install the git pre-commit hook: `bash scripts/install-git-hooks.sh`.
+
+## Formatting and linting
+
+- **clang-format 19 exactly** (`.clang-format` at repo root; the pin exists
+  because 18 formats a measured share of the sources differently). A
+  patch-level difference inside 19 can still matter (one 19.1.x pair disagrees
+  about three continuation lines in `script_engine.cpp`), so after `clang-format
+  -i` read `git diff` for reindentation you did not intend and put it back: the
+  tree as committed is what CI's binary accepts. `Engine formatting` in
+  `pr-tests.yml` runs `--dry-run -Werror` over the whole of
+  `engine/{src,include,tests}` (#886) and `scripts/pre-commit` runs the same
+  check over what a commit stages (#908), skipping loudly without a
+  clang-format 19 rather than answering from another major. The config's two
+  odd-looking settings (`ColumnLimit: 80` with `PenaltyExcessCharacter: 1`,
+  `ContinuationIndentWidth: 0`) are what the code is written to; both are
+  commented in the file, and a "tidier" value costs a five-figure-line rewrite.
+  `engine/vendor/` sets `DisableFormat: true`. Includes are sorted, with one
+  pinned exemption: the `<windows.h>` / `<timeapi.h>` pair in
+  `src/platform/high_resolution_timer.cpp`, wrapped in `// clang-format off`
+  because `timeapi.h` needs `windows.h`'s types and sorts first. A second such
+  case is pinned at the site the same way, never by turning the sorter off.
+- **clang-tidy 19 or newer** (`.clang-tidy` in `engine/`, `engine/src/runtime/`,
+  `engine/tests/`; the root config uses `ExcludeHeaderFilterRegex`, which an
+  older binary rejects). The hook finds it as `clang-tidy-19` or plain
+  `clang-tidy` through the same `find_llvm_tool` the formatter uses (`exact`
+  there, `minimum` here), because apt splits the names and Homebrew does not
+  (#918). **A finding is a failure** (#885): `WarningsAsErrors: '*'` in
+  `engine/.clang-tidy`, and both consumers read the exit status. The pre-commit
+  hook refuses the commit; the `Lint changed engine sources` step in
+  `pr-tests.yml` fails the engine job on Linux and Windows. Windows is gated
+  because a `#ifdef _WIN32` branch is preprocessed away before a Linux run sees
+  it (#1023); macOS is excluded because clang-tidy 19 and 20 both SIGILL on the
+  AppleClang 21 SDK, a settled decision (#940), and the only macOS-conditional
+  code is four `#define`s. Both gated legs lint **whole files** (#946, #1023):
+  a finding anywhere in a file a change touches is that change's to fix, or to
+  `NOLINT` with the reason at the site. A pull request that is nothing but a
+  bulk reformat carries the **`reformat-pr`** label, the gate's one escape
+  hatch. **CI lints translation units, never a header as an input** (#940): a
+  header has no `compile_commands.json` entry, so clang-tidy would guess a
+  command and parse the wrong STL. A header's findings surface through every
+  changed translation unit that includes it; a header-only change relies on
+  the hook, which lints a staged header against the local build tree, and on
+  `.github/workflows/engine-tidy-scan.yml`, the weekly whole-tree scan on both
+  legs (plus `workflow_dispatch`) and the only thing that reads a header. The
+  scan's report fails when it parses no finding out of a log that holds
+  diagnostic-shaped lines, so a zero is reported only where a zero was measured.
+  Nothing lints at build time; the `CMAKE_CXX_CLANG_TIDY` block went with #885.
+  See `docs/engine/building.md`.
 
 ## HTTP API
 
@@ -382,581 +249,344 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
-| POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (issue #987); no restore endpoint - see `docs/engine/architecture.md` |
-| GET | `/trash` | What deleting a collection or request left recoverable (issue #988) - roots only, each with what its cascade took; `POST /trash/:id/restore` puts one back, `DELETE /trash/:id` destroys it, and `trashRetentionDays` purges the rest at startup |
-| POST | `/import/parse` | Read a raw import document - OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4 - into the tree `/import/apply` persists (issue #877); reads only |
-| POST | `/import` | The same parse, flattened and applied in one call - what MCP `import_document` wraps; the app parses and applies separately because a person previews in between |
-| POST | `/import/document` | A document's bytes as a JSON DOM, through the engine's one reader - the whole of what the app's `$ref` bundler needs, and what took the last YAML dependency out of `app/src` |
+| POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (#987); no restore endpoint, see `docs/engine/architecture.md` |
+| GET | `/trash` | What deleting a collection or request left recoverable (#988): roots only, each with what its cascade took; `POST /trash/:id/restore` puts one back, `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
+| POST | `/import/parse` | Read a raw import document (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4) into the tree `/import/apply` persists (#877); reads only |
+| POST | `/import` | The same parse, flattened and applied in one call; what MCP `import_document` wraps. The app parses and applies separately because a person previews in between |
+| POST | `/import/document` | A document's bytes as a JSON DOM through the engine's one reader; what the app's `$ref` bundler needs |
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
-| POST | `/diagnostics/connection` | One policy-honouring send, reported as which hop answered (issue #708) - outcome only, never a body |
-| GET | `/requests/:id/examples` | A request's saved example responses (issue #481), in stored order |
-| POST | `/specs` | Store an OpenAPI document (issue #637) and derive its operation index from it (issue #853); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (issue #712) |
-| POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (issue #655) - new document, moved binding and the created/updated/deleted requests in one transaction |
-| POST | `/specs/describe` | What a picked document is - dialect, title, declared operations (issue #869) - reads only, nothing stored; the identities `/specs/match` is then handed |
-| POST | `/specs/match` | Which request of a collection's subtree is which operation of a document (issue #761) - reads only, nothing stored or stamped |
-| POST | `/specs/diff` | What a re-fetched document would change about the collection bound to it (issue #854) - reads only; applying the answer is `POST /specs/sync` |
-| POST | `/specs/bind` | Bind a collection to a document (issue #862) - the document, the binding and every stamp, written **and cleared**, in one transaction |
-| POST | `/specs/export` | A collection back out as an OpenAPI document (issue #855) - its bound document patched, or a skeleton when it binds none; reads only |
-| POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only** - 409 on an existing id |
-| PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch) - 404 on a missing id |
+| POST | `/diagnostics/connection` | One policy-honouring send, reported as which hop answered (#708); outcome only, never a body |
+| GET | `/requests/:id/examples` | A request's saved example responses (#481), in stored order |
+| POST | `/specs` | Store an OpenAPI document (#637) and derive its operation index (#853); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (#712) |
+| POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (#655): new document, moved binding and the created/updated/deleted requests in one transaction |
+| POST | `/specs/describe` | What a picked document is: dialect, title, declared operations (#869); reads only |
+| POST | `/specs/match` | Which request of a collection's subtree is which operation of a document (#761); reads only |
+| POST | `/specs/diff` | What a re-fetched document would change about the collection bound to it (#854); reads only, applying is `POST /specs/sync` |
+| POST | `/specs/bind` | Bind a collection to a document (#862): the document, the binding and every stamp, written **and cleared**, in one transaction |
+| POST | `/specs/export` | A collection back out as an OpenAPI document (#855): its bound document patched, or a skeleton when it binds none; reads only |
+| POST | `/collections`, `/requests`, `/environments`, `/requests/:id/examples` | **Create only**: 409 on an existing id |
+| PUT | `/collections/:id`, `/requests/:id`, `/environments/:id`, `/requests/:id/examples/:exampleId` | **Update only** (merge-patch): 404 on a missing id |
 
-The pre-consolidation paths (`POST /request`, `POST /run`, `GET /run/:id[/report|/stop]`,
-`DELETE /run/:id`, `GET /metrics/live/:runId`, `GET /stats/:runId?format=json`) still
-work as **deprecated aliases** and will be removed in a future minor release; `GET
-/stats/:runId` in its SSE mode is retained wholesale. See `docs/engine/api-reference.md`
-(Deprecated aliases) for full reference.
+The pre-consolidation paths (`POST /request`, `POST /run`, `GET /run/:id`,
+`GET /run/:id/report`, `POST /run/:id/stop`, `DELETE /run/:id`,
+`GET /metrics/live/:runId`, `GET /stats/:runId?format=json`) still work as
+**deprecated aliases** and will be removed in a future minor release;
+`GET /stats/:runId` in its SSE mode is retained wholesale. See
+`docs/engine/api-reference.md` (Deprecated aliases). An unresolved
+`{"mode":"inherit"}` reaching an execution endpoint is treated as no auth and
+logged as a warning: it means a client skipped composition.
 
-Three things worth knowing before you design around them:
+### Contracts to design around
 
-- **POST creates, PUT updates - they are not interchangeable.** `POST
-  /<resource>` never updates and `PUT /<resource>/:id` on an id that does not
-  exist is a `404`; POST-as-upsert is gone (issue #95). One null-vs-absent rule
-  covers all three resources: on create
-  absent and `null` both mean "use the default", on update absent means "keep"
-  and `null` means "reset to the default", and a field with no default (a
-  collection's / environment's `name`, a request's `collectionId` / `name` /
-  `method` / `url`) rejects `null` with a `400` instead of ignoring the write.
-  The rule lives in one place per side - `apply_*_field` in
-  `engine/include/vayu/http/routes.hpp`, and `apiService.updateX` in
-  `app/src/services/api.ts` - so add fields there rather than re-deriving the
-  rule per handler. **The engine owns every id** (#97): a create carrying an `id`
-  is a `400` (presence alone, `null` included - `id` is outside the null rule),
-  and a `PUT` whose body `id` disagrees with the path is a `400` too, so the 409
-  on an existing id now only guards a `generate_id` collision.
-  `reject_client_supplied_id` / `reject_mismatched_body_id` in `routes.hpp` are
-  the one copy of that; `apiService.createX` strips `id` on the renderer side
-  because TypeScript only excess-property-checks object literals. Bulk import
-  goes through **`POST /import/apply`** (#96), which takes opaque `tempId`s,
-  generates every real id engine-side, returns the `idMap`, and writes the whole
-  tree in one transaction (a rejected payload persists nothing, so the old
-  client-side rollback is gone). The same per-resource field appliers back both
-  paths - `apply_collection_fields` / `apply_request_fields` /
-  `apply_environment_fields`, declared in `routes.hpp` - so add a field there and
-  bulk import gets it too.
+- **POST creates, PUT updates.** `POST /<resource>` never updates and
+  `PUT /<resource>/:id` on a missing id is a `404` (#95). One null-vs-absent
+  rule covers every resource: on create, absent and `null` both mean "use the
+  default"; on update, absent means "keep" and `null` means "reset to the
+  default"; a field with no default (a collection's or environment's `name`, a
+  request's `collectionId` / `name` / `method` / `url`) rejects `null` with a
+  `400`. The rule lives in one place per side, `apply_*_field` in
+  `engine/include/vayu/http/routes.hpp` and `apiService.updateX` in
+  `app/src/services/api.ts`; add fields there, never per handler. **The engine
+  owns every id** (#97): a create carrying an `id` is a `400` (presence alone,
+  `null` included), and a `PUT` whose body `id` disagrees with the path is a
+  `400`; `reject_client_supplied_id` / `reject_mismatched_body_id` in
+  `routes.hpp` are the one copy, and `apiService.createX` strips `id` because
+  TypeScript excess-property-checks object literals only. Bulk import is
+  **`POST /import/apply`** (#96): opaque `tempId`s in, every real id generated
+  engine-side, the `idMap` back, the whole tree in one transaction. The same
+  per-resource appliers (`apply_collection_fields` / `apply_request_fields` /
+  `apply_environment_fields`, declared in `routes.hpp`) back both paths, so a
+  field added there reaches bulk import too.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
-  issue #481) because one owns them: the owner is checked before the example on
-  every path, so an example reached through the wrong request is a `404` rather
-  than a cross-request write, and both `delete_request` and the collection
-  cascade take the examples with them. Ordering is a contract, not a display
-  choice - the list comes back by `order` (then `created_at`, then `id`) and a
-  mock server will answer with the first one. `POST /import/apply` writes them
-  nested on the request item, through the same `apply_request_example_fields`
-  applier the single-item route uses, so the two paths cannot drift. Every row
-  records an **`origin`** (#588): `import` for what an importer or a spec sync
-  wrote, `user` for what the app saved from a live response - defaulting to
-  `import`, and a `400` on anything else. It is stored so the OpenAPI spec sync
-  (`POST /specs/sync`, #655) can replace the first kind without touching the
-  second; nothing else about a row says where it came from. **Deleting an
-  imported example keeps the row as a tombstone** (`suppressed`, #722), because
-  the refresh rewrites a request's imported rows on any applied change and so
-  a plain delete lasted only until the next sync of any field. Every read
-  filters tombstones out - `get_request_examples` and `get_request_example`, so
-  the list route, a mock server and an export all behave as though the row were
-  gone - and `get_suppressed_request_examples` is the single read that sees
-  them, for the refresh. It matches on the response **status**, which is what a
-  document's example keeps when its description is reworded.
+  #481): the owner is checked before the example on every path, so an example
+  reached through the wrong request is a `404`, and `delete_request` and the
+  collection cascade take the examples with them. Ordering is a contract: the
+  list comes back by `order`, then `created_at`, then `id`, and a mock server
+  answers with the first. `POST /import/apply` writes them nested on the
+  request item through the same `apply_request_example_fields` applier. Every
+  row records an **`origin`** (#588), `import` or `user`, defaulting to
+  `import` and `400` on anything else, so the spec sync can replace the first
+  kind without touching the second. **Deleting an imported example keeps the
+  row as a tombstone** (`suppressed`, #722), because the sync rewrites a
+  request's imported rows on any applied change; every read filters tombstones
+  out (`get_request_examples`, `get_request_example`) and
+  `get_suppressed_request_examples` is the single read that sees them, matching
+  on response **status**, which survives a reworded description.
 - **`GET /requests/:id` is a single-request lookup.** `useRequestQuery` uses it
-  to load a restored request tab or a design-run copy on cold start - one round
-  trip, not the old scan of every collection's list. A `404` means the request
-  was genuinely deleted; anything else (a `5xx`, an unreachable engine) is a
-  transport failure, and callers (`DesignRunView`) must keep those apart - only
-  a real 404 becomes `RequestNotFoundError`. `GET /requests?collectionId=` still
-  lists a collection's requests.
+  to load a restored request tab or a design-run copy on cold start. A `404`
+  means the request was genuinely deleted; anything else is a transport failure,
+  and callers (`DesignRunView`) keep those apart: only a real 404 becomes
+  `RequestNotFoundError`. `GET /requests?collectionId=` lists a collection's.
 - **A streaming request is a different execution model, declared not detected**
   (#573). `POST /execute` with `"stream": true` creates the run row, hands the
-  transfer to a managed consumer worker (`SseStreamManager`, declared before
-  `server_` like the listener managers) and answers `202 {runId, eventsUrl}`;
-  `GET /runs/:runId/events` relays a bounded ring of parsed events, and the
-  completed run's trace carries a bounded `events` node. **Every stream ends by
-  a rule that can name itself** - server close, `POST /runs/:id/stop`,
-  `maxStreamEvents`, `maxStreamDurationMs`, or the idle timeout - never a
-  whole-transfer deadline, which is deliberately not set on this path. `stream`
-  with `transient` is a **400** rather than a silent reinterpretation.
-  **`POST /runs` takes `stream` too** (#576), through the *same*
-  `read_stream_flag` parser, so both endpoints agree on the spelling, the types
-  and the ranges. What differs is what enforces the caps: a load stream becomes
-  `Request::stream_bounds` and the event loop ends it, counting events with
-  `SseFrameCounter` (the hot-path counter, which agrees with `SseParser` on what
-  an event is). **Under load a stream is bounded by construction** - both caps
-  are always set, never zero-for-unbounded - because the load loop refills
-  concurrency per completion, so a transfer that never ends leaks its slot for
-  the rest of the run. **Reaching a cap is a successful completion**, not a
-  timeout; the byte cap (`maxResponseBodyBytes`) stays an error, and the
-  whole-transfer timeout becomes a backstop past the duration cap. The report
-  gains a `stream` section (per-completion event distribution, totals,
-  `capped`, derived `eventsPerSecond`), absent for every run that did not
-  stream. **A load stream's events are parsed back, never stored twice**
-  (#657): the sample's body already *is* the `text/event-stream` bytes, so the
-  deferred script replay and `GET /runs/:id/samples` both rebuild the list with
-  `buffered_stream_events_node` - one `SseParser`, one definition of an event -
-  bounded by `sseMaxStoredEvents`. The one thing stored beside the body is the
-  wire count (`result_bodies.stream_events`, NULL = not a stream), because a cut
-  body cannot report the length of the stream it is a prefix of.
-  **Scripts run** (#575): the pre-request one before the
-  transfer, the post-request one after the stream ends, reading the bounded list
-  as `pm.response.events`; because the route already answered `202`, their
-  output is stored on the trace's `scripts` node rather than returned. **A
-  consumer worker is drained by whoever owns the manager, before the state it
-  writes through goes away** (#646): `Server::stop()` calls
-  `SseStreamManager::shutdown()` - which signals every stream and *joins* its
-  worker - because `daemon.cpp` runs `curl_global_cleanup` between that call and
-  `~Server`. A test fixture holding a manager beside a `Database` it resets owes
-  the same order, and the two SSE fixtures hold it by keeping the manager in a
-  `unique_ptr` reset first. Waiting on `context->closed()` is *not* draining: it
-  flips at the end of the transfer, with the completion callback - which writes
-  the run row - still to run.
+  transfer to `SseStreamManager` (declared before `server_`, like the listener
+  managers) and answers `202 {runId, eventsUrl}`; `GET /runs/:runId/events`
+  relays a bounded ring of parsed events and the completed trace carries a
+  bounded `events` node. Every stream ends by a rule that can name itself
+  (server close, `POST /runs/:id/stop`, `maxStreamEvents`,
+  `maxStreamDurationMs`, the idle timeout), never a whole-transfer deadline,
+  which this path deliberately does not set. `stream` with `transient` is a
+  `400`. `POST /runs` takes `stream` too (#576) through the same
+  `read_stream_flag` parser; under load a stream becomes
+  `Request::stream_bounds`, the event loop ends it counting with
+  `SseFrameCounter` (which agrees with `SseParser` on what an event is), and
+  both caps are always set because the load loop refills concurrency per
+  completion and an unending transfer would leak its slot. Reaching a cap is a
+  successful completion; the byte cap (`maxResponseBodyBytes`) stays an error.
+  The report gains a `stream` section, absent for runs that did not stream. A
+  load stream's events are parsed back, never stored twice (#657): the sample
+  body already *is* the `text/event-stream` bytes, and the deferred script
+  replay and `GET /runs/:id/samples` rebuild the list with
+  `buffered_stream_events_node`, bounded by `sseMaxStoredEvents`; the one thing
+  stored beside the body is the wire count (`result_bodies.stream_events`, NULL
+  = not a stream). Scripts run (#575): pre-request before the transfer,
+  post-request after the stream ends with `pm.response.events`, output stored
+  on the trace's `scripts` node because the route already answered `202`.
+  **A consumer worker is drained by whoever owns the manager, before the state
+  it writes through goes away** (#646): `Server::stop()` calls
+  `SseStreamManager::shutdown()`, which signals every stream and *joins* its
+  worker, because `daemon.cpp` runs `curl_global_cleanup` between that call and
+  `~Server`. A fixture holding a manager beside a `Database` it resets owes the
+  same order (keep the manager in a `unique_ptr` reset first). Waiting on
+  `context->closed()` is not draining: it flips before the completion callback
+  writes the run row.
 - **An OpenAPI document is stored once and *bound* by collections, never owned
   by one** (#637). `spec_documents` holds the text verbatim plus an
-  engine-computed `hash`; `collections.openapi`
-  (`{specId, specHash, syncedAt}`, `{}` = unbound) is the edge, and
-  `requests.spec_operation` (`{operationId?, method, path}`, NULL = none) says
-  which operation a request *is*. Several collections may bind one document, so
-  nothing cascades to it: `DELETE /specs/:id` is a **409 naming the binder**
-  while any collection holds it, and there is no `PUT /specs/:id` - a changed
-  document is a new one, because rewriting in place would invalidate the hash
-  every run of every bound collection was stamped with. A scenario run of a
-  bound collection stamps `specId` + `specHash` into `config_snapshot` and
-  `GET /runs/:id/report` echoes it under `metadata.openapi`; an unbound run
-  carries no key at all. **Applying a re-fetched document is `POST /specs/sync`**
-  (#655), not a sequence of writes: it is the one route that creates, updates
-  *and* deletes, which is why it is deliberately outside `/import/apply` (that
-  one only creates, which is what lets it own every id with nothing stored behind
-  it). It refuses to touch a request outside the synced collection's subtree and
-  replaces only `origin="import"` examples. **The examples it writes are the ones
-  the document it stores documents** (#869): the payload carries a *decision* per
-  updated request - `examples: true` refreshes that request's imported rows,
-  absent leaves every one of them alone - and the rows come off the same read the
-  indexes come off (`core::spec_request_drafts_of` over the DOM
-  `read_spec_indexes` hands back). A list where the boolean belongs is a `400`,
-  as is `examples` on a `create` item, because a caller that states rows can
-  state an example for a response the document does not describe - which is what
-  the app did, having read those rows off `POST /specs/diff` two calls earlier.
-  `Database::spec_sync_apply` is its transaction, a sibling of `import_apply` and
-  `apply_reorder` for the same reason those two are separate.
-  **Which request is which operation is the engine's answer** (#761,
-  `POST /specs/match` over `core/operation_match.hpp`). Binding a collection
-  that already exists has to pair two independent lists, and it does it by
-  structure - both sides reduced to a path shape, with the origin, query and
-  fragment dropped and every placeholder (`{{petId}}`, `{petId}`) flattened to
-  `{}`, so a renamed path parameter is still the same endpoint. Ambiguity is
-  refused in both directions rather than guessed at, because the sync applies
-  changes *by* identity and a wrong one is worse than none. It moved out of the
-  renderer so an agent over MCP can bind the same way rather than through a
-  second copy of that rule. Since #854 moved the sync diff, **nothing in the
-  renderer reduces these shapes any more** - `services/openapi/operation-match.ts`
-  and its conformance suite are gone with it, and
-  `tests/fixtures/operation-shape-conformance.json` is this side's own table
-  rather than a cross-language pin. The route reads the **subtree** of the collection
-  it is given - an import binds the root and files requests under tag
-  sub-collections - through the same `collection_subtree_ids` walk
-  `POST /specs/sync` bounds itself by. It still parses no OpenAPI: the caller
-  hands it the identities the document declares, the same rows it stores as the
-  `operations` index - and since #869 the caller gets those from
-  **`POST /specs/describe`** rather than reading the document itself, so the
-  identities a pairing is previewed with are the ones the bind derives from the
-  same bytes. That route is the whole of what the Spec tab used to parse for:
-  the dialect (`OpenAPI 3.0` / `OpenAPI 2.0 (Swagger)`), `info.title`, and the
-  declared identities. A file that is readable and *not* a contract is a `400`
-  naming what it does not declare, never an answer declaring nothing.
-  **Binding is `POST /specs/bind`** (#862), the third spec write and the one that
-  makes an agent able to bind at all: the caller sends a document and a
-  collection - never a pairing - and the route reads the document, derives the
-  indexes, matches the subtree with the *same* `core::match_operations` over the
-  same `collection_subtree_requests` walk `POST /specs/match` previews with, and
-  commits the document, the moved binding and every stamp through
-  `Database::spec_sync_apply` - the sync's transaction, with its create and
-  delete halves empty. **Both halves of the stamping are that one walk**: a
-  request that matched is stamped, and one that carries a stamp and matched
-  nothing is *cleared*, because a stamp naming an operation only the previously
-  bound document declared is resolved by `operationId` first and claims the wrong
-  operation rather than none (#718). Clearing is deliberately not a list the
-  caller states - a list is what a caller can forget. Unbinding stays
-  `PUT /collections/:id` with `openapi: null`: one row, stamps untouched, so
-  unbind-then-rebind of the same document is lossless.
-  **Writing a collection back out as a document is the engine's too** (#855,
-  `core/openapi_export.hpp` over `POST /specs/export`), which is what makes
-  `export_spec` reachable over MCP. Two directions that are not variants of
-  each other: a bound collection's own stored bytes are *patched* - operations
-  nothing claims removed, request values and stored examples written in, and
-  every member Vayu does not model carried through by simply not being visited,
-  because a regenerated document would silently drop every `securityScheme`,
-  vendor extension and description the app has no model for - while an unbound
-  collection gets a skeleton that invents nothing. The same subtree walk bounds
-  it, with one addition: it stops at a collection bound to a *different*
-  document and not at one bound to the same (#721), so `collection_subtree_ids`
-  takes that boundary as a predicate rather than growing a second walk. YAML
-  output is `core::emit_yaml`, which lives beside the reader on purpose - a
-  string is quoted exactly when writing it plainly would read back as something
-  else, and that is `plain_scalar`'s question; split across two files a document
-  would export as `swagger: 2.0` and re-import as a number.
-  **Responses are validated against what the document declares** (#628):
-  `spec_documents.response_schemas` holds an engine-derived index (schemas as
-  written, plus one shared `refRoots` their `$ref`s resolve through), and
-  `core/schema_validation.cpp` matches a response to one by status pattern and
-  media type and validates it with **valijson** - not the `json-schema-validator`
-  #625 named, which segfaults on a recursive schema.
-  **The engine reads the document itself now** (#853, `core/openapi_document.hpp`
-  - rapidyaml, the one YAML dependency and the one translation unit that
-  includes it). **Both stored indexes are derived on every write and refused in
-  the body** - the `operations` index (#629, moved by #853) and the
-  `responseSchemas` index (#628, moved by #860). `POST /specs`,
-  `POST /specs/sync` and `POST /import/apply` all go through
-  `read_spec_indexes` → `core::derive_spec_indexes`, so an index is a fact
-  about the stored bytes the way `hash` is, and a document that cannot be read
-  is a `400` rather than a row nothing downstream can use. **One read produces
-  both**, which is what makes them agree: a status the schema index carries is
-  one the operation index lists for the same operation, on the same identity -
-  #715's repeated-`operationId` rule included. Deriving the schemas is the half
-  that *translates*: 3.0's `nullable` becomes a union with `null` and its
-  draft-04 boolean `exclusiveMinimum` becomes the bound, because a dialect
-  passed through untouched produces a **wrong** verdict about a body rather than
-  no verdict, and a response that is itself a `$ref` is read through one hop in
-  either dialect (#714). Nothing in the renderer extracts either index any more -
-  and since #869 nothing there reads a spec document at all:
-  `services/openapi/spec-operations.ts` went with the Spec tab's parse, and #877
-  took the last of it - the import parsers, and with them the `.testkit.ts` and
-  the two cross-language conformance suites that had been asking whether an
-  *import* still built what this side derives. There is nothing left to ask.
-  The reader keeps
-  document order (a JavaScript object could not: it sorts integer-like keys, so
-  `responses: {404, 200}` used to reach the store as `200, 404`), types scalars
-  like js-yaml's core schema, expands anchors, aliases and merge keys under a
-  budget of one node per input byte, and refuses a duplicate mapping key. The
-  identity it indexes is the identity an import stamps on a request, and since
-  #877 that is one function rather than two agreeing:
-  `tests/fixtures/declared-operations-conformance.json` stayed as this side's own
-  table (`openapi_document_test.cpp`) when its renderer half retired with the
-  parser it pinned, the way `operation-shape-conformance.json` did under #761.
-  **The engine builds the request drafts too now** (#865,
-  `core::spec_request_drafts_of`): not an identity but *the request an import
-  would build* - method, URL with its query joined in, params, headers, sampled
-  body, and the folder an import would file it under. That is the half #854's
-  sync diff compares, and it was a port of `openapi-v3.ts` / `openapi-v2.ts` /
-  their shared helpers / the schema sampler, held to their answers by a
-  cross-language fixture while both existed. **Since #877 it is the only
-  implementation**: the import runs on it too (`core::import_drafts_of`), so the
-  fixture that pinned the two retired with the renderer parser and
-  `tests/fixtures/import-conformance.json` records what that parser produced
-  instead. The port still carries JavaScript's own semantics (`??` falling
-  through `null` alone, `JSON.stringify`'s number spelling, truthiness) rather
-  than the nearest C++ idiom - `src/core/js_json.hpp` is that shim, shared with
-  the import - because those are the rules the answers were built on. All three answers come off **one** walk
-  (`src/core/openapi_walk.hpp`), so no two can disagree about which operations
-  exist or which of two kept a repeated `operationId`. A draft carries the
-  operation's documented responses too (#854): the diff does not compare them,
-  but applying a change *writes* them, and a draft without them is an answer no
-  apply can be built from - which is what kept a second parse of the same
-  document in the renderer after the comparison had moved.
-  **The comparison itself is here now** (#854, `core/spec_diff.hpp` over
-  `POST /specs/diff`): what a re-fetched document would change about the
-  collection bound to it, which was the last part of the spec feature only the
-  Spec tab could reach. It reads the bound document from the binding and walks
-  the subtree itself - the three-way `userTouched` rule (the request holds
-  neither the new document's value nor the bound one's) is worth nothing if the
-  caller can supply the previous side - and it writes nothing, exactly as
-  `POST /specs/match` previews what `POST /specs/bind` commits. The renderer's
-  `spec-diff.ts` went with it; what stays there is `spec-apply.ts`, which turns
-  this answer plus the user's ticks into the `POST /specs/sync` payload. The `{param}` ->
-  `{{param}}` rewrite a draft's URL is written with is
-  `core::normalize_path_templates`, the mock server's copy moved out of
-  `http/routes/mock_server.cpp` rather than written twice - the app writes those
-  URLs and the mock reads them back
-  (`tests/fixtures/path-template-conformance.json`, this side's own table since
-  #877 deleted the `var-normalize.ts` it used to be pinned against; its
-  `{{ x }}`-only half is `core::normalize_template_vars`, which every Postman and
-  Insomnia value an import carries goes through).
-  Three rules the shape enforces: an unbound collection gets **no `validation`
-  node at all** (never judged is not judged-and-passed); `checked: false` carries
-  a reason code and no validity; and keywords the draft-07 validator cannot
-  evaluate are **named and counted** on the verdict, because a body reported
-  clean by a schema half of which went unread is the failure mode this feature
-  would otherwise introduce. `POST /execute` returns the node and
-  `record_design_result` stores the *same object* on the trace, so the live and
-  restored panes cannot disagree. The status-pattern matcher is shared with
-  coverage (`match_status_pattern`), so one status cannot be "covered" by one
-  rule and "no schema for this status" by another.
-  **Under load the same check is deferred to run end** (#682):
-  `validate_sampled_responses` walks the per-step sample reservoirs once the run
-  has drained and stores `schemaValidation` on `runs.summary`, because the load
-  loop refills concurrency per completion and a schema walk there would cost
-  throughput invisibly - a source-scan test fails if validation reaches
-  `load_strategy.cpp` / `scenario_load.cpp`. That makes the tallies **sampled
-  where `coverage` beside them is exact**, so the block stores its own `sampled`
-  denominator and every reader prints it. A step's responses are now kept for
-  either of two reasons - a script to replay, or a contract to check - which is
-  what `configure_step_samples` is told; one budget covers both, so a bound
-  collection that also asserts thins each step's share.
-  **A collection run checks every step instead** (#681): the runner parses the
-  binding's schema index once before its first send - there is no hot path to
-  keep off when steps run one at a time - stamps each step's verdict on its
-  trace *and* its `step` SSE frame, and folds the same
-  `SampledValidationTotals` into the same `schemaValidation` block. It adds
-  `exact: true`, and that flag is load-bearing: the two modes write one block
-  that one component renders, so without it a run that checked everything would
-  be described to the reader as a sample. Absent reads as sampled, because a
-  report written before the flag was one. `failOnSchemaError` (default false,
-  scenario-only) is the opt-in that lets a schema failure fail a step - and only
-  a step that passed everything else, so a step already failing keeps the error
-  that named it.
-- **The engine parses every import document now** (#877,
-  `core/import_document.hpp`), which is what makes #853's "exactly one parser has
-  an opinion" true rather than nearly true. All four formats: OpenAPI 2.0/3.x
-  ride the #859 reader and the #865 draft builder - `core::import_drafts_of` is
-  `spec_request_drafts_of` with the skip tally kept and the operations under a
-  malformed `paths` key included, so the import and the sync diff cannot build a
-  request differently - while Postman v2.0/v2.1, the Postman environment and
-  globals exports and Insomnia v4 are nlohmann, no new dependency. Detection is
-  the renderer's old order, so the same bytes are claimed by the same format.
-  **The move is a test, not a promise**:
-  `tests/fixtures/import-conformance.json` holds what the renderer's own parsers
-  produced for a 15-document corpus, recorded at the last commit that had them,
-  and `import_parse_test.cpp` asserts this side matches on every build - two
-  normalisations aside, both of which are things the *renderer* could not do
-  (`meta.skipped` order out of a `Map`, and a JavaScript object sorting
-  integer-like `responses` keys ahead of the rest). `POST /import` is the parse
-  plus `core::import_apply_payload` plus `POST /import/apply`, for a caller with
-  no preview - **globals last and merged**, because `POST /globals` replaces the
-  whole set and must not run in front of a write that can still fail. That
-  flattening exists twice on purpose (the app flattens a previewed, filtered
-  result) and the two are pinned to each other by `import_parse_test.cpp` and the
-  app's `orchestrator.payload-conformance.test.ts`. **What stays in the renderer
-  is `ref-bundler.ts`, and it is exempt with a reason**: inlining the files a
-  multi-file document references is deterministic fetch-time *assembly*, not an
-  opinion about what a document declares - it reads the document through
-  `POST /import/document` (this same reader) and reaches the network and the disk
-  through channels an engine should not have (the URL proxy, the
-  main-process-gated `specFile:read` IPC).
-- **`followRedirects` / `maxRedirects` are per-request and stored** (request
-  builder → **Settings** tab, `requests.follow_redirects` / `max_redirects`).
-  Both clients send them on *every* execute and load test rather than eliding
-  the defaults, because the engine's `follow_redirects` defaults to **true** -
-  an omitted `false` would silently follow the 3xx the user asked to see.
-  **`verifySSL` joined them** (#706, `requests.verify_ssl` → **Settings** tab),
-  under the same never-elided rule and for a stronger reason: the engine
-  verifies unless told otherwise, so a dropped `false` verifies the certificate
-  the user opted out for. The old "engine-only, deliberately not exposed" line
-  is gone with the deferral it recorded - the answer to a dangerous state is a
-  loud control, not an unreachable one.
+  engine-computed `hash`; `collections.openapi` (`{specId, specHash, syncedAt}`,
+  `{}` = unbound) is the edge; `requests.spec_operation` (`{operationId?,
+  method, path}`, NULL = none) says which operation a request *is*. Nothing
+  cascades to a document: `DELETE /specs/:id` is a **409 naming the binder**
+  while any collection holds it, and there is no `PUT /specs/:id` because a
+  rewrite would invalidate every stamped hash. A scenario run of a bound
+  collection stamps `specId` + `specHash` into `config_snapshot` and the report
+  echoes them under `metadata.openapi`. The writes and reads, each one route:
+  - **`POST /specs/sync`** (#655) applies a re-fetched document. It is the one
+    route that creates, updates *and* deletes, deliberately outside
+    `/import/apply`; it refuses to touch a request outside the synced
+    collection's subtree and replaces only `origin="import"` examples. The
+    payload carries a *decision* per updated request (`examples: true`
+    refreshes that request's imported rows, absent leaves them alone, #869),
+    and the rows come off the same read the indexes come off. A list where the
+    boolean belongs, or `examples` on a `create` item, is a `400`.
+    `Database::spec_sync_apply` is its transaction, a sibling of `import_apply`
+    and `apply_reorder`.
+  - **`POST /specs/match`** (#761, `core/operation_match.hpp`) pairs a
+    collection's subtree with a document's declared identities by structure:
+    both sides reduced to a path shape with origin, query and fragment dropped
+    and every placeholder (`{{petId}}`, `{petId}`) flattened to `{}`. Ambiguity
+    is refused in both directions, because the sync applies changes *by*
+    identity. It parses no OpenAPI: the caller hands it the identities, which
+    since #869 come from **`POST /specs/describe`** (dialect, `info.title`,
+    declared operations; a readable file that is not a contract is a `400`).
+    `tests/fixtures/operation-shape-conformance.json` is this side's own table.
+  - **`POST /specs/bind`** (#862) takes a document and a collection, never a
+    pairing: it reads the document, derives the indexes, matches the subtree
+    with the same `core::match_operations` over the same
+    `collection_subtree_requests` walk `/specs/match` previews with, and
+    commits document, binding and every stamp through `spec_sync_apply` with
+    the create and delete halves empty. Both halves of stamping are that one
+    walk: a matched request is stamped and a stamped request that matched
+    nothing is *cleared* (#718), never a list the caller states. Unbinding is
+    `PUT /collections/:id` with `openapi: null`: one row, stamps untouched.
+  - **`POST /specs/export`** (#855, `core/openapi_export.hpp`) writes a
+    collection back out. A bound collection's stored bytes are *patched*
+    (unclaimed operations removed, request values and stored examples written
+    in, every member Vayu does not model carried through unvisited); an unbound
+    collection gets a skeleton that invents nothing. The subtree walk stops at
+    a collection bound to a *different* document and not at one bound to the
+    same (#721), as a predicate on `collection_subtree_ids`. YAML output is
+    `core::emit_yaml`, beside the reader on purpose: `plain_scalar` decides
+    quoting, and split across two files a document would export as
+    `swagger: 2.0` and re-import as a number.
+  - **Responses are validated against what the document declares** (#628):
+    `spec_documents.response_schemas` holds an engine-derived index and
+    `core/schema_validation.cpp` matches a response by status pattern and media
+    type and validates with **valijson**. Three rules the shape enforces: an
+    unbound collection gets no `validation` node at all; `checked: false`
+    carries a reason code and no validity; keywords the draft-07 validator
+    cannot evaluate are named and counted on the verdict. `POST /execute`
+    returns the node and `record_design_result` stores the *same object* on the
+    trace. `match_status_pattern` is shared with coverage. Under load the check
+    is deferred to run end (#682, `validate_sampled_responses` over the sample
+    reservoirs, stored as `schemaValidation` on `runs.summary` with its own
+    `sampled` denominator); a source-scan test fails if validation reaches
+    `load_strategy.cpp` / `scenario_load.cpp`. A collection run checks every
+    step instead (#681), stamps each verdict on its trace and `step` SSE frame,
+    and writes `exact: true` into the same block; `failOnSchemaError` (default
+    false, scenario-only) lets a schema failure fail an otherwise-passing step.
+  - **The engine reads the document itself** (#853, `core/openapi_document.hpp`,
+    rapidyaml, the one YAML dependency in one translation unit). Both stored
+    indexes (`operations`, `responseSchemas`) are derived on every write
+    (`read_spec_indexes` -> `core::derive_spec_indexes`) and refused in the
+    body; one read produces both, so they agree, including #715's
+    repeated-`operationId` rule. Deriving the schemas translates dialects
+    (3.0's `nullable` becomes a union with `null`, draft-04's boolean
+    `exclusiveMinimum` becomes the bound, a response that is itself a `$ref` is
+    read through one hop, #714). The reader keeps document order, types
+    scalars like js-yaml's core schema, expands anchors, aliases and merge keys
+    under a budget of one node per input byte, and refuses a duplicate mapping
+    key. **It builds the request drafts too** (#865,
+    `core::spec_request_drafts_of`): method, URL with query joined, params,
+    headers, sampled body, documented responses (#854) and the folder an import
+    files it under, all off **one** walk (`src/core/openapi_walk.hpp`), with
+    `src/core/js_json.hpp` carrying the JavaScript semantics (`??`,
+    `JSON.stringify` number spelling, truthiness) the answers were built on.
+    **`POST /specs/diff`** (#854, `core/spec_diff.hpp`) compares those drafts
+    with the bound collection's subtree using the three-way `userTouched` rule
+    and writes nothing; the renderer's `spec-apply.ts` turns the answer plus
+    the user's ticks into the sync payload. The `{param}` -> `{{param}}`
+    rewrite is `core::normalize_path_templates` (shared with the mock server;
+    `tests/fixtures/path-template-conformance.json`), and its `{{ x }}` half is
+    `core::normalize_template_vars`, which every imported Postman and Insomnia
+    value goes through.
+- **The engine parses every import document** (#877,
+  `core/import_document.hpp`): OpenAPI 2.0/3.x ride the same reader and draft
+  builder (`core::import_drafts_of`, with the skip tally kept and operations
+  under a malformed `paths` key included); Postman v2.0/v2.1, the Postman
+  environment and globals exports and Insomnia v4 are nlohmann. Detection order
+  is the renderer's old order. `tests/fixtures/import-conformance.json` records
+  what the renderer's retired parsers produced for a 15-document corpus and
+  `import_parse_test.cpp` asserts this side matches, two normalisations aside.
+  `POST /import` is the parse plus `core::import_apply_payload` plus
+  `POST /import/apply`, **globals last and merged** because `POST /globals`
+  replaces the whole set and must not run in front of a write that can still
+  fail; the app's own flattening of a previewed result is pinned to it by
+  `orchestrator.payload-conformance.test.ts`. The renderer keeps
+  `ref-bundler.ts` alone, exempt with a reason: inlining referenced files is
+  fetch-time assembly through `POST /import/document`, reaching the network and
+  disk through channels an engine should not have.
+- **`followRedirects` / `maxRedirects` / `verifySSL` are per-request and
+  stored** (Settings tab; `requests.follow_redirects` / `max_redirects` /
+  `verify_ssl`, #706). Both clients send them on every execute and load test
+  rather than eliding defaults, because the engine defaults to following and
+  verifying: an omitted `false` would follow the 3xx the user asked to see, or
+  verify the certificate they opted out for.
 - **Every outbound transfer leaves through one `TransportPolicy`** (#705,
-  `include/vayu/http/transport_policy.hpp`). It is resolved from the
-  `proxyMode` / `proxyUrl` / `proxyBypass` settings at the point of use -
-  run-scoped on the load and collection paths, because libcurl only reuses a
-  pooled connection when its proxy config matches - and applied by the single
+  `include/vayu/http/transport_policy.hpp`), resolved from `proxyMode` /
+  `proxyUrl` / `proxyBypass` at the point of use (run-scoped on the load and
+  collection paths, because libcurl reuses a pooled connection only when its
+  proxy config matches) and applied by the single
   `detail::apply_transport_policy`, which owns TLS verification and the proxy
-  options for **all three** drivers. A fourth mode, **`system`** (#708), reads
-  `proxySystemUrl` - the one config row the *app* writes, because resolving the
-  OS proxy needs Chromium and the engine has none. Empty there falls back to
-  `environment`, never to `off`: a headless engine has no app to ask, and the
-  environment pickup is the closest thing to "what this machine would do" that
-  a daemon on its own has. Add a transport option there, never to a
-  driver: the three had grown their own SSL blocks and only two ever grew a
-  proxy block, so SSE silently ignored `CURLOPT_PROXY` for its whole life.
-  Every mode writes `CURLOPT_PROXY` rather than skipping it, because handles
-  are reused - and #706's `ca_bundle_path` writes `CURLOPT_CAINFO` the same
-  way, empty included. That bundle is materialized from the
-  `customCaCertificates` setting beside the database and **extends** the
-  platform's trust rather than replacing it: on an OpenSSL build CAINFO *is*
-  the whole store, so the file is the system anchors plus the user's.
-  **Every leg verifies with OpenSSL now** (#851): `engine/vcpkg.json` pins
-  curl's `openssl` feature with `default-features: false`. **That does not make
-  Windows a single-backend build, and believing it does is the trap #851 fell
-  into** - the port's `http2` feature *itself* depends on `curl[ssl]`, and the
-  engine requires `http2`, so `ssl` is in the resolved feature set however the
-  manifest is written; on Windows it resolves to Schannel and the shipped
-  libcurl is *MultiSSL*. Reading the port file said otherwise; the first CI run
-  said `openssl, schannel`. **So the engine names its backend rather than
-  inheriting one**: `pin_tls_backend()` calls `curl_global_sslset` before
-  `curl_global_init` (`http/client.cpp`), because on a MultiSSL build
-  `multissl_setup` reads **`CURL_SSL_BACKEND` from the environment** before
-  falling back to the first compiled-in backend - so a stray export would put
-  every transfer on Schannel, silently, and mTLS would stop working (#842) with
-  every doc here still saying OpenSSL. Getting the *build* down to one backend
-  needs a triplet or an overlay port and is #858. Six statements across the
-  engine and the docs said macOS was on Apple SecTrust until #818, and none of
-  them had been read off a build - so the backend is asserted per leg, by name
-  **and by whether this process actually selected it**
-  (`TlsBackend.IsTheBackendEveryTrustStatementHereAssumes`).
-  **Windows is the leg with no bundle file**: it ships its anchors in a
-  certificate store, so `system_ca_bundle_path()` finds nothing, the
-  materialized file holds the paste alone, and `CURLSSLOPT_NATIVE_CA` is set
-  **unconditionally** there rather than only when a bundle is in force - an
-  OpenSSL build on Windows whose handle lacks that flag and whose user has
-  pasted nothing trusts *nothing at all*. One promise, two mechanisms, and
-  `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts whichever applies
-  to the leg, because that is the shape in which this being wrong costs a user
-  their trust store. What no unit test can reach - that the *platform's* own
-  anchors still verify a real certificate - is `NativeStoreVerificationTest`
-  (`tests/tls_verification_test.cpp`): a public host with nothing pasted, and
-  the same host still verifying once an unrelated CA is. It skips on a closed
-  network and **fails on an SslError**, which is the asymmetry that makes it
-  worth having.
-  The additive claim itself is checked on
-  each CI platform rather than reasoned about, because a wrong claim here is a
-  security claim - by **two** tests answering two different questions, and the
-  distinction matters because for a while only the first existed and the docs
-  read as though it covered both (#812).
-  `TlsBackend.AcceptsACustomCaBundleOnThisPlatform` asks the narrow one:
-  whether this build's backend refuses `CURLOPT_CAINFO` outright
-  (`CURLE_NOT_BUILT_IN`). It stands up no server and verifies nothing.
-  `CustomCaVerificationTest` (`tests/tls_verification_test.cpp`) asks the one a
-  user cares about, on a wire: an in-process HTTPS listener holds a certificate
-  a per-run CA signed (`tests/tls_server.hpp`), and the send verifies once that
-  CA is pasted into `customCaCertificates`, fails before it is, fails against a
-  CA that signed nothing here - the case that separates real verification from
-  a bundle read and ignored - and still verifies when a second anchor is added
-  beside it, which is the additive rule observed rather than asserted. That
-  listener is why `cpp-httplib` carries the `openssl` feature in
-  `engine/vcpkg.json`. **Two backends did not answer this the same way, and
-  the wire is how we found out** - kept here because #851 removed the second
-  backend, not the lesson. Where curl revocation-checks the chain itself - the
-  Schannel path did, passing `CERT_CHAIN_REVOCATION_CHECK_CHAIN` unless told
-  not to - a certificate authority minted for one test run was refused for
-  publishing no CRL, with the anchor loaded and the signature good, and the two
-  *positive* cases skipped there. **The fixture publishes one now** (#819): the
-  CA signs an empty CRL, a plain-HTTP `CrlServer` serves it, and the leaf names
-  that listener as its distribution point - on the leaf, because
-  `CERT_CHAIN_REVOCATION_CHECK_CHAIN` checks below the root. A backend that
-  never asks would report nothing about any of that, so
-  `TheFixtureServesACaSignedCrlAtTheLeafsDistributionPoint` asserts on every
-  leg that the extension is on the certificate served and that the document
-  behind it parses, is this CA's, and is current. **All four cases now run
-  everywhere** - the leg that skipped went to 2056 run, 2056 passed, 0 skipped -
-  so the skip and its helpers are gone and a refusal naming revocation is an
-  ordinary failure again. What #819 keeps is the user-facing half, which is a
-  decision rather than a fix: someone pasting an internal CA with no reachable
-  distribution point gets the same refusal, and no doc says so. **The client
-  certificate's handshake is on a wire too now** (#802): the same `TlsServer`,
-  built with a second CA, demands a certificate that authority signed, so it
-  reuses this CRL rather than standing up a second listener.
-  A proxy-hop failure is **`ErrorCode::ProxyError`**, distinct from
-  the target's `ConnectionFailed` - and `curl_to_error` now takes the handle,
-  because a 407 answered to a CONNECT is a plain `CURLE_RECV_ERROR` and only
-  `CURLINFO_HTTP_CONNECTCODE` remembers a proxy said no. The handle answers a
-  second question for the same reason (#802): **an https transfer that failed
-  for a code with no mapping and produced no response line is an `SslError`**,
-  not the `InternalError` the default arm used to give it. Every
-  client-certificate refusal lands there - under TLS 1.3 the server's verdict
-  about the client arrives after the client's handshake finishes, so curl
-  reports `CURLE_RECV_ERROR` with the alert in its message. The rule is the
-  *shape*, never a list of codes, and it is consulted only after every mapping
-  with a meaning of its own has been tried.
+  options for all three drivers. A fourth mode, **`system`** (#708), reads
+  `proxySystemUrl`, the one config row the *app* writes (resolving the OS proxy
+  needs Chromium); empty there falls back to `environment`, never `off`. Add a
+  transport option there, never to a driver. Every mode writes `CURLOPT_PROXY`
+  because handles are reused, and `ca_bundle_path` writes `CURLOPT_CAINFO` the
+  same way, empty included. That bundle is materialised from
+  `customCaCertificates` beside the database and **extends** the platform's
+  trust: on an OpenSSL build CAINFO is the whole store, so the file is the
+  system anchors plus the user's. A proxy-hop failure is
+  `ErrorCode::ProxyError`, distinct from the target's `ConnectionFailed`;
+  `curl_to_error` takes the handle because only `CURLINFO_HTTP_CONNECTCODE`
+  remembers a proxy's 407. The handle answers a second question (#802): an
+  https transfer that failed for an unmapped code with no response line is an
+  `SslError`, which is where every client-certificate refusal lands under
+  TLS 1.3. The rule is the shape, never a list of codes, consulted only after
+  every mapping with a meaning of its own.
+- **Every leg verifies with OpenSSL** (#851): `engine/vcpkg.json` pins curl's
+  `openssl` feature with `default-features: false`. That does not make Windows
+  a single-backend build: the port's `http2` feature depends on `curl[ssl]`,
+  which resolves to Schannel there, so the shipped libcurl is MultiSSL, and
+  MultiSSL reads `CURL_SSL_BACKEND` from the environment before falling back
+  to the first compiled-in backend. So **the engine names its backend**:
+  `pin_tls_backend()` calls `curl_global_sslset` before `curl_global_init`
+  (`http/client.cpp`), and `TlsBackend.IsTheBackendEveryTrustStatementHereAssumes`
+  asserts per leg, by name and by whether this process selected it. A
+  single-backend build would need a triplet or an overlay port; #858 declined
+  it, and the runtime pin is the whole answer. **Windows ships its anchors in a
+  certificate store**, so `system_ca_bundle_path()` finds nothing there and
+  `CURLSSLOPT_NATIVE_CA` is set unconditionally; an OpenSSL build without that
+  flag and with nothing pasted trusts nothing at all.
+  `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts whichever mechanism
+  applies. The additive claim is checked on every CI platform by two tests
+  answering different questions (#812): `TlsBackend.AcceptsACustomCaBundleOnThisPlatform`
+  asks whether the backend refuses `CURLOPT_CAINFO` outright, and
+  `CustomCaVerificationTest` (`tests/tls_verification_test.cpp`) asks on a
+  wire, against an in-process HTTPS listener holding a certificate a per-run CA
+  signed (`tests/tls_server.hpp`; why `cpp-httplib` carries the `openssl`
+  feature): verifies once the CA is pasted, fails before, fails against a CA
+  that signed nothing here, still verifies with a second anchor beside it.
+  `NativeStoreVerificationTest` reaches what no unit test can, the platform's
+  own anchors verifying a real certificate; it skips on a closed network and
+  fails on an `SslError`. The fixture's CA publishes an empty CRL through a
+  plain-HTTP `CrlServer` named on the leaf (#819), because a
+  revocation-checking backend refuses a CA with no CRL; all four cases run on
+  every leg with no skip, and a user pasting an internal CA with no reachable
+  distribution point gets that refusal.
 - **A client certificate belongs to a host, not to a request** (#707,
-  `client_certificates`). The registry rides *inside* the `TransportPolicy`, so
-  it reaches every outbound path with no per-site wiring and is read once per
-  run on the load and collection paths - `match_client_certificate` then picks
-  the entry per transfer from that snapshot, ranked in three tiers (#803):
-  closest host first - an exact name beats every wildcard, a longer wildcard
-  beats a shorter one - then port-specific beating catch-all. The only pattern
-  is `*.example.com`, a label suffix that answers for every subdomain and never
-  for the domain itself or an address literal; a `*` elsewhere is a write-time
-  400, and the ranking is total, so no match depends on row order.
-  Only file **paths** are stored (the key never enters
-  the database); the passphrase is stored plaintext on the existing credential
-  precedent and is **never echoed** - reads answer `hasPassphrase`. Both paths
-  are checked at write time, because an unreadable file otherwise surfaces as an
-  `SslError` against the endpoint and reads as "the API is broken". A matched
-  entry is recorded on `Response::client_certificate` and travels both design
-  funnels (live body and stored trace) under `clientCertificate`, deliberately
-  *not* on the load path: it is a per-transfer string for a fact that is
-  constant for the run. **The row says what format its certificate is in**
-  (`cert_format`, #833): the applier writes `CURLOPT_SSLCERTTYPE` from it, so a
-  `p12` bundle goes out as one rather than being handed to the PEM parser. A
-  PKCS#12 row stores no `key_path` (the bundle carries the key) and one
-  `passphrase` column serves both, since libcurl reads it as the import
-  password too. The format is **stored, not sniffed per transfer**, defaulted at
-  write time from the file's first bytes and refused when those bytes
-  contradict it - a check that is deliberately shallow, like `ca_pem_rejection`:
-  only a contradiction is an error, a file we cannot classify is the backend's
-  to judge. `tests/mutual_tls_test.cpp` runs every driver case once per format
-  the leg's backend accepts (`client_identity_formats()`).
-  **mTLS works on all three platforms since #851, and both formats run on every
-  leg with no skip.** It did not before, for a reason that was never ours
-  (#842): curl 8.21's Schannel client-cert path imports the bundle with
-  `PKCS12_NO_PERSIST_KEY` and cannot then use the key, which curl's own
-  `KNOWN_BUGS` documents (curl 17626, 3145) and which measured here as
-  `SEC_E_INTERNAL_ERROR` on every driver, with a legacy-PBE and a PBES2 bundle
-  alike. The wire cases skipped on that leg through `client_auth_defect()`;
-  #851 deleted the helper and the skip by taking Schannel out of the build.
-  **Anything proposing a return to Schannel reads closed #842 first** - the
-  defect is still open upstream, and the skip comes back with it.
+  `client_certificates`). The registry rides inside the `TransportPolicy`,
+  read once per run on the load and collection paths;
+  `match_client_certificate` picks the entry per transfer in three tiers
+  (#803): closest host first (exact beats wildcard, longer wildcard beats
+  shorter), then port-specific beating catch-all. The only pattern is
+  `*.example.com`, a label suffix that never matches the domain itself or an
+  address literal; a `*` elsewhere is a write-time `400`, and the ranking is
+  total. Only file **paths** are stored; the passphrase is stored plaintext on
+  the existing credential precedent and never echoed (reads answer
+  `hasPassphrase`); both paths are checked at write time. A matched entry is
+  recorded on `Response::client_certificate` and travels both design funnels
+  under `clientCertificate`, not the load path. **The row says what format its
+  certificate is in** (`cert_format`, #833): the applier writes
+  `CURLOPT_SSLCERTTYPE` from it, a PKCS#12 row stores no `key_path`, one
+  `passphrase` column serves both, and the format is stored (defaulted at write
+  time from the file's first bytes, refused when they contradict it), never
+  sniffed per transfer. `tests/mutual_tls_test.cpp` runs every driver case per
+  format the leg's backend accepts. mTLS works on all three platforms since
+  #851; curl 8.21's Schannel client-cert path cannot use a PKCS#12 key (curl
+  KNOWN_BUGS 17626 and 3145, closed #842), so a return to Schannel brings that
+  defect back.
 
 ## Request composition (engine-owned - POST /compose)
 
-The **engine owns** request composition (shipped in issue #226):
-`POST /compose` (`engine/src/http/request_composer.cpp`) resolves
-`{{variables}}` and `inherit` auth (collection-chain walk, `noauth`
-terminates, `none` steps over) and returns the execute-ready payload that
-`POST /execute` / `POST /runs` accept unchanged. Compose is **pure** (sends
-nothing, no run row) and is still the one place a payload is *composed* - that
-split is load-bearing, do not "merge" compose into execute. Since #1008,
-execute is not silent past that point either: a name compose could not answer
-(it kept its braces, #1009) is resolved once more, after the pre-request
-script and before the send (`resolve_residual_tokens`,
-`engine/src/http/request_exchange.cpp`) - a value compose already substituted
-is finished text and this pass does not revisit it, so nothing is resolved
-twice. **That pass can refuse** (#1051): a header name it resolves onto a name
-the request already carries would erase that header, so it refuses and the send
-does not happen - composition refuses the same collision with a `400`, in the
-same words, and `http/header_names.hpp` holds the rule. **A name that resolves
-to nothing is refused beside it** (#1084), by both layers and in that file's
-one wording: what is left of an empty name is a `": value"` line no name owns,
-and the pre-send gate is no backstop for it - it reads header text for the
-bytes that end a line early, and an absent name ends nothing. The pass answers
-a `ResidualRefusal`, which carries the compose refusal code as well as the
-error, because the streaming send answers a `400` of its own and a code spelled
-at that call site is one that drifts from the rule it names. **The two rules
-read different reaches, decided in #1095**: the empty-name rule reads every
-header name, so a name a script has just emptied and an empty key posted
-straight to `POST /execute` are refused here too, while the collision rule reads
-only the names that still held a token - a request that arrives already resolved
-cannot carry a collision to find, two names that are already equal being already
-one key. **A fourth layer *binds* a name** rather than resolving one: a data row
-whose header-name column is blank is refused at bind time
-(`core/scenario_data.cpp`), which the load path needs because it runs no
-residual pass over what it binds. Two entry shapes: `requestId` (stored request; MCP uses
-this, and gates its allowlist on the *composed* URL) and an inline `request`
-(+ `collectionId` scope; the renderer uses this because Send/replay execute
-*editor state*, which may be unsaved or detached). Inline over stored = the
-overlay MCP's `start_load_run` overrides ride on.
+The engine owns request composition (#226): `POST /compose`
+(`engine/src/http/request_composer.cpp`) resolves `{{variables}}` and `inherit`
+auth (collection-chain walk; `noauth` terminates, `none` steps over) and
+returns the execute-ready payload `POST /execute` / `POST /runs` accept
+unchanged. Compose is pure (sends nothing, no run row) and is the one place a
+payload is composed; that split is load-bearing. Two entry shapes: `requestId`
+(stored request; MCP uses this and gates its allowlist on the *composed* URL)
+and an inline `request` plus `collectionId` scope (the renderer, because Send
+and replay execute editor state that may be unsaved). Inline over stored is
+the overlay MCP's `start_load_run` overrides ride on.
+
+Execute is not silent past compose (#1008): a name compose could not answer
+(it kept its braces, #1009) is resolved once more after the pre-request script
+and before the send (`resolve_residual_tokens`,
+`engine/src/http/request_exchange.cpp`); a value compose already substituted is
+finished text. **That pass can refuse** (#1051, #1084): a header name that
+resolves onto one the request already carries, or to nothing, is refused
+before the send, in the same words and with the same code compose uses for the
+`400` (`http/header_names.hpp` holds the rule; the pass answers a
+`ResidualRefusal` carrying the code). The two rules read different reaches
+(#1095): the empty-name rule reads every header name, the collision rule only
+the names that still held a token. A data row whose header-name column is
+blank is refused at bind time (`core/scenario_data.cpp`), because the load
+path runs no residual pass over what it binds.
 
 **The renderer's resolver is preview-only.** `useVariableResolver` /
-`app/src/lib/variable-resolution.ts` back tab titles, previews, the
-unresolved-token painting and the OAuth-guard preview - never a payload. The
-preview must show what the engine will substitute, so its rules are pinned to
-the engine's by the **cross-language conformance fixture**
-(`engine/tests/fixtures/variable-resolution-conformance.json`), read by both
-`request_composer_test.cpp` (gtest) and
-`variable-resolution.conformance.test.ts` (vitest). Change resolution
-semantics → change engine + renderer lib + fixture together; a case added to
-the fixture fails whichever side forgot. The dynamic-variable name set
-(`$guid`, `$timestamp`, …) is part of that fixture-pinned contract (C++ table
-in `request_composer.cpp`, renderer table in `lib/dynamic-variables.ts`).
-The D17 malformed-data rules (absent/non-boolean `enabled` = enabled;
-non-string `value` = "") live engine-side in `parse_variables` and
-renderer-side in `lib/variable-resolution.ts`. Compose still resolves strictly
-**before** the pre-request script runs (D1 - deliberate Postman divergence,
-not reversed by #1008 - see the residual pass above), and script text is never
-interpolated (D16). **MCP has no composition copy
-anymore** (`resolve.ts` deleted) - a new engine client should call
-`POST /compose`, never re-implement resolution client-side.
+`app/src/lib/variable-resolution.ts` back tab titles, previews, unresolved-token
+painting and the OAuth-guard preview, never a payload. Its rules are pinned to
+the engine's by `engine/tests/fixtures/variable-resolution-conformance.json`,
+read by `request_composer_test.cpp` and
+`variable-resolution.conformance.test.ts`; change resolution semantics in the
+engine, the renderer lib and the fixture together, and a case added to the
+fixture fails whichever side forgot. The dynamic-variable name set (`$guid`,
+`$timestamp`, …) is part of that contract (C++ table in `request_composer.cpp`,
+renderer table in `lib/dynamic-variables.ts`), as are the D17 malformed-data
+rules (absent or non-boolean `enabled` = enabled; non-string `value` = "") in
+`parse_variables` and `variable-resolution.ts`. Compose resolves strictly
+**before** the pre-request script runs (D1, a deliberate Postman divergence
+the residual pass does not reverse), and script text is never interpolated
+(D16). MCP has no composition copy; a new engine client calls `POST /compose`.
 
-Script parts: clients on the inline path still build the ordered `ScriptPart`
-list themselves (`scriptParts` in
-`app/src/modules/request-builder/utils/script-parts.ts` - now the only
-client-side copy); the by-id path builds it engine-side
-(`compose_script_parts`). The **engine** joins parts with `"\n\n"` and runs
-the result. **Both names reach the same script**: `read_post_request_script`
-(`engine/src/http/script_parts.cpp`) owns every spelling the post-request
-script answers to - stored as `postRequestScript`, `postRequestScript(s)` on
-`/execute`, `tests` on `/runs` - and both routes read through it, so a payload
-composed for one endpoint can start the other kind of run unchanged. Add a
-spelling to that table, never to a route.
-
-The endpoint names above are the canonical ones (`POST /compose`,
-`POST /execute`, `POST /runs`); the old `POST /request` / `POST /run` still
-work as deprecated aliases. An unresolved `{"mode":"inherit"}` reaching an
-execution endpoint is treated as no auth and logged as a **warning** - it
-means a client skipped composition.
+Script parts: clients on the inline path build the ordered `ScriptPart` list
+(`scriptParts` in `app/src/modules/request-builder/utils/script-parts.ts`, the
+only client-side copy); the by-id path builds it engine-side
+(`compose_script_parts`). The engine joins parts with `"\n\n"` and runs the
+result. `read_post_request_script` (`engine/src/http/script_parts.cpp`) owns
+every spelling the post-request script answers to (`postRequestScript`,
+`postRequestScript(s)` on `/execute`, `tests` on `/runs`), and both routes read
+through it; add a spelling to that table, never to a route.
 
 ## Docs to keep in step
 
@@ -966,7 +596,7 @@ means a client skipped composition.
 | `docs/engine/architecture.md` | Core engine structure, auth resolution |
 | `docs/engine/db-schema.md` | Schema, migrations, stored JSON |
 | `docs/engine/scripting.md` | Script globals, hooks, sandbox limits |
-| `docs/engine/mcp.md` | MCP tools or their schemas |
+| `docs/engine/mcp.md` | MCP tools or their schemas (the server itself lives in `app/electron/mcp/`) |
 | `docs/engine/cli.md` | Flags or subcommands |
 | `docs/engine/benchmarks.md` | Load generation or measurement |
-| `docs/engine/building.md` | CMake presets, vcpkg deps |
+| `docs/engine/building.md` | CMake presets, vcpkg deps, the lint and format gates |
