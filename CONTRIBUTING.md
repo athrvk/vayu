@@ -552,7 +552,7 @@ git push origin --tags
 Notes:
 
 - The `VERSION` file should be kept accurate. The workflow uses a pushed tag to identify the release and uploads matching artifacts.
-- Electron-generated filenames already include the version (for example `Vayu Setup 0.1.2.exe` and `Vayu-0.1.2-x86_64.AppImage`), so the workflow publishes them as-is.
+- Electron-generated filenames are whatever `artifactName` in `app/electron-builder.json` resolves to (for example `Vayu-0.1.2-x86_64.AppImage`, and `Vayu-x64.exe`, which carries no version at all), and the workflow publishes them as-is.
 - If you want the bump script to also create the tag and push, you may extend it, but this project requires an explicit tag push so releases remain deliberate.
 
 
