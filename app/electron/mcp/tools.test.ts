@@ -4441,6 +4441,51 @@ describe("dispatchTool", () => {
 		expect(firstText(res)).toContain("200");
 	});
 
+	/**
+	 * Every tool that accepts a `bodyType` states the GraphQL GET transport
+	 * rule, and the list is *discovered* rather than spelled out: #1228 wrote
+	 * the sentence into three descriptions by name and `start_load_run` - which
+	 * offers `graphql` like the rest and is exactly where the rule bites, since
+	 * a run left on the default GET sends no body at all - kept a description
+	 * that never mentioned a method (#1277). The rule is asserted against every
+	 * `bodyType` the schema actually offers rather than a list written here, so
+	 * a fifth such tool is checked the moment it exists; the four names are the
+	 * separate guard that the scan found the set it thinks it found, and a new
+	 * tool joining that list is the deliberate moment to read the rule again.
+	 */
+	describe("the GraphQL GET transport rule", () => {
+		const bodyTypeDescriptions = () =>
+			TOOLS.flatMap((tool) => {
+				const schema = tool.inputSchema as Record<string, { description?: string }>;
+				const description = schema?.bodyType?.description;
+				return description ? [[tool.name, description] as const] : [];
+			});
+
+		test("is stated by every tool that accepts a bodyType", () => {
+			const found = bodyTypeDescriptions();
+			// The scan is worthless if it scanned nothing - the failure mode a
+			// source-shaped guard hides behind (see CLAUDE.md).
+			expect(found.map(([name]) => name).sort()).toEqual([
+				"create_request",
+				"run_request",
+				"start_load_run",
+				"update_request",
+			]);
+			for (const [name, description] of found) {
+				// The three facts an agent needs to pick a method: that graphql
+				// is on offer, which verb carries the document in the URL and
+				// what it becomes there, and which verb a mutation needs. The
+				// wording differs per tool; these are the facts, not a copy.
+				expect(description, `${name} names graphql`).toContain("graphql");
+				expect(description, `${name} names GET`).toMatch(/\bGET\b/);
+				expect(description, `${name} names the query parameters`).toContain(
+					"query parameters"
+				);
+				expect(description, `${name} names POST`).toMatch(/\bPOST\b/);
+			}
+		});
+	});
+
 	test("create_request stores a form body as fields", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
