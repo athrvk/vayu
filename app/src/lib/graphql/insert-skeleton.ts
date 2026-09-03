@@ -693,6 +693,11 @@ function declaredArgument(
  * counts here, unlike in `presentLeaf`: `latest: posts` is still the `posts` the
  * argument row belongs to, and the question is which selection to write onto
  * rather than whether one is a duplicate of another.
+ *
+ * Which is why the *cursor* breaks the tie between two of them. `latest: posts`
+ * and `older: posts` are both that field in one set, and the first in document
+ * order is not the one the user has their cursor inside - editing that one is a
+ * line changing on screen somewhere the user was not looking.
  */
 function selectedField(
 	schema: GraphQLSchema,
@@ -704,9 +709,10 @@ function selectedField(
 	for (let depth = chain.length - 1; depth >= 0; depth--) {
 		const enclosing = chain[depth];
 		if (enclosing.typeName !== request.parentTypeName) continue;
-		const field = enclosing.selectionSet.selections.find(
+		const named = enclosing.selectionSet.selections.filter(
 			(s): s is FieldNode => s.kind === Kind.FIELD && s.name.value === request.fieldName
 		);
+		const field = named.find((s) => contains(s, cursor)) ?? named[0];
 		if (field) return { field, operation: enclosing.operation };
 	}
 	return null;

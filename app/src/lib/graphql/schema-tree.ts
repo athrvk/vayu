@@ -482,7 +482,13 @@ function argumentsNode(fieldRow: SchemaTreeNode): SchemaTreeNode {
 		name: "Arguments",
 		signature: "",
 		returnType: "",
-		args: fieldRow.args,
+		/*
+		 * Empty, though the field's are right there: a container writes nothing
+		 * and answers with nothing, and a row carrying arguments is a row that
+		 * draws their count - which on this one would repeat the count already
+		 * on the field a line above it. Its children read the schema.
+		 */
+		args: [],
 		argumentOwner: {
 			parentTypeName: fieldRow.ownerTypeName ?? "",
 			fieldName: fieldRow.name,

@@ -213,6 +213,19 @@ describe("a field's arguments", () => {
 		]);
 	});
 
+	it("draws the Arguments heading as a heading and nothing else", () => {
+		openQuery();
+		fireEvent.click(rowNamed("search")!.querySelector("[data-tree-toggle]")!);
+		const heading = rowNamed("Arguments")!;
+
+		// A container answers with nothing and asks for nothing: carrying the
+		// field's arguments on it drew a second "(2 args)" a line under the
+		// first, and an empty ": " after the word Arguments.
+		expect(heading.textContent).toBe("Arguments");
+		expect(heading.querySelector("[data-tree-args]")).toBeNull();
+		expect(heading.querySelector("[data-tree-signature]")).toBeNull();
+	});
+
 	it("draws an argument the way the schema declares it", () => {
 		openQuery();
 		fireEvent.click(rowNamed("search")!.querySelector("[data-tree-toggle]")!);

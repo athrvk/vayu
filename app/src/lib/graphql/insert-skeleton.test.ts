@@ -781,6 +781,28 @@ describe("insertionForNode - an argument row", () => {
 		expect(result.variables).toEqual({ ranking: "RELEVANCE" });
 	});
 
+	it("writes onto the occurrence the cursor is in, not the first of that name", () => {
+		/*
+		 * Two aliases of one field in one selection set. Mutation check: take the
+		 * first match in document order instead of the one holding the cursor and
+		 * this reddens - the edit lands on `latest`, a line the user was not
+		 * looking at, and `older` is untouched.
+		 */
+		const doc = `query E {\n  user(id: "1") {\n    latest: posts {\n      id\n    }\n    older: posts {\n      title\n    }\n  }\n}\n`;
+		const result = inserted(
+			insertionForNode(
+				schema,
+				argumentRow(["query", "user", "posts"], "first"),
+				doc,
+				doc.indexOf("title")
+			)!
+		);
+
+		expect(result.text).toContain("older: posts(first: $first)");
+		expect(result.text).toContain("latest: posts {");
+		expectValid(result.text);
+	});
+
 	it("writes past a comment in the argument list rather than into it", () => {
 		/*
 		 * Mutation check: place the edit in front of the `)` found by searching
