@@ -2078,27 +2078,55 @@ because a drag there resized a box inside a pane the user had already sized, and
 held that size in component state that Radix threw away on the next tab switch
 (#1323). The pane's own splitter is the one control for how tall an editor is.
 
-### ActivityBar
+### Dock
 
-- **Width:** `w-11` (44px), full height, `bg-panel border-r border-border`
-- **Tab buttons:** `w-10 h-10 flex items-center justify-center rounded-md`
-- **Active state:** `bg-primary/10 text-primary` + 2px left accent bar
-  ```tsx
-  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-sm" />
-  ```
-- **Inactive hover:** `hover:bg-accent hover:text-foreground`
-- **Icon size:** `w-4 h-4`
-- **Tabs (top):** Collections (Folder), History (Clock), Variables (Code2)
-- **Tab (bottom, pinned):** Settings (Settings2) - pushed down with `flex-1` spacer
-- **Collapse:** clicking active tab while panel open → `setPanelOpen(false)`
-- **Tooltips:** `side="right"` via `TooltipContent`
+The view switcher runs along the bottom of the window, not down its left edge:
+`Dock` (`app/src/components/layout/Dock.tsx`) is one flex row,
+`h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0`. The
+height is that token rather than a bare `h-8` because the toast viewport is
+`fixed` and offsets itself above this strip by the same value - the token is what
+keeps the two from drifting apart.
 
-### SidebarPanel
+- **Left - the six view buttons.** A `<nav aria-label="Sidebar views">`, its
+  names, marks and order read from `constants/drawer-views.ts` and its chords
+  from `constants/shortcuts.ts`, so the palette offering the same six cannot name
+  them differently. Deliberately not `role="toolbar"`: that promises arrow-key
+  traversal between the buttons, which this does not implement.
+- **A button is `w-7 h-7 rounded-md text-xs` with a `w-4 h-4` icon** -
+  `bg-accent text-accent-foreground` while its view is the open one, and
+  `text-muted-foreground hover:bg-muted/50 hover:text-foreground` otherwise. It
+  is icon-only, so its `aria-label` is the accessible name and the chord stays
+  out of it: a tooltip supplies `aria-describedby` while open, never a name.
+- **Middle - ambient status.** The engine connection light (a `bg-current` dot
+  plus Starting… / Connected / Disconnected, on `status-success-text` when
+  connected and `--muted-foreground` otherwise), a running-services button and a
+  pending-restart button that render only when there is something to report, the
+  save status, and the version string. **This strip is where the connection
+  state lives** - no sidebar footer carries a second copy.
+- **Right - the context bar toggle**, the same button component again, pressed
+  on what is visible rather than on the stored open flag.
+- **Clicking the open view's button closes the drawer.** The buttons call
+  `activateDrawerView`, which switches the view and toggles `drawerOpen` only
+  when that view is already showing; an ambient chip pointing at a view calls
+  `revealDrawerView`, which opens and never closes.
 
-- **Width:** `w-60` (240px) internal - the outer resizable container starts at 320px
-- `bg-panel border-r border-border overflow-hidden`
-- **Content:** `ScrollArea` fills available space
-- **Footer:** `ConnectionStatus` pinned to bottom with `border-t border-border`
+### Drawer
+
+The sidebar is `Drawer` (`app/src/components/layout/Drawer.tsx`): an
+`<aside className="relative flex shrink-0 bg-panel">` whose width is `drawerWidth`
+from `layout-store` and whose right edge carries its own `PanelResizeHandle`. It
+renders nothing while `drawerOpen` is false, and it is labelled by the view
+showing ("Collections sidebar") because one landmark hosts six panels -
+collections, history, variables, services, trash and settings - and
+"Complementary" alone would not say which.
+
+**The Drawer wraps no view in a scroll region.** Each view supplies its own
+`DrawerPanel` (`app/src/components/shared/DrawerPanel.tsx`), which owns the
+header - `h-[var(--tabstrip-height)]`, so it lines up with the TabStrip across
+the resize handle - and the single `overflow-y-auto overflow-x-hidden` body
+below it. That frame, not the shell, is what a new view needs: switching views
+changes the content and nothing else. The body is flush, so rows run edge to
+edge and bring their own padding.
 
 ### Pane Toggles
 
@@ -2785,8 +2813,10 @@ opt-out.
 | `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
 | `app/index.html` | Pre-paint appearance script; no font `<link>` (see `fonts.css`) |
 | `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
-| `app/src/components/layout/Shell.tsx` | Root layout - resizable sidebar + drag handle + main |
-| `app/src/components/layout/Sidebar.tsx` | ActivityBar + SidebarPanel |
+| `app/src/components/layout/Shell.tsx` | Root layout - the drawer row, the content column (TabStrip, main, ContextBar), the Dock, and the window chords |
+| `app/src/components/layout/Dock.tsx` | The bottom strip - six view buttons, ambient status, context bar toggle |
+| `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
+| `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
 | `app/src/utils/helpers.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |
