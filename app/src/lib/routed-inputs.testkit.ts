@@ -77,6 +77,16 @@ export const DOC_READING_GUARDS = {
 		reader: "app/src/hooks/script-typedefs.docs-compile.test.ts",
 		paths: ["docs/engine/scripting.md", "docs/app/pm-api-compatibility.md"],
 	},
+	/*
+	 * The same two pages, read for a different question (#1223): the script
+	 * panels stopped stating the `pm.*` rules in prose, so this guard is what
+	 * holds each rule to the surface it moved to - the completion table for a
+	 * member's rule, these pages for a hook's.
+	 */
+	scriptRules: {
+		reader: "app/src/modules/request-builder/components/RequestTabs/panels/script-rules.test.ts",
+		paths: ["docs/engine/scripting.md", "docs/app/pm-api-compatibility.md"],
+	},
 	designSystem: {
 		reader: "app/src/design-system-doc.test.ts",
 		paths: ["docs/design-system.md"],
@@ -166,6 +176,13 @@ export const ENGINE_READING_GUARDS = {
 	},
 	scriptTypedefs: {
 		reader: "app/src/hooks/script-typedefs.docs-compile.test.ts",
+		paths: ["engine/tests/fixtures/script-typedefs.d.ts"],
+	},
+	/* The generated declarations carry the completion table's documentation
+	   strings verbatim, which is what makes them readable as the rules the
+	   script panels no longer state (#1223). */
+	scriptRules: {
+		reader: "app/src/modules/request-builder/components/RequestTabs/panels/script-rules.test.ts",
 		paths: ["engine/tests/fixtures/script-typedefs.d.ts"],
 	},
 	treeOrder: {

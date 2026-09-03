@@ -45,6 +45,16 @@ const mutation = {
 	error: null as Error | null,
 };
 
+/**
+ * The snippets list under the editor reads the engine's completion table
+ * (#1223). Its own behaviour is `ScriptSnippets.test.tsx`; here it only needs
+ * to not reach for a QueryClient this suite does not set up.
+ */
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
+	useScriptCompletionsQuery: () => ({ data: undefined, isPending: true, isError: false }),
+}));
+
 vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => mutation,
 }));

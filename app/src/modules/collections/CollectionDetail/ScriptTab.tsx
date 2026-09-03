@@ -30,9 +30,11 @@
  * `useEntityDraft`). This editor has exactly one.
  */
 
-import { useCallback, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { useCallback, useMemo, useRef } from "react";
+import type * as Monaco from "monaco-editor";
 import { Badge, Button, CodeEditor } from "@/components/ui";
+import { ScriptSnippets } from "@/components/shared";
+import { insertSnippetAtCursor } from "@/lib/editor-snippet";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import {
@@ -58,18 +60,11 @@ interface ScriptTabProps {
 	active?: boolean;
 }
 
-const QUICK_REF: Array<[string, string]> = [
-	["Environment", 'pm.environment.get("key")\npm.environment.set("key", val)'],
-	["Globals", 'pm.globals.get("key")\npm.globals.set("key", val)'],
-	["Collection vars", 'pm.collectionVariables.get("k")\npm.collectionVariables.set("k", v)'],
-	["Response (post only)", "pm.response.json()\npm.response.code\npm.response.responseTime"],
-];
-
 export default function ScriptTab({ collection, kind, active = false }: ScriptTabProps) {
 	const isPre = kind === "pre";
 	const fieldKey = isPre ? "preRequestScript" : "postRequestScript";
 
-	const [showRef, setShowRef] = useState(false);
+	const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
 	const updateCollection = useUpdateCollectionMutation();
 
 	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
@@ -289,40 +284,23 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 					value={script}
 					onChange={setScript}
 					fontSize={12}
+					onMount={(instance) => {
+						editorRef.current = instance;
+					}}
 				/>
 			</div>
 
-			<div>
-				<button
-					type="button"
-					onClick={() => setShowRef((s) => !s)}
-					className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-				>
-					{showRef ? (
-						<ChevronDown className="w-3 h-3" />
-					) : (
-						<ChevronRight className="w-3 h-3" />
-					)}
-					Quick Reference
-				</button>
-				{showRef && (
-					<div className="mt-2 grid grid-cols-2 gap-2">
-						{QUICK_REF.map(([title, code]) => (
-							<div
-								key={title}
-								className="bg-card border border-border rounded-md px-3 py-2.5"
-							>
-								<div className="text-[10px] font-semibold text-muted-foreground mb-1.5">
-									{title}
-								</div>
-								<pre className="m-0 text-[10px] leading-relaxed text-foreground font-mono whitespace-pre-wrap">
-									{code}
-								</pre>
-							</div>
-						))}
-					</div>
-				)}
-			</div>
+			{/*
+			 * The same snippets surface the request script panels use, from the
+			 * same engine table (#1223). This tab used to carry its own four-card
+			 * grid of copy-me prose: a second implementation of one concept, with
+			 * different content, that neither inserted nor remembered whether the
+			 * user wanted it open.
+			 */}
+			<ScriptSnippets
+				context={isPre ? "pre" : "test"}
+				onInsert={(snippet) => insertSnippetAtCursor(editorRef.current, snippet)}
+			/>
 
 			<SaveFailed mutation={updateCollection} what="the script" />
 

@@ -34,8 +34,9 @@
  * `--border-strong` does not rescue it - in dark it is the fainter of the two,
  * because `--muted` (L 16%) sits between `--border` (L 10%) and
  * `--border-strong` (L 18%). The `bg-muted` fill separates from the card on its
- * own at 1.180 light / 1.153 dark, which is the treatment the script panels'
- * Quick Reference slabs have always used.
+ * own at 1.180 light / 1.153 dark, which is what defines these boxes. (The
+ * script panels' Quick Reference slabs used to be the other instance of this
+ * treatment; they went with the prose in #1223.)
  */
 
 import { describe, it, expect } from "vitest";

@@ -42,10 +42,27 @@ import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import ScriptPanel from "./script/ScriptPanel";
 
-/** Monaco does not run under jsdom; nothing here tests the editor. */
+/**
+ * Monaco does not run under jsdom; nothing here tests the editor itself. The
+ * stub does echo the height it was given, because that height is a claim this
+ * panel makes: the editor fills the panel rather than sitting at a fixed 350px
+ * with reference prose taking the rest (#1223).
+ */
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
-	CodeEditor: () => <div data-testid="code-editor" />,
+	CodeEditor: ({ height }: { height?: string | number }) => (
+		<div data-testid="code-editor" data-height={String(height)} />
+	),
+}));
+
+/**
+ * The snippets list under the editor reads the engine's completion table. Its
+ * own behaviour is `ScriptSnippets.test.tsx`; here it only needs to not reach
+ * for a QueryClient this suite does not set up.
+ */
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
+	useScriptCompletionsQuery: () => ({ data: undefined, isPending: true, isError: false }),
 }));
 
 const SCRIPT = `pm.environment.get("token"); const u = "{{base_url}}"; pm.globals.get("run_id");`;
@@ -206,59 +223,57 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 	 * to is a computed-style question jsdom cannot answer.
 	 */
 	/*
-	 * A pre-request script can now change the outgoing request, and none of the
-	 * rules that govern it are visible from a snippet: that the object is
-	 * authoritative, that it beats the Auth tab, that a bad value refuses the
-	 * whole edit. Leaving those only in `docs/engine/scripting.md` puts them
-	 * where the person writing the script is not - so the panel carries them,
-	 * and this checks it still does.
+	 * The panel used to carry a 14-line reference block and nine paragraphs of
+	 * rules, restating a subset of what the completion table already tells the
+	 * editor - in prose the reader could only retype (#1223). What is left is
+	 * the one fact per variant that is about the *hook* rather than a member,
+	 * which is the one thing hover and completion cannot say. The rules
+	 * themselves are pinned where they now live by `script-rules.test.ts`.
 	 */
-	it("tells the reader what its scripts can and cannot change", () => {
+	it("states the one fact about this hook that the editor cannot", () => {
 		const { container } = render(<Panel />);
 		const text = container.textContent ?? "";
 
-		// Both variants render notes at all - an empty list would pass every
-		// substring check below by never contradicting one.
-		expect(container.querySelectorAll("ul li").length).toBeGreaterThan(0);
-
 		if (variant === "pre") {
-			expect(text).toContain("what is actually sent");
-			expect(text).toMatch(/wins over the Auth tab|beats the/i);
-			expect(text).toMatch(/case-sensitive/i);
-			// The failure path is the half a user only meets when it bites.
-			expect(text).toMatch(/rejects the whole edit/i);
 			expect(text).toMatch(/load tests do not run pre-request scripts/i);
 		} else {
-			// The other half of the contract: writing here is a no-op.
-			expect(text).toMatch(/writing to it does nothing/i);
+			expect(text).toContain("pm.response.to");
+			expect(text).toContain("pm.expect");
 		}
 	});
 
-	/*
-	 * The quick reference is copy-paste bait: it sits next to the editor and a
-	 * script author types what it shows. It suggested
-	 * `pm.response.headers.get("Content-Type")` for as long as the panel had
-	 * existed while the runtime had no such member (#182), so the line was
-	 * pulled; #185 added `get`/`has` to both header objects and it went back.
-	 * These now pin the restored form, so dropping the runtime methods without
-	 * pulling the suggestion again fails here.
-	 */
-	it("suggests the header reads the runtime implements", () => {
+	it("no longer spends the panel on a wall of reference prose", () => {
 		const { container } = render(<Panel />);
-		const text = container.textContent ?? "";
 
-		if (variant === "post") {
-			expect(text).toContain('pm.response.headers.get("Content-Type")');
-			// The distinction the snippet cannot show: get() is case-insensitive,
-			// indexing is not, and the engine lower-cases what it parses.
-			expect(text).toMatch(/lower-cases every key/i);
-			expect(text).toMatch(/case-insensitive/i);
-		} else {
-			// The pre-request half: the mutators, and the one that refuses a
-			// name it already holds.
-			expect(text).toContain("pm.request.headers.upsert(");
-			expect(text).toMatch(/add.*throws/is);
-		}
+		/*
+		 * The `<pre>` block of copy-me `pm.*` lines and the bulleted rules
+		 * under it. The one `<pre>` still here belongs to the legacy-script
+		 * notice, which shows the user their own recorded script - so the
+		 * assertion is about what a block *holds*, not that no block exists.
+		 * Mutation check: restore either and this reddens.
+		 */
+		const reference = Array.from(container.querySelectorAll("pre")).filter((block) =>
+			/pm\.(environment|request|response)\./.test(block.textContent ?? "")
+		);
+		expect(reference).toHaveLength(0);
+		expect(container.querySelectorAll("ul li").length).toBe(0);
+	});
+
+	it("gives the editor the panel instead of a fixed 350px", () => {
+		const { container } = render(<Panel />);
+		const editor = container.querySelector('[data-testid="code-editor"]');
+
+		expect(editor?.getAttribute("data-height")).toBe("100%");
+		expect(editor?.parentElement?.className).toContain("flex-1");
+	});
+
+	it("offers the snippets list under the editor", () => {
+		const { container } = render(<Panel />);
+		const trigger = Array.from(container.querySelectorAll("button")).find((b) =>
+			/^snippets/i.test(b.textContent?.trim() ?? "")
+		);
+
+		expect(trigger, "both script panels list insertable templates").toBeTruthy();
 	});
 
 	/*
@@ -310,8 +325,8 @@ describe.each(PANELS)("%s panel", (_name, variant, ownMarker, ownChain, ownLegac
 			const slabs = container.querySelectorAll(".surface-sunken");
 			expect(
 				slabs.length,
-				"the full variable list, the quick reference, and the legacy script"
-			).toBe(3);
+				"the full variable list and the legacy script - the quick reference's slab went with the prose (#1223), and the snippets list is collapsed by default"
+			).toBe(2);
 			for (const slab of slabs) {
 				expect(slab.className).toContain("border-rule");
 			}

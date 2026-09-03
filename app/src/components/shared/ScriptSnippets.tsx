@@ -1,0 +1,140 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * The templates a script editor offers, insertable at the cursor.
+ *
+ * **It replaced two walls of prose.** Under every script editor sat a 14-line
+ * `<pre>` and nine paragraphs of rules the reader could only retype (the request
+ * panel), and a second, differently shaped four-card grid on the collection tab
+ * (#1223). Neither could be inserted, and between them they restated a subset of
+ * what the editor already knows: the engine's completion table carries every one
+ * of those lines as a template with placeholders and documentation, and Monaco
+ * shows them as you type. What the table could not say was which script kind a
+ * template belongs in, so it could not be *listed*; it says so now (`context`),
+ * and this is the one surface that lists it, for both hosts.
+ *
+ * **`Command`, not a hand-rolled list.** Arrow keys, the highlight, Enter to
+ * activate and filtering are all `cmdk`'s, which the palette and the header
+ * suggestions already use - a second copy of that keyboard handling is the
+ * defect `suggestion-list.tsx` was written to end.
+ *
+ * **Collapsed by default, and remembered in `layout-store`.** The editor is what
+ * the panel is for. A list open under every editor would be the wall it replaced
+ * with a chevron on it, and component state would forget the choice on the next
+ * tab switch, which unmounts the panel.
+ */
+
+import { ChevronDown, ChevronRight } from "lucide-react";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+	Command,
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+	EYEBROW_CLASS,
+} from "@/components/ui";
+import { useScriptCompletionsQuery } from "@/queries";
+import { useLayoutStore } from "@/stores";
+import { countSnippets, snippetsForContext } from "@/lib/script-snippets";
+import { cn } from "@/lib/utils";
+
+export interface ScriptSnippetsProps {
+	/** Which editor this list sits under. */
+	context: "pre" | "test";
+	/**
+	 * Insert the template at the cursor. The host owns the editor instance, so
+	 * it owns the insertion; this list only says which template was chosen.
+	 */
+	onInsert: (snippet: string) => void;
+	className?: string;
+}
+
+export function ScriptSnippets({ context, onInsert, className }: ScriptSnippetsProps) {
+	const collapsed = useLayoutStore((s) => s.scriptSnippetsCollapsed);
+	const setCollapsed = useLayoutStore((s) => s.setScriptSnippetsCollapsed);
+	const { data, isPending, isError } = useScriptCompletionsQuery();
+
+	const groups = snippetsForContext(data?.completions, context);
+	const total = countSnippets(groups);
+
+	return (
+		<Collapsible
+			open={!collapsed}
+			onOpenChange={(open) => setCollapsed(!open)}
+			className={className}
+		>
+			{/*
+			 * The whole header is the control, per the composite-row hit-area rule:
+			 * a narrow activator in a wide bar leaves most of the row painting a
+			 * hover it does not act on.
+			 */}
+			<CollapsibleTrigger
+				className={cn(
+					EYEBROW_CLASS,
+					"flex w-full items-center gap-1 text-left transition-colors hover:text-foreground"
+				)}
+			>
+				{collapsed ? (
+					<ChevronRight className="w-3 h-3 shrink-0" />
+				) : (
+					<ChevronDown className="w-3 h-3 shrink-0" />
+				)}
+				Snippets
+				{total > 0 && <span className="ml-1 tabular-nums opacity-70">{total}</span>}
+			</CollapsibleTrigger>
+
+			<CollapsibleContent className="mt-2">
+				{!collapsed && (
+					<div className="rounded-md border border-rule surface-sunken overflow-hidden">
+						{isError ? (
+							<p className="px-3 py-2 text-xs text-muted-foreground">
+								Snippets come from the engine, which is not answering right now.
+							</p>
+						) : isPending ? (
+							<p className="px-3 py-2 text-xs text-muted-foreground">
+								Loading snippets…
+							</p>
+						) : (
+							<Command className="bg-transparent">
+								<CommandInput placeholder="Filter snippets" />
+								<CommandList className="max-h-56">
+									<CommandEmpty>No snippet matches that.</CommandEmpty>
+									{groups.map(({ group, snippets }) => (
+										<CommandGroup key={group} heading={group}>
+											{snippets.map((snippet) => (
+												<CommandItem
+													key={snippet.label}
+													value={`${group} ${snippet.label} ${snippet.filterText ?? ""}`}
+													onSelect={() => onInsert(snippet.insertText)}
+													className="cursor-pointer flex-col items-start gap-0.5"
+												>
+													<span className="font-mono text-xs">
+														{snippet.label}
+													</span>
+													{snippet.detail && (
+														<span className="text-[11px] text-muted-foreground">
+															{snippet.detail}
+														</span>
+													)}
+												</CommandItem>
+											))}
+										</CommandGroup>
+									))}
+								</CommandList>
+							</Command>
+						)}
+					</div>
+				)}
+			</CollapsibleContent>
+		</Collapsible>
+	);
+}
