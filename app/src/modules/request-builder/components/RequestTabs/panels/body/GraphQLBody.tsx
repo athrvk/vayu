@@ -187,6 +187,7 @@ const PLACEMENT_PHRASE: Record<DocumentInsertion["placement"], string> = {
 	ancestor: "into the enclosing selection",
 	"new-operation": "as a new operation",
 	fragment: "as a new fragment",
+	argument: "as an argument",
 };
 
 const PANE_HEADER_CLASS =

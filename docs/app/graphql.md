@@ -58,9 +58,14 @@ to dock the explorer beside the editor. It opens on that side, which is where
 the icon points; the same button closes it again, so the control does not move
 when the pane appears.
 
-- **Browse** Query, Mutation, Subscription and Types. Fields show their
-  arguments and result type; descriptions sit beside them; a deprecated field or
-  enum value is struck through, with the reason in its tooltip.
+- **Browse** Query, Mutation, Subscription and Types. A field's row shows its
+  name and result type, with a muted argument count - `(2 args)` - standing in
+  for the list; the full signature leads its tooltip, ahead of the description,
+  so an argument list is a hover away rather than a drag of the splitter. A
+  field that takes arguments expands into an **Arguments** group, one row per
+  argument, above the fields of what it returns. Descriptions sit beside rows,
+  and a deprecated field or enum value is struck through, with the reason in its
+  tooltip.
 - **Search** filters across every field and type in the schema at once. Press
   `/` from anywhere in the tree to jump to the search box. Results are grouped
   under the same Query / Mutation / Subscription / Types headings the tree uses,
@@ -94,6 +99,16 @@ which cannot carry variables at all, Vayu promotes it to `query ( … )` in the
 same edit. Object-typed fields arrive with their scalar fields selected and the
 cursor inside the braces; deprecated fields are browsable but are never selected
 for you.
+
+Activating an **argument** row writes it onto the field as a `$variable`:
+`posts(first: $first)` plus `$first: Int` declared on the operation, with a
+placeholder merged into the Variables pane the same way a required argument's
+is. When the document does not select that field yet, Vayu inserts the field
+first by the rules above and writes the argument onto what that wrote.
+Activating an argument the selection already carries selects the existing one
+instead of writing a duplicate, the same "already present" behaviour a field
+gets. An argument under a **subscription** field is refused, naming the
+subscription it belongs to.
 
 Selecting a **type** inserts the operation that returns it - `Post` writes the
 `createPost` mutation that answers with one, following the shortest route the
