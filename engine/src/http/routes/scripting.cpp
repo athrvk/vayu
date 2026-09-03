@@ -36,6 +36,19 @@ nlohmann::json get_script_completions () {
     // InsertTextRules (monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet)
     constexpr int INSERT_AS_SNIPPET = 4;
 
+    // Snippet-only metadata: which script kind a KIND_SNIPPET entry belongs in
+    // (CONTEXT_*) and the heading it is listed under (GROUP_*). Non-snippet
+    // entries carry neither key.
+    constexpr const char* CONTEXT_PRE  = "pre";
+    constexpr const char* CONTEXT_TEST = "test";
+    constexpr const char* CONTEXT_BOTH = "both";
+
+    constexpr const char* GROUP_VARIABLES = "Variables";
+    constexpr const char* GROUP_REQUEST   = "Request";
+    constexpr const char* GROUP_TESTS     = "Tests";
+    constexpr const char* GROUP_SIGNING   = "Signing";
+    constexpr const char* GROUP_LOGGING   = "Logging";
+
     nlohmann::json completions = nlohmann::json::array ();
 
     // ========================================
@@ -458,8 +471,13 @@ nlohmann::json get_script_completions () {
     "Access the HTTP request data including URL, method, headers, and body.\n\n"
     "In a **pre-request** script these are writable: whatever pm.request holds "
     "when the script ends is what is sent, and a script-set header overrides "
-    "the one the Auth tab applied. In a **test** script it is a read-only "
-    "record of what was already sent." },
+    "the one the Auth tab applied. A value the engine cannot send - an empty "
+    "URL, an unrecognised method - rejects the whole edit rather than part of "
+    "it: the request goes out exactly as it was before the script ran, and "
+    "the reason is reported in the Console tab. In a **test** script it is a "
+    "read-only record of what was already sent - a write to it does nothing, "
+    "the script's own copy changes but nothing carries it back to the "
+    "request that was sent." },
     { "sortText", "0_pm_request" } });
 
     completions.push_back ({ { "label", "pm.request.url" }, { "kind", KIND_FIELD },
@@ -592,6 +610,17 @@ nlohmann::json get_script_completions () {
     "signature over the query changes shape if a parameter moves." },
     { "sortText", "3_pm_request_url_query_upsert" } });
 
+    completions.push_back ({ { "label", "Upsert a query parameter" }, { "kind", KIND_SNIPPET },
+    { "insertText", "pm.request.url.query.upsert({ key: \"${1:page}\", value: ${2:2} });" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.request.url.query upsert" },
+    { "detail", "Add or replace a query parameter (pre-request)" },
+    { "documentation",
+    "Replace a query parameter, or add it if the URL does not carry one of "
+    "that name yet. Position is kept for a parameter that is already there, "
+    "same as calling query.upsert() directly." },
+    { "context", CONTEXT_PRE }, { "group", GROUP_REQUEST },
+    { "sortText", "3_snippet_query_upsert" } });
+
     completions.push_back ({ { "label", "pm.request.url.query.remove" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.remove(\"${1:page}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
@@ -666,6 +695,17 @@ nlohmann::json get_script_completions () {
     "Both re-parse the whole URL in place; editing a single member (pushing "
     "to path, changing a query entry) is not supported." },
     { "sortText", "2_pm_request_url_update" } });
+
+    completions.push_back ({ { "label", "Retarget the request URL" }, { "kind", KIND_SNIPPET },
+    { "insertText", "pm.request.url = \"${1:https://api.example.com/v2/users}\";" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.request.url retarget" },
+    { "detail", "Point the request at a different URL (pre-request)" },
+    { "documentation",
+    "Replace the whole URL. Re-parses it in place, so this is the same edit "
+    "as pm.request.url.update() - editing a single member (pushing to path, "
+    "changing one query entry) needs that member's own writer instead." },
+    { "context", CONTEXT_PRE }, { "group", GROUP_REQUEST },
+    { "sortText", "3_snippet_url_retarget" } });
 
     completions.push_back ({ { "label", "pm.request.method" }, { "kind", KIND_FIELD },
     { "insertText", "pm.request.method" }, { "detail", "string (writable pre-request)" },
@@ -934,6 +974,7 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "Set a header on the outgoing request. Replaces an existing one of the "
     "same name." },
+    { "context", CONTEXT_PRE }, { "group", GROUP_REQUEST },
     { "sortText", "2_pm_request_headers_set" } });
 
     completions.push_back ({ { "label", "delete pm.request.headers[...] (remove a header)" },
@@ -943,6 +984,7 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "Remove a header from the outgoing request, including one the Auth tab "
     "applied. The name is case-sensitive - match it exactly." },
+    { "context", CONTEXT_PRE }, { "group", GROUP_REQUEST },
     { "sortText", "2_pm_request_headers_delete" } });
 
     completions.push_back (
@@ -960,7 +1002,20 @@ nlohmann::json get_script_completions () {
     "body object in place; assigning pm.request.body a string still works and "
     "replaces it with that string. Compute anything derived from the body "
     "after this, or it describes the old one." },
+    { "context", CONTEXT_PRE }, { "group", GROUP_REQUEST },
     { "sortText", "2_pm_request_body_rewrite" } });
+
+    completions.push_back ({ { "label", "Replace the body outright" }, { "kind", KIND_SNIPPET },
+    { "insertText", "pm.request.body.raw = JSON.stringify({ ${1:key}: ${2:value} });" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.request.body replace json" },
+    { "detail", "Replace the whole body (pre-request)" },
+    { "documentation",
+    "Send a new body instead of editing the old one - build the object from "
+    "scratch rather than parsing what pm.request.body.raw already holds. Use "
+    "the parse-edit-stringify snippet instead when only part of the body "
+    "should change." },
+    { "context", CONTEXT_PRE }, { "group", GROUP_REQUEST },
+    { "sortText", "3_snippet_body_replace" } });
 
     // ========================================
     // pm.info - Which request, which hook
@@ -1040,6 +1095,19 @@ nlohmann::json get_script_completions () {
     "\n\nExample:\nconsole.log("
     "'pass ' + (pm.info.iteration + 1) + ' of ' + pm.info.iterationCount);" },
     { "sortText", "1_pm_info_iterationCount" } });
+
+    completions.push_back (
+    { { "label", "Check where the script is running" }, { "kind", KIND_SNIPPET },
+    { "insertText", "if (typeof pm.info.requestName === \"string\") {\n\t${1:// ...}\n}" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.info typeof guard" },
+    { "detail", "Guard a shared script by whether pm.info is set" },
+    { "documentation",
+    "Every pm.info field is optional, so typeof is the right test rather "
+    "than truthiness or a direct read - this guards a script shared across "
+    "hooks or requests from the one that has no pm.info field to check at "
+    "all." },
+    { "context", CONTEXT_BOTH }, { "group", GROUP_VARIABLES },
+    { "sortText", "3_snippet_info_guard" } });
 
     // ========================================
     // pm.iterationData - this iteration's data row (#356)
@@ -1343,6 +1411,22 @@ nlohmann::json get_script_completions () {
     "pm.environment.set('token', res.json().access_token);\n});" },
     { "sortText", "0_pm_sendRequest" } });
 
+    completions.push_back (
+    { { "label", "Fetch a token before the send" }, { "kind", KIND_SNIPPET },
+    { "insertText",
+    "pm.sendRequest(\"${1:https://api.example.com/token}\", function (err, "
+    "res) {\n\tif (err) { return; }\n\tpm.environment.set(\"${2:token}\", "
+    "res.json().${3:access_token});\n});" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.sendRequest token auth" },
+    { "detail", "Send an auxiliary request and stash what it returns (pre-request)" },
+    { "documentation",
+    "Fetch a token before the main request goes out and save it where the "
+    "URL, headers or body can read it. Blocks until the auxiliary request "
+    "completes - pm.sendRequest has no event loop to wait on - and err is "
+    "null exactly when res is not, so check err first." },
+    { "context", CONTEXT_PRE }, { "group", GROUP_REQUEST },
+    { "sortText", "3_snippet_sendRequest_token" } });
+
     // ========================================
     // pm.cookies - the jar, read-side
     // ========================================
@@ -1606,6 +1690,7 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "HMAC-sign the request from a pre-request script. Build the canonical "
     "string after any other edits, so the signature covers what is sent." },
+    { "context", CONTEXT_PRE }, { "group", GROUP_SIGNING },
     { "sortText", "3_snippet_sign" } });
 
     // ========================================
@@ -2022,16 +2107,16 @@ nlohmann::json get_script_completions () {
     "pm.test(\"Status code is ${1:200}\", function() "
     "{\n\tpm.response.to.have.status(${1:200});\n});" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "Test template" },
-    { "documentation", "Quick template for status code test." },
-    { "sortText", "3_snippet_status" } });
+    { "documentation", "Quick template for status code test." }, { "context", CONTEXT_TEST },
+    { "group", GROUP_TESTS }, { "sortText", "3_snippet_status" } });
 
     completions.push_back ({ { "label", "Test: Response time" }, { "kind", KIND_SNIPPET },
     { "insertText",
     "pm.test(\"Response time is less than ${1:500}ms\", function() "
     "{\n\tpm.expect(pm.response.responseTime).to.be.below(${1:500});\n});" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "Test template" },
-    { "documentation", "Quick template for response time test." },
-    { "sortText", "3_snippet_time" } });
+    { "documentation", "Quick template for response time test." }, { "context", CONTEXT_TEST },
+    { "group", GROUP_TESTS }, { "sortText", "3_snippet_time" } });
 
     completions.push_back ({ { "label", "Test: JSON property" }, { "kind", KIND_SNIPPET },
     { "insertText",
@@ -2039,8 +2124,8 @@ nlohmann::json get_script_completions () {
     "pm.response.json();\n\tpm.expect(json).to.have.property(\"${1:property}\")"
     ";\n});" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "Test template" },
-    { "documentation", "Quick template for JSON property test." },
-    { "sortText", "3_snippet_property" } });
+    { "documentation", "Quick template for JSON property test." }, { "context", CONTEXT_TEST },
+    { "group", GROUP_TESTS }, { "sortText", "3_snippet_property" } });
 
     completions.push_back ({ { "label", "Test: JSON value" }, { "kind", KIND_SNIPPET },
     { "insertText",
@@ -2048,8 +2133,8 @@ nlohmann::json get_script_completions () {
     "pm.response.json();\n\tpm.expect(json.${1:field}).to.equal(${2:value});\n}"
     ");" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "Test template" },
-    { "documentation", "Quick template for JSON value assertion." },
-    { "sortText", "3_snippet_value" } });
+    { "documentation", "Quick template for JSON value assertion." }, { "context", CONTEXT_TEST },
+    { "group", GROUP_TESTS }, { "sortText", "3_snippet_value" } });
 
     completions.push_back ({ { "label", "Test: Content-Type JSON" }, { "kind", KIND_SNIPPET },
     { "insertText",
@@ -2064,6 +2149,7 @@ nlohmann::json get_script_completions () {
     "\"Content-Type\")).to.include(\"application/json\");\n});" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "Test template" },
     { "documentation", "Quick template for Content-Type header test." },
+    { "context", CONTEXT_TEST }, { "group", GROUP_TESTS },
     { "sortText", "3_snippet_content_type" } });
 
     completions.push_back ({ { "label", "Set environment variable" }, { "kind", KIND_SNIPPET },
@@ -2073,13 +2159,17 @@ nlohmann::json get_script_completions () {
     "json.${2:token});" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "Script template" },
     { "documentation", "Extract a value from response and save to environment." },
+    // Test-only despite writing a variable: it reads pm.response, which a
+    // pre-request script has not got. Storing a value *before* the send is
+    // the "Fetch a token before the send" template.
+    { "context", CONTEXT_TEST }, { "group", GROUP_VARIABLES },
     { "sortText", "3_snippet_set_env" } });
 
     completions.push_back ({ { "label", "Log response" }, { "kind", KIND_SNIPPET },
     { "insertText", "console.log(\"Response:\", JSON.stringify(pm.response.json(), null, 2));" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "Script template" },
-    { "documentation", "Log the formatted JSON response." },
-    { "sortText", "3_snippet_log" } });
+    { "documentation", "Log the formatted JSON response." }, { "context", CONTEXT_TEST },
+    { "group", GROUP_LOGGING }, { "sortText", "3_snippet_log" } });
 
     return completions;
 }
