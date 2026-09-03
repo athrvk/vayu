@@ -1371,28 +1371,40 @@
  * both from the *editor* font and its own 3px radius, so a suggest list beside
  * a Radix popover read as two systems even once the colours agreed.
  *
- * Scoped under `.monaco-editor` for the same reason the variable tokens above
- * are: Monaco injects its own single-class rules at runtime, and two classes
- * beat one whenever the stylesheets load. Overflow widgets are reparented to a
- * body-level `.monaco-editor` container (`fixedOverflowWidgets`), so the same
- * selector reaches them there.
+ * **Out of `@layer`, and one step more specific than Monaco's own rule.** Both
+ * halves are load bearing here, and neither is the reason the variable tokens
+ * above win. Tailwind v4 compiles `@layer utilities` to a real cascade layer,
+ * and an unlayered declaration beats a layered one at any specificity - Monaco
+ * ships plain, unlayered CSS, so a rule for these widgets inside the layer is
+ * simply never applied (`.monaco-editor .suggest-widget { border-radius: 3px }`
+ * in `suggest.css`, and the find widget's two bottom corners in
+ * `findWidget.css`, would both have stood). Unlayered, the selectors then tie
+ * on specificity, and Monaco's stylesheet arrives with the lazily loaded editor
+ * chunk, after this one - so a tie goes to Monaco. `html` in front is the one
+ * step that settles it. The variable-token classes above need neither: they
+ * outrank a single-class `.mtk1` rule that Monaco injects at runtime, which is
+ * a different contest.
+ *
+ * The widgets stay inside their editor's own `.monaco-editor` root even with
+ * `fixedOverflowWidgets`, which reparents them only when an explicit
+ * `overflowWidgetsDomNode` is passed and the app passes none.
  */
-@layer utilities {
-	.monaco-editor .suggest-widget,
-	.monaco-editor .find-widget,
-	.monaco-editor .monaco-hover {
-		font-family: var(--font-sans);
-		border-radius: var(--radius);
-	}
+html .monaco-editor .suggest-widget,
+html .monaco-editor .find-widget,
+html .monaco-editor .monaco-hover {
+	font-family: var(--font-sans);
+	border-radius: var(--radius);
+}
 
-	/* What is code inside them stays code: a completion's label, a hover's
-	 * sample. The mono stack, not Monaco's default, so it matches the editor
-	 * the suggestion is about to be inserted into. */
-	.monaco-editor .suggest-widget .monaco-icon-label,
-	.monaco-editor .monaco-hover code,
-	.monaco-editor .monaco-hover .monaco-tokenized-source {
-		font-family: var(--font-mono);
-	}
+/*
+ * What is code inside them stays code: a completion's label, a hover's sample.
+ * The mono stack, not Monaco's default, so it matches the editor the
+ * suggestion is about to be inserted into.
+ */
+html .monaco-editor .suggest-widget .monaco-icon-label,
+html .monaco-editor .monaco-hover code,
+html .monaco-editor .monaco-hover .monaco-tokenized-source {
+	font-family: var(--font-mono);
 }
 
 /*

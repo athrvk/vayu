@@ -2580,7 +2580,7 @@ Monaco lists:
 | Monaco colour key | Token |
 |---|---|
 | `editorSuggestWidget.selectedBackground`, `list.hoverBackground`, `list.focusBackground`, `menu.selectionBackground` | `accent` |
-| `editorSuggestWidget.selectedForeground`, `list.hoverForeground`, `list.focusForeground`, `menu.selectionForeground` | `foreground` |
+| `editorSuggestWidget.selectedForeground`, `list.hoverForeground`, `list.focusForeground`, `menu.selectionForeground` | `accent-foreground` |
 | `editorSuggestWidget.highlightForeground`, `editorSuggestWidget.focusHighlightForeground`, `list.highlightForeground` | `primary` |
 
 **The find widget's input**, a plain box in VS Code's palette:
@@ -2616,7 +2616,15 @@ showing is what lets a colour-scheme change reach an open editor without a
 reload.
 
 `IStandaloneThemeData` has no key for font or corner radius, so those two
-still live in `index.css`, scoped under `.monaco-editor`.
+still live in `index.css`, scoped under `.monaco-editor` - and, unlike every
+other rule in that file, **outside `@layer` and prefixed with `html`**. Monaco
+ships unlayered CSS that declares both properties on the same two-class
+selectors, and an unlayered declaration beats a layered one at any
+specificity, so the same rule inside `@layer utilities` never applies at all;
+unlayered it merely ties, and Monaco's stylesheet arrives after this one with
+the lazily loaded editor chunk. Any future rule that has to win against a
+widget Monaco styles itself needs both halves. `monaco-theme.test.ts` reads
+them back out of the stylesheet and fails if either is dropped.
 
 Guarded by `lib/monaco-theme.test.ts` (the builder, plus a source scan that no
 file outside the theme module passes `"vs"` / `"vs-dark"`),

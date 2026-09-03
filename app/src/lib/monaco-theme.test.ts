@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { indexCss } from "./css-tokens.testkit";
 import {
 	MONACO_THEME_NAMES,
 	THEME_TOKENS,
@@ -39,6 +40,7 @@ const TOKENS: Record<string, string> = {
 	"popover-foreground": "0 0% 100%",
 	border: "0 0% 50%",
 	accent: "120 100% 25%",
+	"accent-foreground": "0 0% 0%",
 	primary: "0 100% 50%",
 	"muted-foreground": "0 0% 50%",
 };
@@ -102,6 +104,40 @@ describe("buildMonacoTheme", () => {
 		// And the stub above covers all of them, so the assertions here are not
 		// passing over keys the builder silently dropped.
 		expect(THEME_TOKENS.filter((token) => !(token in TOKENS))).toEqual([]);
+	});
+});
+
+describe("the widget rules Monaco's theme data cannot carry", () => {
+	/*
+	 * Font and radius are the two the theme cannot state, so they are CSS - and
+	 * CSS is where they can be silently lost. Tailwind v4 turns `@layer
+	 * utilities` into a real cascade layer, and an unlayered declaration beats a
+	 * layered one at any specificity. Monaco's own stylesheets are unlayered, so
+	 * these rules inside a layer would never apply and nothing in a jsdom test
+	 * would notice: jsdom implements no cascade at all.
+	 */
+	const css = indexCss.replace(/\/\*[\s\S]*?\*\//g, "");
+	const selectors = [".monaco-editor .suggest-widget", ".monaco-editor .find-widget"];
+
+	function braceDepthAt(index: number): number {
+		const before = css.slice(0, index);
+		return before.split("{").length - before.split("}").length;
+	}
+
+	it("declares the rules this guard is about", () => {
+		for (const selector of selectors) expect(css).toContain(selector);
+	});
+
+	it("keeps them out of every `@layer`, where Monaco's own CSS would outrank them", () => {
+		for (const selector of selectors) {
+			expect(braceDepthAt(css.indexOf(selector)), `${selector} is nested`).toBe(0);
+		}
+	});
+
+	it("outranks Monaco's equally specific rule for the same widgets", () => {
+		// Unlayered leaves a tie on specificity, and Monaco's stylesheet loads
+		// after this one with the editor chunk. `html` is the step that wins it.
+		for (const selector of selectors) expect(css).toContain(`html ${selector}`);
 	});
 });
 

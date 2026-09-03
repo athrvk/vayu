@@ -103,7 +103,7 @@ export const WIDGET_COLORS = {
 	"editorSuggestWidget.foreground": { token: "popover-foreground" },
 	"editorSuggestWidget.border": { token: "border" },
 	"editorSuggestWidget.selectedBackground": { token: "accent" },
-	"editorSuggestWidget.selectedForeground": { token: "foreground" },
+	"editorSuggestWidget.selectedForeground": { token: "accent-foreground" },
 	"editorSuggestWidget.highlightForeground": { token: "primary" },
 	"editorSuggestWidget.focusHighlightForeground": { token: "primary" },
 	"editorHoverWidget.background": { token: "popover" },
@@ -113,14 +113,16 @@ export const WIDGET_COLORS = {
 	"menu.foreground": { token: "popover-foreground" },
 	"menu.border": { token: "border" },
 	"menu.selectionBackground": { token: "accent" },
-	"menu.selectionForeground": { token: "foreground" },
+	"menu.selectionForeground": { token: "accent-foreground" },
 
 	// The rows inside them - the suggest list and the context menu are both
-	// Monaco lists.
+	// Monaco lists, and a highlighted row is `bg-accent text-accent-foreground`
+	// wherever the app draws one (`command.tsx`). The two foregrounds hold the
+	// same value today; the pair is what the palette means, not the value.
 	"list.hoverBackground": { token: "accent" },
-	"list.hoverForeground": { token: "foreground" },
+	"list.hoverForeground": { token: "accent-foreground" },
 	"list.focusBackground": { token: "accent" },
-	"list.focusForeground": { token: "foreground" },
+	"list.focusForeground": { token: "accent-foreground" },
 	"list.highlightForeground": { token: "primary" },
 
 	// The find widget's input, which is a plain box in VS Code's palette.
