@@ -94,3 +94,35 @@ describe("RequestItem opens without a click delay", () => {
 		expect(onStartRename).toHaveBeenCalledWith(REQUEST);
 	});
 });
+
+/**
+ * The method chip in the tree row sits inside the row's own hover fill and
+ * selection ring, so a bordered chip on every row was a second shape competing
+ * with both. The row uses `MethodBadge`'s text variant inside a caller-set
+ * `w-[5ch]` column (the pattern the import preview also uses), giving the
+ * name after it the same starting x every method. These guards render the row
+ * and read the chip's class list, because the class arrives through `cn()`
+ * inside the primitive and a source scan of `RequestItem` cannot see it.
+ */
+describe("RequestItem method chip is a colour-only fixed column, not a bordered chip", () => {
+	it("carries the fixed 5ch column and no chip chrome", () => {
+		const { container } = renderItem();
+		// The chip is the only `font-mono` span the row renders, and the only
+		// caller in the row that reaches `MethodBadge`. Reach it by its font
+		// stack so this test does not care about markup order changes.
+		const chip = container.querySelector("span.font-mono") as HTMLElement;
+		expect(chip).toBeTruthy();
+		// Fixed column matching the abbreviated methods (`DEL`, `OPT`, `CONN`)
+		// and the widest whole label (`PATCH`), so every request name after it
+		// starts at the same x.
+		expect(chip.className).toContain("w-[5ch]");
+		// No border and no chip fill: colour alone carries the method signal
+		// against the row's hover fill and selection ring.
+		expect(chip.className).not.toContain("border ");
+		expect(chip.className).not.toMatch(/\brounded-md\b/);
+		expect(chip.className).not.toContain("px-1.5");
+		// Mutation check: reverting the row back to `variant="badge"` puts the
+		// column class from `WIDTH_CLASS` on the chip and this assertion fails.
+		expect(chip.className).not.toContain("w-[calc(");
+	});
+});
