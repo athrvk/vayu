@@ -371,7 +371,9 @@ The project uses GitHub Actions for automated builds:
   - Runs on every pull request
   - Tests engine and frontend on Linux/Windows/macOS
   - Lint, formatting and type-check run once, on their own Linux job, rather
-    than in front of a suite they cannot affect
+    than in front of a suite they cannot affect. That job also runs ESLint over
+    the JavaScript outside `app/` (`scripts/perf/*.{mjs,cjs}` today), from the
+    repository root and against its own config - it is where Node already is
   - `Script lint` does the same for the other two languages: shellcheck
     (v0.10.0) over every tracked shell script and ruff (0.15.8) over every
     tracked `.py`, both file lists taken from `git ls-files` so a script added

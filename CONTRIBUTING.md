@@ -252,6 +252,25 @@ violation, an unformatted file or a type error fails CI. Where a rule genuinely
 cannot be satisfied, suppress it on the single line with a comment saying why -
 an unexplained `eslint-disable` is treated as a defect.
 
+That job also lints the JavaScript that lives **outside** `app/` - the perf
+harnesses under `scripts/perf/` today, anything under `scripts/` or `.github/`
+tomorrow. It is a fourth step rather than part of `pnpm lint`, because ESLint
+matches a config's patterns against the directory it runs in, so the repository
+tree needs a run of its own from the repository root:
+
+```bash
+app/node_modules/.bin/eslint --config app/eslint.repo-js.config.mjs \
+  $(git ls-files -- '*.mjs' '*.cjs' '*.js' | grep -v '^app/' | grep -v '^engine/vendor/')
+```
+
+The config is plain ESLint recommended with Node globals - no TypeScript, React
+or Prettier plugin, since these are Node scripts with no tsc behind them and
+prettier's domain is `app/` alone. Its header says why it sits under `app/`
+while describing the tree above it. The file list comes from `git ls-files` for
+the reason the shell and Python scans do, and the `repo_js` filter that routes a
+change here is derived from that same list by
+`app/src/lib/repo-js-lint-routing.test.ts`, so neither half can move alone.
+
 ### Shell and Python (tooling)
 
 The installer, the git hook, the test harnesses and `build.py` are the

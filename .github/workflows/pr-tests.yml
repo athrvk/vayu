@@ -68,6 +68,7 @@ jobs:
       installer: ${{ steps.area.outputs.installer }}
       build_script: ${{ steps.area.outputs.build_script }}
       scripts: ${{ steps.area.outputs.scripts }}
+      repo_js: ${{ steps.area.outputs.repo_js }}
     steps:
       # Two invocations, because `predicate-quantifier` applies to the whole
       # action and the two kinds of filter need opposite ones. This one answers
@@ -341,8 +342,35 @@ jobs:
               - '**/*.py'
               - 'scripts/pre-commit'
               - '.github/workflows/pr-tests.yml'
+            # The first-party JavaScript outside `app/` (#1166) - the perf
+            # harnesses under `scripts/perf/` today. ESLint is configured a
+            # directory away and reached none of it, prettier's domain is
+            # `app/` by policy and `scripts` above lints shell and Python, so
+            # these files were checked by nothing. The lint that now covers
+            # them rides `App quality checks`, where Node and ESLint already
+            # are, so this filter is ORed into *that* job's condition rather
+            # than gating one of its own.
+            #
+            # Globs rather than a list, for the reason `scripts` gives: the
+            # lint step takes its files from `git ls-files`, so a script added
+            # tomorrow is linted the day it lands and this filter has to be
+            # able to see the same file. `app/**` is excluded because the app's
+            # own tree has its own config, `engine/vendor/**` because upstream's
+            # sources are not ours to keep clean - the same two exclusions the
+            # lint step applies, held to it by
+            # `app/src/lib/repo-js-lint-routing.test.ts`.
+            repo_js:
+              - '*.mjs'
+              - '**/*.mjs'
+              - '*.cjs'
+              - '**/*.cjs'
+              - '*.js'
+              - '**/*.js'
+              - '.github/workflows/pr-tests.yml'
+              - '!app/**'
+              - '!engine/vendor/**'
 
-      # The routing, said out loud. Every job below is gated on these six
+      # The routing, said out loud. Every job below is gated on these
       # booleans, and until this step existed the only way to answer "why did
       # the engine matrix run on a change that touched no engine source" was to
       # re-evaluate the globs by hand - which is how the doc-routing defect
@@ -375,7 +403,11 @@ jobs:
     name: App quality checks
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true'
+    # The second clause is the JavaScript outside `app/` (#1166): its lint runs
+    # here, so an edit to one of those files has to be able to reach this job.
+    # Bare rather than ANDed with `code`, to read as the app clause's sibling -
+    # `code` is true for any of those paths anyway, none of them being Markdown.
+    if: (needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.repo_js == 'true'
     permissions:
       contents: read
     timeout-minutes: 15
@@ -406,6 +438,37 @@ jobs:
         working-directory: app
         run: pnpm lint
 
+      # The first-party JavaScript outside `app/` (#1166). It rides this job
+      # because this is where Node and the app's ESLint install already are:
+      # `Script lint` is deliberately a runner that needs no Node, and standing
+      # one up there for two files would buy an app install - an Electron
+      # download included - to lint them.
+      #
+      # Run from the repository root, not from `app/`: ESLint matches a
+      # config's `files` patterns against the working directory, while the
+      # config resolves its own imports from where it sits. That split is why
+      # the config lives under `app/` and is invoked from here; its header
+      # carries the long version.
+      #
+      # `git ls-files` rather than a list, and an empty list fails rather than
+      # passes, for the reasons `Script lint` gives at both points. The two
+      # exclusions are that job's `engine/vendor/` rule plus `app/`, whose tree
+      # has its own config and its own lint step above.
+      - name: Lint JavaScript outside app/
+        shell: bash
+        run: |
+          mapfile -t files < <(git ls-files -- '*.mjs' '*.cjs' '*.js' | grep -v '^app/' | grep -v '^engine/vendor/')
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::No JavaScript outside app/ to check - the file list is broken, not the tree"
+            exit 1
+          fi
+          printf '  %s\n' "${files[@]}"
+          app/node_modules/.bin/eslint \
+            --config app/eslint.repo-js.config.mjs \
+            --report-unused-disable-directives \
+            --max-warnings 0 \
+            "${files[@]}"
+
       - name: Check frontend formatting
         working-directory: app
         run: pnpm format:check
@@ -431,10 +494,11 @@ jobs:
     # it lists is source or fixture, never Markdown, so `code` is true whenever
     # it is - and is left bare to read as the clause beside it. The root clause
     # must be bare: half of it is `README.md`, which `code` rejects, so an AND
-    # there would restore exactly the hole it closes. `quality` deliberately
-    # keeps the plain condition: eslint reads TS/TSX, prettier's domain is
-    # `app/` and tsc reads none of these files, so nothing it runs can change
-    # colour over an edit to one.
+    # there would restore exactly the hole it closes. `quality` needs none of
+    # these three: eslint reads TS/TSX, prettier's domain is `app/` and tsc
+    # reads none of these files, so nothing it runs can change colour over an
+    # edit to one. It carries a clause of its own for a fourth input instead -
+    # the JavaScript outside `app/` that #1166 put under eslint.
     if: (needs.changes.outputs.code == 'true' && needs.changes.outputs.app == 'true') || needs.changes.outputs.app_doc_fixtures == 'true' || needs.changes.outputs.app_engine_inputs == 'true' || needs.changes.outputs.app_root_inputs == 'true'
     permissions:
       contents: read
@@ -1157,11 +1221,17 @@ jobs:
       - name: Test the stale-vcpkg-baseline self-heal
         run: python3 scripts/test/vcpkg_baseline_test.py
 
-  # The repository's two unlinted languages (#887). Both checks are seconds of
-  # work on a runner that needs neither a C++ toolchain nor Node, so they share
-  # one Linux job rather than riding a matrix that would run each of them two or
-  # three times for one answer - the same reasoning that gave `quality` its own
-  # job.
+  # Shell and Python (#887) - the two languages nothing else in this workflow
+  # reads. Both checks are seconds of work on a runner that needs neither a C++
+  # toolchain nor Node, so they share one Linux job rather than riding a matrix
+  # that would run each of them two or three times for one answer - the same
+  # reasoning that gave `quality` its own job.
+  #
+  # JavaScript outside `app/` was the third such language until #1166. It is
+  # linted by ESLint, which needs the Node toolchain this job is defined by not
+  # having, so it is checked in `App quality checks` where that toolchain is
+  # already stood up - not here. This job's name outlives that: what it lints is
+  # what a runner without Node can lint.
   #
   # Both take their files from `git ls-files`, not an enumerated list. The list
   # this replaces had drifted to five of the twelve tracked shell scripts, and an
