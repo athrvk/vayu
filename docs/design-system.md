@@ -712,18 +712,40 @@ colour.
 letters.** Every list that shows one puts the badge first and the name after it,
 so an intrinsic-width chip started `GET` names at one x, `POST` names at another
 and `DELETE`/`OPTIONS` further still - a ragged left edge down the collections
-tree, the history sidebar and the welcome recents at once. The chip is `7ch`
+tree, the history sidebar and the welcome recents at once. The chip is `5ch`
 wide plus its own padding and border (`ch`, so one class serves both sizes and
-tracks the mono font it already uses), seven being the longest standard method -
-`OPTIONS` and `CONNECT`. The label is centred, and a longer method (the engine
-and a pasted `curl -X` both pass arbitrary strings) truncates inside the chip
-with the full method on the element's `title`, rather than widening it and
+tracks the mono font it already uses), five being the longest label that stays
+whole - `PATCH`. The label is centred, and a longer method (the engine and a
+pasted `curl -X` both pass arbitrary strings) truncates inside the chip with
+the full method on the element's `title`, rather than widening it and
 re-breaking every row around it.
+
+**The three standard methods longer than the column are abbreviated.** `DELETE`,
+`OPTIONS` and `CONNECT` render as `DEL`, `OPT` and `CONN` - the substitutions
+Postman, Insomnia and Bruno all use - and the full name is one hover away on
+the same `title` that reveals a truncated custom method. The abbreviation table
+lives beside `getMethodColor` in `utils/helpers.ts` (`METHOD_ABBREVIATIONS`,
+read by `getMethodDisplayLabel`), for the same reason: one value, one meaning
+everywhere. The column paid `7ch` on every row for two verbs almost nobody has
+in a tree; at `5ch` the collections sidebar gives the request name roughly a
+third of the row back.
+
+| Method | Column label | Title on hover |
+|--------|--------------|----------------|
+| `GET`, `POST`, `PUT`, `PATCH`, `HEAD` | as written | none |
+| `DELETE` | `DEL` | `DELETE` |
+| `OPTIONS` | `OPT` | `OPTIONS` |
+| `CONNECT` | `CONN` | `CONNECT` |
+| longer custom (`PROPPATCH`, …) | truncated | full method |
 
 The width is not an opt-in prop - the primitive enforces it, which is the whole
 reason this component exists. The `text` variant keeps its intrinsic width: it
 sits inline in running text, where a fixed column would punch holes, and a
-caller that wants a column there (the import preview) still sets its own.
+caller that wants a column there sets its own. Two callers do: the import
+preview (`w-10`) and the collections tree row (`w-[5ch]`, matching the badge
+column so `DELETE` still fits). The tree row uses the text variant because a
+bordered chip on every row was a second shape competing with the tree's own
+hover fill and selection ring; colour alone carries the signal there.
 
 Method colors are design tokens, not hardcoded hex values. **They are
 mode-adaptive** - hue and saturation are identical in both themes, so a method

@@ -31,10 +31,13 @@ function renderBadge(ui: React.ReactElement): HTMLElement {
 }
 
 /**
- * The width class the badge variant must carry: seven characters of content
- * (OPTIONS, CONNECT) plus the chip's own `px-1.5` and 1px border.
+ * The width class the badge variant must carry: five characters of content
+ * (`PATCH`, the longest standard label that stays whole) plus the chip's own
+ * `px-1.5` and 1px border. `DELETE`, `OPTIONS` and `CONNECT` are abbreviated
+ * to `DEL`, `OPT`, `CONN` before they reach the chip; the abbreviation tests
+ * below pin that.
  */
-const WIDTH_CLASS = "w-[calc(7ch+0.75rem+2px)]";
+const WIDTH_CLASS = "w-[calc(5ch+0.75rem+2px)]";
 
 describe("MethodBadge - badge variant is a fixed-width column", () => {
 	it("carries the fixed width, so the label after it starts at a fixed x", () => {
@@ -86,7 +89,8 @@ describe("MethodBadge - methods longer than the column", () => {
 		// truncation threshold lives in a constant - two spellings of the same
 		// number, so pin them to each other. Read the character count back out of
 		// what was rendered rather than restating it here, or this test is just a
-		// third copy.
+		// third copy. `GET` is safe as the fixture: it is not in the abbreviation
+		// table, so what the chip renders is the input.
 		const chars = Number(
 			/(\d+)ch/.exec(renderBadge(<MethodBadge method="GET" />).className)?.[1]
 		);
@@ -97,12 +101,62 @@ describe("MethodBadge - methods longer than the column", () => {
 		expect(renderBadge(<MethodBadge method={overflows} />).title).toBe(overflows);
 	});
 
-	it("exposes the full method as a title only when it is truncated", () => {
+	it("exposes the full method as a title only when it is truncated or abbreviated", () => {
 		// An unconditional title would fight the app's own tooltips on the same
 		// rows, so the absent case is as much of the contract as the present one.
 		expect(renderBadge(<MethodBadge method="PROPPATCH" />).title).toBe("PROPPATCH");
-		expect(renderBadge(<MethodBadge method="OPTIONS" />).title).toBe("");
+		// The three abbreviated standard methods carry the full name on `title`;
+		// see the abbreviation suite below for the substitution itself.
 		expect(renderBadge(<MethodBadge method="GET" />).title).toBe("");
+	});
+});
+
+describe("MethodBadge - standard methods longer than the column are abbreviated", () => {
+	/*
+	 * Postman, Insomnia and Bruno all shorten `DELETE`, `OPTIONS` and `CONNECT`
+	 * in a narrow column - `DEL`, `OPT`, `CONN` - and reveal the full name on
+	 * hover. This suite pins the three substitutions and the `title` that
+	 * carries the full method with them. It also pins the *absent* case for
+	 * every method whose full name fits (`GET`, `POST`, `PUT`, `PATCH`,
+	 * `HEAD`): a title on those would fight the app's tooltips on the same rows
+	 * on every list.
+	 */
+
+	it.each([
+		["DELETE", "DEL"],
+		["OPTIONS", "OPT"],
+		["CONNECT", "CONN"],
+	])("renders %s as %s with the full method on title", (method, abbrev) => {
+		const badge = renderBadge(<MethodBadge method={method} />);
+		const label = badge.firstElementChild as HTMLElement;
+		expect(label.textContent).toBe(abbrev);
+		expect(badge.title).toBe(method);
+	});
+
+	it.each(["GET", "POST", "PUT", "PATCH", "HEAD"])("renders %s whole with no title", (method) => {
+		const badge = renderBadge(<MethodBadge method={method} />);
+		const label = badge.firstElementChild as HTMLElement;
+		expect(label.textContent).toBe(method);
+		expect(badge.title).toBe("");
+	});
+
+	it("abbreviates in the text variant too, so the tree column also fits", () => {
+		// The tree row's `w-[5ch]` container matches the badge column - both
+		// widths derive from `BADGE_METHOD_CHARS` - so the text variant must
+		// substitute the same labels or `DELETE` would overflow the tree column.
+		const badge = renderBadge(<MethodBadge method="DELETE" variant="text" />);
+		expect(badge.textContent).toBe("DEL");
+		expect(badge.title).toBe("DELETE");
+	});
+
+	it("substitution survives a lower-cased input", () => {
+		// A stored request's method is a plain string and the curl parser passes
+		// pasted casings through unchanged, so the abbreviation table has to see
+		// the input as upper case, not compare it as it arrived.
+		expect(
+			(renderBadge(<MethodBadge method="delete" />).firstElementChild as HTMLElement)
+				.textContent
+		).toBe("DEL");
 	});
 });
 

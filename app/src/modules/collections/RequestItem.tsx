@@ -186,7 +186,22 @@ export default function RequestItem({
 				className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 				disabled={isDeleting || isRenaming}
 			>
-				<MethodBadge method={request.method} size="md" />
+				{/*
+				 * A bordered chip on every row was a second shape competing with the
+				 * tree's own hover fill and selection ring, and paid `7ch` of width on
+				 * every row so the two verbs almost nobody has in a tree could fit.
+				 * The text variant in a fixed `5ch` column (the caller-set pattern the
+				 * import preview already uses) is colour alone, aligned with the same
+				 * column every sibling row uses. `MethodBadge` abbreviates the three
+				 * standard methods longer than five characters (`DEL`, `OPT`, `CONN`)
+				 * and reveals the full name on hover, so no method overflows the box.
+				 */}
+				<MethodBadge
+					method={request.method}
+					variant="text"
+					size="sm"
+					className="w-[5ch] text-center"
+				/>
 				{isRenaming ? (
 					<Input
 						type="text"
