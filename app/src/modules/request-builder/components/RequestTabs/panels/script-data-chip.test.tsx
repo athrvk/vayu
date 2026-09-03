@@ -29,6 +29,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import ScriptPanel from "./script/ScriptPanel";
+import { DATA_TOKEN_TONE_CLASS } from "@/lib/data-token-tone";
+import type { VariableOrigin } from "@/types/domain";
 
 /** Monaco does not run under jsdom; nothing here tests the editor. */
 vi.mock("@/components/ui", async (importOriginal) => ({
@@ -67,6 +69,13 @@ const contract: { value: { collectionName: string; columns: string[] } | undefin
 /** What `getAllVariables()` answers with - empty unless a case says otherwise. */
 const variables: { value: Record<string, { value: string; scope: string }> } = { value: {} };
 
+/**
+ * What `getVariableOrigins(name)` answers with - empty unless a case says
+ * otherwise. This is the list `describeScopedRead` (issue #1196) reads to see
+ * a losing definition `allVariables`, keyed on the winner alone, cannot show.
+ */
+const origins: { value: Record<string, VariableOrigin[]> } = { value: {} };
+
 /** The script under the panel - `SCRIPT` unless a case swaps it. */
 const script = { value: SCRIPT };
 
@@ -85,6 +94,7 @@ vi.mock("../../../context", () => ({
 		},
 		updateField: () => {},
 		getAllVariables: () => variables.value,
+		getVariableOrigins: (name: string) => origins.value[name] ?? [],
 		get dataColumns() {
 			return contract.value;
 		},
@@ -117,6 +127,7 @@ function chipFor(container: HTMLElement, name: string): HTMLElement {
 beforeEach(() => {
 	contract.value = undefined;
 	variables.value = {};
+	origins.value = {};
 	script.value = SCRIPT;
 });
 
@@ -288,5 +299,122 @@ describe("a column read through pm, by its bare name", () => {
 		const { container } = render(<ScriptPanel variant="pre" />);
 
 		expect(chipFor(container, "email").className).toContain("bg-destructive");
+	});
+});
+
+/**
+ * A single-scope read whose own scope answers emptily while another scope
+ * holds the value (issue #1196).
+ *
+ * `shop_domain` is the reported trap: a Postman import leaves an enabled,
+ * empty row at collection scope, and `pm.collectionVariables.get("shop_domain")`
+ * honestly returns `""`. Nothing about that is wrong on its own - but the
+ * environment defines the same name with a real value, `allVariables` reports
+ * the *winner* (the environment's), and a chip keyed on `allVariables` alone
+ * called this read healthy while it silently returned empty. The origins list
+ * is what tells the two apart, so `getAllVariables()` has to report the name
+ * resolved here exactly as it did when the bug was filed - a fixture that
+ * leaves `shop_domain` out of `allVariables` cannot reproduce what fooled the
+ * old chip in the first place.
+ */
+describe("a single-scope pm read whose own scope answers emptily (issue #1196)", () => {
+	const TRAP_SCRIPT = 'const d = pm.collectionVariables.get("shop_domain");';
+
+	// Mutation check: delete the `describeScopedRead` branch from ScriptPanel
+	// (or make it always return null) and this case is the first to redden -
+	// the chip falls back to the destructive/secondary pair and, because
+	// `allVariables` reports the name resolved, paints the healthy chip that
+	// hid the bug.
+	it("warns, names the scope that answered empty and the scope that shadows it, and never prints the value", () => {
+		origins.value = {
+			shop_domain: [
+				{ scope: "collection", value: "", enabled: true, winner: false },
+				{
+					scope: "environment",
+					sourceName: "Staging",
+					value: "shop.example.com",
+					enabled: true,
+					winner: true,
+				},
+			],
+		};
+		// The winner `allVariables` reports - exactly what made this chip look
+		// healthy before #1196's fix, so the fixture has to keep reporting it.
+		variables.value = { shop_domain: { value: "shop.example.com", scope: "environment" } };
+		script.value = TRAP_SCRIPT;
+
+		const { container } = render(<ScriptPanel variant="pre" />);
+		const chip = chipFor(container, "shop_domain");
+
+		expect(chip.className).toContain(DATA_TOKEN_TONE_CLASS.warning);
+		const title = chip.getAttribute("title")!;
+		expect(title).toContain("Empty at collection scope");
+		expect(title).toContain("environment - Staging");
+		// One of these definitions may be a secret; the tooltip names sources,
+		// never values.
+		expect(title).not.toContain("shop.example.com");
+	});
+
+	it("stays the ordinary healthy chip when the accessor's own scope actually answers", () => {
+		/*
+		 * Same script, but the collection row holds a real value of its own. The
+		 * environment still wins the ladder - it outranks the collection, so it is
+		 * last and takes `winner` - and that is the point: warning on "another
+		 * scope wins" would fire on most healthy scripts. What decides is whether
+		 * the accessor's *own* scope answers, and here it does.
+		 */
+		origins.value = {
+			shop_domain: [
+				{
+					scope: "collection",
+					value: "collection.example.com",
+					enabled: true,
+					winner: false,
+				},
+				{
+					scope: "environment",
+					sourceName: "Staging",
+					value: "env.example.com",
+					enabled: true,
+					winner: true,
+				},
+			],
+		};
+		variables.value = { shop_domain: { value: "env.example.com", scope: "environment" } };
+		script.value = TRAP_SCRIPT;
+
+		const { container } = render(<ScriptPanel variant="pre" />);
+		const chip = chipFor(container, "shop_domain");
+
+		expect(chip.className).not.toContain(DATA_TOKEN_TONE_CLASS.warning);
+		// The paint this read fell back to before #1196 ever existed: resolved,
+		// so the ordinary secondary chip - not the destructive one, and not amber.
+		expect(chip.className).toContain("bg-secondary");
+	});
+
+	it("never warns for the merged pm.variables read of the same name", () => {
+		// `pm.variables` returns the winner by construction, so it is correct
+		// regardless of what a single scope answers - the trap above is specific
+		// to the single-scope accessors and must not leak into this one.
+		origins.value = {
+			shop_domain: [
+				{ scope: "collection", value: "", enabled: true, winner: false },
+				{
+					scope: "environment",
+					sourceName: "Staging",
+					value: "shop.example.com",
+					enabled: true,
+					winner: true,
+				},
+			],
+		};
+		variables.value = { shop_domain: { value: "shop.example.com", scope: "environment" } };
+		script.value = 'const d = pm.variables.get("shop_domain");';
+
+		const { container } = render(<ScriptPanel variant="pre" />);
+
+		expect(chipFor(container, "shop_domain").className).not.toContain(
+			DATA_TOKEN_TONE_CLASS.warning
+		);
 	});
 });

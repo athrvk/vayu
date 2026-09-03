@@ -1606,6 +1606,36 @@ while the name is a declared column no scope defines, which is the line
 `VariableInput` already draws for a bare `{{email}}`. Everything else keeps the
 paint it had.
 
+**A reference also carries *which* scope it reads, and a scoped read that its
+own scope answers emptily is amber** (issue #1196). `reads: "scope"` said that
+one scope answers and never which, so both chip rows could only ask
+`allVariables` whether *any* scope defines the name - an answer about the winner
+of the full ladder. An enabled, empty `shop_domain` at collection scope
+therefore got the healthy accent while `pm.collectionVariables.get` returned
+`''` and `{{shop_domain}}` in the URL bar resolved the environment's value: a
+failing assertion with nothing on screen connecting it to its cause, and the
+usual way in is a Postman import's initial-value placeholder. Each reference now
+carries a `scope` of `environment`, `collection` or `global`, null for the
+merged and row reads and for a template mention, and `describeScopedRead`
+(beside the helper, so the two surfaces cannot disagree) joins it against
+`useVariableResolver`'s `getVariableOrigins` - which both panels were already
+handed and neither read. The chip is amber when that scope's own **last enabled**
+definition is empty or absent while **the ladder's winner** is a different scope
+holding a non-empty value, and the tooltip names both facts: what the read
+returns, and where the value the author is looking at lives. The winner is the
+test, not "some other scope has a value", because the two part company exactly
+where the read's own scope is the one that wins: an empty collection row beside a
+non-empty global is the collection's answer *and* the merged answer, and an
+enabled environment row wins whatever it holds, so neither can be shadowed by
+anything. Amber on those would be amber on healthy scripts. Amber and not destructive, for the same reason the
+undeclared column is: the read works and the name resolves, it just does not
+resolve there. The merged read never warns - `pm.variables.get` returns the
+winning value and is the escape from this trap - and the tooltip prints sources
+(`environment - Staging`), never values, because a shadowing definition may be a
+secret. The engine is correct here and untouched: `js_pm_scope_get` returns the
+stored empty string when an enabled row holds one, and `undefined` when none
+does, which is exactly what these two states say.
+
 **A run-time token receives pointer events; the overlay does not.** The overlay
 is `pointer-events: none` so clicks reach the transparent input underneath and
 place the caret, and each token wrapper opts back in for itself -

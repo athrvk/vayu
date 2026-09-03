@@ -27,6 +27,7 @@ import LegacyScriptNotice from "../LegacyScriptNotice";
 import { SCRIPT_VARIANTS, type ScriptVariant } from "./script-variants";
 import {
 	describeColumnReference,
+	describeScopedRead,
 	referencedVariables,
 	TEMPLATE_IN_SCRIPT_NOTE,
 } from "@/lib/referenced-variables";
@@ -45,7 +46,7 @@ export interface ScriptPanelProps {
 export default function ScriptPanel({ variant }: ScriptPanelProps) {
 	const config = SCRIPT_VARIANTS[variant];
 	const context = useRequestBuilderContext();
-	const { request, updateField, getAllVariables } = context;
+	const { request, updateField, getAllVariables, getVariableOrigins } = context;
 	const [showVariables, setShowVariables] = useState(false);
 
 	const script = request[config.field];
@@ -192,6 +193,32 @@ export default function ScriptPanel({ variant }: ScriptPanelProps) {
 									title={TEMPLATE_IN_SCRIPT_NOTE}
 								>
 									{`{{${name}}}`}
+								</Badge>
+							);
+						}
+						/*
+						 * A single-scope read whose own scope answers emptily while
+						 * another scope holds the value (issue #1196). Below the
+						 * resolved/unresolved pair because `allVariables` answers
+						 * about the *winner*: a name the environment defines is in
+						 * that map, so `pm.collectionVariables.get("shop_domain")`
+						 * got the healthy chip while returning `''`. Amber, because
+						 * the read works and the name resolves - it just does not
+						 * resolve here.
+						 */
+						const scoped = describeScopedRead(reference, getVariableOrigins(name));
+						if (scoped) {
+							return (
+								<Badge
+									key={name}
+									variant="chip"
+									className={cn(
+										"font-mono text-xs bg-muted",
+										DATA_TOKEN_TONE_CLASS[scoped.tone]
+									)}
+									title={`${scoped.description} - ${scoped.note}`}
+								>
+									{name}
 								</Badge>
 							);
 						}
