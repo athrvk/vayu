@@ -300,12 +300,12 @@ jobs:
           done
 
       # The cold-start leg is unreliable on the Linux runner and reliable on the
-      # other two, which is recorded here because the summary will show it: the
-      # packaged app produced a figure once in five runs (743 ms), and the other
-      # four times it came up whole - engine listening, MCP up, the renderer
-      # fetching config, collections and globals from it, all inside a second -
-      # and then produced no frame at all, so `ready-to-show` never fired and
-      # the leg timed out. The harness's plain window becomes showable in the
+      # other two, which is recorded here because the summary will show it:
+      # across the runs that landed #1165 the packaged app produced a figure
+      # once (743 ms) and timed out every other time, each time having come up
+      # whole - engine listening, MCP up, the renderer fetching config,
+      # collections and globals from it, all inside a second - and then produced
+      # no frame at all, so `ready-to-show` never fired. The harness's plain window becomes showable in the
       # same session every time; the app's is frameless. Running a window
       # manager (openbox, waited for with `_NET_SUPPORTING_WM_CHECK`) changed
       # nothing, so none is carried here. #1347 holds the evidence and is where

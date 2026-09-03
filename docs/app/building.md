@@ -277,11 +277,12 @@ node scripts/perf/measure-app.mjs --out perf-app.json --packaged-dir app/release
 `"unavailable"` and the renderer-graph figures still come out.
 
 **On a headless Linux box the packaged figure is unreliable, and the CI runner
-is one.** Under `xvfb-run` the app produced a figure once in five runs there;
-the other four it came up whole - engine listening, MCP up, the renderer
-fetching config, collections and globals from it, inside a second - and then
-produced no frame, so `ready-to-show` never fired and the leg reported
-`"unavailable"` with that output in `note`. The harness's plain window becomes
+is one.** Under `xvfb-run` the app produced a figure once across the runs that
+landed this leg and timed out every other time, each time having come up whole
+- engine listening, MCP up, the renderer fetching config, collections and
+globals from it, inside a second - and then produced no frame, so
+`ready-to-show` never fired and the leg reported `"unavailable"` with that
+output in `note`. The harness's plain window becomes
 showable in the same session every time, and the app's window is frameless.
 Running a window manager in the session changed nothing. #1347 tracks it; the
 Windows and macOS figures are unaffected, as is a Linux desktop, where this has
