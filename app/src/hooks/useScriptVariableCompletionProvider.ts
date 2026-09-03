@@ -202,38 +202,38 @@ export function useScriptVariableCompletionProvider() {
 				 */
 				const scope = context.scope === "all" ? null : context.scope;
 				const variables = scope ? getScopeVariables(scope) : getAllVariables();
-				const suggestions: Monaco.languages.CompletionItem[] = Object.entries(variables).map(
-					([name, info]) => {
-						/*
-						 * The trap at typing time rather than after a failed run
-						 * (#1196's second item): this scope answers emptily while
-						 * another holds the value, so the read returns `""` and the
-						 * `{{name}}` beside it does not. One sentence, from the same
-						 * function the chip above the editor reads - a second
-						 * cross-check here would be a copy that drifts from it.
-						 */
-						const shadowed = scope
-							? describeScopedRead(
-									{ name, via: "pm", reads: "scope", scope },
-									getVariableOrigins(name)
-								)
-							: null;
-						return {
-							label: name,
-							kind: monaco.languages.CompletionItemKind.Variable,
-							insertText: wrap(name),
-							// What this call returns, which is the thing you are
-							// actually checking when you reach for the list.
-							detail: shadowed ? shadowed.description : valueDetail(info),
-							documentation: shadowed
-								? `${originLabel(info)} - ${shadowed.note}`
-								: originLabel(info),
-							sortText: `${SCOPE_ORDER[info.scope] ?? 9}${name}`,
-							filterText: wrap(name),
-							range,
-						};
-					}
-				);
+				const suggestions: Monaco.languages.CompletionItem[] = Object.entries(
+					variables
+				).map(([name, info]) => {
+					/*
+					 * The trap at typing time rather than after a failed run
+					 * (#1196's second item): this scope answers emptily while
+					 * another holds the value, so the read returns `""` and the
+					 * `{{name}}` beside it does not. One sentence, from the same
+					 * function the chip above the editor reads - a second
+					 * cross-check here would be a copy that drifts from it.
+					 */
+					const shadowed = scope
+						? describeScopedRead(
+								{ name, via: "pm", reads: "scope", scope },
+								getVariableOrigins(name)
+							)
+						: null;
+					return {
+						label: name,
+						kind: monaco.languages.CompletionItemKind.Variable,
+						insertText: wrap(name),
+						// What this call returns, which is the thing you are
+						// actually checking when you reach for the list.
+						detail: shadowed ? shadowed.description : valueDetail(info),
+						documentation: shadowed
+							? `${originLabel(info)} - ${shadowed.note}`
+							: originLabel(info),
+						sortText: `${SCOPE_ORDER[info.scope] ?? 9}${name}`,
+						filterText: wrap(name),
+						range,
+					};
+				});
 
 				/*
 				 * Declared columns, blended into the merged accessor and nowhere

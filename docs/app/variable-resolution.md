@@ -434,6 +434,31 @@ cannot disagree about which definition won. A name whose every definition is
 disabled is absent from the map, not present-and-empty - the red token keys off
 absence, so a present-and-empty entry would paint it resolved and send "".
 
+### `getScopeVariables(scope)`
+
+Returns what **one** scope answers on its own: the names it defines through
+enabled rows, each valued as `pm.<scope>.get` would read it, independent of
+which scope wins the whole ladder (issue #1302).
+
+A different question from `getAllVariables`, and the difference is the point.
+`pm.collectionVariables.get` reads the collection chain and answers from it
+whether or not the environment defines the name too, so a caller that wants
+"what does this scope hold?" cannot get it by filtering the winners: a
+collection's own `shop_domain` disappears from that filter the moment an
+environment shadows it, which is the one configuration where the scoped read
+and the `{{name}}` beside it disagree. The completion list inside a
+single-scope accessor is built from this (below).
+
+Derived from the same origins as `variableMap`, through the same "last enabled
+wins" rule - `scopeAnswer` in `lib/referenced-variables.ts`, which
+`describeScopedRead` reads as well, so what a list offers and what the chip
+above the editor says about it cannot drift apart. A name whose definitions in
+that scope are all disabled is absent rather than present-and-empty, for the
+reason it is absent from `variableMap`: `get` reads enabled rows only.
+
+Display-only, like `getVariableOrigins`. The bound row never appears here - it
+is not a scope, and no accessor reads a single scope through it.
+
 ### `getVariableOrigins(name)`
 
 Returns every definition of a name, lowest precedence first, **including the
@@ -904,6 +929,20 @@ These rules make the offered set match what the call can actually read:
   variable offered there would be a name that returns `undefined`. Only the
   merged `pm.variables.get` lists all three, and it alone also lists the
   declared columns (below), because it alone reads both.
+- **And the scope answers for itself.** A single-scope list is the names that
+  scope *defines*, through enabled rows - `getScopeVariables` (above) - not the
+  names whose ladder-winner happens to sit there (issue #1302). The two are
+  different lists wherever a name is defined twice: a collection `shop_domain`
+  shadowed by the active environment is still a name
+  `pm.collectionVariables.get` reads and answers, so withholding it would hide
+  the very case the list is worth opening for. `detail` is that scope's own
+  answer for the same reason - its value, `(empty)` for an enabled empty row,
+  or `secret` for a masked one - rather than the winner's value, which the call
+  will not return. Where that answer is an empty row while another scope holds
+  a value, `detail` carries `describeScopedRead`'s sentence (*Empty at
+  collection scope - this read returns ""*) and the documentation names the
+  scope that holds it - the same words the chip above the editor uses, from the
+  same function.
 - **Collection variables come from the active tab.** Collection scope is
   explicit-only (see *Collection scope is explicit only* above) and a Monaco
   completion provider is registered once per *language*, not per editor, so it
@@ -917,7 +956,7 @@ These rules make the offered set match what the call can actually read:
   `pm.collectionVariables.get()` and the merged `pm.variables.get()` - it is a
   name the call can read. This list narrowed to the immediate collection while
   the engine did; the rule underneath is unchanged, which is that the list
-  offers exactly what the call resolves.
+  offers exactly what the call reads.
 - **`pm.iterationData` completes columns, not variables.** The row it reads is
   bound from the collection's data file, so the names offered inside
   `pm.iterationData.get("…")` and `.has("…")` are the declared columns of the

@@ -376,3 +376,106 @@ describe("the bound row as an origin", () => {
 		expect(origins.find((o) => o.winner)?.scope).toBe("environment");
 	});
 });
+
+/**
+ * `getScopeVariables` answers a different question from `getAllVariables`
+ * (issue #1302): what one scope holds, not what wins over every other one.
+ *
+ * `pm.collectionVariables.get` reads the collection chain and answers from it
+ * whether or not the environment defines the name too, so the completion list
+ * for that call is built from this rather than from the winners - and the two
+ * disagree in exactly the configuration the author most needs to see.
+ */
+describe("what one scope answers on its own", () => {
+	it("keeps a definition the environment shadows", () => {
+		const r = setup({
+			cols: [{ id: "c1", name: "Acme", variables: { shop_domain: v("shop.test") } }],
+			envs: [
+				{ id: "e1", name: "Staging", variables: { shop_domain: v("staging.shop.test") } },
+			],
+			activeCollectionId: "c1",
+			activeEnvironmentId: "e1",
+		});
+		expect(r.getScopeVariables("collection").shop_domain.value).toBe("shop.test");
+		expect(r.getScopeVariables("collection").shop_domain.sourceName).toBe("Acme");
+		// The ladder is untouched: the environment still wins everywhere else.
+		expect(r.getVariable("shop_domain")?.scope).toBe("environment");
+	});
+
+	it("gives the leaf collection's value, not its ancestor's", () => {
+		const r = setup({
+			cols: [
+				{ id: "root", name: "Acme", variables: { baseUrl: v("https://root.io") } },
+				{
+					id: "leaf",
+					name: "Leaf",
+					parentId: "root",
+					variables: { baseUrl: v("https://leaf.io") },
+				},
+			],
+			activeCollectionId: "leaf",
+		});
+		expect(r.getScopeVariables("collection").baseUrl.value).toBe("https://leaf.io");
+	});
+
+	it("looks past a disabled row to the enabled one beneath it", () => {
+		const r = setup({
+			cols: [
+				{ id: "root", name: "Acme", variables: { baseUrl: v("https://root.io") } },
+				{
+					id: "leaf",
+					name: "Leaf",
+					parentId: "root",
+					variables: { baseUrl: v("https://leaf.io", { enabled: false }) },
+				},
+			],
+			activeCollectionId: "leaf",
+		});
+		expect(r.getScopeVariables("collection").baseUrl.value).toBe("https://root.io");
+	});
+
+	it("drops a name whose every definition in that scope is disabled", () => {
+		const r = setup({
+			cols: [{ id: "c1", name: "Acme", variables: { retired: v("1", { enabled: false }) } }],
+			envs: [{ id: "e1", name: "Staging", variables: { retired: v("2") } }],
+			activeCollectionId: "c1",
+			activeEnvironmentId: "e1",
+		});
+		// `get` reads enabled rows only, so absence rather than present-and-empty.
+		expect("retired" in r.getScopeVariables("collection")).toBe(false);
+		expect(r.getScopeVariables("environment").retired.value).toBe("2");
+	});
+
+	it("holds no name the scope never defined", () => {
+		const r = setup({
+			globalVars: { traceId: v("abc") },
+			envs: [{ id: "e1", name: "Staging", variables: { host: v("staging.acme.io") } }],
+			activeEnvironmentId: "e1",
+		});
+		expect(Object.keys(r.getScopeVariables("collection"))).toEqual([]);
+		expect(Object.keys(r.getScopeVariables("environment"))).toEqual(["host"]);
+		expect(Object.keys(r.getScopeVariables("global"))).toEqual(["traceId"]);
+	});
+
+	it("keeps an empty row, which is a definition and answers the read", () => {
+		const r = setup({
+			cols: [{ id: "c1", name: "Acme", variables: { shop_domain: v("") } }],
+			envs: [
+				{ id: "e1", name: "Staging", variables: { shop_domain: v("staging.shop.test") } },
+			],
+			activeCollectionId: "c1",
+			activeEnvironmentId: "e1",
+		});
+		expect(r.getScopeVariables("collection").shop_domain.value).toBe("");
+	});
+
+	it("never reports the bound row, which is not a scope", () => {
+		const r = setup({
+			envs: [{ id: "e1", name: "Staging", variables: { email: v("staging@acme.io") } }],
+			activeEnvironmentId: "e1",
+			boundRow: { email: "alice@acme.io", extra: "x" },
+		});
+		expect(r.getScopeVariables("environment").email.value).toBe("staging@acme.io");
+		expect("extra" in r.getScopeVariables("environment")).toBe(false);
+	});
+});
