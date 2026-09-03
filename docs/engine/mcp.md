@@ -1154,9 +1154,20 @@ project (TS6305). So `electron/mcp/variable-origins.ts` mirrors
 `variable-origins.conformance.test.ts` replays the engine's own fixture
 (`engine/tests/fixtures/variable-resolution-conformance.json`) through both, so
 a divergence fails a test rather than surfacing as a wrong answer months
-later. This does not make MCP a second composition path: `resolve_variables`
-reports stored definitions and substitutes no `{{tokens}}` - `POST /compose`
-remains the only place a request is actually composed.
+later. The fixture supplies a pre-flattened chain, so it cannot exercise the
+`parentId` walk; that half is pinned separately, by running `collectionChain()`
+and the renderer's `walkAncestors()` over the same rows - including the
+malformed ones (a self-parent, a two-node loop, a parent that does not exist) -
+and asserting they agree.
+
+Call this what it is: a second implementation of the resolution order, kept
+honest rather than avoided. Importing the renderer's resolver is the option
+that would have avoided it and the build forbids it; an engine endpoint
+reporting origins is the other, and it would mean new C++ for a question the
+engine has no use for (execution needs the winner, never the losers). This
+does not make MCP a second **composition** path, which is the split that is
+load-bearing: `resolve_variables` reports stored definitions and substitutes no
+`{{tokens}}` - `POST /compose` remains the only place a request is composed.
 
 ## Resources
 

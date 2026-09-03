@@ -95,7 +95,7 @@ export interface VariableOrigin {
  * by the raw engine API) and malformed values count as enabled, matching the
  * importers' normalization and the engine's `parse_variables`.
  */
-export function isEnabledDefinition(def: StoredVariableLike | undefined): boolean {
+function isEnabledDefinition(def: StoredVariableLike | undefined): boolean {
 	return !!def && typeof def === "object" && def.enabled !== false;
 }
 
@@ -103,7 +103,7 @@ export function isEnabledDefinition(def: StoredVariableLike | undefined): boolea
  * D17: the raw stored string substitutes; a non-string stored `value` reads as
  * "" rather than being stringified.
  */
-export function coerceVariableValue(value: unknown): string {
+function coerceVariableValue(value: unknown): string {
 	return typeof value === "string" ? value : "";
 }
 
@@ -170,6 +170,20 @@ export interface CollectionLike {
 }
 
 /**
+ * A collection's parent, with the three spellings of "root" normalized to one.
+ *
+ * `null`, absent and the empty string all mean top-level, and comparing raw
+ * values would file a root collection under a parent named "". Exported because
+ * `tools.ts` walks the same rows for its cascade accounting: the rule has to
+ * have one definition, and this module is the one of the two that can be
+ * imported by the other (`tools.ts` already imports from here; the reverse would
+ * be a cycle).
+ */
+export function collectionParentId(row: CollectionLike): string | null {
+	return typeof row.parentId === "string" && row.parentId !== "" ? row.parentId : null;
+}
+
+/**
  * The collection chain from the root down to `leafId`, root-first.
  *
  * Root is spelled three ways in stored rows (`null`, absent, `""`), and a
@@ -201,7 +215,7 @@ export function collectionChain(rows: readonly CollectionLike[], leafId: string)
 					? (row.variables as StoredVariableBag)
 					: undefined,
 		});
-		currentId = typeof row.parentId === "string" && row.parentId !== "" ? row.parentId : null;
+		currentId = collectionParentId(row);
 	}
 	return chain;
 }

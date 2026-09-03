@@ -8130,24 +8130,66 @@ describe("variable precedence is stated wherever a variable is written or listed
 	 * one to this list and it is checked, and the list is what a reviewer reads
 	 * to see whether it is complete.
 	 */
-	const VARIABLE_SURFACES = [
+	/**
+	 * Derived, not listed: every tool taking a `variables` argument is a tool
+	 * that writes a tier, so a new one is covered the day it is written. A
+	 * hand-maintained list would only ever pin the tools someone remembered to
+	 * add to it, which is the defect this issue was opened about wearing a
+	 * different hat.
+	 */
+	const VARIABLE_WRITERS = TOOLS.filter((t) => "variables" in t.inputSchema);
+
+	/**
+	 * The read and activation surfaces, which take no `variables` argument and
+	 * so cannot be derived the same way. Listed, and the list is asserted
+	 * complete below against every tool whose description mentions variables.
+	 */
+	const VARIABLE_READERS = [
 		"get_globals",
-		"update_globals",
 		"list_environments",
-		"create_environment",
-		"update_environment",
-		"create_collection",
-		"update_collection",
+		"list_collections",
+		"activate_environment",
 		"resolve_variables",
 	] as const;
 
-	test.each(VARIABLE_SURFACES)("%s states the order and links the model", (name) => {
+	test("the derived writer set is non-empty and is what we think it is", () => {
+		// A guard over a filter that silently matched nothing would pass forever.
+		expect(VARIABLE_WRITERS.length).toBeGreaterThan(0);
+		expect(VARIABLE_WRITERS.map((t) => t.name).sort()).toEqual([
+			"create_collection",
+			"create_environment",
+			"update_collection",
+			"update_environment",
+			"update_globals",
+		]);
+	});
+
+	test.each(VARIABLE_WRITERS.map((t) => [t.name, t] as const))(
+		"%s (writes a tier) states the order and links the model",
+		(_name, tool) => {
+			// Mutation check: drop the precedenceNote() call from any one of these
+			// descriptions and that row fails.
+			expect(tool.description).toContain(VARIABLE_PRECEDENCE_SENTENCE);
+			expect(tool.description).toContain(VARIABLE_RESOLUTION_URI);
+		}
+	);
+
+	test.each(VARIABLE_READERS)("%s (reads or switches a tier) states it too", (name) => {
 		const tool = TOOLS.find((t) => t.name === name);
 		expect(tool, `${name} is missing from TOOLS`).toBeDefined();
-		// Mutation check: drop the precedenceNote() call from any one of these
-		// descriptions and that row fails.
 		expect(tool!.description).toContain(VARIABLE_PRECEDENCE_SENTENCE);
 		expect(tool!.description).toContain(VARIABLE_RESOLUTION_URI);
+	});
+
+	test("no tool spells the order its own way any more", () => {
+		// The original complaint: the order appeared as prose in two tools and
+		// nowhere else. A second spelling is how it drifts back apart.
+		const rogue = TOOLS.filter(
+			(t) =>
+				/environment\s*>\s*collection\s*chain\s*>\s*globals/.test(t.description) &&
+				!t.description.includes(VARIABLE_RESOLUTION_URI)
+		);
+		expect(rogue.map((t) => t.name)).toEqual([]);
 	});
 
 	test("each surface names its own tier's position, not just the ladder", () => {

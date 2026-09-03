@@ -36,6 +36,7 @@ import {
 import { compareReports } from "./compare.js";
 import {
 	collectionChain,
+	collectionParentId,
 	precedenceNote,
 	resolveVariableReports,
 	VARIABLE_PRECEDENCE_SENTENCE,
@@ -2847,7 +2848,10 @@ interface CollectionRow {
  * which is a destination that does not exist.
  */
 function collectionParent(row: CollectionRow): string | null {
-	return typeof row.parentId === "string" && row.parentId !== "" ? row.parentId : null;
+	// One definition of the rule, shared with the chain walk `resolve_variables`
+	// does - the two disagreeing about what counts as a root is a defect neither
+	// side's own tests would catch.
+	return collectionParentId(row);
 }
 
 /** The collections list, dropping anything without a usable id. */
@@ -3732,7 +3736,11 @@ export const TOOLS: McpTool[] = [
 		name: "list_collections",
 		category: "read",
 		invalidates: [],
-		description: "List all request collections (folders that organize saved requests).",
+		description:
+			"List all request collections (folders that organize saved requests). Each row carries that collection's own `variables` blob; a request resolves against the whole chain from the root down, not just its own collection. " +
+			precedenceNote(
+				"Collection variables sit between globals and the active environment, and a nested collection outranks its ancestors."
+			),
 		annotations: {
 			title: "List collections",
 			readOnlyHint: true,
@@ -4026,7 +4034,10 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app. " +
+			VARIABLE_PRECEDENCE_SENTENCE +
+			` See ${VARIABLE_RESOLUTION_URI}.` +
+			" Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
 			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned.`,
 		annotations: {
 			title: "Send a request",
@@ -5647,7 +5658,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			'Make an environment the active one - the set {{variables}} resolve against when a call names no environmentId of its own, and what the app\'s own switcher shows. Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. Tools that take an explicit environmentId (run_request, start_load_run, run_collection) are unaffected by this - it is the default, not an override. GUARDED: requires write access to be enabled in Vayu Settings.',
+			'Make an environment the active one - the set {{variables}} resolve against when a call names no environmentId of its own, and what the app\'s own switcher shows. Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. Tools that take an explicit environmentId (run_request, start_load_run, run_collection) are unaffected by this - it is the default, not an override. GUARDED: requires write access to be enabled in Vayu Settings. ' +
+			precedenceNote(
+				"This is the one call that changes which tier answers without changing any value: the newly active environment shadows every collection and global of the same name, so a name can start resolving differently with nothing else edited."
+			),
 		annotations: {
 			title: "Activate environment",
 			readOnlyHint: false,
@@ -5945,7 +5959,9 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
+			VARIABLE_RESOLUTION_URI +
+			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,

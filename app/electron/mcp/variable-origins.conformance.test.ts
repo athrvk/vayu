@@ -32,6 +32,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { buildVariableValues, type StoredVariableBag } from "@/lib/variable-resolution";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { walkAncestors } from "@/modules/collections/tree-utils";
 import {
 	buildVariableOrigins,
 	collectionChain,
@@ -181,6 +182,29 @@ describe("what the winner alone cannot say", () => {
 		expect(token.secret).toBe(true);
 	});
 
+	test("a secret that loses is withheld too, not just a winning one", () => {
+		const [token] = resolveVariableReports({
+			globals: { token: { value: "loser-secret", enabled: true, secret: true } },
+			environment: {
+				id: "e",
+				name: "E",
+				variables: { token: { value: "winner", enabled: true } },
+			},
+		});
+		expect(token.value).toBe("winner");
+		const shadowed = token.shadowedBy[0];
+		expect(shadowed.valueWithheld).toBe(true);
+		expect(shadowed).not.toHaveProperty("value");
+		expect(JSON.stringify(token)).not.toContain("loser-secret");
+	});
+
+	test("the type hint survives into the report", () => {
+		const [port] = resolveVariableReports({
+			globals: { port: { value: "8080", enabled: true, type: "number" } },
+		});
+		expect(port.type).toBe("number");
+	});
+
 	test("a requested name nothing defines gets a row saying so", () => {
 		const [missing] = resolveVariableReports({ globals: {} }, ["nope"]);
 		expect(missing).toEqual({ name: "nope", resolved: false, shadowedBy: [] });
@@ -215,6 +239,37 @@ describe("the collection chain walk", () => {
 
 	test("an unknown id yields an empty chain rather than throwing", () => {
 		expect(collectionChain(rows, "ghost")).toEqual([]);
+	});
+
+	/**
+	 * The walk is the one part of the resolution the shared fixture cannot
+	 * reach: its cases supply a pre-flattened `chain`, so the parentId walk is
+	 * never exercised by it. Cross-checking against the renderer's own
+	 * `walkAncestors` is what closes that hole - without this, the two walkers
+	 * could disagree about a malformed `parentId` with both files' local tests
+	 * still green, which is exactly the drift this file exists to prevent.
+	 */
+	test.each([
+		["a normal chain", rows, "leaf"],
+		["a root", rows, "root"],
+		["an unknown id", rows, "ghost"],
+		["an empty-string parent", [{ id: "a", name: "A", parentId: "" }], "a"],
+		["an absent parent", [{ id: "a", name: "A" }], "a"],
+		["a self-parent", [{ id: "s", name: "S", parentId: "s" }], "s"],
+		[
+			"a two-node loop",
+			[
+				{ id: "a", name: "A", parentId: "b" },
+				{ id: "b", name: "B", parentId: "a" },
+			],
+			"a",
+		],
+		["a parent that does not exist", [{ id: "a", name: "A", parentId: "gone" }], "a"],
+	] as const)("agrees with the renderer's walkAncestors on %s", (_name, nodes, leaf) => {
+		const mine = collectionChain(nodes as never, leaf).map((c) => c.id);
+		// walkAncestors takes `parentId?: string | null`, the same rows.
+		const renderer = walkAncestors(leaf, nodes as never).map((c) => c.id);
+		expect(mine).toEqual(renderer);
 	});
 });
 

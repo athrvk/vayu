@@ -322,6 +322,18 @@ describe("the variable resolution resource", () => {
 		for (const name of named) expect(toolNames, name).toContain(name);
 	});
 
+	test("names where resolution actually runs, so the model is not read as MCP's own", async () => {
+		const model = await read();
+		expect(model.resolvedBy).toMatch(/POST \/compose/);
+		expect(model.resolvedBy).toMatch(/conformance fixture|shared conformance/i);
+	});
+
+	test("the collections resource points at the model too, not just environments", () => {
+		const collections = STATIC_RESOURCES.find((s) => s.uri === "vayu://collections");
+		expect(collections?.description).toContain(VARIABLE_PRECEDENCE_SENTENCE);
+		expect(collections?.description).toContain(VARIABLE_RESOLUTION_URI);
+	});
+
 	test("carries the rules a winner alone cannot express", async () => {
 		const model = await read();
 		const rules = model.rules.join(" ");

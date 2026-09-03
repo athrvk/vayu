@@ -59,7 +59,13 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		name: "collections",
 		uri: "vayu://collections",
 		title: "Collections",
-		description: "All request collections.",
+		// The same correction the environments row needed: each collection
+		// carries variables, and a request resolves against its whole ancestor
+		// chain rather than the one collection it sits in.
+		description:
+			"All request collections, each with its own `variables`. A request resolves against the whole chain from the root down, and a nested collection outranks its ancestors. " +
+			VARIABLE_PRECEDENCE_SENTENCE +
+			` Full model: ${VARIABLE_RESOLUTION_URI}.`,
 		read: (ctx, signal) => ctx.client.listCollections(signal),
 	},
 	{
