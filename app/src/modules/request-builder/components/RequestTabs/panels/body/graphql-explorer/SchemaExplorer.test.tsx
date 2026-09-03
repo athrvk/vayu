@@ -158,6 +158,10 @@ describe("a field's arguments", () => {
 
 		expect(row.textContent).toContain(": [SearchResult!]!");
 		expect(row.textContent).not.toContain("term: String!");
+		// The description takes what is left rather than competing for it, so a
+		// documented field is not a field whose type is cut off. jsdom lays
+		// nothing out, so the rule is read off the class that carries it.
+		expect(descriptionOf(row)!.className).toContain("flex-1");
 	});
 
 	it("counts the arguments where the list used to be", () => {

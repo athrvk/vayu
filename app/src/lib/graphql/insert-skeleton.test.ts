@@ -796,7 +796,9 @@ describe("insertionForNode - an argument row", () => {
 
 	it("does not write a required argument twice when the field insertion wrote it", () => {
 		// `search(term:)` is required, so inserting the field already writes it.
-		const result = inserted(insertionForNode(schema, argumentRow(["query", "search"], "term"), "", 0)!);
+		const result = inserted(
+			insertionForNode(schema, argumentRow(["query", "search"], "term"), "", 0)!
+		);
 
 		expect(result.text.match(/term: \$term/g)).toHaveLength(1);
 		expectValid(result.text);

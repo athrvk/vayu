@@ -680,9 +680,16 @@ function ExplorerRow({
 						</span>
 					)}
 					{node.description && !full && (
+						/*
+						 * `flex-1` is a basis of zero, so a clipped description
+						 * takes the width left over rather than competing for it:
+						 * the result type keeps its own, and a documented field is
+						 * not a field whose type is cut off. It still clips, which
+						 * is what the pane's show-descriptions toggle is for.
+						 */
 						<span
 							data-tree-description
-							className="truncate text-muted-foreground font-sans"
+							className="flex-1 truncate text-muted-foreground font-sans"
 						>
 							- {node.description}
 						</span>
