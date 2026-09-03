@@ -33,14 +33,14 @@
  *   rows to decide, which is the scan this exists to avoid.
  *
  * **What a commit still costs, and why it stays.** The matched rows are rebuilt
- * as one array per commit, so the copy is proportional to what matched rather
- * than to the batch. That is the same class of cost - and half the size - as
- * the copy `foldStepEvents` makes of the whole list on the same commit, which
- * immutability requires; removing it would mean appending to an array in place
- * across renders, which is the impure render this repo's `react-hooks` rules
- * refuse. What is gone is the predicate pass over the run, which is the part
- * that lowercased a string per row. Issue #1297 holds the window-bounded route
- * for the day the copy itself measures.
+ * as one array on a commit whose batch matched something, so that copy is
+ * proportional to what has matched rather than to the batch. It is the same
+ * class of cost - and at most the same size - as the copy `foldStepEvents`
+ * makes of the whole list on the same commit, which immutability requires;
+ * removing it would mean appending to an array in place across renders, which
+ * is the impure render this repo's `react-hooks` rules refuse. What is gone is
+ * the predicate pass over the run, the part that lowercased a string per row.
+ * Issue #1297 holds the window-bounded route for the day the copy measures.
  */
 
 import { useState } from "react";
@@ -50,6 +50,9 @@ import {
 	type ScenarioStepRow,
 	type StepListFilter,
 } from "./scenario-steps";
+
+/** Shared, so a batch that matched nothing costs no allocation at all. */
+const NONE: readonly ScenarioStepRow[] = [];
 
 export interface FilteredStepList {
 	/** How many rows matched - the total the "showing X of Y" line states. */
@@ -106,13 +109,11 @@ export function useFilteredSteps(
 
 	const held = usable ? matched : null;
 	const scanned = held?.scanned ?? 0;
-	const rows =
-		scanned === steps.length && held !== null
-			? held.rows
-			: // The one predicate, over the rows that arrived since the last pass.
-				// Appended rows sort after every row already held, so what they
-				// match goes on the end and plan order needs no merge.
-				[...(held?.rows ?? []), ...filterSteps(steps.slice(scanned), filter)];
+	// The one predicate, over the rows that arrived since the last pass and
+	// nothing else. Appended rows sort after every row already held, so what
+	// they match goes on the end and plan order needs no merge.
+	const added = scanned < steps.length ? filterSteps(steps.slice(scanned), filter) : NONE;
+	const rows = added.length === 0 ? (held?.rows ?? NONE) : [...(held?.rows ?? NONE), ...added];
 
 	/*
 	 * Adjusted during render rather than in an effect - the shape
@@ -121,7 +122,7 @@ export function useFilteredSteps(
 	 * correcting it. It settles in one extra pass, because the second finds the
 	 * whole list already matched and asks for nothing.
 	 */
-	if (rows !== held?.rows) {
+	if (held === null || scanned < steps.length) {
 		setMatched({
 			appendKey,
 			outcome: filter.outcome,
