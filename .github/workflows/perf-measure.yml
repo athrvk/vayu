@@ -291,6 +291,10 @@ jobs:
             --out perf-app.json \
             --packaged-dir app/release
 
+      # tee, not a plain redirect: a leg that reports "unavailable" is a green
+      # job with a note in it, so the log has to carry the table too. That is
+      # where anyone looks when a run measured nothing, and a step summary is
+      # not readable from the API a checkout or a review tool has.
       - name: Summarize
         if: always()
         shell: bash
@@ -298,7 +302,7 @@ jobs:
           python scripts/perf/summarize.py \
             --os "${{ matrix.os }}" \
             --engine-json perf-engine.json \
-            --app-json perf-app.json >> "$GITHUB_STEP_SUMMARY"
+            --app-json perf-app.json | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the measurements
         if: always()
