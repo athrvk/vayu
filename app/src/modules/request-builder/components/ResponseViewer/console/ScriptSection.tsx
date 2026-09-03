@@ -30,6 +30,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { cn } from "@/lib/utils";
 import type { ConsoleLevel } from "@/types";
 import type { ParsedLog } from "./parse-logs";
+import { SCRIPT_SECTIONS, type ScriptKey } from "./script-sections";
 
 /**
  * How each `console.*` level is drawn.
@@ -51,19 +52,6 @@ const LEVEL_TONE: Record<ConsoleLevel, { gutter: string; text: string; label: st
 	warn: { gutter: "warn", text: "text-status-warning-text", label: "text-status-warning-text" },
 	error: { gutter: "error", text: "text-status-error-text", label: "text-status-error-text" },
 };
-
-/**
- * The two scripts, and the token each is drawn in.
- *
- * A table rather than a prop per colour, so adding a third source is one entry
- * and cannot half-land.
- */
-export const SCRIPT_SECTIONS = {
-	pre: { label: "Pre-request Script", errorLabel: "Pre-request Script Error", tone: "running" },
-	test: { label: "Test Script", errorLabel: "Test Script Error", tone: "success" },
-} as const;
-
-export type ScriptKey = keyof typeof SCRIPT_SECTIONS;
 
 /**
  * A script error.

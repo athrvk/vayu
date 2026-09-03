@@ -23,9 +23,7 @@
 import type { Collection } from "@/types";
 
 export type NewRequestTarget =
-	| { kind: "collection"; collectionId: string }
-	| { kind: "create" }
-	| { kind: "pick" };
+	{ kind: "collection"; collectionId: string } | { kind: "create" } | { kind: "pick" };
 
 export function resolveNewRequestTarget(
 	lastCollectionId: string | null,

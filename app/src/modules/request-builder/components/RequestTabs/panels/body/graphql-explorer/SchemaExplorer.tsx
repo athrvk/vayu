@@ -114,19 +114,17 @@ type ExplorerRowModel = NodeRowModel | GroupRowModel;
 function searchRows(matches: SchemaSearchMatch[]): ExplorerRowModel[] {
 	return groupSearchMatches(matches).flatMap((group) => [
 		{ kind: "group" as const, key: `group:${group.branch}`, label: group.label },
-		...group.matches.map(
-			(match): NodeRowModel => ({
-				kind: "row",
-				key: match.node.id,
-				node: match.node,
-				depth: 0,
-				matchStart: match.matchStart,
-				descriptionStart: match.descriptionStart,
-				descriptionMatched: match.tier === "description",
-				showOwner: match.node.ownerTypeName !== null,
-				reveal: treeLocationOf(match.node),
-			})
-		),
+		...group.matches.map((match): NodeRowModel => ({
+			kind: "row",
+			key: match.node.id,
+			node: match.node,
+			depth: 0,
+			matchStart: match.matchStart,
+			descriptionStart: match.descriptionStart,
+			descriptionMatched: match.tier === "description",
+			showOwner: match.node.ownerTypeName !== null,
+			reveal: treeLocationOf(match.node),
+		})),
 	]);
 }
 
@@ -195,19 +193,17 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 	const rows = useMemo<ExplorerRowModel[]>(() => {
 		if (!schema) return [];
 		if (term && searchIndex) return searchRows(searchSchema(searchIndex, term));
-		return visibleRows(schema, expanded).map(
-			(row): NodeRowModel => ({
-				kind: "row",
-				key: row.node.id,
-				node: row.node,
-				depth: row.depth,
-				matchStart: -1,
-				descriptionStart: -1,
-				descriptionMatched: false,
-				showOwner: false,
-				reveal: null,
-			})
-		);
+		return visibleRows(schema, expanded).map((row): NodeRowModel => ({
+			kind: "row",
+			key: row.node.id,
+			node: row.node,
+			depth: row.depth,
+			matchStart: -1,
+			descriptionStart: -1,
+			descriptionMatched: false,
+			showOwner: false,
+			reveal: null,
+		}));
 	}, [schema, searchIndex, term, expanded]);
 
 	/*

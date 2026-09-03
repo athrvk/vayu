@@ -12,14 +12,7 @@ import { useSaveStore, type SaveContext } from "./save-store";
 import { useResponseStore } from "./response-store";
 
 export type TabType =
-	| "welcome"
-	| "request"
-	| "collection"
-	| "dashboard"
-	| "run"
-	| "variables"
-	| "settings"
-	| "inbox";
+	"welcome" | "request" | "collection" | "dashboard" | "run" | "variables" | "settings" | "inbox";
 
 export interface Tab {
 	id: string; // unique tab instance ID (nanoid or crypto.randomUUID)

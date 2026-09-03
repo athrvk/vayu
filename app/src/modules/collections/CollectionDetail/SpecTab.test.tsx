@@ -70,8 +70,7 @@ const specMatchQuery = {
 
 const specMetaQuery = {
 	data: undefined as
-		| { sourceUrl: string | null; fetchedAt: number; contentBytes: number }
-		| undefined,
+		{ sourceUrl: string | null; fetchedAt: number; contentBytes: number } | undefined,
 	isLoading: false,
 	isError: false,
 };
@@ -86,8 +85,7 @@ const specMetaQuery = {
  */
 const specDescribeQuery = {
 	data: undefined as
-		| { format: string; title: string; operations: Request["specOperation"][] }
-		| undefined,
+		{ format: string; title: string; operations: Request["specOperation"][] } | undefined,
 	isFetching: false,
 	isError: false,
 	error: null as Error | null,

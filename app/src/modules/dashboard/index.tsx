@@ -306,8 +306,7 @@ export default function LoadTestDashboard() {
 
 	// Typed intermediate for ramp-specific fields that only exist on the loadTestConfig branch
 	const rampCfg = displayConfiguration as
-		| { rampUpDuration?: string; startConcurrency?: number; concurrency?: number }
-		| undefined;
+		{ rampUpDuration?: string; startConcurrency?: number; concurrency?: number } | undefined;
 
 	// Build request info from stored info or final report
 	const displayRequestUrl = runMetadata?.requestUrl ?? requestInfo?.url;

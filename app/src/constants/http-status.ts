@@ -29,11 +29,7 @@
  */
 
 export type HttpStatusClass =
-	| "success"
-	| "redirect"
-	| "client-error"
-	| "server-error"
-	| "no-response";
+	"success" | "redirect" | "client-error" | "server-error" | "no-response";
 
 /**
  * Which class a status code belongs to.
