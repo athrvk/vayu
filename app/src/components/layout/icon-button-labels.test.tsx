@@ -25,9 +25,24 @@
  * feed the accessible-name computation, and this codebase uses `title` for it
  * in several places. (title-only is weaker - it does not surface on keyboard
  * focus - but it is a name, and forcing a conversion is a separate decision.)
+ *
+ * Two gaps closed in #1216:
+ *
+ * - It saw `<Button size="icon">` and nothing else, while 12 raw `<button>`
+ *   elements hold an icon and no text. Every one of them is named today; the
+ *   scan is here so the thirteenth is not the one that finds out. (A
+ *   thirteenth exists and is skipped on purpose: the schema explorer's chevron
+ *   is `aria-hidden` and `tabIndex={-1}`, a pointer affordance for an expand
+ *   the row already exposes through `aria-expanded` and the arrow keys.)
+ * - `title`-only was accepted without limit. No site relies on it any more, so
+ *   the count is pinned at zero: a *new* icon button gets a real `aria-label`,
+ *   which is the half of the name computation that survives keyboard focus.
+ *   The three buttons that carry `title` beside an `aria-label` are unaffected
+ *   - a redundant tooltip is not a naming decision.
  */
 
 import { describe, it, expect } from "vitest";
+import { blankComments, elements, openingTags, summarize } from "@/lib/jsx-opening-tags.testkit";
 
 const sources = import.meta.glob("/src/**/*.tsx", {
 	query: "?raw",
@@ -35,45 +50,99 @@ const sources = import.meta.glob("/src/**/*.tsx", {
 	eager: true,
 });
 
-/**
- * Extract complete `<Button ...>` opening tags. A regex cannot do this: JSX
- * props hold arrow functions (`onClick={(e) => …}`) and object literals whose
- * `>` and `}` would end the match early - which is exactly the bug that made an
- * earlier version of this test flag already-labelled buttons. So scan with a
- * brace/string-aware cursor and end the tag only at a top-level `>`.
- */
-function buttonOpeningTags(src: string): string[] {
-	const tags: string[] = [];
-	const re = /<Button\b/g;
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(src))) {
-		let depth = 0; // {} nesting
-		let quote: string | null = null;
-		let i = m.index + m[0].length;
-		for (; i < src.length; i++) {
-			const c = src[i];
-			if (quote) {
-				if (c === quote) quote = null;
-				continue;
-			}
-			if (c === '"' || c === "'" || c === "`") quote = c;
-			else if (c === "{") depth++;
-			else if (c === "}") depth--;
-			else if (c === ">" && depth === 0) break;
-		}
-		tags.push(src.slice(m.index, i + 1));
-	}
-	return tags;
-}
-
 const isIconButton = (tag: string) => /size=["']icon["']/.test(tag);
 
-const hasAccessibleName = (tag: string) =>
-	/aria-label[=\s]/.test(tag) || /aria-labelledby[=\s]/.test(tag) || /\btitle[=\s]/.test(tag);
+const hasAriaName = (tag: string) =>
+	/aria-label[=\s]/.test(tag) || /aria-labelledby[=\s]/.test(tag);
+
+const hasAccessibleName = (tag: string) => hasAriaName(tag) || /\btitle[=\s]/.test(tag);
+
+/**
+ * Hidden from assistive technology, so there is no name to give. The tree rows
+ * pair a `tabIndex={-1} aria-hidden` chevron with the row's own `aria-expanded`
+ * and arrow keys: the button is a pointer affordance for something the keyboard
+ * and the screen reader already reach another way.
+ */
+const isHiddenFromAt = (tag: string) => /aria-hidden[=\s]/.test(tag);
+
+/**
+ * Whether a button's children would announce anything.
+ *
+ * Everything is a text node except an element and an expression that renders
+ * only elements: `<Trash2 />` announces nothing, `{label}` announces itself, and
+ * `{expanded ? <ChevronDown /> : <ChevronRight />}` is two icons wearing a
+ * conditional. The walk skips tags and quoted strings so that a `[&>span]` in a
+ * class and a `>` inside an arrow function do not end a tag early - the same
+ * hazard `openingTags` exists for.
+ *
+ * Skipping only the *tag* rather than the element is what makes
+ * `<TruncatedText>{request.name}</TruncatedText>` announce: the name is a child
+ * expression, and a wrapper around it does not silence it.
+ */
+function announcesText(children: string): boolean {
+	// JSX comments go first and whole: blanking one would leave `{ }`, an empty
+	// expression, which reads as a rendered value and so as text.
+	const source = blankComments(children.replace(/\{\/\*[\s\S]*?\*\/\}/g, ""));
+	for (let i = 0; i < source.length; i++) {
+		const c = source[i];
+		if (/\s/.test(c)) continue;
+		if (c === "<") {
+			i = skip(source, i, "<", ">");
+			continue;
+		}
+		if (c === "{") {
+			const end = skip(source, i, "{", "}");
+			if (expressionAnnouncesText(source.slice(i + 1, end))) return true;
+			i = end;
+			continue;
+		}
+		return true; // A bare text node.
+	}
+	return false;
+}
+
+/**
+ * The same question inside `{ … }`, where the rules invert: what is *not* in an
+ * element is code, and code announces nothing.
+ *
+ * So an expression with no JSX renders a value (`{label}`), and one with JSX
+ * announces only if something inside those elements does - a nested expression
+ * or a string literal, both of which are content rather than control flow. It
+ * is a heuristic, and deliberately the cautious one: it over-reports text,
+ * which costs coverage, rather than under-reporting it, which would call a
+ * labelled button unnamed.
+ */
+function expressionAnnouncesText(code: string): boolean {
+	if (!code.includes("<")) return true;
+
+	let outsideTags = "";
+	for (let i = 0; i < code.length; i++) {
+		if (code[i] === "<") i = skip(code, i, "<", ">");
+		else outsideTags += code[i];
+	}
+	return /[{"'`]/.test(outsideTags);
+}
+
+/** The index of the `close` that matches the `open` at `from`, quotes skipped. */
+function skip(source: string, from: number, open: string, close: string): number {
+	let depth = 0;
+	let quote: string | null = null;
+	for (let i = from; i < source.length; i++) {
+		const c = source[i];
+		if (quote) {
+			if (c === quote) quote = null;
+			continue;
+		}
+		if (c === '"' || c === "'" || c === "`") quote = c;
+		else if (c === open) depth++;
+		else if (c === close && --depth === 0) return i;
+	}
+	return source.length;
+}
 
 describe("icon-only buttons have accessible names", () => {
 	const iconTags = Object.entries(sources).flatMap(([path, src]) =>
-		buttonOpeningTags(src as string)
+		openingTags(src as string, "Button")
 			.filter(isIconButton)
 			.map((tag) => ({ path, tag }))
 	);
@@ -89,7 +158,35 @@ describe("icon-only buttons have accessible names", () => {
 	it("names every icon-only Button", () => {
 		const offenders = iconTags
 			.filter(({ tag }) => !hasAccessibleName(tag))
-			.map(({ path, tag }) => `${path}: ${tag.replace(/\s+/g, " ").slice(0, 90)}`);
+			.map(({ path, tag }) => summarize(path, tag));
 		expect(offenders).toEqual([]);
+	});
+
+	const rawIconButtons = Object.entries(sources).flatMap(([path, src]) =>
+		elements(src as string, "button")
+			.filter(({ tag, children }) => !isHiddenFromAt(tag) && !announcesText(children))
+			.map(({ tag }) => ({ path, tag }))
+	);
+
+	it("finds raw icon-only <button> elements to check", () => {
+		// 12 when this was written, across 42 files that hold a raw `<button>`.
+		expect(rawIconButtons.length).toBeGreaterThan(5);
+	});
+
+	it("names every raw icon-only <button>", () => {
+		const offenders = rawIconButtons
+			.filter(({ tag }) => !hasAccessibleName(tag))
+			.map(({ path, tag }) => summarize(path, tag));
+		expect(offenders).toEqual([]);
+	});
+
+	it("adds no new button whose only name is a title", () => {
+		const titleOnly = [...iconTags, ...rawIconButtons]
+			.filter(({ tag }) => hasAccessibleName(tag) && !hasAriaName(tag))
+			.map(({ path, tag }) => summarize(path, tag));
+		// The count today is zero. A cap rather than a ban, because the docblock
+		// above still holds - `title` is a name, just the weaker one - and this is
+		// the ratchet that keeps the weaker one from spreading.
+		expect(titleOnly).toEqual([]);
 	});
 });

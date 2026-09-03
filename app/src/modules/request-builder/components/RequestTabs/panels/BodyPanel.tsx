@@ -15,8 +15,10 @@
  * **XML is a plain code pane too.** SOAP and legacy-enterprise APIs are HTTP
  * plus an XML document the user writes whole, so the mode buys highlighting
  * (Monaco's `xml` basic language ships in the bundle already, for the response
- * viewer) and an auto-`Content-Type: application/xml` - not an editor. The
- * engine sends its content byte for byte, with no envelope of any kind.
+ * viewer), the `{{` completion every other body language gets
+ * (`BODY_LANGUAGES`, which this mode was missing from until #1214) and an
+ * auto-`Content-Type: application/xml` - not an editor of its own. The engine
+ * sends its content byte for byte, with no envelope of any kind.
  *
  * **JSON-RPC is a plain JSON pane, deliberately.** Its call is one JSON text -
  * the envelope around it (`"jsonrpc":"2.0"`, and an `id` when the call names
@@ -47,7 +49,7 @@
  * alongside, so the two share one full-width surface.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { OnMount } from "@monaco-editor/react";
 import {
 	Select,
@@ -57,6 +59,7 @@ import {
 	SelectValue,
 	Button,
 	CodeEditor,
+	Skeleton,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
@@ -70,25 +73,19 @@ import { useResizable } from "@/hooks/useResizable";
 import { useSessionStore } from "@/stores";
 import type { SchemaTarget } from "@/lib/graphql/schema-cache";
 import { cn } from "@/lib/utils";
-import GraphQLBody from "./body/GraphQLBody";
+import { BODY_MODES } from "./body/body-modes";
 import { switchContentType, withoutContentType } from "./body/content-type";
+import { switchGraphQLMethod } from "./body/graphql-method";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
 import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
 
-const BODY_MODES: { value: BodyMode; label: string; contentType: string | null }[] = [
-	{ value: "none", label: "None", contentType: null },
-	{ value: "json", label: "JSON", contentType: "application/json" },
-	{ value: "text", label: "Text", contentType: "text/plain" },
-	{ value: "graphql", label: "GraphQL", contentType: "application/json" },
-	{ value: "jsonrpc", label: "JSON-RPC", contentType: "application/json" },
-	{ value: "xml", label: "XML", contentType: "application/xml" },
-	{ value: "form-data", label: "Form Data", contentType: "multipart/form-data" },
-	{
-		value: "x-www-form-urlencoded",
-		label: "URL Encoded",
-		contentType: "application/x-www-form-urlencoded",
-	},
-];
+/*
+ * The GraphQL pane is the entry chunk's largest optional passenger: the
+ * `graphql` package plus `graphql-language-service` and the variables schema
+ * work, none of which a REST request ever touches. It renders only for
+ * `bodyMode === "graphql"`, so it loads then (#1146).
+ */
+const GraphQLBody = lazy(() => import("./body/GraphQLBody"));
 
 /** One arrow press. A shade over a text line, so it moves visibly. */
 const RESIZE_STEP = 24;
@@ -124,6 +121,7 @@ function ResizeHandle({
 	max: number;
 }) {
 	return (
+		// eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- WAI-ARIA window splitter - a focusable `role="separator"` is its sanctioned interactive form, with the arrow/Page/Home/End handling in the onKeyDown just below
 		<div
 			role="separator"
 			aria-orientation="horizontal"
@@ -179,6 +177,8 @@ export default function BodyPanel() {
 		setVariablesDraft,
 		getAutoContentType,
 		setAutoContentType,
+		getAutoMethod,
+		setAutoMethod,
 		resolvedAuth,
 	} = useRequestBuilderContext();
 	const variables = useVariableSupport();
@@ -306,6 +306,26 @@ export default function BodyPanel() {
 		if (contentType.headers !== request.headers) updateField("headers", contentType.headers);
 		setAutoContentType(contentType.auto);
 		setAddedContentType(contentType.added);
+
+		/*
+		 * GraphQL means something different on a GET - the document travels as
+		 * query parameters and a mutation cannot be sent at all - and a new
+		 * request is a GET, so picking the mode used to build a request the
+		 * server answered with a bare 400 (issue #1228). The method moves the
+		 * same reversible way the header above does, and back again on the way
+		 * out; `graphql-method.ts` is the rule, including why a method the user
+		 * chose is left alone in both directions.
+		 */
+		const graphqlMethod = switchGraphQLMethod(
+			mode,
+			request.method,
+			request.id,
+			getAutoMethod()
+		);
+		if (graphqlMethod.method !== request.method) {
+			updateField("method", graphqlMethod.method);
+		}
+		setAutoMethod(graphqlMethod.auto);
 	};
 
 	const undoContentType = () => {
@@ -420,6 +440,7 @@ export default function BodyPanel() {
 											? "xml"
 											: "plaintext"
 								}
+								ariaLabel="Request body"
 								value={request.body || ""}
 								onChange={(v) => updateField("body", v ?? "")}
 								onMount={handleEditorMount}
@@ -443,18 +464,31 @@ export default function BodyPanel() {
 						className="overflow-hidden rounded-md border border-input"
 						style={{ height: editorHeight }}
 					>
-						<GraphQLBody
-							body={request.body || ""}
-							onBodyChange={(b) => updateField("body", b)}
-							requestId={request.id ?? null}
-							schemaTarget={gqlSchemaTarget}
-							onEditorMount={handleEditorMount}
-							variablesDraft={ownVariablesDraft(
-								getVariablesDraft(),
-								request.id ?? null
-							)}
-							onVariablesDraftChange={handleVariablesDraftChange}
-						/>
+						<Suspense
+							fallback={
+								<div
+									className="h-full w-full p-2"
+									role="status"
+									aria-label="Loading GraphQL editor"
+								>
+									<Skeleton className="h-full w-full rounded-md" />
+								</div>
+							}
+						>
+							<GraphQLBody
+								body={request.body || ""}
+								method={request.method}
+								onBodyChange={(b) => updateField("body", b)}
+								requestId={request.id ?? null}
+								schemaTarget={gqlSchemaTarget}
+								onEditorMount={handleEditorMount}
+								variablesDraft={ownVariablesDraft(
+									getVariablesDraft(),
+									request.id ?? null
+								)}
+								onVariablesDraftChange={handleVariablesDraftChange}
+							/>
+						</Suspense>
 					</div>
 					<ResizeHandle
 						onMouseDown={startResizing}

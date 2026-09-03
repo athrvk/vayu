@@ -31,6 +31,7 @@ import { render, cleanup } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { APP_SETTINGS } from "./app-settings";
 import { APP_SETTINGS_PANELS } from "./app-panels";
+import { APP_PANEL_COMPONENTS } from "./app-panel-components";
 
 // The panels reach outside Settings for three things, none of them the subject:
 // the engine's run store, its cookie jar, and the Electron updater bridge.
@@ -106,7 +107,7 @@ describe("the app settings catalogue", () => {
 			// screen missing from search, which is the bug this file guards.
 			expect(declared.length).toBeGreaterThan(0);
 
-			const { container } = renderPanel(panel.Component);
+			const { container } = renderPanel(APP_PANEL_COMPONENTS[panel.id]);
 			const rendered = new Set(
 				[...container.querySelectorAll("[data-setting-anchor]")].map((el) =>
 					el.getAttribute("data-setting-anchor")
@@ -126,7 +127,7 @@ describe("the app settings catalogue", () => {
 		"prints the catalogue's label as the heading of every block in %s",
 		(id, panel) => {
 			const declared = APP_SETTINGS.filter((s) => s.panel === id);
-			const { container } = renderPanel(panel.Component);
+			const { container } = renderPanel(APP_PANEL_COMPONENTS[panel.id]);
 
 			let checked = 0;
 			for (const setting of declared) {

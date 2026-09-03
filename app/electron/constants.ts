@@ -237,3 +237,21 @@ export const ISSUES_URL = `https://github.com/${REPO}/issues`;
 // Auto-updater
 /** Re-check for updates every 6 hours while the app stays open. */
 export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/**
+ * How long after launch the session's first update check waits.
+ *
+ * On the silent platforms (Windows, Linux AppImage) a check that finds a
+ * release downloads it there and then, and `initAutoUpdater` runs a few lines
+ * after the window is created - so a 127MB NSIS pull, or an AppImage apply that
+ * reads the whole old image and writes a new one, used to begin at t=0 of a
+ * launch. In an API-testing client that transfer competes for the link with the
+ * user's own requests, and for the disk with the engine's startup work; with a
+ * release every day or two, a daily user paid it every second or third launch.
+ *
+ * A minute puts it past window creation, engine startup and the first requests
+ * a user makes, and costs nothing they can see: the release is still picked up
+ * by this launch, by the 6h cycle, or by the next one. Only the timing moves -
+ * which platforms download silently, the retry budget and every manual check
+ * path are unchanged.
+ */
+export const UPDATE_STARTUP_CHECK_DELAY_MS = 60 * 1000;

@@ -21,6 +21,7 @@
  */
 
 import type { LucideIcon } from "lucide-react";
+import type { Chord } from "@/lib/platform";
 import type { Tab } from "@/stores";
 import type { Collection } from "@/types";
 
@@ -62,6 +63,14 @@ export interface CommandSurfaces {
 	 * builder; absent whenever none is mounted.
 	 */
 	startLoadTest?: () => void;
+	/**
+	 * Send the request the builder currently holds, again from the live draft
+	 * rather than the saved copy (#1243). Contributed by the mounted request
+	 * builder, and only while it could actually send: absent with no builder on
+	 * screen, and absent for the window in which the builder's own Send button is
+	 * disabled or has become Stop.
+	 */
+	sendRequest?: () => void;
 }
 
 /**
@@ -98,6 +107,16 @@ export interface Command {
 	icon: LucideIcon;
 	/** Where the row says this action already lives, when that is not obvious. */
 	subtitle?: string;
+	/**
+	 * The chord that already runs this action, for a surface that advertises it.
+	 *
+	 * The `Chord` object from `constants/shortcuts.ts` and never a second
+	 * spelling of it (#938): a row printing "⌘W" that the handler does not
+	 * listen for is exactly the drift that file exists to end. Present only
+	 * where a chord genuinely runs *this* command - most commands have none, and
+	 * inventing one for them would put a key on screen that does nothing.
+	 */
+	shortcut?: Chord;
 	/**
 	 * Whether this command can run at all right now. Omitted means always -
 	 * spelled that way rather than `() => true` so the roster reads as "these

@@ -123,27 +123,31 @@ describe("live progress", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addStep({
-				iteration: 0,
-				stepIndex: 0,
-				name: "Log in",
-				outcome: "passed",
-				statusCode: 200,
-				latencyMs: 40,
-			});
+			store.addSteps([
+				{
+					iteration: 0,
+					stepIndex: 0,
+					name: "Log in",
+					outcome: "passed",
+					statusCode: 200,
+					latencyMs: 40,
+				},
+			]);
 		});
 
 		expect(screen.getByText("Log in")).toBeTruthy();
 
 		act(() => {
-			useScenarioRunStore.getState().addStep({
-				iteration: 0,
-				stepIndex: 1,
-				name: "Browse",
-				outcome: "failed",
-				statusCode: 200,
-				latencyMs: 12,
-			});
+			useScenarioRunStore.getState().addSteps([
+				{
+					iteration: 0,
+					stepIndex: 1,
+					name: "Browse",
+					outcome: "failed",
+					statusCode: 200,
+					latencyMs: 12,
+				},
+			]);
 		});
 
 		expect(screen.getByText("Browse")).toBeTruthy();
@@ -158,14 +162,16 @@ describe("live progress", () => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
 			for (const step of [0, 1, 0, 1]) {
-				store.addStep({
-					iteration: 0,
-					stepIndex: step,
-					name: `Step ${step + 1}`,
-					outcome: "passed",
-					statusCode: 200,
-					latencyMs: 1,
-				});
+				store.addSteps([
+					{
+						iteration: 0,
+						stepIndex: step,
+						name: `Step ${step + 1}`,
+						outcome: "passed",
+						statusCode: 200,
+						latencyMs: 1,
+					},
+				]);
 			}
 		});
 
@@ -180,14 +186,16 @@ describe("live progress", () => {
 			const store = useScenarioRunStore.getState();
 			// A second run started elsewhere; this tab is not it.
 			store.startRun("run-2");
-			store.addStep({
-				iteration: 0,
-				stepIndex: 0,
-				name: "Somebody else's step",
-				outcome: "passed",
-				statusCode: 200,
-				latencyMs: 1,
-			});
+			store.addSteps([
+				{
+					iteration: 0,
+					stepIndex: 0,
+					name: "Somebody else's step",
+					outcome: "passed",
+					statusCode: 200,
+					latencyMs: 1,
+				},
+			]);
 		});
 
 		expect(screen.queryByText("Somebody else's step")).toBeNull();
@@ -269,14 +277,16 @@ describe("outcomes", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addStep({
-				iteration: 0,
-				stepIndex: 0,
-				name: "Log in",
-				outcome: "passed",
-				statusCode: 200,
-				latencyMs: 40,
-			});
+			store.addSteps([
+				{
+					iteration: 0,
+					stepIndex: 0,
+					name: "Log in",
+					outcome: "passed",
+					statusCode: 200,
+					latencyMs: 40,
+				},
+			]);
 		});
 
 		// The report's totals are the truth once it exists; until then the only
@@ -342,14 +352,16 @@ describe("stored step results", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addStep({
-				iteration: 0,
-				stepIndex: 0,
-				name: "In flight",
-				outcome: "passed",
-				statusCode: 200,
-				latencyMs: 5,
-			});
+			store.addSteps([
+				{
+					iteration: 0,
+					stepIndex: 0,
+					name: "In flight",
+					outcome: "passed",
+					statusCode: 200,
+					latencyMs: 5,
+				},
+			]);
 		});
 
 		fireEvent.click(screen.getByText("In flight").closest("button")!);
@@ -503,15 +515,17 @@ describe("stored-exchange disclosure", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addStep({
-				iteration: 0,
-				stepIndex: 0,
-				name: "In flight",
-				outcome: "passed",
-				statusCode: 200,
-				latencyMs: 5,
-				dataRowIndex: 0,
-			});
+			store.addSteps([
+				{
+					iteration: 0,
+					stepIndex: 0,
+					name: "In flight",
+					outcome: "passed",
+					statusCode: 200,
+					latencyMs: 5,
+					dataRowIndex: 0,
+				},
+			]);
 		});
 
 		const notice = screen.getByText(/stored step data/i).closest("div")!;

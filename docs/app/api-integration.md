@@ -1116,6 +1116,7 @@ forces HTTP/1.1, and `"http2"` attempts h2 over TLS with a silent fallback to
   httpVersion: "HTTP/1.1",
   httpVersionDowngraded: false,
   clientCertificate: "",
+  bodyCapped: false,
   timing: { total: 150, dns: 10, connect: 20, ... },
   testResults: [
     { name: "Token was issued", passed: true, source: "pre" },
@@ -1172,10 +1173,49 @@ only in which registry entry matched. The stored trace carries the same value
 under the same key, so `responseFromExecuteResult` and `responseFromRunResult`
 agree - see `client-certificate-funnels.test.ts`.
 
+`bodyCapped` says the engine stopped **reading** this response at
+`maxDesignResponseBodyBytes` (Settings → Limits, default 32MB), so `body`,
+`bodyRaw` and `bodySize` describe the prefix it read rather than what the server
+sent (issue #1157). The status and headers are the server's own, so this is a
+successful response carrying a flag. It is always present on the live body -
+absent means an engine too old to say, not "not capped" - and the stored trace
+carries the same key under `trace.response.bodyCapped`, written only when it
+happened, so `responseFromExecuteResult` normalises its `false` to `undefined`
+and the two funnels agree (`body-capped-funnels.test.ts`).
+
+The renderer keeps it strictly apart from `bodyTruncated`, which is
+`maxTraceBodyBytes` shortening a *stored* body after the whole of it was read:
+a re-send recovers from that one, while a capped read is reproduced by a
+re-send and only a bigger `maxDesignResponseBodyBytes` changes it. The response
+pane renders one `Callout` per fact and both can be on screen at once - "Body
+truncated for storage" tells the user to re-send, "Body capped while reading"
+tells them to raise the setting, and collapsing the two into one notice would
+give the wrong instruction to half the cases.
+
+A third limit is the renderer's alone and reaches no wire field:
+`LARGE_BODY_BYTES` (2MB, `shared/response-viewer/utils.ts`). Above it
+`responseFromExecuteResult` stops building the indented `body` copy - it hands
+back `bodyRaw`, which is what would be displayed anyway - and `ResponseBody`
+stops formatting, hides the view toggle and shows the first 2MB of the raw body
+under its own notice. Both are about *rendering* cost, not about what arrived.
+
 `report.sampling` carries what each of the run's bounded stores thinned away -
 `successTracesDropped` / `slowTracesDropped` for the trace records behind
 `report.results`, and `responseSamplesDropped` for the buffer post-run test
-scripts are graded on. The renderer treats a non-zero count as "this list is a
+scripts are graded on. That buffer is bounded twice, and one counter reports
+both: by count (`max_response_samples`), which displaces an incumbent and so
+keeps the graded set uniform over the run, and by bytes
+(`max_response_sample_bytes`), which stops admitting once the retained bodies
+fill it. The renderer now reads `sampling.responseSampleBudgetSpent` to tell
+which one applied (issue #1192): `true` means the byte budget ended at least
+one sample, so the graded set is drawn from the part of the run whose bodies
+fit rather than uniformly from the whole of it; `false` means only the count
+cap displaced anything, so the graded set stays uniform. The key is absent on
+a summary written before the marker existed, and absent keeps today's
+uniformity sentence rather than weakening it - only a target whose retained
+bodies average more than ~256 KiB reaches the budget at the defaults, so
+absent-as-uniform is the accurate message for nearly every older run.
+The renderer treats a non-zero count as "this list is a
 *sample* of a larger set": `SampleRetentionNote` (shared) renders under the
 dashboard's Sampled Requests, the history Samples tab and the Test Validation
 card, and the sample-count badges say **shown** rather than *captured*, since
@@ -1369,15 +1409,40 @@ useHealthQuery() // TIMING.HEALTH_RECONNECT_POLL_INTERVAL_MS (1s) while erroring
 ```
 
 The window loads alongside the engine rather than after it, so an ordinary
-launch spends its first seconds disconnected; polling that state at the 30s
-cadence could leave a launch reading disconnected for half a minute after the
-engine was already serving. A poll that succeeds right after one that failed
-also triggers `queryClient.invalidateQueries()` once - collections, runs and
-config gave up after two retries while the engine was down, a connection
+launch spends its first seconds starting rather than connected; polling that
+state at the 30s cadence could leave a launch showing it for half a minute
+after the engine was already serving. A poll that succeeds right after one that
+failed also triggers `queryClient.invalidateQueries()` once - collections, runs
+and config gave up after two retries while the engine was down, a connection
 refused by a closed port is a plain `Error` rather than an `ApiError`, and
 `refetchOnReconnect` only fires on the browser's online/offline event, which
 localhost never changes - so nothing else would ever revisit their error state
 once the engine came back.
+
+A failed poll does not mean `engineStatus` becomes `unreachable` outright:
+`engineStatusAfterFailedPoll` (`queries/health.ts`) reads `starting` while an
+engine is known to be coming up and is still inside
+`TIMING.ENGINE_STARTUP_GRACE_MS` (45s) of the moment it began, and `unreachable`
+otherwise - past that window, or after an engine that had answered stops
+answering with nothing starting. The moment it began is `engineStartWindow` on
+`engine-store`, opened by this hook on mount - which is when the main process
+spawns the engine and starts spending its own budget on the same wait - and
+again by `useEngineRestart` before it invokes the restart IPC, because a restart
+kills the daemon and spawns a fresh one that repeats the whole cold start with
+the port down for all of it (#1227). Measuring from the hook's mount alone
+called every such restart a failure, since an engine had answered: the one this
+one replaced. The restart opens the window and never writes `engineStatus`, so
+this hook remains the only thing that classifies; a restart the main process
+reports as failed closes the window again, and the next failed poll goes back
+to owing the user its reason.
+
+That 45s is the same budget the main process spends on a cold
+engine before it gives up and logs `EngineNotReadyError`
+(`ENGINE_HEALTH_POLL_BUDGET_MS` in `electron/constants.ts`) - it is the same
+question asked from the other side of the process boundary - and since the
+two files' tsconfigs share no module graph, `health.test.ts` reads the
+constant out of `electron/constants.ts`'s source text and asserts it equals
+`TIMING.ENGINE_STARTUP_GRACE_MS`, so the two cannot drift apart unnoticed.
 
 **Health Response:**
 ```typescript

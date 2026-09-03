@@ -404,6 +404,7 @@ export function UPlotChart({
 			{liveDot && (
 				<span
 					aria-hidden
+					className="animate-[vayu-pulse_1.6s_ease-in-out_infinite]"
 					style={{
 						position: "absolute",
 						right: 6,
@@ -413,7 +414,6 @@ export function UPlotChart({
 						borderRadius: "50%",
 						background: "hsl(var(--primary))",
 						boxShadow: "0 0 0 3px hsl(var(--primary) / 0.25)",
-						animation: "vayuPulse 1.6s ease-in-out infinite",
 					}}
 				/>
 			)}

@@ -23,8 +23,8 @@ import {
 	VariablePopover,
 	Tooltip,
 	TooltipContent,
-	TooltipHint,
 	TooltipTrigger,
+	TooltipValue,
 } from "@/components/ui";
 import type { VariableScope } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -55,6 +55,13 @@ export interface EditableVariableProps {
 	 * has origins to list and writable targets to offer (#564).
 	 */
 	variables: VariableSupport;
+	/**
+	 * Position in the host field's roving tab order (issue #1215). `VariableInput`
+	 * paints a strip of these over one input and gives exactly one of them the
+	 * Tab stop, so a URL with five variables costs one stop rather than five.
+	 * Left at `0` for a token rendered on its own.
+	 */
+	tabIndex?: number;
 }
 
 export default function EditableVariable({
@@ -67,6 +74,7 @@ export default function EditableVariable({
 	secret = false,
 	sourceName,
 	variables,
+	tabIndex,
 }: EditableVariableProps) {
 	const { getVariableOrigins, writableScopes } = variables;
 	const origins = getVariableOrigins(name);
@@ -114,6 +122,7 @@ export default function EditableVariable({
 
 	return (
 		<VariablePopover
+			tabIndex={tabIndex}
 			name={name}
 			varInfo={varInfo}
 			resolved={resolved}
@@ -158,38 +167,27 @@ export default function EditableVariable({
 							 * cell is never a secret: it came from the picked file, not
 							 * from a stored variable someone marked.
 							 */
-							<span className="flex items-baseline gap-2">
-								<span className="break-all font-mono">
-									{boundRowValue || "empty"}
-								</span>
-								<TooltipHint className="shrink-0">Bound row</TooltipHint>
-							</span>
+							<TooltipValue className="font-mono" hint="Bound row">
+								{boundRowValue || "empty"}
+							</TooltipValue>
 						) : !resolved ? (
 							<span className="italic opacity-90">not defined</span>
 						) : (
-							<span className="flex items-baseline gap-2">
-								{/*
-								 * A secret says it *is* a secret rather than drawing a
-								 * row of dots. Dots on hover are the worst of both:
-								 * they occupy the space of an answer, tell you nothing
-								 * you did not already know from the token, and invite a
-								 * second look to check you did not misread them. The
-								 * word plus the source is the useful part - whether it
-								 * is set at all belongs in the popover, where revealing
-								 * is a deliberate act.
-								 */}
-								<span
-									className={cn(
-										"break-all",
-										secret ? "italic opacity-90" : "font-mono"
-									)}
-								>
-									{secret ? "secret" : value || "empty"}
-								</span>
-								{sourceName && (
-									<TooltipHint className="shrink-0">{sourceName}</TooltipHint>
-								)}
-							</span>
+							/*
+							 * A secret says it *is* a secret rather than drawing a row
+							 * of dots. Dots on hover are the worst of both: they occupy
+							 * the space of an answer, tell you nothing you did not
+							 * already know from the token, and invite a second look to
+							 * check you did not misread them. The word plus the source
+							 * is the useful part - whether it is set at all belongs in
+							 * the popover, where revealing is a deliberate act.
+							 */
+							<TooltipValue
+								className={secret ? "italic opacity-90" : "font-mono"}
+								hint={sourceName}
+							>
+								{secret ? "secret" : value || "empty"}
+							</TooltipValue>
 						)}
 					</TooltipContent>
 				</Tooltip>

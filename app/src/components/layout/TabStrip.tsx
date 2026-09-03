@@ -60,6 +60,7 @@ import { getMethodColor } from "@/utils";
 // The tab -> panel ids, shared with Shell, which renders the panel end of the
 // relationship. See tab-aria.ts.
 import { tabElementId, tabPanelElementId } from "./tab-aria";
+import { closeTabFromKeyboard } from "./tab-focus";
 
 function TabItem({
 	tab,
@@ -107,7 +108,9 @@ function TabItem({
 				// work and the request it showed is still in its collection.
 				if (e.key === "Delete" || e.key === "Backspace") {
 					e.preventDefault();
-					closeTab(tab.id);
+					// Through the shared helper, because this tab is what holds
+					// focus: closing it plainly drops the user on `<body>` (#1218).
+					closeTabFromKeyboard(tab.id);
 				}
 			}}
 			onAuxClick={(e) => {
@@ -145,6 +148,7 @@ function TabItem({
 					{descriptor.label}
 				</span>
 			</ScrollOnOverflow>
+			{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- close is a keyboard action on the focused `role="tab"` row (Delete/Backspace, TabStrip.tsx:109-114); this span is `tabIndex={-1}` on purpose, a pointer affordance for the same thing */}
 			<span
 				role="button"
 				tabIndex={-1}
@@ -276,6 +280,7 @@ export function TabStrip() {
 			 * is unchanged visually, because the strip's flex layout is on the element
 			 * around all three.
 			 */}
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tablist is never a tab stop, the active `role="tab"` child carries `tabIndex={0}` and this onKeyDown moves it */}
 			<div role="tablist" onKeyDown={onKeyDown} className="flex min-w-0 items-stretch">
 				{visible.map((i) => (
 					<TabItem
@@ -337,6 +342,9 @@ export function TabStrip() {
 			<button
 				onClick={() => openTab({ type: "welcome", entityId: null })}
 				aria-label="New tab"
+				// Where focus lands when the last tab is closed from the keyboard
+				// (tab-focus.ts), the way the tree's hidden controls are reached.
+				data-tab-new
 				style={{ width: TAB_NEW_BUTTON_WIDTH }}
 				className="flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground"
 			>

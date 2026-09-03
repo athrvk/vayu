@@ -274,29 +274,44 @@ whole of the rule, and it is worth stating separately because the failure mode i
 easy to miss: a bare token used as a foreground still *looks* like the right
 colour, it is just too close in luminance to the surface behind it. Measured on
 `bg-card` in the running app (contrast ratio; **bold fails** the 4.5 floor for
-normal text, and the two worst also fail the 3.0 floor for icons):
+normal text, and the four values under 3.0 fail the 3.0 icon floor as well):
 
-| family           | light bare | light `-text` | dark bare | dark `-text` |
-|------------------|-----------:|--------------:|----------:|-------------:|
-| `destructive`    |       4.87 |          5.48 |  **1.73** |         5.40 |
-| `success`        |   **3.33** |          5.71 |      7.46 |         8.81 |
-| `warning`        |   **2.13** |          5.46 |      8.13 |         9.81 |
-| `status-success` |   **2.30** |          5.71 |      7.53 |         8.81 |
-| `status-error`   |   **3.78** |          5.88 |      4.59 |         5.85 |
-| `status-stopped` |   **2.79** |          5.73 |      6.23 |         7.40 |
-| `status-running` |   **3.64** |          5.99 |      4.77 |         6.75 |
-| `status-warning` |      17.72 |         17.72 |     15.78 |        15.78 |
+| family              | light bare | light `-text` | dark bare | dark `-text` |
+|---------------------|-----------:|--------------:|----------:|-------------:|
+| `destructive`       |       4.87 |          5.48 |  **1.73** |         5.40 |
+| `success`           |   **3.33** |          5.71 |      7.46 |         8.81 |
+| `warning`           |   **2.13** |          5.46 |      8.13 |         9.81 |
+| `status-success`    |   **2.30** |          5.71 |      7.53 |         8.81 |
+| `status-error`      |   **3.78** |          5.88 |      4.59 |         5.85 |
+| `status-stopped`    |   **2.79** |          5.73 |      6.23 |         7.40 |
+| `status-running`    |   **3.64** |          5.99 |      4.77 |         6.75 |
+| `status-warning`    |   **3.98** |          5.46 |  **4.35** |         9.81 |
+| `status-redirect`   |   **4.34** |          7.86 |  **3.99** |         5.64 |
+| `status-no-response`|   **3.98** |          6.69 |  **4.34** |         6.71 |
 
-Note the inversion: `destructive` is the only family that fails in **dark**,
-every other family fails in **light**. That rules out "a dark-mode bug" as the
-diagnosis - the single cause is the fill token standing in for the foreground
-one, and which mode it breaks in just depends on where that fill sits relative to
-the surface. `destructive` on `bg-destructive/10` and on `bg-background` measures
-worse still (4.14 / 4.43 light, 1.69 / 1.99 dark), so a tinted error chip is the
-worst case, not the safe one.
+Which mode a family fails in is not a property of the mode. `destructive` fails
+in **dark** alone, the six above it in **light** alone, and the last three - the
+mode-consistent indicators added for HTTP status - in **both**, because a value
+tuned to read as a dot on either card is by construction near the middle. That
+spread rules out "a dark-mode bug" as the diagnosis: the single cause is the fill
+token standing in for the foreground one, and which mode it shows up in just
+depends on where that fill sits relative to the surface. `destructive` on
+`bg-destructive/10` and on `bg-background` measures worse still (4.14 / 4.43
+light, 1.69 / 1.99 dark), so a tinted error chip is the worst case, not the safe
+one.
 
-`status-warning` is the exception: it has no `-text` variant, because the bare
-token already measures 17.72 / 15.78. Leave it as-is.
+`status-warning` used to be recorded here as an exception with no `-text`
+variant. It has one - `--status-warning-text`, holding the same value as
+`--warning-text` in both themes, which is why its `-text` column repeats that
+row's figures rather than stating a second number for one colour. The bare amber
+is the family's worst case rather than its safe one: 3.98 on the card, 3.63 on
+`--background`, 3.38 on `--muted` / `--accent` and 3.54 on its own `/10` tint, so
+it clears the 3.0 icon floor everywhere and the 4.5 text floor nowhere. The
+`-text` variant clears both on all four (5.46 / 4.98 / 4.64 / 4.86 light). Its
+worst is the `--muted` case the light-amber floor above is quoted from, and the
+two figures differ in the last place - 4.64 computed from the declared triple,
+4.63 measured in the browser, which quantises to 8-bit channels first. That is
+the size of the gap between the two methods across this whole page.
 
 Icons count. 1.73 fails the non-text threshold as surely as the text one, so a
 red `AlertCircle` is in scope, not just the sentence next to it. So are opacity
@@ -314,7 +329,10 @@ a `Trash2` at `size="icon"`. Putting a text label in it would stop it passing.
 `app/src/components/ui/status-color-tokens.test.ts` enforces this: it fails on
 any `text-<family>` in `app/src` (including `hover:`/`focus:` prefixes and `/NN`
 opacity forms) while allowing `bg-*`, `border-*` and `*-foreground`, which are
-correct uses of the fill token.
+correct uses of the fill token. It reads the families out of `index.css` - every
+token declaring both a bare value and a `-text` one in the base palette - rather
+than listing them, so a family added to the stylesheet arrives guarded. A
+hand-written list held seven while the stylesheet had ten.
 
 **Non-text contrast (WCAG 1.4.11) is a separate 3.0 bar**, and it applies to
 things text contrast never touches: focus rings, control boundaries, and the
@@ -388,9 +406,19 @@ their own. Resolved colour is a computed-style question and is checked in the
 browser.
 
 Definitions live in `app/src/index.css` under "Surfaces, and the rule colour that
-reads on each". Adopted by the response-viewer family and the import dialog
-(`ImportModal.surface-rule.test.tsx` guards the latter's declarations); the rest
-of the app still uses explicit tokens and can migrate as it is touched.
+reads on each". Adopted by the response-viewer family, the import dialog
+(`ImportModal.surface-rule.test.tsx` guards the latter's declarations) and the
+command list, whose `Command` root declares `bg-card surface-card` so the
+input's divider, the section separators and the footer can all say `border-rule`
+(`command.chrome.test.tsx`); the rest of the app still uses explicit tokens and
+can migrate as it is touched.
+
+A surface a component only *looks* like it has is the case the command list
+answers: it painted `bg-popover`, which no surface class declares. `--popover`
+and `--card` hold the same three numbers in both themes, and their foregrounds
+do too, so it declares the card rather than gaining a `surface-popover` that
+would be a second definition with nothing behind it. Check the values before
+copying that move - two tokens that merely look alike are two surfaces.
 
 One trap the import dialog documents: `surface-card` **cannot simply replace**
 a background utility that a primitive already sets. The surface classes live in
@@ -497,6 +525,12 @@ same "good / bad / busy" signal on either surface. Distinct from `--success` /
 --status-running: 217 91% 60%;   /* blue-500   - running */
 --status-stopped: 25 95% 53%;    /* orange-500 - stopped */
 /* pending → text-muted-foreground / bg-muted-foreground */
+
+/* The HTTP-status half of the same family, added with that vocabulary below.
+   Amber cannot follow the -500 convention - see the note further down. */
+--status-redirect: 258 60% 62%;     /* violet  - 3xx, redirect */
+--status-no-response: 240 5% 52%;   /* neutral - status 0, nothing came back */
+--status-warning: 38 92% 36%;       /* amber   - 4xx, client error */
 ```
 
 **A status colour has three jobs, and three tokens.** The base value above is
@@ -518,6 +552,26 @@ and a "200 OK" chip read identically on either theme. This is the same split
 **Utility classes** (`text-`, `bg-`, `border-`): `text-status-success-text`,
 `bg-status-error-fill`, `border-status-running/25`, etc. Use `--warning` for
 "expiring / caution" indicators (amber) and `--success` for success *banners*.
+
+**Which family a surface belongs to is decided by what it describes, not by the
+colour it wants.** Anything painting the lifecycle state of a run, a connection
+or a service - connected, running, completed, stopped, failed - takes
+`--status-*`, including when that state is drawn as text or as a glyph rather
+than as a dot (`text-status-success-text`). The Dock's connection light and its
+running-services chip, the Services panel dot, the mock-server glyph, the MCP
+server's Running / Stopped badge and the Welcome screen's recent-run labels are
+all that case. `--success` / `--warning` / `--destructive` keep everything else,
+and the boundary is worth naming because several of them look close: banner
+text, form and field errors, a schema's fetch or validation outcome (the context
+bar's GraphQL state, the body panel's schema badge), metric readouts such as the
+dashboard's "ramp off target" and `ThroughputTwinCard`'s delta chip - a number
+against a target is not a lifecycle - and action affordances such as the Dock's
+"Restart pending", which announces a pending setting rather than a state.
+`--success-text` and `--status-success-text` are
+the same value in both themes, so on the green surfaces this distinction is not
+visible - it is only greppable, which is what it is for: the family is how a
+future reader finds every status surface, and one that answers a different name
+is one it will miss.
 
 The same set also colors **HTTP response severity** and **latency thresholds**,
 since those map onto the same hues.
@@ -654,6 +708,44 @@ colour.
 <MethodBadge method={m} variant="text" muted={!isActive} />    // secondary context
 ```
 
+**The `badge` variant is a fixed-width column, not a chip that grows with its
+letters.** Every list that shows one puts the badge first and the name after it,
+so an intrinsic-width chip started `GET` names at one x, `POST` names at another
+and `DELETE`/`OPTIONS` further still - a ragged left edge down the collections
+tree, the history sidebar and the welcome recents at once. The chip is `5ch`
+wide plus its own padding and border (`ch`, so one class serves both sizes and
+tracks the mono font it already uses), five being the longest label that stays
+whole - `PATCH`. The label is centred, and a longer method (the engine and a
+pasted `curl -X` both pass arbitrary strings) truncates inside the chip with
+the full method on the element's `title`, rather than widening it and
+re-breaking every row around it.
+
+**The three standard methods longer than the column are abbreviated.** `DELETE`,
+`OPTIONS` and `CONNECT` render as `DEL`, `OPT` and `CONN` - the substitutions
+Postman, Insomnia and Bruno all use - and the full name is one hover away on
+the same `title` that reveals a truncated custom method. The abbreviation table
+lives beside `getMethodColor` in `utils/helpers.ts` (`METHOD_ABBREVIATIONS`,
+read by `getMethodDisplayLabel`), for the same reason: one value, one meaning
+everywhere. The column paid `7ch` on every row for two verbs almost nobody has
+in a tree; at `5ch` the collections sidebar gives the request name roughly a
+third of the row back.
+
+| Method | Column label | Title on hover |
+|--------|--------------|----------------|
+| `GET`, `POST`, `PUT`, `PATCH`, `HEAD` | as written | none |
+| `DELETE` | `DEL` | `DELETE` |
+| `OPTIONS` | `OPT` | `OPTIONS` |
+| `CONNECT` | `CONN` | `CONNECT` |
+| longer custom (`PROPPATCH`, …) | truncated | full method |
+
+The width is not an opt-in prop - the primitive enforces it, which is the whole
+reason this component exists. The `text` variant keeps its intrinsic width: it
+sits inline in running text, where a fixed column would punch holes, and a
+caller that wants a column there sets its own. Two callers do: the import
+preview (`w-10`) and the collections tree row (`w-[5ch]`, matching the badge
+column so `DELETE` still fits). The tree row uses the text variant because a
+bordered chip on every row was a second shape competing with the tree's own
+hover fill and selection ring; colour alone carries the signal there.
 
 Method colors are design tokens, not hardcoded hex values. **They are
 mode-adaptive** - hue and saturation are identical in both themes, so a method
@@ -701,21 +793,15 @@ background: `hsl(${c} / 0.1)`
 borderColor: `hsl(${c} / 0.3)`
 ```
 
-**Method badge pattern** (inline `<span>`, not a `<Badge>` component - used in RunItem, DashboardHeader):
-
-```tsx
-const c = `var(--method-${method.toLowerCase()})`;
-<span
-  className="text-[10px] h-5 px-1.5 font-mono font-bold shrink-0 inline-flex items-center rounded"
-  style={{
-    color:      `hsl(${c})`,
-    background: `hsl(${c} / 0.1)`,
-    border:     `1px solid hsl(${c} / 0.3)`,
-  }}
->
-  {method}
-</span>
-```
+**Do not hand-roll that span for a method.** This section used to carry the
+badge's markup as a pattern to copy, naming `RunItem` and `DashboardHeader` as
+its users; both have rendered `MethodBadge` for some time, and the copy here had
+already drifted (`font-bold` against the primitive's `font-semibold`, `rounded`
+against `rounded-md`, and no fixed width at all - so a copy of it would have
+reintroduced the ragged left edge the primitive now prevents). A hand-rolled
+copy of a primitive does not receive the primitive's fixes. Render
+`MethodBadge`; the three `hsl()` forms above are how it, the tab strip and the
+method selector each build a colour from `getMethodColor`.
 
 **MethodSelector** used to carry its own `METHOD_COLORS` map of those utility
 classes - a second source of truth for the same seven colours, and the kind that
@@ -794,6 +880,20 @@ out-read the label it is secondary to - white on `sunset` is the ceiling at
 3.6:1 - so the bar is 2.5:1 on every scheme, checked in
 `tooltip-hint-contrast.test.ts`.
 
+**A value and the hint that sources it stack; they never share a flex row.**
+`TooltipContent` is capped at `max-w-xs`, a value that wraps on `break-all` has
+a min-content width of about one character, and a hint has to keep its
+intrinsic width to stay readable - so a row of the two hands its whole width to
+the hint and leaves the value a vertical strip of letter fragments. It takes
+only a long environment name beside an unbroken value (issue #1195), or a note
+carrying the user's own data, such as a declared column list. `TooltipValue`
+holds the stacked shape and takes the hint as a prop, so a call site using it
+cannot express the row; the one-line alternative - `min-w-0 flex-1` on the
+value plus a truncated hint - was rejected, because a clipped source name loses
+the answer to "which environment". A short label beside a short one
+(`TooltipIconButton`'s shortcut hint) has neither ingredient and stays a row.
+→ `tooltip-value-layout.test.ts` reads every tooltip block for the shape.
+
 | Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
 |--------|-----------|----------|----------|
 | `sunset` | `24 90% 46%` | `24 95% 58%` | `24 90% 46%` |
@@ -829,20 +929,38 @@ only desaturated option.
 
 ### Fonts
 
-| Role | Family | Import |
-|------|--------|--------|
-| UI / body | Space Grotesk | Google Fonts |
-| Code / mono | JetBrains Mono | Google Fonts |
+| Role | Family | Weights bundled | Source |
+|------|--------|-----------------|--------|
+| UI / body default | Space Grotesk | 400, 500, 600, 700 | `@fontsource`, in the app |
+| UI / body alternate | Inter | 400, 500, 600, 700 | `@fontsource`, in the app |
+| Code / mono default | JetBrains Mono | 400, 500, 600, 400 italic | `@fontsource`, in the app |
+| Code / mono option | Fira Code | 400, 500 | `@fontsource`, in the app |
+| Code / mono option | IBM Plex Mono | 400, 500 | `@fontsource`, in the app |
+| Code / mono option | Space Mono | 400, 700 | `@fontsource`, in the app |
 
-```html
-<!-- app/index.html -->
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+```css
+/* app/src/index.css */
+@import "./fonts.css";
 ```
+
+`app/src/fonts.css` holds the `@fontsource` `@import` lines for all six
+families - the weights bundled, the subsets, and why.
 
 ```css
 body { font-family: var(--font-sans); } /* default: "Space Grotesk", system-ui, sans-serif */
 /* mono via font-mono Tailwind class, or .font-code utility */
 ```
+
+The faces are bundled rather than fetched because a stylesheet in
+`index.html`'s head is render-blocking and the window is only shown on first
+paint, so the fetch delayed the window appearing at all - measured at ~12.8s
+on a network that black-holes the request. Nothing about how the app renders
+changed with the move: the weights bundled are exactly the ones the old css2
+URL asked for, so `font-mono font-bold` stays browser-synthesised for JetBrains
+Mono, Fira Code and IBM Plex Mono, same as before. Every subset each family
+ships is bundled too, which is what Google served on demand; behind their
+`unicode-range` a file is still only read when a character needs it, so the
+subsets beyond latin cost installer bytes and no startup work.
 
 **User-selectable UI font + scale.** Settings → Appearance → Interface lets the
 user pick the sans/body face (Space Grotesk / Inter / System / JetBrains Mono)
@@ -871,12 +989,52 @@ composes with page zoom.
 | Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
 | Small label | 12px | medium | `text-xs font-medium` |
-| Micro / badge | 10–11px | mono bold | `text-[10px] font-mono font-bold` |
+| Micro / badge (mono) | 10–11px | mono semibold | `text-[10px] font-mono font-semibold` |
+| Micro / badge (UI face) | 10–11px | semibold | `text-[10px] font-semibold` |
 | URL / path | 12–13px | mono | `text-xs font-mono` |
 
 **Only `text-[10px]`, `text-[11px]`, `text-[22px]` and `text-[34px]` may be
 written as arbitrary values.** Everything else has a named step, and
 `type-scale.test.ts` fails on anything outside that set.
+
+**The micro/badge step is semibold because 600 is the heaviest face the code
+font ships.** `fonts.css` loads JetBrains Mono - the default `--font-mono` - at
+400/500/600, and Fira Code and IBM Plex Mono at 400/500; only Space Mono, one of
+four selectable code faces, has a real 700. So `font-mono font-bold` on a chip
+renders a synthesised weight for every user who has not picked that one face -
+which is what this row used to specify while `MethodBadge`, the primitive that
+owns the step, shipped `font-semibold` (#1199).
+
+**The same step in the UI face is semibold too, and the reason is the row
+itself.** The mono row settled one half of 10px and left the other half with no
+row to read, so the chips that are not `font-mono` picked a weight each - four
+different values, one pair of them inside a single primitive: `VariableScopeBadge`
+rendered `font-medium` compact and `font-semibold` full, because compact
+overrode `Badge`'s base and full did not (#1222). Semibold is that base, so a
+chip that names no weight is already correct; a chip that names one should name
+this. Above 600 is refused here for a second reason on top of the synthesised
+face: at 10px in the UI face the extra stroke closes the counters rather than
+reading as emphasis.
+
+`type-scale.test.ts` reads both rows and every 10-11px class string written in
+`src` - either face, quoted or a template literal - and fails on a weight above
+600 in any of them, so the rows and the app cannot part again. A weight that is
+not *written* beside the size is out of its reach, whether it arrives through a
+`cn()` argument or from a `cva` base, so the two primitives at this step are
+pinned by rendering them instead (`MethodBadge.test.tsx`,
+`variable-scope-badge.test.tsx`).
+
+It is a ceiling and never a floor: a chip that names a *lighter* weight, or none
+at all, passes. That is deliberate, and tightening it is not the fix - the two
+exceptions below live in exactly the shape a floor would have to match, so a
+floor would fail on a `<code>` printing a column name. Below the ceiling the row
+above is the rule and review is what applies it.
+
+Two things at this size deliberately carry no badge weight. A chip that prints a
+*value* rather than a label - a column name, a cookie attribute - is the URL /
+path step and stays unweighted. And a numeric readout may take `font-medium` to
+lift one figure above its unweighted siblings, as the timing waterfall and the
+phase percentiles do; that is emphasis inside a row, not a badge.
 
 The app had drifted to **182 arbitrary sizes across 11 distinct values**. Half
 duplicated a step that already existed - `text-[12px]` *is* `text-xs`,
@@ -1115,6 +1273,199 @@ roving tabindex focuses the row), or focus sits on a control inside it. `:has()`
 is descendant-only and does not cover the first, hence the `:focus-visible`
 selector alongside it.
 
+**Focus must be able to leave, and a Monaco editor is where it could not.** A
+ring that says where focus is means nothing if Tab cannot move it on. Monaco
+indents with Tab - right for a code editor, and a keyboard trap for anyone who
+reached one by tabbing (WCAG 2.1.2). Two rules, both held in `ui/code-editor.tsx`
+rather than at the dozen mount sites:
+
+- **A read-only editor runs with `tabFocusMode` on.** There is no indentation to
+  insert in text nobody can type into, so Tab simply moves focus and no trap
+  exists to escape.
+- **An editable editor advertises the way out while it holds focus.** ⇧⌘M
+  (`LEAVE_EDITOR_CHORD`) moves focus to the first focusable element after the
+  editor, and a `Kbd` hint names it in the editor's bottom-right corner - on
+  focus, not always, so a dozen panes do not each carry a standing badge over
+  their content. The caps come from `chordKeys`, like every other chord this app
+  puts on screen; a hand-rolled badge would be a second place a modifier is
+  spelled.
+
+The general rule behind both: **any component that takes over a key the browser
+uses for navigation owes the user a documented way back**, and that way back is a
+`Chord` in `constants/shortcuts.ts` so the Keyboard Shortcuts panel lists it
+without being told. Guarded by `code-editor.chords.test.tsx` (the chord is
+registered, the hint appears on focus and never on a read-only editor) and
+`shortcuts.listed.test.ts` (it reaches the panel).
+
+**Moving focus *between* regions is F6's job, not Tab's** (#1219). The window is
+four bands - the title bar, the drawer, the main pane and the context bar - and
+reaching one from another by Tab alone meant walking every request in an
+expanded collection tree on the way. F6 cycles the bands; Shift+F6 goes back.
+
+Each band carries `data-app-region` rather than being found by landmark tag.
+`header, aside, main` looks like it would do the same job, and it does not: the
+run view renders its own `<header>`, the breadcrumb its own `<nav>`, and the
+inbox its own `<aside>` - content landmarks *inside* `main`, so a tag query
+would cycle around inside one region forever rather than moving between the
+four the window actually has. The attribute says which of the shell's children
+are stops in the cycle, and a feature adding a landmark of its own cannot join
+it by accident.
+
+A band is marked by spreading `regionProps("drawer")` from `region-focus.ts`,
+never by writing the attribute onto the element. A JSX attribute *name* has to
+be a literal, so bands that spelled it out left one name with five spellings,
+four of which a rename would leave behind; and the value they carried inline,
+`{"drawer" satisfies AppRegion}`, is a node `jsx-ast-utils` has no case for, so
+`pnpm lint` printed two "could not be resolved" advisories on every run, CI
+included (#1261). The helper takes the `AppRegion` union, which makes a name
+that is not a band an error at the call rather than on the value.
+
+Focus lands on the region's first focusable element, never on the region
+container itself. A `tabindex="-1"` box would be a legal target and would take
+focus silently: the `:focus-visible` rule above is written `[tabindex]:not([tabindex="-1"])`,
+on purpose, so a script-focused container paints no ring at all. Landing there
+would move focus with nothing on screen saying where it went, which for a
+keyboard-only feature defeats the point of the key.
+
+**A `{{variable}}` inside an editor is painted from the same tokens as one
+outside it.** `EditableVariable` colours its overlay tokens `text-primary` /
+`text-muted-foreground` / `text-destructive-text` for resolved, empty and
+undefined; Monaco draws its own text, so the same three colours (plus
+`text-muted-foreground` for a run-time token and `text-warning-text` for a
+`data.*` column no contract declares) are declared in `index.css` as five
+global classes its decorations can name - `vayu-variable-token-*`, under a
+`.monaco-editor` prefix so they outrank the theme rules Monaco injects at
+runtime. They are the one place a global class is the right answer rather than
+a utility string, for the same reason the scrollbar block is: no component
+stylesheet reaches what Monaco renders. → `variable-token-classes.test.ts`
+
+---
+
+## Accessibility
+
+Which tool holds a rule decides what breaking it looks like: a lint error on the
+line, a source scan naming the file, a rendered assertion, or - until #1216 -
+nothing at all. `eslint-plugin-jsx-a11y`'s recommended set now runs on every
+`.tsx` under `pnpm lint`, underneath the behavioural guards rather than instead
+of them: the lint reads markup, and none of the rules below are things it can
+see.
+
+| Rule | Enforced by |
+|------|-------------|
+| An icon-only button carries an `aria-label` | `icon-button-labels.test.tsx` |
+| `outline-none` is paired with a replacement indicator | `focus-indicator.test.ts` |
+| A control revealed on hover is revealed on focus too | `row-action-reveal.test.ts` |
+| An editor that takes Tab advertises the way out | `code-editor.chords.test.tsx` |
+| Every chord the app listens for is listed for the user | `shortcuts.listed.test.ts` |
+| A hand-rolled `role="button"` is focusable and answers Enter/Space | `jsx-a11y/interactive-supports-focus`, `jsx-a11y/click-events-have-key-events` |
+| A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
+| A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
+| Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
+| A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
+
+**A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
+open, which is a description; before it opens - and to a screen reader reading
+the row - the button is announced as "button". The Dock's four view switchers
+all had tooltips and all announced as bare buttons. `title` is a name, but the
+weaker one, since it does not surface on keyboard focus: no control here relies
+on it any more, and the guard pins that count at zero.
+
+**`outline-none` needs its replacement in the same class string.** The base
+`:focus-visible` outline at the top of this page is the whole focus story for
+anything without its own ring, so `outline-none` is the single token that opts
+an element out of it - and the command palette's input had been opted out since
+it was written, unnoticed, because it is the only focusable element in its
+dialog. A replacement may be a ring on the element, a ring on the wrapper it
+fills (`focus-within:`, as `CommandInput` and `VariableInput` do), or the
+background fill Radix and cmdk paint on `data-[selected]` / `data-[highlighted]`.
+An element that is genuinely never a tab stop is exempt by name, with a reason,
+in the guard - and an exemption claiming "the wrapper paints it" has to name the
+class that does.
+
+**A composite widget is not itself a tab stop.** A tree, a tablist or a
+radiogroup keeps one focusable descendant and moves that stop with the arrow
+keys (`useRovingTreeFocus.ts`); the container carries the `onKeyDown` and no
+`tabIndex`. `jsx-a11y` cannot see across that split and reports the container as
+unfocusable, so those sites carry a one-line disable naming the hook - the same
+for a row whose Enter and Space arrive through the tree rather than through its
+own handler.
+
+**The lint's allowlist.** Three rules are configured rather than obeyed as
+written, in `app/eslint.config.mjs`, each because the pattern it flags is the
+correct one here:
+
+- `no-autofocus` is off. Its 14 sites are all a field inside a dialog, a rename
+  box opened over a row, or the command palette - moving focus into what the
+  user just opened is the WAI-ARIA dialog pattern, not the page-load autofocus
+  the rule exists to prevent.
+- `label-has-associated-control` is given `controlComponents: ["Switch",
+  "Input", "SelectTrigger"]`. It recognises a nested control by lower-case tag
+  name, and each of those renders exactly one native labelable element, so the
+  association it asks for is already there.
+- `no-noninteractive-tabindex` also allows `role="separator"`. A focusable
+  separator is the ARIA window splitter, which is what both resize handles are,
+  arrow/Page/Home/End and all.
+
+Everything else is suppressed at the line it happens on, with the reason and the
+file that provides the missing half. **16 directives across 12 files**, listed
+here because a rule-level configuration is visible in one place and a line-level
+one is visible only to whoever opens that file - and because nothing otherwise
+stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
+reads this list and the sources together: a site added, moved or removed without
+the list following fails, an unreasoned directive fails, and the count is a
+ceiling that comes down when a suppression goes rather than a budget to spend.
+
+Paths are relative to `app/src`, and the count in brackets is directive lines,
+not rule names - two of these lines silence two rules at once.
+
+- `components/layout/TabStrip.tsx` (2) - `jsx-a11y/interactive-supports-focus`
+  on the tablist, whose tab stop is the active tab;
+  `jsx-a11y/click-events-have-key-events` on the close affordance, which is
+  Delete or Backspace on the focused row and a `tabIndex={-1}` pointer target
+  here.
+- `components/layout/Dock.tsx` (1) - `jsx-a11y/no-noninteractive-tabindex`: the
+  Radix `TooltipTrigger` wires focus and blur to the tooltip holding the engine
+  error text, which is the only keyboard path to it.
+- `components/layout/PanelResizeHandle.tsx` (1) -
+  `jsx-a11y/no-noninteractive-element-interactions`: the window splitter, with
+  its arrow/Page/Home/End handling in the `onKeyDown` beside it.
+- `components/shared/VariableInput/index.tsx` (2) -
+  `jsx-a11y/click-events-have-key-events` and
+  `jsx-a11y/no-static-element-interactions` on the box that widens the hit area
+  around a native input, and `no-static-element-interactions` again on the
+  `pointerEvents: none` overlay whose keydown delegates for the tokens inside it.
+- `modules/collections/CollectionTree.tsx` (1) -
+  `jsx-a11y/interactive-supports-focus`, the roving tab stop seeded by
+  `useRovingTreeFocus`.
+- `modules/collections/CollectionItem.tsx` (1) -
+  `jsx-a11y/click-events-have-key-events`: Enter and Space arrive through the
+  tree, which clicks the row's `[data-tree-activate]` button.
+- `modules/collections/RequestItem.tsx` (1) -
+  `jsx-a11y/click-events-have-key-events`, the same tree path as its sibling
+  above.
+- `modules/variables/sidebar/VariablesCategoryTree.tsx` (2) -
+  `jsx-a11y/interactive-supports-focus` on the tree and
+  `jsx-a11y/click-events-have-key-events` on its rows.
+- `modules/services/ServicesPanel.tsx` (1) -
+  `jsx-a11y/click-events-have-key-events` and
+  `jsx-a11y/no-static-element-interactions`: the drawer-row hit area, which
+  delegates only the clicks landing on the row's own padding.
+- `modules/request-builder/components/LoadTestConfigDialog/ProfilePicker.tsx`
+  (1) - `jsx-a11y/interactive-supports-focus`: a radiogroup, where the selected
+  `role="radio"` holds the stop and the `onKeyDown` moves selection and focus
+  together.
+- `modules/request-builder/components/RequestTabs/panels/BodyPanel.tsx` (1) -
+  `jsx-a11y/no-noninteractive-element-interactions`, the second window splitter.
+- `modules/request-builder/components/RequestTabs/panels/body/graphql-explorer/SchemaExplorer.tsx`
+  (2) - `jsx-a11y/interactive-supports-focus` on the tree, and
+  `jsx-a11y/role-has-required-aria-props` because this tree has no selection
+  model: a row inserts into the query and nothing stays selected, so
+  `aria-selected` is omitted rather than faked.
+
+Test files are outside the count. Four directives live in two of them, each a
+fixture modelling one of the patterns above rather than a component the app
+ships.
+
 ---
 
 ## Row Actions
@@ -1162,7 +1513,10 @@ absent - and here the answer is no.
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
 consistently and get focus management, Escape-to-close and arrow-key navigation
-for free. Used by request rows and environment rows.
+for free. Used by request rows and environment rows. It opens on a pointer and
+on a click reporting `detail === 0` - the keyboard's kind - and takes a
+`tabIndex` prop, `0` unless the row sits in a roving-tabindex tree. See Tree
+Navigation for why.
 
 ---
 
@@ -1347,6 +1701,25 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   `data-tree-delete` swallowed Delete silently for months, because the hook
   `preventDefault`s the key whether or not it finds something to click.
 
+**Those keys reach a control by clicking it, so the control has to answer a
+click.** The hook calls `.click()` on the row's `[data-tree-menu]`, and Radix's
+dropdown trigger opens on `pointerdown` and on its own `keydown` - neither of
+which a programmatic click dispatches. Every menu-only action (Duplicate, Move
+to, Run, Add, Export) was therefore mouse-only, on a path the tree advertised
+(#1212). `RowActionsMenu` now holds its own open state and opens on a click
+reporting `detail === 0`, which is what a click with no pointer behind it
+reports - the mouse path stays Radix's, since its own `pointerdown` has already
+opened the menu by the time a real click arrives. The hidden `<button>` controls
+answer a click by being plain buttons; anything richer added to a row has to
+declare how it answers one.
+
+**`RowActionsMenu` takes its `tabIndex` from the row.** It is `0` by default -
+outside a tree the `⋯` menu is an ordinary tab stop - and these rows pass `-1`,
+because the tree is one tab stop and the keys above are the way in. Closing the
+menu hands focus back to the *row*, not to the trigger Radix would return it to:
+a `tabIndex={-1}` control holding the tree's focus is a stop the user cannot Tab
+back to.
+
 Rows declare behaviour through data attributes rather than props
 (`data-tree-activate`, `data-tree-toggle`, `data-tree-menu`, `data-tree-rename`,
 `data-tree-delete`, `data-tree-move-up` / `-down` / `-in` / `-out`,
@@ -1382,9 +1755,10 @@ and is the guard on every pointer handler a row spreads.
 rows is a 2px `bg-primary` span positioned inside the target row and indented to
 that row's own depth - the depth is the only thing separating "after this
 collapsed folder", "into it" and "after its parent". Dropping *into* a folder
-reuses the selected-row ring. Nothing new gets `role="treeitem"`: the
-roving-focus walk and the group nesting are read off the DOM, so an indicator
-node between rows would change the tree's shape mid-drag. A row that cannot take
+reuses the selected-row ring. Nothing new gets `role="treeitem"`: every row in
+document order *is* the tree's row list, so an indicator node between rows would
+join it and change the tree's shape mid-drag - a row with no level, sitting
+between a folder and its children. A row that cannot take
 the drop is dimmed and carries `data-drop-blocked` - the dragged folder's own
 subtree, and the block the dragged row does not belong to.
 
@@ -1394,17 +1768,73 @@ catch focus drops the user to `<body>` and the next Tab restarts from the top of
 the document. Both row types refocus their own row. A *blur* deliberately does
 not - focus has already gone where the user sent it.
 
-Visible order comes from the DOM (`[role="treeitem"]` in document order), since
-collapsed subtrees are not rendered. Note a row's children are a **sibling** of
-that row inside a shared wrapper, not nested within it, so finding a parent row
-means walking up to the enclosing wrapper - not `closest()`.
+**A delete must hand focus on, because the row it came from is gone.** The
+confirm dialog is rendered controlled with no trigger, and a trigger is what
+Radix aims its close-focus at - so both outcomes dropped the user to `<body>`
+(#1218). Cancel returns focus to the row, which is still there. A delete that
+actually removes the row moves focus to the **next row in the deleted row's own
+set**, or to the **parent** when that row was the last in it: chosen while the
+row is still on screen, since afterwards the DOM cannot say what followed it.
+Focus moves through `focusTreeRow`, so the tree's one tab stop travels with it.
+
+**A tree that runs out of rows still has to name somewhere.** The rules above
+answer for every row but one: a root falls back to the root before it, so it
+takes the *whole tree emptying* - the deleted row was the only one there was -
+for the honest answer to "which row now" to be *none*, which is `<body>` again
+unless the caller says otherwise. So the last resort is the caller's to name,
+and it is a control
+rather than a row: the collection tree hands focus to **Add collection**, the
+one thing left to do on an emptied tree, and the Trash view - flat, with no
+create control of its own - to its **list container**, which stays mounted
+holding the empty state. The variables sidebar names none, and needs none:
+every environment row is a level-2 child of the Environments header, so the
+parent rule above always answers. A last resort is not a row, so it does not
+travel through `focusTreeRow` - moving the roving tab stop onto it would take
+that stop off the tree altogether.
+
+**Which of the two it is, is read from the outcome and never from the confirm
+click.** The dialog closes on a failure as much as on a success, and nothing at
+close time can say which happened - `confirmDelete` returns `void`, and an
+awaited answer arrives after Radix has already moved focus. Read as intent, a
+*failed* delete landed the user beside a row that was still sitting there
+(#1234). So the decision waits instead: focus goes back to the row at close, and
+moves to the successor only once that row actually leaves the DOM - which for a
+successful delete is normally a later render, when the refetch lands. A user who
+has moved focus on in the meantime keeps it; the move only happens out of
+`<body>`, where the removal itself left it. The waiting is
+`useRemovalRefocus` (`app/src/hooks/`), shared with the Trash view's permanent
+delete - a flat list, so its rule is the next row, or the previous one when the
+purged row was last. Both trees that can delete a row - the collection tree and
+the variables sidebar, which grew its Delete key in #1217, after the rule was
+written - reach it through the one `useDeleteRefocus`, which each tells only
+which attribute identifies its rows and where its last resort is (#1279).
+
+**Order comes from the DOM; hierarchy comes from `aria-level`.** Order the DOM
+states plainly - `[role="treeitem"]` in document order is exactly the rows a
+user can see, since collapsed subtrees are not rendered. Parentage it does not:
+a row's children are a **sibling** of that row inside a shared wrapper, not
+nested within it, so `closest()` finds nothing and a walk up the ancestors takes
+whichever treeitem an ancestor holds first - a group's own first row, which is a
+preceding *sibling* of every row after it. Under that walk Left moved to the top
+of a list instead of out of it, and self-corrected on the next press, so it read
+as hesitation rather than as breakage (#1237). One function answers the question
+now - `parentRow` in `tree-focus.ts`, the nearest row above with a smaller
+level - and both the Left key and the delete refocus read it, so there is one
+description of this tree's shape rather than two that can drift.
+
+**A consumer of the hook therefore has to announce `aria-level` on every row**,
+and all three do. It is not only for assistive tech: a tree that omits it is a
+tree of roots, where Left moves nowhere and `*` calls every row a sibling. The
+schema explorer is why the level and not the shape is the source - it renders
+every row, at every depth, as a direct child of the tree, so no DOM rule can
+answer for it at all.
 
 **That same shape is why the hierarchy has to be stated, not inferred.** A
 sibling group is not a child group, so the accessibility tree read as a flat
 list of rows. Every row carries `aria-level` (1-based), `aria-posinset` and
 `aria-setsize`; the children wrapper is `role="group"` and the folder row claims
 it with `aria-owns`, which buys the ownership without moving the DOM the
-roving-focus walk and the hit-area rules depend on. Folders and requests inside
+roving-focus order and the hit-area rules depend on. Folders and requests inside
 one group are **one** set - the requests continue the folders' numbering, or two
 adjacent rows both announce "1 of 1".
 
@@ -1416,10 +1846,48 @@ same constraint `ResponseAnnouncer` carries). What writes to it now is a move -
 happen ("Get Users is already first in Billing"), which is the only feedback a
 keyboard user gets for a row that visibly went nowhere.
 
-Currently on `CollectionItem` and `RequestItem` rows. **Only needed where the
-control and the row genuinely differ** - the history, variables and settings
-trees use full-width buttons that are their own target, so they use the baseline.
-Before adding it, check whether the focusable element already spans the row.
+Currently on `CollectionItem` and `RequestItem` rows and on every row of the
+variables sidebar (`VariablesCategoryTree`, #1217), which is a roving-tabindex
+tree for the same reason: its Rename and Duplicate live only in the row's ⋯ menu,
+so a row that was not a `treeitem` left both unreachable without a mouse.
+**Otherwise only needed where the control and the row genuinely differ** - the
+history and settings trees use full-width buttons that are their own target, so
+they use the baseline. Before adding it, check whether the focusable element
+already spans the row.
+
+**The variables sidebar shows what a second consumer costs.** Two things there
+are not the collection tree's, and both are decisions rather than omissions:
+
+- **Its section headers are rows.** Globals, Environments and Collections are the
+  three level-1 treeitems and the two lists are their children, so one arrow key
+  walks the whole sidebar and the headers get expand/collapse from Right/Left.
+  The header's one button is both `data-tree-toggle` and `data-tree-activate`,
+  because for a header those two verbs are the same one.
+- **"Add environment" is still a tab stop**, and sits outside the header row's
+  treeitem. The tree owns no "create" key, so a `tabIndex={-1}` there would make
+  creating an environment mouse-only - the defect the tree was adopted to fix,
+  pointing the other way. The tree is one stop; that button is the second.
+
+A row that does not carry a control still has to declare it: an environment row
+renders the hidden `data-tree-rename` and `data-tree-delete` buttons, because the
+hook `preventDefault`s F2 and Delete whether or not it finds something to click.
+
+**The other roving strip is not a tree, and does not use the hook.** The
+`{{variable}}` tokens `VariableInput` paints over a field share one Tab stop the
+same way - one token at `tabIndex={0}`, the rest at `-1`, Left/Right between them
+and Home/End to the ends - because a URL with five variables otherwise put five
+stops between the URL and Send (issue #1215). It is wired in the component rather
+than taken from either half of the tree's machinery, for two different reasons.
+`useRovingTreeFocus` navigates `[role="treeitem"]` and acts by dispatching at the
+tree's own `data-tree-*` attributes, so pointed at tokens it would find nothing
+and silently do nothing. `focusTreeRow` (`tree-focus.ts`) is closer - it is
+exactly "move the stop and focus the row" - but it moves the stop by writing
+`tabIndex` onto DOM nodes, which is right for the tree, whose rows render
+`tabIndex={-1}` and do not re-render for it, and wrong here: the token strip's
+stop *is* a React prop, so the same write would sit on top of a vdom value React
+still believes and be undone by the next render. Arrowing does not wrap there -
+falling off the end leaves Tab as the way out, per **Focus must be able to
+leave** above.
 
 ---
 
@@ -1553,6 +2021,17 @@ is already a self-scrolling list (`CommandDialog`) opts out at the call site wit
 the reason written there; `dialog-height-band.test.tsx` holds that list closed,
 so a new dialog cannot skip the band silently.
 
+Opting out of the band does not opt out of the shape. The command palette's
+keyboard hints are a `CommandFooter` - `shrink-0`, a sibling of `CommandList`
+and never a row inside it - because the rule is about what scrolls, not about
+which primitive names it: hints that scroll away with the results they describe
+are hints nobody reads. Nor does opting out excuse the cap: the list that
+scrolls in place of a band owns one of its own, and the palette's is
+`min(400px, 60vh)` (#1177) rather than a bare pixel value, so the input, the
+list and the hints together stay inside the panel's `85vh` on a short window
+instead of being clipped by the `overflow-hidden` that keeps the list's scroll
+the only one.
+
 ---
 
 ## Layout Structure
@@ -1621,6 +2100,25 @@ useResizable({ defaultSize, min, max, direction?: "horizontal" | "vertical" })
 - **Content:** `ScrollArea` fills available space
 - **Footer:** `ConnectionStatus` pinned to bottom with `border-t border-border`
 
+### Pane Toggles
+
+**A toggle for a docked pane sits at the edge the pane opens from, and its icon
+names that side.** A user reaches for the side the pane will appear on; a toggle
+on the far edge is not where anyone looks for it, and `PanelRightOpen` on a
+control that opens a pane to the left states the wrong thing outright. The GraphQL
+schema explorer had both faults at once: it is the first panel of a horizontal
+`ResizablePanelGroup`, so it opens on the **left**, while the chip that opened it
+sat at the right of the Query header drawing the `PanelRight*` pair (#1224).
+
+- **Icons:** `PanelLeftOpen` / `PanelLeftClose` for a pane on the left,
+  `PanelRightOpen` / `PanelRightClose` for one on the right. Only the icon and
+  the label change with state.
+- **State:** `aria-expanded` bound to the store the pane reads, never a literal.
+- **One home:** the toggle stays put when the pane opens, and the pane does not
+  grow a close button of its own. A control that changes address with the state
+  it controls teaches a position and then abandons it, and the two copies drift
+  into saying the same thing differently.
+
 ---
 
 ## Component Patterns
@@ -1670,6 +2168,13 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
   Section Title
 </p>
 ```
+
+That string has one home: the `Eyebrow` primitive
+(`app/src/components/ui/eyebrow.tsx`), which is what a section label should
+render - it was extracted because the class was hand-typed in about a dozen
+components and two of them had already drifted, and `eyebrow.test.ts` fails on a
+second copy of the literal. The command palette's group headings are an
+`Eyebrow` inside the element cmdk labels the group by.
 
 ### Status Badges / Pills
 
@@ -1825,7 +2330,7 @@ for, so interrupting what they are reading is the wrong trade.
 
 ```tsx
 <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
-  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-bold text-[11px] */}
+  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-semibold text-[11px] */}
   <UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus:border-primary focus:outline-none transition-colors" />
 
   {/* Primary action */}
@@ -2177,7 +2682,8 @@ opt-out.
 |------|---------|
 | `app/src/index.css` | All CSS custom properties, keyframes, utility classes |
 | `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
-| `app/index.html` | Google Fonts preconnect + link tags |
+| `app/index.html` | Pre-paint appearance script; no font `<link>` (see `fonts.css`) |
+| `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
 | `app/src/components/layout/Shell.tsx` | Root layout - resizable sidebar + drag handle + main |
 | `app/src/components/layout/Sidebar.tsx` | ActivityBar + SidebarPanel |
 | `app/src/hooks/useResizable.ts` | Drag-to-resize hook (delta-based, horizontal/vertical) |

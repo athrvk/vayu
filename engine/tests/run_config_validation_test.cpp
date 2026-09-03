@@ -455,6 +455,23 @@ TEST (RunConfigValidation, ZeroRetentionLimitIsAcceptedAsUnlimited) {
     EXPECT_FALSE (validate_run_config (config).has_value ());
 }
 
+// The reservoir's other dimension (issue #1155). Read as a size_t like its
+// neighbours, so a negative is ~1.8e19 - a budget that removes the bound it
+// exists to provide rather than widening it.
+TEST (RunConfigValidation, SampleBudgetBoundsAreInclusive) {
+    auto config                         = valid_config ();
+    config["max_response_sample_bytes"] = 0;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+    config["max_response_sample_bytes"] =
+    vayu::core::constants::run_config::MAX_RESPONSE_SAMPLE_BYTES;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+    config["max_response_sample_bytes"] =
+    vayu::core::constants::run_config::MAX_RESPONSE_SAMPLE_BYTES + 1;
+    expect_rejected (config, "max_response_sample_bytes");
+    config["max_response_sample_bytes"] = -1;
+    expect_rejected (config, "max_response_sample_bytes");
+}
+
 TEST (RunConfigValidation, NegativeSlowThresholdIsRejected) {
     // A negative threshold would make every completion an outlier, filling the
     // slow store with the whole run.

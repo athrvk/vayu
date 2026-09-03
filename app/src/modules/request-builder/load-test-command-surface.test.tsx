@@ -133,7 +133,7 @@ describe("the request builder contributes its live draft to the command registry
 
 		// A previous builder's unmount arriving late must not empty the slot the
 		// builder now on screen owns.
-		act(() => useLiveCommandSurfaceStore.getState().clearStartLoadTest(() => {}));
+		act(() => useLiveCommandSurfaceStore.getState().clearSurface("startLoadTest", () => {}));
 
 		expect(registered()).toBe(current);
 	});

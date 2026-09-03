@@ -156,6 +156,9 @@ int extract_port (const std::string& url) {
 }
 
 std::optional<Error> validate_transferable (const Request& request) {
+    // The body-level answer on purpose: this gate is about a body existing at
+    // all, and a `graphql` body on a HEAD is still one to refuse - the GET
+    // transport that moves it into the URL is GET's alone (issue #1228).
     const bool has_body = vayu::http::has_wire_body (request.body);
     if (has_body && request.method == HttpMethod::HEAD) {
         Error error;
@@ -202,7 +205,10 @@ Response error_response (const Error& error) {
 }
 
 curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
-    const bool has_body = vayu::http::has_wire_body (request.body);
+    // The request-level answer, not the body-level one: a GraphQL body on a
+    // GET travels in the URL, so this is where "no body frame" comes from and
+    // what makes the GET arm below take `CURLOPT_HTTPGET` (issue #1228).
+    const bool has_body = vayu::http::has_wire_body (request);
     curl_mime* mime     = nullptr;
 
     if (has_body && request.body.mode == BodyMode::FormData) {
@@ -245,7 +251,7 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
         // COPYPOSTFIELDS rather than POSTFIELDS because the body is built here
         // and dies at the end of this scope, while POSTFIELDS keeps only a
         // pointer that has to outlive the transfer.
-        const std::string body = vayu::http::wire_body_bytes (request.body);
+        const std::string body = vayu::http::wire_body_bytes (request);
         set_opt<CURLOPT_POSTFIELDSIZE> (curl, static_cast<long> (body.size ()));
         set_opt<CURLOPT_COPYPOSTFIELDS> (curl, body.c_str ());
     }
@@ -308,7 +314,7 @@ curl_mime* apply_method_and_body (CURL* curl, const Request& request) {
 }
 
 std::string body_content_type_value (const Request& request) {
-    std::string implied = vayu::http::implied_content_type (request.body);
+    std::string implied = vayu::http::implied_content_type (request);
     if (implied.empty ()) {
         return {};
     }
@@ -783,7 +789,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     data->errors.attach (curl);
 
     // Set URL
-    set_opt<CURLOPT_URL> (curl, request.url.c_str ());
+    set_opt<CURLOPT_URL> (curl, vayu::http::wire_url (request).c_str ());
 
     // DNS Pre-resolution: Use cached DNS to bypass system resolver
     // This is critical for high-RPS loads (prevents DNS saturation)

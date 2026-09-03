@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/transport_policy.hpp"
@@ -237,6 +238,22 @@ struct ExchangeInputs {
     /// callers that do (the design route and the scenario runner) resolve it
     /// once and hand it down.
     vayu::http::TransportPolicy transport;
+    /**
+     * @brief Largest response body this exchange's send reads into memory,
+     *        0 = unbounded (issue #1157).
+     *
+     * Carried here for the reason @ref transport is: the bound is
+     * `maxDesignResponseBodyBytes`, `execute_exchange` holds no `Database` to
+     * read it from, and both callers that do - `POST /execute` and the
+     * scenario runner, whose steps are design-mode sends too - resolve it once
+     * per run and hand it down. The default is the constant rather than 0 so
+     * that a caller which resolves nothing is still bounded; a test that wants
+     * the old unbounded read sets it to 0 deliberately.
+     *
+     * Reaching it keeps the prefix rather than failing the send
+     * (`ClientConfig::truncate_over_limit`).
+     */
+    size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
 };
 
 /** What one exchange produced. */
@@ -348,5 +365,35 @@ const std::string& cookie_scope,
 ScriptVariableScopes& scopes,
 ExchangeInputs inputs,
 bool verbose);
+
+/**
+ * What this database is configured to let a design-mode send read
+ * (`maxDesignResponseBodyBytes`, issue #1157).
+ *
+ * One function rather than the same `get_config_int` at each of the two call
+ * sites - `POST /execute` and the scenario runner - because a key spelled twice
+ * is a key one of them can spell wrong, and a wrong spelling here falls back to
+ * the compiled-in default silently: the Settings control would go on reading as
+ * though it worked. This is what a test can call.
+ */
+[[nodiscard]] size_t design_response_body_bound (vayu::db::Database& db);
+
+/**
+ * What this database is configured to let a load-run transfer read
+ * (`maxResponseBodyBytes`), for the same reason its design-mode sibling above
+ * is one function: two call sites, one spelling.
+ *
+ * It reads a *load* bound from a header about the design exchange because the
+ * two callers are the two halves of one run - the event loop reads it for the
+ * transfers, and the deferred `tests` pass reads it for the `pm.sendRequest`
+ * those scripts may make (issue #1188) - and a script that runs once per
+ * sampled response belongs to the load path's memory budget.
+ *
+ * It keeps the `std::max (0, ...)` its inline predecessor in
+ * `configure_event_loop` carried, which the design-mode sibling has never had:
+ * the config route holds both keys at 1024 or more, so the clamp guards a row
+ * written before that validation existed rather than anything a caller can do.
+ */
+[[nodiscard]] size_t load_response_body_bound (vayu::db::Database& db);
 
 } // namespace vayu::http::routes

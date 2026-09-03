@@ -22,11 +22,12 @@
  *   and a toast fired by idle input is the palette shouting at someone who did
  *   not ask it anything. The query does not retry either - a typist should not
  *   wait out a retry budget for a group that is about to disappear.
- * - **cmdk cannot re-judge these rows.** The engine matched against the whole
- *   stored snapshot, which includes text no row prints, so the rendered list's
- *   own filter would drop rows that legitimately matched. Each row carries the
- *   query in its keywords, which is how it says "the match is real, you just
- *   cannot see it from here".
+ * - **Nothing re-judges these rows.** The engine matched against the whole
+ *   stored snapshot, which includes text no row prints, so a second opinion
+ *   formed from the row alone would drop matches that are real. Each row says
+ *   so with `preMatched`, and `ranking.ts` takes it at its word. The query
+ *   itself used to be stuffed into the keywords to the same end, which worked
+ *   by making every run score as an exact match - and outrank everything else.
  */
 
 /* global setTimeout, clearTimeout */
@@ -94,12 +95,17 @@ export function useRunItems(query: string): PaletteItem[] {
 		const items: PaletteItem[] = data.data.map((run) => ({
 			id: `run:${run.id}`,
 			kind: "run" as const,
+			// The engine matched this run, against stored snapshot text no row
+			// prints - see `PaletteItem.preMatched`.
+			preMatched: true,
 			title: runTitle(run, collectionsById),
 			subtitle: `${RUN_KIND_LABEL[run.type]} · ${run.status} · ${formatRelativeTime(run.startTime)}`,
-			// The engine already decided this row matches; cmdk filters the
-			// rendered list again and cannot see the snapshot text that matched,
-			// so the query itself is what keeps the row alive.
-			keywords: [search, run.summary?.method ?? "", run.type, run.status],
+			// The query itself used to be first in this list, so cmdk's second
+			// filter could not drop a row the engine had matched on snapshot
+			// text no row prints. That is `ranking.ts`'s job now, and carrying
+			// the query was never free: a row whose keywords contain the query
+			// verbatim scores near 1, so every run outranked every real match.
+			keywords: [run.summary?.method ?? "", run.type, run.status],
 			icon: run.type === "load" ? Zap : run.summary?.scenario ? FolderTree : Clock,
 			...(run.summary?.method ? { method: run.summary.method } : {}),
 			recencyAt: run.startTime,
@@ -115,7 +121,6 @@ export function useRunItems(query: string): PaletteItem[] {
 				subtitle: `${data.pagination.total} runs`,
 				icon: Search,
 				escape: true,
-				keywords: [search],
 				perform: () => {
 					const history = useHistoryStore.getState();
 					// Reset first: type, status and pin filters are applied over

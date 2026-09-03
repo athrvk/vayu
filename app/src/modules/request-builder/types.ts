@@ -113,12 +113,33 @@ export interface BodyConfig {
  * which name it is working on.
  *
  * Ephemeral, like the body drafts - `requestId` says whose row it is, and a
- * record belonging to another request is dropped rather than applied.
+ * record belonging to another request is dropped rather than applied. The
+ * provider keeps one record per request (issue #1269), so the rule reading this
+ * one is normally handed the record it owns; the check stays because the rule
+ * is a pure function that cannot know that.
  */
 export interface AutoHeader {
 	requestId: string | null;
 	rowId: string;
 	value: string;
+}
+
+/**
+ * The method a body mode set, and what it was before (issue #1228).
+ *
+ * The same reversible-side-effect rule as {@link AutoHeader}, on the one field
+ * that is not a header row: GraphQL over `GET` is sent as query parameters and
+ * cannot carry a mutation at all, so choosing the mode on a request still
+ * holding the default `GET` sets `POST` - and leaving the mode puts `GET` back.
+ *
+ * `method` is what this record set, and it is re-checked before the revert for
+ * the reason `AutoHeader` keeps `value`: a method the user has picked since is
+ * theirs, and reverting it would take a choice away rather than complete one.
+ */
+export interface AutoMethod {
+	requestId: string | null;
+	method: HttpMethod;
+	previous: HttpMethod;
 }
 
 // ============================================================================
@@ -203,11 +224,28 @@ export interface ResponseState {
 	 * Set when this response was restored from a stored run whose body the engine
 	 * truncated for storage (`maxTraceBodyBytes`). `body` then holds only the
 	 * stored slice, and `bodyBytes` is the original length. Drives the truncation
-	 * notice in the response viewer; re-sending fetches the full body.
+	 * notice in the response viewer; re-sending fetches the body again - up to
+	 * `maxDesignResponseBodyBytes`, which is the separate limit `bodyCapped`
+	 * below reports.
+	 *
+	 * Only the restore funnel sets it: a live send has nothing stored yet.
 	 */
 	bodyTruncated?: boolean;
 	/** The response body's original byte length, present only when truncated. */
 	bodyBytes?: number;
+	/**
+	 * The engine only ever *read* this much of the body, stopping at
+	 * `maxDesignResponseBodyBytes` (issue #1157).
+	 *
+	 * Both funnels set it - the live send from `bodyCapped` on the `/execute`
+	 * body, a restored one from `trace.response.bodyCapped` - and it is a
+	 * different fact from `bodyTruncated` above, so the two notices must not be
+	 * worded alike and are not exclusive. Storage truncation shortened a body
+	 * that was received whole, so re-sending recovers it; a capped read never
+	 * fetched the rest, so re-sending reproduces it and the remedy is raising
+	 * the limit.
+	 */
+	bodyCapped?: boolean;
 	time: number;
 	timing?: ResponseTiming;
 	/**
@@ -371,6 +409,11 @@ export interface RequestBuilderContextValue {
 	 * provider for the same reasons as the drafts above - and for one more: the
 	 * record has to outlive the panel, or the header outlives the mode that
 	 * needed it, which is the bug it exists to fix.
+	 *
+	 * These accessors answer for the request on screen, and each slot holds one
+	 * record per request (issue #1269) - one provider serves every request tab,
+	 * so a slot holding a single record stranded the header the app had added to
+	 * whichever request entered the mode first.
 	 */
 	getAutoContentType: () => AutoHeader | null;
 	setAutoContentType: (auto: AutoHeader | null) => void;
@@ -384,6 +427,15 @@ export interface RequestBuilderContextValue {
 	 */
 	getAutoAccept: () => AutoHeader | null;
 	setAutoAccept: (auto: AutoHeader | null) => void;
+
+	/**
+	 * The method the GraphQL body mode set, so leaving the mode can put back
+	 * the one it replaced (issue #1228). A third slot beside the two above,
+	 * and deliberately not one of them: what it owns is a scalar field rather
+	 * than a header row, so it records the value it wrote instead of a row id.
+	 */
+	getAutoMethod: () => AutoMethod | null;
+	setAutoMethod: (auto: AutoMethod | null) => void;
 
 	// Response State
 	response: ResponseState | null;

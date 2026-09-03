@@ -127,7 +127,9 @@ src/
 │   └── ui/             # UI primitives (Radix UI)
 ├── lib/                # Shared libraries
 │   ├── graphql/        # GraphQL support: diagnostics, introspection, schema cache, Monaco providers, variables JSON Schema, explorer tree + insertion
-│   ├── monaco-setup.ts # Monaco local-bundle config + GraphQL provider registration (imported once in main.tsx)
+│   ├── monaco-setup.ts # Monaco entry composition + local-bundle config + GraphQL provider registration (loaded on the first editor mount)
+│   ├── monaco-loader.ts # The lazy boundary in front of it: ensureMonaco() / useLoadedMonaco()
+│   ├── monaco-api.ts   # The Monaco surface that composition yields, and what it leaves out
 │   └── utils.ts        # General utilities (cn, etc.)
 ├── modules/            # Feature modules
 │   ├── request-builder/  # API request editor and execution
@@ -163,7 +165,7 @@ The app uses a dual-state management approach:
    - `session-store.ts`: Active environment id (mirrored from the engine) and the last-used collection
    - `engine-store.ts`: Engine health, connectivity status
    - `dashboard-store.ts`: Load test metrics (retained by time window, see `state-management.md`), streaming state
-   - `response-store.ts`: The last response per request id - status, headers, body, script results
+   - `response-store.ts`: The last response per request id - status, headers, body, script results. LRU-bounded at twice `MAX_OPEN_TABS`, since each entry holds a body plus its raw copy
    - `client-settings-store.ts`: Renderer preferences (editor, charts, auto-save, notifications)
    - `toast-store.ts`: The transient notification queue
    - `save-store.ts`: Auto-save orchestration and progress
@@ -181,17 +183,28 @@ The app uses a dual-state management approach:
 
 The right-hand context bar renders a list rather than a component tree it owns:
 `components/layout/context-bar/registry.ts` holds one ordered array of
-`{ id, title, appliesTo(tab), Component }`, and both the bar (what to draw) and
-the Dock's toggle (whether the button has anything to light up for) read it
-through the same `sectionsForTab` / `contextBarHasContent` pair. Keeping those
-two answers in one place is the point: they were a hardcoded tab type in one file
-and a `return null` in another, and they drifted.
+`{ id, title, appliesTo(tab), useRelevance?(tab), Component }`, and both the bar
+(what to draw) and the Dock's toggle (whether the button has anything to light up
+for) read `appliesTo` through the same `sectionsForTab` / `contextBarHasContent`
+pair. Keeping those two answers in one place is the point: they were a hardcoded
+tab type in one file and a `return null` in another, and they drifted.
+`appliesTo` stays a pure, synchronous function of the tab alone: the Dock's
+toggle calls it on every render, including while the bar is closed, so it can
+never read a query.
+
+`useRelevance` is a second, orthogonal function a section can opt into, asked
+only by the bar and only while it is open: whether the section has anything to
+say about *this* request, once its own data is in, rather than just this tab
+type. See `docs/app/COMPONENTS.md` for the three verdicts it can return and why
+the question was split off `appliesTo` rather than widening it (#1310).
 
 A section is a leaf component over the ordinary query layer - no bar-wide shared
 state - and is **mounted only while its section is expanded**, so a collapsed
-section registers no queries. That is what makes it safe for the bar to stay open
-on every tab the registry has entries for - request, collection and run. See
-`docs/app/COMPONENTS.md` for the sections themselves.
+section registers no queries; its `useRelevance` hook is the one thing that still
+runs collapsed, and only for a query its section already makes. That is what
+makes it safe for the bar to stay open on every tab the registry has entries
+for - request, collection and run. See `docs/app/COMPONENTS.md` for the
+sections themselves.
 
 #### Services Layer
 
@@ -291,7 +304,7 @@ cross-language conformance fixture. See `variable-resolution.md`.
 - **TanStack Query**: Server state and caching
 - **Radix UI**: Accessible component primitives
 - **Tailwind CSS**: Utility-first styling
-- **Monaco Editor**: Code editing - scripts, JSON body, and GraphQL (with syntax diagnostics, autocomplete, hover, and formatting via `graphql-language-service`)
+- **Monaco Editor**: Code editing - scripts, JSON body, and GraphQL (with syntax diagnostics, autocomplete, hover, and formatting via `graphql-language-service`); `{{variable}}` tokens are coloured and explained on hover in the body and GraphQL editors too
 - **uPlot**: Charts for metrics visualization (all dashboard/history charts centralize on one Canvas primitive; see `modules/dashboard/components/charts/uplot/`)
 - **Vite**: Build tool and dev server
 
@@ -317,7 +330,8 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 
 ## Performance Optimizations
 
-- **Code Splitting**: React vendor and charts split into separate chunks
+- **Code Splitting**: every chunk boundary here is a dynamic import - `vite.config.ts` declares no manual chunk groups, because the `react-vendor` and `charts` groups it used to declare were measured against rolldown's own chunking and moved nothing, and a group added for monaco actively pulled the 3.7MB editor chunk back onto the startup path as a `modulepreload` (#1147). `Shell` mounts every tab surface except `RequestBuilder` through `React.lazy` behind one Suspense boundary; Monaco (`lib/monaco-loader.ts`), the markdown pipeline (`ui/markdown-renderer.tsx`), the GraphQL body pane and the context bar's GraphQL section each sit behind their own boundary - the last two are what keep `graphql` and `graphql-language-service` off the startup path, since both are reached from surfaces that are otherwise eager. The entry chunk is what the window needs in order to appear - everything else arrives with the tab, editor or description that wants it (#1146)
+- **Monaco loads with the first editor, not at startup**: nothing imports `lib/monaco-setup.ts` statically. `ensureMonaco()` brings it in when a `CodeEditor` mounts, which is also what keeps `loader.config({ monaco })` ahead of `@monaco-editor/react`'s `loader.init()` - an `init()` that runs first fetches Monaco from the jsDelivr CDN instead of using the bundled copy. The app-level completion providers subscribe through `useLoadedMonaco()`, which never triggers the load. That file also composes the Monaco entry rather than importing the package root: the editor core (`edcore.main`, which is what carries the find, folding, suggest and hover widgets - `editor.api` alone is the API surface with no contributions), the JSON and TypeScript language services the app drives, and one Monarch grammar per language id it can open. The CSS and HTML language *services* are the two it leaves out, since they pulled 1.7MB of `css.worker` and `html.worker` into every installer that nothing could reach; their grammars stay, so an HTML or CSS response body is still highlighted, it just no longer carries language-service validation or completions (#1147)
 - **Query Caching**: TanStack Query caches server responses
 - **Optimistic Updates**: UI updates immediately, syncs with server
 - **Debounced Saves**: Auto-save waits for user to stop typing

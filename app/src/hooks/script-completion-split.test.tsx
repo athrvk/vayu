@@ -23,6 +23,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
+import {
+	stubAllVariables,
+	stubOrigins,
+	stubScopeVariables,
+	type ScopeDefinitions,
+} from "@/lib/scoped-variables.testkit";
+import type { VariableScope } from "@/types";
 
 interface Suggestion {
 	label: string;
@@ -50,12 +57,26 @@ const monacoStub = {
 	},
 };
 
-vi.mock("@monaco-editor/react", () => ({ useMonaco: () => monacoStub }));
+// `CodeEditor` gates rendering on `useLoadedMonaco` since #1146, and these
+// hooks moved to it too - so the mock moves from `useMonaco` to the loader.
+vi.mock("@/lib/monaco-loader", () => ({
+	useLoadedMonaco: () => monacoStub,
+	ensureMonaco: () => Promise.resolve(monacoStub),
+}));
 
-const variables: Record<string, { value: string; scope: string }> = {};
+/**
+ * What each scope defines; the resolver's three views are derived from it, so
+ * the merged list and a single-scope list cannot disagree here in a way they
+ * never could in the app. See `scoped-variables.testkit`.
+ */
+const defs: ScopeDefinitions = {};
 
 vi.mock("./useVariableResolver", () => ({
-	useVariableResolver: () => ({ getAllVariables: () => variables }),
+	useVariableResolver: () => ({
+		getAllVariables: () => stubAllVariables(defs),
+		getScopeVariables: (scope: VariableScope) => stubScopeVariables(defs, scope),
+		getVariableOrigins: (name: string) => stubOrigins(defs, name),
+	}),
 }));
 
 /** The providers scope themselves to the active tab; scoping is covered by `variable-completion-scope.test.tsx`. */
@@ -96,10 +117,10 @@ const pmLabels = (line: string) =>
 	suggestionsFrom(useScriptCompletionProvider, line).map((s) => s.label);
 
 beforeEach(() => {
-	for (const key of Object.keys(variables)) delete variables[key];
-	variables.apiHost = { value: "https://api.test", scope: "environment" };
-	variables.retries = { value: "3", scope: "collection" };
-	variables.traceId = { value: "abc", scope: "global" };
+	for (const scope of Object.keys(defs) as VariableScope[]) delete defs[scope];
+	defs.environment = { apiHost: { value: "https://api.test" } };
+	defs.collection = { retries: { value: "3" } };
+	defs.global = { traceId: { value: "abc" } };
 });
 
 describe("variable names in the script editors", () => {
@@ -142,7 +163,7 @@ describe("variable names in the script editors", () => {
 	});
 
 	it("hides a secret's value while still offering the name", () => {
-		variables.apiKey = { value: "s3cret", scope: "environment", secret: true } as never;
+		defs.environment = { ...defs.environment, apiKey: { value: "s3cret", secret: true } };
 		const item = suggestionsFrom(
 			useScriptVariableCompletionProvider,
 			'pm.environment.get("'
@@ -168,11 +189,14 @@ describe("replaceIn, which interpolates rather than looks up", () => {
 	});
 
 	it("closes the braces it opened, but not when they are already there", () => {
+		// By name, not by position: the merged list is built scope by scope and
+		// ordered by `sortText`, so which entry lands first is not this case's
+		// subject.
 		const opened = suggestionsFrom(
 			useScriptVariableCompletionProvider,
 			'pm.variables.replaceIn("{{'
-		)[0];
-		expect(opened.insertText).toBe("{{apiHost}}");
+		).find((s) => s.label === "apiHost");
+		expect(opened?.insertText).toBe("{{apiHost}}");
 	});
 });
 

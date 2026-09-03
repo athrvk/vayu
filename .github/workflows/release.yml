@@ -358,6 +358,23 @@ jobs:
             exit 1
           }
           $exeFiles | ForEach-Object { Copy-Item $_.FullName -Destination artifacts/ }
+          # The installer's .blockmap is what makes a Windows update a ranged
+          # download instead of the whole 127MB installer: NsisUpdater derives
+          # <installer>.blockmap for this release and for the one being upgraded
+          # from, and transfers only the blocks that differ. Left behind in
+          # app/release/, both fetches 404, the differential path throws, and
+          # every update falls back to the full download with nothing but a log
+          # line to say so - which is how it went unnoticed for 24 releases. So
+          # a missing blockmap fails the release rather than being skipped
+          # quietly. Windows is the only platform that needs the file uploaded:
+          # the AppImage carries its blockmap appended to its own tail, and
+          # macOS notifies rather than downloading.
+          $blockMaps = Get-ChildItem app/release/*.exe.blockmap -ErrorAction SilentlyContinue
+          if ($blockMaps.Count -eq 0) {
+            Write-Error "No .exe.blockmap produced - every Windows update would fall back to the full installer."
+            exit 1
+          }
+          $blockMaps | ForEach-Object { Copy-Item $_.FullName -Destination artifacts/ }
           # electron-updater feed metadata for the NSIS auto-updater.
           Copy-Item app/release/latest.yml -Destination artifacts/ -ErrorAction SilentlyContinue
           Get-ChildItem artifacts
@@ -388,8 +405,10 @@ jobs:
       # generated for every artifact rather than the one that happened to have
       # it, and a missing one is a release-blocking error rather than a silent
       # skip: a checksum that is sometimes absent is a checksum nobody can rely
-      # on. The .yml feeds are excluded - electron-updater carries its own
-      # hashes inside them.
+      # on. The .yml feeds and the .blockmap are excluded - both are
+      # electron-updater's own metadata, and what it assembles from them is
+      # verified against the sha512 the feed carries, never against a sidecar
+      # nothing would fetch.
       - name: Checksum artifacts (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -397,7 +416,7 @@ jobs:
           shopt -s nullglob
           count=0
           for f in artifacts/*; do
-            case "$f" in *.yml|*.sha256) continue ;; esac
+            case "$f" in *.yml|*.sha256|*.blockmap) continue ;; esac
             shasum -a 256 "$f" | awk '{print $1}' > "$f.sha256"
             count=$((count + 1))
           done
@@ -412,7 +431,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $files = Get-ChildItem artifacts -File | Where-Object { $_.Extension -notin '.yml', '.sha256' }
+          $files = Get-ChildItem artifacts -File | Where-Object { $_.Extension -notin '.yml', '.sha256', '.blockmap' }
           if ($files.Count -eq 0) {
             Write-Error "No artifacts to checksum - the collect step should have failed first."
             exit 1

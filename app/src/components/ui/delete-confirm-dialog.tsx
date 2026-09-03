@@ -52,6 +52,16 @@ export interface DeleteConfirmDialogProps {
 	 * irreversible-but-not-destructive action, where a red button overstates it.
 	 */
 	confirmVariant?: "destructive" | "default";
+	/**
+	 * Where focus goes when the dialog closes.
+	 *
+	 * Radix restores it to whatever held it before the dialog opened, which is
+	 * right for a Cancel and wrong for a confirmed delete: the control that
+	 * opened it was usually inside the thing just deleted, so focus lands on
+	 * `<body>` (#1218). A caller that knows what survives passes a handler and
+	 * calls `preventDefault` on the event.
+	 */
+	onCloseAutoFocus?: (event: Event) => void;
 }
 
 export function DeleteConfirmDialog({
@@ -63,6 +73,7 @@ export function DeleteConfirmDialog({
 	isDeleting = false,
 	confirmLabel = "Delete",
 	confirmVariant = "destructive",
+	onCloseAutoFocus,
 }: DeleteConfirmDialogProps) {
 	const cancelRef = useRef<HTMLButtonElement>(null);
 
@@ -96,6 +107,7 @@ export function DeleteConfirmDialog({
 					e.preventDefault();
 					cancelRef.current?.focus();
 				}}
+				onCloseAutoFocus={onCloseAutoFocus}
 			>
 				<DialogHeader>
 					<DialogTitle>{title}</DialogTitle>

@@ -62,6 +62,37 @@ export function getMethodColor(method: string): string {
 }
 
 /**
+ * Standard HTTP methods whose full name is longer than the five-character
+ * fixed column `MethodBadge` uses, and the label the badge renders in their
+ * place. The abbreviations are the ones every other client picks - `DEL` for
+ * `DELETE`, `OPT` for `OPTIONS`, `CONN` for `CONNECT` - and the badge exposes
+ * the full method as `title` when it substitutes one, so the meaning is one
+ * hover away. Kept beside `getMethodColor` for the same reason: one value,
+ * one meaning everywhere.
+ */
+export const METHOD_ABBREVIATIONS: Readonly<Record<string, string>> = {
+	DELETE: "DEL",
+	OPTIONS: "OPT",
+	CONNECT: "CONN",
+};
+
+/**
+ * Returns the label to display for a method and whether it was substituted
+ * for the full name. `abbreviated: true` means the caller should reveal the
+ * full method on hover (as `MethodBadge` does through its `title`) - a `DEL`
+ * on screen without that would leave a user guessing between `DELETE` and
+ * `DEL` the same way an unlabelled icon does.
+ */
+export function getMethodDisplayLabel(method: string): {
+	label: string;
+	abbreviated: boolean;
+} {
+	const upper = method.toUpperCase();
+	const abbrev = METHOD_ABBREVIATIONS[upper];
+	return abbrev ? { label: abbrev, abbreviated: true } : { label: upper, abbreviated: false };
+}
+
+/**
  * @deprecated Prefer `loadTestModeLabel` from `@/constants/load-test-modes`.
  * Kept as a thin alias so existing call sites keep working; it used to hold its
  * own copy of the names, which is how "Iterations" and "Fixed Iterations" ended

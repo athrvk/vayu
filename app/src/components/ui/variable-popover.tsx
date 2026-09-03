@@ -91,7 +91,7 @@ const BOUND_ROW_LABEL = "Bound row";
  * is where a shape or radius fix starts reaching only two of them.
  */
 const NAME_CHIP =
-	"inline-flex h-[18px] items-center rounded-md border px-1.5 text-[10px] leading-none";
+	"inline-flex h-[18px] items-center rounded-md border px-1.5 text-[10px] font-semibold leading-none";
 
 /**
  * The bare spelling's own sentence, and deliberately not the `data.*` one.
@@ -118,12 +118,22 @@ const BOUND_ROW_NOTE_ALL_OFF =
 	"While a row is picked, its column answers this name. Every definition below is switched off, so a send that carries no row resolves nothing.";
 
 /** The eye that swaps a hidden secret field for an editable one. */
-function RevealButton({ revealed, onToggle }: { revealed: boolean; onToggle: () => void }) {
+function RevealButton({
+	revealed,
+	onToggle,
+	autoFocus,
+}: {
+	revealed: boolean;
+	onToggle: () => void;
+	/** See the hidden-secret branch below - this is its only entry point. */
+	autoFocus?: boolean;
+}) {
 	return (
 		<TooltipIconButton
 			label={revealed ? "Hide value" : "Reveal value"}
 			icon={revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
 			onClick={onToggle}
+			autoFocus={autoFocus}
 			className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
 		/>
 	);
@@ -159,6 +169,39 @@ export interface VariablePopoverProps {
 	 * because there is nowhere this popover could put it.
 	 */
 	writableScopes?: VariableScope[];
+	/**
+	 * The trigger's position in a host's roving tab order (issue #1215).
+	 * `VariableInput` paints a strip of tokens over one field and passes `-1` to
+	 * all but one, so the strip costs a single Tab stop. Defaults to `0`: a token
+	 * standing on its own is an ordinary tab stop, and `disabled` still wins.
+	 */
+	tabIndex?: number;
+	/**
+	 * Open on mount, for a host that has already decided to open it (issue
+	 * #1220): a `{{token}}` in a Monaco editor has no DOM node to click, so the
+	 * editor mounts this over the token's screen rectangle already open.
+	 *
+	 * Deliberately `defaultOpen` and not a controlled `open`: opening seeds the
+	 * edit buffer from `varInfo`, and the initial state below does that for free.
+	 * A controlled prop would need an effect to re-seed on every external open,
+	 * which is the effect that used to reset the buffer under a user mid-type.
+	 */
+	defaultOpen?: boolean;
+	/**
+	 * Told whenever the popover opens or closes, after the save this component
+	 * already does on close. A host that positioned the trigger itself uses it
+	 * to unmount and to put focus back where it came from.
+	 */
+	onOpenChange?: (open: boolean) => void;
+	/**
+	 * Let focus move into the popover when it opens, instead of leaving it where
+	 * it was. Off by default, and that default is the one `VariableInput` needs:
+	 * its tokens sit over a live `<input>`, so pulling focus out of the field on
+	 * a click in the middle of a URL would take the caret with it. An editor's
+	 * token has the opposite need - the popover is opened by a chord, and a
+	 * keyboard user who cannot reach what opened is no better off than before.
+	 */
+	focusOnOpen?: boolean;
 }
 
 export function VariablePopover({
@@ -172,8 +215,12 @@ export function VariablePopover({
 	triggerClassName,
 	origins,
 	writableScopes,
+	tabIndex = 0,
+	defaultOpen = false,
+	onOpenChange,
+	focusOnOpen = false,
 }: VariablePopoverProps) {
-	const [isOpen, setIsOpen] = useState(false);
+	const [isOpen, setIsOpen] = useState(defaultOpen);
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
 	const [isSecretRevealed, setIsSecretRevealed] = useState(false);
 	const openValueRef = useRef(varInfo?.value || "");
@@ -194,11 +241,13 @@ export function VariablePopover({
 			setEditValue(varInfo.value);
 		}
 		setIsOpen(true);
+		onOpenChange?.(true);
 	};
 
 	const closePopover = () => {
 		setIsSecretRevealed(false);
 		setIsOpen(false);
+		onOpenChange?.(false);
 	};
 
 	const canEdit = !!onValueChange && !!varInfo && resolved && !disabled;
@@ -334,7 +383,7 @@ export function VariablePopover({
 	const triggerElement = (
 		<span
 			role="button"
-			tabIndex={disabled ? -1 : 0}
+			tabIndex={disabled ? -1 : tabIndex}
 			className={triggerClassName}
 			onClick={(e) => {
 				if (disabled) return;
@@ -370,7 +419,11 @@ export function VariablePopover({
 						e.preventDefault();
 					}
 				}}
-				onOpenAutoFocus={(e) => e.preventDefault()}
+				onOpenAutoFocus={(e) => {
+					// See `focusOnOpen`: a token over a live input must not take the
+					// caret with it, and a token opened by a chord must be reachable.
+					if (!focusOnOpen) e.preventDefault();
+				}}
 			>
 				<div className="flex flex-col gap-2">
 					{/*
@@ -396,7 +449,7 @@ export function VariablePopover({
 							{isSecret && (
 								<span
 									title="Secret - hidden until revealed"
-									className="inline-flex h-[18px] items-center gap-1 rounded-md border border-warning-text/40 px-1.5 text-[10px] leading-none text-warning-text"
+									className="inline-flex h-[18px] items-center gap-1 rounded-md border border-warning-text/40 px-1.5 text-[10px] font-semibold leading-none text-warning-text"
 								>
 									<KeyRound className="h-2.5 w-2.5" />
 									Secret
@@ -463,6 +516,16 @@ export function VariablePopover({
 								isSecret && !isSecretRevealed ? (
 									<div className="relative">
 										<Input
+											/*
+											 * Keyed against the revealed field below,
+											 * which is otherwise the same `<Input>` in
+											 * the same slot: React would reconcile the
+											 * two rather than remount, and `autoFocus`
+											 * fires on mount - so revealing left focus
+											 * behind on the eye and the field the reveal
+											 * exists to open had to be tabbed back to.
+											 */
+											key="secret-masked"
 											readOnly
 											value={varInfo.value ? SECRET_MASK : ""}
 											placeholder="not set"
@@ -472,11 +535,24 @@ export function VariablePopover({
 										<RevealButton
 											revealed={false}
 											onToggle={() => setIsSecretRevealed(true)}
+											/*
+											 * The popover suppresses its own open-autofocus, and every
+											 * other branch compensates with `autoFocus` on the field it
+											 * opens onto. This one had nothing: the masked field is
+											 * `readOnly`, and the popover is non-modal and portalled, so
+											 * Tab from the token did not enter it and focus-outside
+											 * dismissed it - a secret was the one variable a keyboard
+											 * user could not read (issue #1215). The eye is the right
+											 * landing: revealing is the only action here, and it hands
+											 * focus on to the editable field.
+											 */
+											autoFocus
 										/>
 									</div>
 								) : (
 									<div className="relative">
 										<Input
+											key="secret-revealed"
 											value={editValue}
 											onChange={(e) => setEditValue(e.target.value)}
 											onKeyDown={handleKeyDown}

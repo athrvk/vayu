@@ -203,7 +203,7 @@ one app instance may drive it:
   page-reclaim rewrite before the engine listens at all, and that whole window
   used to be blank screen. Nothing is lost by overlapping them: the renderer
   tolerates an absent engine by design, polling `/health` itself and rendering
-  the disconnected state until one answers. MCP still starts after the window,
+  the starting state until one answers. MCP still starts after the window,
   for its own reason - it reads a config file, and a corrupt one must not cost
   the user a window.
 - **MCP is *loaded* after the window too, not merely started there.** Placing the
@@ -250,10 +250,10 @@ See [App Architecture - Sidecar](app/architecture.md#engine-sidecar-electronside
 ### Outbound Transport
 
 Every request the engine puts on the wire - a design send, a load run, an SSE
-stream, an OAuth token fetch, a spec import by URL, a monitor scrape - leaves
-through one transport policy, resolved from Settings > Network & connectivity
-at the point of use and applied by a single function
-(`detail::apply_transport_policy`). There is one hop between the engine and the
+stream, an OAuth token fetch, a spec import by URL, a monitor scrape, a script's
+own `pm.sendRequest` - leaves through one transport policy, resolved from
+Settings > Network & connectivity at the point of use and applied by a single
+function (`detail::apply_transport_policy`). There is one hop between the engine and the
 target and it is either absent or a proxy:
 
 ```

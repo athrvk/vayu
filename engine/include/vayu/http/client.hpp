@@ -96,9 +96,13 @@ struct ClientConfig {
      *
      * Zero, and therefore unbounded, for every caller that does not set it -
      * which is what "Design-mode sends are not affected" by
-     * `maxResponseBodyBytes` has always meant, and this must not change it. The
-     * `/import/fetch` proxy sets it, because that route buffers a response from
-     * a URL a user typed with nothing behind it at all.
+     * `maxResponseBodyBytes` still means: that setting is the load path's, and
+     * nothing here reads it. The `/import/fetch` proxy sets it, because that
+     * route buffers a response from a URL a user typed with nothing behind it
+     * at all, and since #1157 the design-mode send sets it too - from
+     * `maxDesignResponseBodyBytes`, its own setting, and with
+     * @ref truncate_over_limit, which is what makes that bound survivable for a
+     * response someone is watching for.
      *
      * Enforced by the write callback, which cuts the transfer short as soon as
      * the body grows past the bound - whether the server declared a length or
@@ -107,6 +111,23 @@ struct ClientConfig {
      * error message names as the count.
      */
     size_t max_response_bytes = 0;
+
+    /**
+     * @brief What reaching @ref max_response_bytes means: keep the prefix and
+     *        report a truncated response (true), or refuse the transfer
+     *        (false, the default) - issue #1157.
+     *
+     * The bound is enforced identically either way; this decides only what the
+     * caller is handed afterwards. False is the right answer for a machine
+     * reader - `/import/fetch` cannot import half a document and answers a
+     * `413` - and true is the right answer for the design-mode send, where a
+     * person asked to see this response: the prefix, its status and its
+     * headers are worth more than an empty pane, and `Response::body_truncated`
+     * is what stops that prefix being read as the whole body.
+     *
+     * Ignored when @ref max_response_bytes is 0, which nothing can exceed.
+     */
+    bool truncate_over_limit = false;
 
     /**
      * @brief Report the body's arrival to this callback, or null to report

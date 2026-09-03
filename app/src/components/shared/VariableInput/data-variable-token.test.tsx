@@ -41,7 +41,7 @@ function overlayOf(value: string) {
 			<VariableInput value={value} onChange={() => {}} placeholder="URL" variables={scope} />
 		</TooltipProvider>
 	);
-	const overlay = container.querySelector('[aria-hidden="true"]');
+	const overlay = container.querySelector("[data-variable-overlay]");
 	expect(overlay).toBeTruthy();
 	return overlay as HTMLElement;
 }

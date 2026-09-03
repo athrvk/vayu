@@ -5,129 +5,24 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import {
-	FolderOpen,
-	Clock,
-	Braces,
-	Info,
-	PanelRight,
-	Radio,
-	RefreshCw,
-	Settings,
-	Trash2,
-} from "lucide-react";
+import { Info, PanelRight, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChord } from "@/lib/platform";
 import { DRAWER_VIEW_CHORDS, TOGGLE_CONTEXT_BAR_CHORD } from "@/constants/shortcuts";
+import { DRAWER_VIEWS } from "@/constants/drawer-views";
 import {
 	useLayoutStore,
 	useEngineStore,
 	useSaveStore,
 	useTabsStore,
-	type DrawerView,
+	// Aliased: `EngineStatus` is the component below, and the type is what it
+	// switches on.
+	type EngineStatus as EngineConnectionStatus,
 } from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
 import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
-
-interface DrawerButton {
-	view: DrawerView;
-	icon: React.ReactNode;
-	label: string;
-	shortcut: string;
-}
-
-const DRAWER_BUTTONS: DrawerButton[] = [
-	{
-		view: "collections",
-		icon: <FolderOpen className="w-4 h-4" />,
-		label: "Collections",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.collections),
-	},
-	{
-		view: "history",
-		icon: <Clock className="w-4 h-4" />,
-		label: "History",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.history),
-	},
-	{
-		view: "variables",
-		/*
-		 * `Braces`, not `Zap`. The lightning bolt is this app's load-test mark -
-		 * it is the Load Test button in the URL bar, the dashboard tab icon, and
-		 * the badge on a load run in History. Sitting in the Dock it said "run",
-		 * which is the one thing this view does not do.
-		 *
-		 * `{}` is the strongest reading of "variables" here because it *is* the
-		 * syntax: every variable in Vayu is written `{{name}}`, in the URL bar,
-		 * in headers, in bodies, in scripts. The user has already learned the
-		 * glyph before they ever look at the Dock.
-		 *
-		 * Rejected: `Variable` (lucide's `(x)`) is maths notation, not ours, and
-		 * its centre crossing packs a 6-unit X into a 24-unit box - at 16px that
-		 * is roughly 4px of detail, and it gives the icon the same
-		 * round-with-something-inside silhouette as Clock and Settings.
-		 * `SquareCode` (`<>` in a box) reads "script", and Vayu has real pre/post
-		 * scripts to confuse it with. `Parentheses` is `Variable` minus the X:
-		 * unreadable on its own, and it says "call", not "value".
-		 *
-		 * Distinctness in the strip: Braces is two thin open curves with a gap
-		 * down the middle, the only glyph of the four that is not a closed or
-		 * centre-filled shape - Collections is a solid horizontal trapezoid,
-		 * History a filled circle, Settings a round cog.
-		 *
-		 * Kept in step with `variables/main/VariablesMain.tsx` (empty state) and
-		 * `welcome/Launcher.tsx` (the Variables tile), which drew the same
-		 * concept as `Variable` and `Database` respectively.
-		 */
-		icon: <Braces className="w-4 h-4" />,
-		label: "Variables",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.variables),
-	},
-	{
-		view: "services",
-		/*
-		 * `Radio`: the group is inboxes, OAuth issuers and (with #481) mock
-		 * servers - things that sit there *listening*, which is what the
-		 * broadcast arcs say and what none of the alternatives do. `Server`
-		 * reads as a remote host, which is the thing these stand in for rather
-		 * than what they are; `Play` is the load-test run mark; `Plug` reads as
-		 * a connection to something else, and the point of a local service is
-		 * that there is nothing else.
-		 *
-		 * Distinct in the strip: it is the only glyph made of concentric arcs -
-		 * Collections a solid trapezoid, History a filled circle, Variables two
-		 * open curves, Settings a round cog.
-		 */
-		icon: <Radio className="w-4 h-4" />,
-		label: "Services",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.services),
-	},
-	{
-		view: "trash",
-		/*
-		 * `Trash2`, the same glyph every delete affordance in the app already
-		 * uses - and that repetition is the argument for it rather than against
-		 * it. The user meets this icon on the row action that put the item here;
-		 * finding it again in the Dock is how they learn where the item went.
-		 *
-		 * Distinct in the strip: a tapered bin with a lid line across the top,
-		 * the only glyph of the six that is wider at the shoulders than the foot
-		 * - Collections a solid trapezoid, History a filled circle, Variables
-		 * two open curves, Services concentric arcs, Settings a round cog.
-		 */
-		icon: <Trash2 className="w-4 h-4" />,
-		label: "Trash",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.trash),
-	},
-	{
-		view: "settings",
-		icon: <Settings className="w-4 h-4" />,
-		label: "Settings",
-		shortcut: formatChord(DRAWER_VIEW_CHORDS.settings),
-	},
-];
 
 interface DockButtonProps {
 	active: boolean;
@@ -175,6 +70,19 @@ function DockButton({ active, onClick, label, shortcut, children }: DockButtonPr
 }
 
 /**
+ * What each engine state is called in the strip.
+ *
+ * "Disconnected" stays the word for `unreachable` - it is what the state has
+ * always been called here and in the docs, and the new state is the one that
+ * needed a name of its own.
+ */
+const ENGINE_STATUS_LABEL: Record<EngineConnectionStatus, string> = {
+	starting: "Starting…",
+	connected: "Connected",
+	unreachable: "Disconnected",
+};
+
+/**
  * The connection light - and, when it is out, why.
  *
  * `engineError` is written on every failed health poll (`queries/health.ts`)
@@ -187,30 +95,49 @@ function DockButton({ active, onClick, label, shortcut, children }: DockButtonPr
  *
  * The trigger is focusable, so the reason is reachable by keyboard and not only
  * by hover, and the icon exists to say there is something to hover at all.
+ *
+ * Only `unreachable` gets that affordance. The window paints while the engine is
+ * still starting (#1144), so the first seconds of every launch are spent not
+ * connected - and rendering a red flag and a transport error there described a
+ * failure that had not happened (#1164). "Starting…" is a state of its own,
+ * quiet by design, and the store turns it into `unreachable` on its own budget
+ * so an engine that never comes up still ends up saying why.
  */
 function EngineStatus() {
-	const isEngineConnected = useEngineStore((s) => s.isEngineConnected);
+	const engineStatus = useEngineStore((s) => s.engineStatus);
 	const engineError = useEngineStore((s) => s.engineError);
 
 	/*
-	 * success-text, not status-success. The status tokens are tuned as fills and
-	 * indicators; as 12px text `status-success` measures 2.21:1 on the light
-	 * panel, well under the 4.5 AA needs. The `-text` variant is the accessible
-	 * pair (4.57 light / 9.58 dark) and the dot inherits it via bg-current,
-	 * clearing the 3:1 that non-text indicators need too.
+	 * `status-success-text`: not the general `success-text`, and not the bare
+	 * `status-success`. A connection light is precisely what design-system.md
+	 * means by "Run, connection, and test status", so it belongs to the
+	 * `--status-*` family - the family a reader greps to find every status
+	 * surface. The comment this replaces rejected the *bare* token, which is the
+	 * right rejection and the wrong conclusion: as 12px text `status-success`
+	 * measures 2.21:1 on --panel (design-system.md's own figure, reproduced), and
+	 * the family's answer to that is its `-text` pair, not a different family.
+	 *
+	 * Measured on --panel, the Dock's own surface, in both themes: 5.43:1 light
+	 * (142 72% 27%) and 9.61:1 dark (142 60% 55%), so the dot - which inherits
+	 * the colour through bg-current - clears the 3:1 non-text bar too. The pair
+	 * is byte-identical to --success-text in both modes, so the swap moved no
+	 * pixel; it moved the token into the family that names this indicator.
+	 *
+	 * `starting` and `unreachable` stay on --muted-foreground, which is what the
+	 * doc prescribes for a pending state (there is no --status-pending).
 	 */
 	const className = cn(
 		"flex items-center gap-1 text-xs",
-		isEngineConnected ? "text-success-text" : "text-muted-foreground"
+		engineStatus === "connected" ? "text-status-success-text" : "text-muted-foreground"
 	);
 	const label = (
 		<>
 			<span className="w-1.5 h-1.5 rounded-full bg-current" />
-			{isEngineConnected ? "Connected" : "Disconnected"}
+			{ENGINE_STATUS_LABEL[engineStatus]}
 		</>
 	);
 
-	if (isEngineConnected || !engineError) {
+	if (engineStatus !== "unreachable" || !engineError) {
 		return <span className={className}>{label}</span>;
 	}
 
@@ -218,6 +145,7 @@ function EngineStatus() {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span
+					// eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- TooltipTrigger (Radix) wires focus and blur to reveal and dismiss this tooltip, which is the only keyboard path to the engine error text
 					tabIndex={0}
 					className={cn(
 						className,
@@ -272,8 +200,9 @@ function PendingRestart() {
  * light because that is this strip's ambient-status region, and because these
  * are the same kind of fact: what the engine is doing on the user's behalf.
  *
- * **Nothing renders when nothing runs** - and a disconnected engine is running
- * nothing, which `useRunningServiceCount` is what decides (it holds the gate,
+ * **Nothing renders when nothing runs** - and an engine that is not connected,
+ * starting or unreachable alike, is running nothing, which
+ * `useRunningServiceCount` is what decides (it holds the gate,
  * so no reader has to remember the caveat). The Dock's middle is ambient, and a
  * standing "0 services" would spend a permanent line on the ordinary case.
  * Guarded by `Dock.services.test.tsx` - rendering it unconditionally fails.
@@ -293,12 +222,13 @@ function RunningServices() {
 				{/*
 				 * A button, not a chip: knowing a listener is up is only half the
 				 * need - the other half is getting to it, and the drawer is where
-				 * it can be stopped or copied. `success-text` is the accessible
-				 * pair the connection light above uses for the same 12px dot.
+				 * it can be stopped or copied. A listener being up is a service's
+				 * run state, so it takes `status-success-text`, the same pair the
+				 * connection light above uses for the same 12px dot.
 				 */}
 				<button
 					onClick={() => revealDrawerView("services")}
-					className="flex items-center gap-1 text-xs text-success-text rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					className="flex items-center gap-1 text-xs text-status-success-text rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 				>
 					<span className="w-1.5 h-1.5 rounded-full bg-current" />
 					{count === 1 ? "1 service" : `${count} services`}
@@ -323,6 +253,11 @@ function PendingRestartButton() {
 				 * back to Settings. Warning tokens rather than a raw amber - the
 				 * `-text` variant is the pair that passes contrast at 12px, the
 				 * same rule the connection light follows above.
+				 *
+				 * Deliberately `--warning` and not the `--status-*` family the two
+				 * indicators beside it now use: this announces a pending action on
+				 * a setting, not the state of a run, a connection or a service, and
+				 * amber in that family means "4xx client error".
 				 */}
 				<button
 					onClick={() => void restart()}
@@ -375,15 +310,18 @@ export function Dock() {
 				    arrow-key traversal between the buttons, which this does not
 				    implement, and claiming it would mislead a keyboard user. */}
 				<nav className="flex items-center gap-0.5" aria-label="Sidebar views">
-					{DRAWER_BUTTONS.map(({ view, icon, label, shortcut }) => (
+					{/* Names, marks and order from `constants/drawer-views.ts`, chords
+					    from `constants/shortcuts.ts` - the strip holds neither, so the
+					    palette offering the same six cannot name them differently. */}
+					{DRAWER_VIEWS.map(({ view, label, icon: Icon }) => (
 						<DockButton
 							key={view}
 							active={drawerOpen && drawerView === view}
 							onClick={() => activateDrawerView(view)}
 							label={label}
-							shortcut={shortcut}
+							shortcut={formatChord(DRAWER_VIEW_CHORDS[view])}
 						>
-							{icon}
+							<Icon className="w-4 h-4" />
 						</DockButton>
 					))}
 				</nav>

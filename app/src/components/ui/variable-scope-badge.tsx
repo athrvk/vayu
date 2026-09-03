@@ -42,13 +42,20 @@ export function VariableScopeBadge({
 	 * key from `bg-*` - so the tint below replaced the background and left the
 	 * hover behind. The full variant was `secondary` and greyed out under the
 	 * pointer. None of these is clickable.
+	 *
+	 * Neither variant names a weight: `Badge`'s own base is `font-semibold`,
+	 * which is the micro/badge step (#1222). Compact used to override it to
+	 * `font-medium` while full inherited the base, so one primitive rendered one
+	 * size at two weights. The weight is pinned by rendering both variants in
+	 * `variable-scope-badge.test.tsx` - no source scan can see a class that
+	 * arrives from a `cva` base through `cn()`.
 	 */
 	if (variant === "compact") {
 		return (
 			<Badge
 				variant="chip"
 				className={cn(
-					"h-5 px-1.5 text-[10px] font-medium border",
+					"h-5 px-1.5 text-[10px] border",
 					config.tint,
 					config.border,
 					className

@@ -34,6 +34,7 @@
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/transport_policy.hpp"
 
 namespace vayu::http {
 // A scenario run's steps send through the daemon's jar; the manager only passes
@@ -155,6 +156,12 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
 struct EngineDefaults {
     size_t max_sample_body_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES;
     size_t max_sample_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES;
+    /// Config key `maxResponseSampleBytes`. The whole-run budget for the
+    /// script-validation reservoir's bodies, which are kept untruncated - so
+    /// this is the setting that decides how much of a large-bodied target's
+    /// traffic a run can validate.
+    size_t max_response_sample_bytes =
+    constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES;
     /// Config key `phaseHistograms`. Whether the run feeds the five per-phase
     /// histograms behind the report's `timingBreakdown.phases`.
     bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
@@ -170,6 +177,8 @@ struct EngineDefaults {
 
 struct RunContext {
     std::string run_id;
+    /// The loop also carries Windows' 1 ms timer resolution for its lifetime
+    /// (issue #1161), so releasing it below gives that back too.
     std::unique_ptr<vayu::http::EventLoop> event_loop;
     // Orders the metrics thread's reads of `event_loop` against its
     // publication (#956). start_run spawns the metrics thread before the
@@ -207,6 +216,44 @@ struct RunContext {
     [[nodiscard]] size_t active_transfer_count () const {
         std::lock_guard<std::mutex> lock (event_loop_mtx);
         return event_loop ? event_loop->active_count () : 0;
+    }
+
+    /// Let go of everything the run needed only while it was sending: the
+    /// event loop - with its per-worker curl handle pools, its multi handles
+    /// and the TCP/TLS connections those hold open against the target, and the
+    /// 512KB submission queues - the bound CSV rows, the scenario plan, and the
+    /// response bodies the deferred passes have already read (issue #1155).
+    /// What retention exists for is untouched: the tick topic, `closed`, the
+    /// summary counters and the collector behind them (issue #1154) - including
+    /// `response_samples_dropped`, so the report still says what was thinned
+    /// after the samples themselves are gone.
+    ///
+    /// Called once, by `RunManager::retain_run`, so no exit path can forget
+    /// it. By then the run's own thread has made its last read of these
+    /// members - the strategy has returned, `event_loop->stop` has drained,
+    /// and `join_aux_threads` has joined the metrics thread, the one other
+    /// reader of the loop.
+    ///
+    /// The loop is moved out under `event_loop_mtx` and destroyed after it is
+    /// dropped: `active_transfer_count` answers 0 from the swap on, and the
+    /// frees - which close sockets - never run with a lock held.
+    void release_execution_resources () {
+        std::unique_ptr<vayu::http::EventLoop> loop;
+        {
+            std::lock_guard<std::mutex> lock (event_loop_mtx);
+            loop = std::move (event_loop);
+        }
+        load_data.reset ();
+        scenario.reset ();
+        // The sample reservoirs, but not the collector: the two deferred passes
+        // that read them have run by now - both finish before the summary is
+        // written, and the paths that reach retention without them are the ones
+        // that failed before a response existed to sample - while the counters
+        // beside them are read for the whole retention window.
+        if (metrics_collector) {
+            metrics_collector->release_response_samples ();
+        }
+        // `loop` frees here, outside the critical section above.
     }
 
     // The run's worker thread is NOT owned here: it holds a shared_ptr to this
@@ -284,6 +331,32 @@ struct RunContext {
      * strategy thread's hot path.
      */
     std::optional<vayu::StreamBounds> stream_bounds;
+
+    /**
+     * The route every transfer of this run left by, kept so the deferred
+     * script pass can leave by it too (issue #1256).
+     *
+     * A copy of the `EventLoopConfig::transport` the run's transfers were sent
+     * under, written by `configure_event_loop` - the one place a load run
+     * resolves a policy - and read at the other end of the run by
+     * `validate_scripts`, which has no other way to reach it: the loop keeps
+     * its config behind its pImpl and is released before retention.
+     *
+     * Held rather than re-resolved there because the deferred `tests` script
+     * asserts on responses these transfers produced, and a `pm.sendRequest`
+     * that took a different proxy, CA bundle or client certificate than they
+     * did would report the target as broken over a `Settings` edit made while
+     * the run was in flight. Same reasoning as `scenario_runner.cpp`'s
+     * run-scoped `transport` (issue #705, epic decision 3 of #704), one run
+     * later in the lifecycle.
+     *
+     * The default - the environment pickup a bare `TransportPolicy` carries -
+     * only ever reaches a script through a `RunContext` built by hand, since
+     * `execute_load_test` configures the loop before anything can be sampled
+     * and is the only path to the validation pass. Written and read on the
+     * run's worker thread, so it needs no lock.
+     */
+    vayu::http::TransportPolicy transport;
 
     // High-performance in-memory metrics collector
     // Replaces direct DB writes for individual results during load tests
@@ -737,6 +810,11 @@ struct SamplingRetention {
     /// tab warn that the stored set may contain credentials. Deleted with the
     /// run, which makes `maxRunsRetained` the expiry for that data too.
     size_t response_bodies_captured = 0;
+    /// Whether the response-sample byte budget (`max_response_sample_bytes`)
+    /// ended at least one sample. The counts above cannot say it: both bounds
+    /// on that store report through `response_samples_dropped`, and only this
+    /// one costs the retained set its uniformity (issue #1192).
+    bool response_sample_budget_spent = false;
 };
 
 /**
@@ -831,6 +909,17 @@ struct RunSummaryInputs {
 [[nodiscard]] nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs);
 
 /**
+ * @brief Snapshot what each bounded store thinned away, for the run summary.
+ *
+ * One copy so the completed-run and crashed-run summaries cannot report
+ * retention differently. Declared here rather than kept private because it is
+ * the only thing that carries a collector's counts into the stored summary: a
+ * field the collector grows and this forgets reaches no report, and nothing
+ * else in the engine would say so.
+ */
+[[nodiscard]] SamplingRetention read_retention (const MetricsCollector& mc);
+
+/**
  * @brief Wrap a per-tick stats object as a wire-ready SSE "metrics" event,
  * tagged with `id: <offset>` for Last-Event-ID resume. Extracted for testing.
  */
@@ -845,7 +934,8 @@ class RunManager {
     // Background TTL sweeper. Without this, retained runs only get evicted when
     // /metrics/live or start_run fires - headless API users (POST /run +
     // GET /run/:id/report) never trigger either, and retained RunContexts
-    // (full tick_buffer, HdrHistogram, counters) accumulate indefinitely.
+    // (tick_buffer, HdrHistogram, counters - the execution machinery is
+    // already released by retain_run) accumulate indefinitely.
     std::thread sweeper_thread_;
     std::mutex sweeper_mtx_;
     std::condition_variable sweeper_cv_;
@@ -907,6 +997,9 @@ class RunManager {
     // On completion a run is MOVED from active_runs_ to retained_runs_ so its
     // in-memory tick topic survives for late/instant consumers. active_count()
     // and get_all_active_runs() keep their exact meaning (active only).
+    // The topic is all that survives: the move calls
+    // RunContext::release_execution_resources(), so the event loop, the bound
+    // rows and the plan are freed here rather than at the sweep (issue #1154).
     void retain_run (const std::string& run_id);
     // Active OR retained-within-window. Used only by /metrics/live.
     std::shared_ptr<RunContext> get_run_or_retained (const std::string& run_id);

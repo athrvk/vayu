@@ -201,6 +201,16 @@ struct MetricsCollectorConfig {
     /// Maximum response samples to store for script validation
     size_t max_response_samples = constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLES;
 
+    /// Whole-run byte budget for those samples' bodies, shared by the run-level
+    /// reservoir and every per-step one. A sample whose body would exceed what
+    /// is left is dropped **whole** and counted by response_samples_dropped();
+    /// nothing here is ever truncated, because a deferred script or schema
+    /// check reading a cut body reports a failure the target never produced.
+    /// The figure is what is currently *held*, so a displaced sample gives its
+    /// bytes back - see MetricsCollector::response_sample_bytes.
+    size_t max_response_sample_bytes =
+    constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES;
+
     /// Sample rate for response storage (1 = all, 100 = 1%, etc.)
     size_t response_sample_rate = constants::metrics_collector::DEFAULT_RESPONSE_SAMPLE_RATE;
 
@@ -427,6 +437,24 @@ class MetricsCollector {
     SampleIdentity identity);
 
     /**
+     * @brief Let go of every retained response sample and its bytes.
+     *
+     * Called once the run is retained: the deferred passes that read these
+     * stores have already run (they are what the samples exist for), and the
+     * retention window keeps the tick topic and the summary counters, not the
+     * bodies behind them (issue #1154's deferred half). Without this a run
+     * against a 1 MiB endpoint held its whole sample budget resident for
+     * `liveRetentionMs` after it stopped sending.
+     *
+     * Each store gives back exactly the bytes it held, under its own lock,
+     * rather than the budget being zeroed - that is what keeps the figure from
+     * going below zero, which for a size_t is a budget of 1.8e19. The locking
+     * is defensive rather than load-bearing: `retain_run` is a worker's last
+     * act, after the run has drained, so no completion is still landing.
+     */
+    void release_response_samples ();
+
+    /**
      * @brief Record a failed request
      * Thread-safe. The error counters and the status-code distribution always
      * see every error; the individual record is stored only while the store is
@@ -461,9 +489,57 @@ class MetricsCollector {
         return slow_dropped_.load (std::memory_order_relaxed);
     }
 
-    /** @brief Response samples dropped or displaced by the reservoir. */
+    /**
+     * @brief Response samples dropped or displaced by the reservoir.
+     *
+     * Two budgets end a sample here and both count the same way, because both
+     * mean the same thing to a reader: this response was not validated. The
+     * count cap (`max_response_samples`) refuses or displaces a candidate; the
+     * byte budget (`max_response_sample_bytes`) drops one whose body no longer
+     * fits. Neither ever stores a truncated body - see the config field.
+     *
+     * The one thing the count loses is which bound applied, and the two differ
+     * in what they leave behind: a displaced incumbent keeps the retained set a
+     * uniform sample of the run, a spent byte budget stops admitting. That is
+     * what `response_sample_budget_spent()` beside this answers.
+     */
     [[nodiscard]] size_t response_samples_dropped () const {
         return response_dropped_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Whether the byte budget ever ended a response sample.
+     *
+     * True means at least one sample was dropped because its body no longer fit
+     * `max_response_sample_bytes`, so the retained set is drawn from the part of
+     * the run whose bodies fit rather than uniformly from the whole of it. The
+     * drop count cannot say this: the count cap displaces an incumbent and stays
+     * uniform, and both bounds report through `response_samples_dropped()`
+     * (issue #1192).
+     *
+     * A flag rather than a second counter, deliberately. How many samples the
+     * budget ended is a number no reader acts on - what changes the reading of
+     * the report is that it was spent at all - and a second count beside the
+     * first would invite the sum, which is not the drop total.
+     */
+    [[nodiscard]] bool response_sample_budget_spent () const {
+        return response_budget_spent_.load (std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Body bytes the retained response samples currently hold.
+     * The figure `max_response_sample_bytes` is spent against, across the
+     * run-level reservoir and every per-step one.
+     *
+     * The run report carries the *drop count*, not this - what a reader needs
+     * to know is which responses went unvalidated, and a resident-byte figure
+     * for a store that no longer exists by the time the report is read would
+     * be one more number to explain. So this is the tests' seam, exactly as
+     * `captured_body_bytes()` beside it is: deliberately test-only, not a
+     * field that lost its reader.
+     */
+    [[nodiscard]] size_t response_sample_bytes () const {
+        return response_sample_bytes_.load (std::memory_order_relaxed);
     }
 
     /**
@@ -928,6 +1004,19 @@ class MetricsCollector {
     std::atomic<size_t> response_sample_counter_{ 0 };
     std::atomic<size_t> response_seen_{ 0 };
     std::atomic<size_t> response_dropped_{ 0 };
+    /// Body bytes the retained samples hold, run-level store and every step
+    /// store together - one budget for one run's memory. Kept exact rather
+    /// than monotonic: a displaced sample gives its bytes back, because
+    /// otherwise a long run's charge grows with the *candidates* the reservoir
+    /// accepted (~k ln(n/k) of them) while what is held stays at k, and the
+    /// budget would eventually freeze a reservoir that is nowhere near it.
+    std::atomic<size_t> response_sample_bytes_{ 0 };
+    /// Set the first time a body no longer fits the budget above, and never
+    /// cleared: a run that spent the budget once is graded on the part of it
+    /// whose bodies fit, and a later release that frees room does not give the
+    /// dropped responses back. Read by the run summary as the one thing
+    /// `response_dropped_` cannot say (issue #1192).
+    std::atomic<bool> response_budget_spent_{ false };
 
     /**
      * @brief One reservoir per plan step, for a scenario load run's deferred
@@ -979,6 +1068,19 @@ class MetricsCollector {
      * being reported.
      */
     [[nodiscard]] CapturedExchange capture_exchange (const Response& response);
+
+    /**
+     * @brief Charge @p bytes to the run's response-sample budget.
+     *
+     * Answers false when the budget cannot cover them, having charged nothing;
+     * the caller then drops the whole sample. Called after the reservoir slot
+     * is claimed and *before* the body is copied, so a refusal costs neither
+     * the copy nor the store's mutex.
+     */
+    [[nodiscard]] bool claim_response_sample_bytes (size_t bytes);
+
+    /** @brief Give @p bytes back - a displaced incumbent, or a refused insert. */
+    void release_response_sample_bytes (size_t bytes);
 
     // Helper for atomic double addition
     void atomic_add_double (std::atomic<double>& target, double value);

@@ -27,6 +27,7 @@ import {
 	TOGGLE_DRAWER_CHORD,
 	TOGGLE_CONTEXT_BAR_CHORD,
 	SETTINGS_CHORD,
+	LEAVE_EDITOR_CHORD,
 	DRAWER_VIEW_CHORDS,
 	TAB_CHORDS,
 	matchesChord,
@@ -183,13 +184,14 @@ describe("no press matches two chords", () => {
 		CLOSE_TAB_CHORD,
 		TOGGLE_DRAWER_CHORD,
 		TOGGLE_CONTEXT_BAR_CHORD,
+		LEAVE_EDITOR_CHORD,
 		...Object.values(DRAWER_VIEW_CHORDS),
 		...TAB_CHORDS,
 	];
 
 	// ⇧⌘S is Services and ⌘S is Save - the pair the old shifted branch had to be
 	// written around, by returning early for every shifted press.
-	it.each(["s", "w", "b", "i", "e", "h", "u", ",", "Enter"])(
+	it.each(["s", "w", "b", "i", "m", "e", "h", "u", ",", "Enter"])(
 		"Ctrl+%s, shifted or not, matches at most one",
 		(key) => {
 			for (const shift of [false, true]) {

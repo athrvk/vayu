@@ -19,6 +19,8 @@
 import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
+import { useAutoRecordSlot, UNSAVED_AUTO_KEY } from "./auto-record-slot";
+import { retainKeys } from "./retain-keys";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
@@ -37,6 +39,8 @@ import {
 	useResponseStore,
 	useExecutionEventsStore,
 	useBoundRowStore,
+	useTabsStore,
+	type Tab,
 } from "@/stores";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
 import { apiService } from "@/services";
@@ -45,6 +49,7 @@ import { queryKeys } from "@/queries";
 import type { ScriptPart, VariableValue } from "@/types";
 import type {
 	AutoHeader,
+	AutoMethod,
 	RequestState,
 	ResponseState,
 	RequestTab,
@@ -58,10 +63,23 @@ import { createDefaultRequestState } from "../utils/request-state";
 import { responseFromRunResult } from "../utils/restore-response";
 import { useExecutionEvents } from "../hooks/useExecutionEvents";
 import { useSendWithRow } from "../hooks/useSendWithRow";
+import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
 
 interface RequestBuilderProviderProps {
 	children: ReactNode;
 	initialRequest?: Partial<RequestState>;
+	/**
+	 * The identity this builder files its per-builder memory under - the three
+	 * auto side-effect records and the picker's row index (issue #1272).
+	 *
+	 * Defaults to `request.id`, which is what a request tab wants. The History
+	 * run view passes its run id, because the copy it renders is deliberately
+	 * id-less (`design-run-seed.ts` sets `id: null`, one of the two gates that
+	 * detach it) and two open run tabs would otherwise be one identity. Pass an
+	 * id the tab strip can name - a record keyed under it is bounded by that
+	 * tab, exactly as a request's is.
+	 */
+	memoryKey?: string;
 	/**
 	 * Starting response for a builder with no id, which cannot read the store.
 	 * Used by the History run view, where the response comes from the run.
@@ -116,6 +134,7 @@ interface RequestBuilderProviderProps {
 export default function RequestBuilderProvider({
 	children,
 	initialRequest,
+	memoryKey: declaredMemoryKey,
 	initialResponse,
 	inheritedPreScripts,
 	inheritedPostScripts,
@@ -284,6 +303,20 @@ export default function RequestBuilderProvider({
 	}, []);
 
 	/*
+	 * The one identity every per-builder map here is read and written under: the
+	 * three records below and the picker's row index further down. One
+	 * `RequestBuilderProvider` serves every tab, so a slot holding a single
+	 * record held whichever request was in a mode last, and the request before
+	 * it kept what the app had changed for it (issue #1269).
+	 *
+	 * A request tab is its request; a builder over something else says so with
+	 * `memoryKey`, because two id-less builders are not one builder (issue
+	 * #1272). Spelled once rather than per map - the maps share a sweep, and two
+	 * spellings of one rule are how they drift apart.
+	 */
+	const memoryKey = declaredMemoryKey ?? request.id ?? UNSAVED_AUTO_KEY;
+
+	/*
 	 * The Content-Type row a body mode added on its way in, so leaving the mode
 	 * can remove it again. Here rather than in `BodyPanel` for the drafts' reason
 	 * and one of its own: the panel is unmounted whenever another tab is on
@@ -295,11 +328,11 @@ export default function RequestBuilderProvider({
 	 * drafts: the record names its own request and `switchContentType` drops one
 	 * belonging to another.
 	 */
-	const autoContentTypeRef = useRef<AutoHeader | null>(null);
-	const getAutoContentType = useCallback(() => autoContentTypeRef.current, []);
-	const setAutoContentType = useCallback((auto: AutoHeader | null) => {
-		autoContentTypeRef.current = auto;
-	}, []);
+	const {
+		get: getAutoContentType,
+		set: setAutoContentType,
+		retain: retainAutoContentTypes,
+	} = useAutoRecordSlot<AutoHeader>(memoryKey);
 
 	/*
 	 * The `Accept: text/event-stream` row the Event stream toggle added, so
@@ -309,11 +342,28 @@ export default function RequestBuilderProvider({
 	 * another tab - and then the header outlives the setting that needed it,
 	 * which is exactly the bug the record exists to prevent.
 	 */
-	const autoAcceptRef = useRef<AutoHeader | null>(null);
-	const getAutoAccept = useCallback(() => autoAcceptRef.current, []);
-	const setAutoAccept = useCallback((auto: AutoHeader | null) => {
-		autoAcceptRef.current = auto;
-	}, []);
+	const {
+		get: getAutoAccept,
+		set: setAutoAccept,
+		retain: retainAutoAccepts,
+	} = useAutoRecordSlot<AutoHeader>(memoryKey);
+
+	/*
+	 * The method the GraphQL body mode set, so leaving the mode can put back
+	 * the one it replaced (issue #1228). Here for the same reason as the two
+	 * above - the panel that writes it is unmounted whenever another tab is on
+	 * screen, and a record that does not outlive the panel leaves the method
+	 * changed with nothing left to change it back.
+	 */
+	const {
+		get: getAutoMethod,
+		set: setAutoMethod,
+		retain: retainAutoMethods,
+	} = useAutoRecordSlot<AutoMethod>(memoryKey);
+
+	// What bounds these three is stated with the row memory below, which the
+	// same sweep bounds (issue #1271): one rule over every per-builder map the
+	// provider holds, rather than one rule each.
 
 	const { data: collections = [] } = useCollectionsQuery();
 
@@ -362,17 +412,12 @@ export default function RequestBuilderProvider({
 	const { maxRows: dataFileMaxRows } = useDataFileLimits();
 	const sendWithRow = useSendWithRow(dataColumns, dataFileMaxRows);
 	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
-	/*
-	 * An unsaved request has no id and cannot be switched away from and back to
-	 * as itself, so every one of them shares this key. They can never collide:
-	 * a request tab holds exactly one draft.
-	 */
-	const rowMemoryKey = request.id ?? "__unsaved__";
-	const lastRowIndex = rowIndexByRequest[rowMemoryKey] ?? null;
+	// Filed under the same identity as the records above, for the same reason.
+	const lastRowIndex = rowIndexByRequest[memoryKey] ?? null;
 	const rememberRowIndex = useCallback(
 		(index: number) =>
-			setRowIndexByRequest((previous) => ({ ...previous, [rowMemoryKey]: index })),
-		[rowMemoryKey]
+			setRowIndexByRequest((previous) => ({ ...previous, [memoryKey]: index })),
+		[memoryKey]
 	);
 	/*
 	 * A Send that carries no row leaves the request bound to none (issue #1062).
@@ -389,12 +434,57 @@ export default function RequestBuilderProvider({
 	const forgetRowIndex = useCallback(
 		() =>
 			setRowIndexByRequest((previous) => {
-				if (!(rowMemoryKey in previous)) return previous;
-				const { [rowMemoryKey]: _forgotten, ...rest } = previous;
+				if (!(memoryKey in previous)) return previous;
+				const { [memoryKey]: _forgotten, ...rest } = previous;
 				return rest;
 			}),
-		[rowMemoryKey]
+		[memoryKey]
 	);
+	const retainRowIndexes = useCallback(
+		(live: ReadonlySet<string>) =>
+			setRowIndexByRequest((previous) => retainKeys(previous, live)),
+		[]
+	);
+
+	/*
+	 * What bounds every per-builder map above: the open tabs (issues #1269,
+	 * #1271, #1272). An entry - a record, or a picked row index - is only ever
+	 * read by the builder it is filed under, so once that builder has no tab it
+	 * can never be read again, and a per-builder store that nothing prunes is
+	 * how a map becomes a leak. `MAX_OPEN_TABS` caps the tab strip, so this caps
+	 * the maps.
+	 *
+	 * Subscribed to rather than selected, like the reveal command above: a
+	 * provider that re-rendered on every tab focus would pay for it on the
+	 * request the user is actually working in. The three slots prune a ref, so
+	 * they cannot re-render at all; the row memory is state - `lastRowIndex` is
+	 * read during render - so `retainKeys` returns the map it was given when it
+	 * drops nothing, and React bails out.
+	 *
+	 * A run tab is swept like a request tab, because the History copy it holds
+	 * now files under its run id (issue #1272) and that id names a tab like any
+	 * other. Run ids and request ids come from different tables and cannot
+	 * collide; a run tab holding no builder - a load test, a scenario - only
+	 * ever keeps a key nothing wrote.
+	 *
+	 * The id-less key survives the sweep: it names no tab, and a builder that
+	 * declares no identity of its own is the one whose memory nothing else
+	 * could keep.
+	 */
+	useEffect(() => {
+		const retainOpen = (tabs: readonly Tab[]) => {
+			const live = new Set<string>([UNSAVED_AUTO_KEY]);
+			for (const tab of tabs) {
+				if (tab.entityId === null) continue;
+				if (tab.type === "request" || tab.type === "run") live.add(tab.entityId);
+			}
+			retainAutoContentTypes(live);
+			retainAutoAccepts(live);
+			retainAutoMethods(live);
+			retainRowIndexes(live);
+		};
+		return useTabsStore.subscribe((s) => retainOpen(s.openTabs));
+	}, [retainAutoContentTypes, retainAutoAccepts, retainAutoMethods, retainRowIndexes]);
 
 	/**
 	 * The row the preview resolves against - the picked one, once the file it
@@ -936,6 +1026,8 @@ export default function RequestBuilderProvider({
 			setAutoContentType,
 			getAutoAccept,
 			setAutoAccept,
+			getAutoMethod,
+			setAutoMethod,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -980,6 +1072,8 @@ export default function RequestBuilderProvider({
 			setAutoContentType,
 			getAutoAccept,
 			setAutoAccept,
+			getAutoMethod,
+			setAutoMethod,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -1013,7 +1107,14 @@ export default function RequestBuilderProvider({
 
 	return (
 		<RequestBuilderContext.Provider value={contextValue}>
-			{children}
+			{/*
+			 * Inside the context, not around it: the `{{token}}` popover the code
+			 * editors open is the same one the single-line fields open, and it
+			 * needs this provider's `updateVariable` and `writableScopes` to edit
+			 * or create anything (issue #1220). Every Monaco editor that
+			 * interpolates variables is somewhere under here.
+			 */}
+			<EditorVariableTokensProvider>{children}</EditorVariableTokensProvider>
 		</RequestBuilderContext.Provider>
 	);
 }

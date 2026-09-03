@@ -58,6 +58,8 @@ import {
 	resolveTemplateWithRow,
 	type DataRowCells,
 } from "@/lib/variable-resolution";
+// The single-scope read's own rule, shared with the chip that explains it.
+import { scopeAnswer } from "@/lib/referenced-variables";
 import type { DataFileRow } from "@/services/data-files";
 
 interface UseVariableResolverOptions {
@@ -87,6 +89,15 @@ interface UseVariableResolverReturn {
 	getVariable: (name: string) => ResolvedVariable | null;
 	getAllVariables: () => Record<string, ResolvedVariable>;
 	/**
+	 * What one scope answers on its own: the names it defines through enabled
+	 * rows, valued as `pm.<scope>.get` would read them - independent of which
+	 * scope wins the whole ladder (issue #1302).
+	 *
+	 * Display-only, like `getVariableOrigins`. Execution reaches a single scope
+	 * through the engine, which walks that scope's own chain for the same reason.
+	 */
+	getScopeVariables: (scope: VariableScope) => Record<string, ResolvedVariable>;
+	/**
 	 * Every definition of a name, lowest precedence first, including the disabled
 	 * ones that never resolve. Empty array for a name nothing defines.
 	 *
@@ -94,6 +105,25 @@ interface UseVariableResolverReturn {
 	 * `VariableOrigin` for why the losers are worth keeping.
 	 */
 	getVariableOrigins: (name: string) => VariableOrigin[];
+}
+
+/** The writable scopes, lowest precedence first. */
+const VARIABLE_SCOPES: readonly VariableScope[] = ["global", "collection", "environment"];
+
+/**
+ * One definition as the value a reader gets - written once because the ladder's
+ * winner and a single scope's own answer are the same shape and must stay so.
+ */
+function resolvedFrom(origin: ScopeVariableOrigin): ResolvedVariable {
+	return {
+		value: origin.value,
+		scope: origin.scope,
+		secret: origin.secret,
+		sourceId: origin.sourceId,
+		sourceName: origin.sourceName,
+		type: origin.type,
+		typedValue: castByType(origin.value, origin.type),
+	};
 }
 
 /**
@@ -214,15 +244,38 @@ export function useVariableResolver(
 			// table) depends on such a name being absent rather than
 			// present-and-empty.
 			if (!won) continue;
-			result[name] = {
-				value: won.value,
-				scope: won.scope,
-				secret: won.secret,
-				sourceId: won.sourceId,
-				sourceName: won.sourceName,
-				type: won.type,
-				typedValue: castByType(won.value, won.type),
-			};
+			result[name] = resolvedFrom(won);
+		}
+		return result;
+	}, [originsByName]);
+
+	/**
+	 * What each scope answers **on its own** - the names it defines through
+	 * enabled rows, valued as its own accessor would read them (issue #1302).
+	 *
+	 * A different question from `variableMap`, and the difference is the point:
+	 * `pm.collectionVariables.get` reads the collection chain and answers from it
+	 * whether or not the environment also defines the name, so a list built by
+	 * filtering the ladder's winners hides a collection's own `shop_domain` for
+	 * no reason the caller can see. Same origins, same "last enabled wins" rule
+	 * (`scopeAnswer`, which `describeScopedRead` reads too), one rung of the
+	 * ladder instead of all of them.
+	 *
+	 * A name whose definitions in a scope are all disabled is absent here, for
+	 * the reason it is absent from `variableMap`: `get` reads enabled rows only,
+	 * so present-and-empty would offer a name the call cannot answer.
+	 */
+	const scopeVariableMaps = useMemo(() => {
+		const result: Record<VariableScope, Record<string, ResolvedVariable>> = {
+			global: {},
+			collection: {},
+			environment: {},
+		};
+		for (const [name, origins] of Object.entries(originsByName)) {
+			for (const scope of VARIABLE_SCOPES) {
+				const own = scopeAnswer(origins, scope);
+				if (own) result[scope][name] = resolvedFrom(own);
+			}
 		}
 		return result;
 	}, [originsByName]);
@@ -235,6 +288,13 @@ export function useVariableResolver(
 	const getAllVariables = useCallback(
 		(): Record<string, ResolvedVariable> => ({ ...variableMap }),
 		[variableMap]
+	);
+
+	const getScopeVariables = useCallback(
+		(scope: VariableScope): Record<string, ResolvedVariable> => ({
+			...scopeVariableMaps[scope],
+		}),
+		[scopeVariableMaps]
 	);
 
 	/**
@@ -343,6 +403,7 @@ export function useVariableResolver(
 		resolveObject,
 		getVariable,
 		getAllVariables,
+		getScopeVariables,
 		getVariableOrigins,
 	};
 }

@@ -261,5 +261,51 @@ TEST (UrlPartsTest, JoinHostAndJoinPathAreEmptyForEmptyInput) {
     EXPECT_EQ (join_path ({}), "");
 }
 
+// ---------------------------------------------------------------------------
+// Appending a query to a URL that keeps its own bytes (issue #1228).
+// ---------------------------------------------------------------------------
+
+TEST (UrlWithQueryTest, AddsTheFirstQueryStringWithAQuestionMark) {
+    EXPECT_EQ (url_with_query ("https://example.com/graphql", "query=%7Ba%7D"),
+    "https://example.com/graphql?query=%7Ba%7D");
+}
+
+// The URL's own parameters are kept: an api key in the query is how several of
+// these endpoints are reached at all, and composing over it would drop it.
+TEST (UrlWithQueryTest, MergesWithAQueryTheUrlAlreadyHas) {
+    EXPECT_EQ (url_with_query ("https://example.com/graphql?apikey=k", "query=%7Ba%7D"),
+    "https://example.com/graphql?apikey=k&query=%7Ba%7D");
+}
+
+// A URL left with a trailing separator is still one query string, not one with
+// an empty parameter wedged into it.
+TEST (UrlWithQueryTest, DoesNotDoubleASeparatorTheUrlEndsWith) {
+    EXPECT_EQ (url_with_query ("https://example.com/g?", "q=1"), "https://example.com/g?q=1");
+    EXPECT_EQ (url_with_query ("https://example.com/g?a=1&", "q=1"),
+    "https://example.com/g?a=1&q=1");
+}
+
+// The fragment is not sent, so everything appended after one would reach no
+// server at all. Mutation check: drop the split and this reads
+// `...#frag?q=1`, which is a fragment named "frag?q=1".
+TEST (UrlWithQueryTest, WritesTheParametersBeforeAFragment) {
+    EXPECT_EQ (url_with_query ("https://example.com/g#frag", "q=1"),
+    "https://example.com/g?q=1#frag");
+    EXPECT_EQ (url_with_query ("https://example.com/g?a=1#frag", "q=1"),
+    "https://example.com/g?a=1&q=1#frag");
+}
+
+TEST (UrlWithQueryTest, NothingToAppendLeavesTheUrlAlone) {
+    EXPECT_EQ (url_with_query ("https://example.com/g", ""), "https://example.com/g");
+}
+
+// The escaper the query builders share. Everything outside the unreserved set
+// goes, which is what makes a document safe to carry in a parameter.
+TEST (PercentEncodeTest, EscapesEverythingOutsideTheUnreservedSet) {
+    EXPECT_EQ (percent_encode ("{ me { id } }"), "%7B%20me%20%7B%20id%20%7D%20%7D");
+    EXPECT_EQ (percent_encode ("a-b_c.d~e"), "a-b_c.d~e");
+    EXPECT_EQ (percent_encode (""), "");
+}
+
 } // namespace
 } // namespace vayu::http

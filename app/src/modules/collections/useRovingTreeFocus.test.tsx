@@ -2,8 +2,10 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { useRef } from "react";
+import { Copy } from "lucide-react";
+import { RowActionsMenu } from "@/components/shared/RowActionsMenu";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
 import { TIMING } from "@/config/timing";
 
@@ -14,8 +16,10 @@ const menu = vi.fn();
 const rename = vi.fn();
 
 /**
- * Mirrors the real shape: collections are treeitems with aria-expanded whose
- * children are nested inside them; requests are leaf treeitems. Collapsed
+ * Mirrors the real shape: collections are treeitems whose children are rendered
+ * *beside* them rather than within, requests are leaf treeitems, and every row
+ * announces its depth with `aria-level` - which is where the hook reads
+ * parentage from, so a fixture without it would be a tree of roots. Collapsed
  * children are not rendered, exactly as CollectionItem does.
  */
 function Tree({ expanded }: { expanded: boolean }) {
@@ -23,11 +27,14 @@ function Tree({ expanded }: { expanded: boolean }) {
 	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
 	return (
 		<div ref={ref}>
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
 			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
 				<div>
 					<div
 						role="treeitem"
+						aria-selected={false}
 						tabIndex={-1}
+						aria-level={1}
 						aria-expanded={expanded}
 						data-name="demo"
 						data-tree-label="Demo"
@@ -38,9 +45,14 @@ function Tree({ expanded }: { expanded: boolean }) {
 						<button tabIndex={-1} data-tree-activate onClick={activate}>
 							demo
 						</button>
-						<button tabIndex={-1} data-tree-menu onClick={menu}>
-							menu
-						</button>
+						{/* The real menu, not a stand-in. A plain button answered the
+						    `.click()` this hook dispatches, so a stub here certified
+						    a path the Radix-backed component did not have (#1212). */}
+						<RowActionsMenu
+							label="Row menu"
+							tabIndex={-1}
+							actions={[{ label: "Menu action", icon: Copy, onSelect: menu }]}
+						/>
 						<button tabIndex={-1} data-tree-rename onClick={rename}>
 							rename
 						</button>
@@ -49,7 +61,9 @@ function Tree({ expanded }: { expanded: boolean }) {
 						<div>
 							<div
 								role="treeitem"
+								aria-selected={false}
 								tabIndex={-1}
+								aria-level={2}
 								data-name="req-1"
 								data-tree-label="Ping users"
 							>
@@ -65,7 +79,9 @@ function Tree({ expanded }: { expanded: boolean }) {
 							</div>
 							<div
 								role="treeitem"
+								aria-selected={false}
 								tabIndex={-1}
+								aria-level={2}
 								data-name="req-2"
 								data-tree-label="Post orders"
 							/>
@@ -74,7 +90,9 @@ function Tree({ expanded }: { expanded: boolean }) {
 				</div>
 				<div
 					role="treeitem"
+					aria-selected={false}
 					tabIndex={-1}
+					aria-level={1}
 					aria-expanded={false}
 					data-name="test"
 					data-tree-label="Payments"
@@ -98,11 +116,14 @@ function EmptyFolderTree() {
 	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
 	return (
 		<div ref={ref}>
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
 			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
 				<div>
 					<div
 						role="treeitem"
+						aria-selected={false}
 						tabIndex={-1}
+						aria-level={1}
 						aria-expanded="true"
 						data-name="empty"
 						data-tree-label="Empty"
@@ -113,7 +134,74 @@ function EmptyFolderTree() {
 					</div>
 					<div>Empty folder</div>
 				</div>
-				<div role="treeitem" tabIndex={-1} data-name="after" data-tree-label="After" />
+				<div
+					role="treeitem"
+					aria-selected={false}
+					tabIndex={-1}
+					aria-level={1}
+					data-name="after"
+					data-tree-label="After"
+				/>
+			</div>
+		</div>
+	);
+}
+
+/** Which folders a `*` press opened, in the order it opened them. */
+const toggled: string[] = [];
+
+/** A row. A folder passes `expanded`; a leaf leaves it off and renders no toggle. */
+function Row({ name, level, expanded }: { name: string; level: number; expanded?: boolean }) {
+	return (
+		<div
+			role="treeitem"
+			aria-selected={false}
+			tabIndex={-1}
+			aria-level={level}
+			aria-expanded={expanded}
+			data-name={name}
+			data-tree-label={name}
+		>
+			{expanded !== undefined && (
+				<button tabIndex={-1} data-tree-toggle onClick={() => toggled.push(name)}>
+					toggle
+				</button>
+			)}
+		</div>
+	);
+}
+
+/**
+ * Three rows in one group, the second of them a folder holding three of its own.
+ * The shape `Tree` cannot express: every one of its groups is two rows deep and
+ * one level down, so the walk that answered with a group's *first* row rather
+ * than its owner was right often enough to pass every test above (#1237).
+ */
+function DeepTree() {
+	const ref = useRef<HTMLDivElement>(null);
+	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
+	return (
+		<div ref={ref}>
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
+			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
+				<div>
+					<Row name="root-a" level={1} expanded />
+					<div role="group">
+						<div>
+							<Row name="child-1" level={2} expanded={false} />
+						</div>
+						<div>
+							<Row name="child-2" level={2} expanded />
+							<div role="group">
+								<Row name="grand-1" level={3} />
+								<Row name="grand-2" level={3} />
+								<Row name="grand-3" level={3} />
+							</div>
+						</div>
+						<Row name="child-3" level={2} expanded={false} />
+					</div>
+				</div>
+				<Row name="root-b" level={1} expanded={false} />
 			</div>
 		</div>
 	);
@@ -131,6 +219,7 @@ describe("useRovingTreeFocus", () => {
 		del.mockClear();
 		menu.mockClear();
 		rename.mockClear();
+		toggled.length = 0;
 	});
 
 	it("makes the tree a single tab stop", () => {
@@ -203,6 +292,64 @@ describe("useRovingTreeFocus", () => {
 		expect(document.activeElement).toBe(byName("test"));
 	});
 
+	// The rows a group's first-row special case used to hide: ArrowLeft from the
+	// second or third row of a list moved to the top of that list rather than out
+	// of it, and self-corrected on the next press, so it read as hesitation.
+	describe("parentage at depth", () => {
+		it("leaves a group from any row in it, not just the first", () => {
+			render(<DeepTree />);
+
+			byName("grand-1").focus();
+			key("ArrowLeft");
+			expect(document.activeElement).toBe(byName("child-2"));
+
+			byName("grand-2").focus();
+			key("ArrowLeft");
+			expect(document.activeElement).toBe(byName("child-2"));
+
+			// The third row too, so a fix that special-cases the second does not pass.
+			byName("grand-3").focus();
+			key("ArrowLeft");
+			expect(document.activeElement).toBe(byName("child-2"));
+		});
+
+		it("takes a collapsed folder out to its own parent, one level at a time", () => {
+			render(<DeepTree />);
+
+			// child-3 is collapsed, so Left moves rather than collapses - and it is
+			// the third row of its group, the case the walk got wrong.
+			byName("child-3").focus();
+			key("ArrowLeft");
+			expect(document.activeElement).toBe(byName("root-a"));
+
+			key("ArrowLeft"); // root-a is expanded: this collapses it instead
+			expect(toggled).toEqual(["root-a"]);
+		});
+
+		it("still steps into the first child with ArrowRight, at depth", () => {
+			render(<DeepTree />);
+
+			byName("root-a").focus();
+			key("ArrowRight");
+			expect(document.activeElement).toBe(byName("child-1"));
+
+			byName("child-2").focus();
+			key("ArrowRight");
+			expect(document.activeElement).toBe(byName("grand-1"));
+		});
+
+		it("expands the focused row's own siblings with *, from any row in the group", () => {
+			render(<DeepTree />);
+
+			byName("child-3").focus();
+			key("*");
+
+			// Both collapsed folders under root-a, and neither the already-open
+			// child-2 nor root-b, which is a root rather than a sibling.
+			expect(toggled).toEqual(["child-1", "child-3"]);
+		});
+	});
+
 	// Focus moves without opening anything - selection is a separate concept.
 	it("does not activate a row merely by moving focus", () => {
 		render(<Tree expanded />);
@@ -222,7 +369,7 @@ describe("useRovingTreeFocus", () => {
 
 	// C makes every row control tabIndex=-1, so these keys are the replacement
 	// path - without them delete and row actions become mouse-only.
-	it("reaches row actions with Delete and Shift+F10 / ContextMenu", () => {
+	it("reaches row actions with Delete and Shift+F10 / ContextMenu", async () => {
 		render(<Tree expanded />);
 		byName("req-1").focus();
 		key("Delete");
@@ -230,9 +377,15 @@ describe("useRovingTreeFocus", () => {
 
 		byName("demo").focus();
 		key("F10", { shiftKey: true });
-		expect(menu).toHaveBeenCalledTimes(1);
+		expect(await screen.findByRole("menu")).toBeInTheDocument();
+
+		// Close it and press the other key: the menu takes focus while open, so
+		// the row is not listening until it has it back.
+		fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+		await waitFor(() => expect(document.activeElement).toBe(byName("demo")));
+
 		key("ContextMenu");
-		expect(menu).toHaveBeenCalledTimes(2);
+		expect(await screen.findByRole("menu")).toBeInTheDocument();
 	});
 
 	/*
@@ -255,14 +408,18 @@ describe("useRovingTreeFocus", () => {
 		expect(del).toHaveBeenCalledTimes(2);
 	});
 
-	it("opens the row menu on Shift+Enter, the Mac-reachable path", () => {
+	it("opens the row menu on Shift+Enter, the Mac-reachable path", async () => {
 		render(<Tree expanded />);
 		byName("demo").focus();
 
 		key("Enter", { shiftKey: true });
-		expect(menu).toHaveBeenCalledTimes(1);
+		expect(await screen.findByRole("menu")).toBeInTheDocument();
 		// Shift+Enter is the menu, not a second way to open the row.
 		expect(activate).not.toHaveBeenCalled();
+
+		// End to end: the action the menu offers actually runs from here.
+		fireEvent.click(screen.getByRole("menuitem", { name: "Menu action" }));
+		await waitFor(() => expect(menu).toHaveBeenCalledTimes(1));
 	});
 
 	it("still activates on plain Enter and on Space", () => {

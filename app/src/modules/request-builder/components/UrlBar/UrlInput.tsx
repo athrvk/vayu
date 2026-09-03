@@ -18,6 +18,7 @@ import { useToastStore } from "@/stores";
 import { droppedFlagsNotice } from "../../utils/paste-disclosure";
 import { useRequestBuilderContext } from "../../context";
 import VariableInput from "@/components/shared/VariableInput";
+import { REQUEST_URL_INPUT_ID } from "@/constants/dom-ids";
 import { useVariableSupport } from "../../hooks/useVariableSupport";
 import { parseQueryParams } from "../../utils/url";
 
@@ -78,6 +79,8 @@ export default function UrlInput({ className }: UrlInputProps) {
 			// make a poor spoken name, and it is withheld entirely once the URL
 			// contains a variable.
 			aria-label="Request URL"
+			// So ⌘L can find it from the Shell, which is outside this subtree.
+			id={REQUEST_URL_INPUT_ID}
 			variables={variables}
 			className={className ?? "w-full"}
 		/>

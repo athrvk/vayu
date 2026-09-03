@@ -1126,6 +1126,17 @@ export interface RunResultTrace {
 		 * than defaulted to `false` at the type level.
 		 */
 		httpVersionDowngraded?: boolean;
+		/**
+		 * The live send this trace records stopped reading at
+		 * `maxDesignResponseBodyBytes` - see {@link HttpResponse.bodyCapped}
+		 * (issue #1157). `build_result_trace` writes the key **only when the
+		 * body was cut**, so absent is "not capped" here, unlike on the live
+		 * response where it is always present.
+		 *
+		 * Distinct from `bodyTruncated` above: that one is storage shortening a
+		 * body the user already saw whole, and a re-send recovers from it.
+		 */
+		bodyCapped?: boolean;
 	};
 	/**
 	 * Present on a **streaming** design run's trace only (issue #573), which is
@@ -1568,6 +1579,22 @@ export interface HttpResponse {
 	 * an absent key would be an engine too old to say, not "no certificate".
 	 */
 	clientCertificate?: string;
+	/**
+	 * The engine stopped reading this body at `maxDesignResponseBodyBytes`
+	 * (Settings → Limits, default 32MB), so `body` / `bodyRaw` / `bodySize`
+	 * describe the prefix that was read rather than what the server sent
+	 * (issue #1157). Status and headers are the server's own - they arrive
+	 * first - so this is a successful response carrying a flag.
+	 *
+	 * Always present on a live body, like `clientCertificate` above and for the
+	 * same reason: an absent key is an engine too old to say, not "not capped".
+	 *
+	 * Not the same fact as the stored trace's `bodyTruncated`, which is
+	 * `maxTraceBodyBytes` shortening a body for storage *after* the whole of it
+	 * was read - a re-send recovers from that one, and re-sending under a
+	 * capped read reproduces the cap.
+	 */
+	bodyCapped?: boolean;
 }
 
 export interface TestResult {
@@ -2046,6 +2073,18 @@ export interface RunReport {
 		slowTracesDropped: number;
 		/** Responses displaced or dropped before test validation ran. */
 		responseSamplesDropped: number;
+		/**
+		 * Whether the run's response-sample **byte** budget
+		 * (`max_response_sample_bytes`) ended a sample. The count above cannot
+		 * say it: the store is bounded twice and both bounds report through it,
+		 * but only this one costs the tested set its uniformity - the count cap
+		 * displaces an incumbent, while a spent byte budget stops admitting, so
+		 * the run is graded on the part of it whose bodies fit.
+		 *
+		 * `undefined` is a run recorded before the marker existed, which is not
+		 * the same claim as `false` - see `SampleRetentionNote`.
+		 */
+		responseSampleBudgetSpent?: boolean;
 		/**
 		 * Per-status exemplars refused because the exemplar store was full
 		 * (`max_exemplar_results`). Only a target answering with more distinct

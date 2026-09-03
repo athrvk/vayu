@@ -31,7 +31,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import type { Collection } from "@/types";
 
@@ -57,12 +57,21 @@ const collection = {
 	updatedAt: "2026-01-02T00:00:00Z",
 } as unknown as Collection;
 
-function renderTab(overrides: Partial<Collection> = {}) {
-	return render(
+/*
+ * The description renders through `MarkdownView`, whose pipeline is lazy since
+ * #1146. The chunk is loaded here so only React's own one-tick retry is left,
+ * and the `act` flush commits it before any case reads the DOM.
+ */
+await import("@/components/ui/markdown-renderer");
+
+async function renderTab(overrides: Partial<Collection> = {}) {
+	const utils = render(
 		<TooltipProvider>
 			<InfoTab collection={{ ...collection, ...overrides }} requestCount={3} />
 		</TooltipProvider>
 	);
+	await act(async () => {});
+	return utils;
 }
 
 beforeEach(() => {
@@ -71,46 +80,48 @@ beforeEach(() => {
 });
 
 describe("the collection description", () => {
-	it("renders its markdown instead of printing the syntax", () => {
-		const { container } = renderTab();
+	it("renders its markdown instead of printing the syntax", async () => {
+		const { container } = await renderTab();
 		expect(container.querySelector("strong")?.textContent).toBe("settled");
 		expect(container.querySelector("code")?.textContent).toBe("10 req/s");
 		expect(container.textContent).not.toContain("**settled**");
 	});
 
-	it("no longer needs to advertise that markdown works", () => {
+	it("no longer needs to advertise that markdown works", async () => {
 		// The behaviour says it now; the hint beside a plain textarea did not.
-		renderTab();
+		await renderTab();
 		expect(screen.queryByText("Markdown supported")).not.toBeInTheDocument();
 	});
 
-	it("shows the source when the rendered block is clicked", () => {
-		const { container } = renderTab();
+	it("shows the source when the rendered block is clicked", async () => {
+		const { container } = await renderTab();
 		const block = container.querySelector('[role="button"]') as HTMLElement;
 		fireEvent.click(block);
 		expect(screen.getByLabelText("Collection description")).toBeInTheDocument();
 	});
 
-	it("renders inside a tooltip provider, which the source pin requires", () => {
+	it("renders inside a tooltip provider, which the source pin requires", async () => {
 		// Radix throws "`Tooltip` must be used within `TooltipProvider`" without
-		// one. Rendering at all is the assertion.
-		expect(() => renderTab()).not.toThrow();
+		// one. Rendering at all is the assertion - `resolves`, not `not.toThrow`,
+		// because the helper is async and a throw on mount reaches us as a
+		// rejection, which `not.toThrow` would pass straight over.
+		await expect(renderTab()).resolves.toBeTruthy();
 		expect(screen.getByLabelText(/show markdown source/i)).toBeInTheDocument();
 	});
 });
 
 describe("a failed save keeps the source open", () => {
-	it("renders normally while the save is fine", () => {
-		renderTab();
+	it("renders normally while the save is fine", async () => {
+		await renderTab();
 		expect(screen.queryByLabelText("Collection description")).not.toBeInTheDocument();
 	});
 
-	it("holds the raw text on screen when the mutation errored", () => {
+	it("holds the raw text on screen when the mutation errored", async () => {
 		// Otherwise blurring renders what is *stored*, hiding the edit that still
 		// needs attention behind a tidy view of the old value - directly above
 		// the SaveFailed notice telling you to try again.
 		mutation.isError = true;
-		renderTab();
+		await renderTab();
 		expect(screen.getByLabelText("Collection description")).toBeInTheDocument();
 	});
 });

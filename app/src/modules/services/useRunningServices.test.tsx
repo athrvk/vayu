@@ -111,9 +111,9 @@ beforeEach(() => {
 	listInboxes.mockReset().mockResolvedValue([]);
 	listMockIssuers.mockReset().mockResolvedValue([]);
 	listMockServers.mockReset().mockResolvedValue([]);
-	// The count is gated on this, and the store's own default is `false` - a
+	// The count is gated on this, and the store's own default is `starting` - a
 	// list that answered at all came from an engine that was up.
-	useEngineStore.setState({ isEngineConnected: true, engineError: null });
+	useEngineStore.setState({ engineStatus: "connected", engineError: null });
 });
 
 describe("useRunningServiceCount", () => {
@@ -164,7 +164,25 @@ describe("useRunningServiceCount", () => {
 		// The cache is warm first, so this proves the gate and not a slow query.
 		await waitFor(() => expect(result.current).toBe(1));
 
-		useEngineStore.setState({ isEngineConnected: false });
+		useEngineStore.setState({ engineStatus: "unreachable" });
+
+		await waitFor(() => expect(result.current).toBe(0));
+	});
+
+	/*
+	 * The third state gates the same way as the second, which is the only thing
+	 * about it that is not new: a launch whose engine has not answered yet is
+	 * running nothing either, and a cache warmed by a previous session would
+	 * otherwise claim it is. The gate reads `!== "connected"`, not `===
+	 * "unreachable"`, and this is what says so.
+	 */
+	it("reports nothing while the engine is still starting", async () => {
+		listMockServers.mockResolvedValue([mockServer()]);
+
+		const { result } = countHook();
+		await waitFor(() => expect(result.current).toBe(1));
+
+		useEngineStore.setState({ engineStatus: "starting" });
 
 		await waitFor(() => expect(result.current).toBe(0));
 	});

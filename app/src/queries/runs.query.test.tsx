@@ -24,8 +24,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { InfiniteData } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
 	useLastDesignRunQuery,
@@ -34,6 +35,7 @@ import {
 	useStartScenarioRunMutation,
 	RECENT_DESIGN_RUN_LIMIT,
 	useRunsQuery,
+	usePrefetchRuns,
 	flattenRunPages,
 	runsPollInterval,
 	runDetailOptions,
@@ -97,6 +99,15 @@ beforeEach(() => {
 function runRow(id: string) {
 	return { id, type: "load", status: "completed", startTime: 1, endTime: 2 } as const;
 }
+
+/**
+ * The cadence an unpaged runs list polls on. Restated here rather than derived,
+ * because `runsPollInterval` also returns `false` and a derivation that
+ * collapsed to `0` would make the timer assertions below pass vacuously - the
+ * `runsPollInterval` case at the bottom of this file is what holds the source
+ * to this number.
+ */
+const UNPAGED_POLL_MS = 5000;
 
 describe("useLastDesignRunQuery", () => {
 	it("issues one filtered single-run call, not a full-list scan", async () => {
@@ -306,6 +317,82 @@ describe("useRunsQuery", () => {
 		renderHook(() => useRunsQuery(undefined, false), { wrapper: wrapper(makeClient()) });
 		await waitFor(() => expect(listRuns).toHaveBeenCalled());
 		expect(listRuns).toHaveBeenCalledWith(expect.objectContaining({ baseline: undefined }));
+	});
+});
+
+/**
+ * The App root warms this cache and must not go on polling it (#1150). The
+ * three assertions below are the whole contract: the warm entry is the one the
+ * visible surfaces read, warming installs no timer, and a surface that *is*
+ * mounted still polls on the documented cadence.
+ */
+describe("usePrefetchRuns", () => {
+	it("warms the exact entry a mounted runs surface reads, in InfiniteData shape", async () => {
+		listRuns.mockResolvedValue(page([runRow("warm")]));
+		const client = makeClient();
+
+		renderHook(() => usePrefetchRuns(), { wrapper: wrapper(client) });
+		await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(1));
+		expect(listRuns).toHaveBeenCalledWith({
+			q: undefined,
+			baseline: undefined,
+			limit: 50,
+			offset: 0,
+		});
+
+		// Paged shape, not a bare page: `prefetchQuery` would store the
+		// `RunListResponse` itself here and every reader walks `.pages`.
+		const cached = client.getQueryData<InfiniteData<RunListResponse>>(
+			queryKeys.runs.list({ q: undefined, baseline: undefined })
+		);
+		expect(cached?.pages).toHaveLength(1);
+		expect(flattenRunPages(cached).map((r) => r.id)).toEqual(["warm"]);
+
+		// ...and the hook finds it already there, which is what keeps Welcome
+		// showing runs on first paint now that the root no longer observes.
+		const { result } = renderHook(() => useRunsQuery(), { wrapper: wrapper(client) });
+		expect(result.current.isLoading).toBe(false);
+		expect(flattenRunPages(result.current.data).map((r) => r.id)).toEqual(["warm"]);
+	});
+
+	it("installs no poll of its own - one request, then silence", async () => {
+		vi.useFakeTimers();
+		try {
+			listRuns.mockResolvedValue(page([runRow("warm")]));
+			renderHook(() => usePrefetchRuns(), { wrapper: wrapper(makeClient()) });
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(0);
+			});
+			expect(listRuns).toHaveBeenCalledTimes(1);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(UNPAGED_POLL_MS * 4);
+			});
+			expect(listRuns).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("leaves the cadence intact for a surface that does observe the list", async () => {
+		vi.useFakeTimers();
+		try {
+			listRuns.mockResolvedValue(page([runRow("warm")]));
+			renderHook(() => useRunsQuery(), { wrapper: wrapper(makeClient()) });
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(0);
+			});
+			expect(listRuns).toHaveBeenCalledTimes(1);
+
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(UNPAGED_POLL_MS + 100);
+			});
+			expect(listRuns.mock.calls.length).toBeGreaterThan(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 

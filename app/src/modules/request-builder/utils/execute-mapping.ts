@@ -26,6 +26,7 @@
 import type { SanityResult, ScriptPart } from "@/types";
 import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
+import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
 
 /** The body shape `POST /request` and `POST /run` accept. */
 export interface ExecBody {
@@ -127,6 +128,30 @@ export function execIdentity(request: RequestState): { requestName?: string } {
 	return request.name ? { requestName: request.name } : {};
 }
 
+/**
+ * The string the pane's Pretty view reads, given the raw body beside it.
+ *
+ * The first branch is the only one that builds a *second* full copy of the
+ * payload, and above `LARGE_BODY_BYTES` it builds one nothing renders:
+ * `ResponseBody` stops calling `formatBody` at that size and shows a raw prefix
+ * instead. So over the threshold this hands back the raw string it already has
+ * - which is what the pane would display anyway - and a multi-megabyte response
+ * costs one indent pass on the send path rather than two.
+ *
+ * Two subtleties from the original expression, both load-bearing:
+ * `typeof null === "object"`, so null is excluded explicitly or a JSON `null`
+ * body stringifies as `"null"` in one branch and vanishes in the other; and a
+ * body that is `null`/`undefined` falls through to `bodyRaw`, not to `"null"`.
+ */
+function paneBody(body: unknown, bodyRaw: string): string {
+	if (typeof body === "object" && body !== null) {
+		if (bodyRaw.length > LARGE_BODY_BYTES) return bodyRaw;
+		return JSON.stringify(body, null, 2);
+	}
+	if (body !== null && body !== undefined) return String(body);
+	return bodyRaw || "";
+}
+
 /** Sniff the render mode from the response's content type. */
 function bodyTypeFromContentType(headers: Record<string, string> | undefined) {
 	const contentType = (headers?.["content-type"] || "").toLowerCase();
@@ -146,7 +171,8 @@ function bodyTypeFromContentType(headers: Record<string, string> | undefined) {
  *   the pane render `ClientErrorView` instead of an empty 200.
  * - **`typeof null === "object"`**, so the body checks test for null
  *   explicitly. Without that a JSON `null` body stringifies as `"null"` in one
- *   branch and vanishes in the other.
+ *   branch and vanishes in the other. Those checks live in `paneBody` above,
+ *   which also holds the large-body gate.
  *
  * `bodyRaw` is always carried through for the Raw view; `body` prefers the
  * parsed form and falls back to it.
@@ -170,12 +196,7 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 			? JSON.stringify(result.body)
 			: String(result.body || ""));
 
-	const body =
-		typeof result.body === "object" && result.body !== null
-			? JSON.stringify(result.body, null, 2)
-			: result.body !== null && result.body !== undefined
-				? String(result.body)
-				: bodyRaw || "";
+	const body = paneBody(result.body, bodyRaw);
 
 	return {
 		status: result.status !== undefined && result.status !== null ? result.status : 200,
@@ -191,6 +212,15 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		clientCertificate: result.clientCertificate || undefined,
 		body,
 		bodyRaw,
+		// The engine read only this much of it (issue #1157). Carried on both
+		// funnels - `responseFromRunResult` reads the same fact off the stored
+		// trace - because a restored response must say what the live one said.
+		//
+		// `false` becomes `undefined` for the same reason `clientCertificate`'s
+		// `""` does: the live body always carries the key while the stored trace
+		// writes it only when it happened, so without this the two funnels would
+		// disagree in type on every uncapped response.
+		bodyCapped: result.bodyCapped || undefined,
 		bodyType: bodyTypeFromContentType(result.headers),
 		// When it arrived, as opposed to how long it took. The status bar shows
 		// it as an age, which is the only thing distinguishing a fresh response

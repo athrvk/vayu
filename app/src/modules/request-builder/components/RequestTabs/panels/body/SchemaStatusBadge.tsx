@@ -9,11 +9,13 @@
  * What the GraphQL body says about the schema in one line, and the text tier the
  * body's other badges are built from.
  *
- * Its own module because two surfaces render it: the schema explorer's header,
- * which is where every schema affordance lives, and the Query pane's chip for
- * when the explorer is closed. A second copy in one of them would be a copy that
- * does not receive the other's fixes - and the two used to say the same thing in
- * different words from different panes, which is the split #455 was filed about.
+ * Its own module because it once had two renderers - the schema explorer's
+ * header and the Query pane's chip - and a second copy in one of them would be a
+ * copy that does not receive the other's fixes; the two used to say the same
+ * thing in different words from different panes, which is the split #455 was
+ * filed about. The badge now renders once, in the Query header's schema control,
+ * in the same place whether the explorer is open or shut (#1224). `BadgeText`,
+ * the tier under it, still has other callers in the body.
  *
  * The sentence itself lives in `lib/graphql/schema-status.ts`, pure and beside
  * the store it reads.
@@ -34,7 +36,10 @@ export function BadgeText({
 	children: React.ReactNode;
 }) {
 	return (
-		<span className={cn("flex items-center gap-1 text-[10px]", className)} title={title}>
+		<span
+			className={cn("flex items-center gap-1 text-[10px] font-semibold", className)}
+			title={title}
+		>
 			{children}
 		</span>
 	);

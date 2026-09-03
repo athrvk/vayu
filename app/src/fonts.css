@@ -1,0 +1,82 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/*
+ * The faces the app can render, bundled rather than fetched.
+ *
+ * These six families used to arrive through one `fonts.googleapis.com`
+ * stylesheet in the head of `index.html`. A stylesheet in the head is
+ * render-blocking, and the window is only shown on `ready-to-show` - first
+ * paint, with no fallback timer (`electron/main.ts`) - so the window's
+ * appearance waited on that round trip: a revalidation on any launch after a
+ * day away, and ~12.8s of blank window on a network that black-holes the
+ * request rather than refusing it. Bundling the faces removes the renderer's
+ * only startup network dependency and makes typography identical offline.
+ *
+ * Each `@import` is the `@fontsource` package's own stylesheet for one weight,
+ * so the `unicode-range`, `font-display: swap` and the woff2 files stay the
+ * package's business and a version bump carries its own corrections. The
+ * families keep their real names ("Inter", not "Inter Variable"), which is why
+ * every stack in `index.css`, `tailwind.config.js`, `constants/appearance.ts`
+ * and the uPlot themes reads exactly as it did.
+ *
+ * Import the `<weight>.css` files, never the `<subset>-<weight>.css` ones. The
+ * per-subset entry points declare their `@font-face` with no `unicode-range` at
+ * all, so nothing tells the browser which file holds which characters and every
+ * subset face for a rendered weight is read, whether or not a character needs
+ * it. Measured on the built app: with per-subset imports, painting the shell
+ * read four Space Grotesk files where the weight files read two - and with
+ * every subset bundled that multiplies by seven, on the first-paint path this
+ * whole change exists to shorten. What it does *not* do is break typography -
+ * Chromium falls back within the family per character, so the text looks right
+ * and only the profiler knows - which is what makes it easy to ship by
+ * accident. `constants/appearance.bundled-faces.test.ts` fails on a range-less
+ * import.
+ *
+ * The weights are the ones the old css2 URL asked for, so nothing about how the
+ * app renders changes: `font-mono font-bold` has always been
+ * browser-synthesised for JetBrains Mono, Fira Code and IBM Plex Mono - none of
+ * them was ever loaded at 700 - and it still is. Every subset each package
+ * ships is bundled, which is what Google served on demand; behind their
+ * `unicode-range` a file is still only read when a character needs it, so the
+ * subsets beyond latin cost installer bytes, not startup work.
+ *
+ * A face added here needs a reader: it is selectable only if
+ * `constants/appearance.ts` names it in a stack. The same test holds the two
+ * files together in both directions - a family the app can select but nothing
+ * bundles, and a family bundled that nothing can select.
+ */
+
+/* Space Grotesk - the UI default (`--font-sans`). */
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
+@import "@fontsource/space-grotesk/700.css";
+
+/* Inter - the alternate UI face. */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+
+/* JetBrains Mono - the code default (`--font-mono`), and a UI option. */
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource/jetbrains-mono/400-italic.css";
+
+/* Fira Code - a code option. */
+@import "@fontsource/fira-code/400.css";
+@import "@fontsource/fira-code/500.css";
+
+/* IBM Plex Mono - a code option. */
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+/* Space Mono - a code option, and the one mono face with a real bold. */
+@import "@fontsource/space-mono/400.css";
+@import "@fontsource/space-mono/700.css";

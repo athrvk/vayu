@@ -4,6 +4,16 @@ This directory contains feature-based modules organized by domain. Each module i
 
 ## Module Organization
 
+**A module's main surface is imported from its own file, not from a barrel, by
+anything that loads it lazily.** `Shell` mounts every surface but
+`RequestBuilder` through `React.lazy` (#1146), and a barrel is one module: while
+it imported `SettingsMain` from `@/modules/settings`, the Drawer's
+`SettingsCategoryTree` - alive on every tab - came from that same file and put
+the settings surface back in the startup chunk. The barrels below are still the
+right import for anything already inside a surface; the deep path is what a lazy
+boundary needs. The same reasoning is why `settings/main/app-panels.ts` holds no
+components: whatever the always-mounted chrome reads, it loads.
+
 ### Modules with Both Sidebar and Main Components
 
 Some modules have components displayed in both the sidebar and main content area. These are organized into subdirectories:
@@ -32,7 +42,8 @@ Some modules have components displayed in both the sidebar and main content area
 
 - **Location:** Both sidebar and main
 - **Sidebar:** `sidebar/VariablesCategoryTree.tsx` - Tree navigation for variable scopes
-- **Main:** `main/VariablesEditor.tsx` and related editors - Variable editing interface
+- **Main:** `main/VariablesMain.tsx` - Variable editing interface, exported as
+  `VariablesEditor`; the grid itself is `main/VariableTableEditor.tsx`
 - **Usage:**
 
     ```tsx

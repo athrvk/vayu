@@ -21,12 +21,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { indexCss as css } from "@/lib/css-tokens.testkit";
 import { COLOR_SCHEMES, DEFAULT_COLOR_SCHEME, isColorScheme } from "./color-schemes";
-
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "index.css"), "utf8");
 
 // Every token a scheme block is expected to set. `--primary-fill` is the one
 // that carries a white label, so it must be present even though it is the only
@@ -60,8 +56,10 @@ function block(selector: string, dark: boolean): string | null {
 
 describe("accent colour schemes", () => {
 	it("reads a stylesheet that is actually populated", () => {
-		// vitest stubs CSS imports to "" - this file is read from disk for that
-		// reason, and a guard that scans an empty string passes for free.
+		// vitest stubs CSS imports to "" - the testkit reads the stylesheet off
+		// disk for that reason, and a guard that scans an empty string passes for
+		// free. The floor stays here: the import says where the text came from,
+		// this says the scan found something.
 		expect(css.length).toBeGreaterThan(1000);
 		expect(css).toContain("data-color-scheme");
 	});

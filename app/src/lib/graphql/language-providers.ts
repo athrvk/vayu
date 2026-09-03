@@ -12,6 +12,7 @@
  */
 
 import type * as Monaco from "monaco-editor";
+import type { MonacoApi } from "../monaco-api";
 import {
 	CompletionItemKind,
 	getAutocompleteSuggestions,
@@ -40,7 +41,7 @@ const LSP_KIND_NAMES = new Map<number, string>(
 	Object.entries(CompletionItemKind).map(([name, value]) => [value as number, name])
 );
 
-export function toMonacoCompletionKind(monaco: typeof Monaco, lspKind: number | undefined): number {
+export function toMonacoCompletionKind(monaco: MonacoApi, lspKind: number | undefined): number {
 	const kinds = monaco.languages.CompletionItemKind as unknown as Record<string, number>;
 	const name = lspKind === undefined ? undefined : LSP_KIND_NAMES.get(lspKind);
 	// `Field` is what every suggestion used to get, so it stays the fallback: an
@@ -48,7 +49,7 @@ export function toMonacoCompletionKind(monaco: typeof Monaco, lspKind: number | 
 	return name !== undefined && name in kinds ? kinds[name] : kinds.Field;
 }
 
-export function registerGraphqlProviders(monaco: typeof Monaco): void {
+export function registerGraphqlProviders(monaco: MonacoApi): void {
 	const toSeverity = (s: "error" | "warning") =>
 		s === "warning" ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error;
 

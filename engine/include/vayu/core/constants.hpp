@@ -74,6 +74,17 @@ constexpr const char* EOL_CHARS = "\r\n";
 constexpr double BURST_MULTIPLIER = 2.0;
 /// Cost of a single token in the rate limiter
 constexpr double TOKEN_COST = 1.0;
+/// Largest response body a design-mode send - `POST /execute` and every step
+/// of a collection run - reads into memory (issue #1157). Deliberately the
+/// same figure as the load path's `event_loop::MAX_RESPONSE_BODY_BYTES` and
+/// deliberately a *separate* one: a load run holds a body per in-flight
+/// request and refuses one past the bound, while a design send holds one at a
+/// time and is being watched by someone who asked to see it - so this one
+/// keeps the prefix it read and says the body was cut, rather than answering
+/// with nothing. What it bounds is the renderer's exposure as much as the
+/// daemon's: the whole body crosses to the app and is held there as a string.
+/// 0 = unbounded, which is what every caller that sets nothing still gets.
+constexpr size_t MAX_DESIGN_RESPONSE_BODY_BYTES = size_t{ 32 } * 1024 * 1024;
 } // namespace http
 
 /**
@@ -87,6 +98,9 @@ constexpr size_t MAX_PER_HOST = 200;
 /// Timeout for a worker's curl_multi_poll in milliseconds. Deliberately short:
 /// it only bounds how long a worker with active transfers blocks waiting for
 /// IO, and submit() interrupts the poll via curl_multi_wakeup anyway.
+/// On Windows a 1ms wait is only 1ms because the run holds
+/// `platform::HighResolutionTimerScope`; at the OS default this poll would
+/// return after ~15.6ms (issue #1161).
 constexpr int POLL_TIMEOUT_MS = 1;
 /// DNS cache timeout in seconds (avoids DNS resolver saturation).
 /// Governs both curl's own cache and the pre-resolution pin cache.
@@ -154,6 +168,10 @@ constexpr int64_t MAX_SAMPLE_BODY_BYTES = 104857600; // 100MB
 /// Upper bound on `max_sample_bytes` (the whole-run capture budget). Every
 /// byte under it is held in memory until the run flushes.
 constexpr int64_t MAX_SAMPLE_BYTES = 1073741824; // 1GB
+/// Upper bound on `max_response_sample_bytes` (the whole-run budget for the
+/// script-validation reservoir). Every byte under it is held in memory for the
+/// run *and* its retention window, so the ceiling is the capture budget's.
+constexpr int64_t MAX_RESPONSE_SAMPLE_BYTES = 1073741824; // 1GB
 /// Upper bound on `max_exemplar_results`. Each retained exemplar holds a
 /// captured exchange, bounded in turn by the two budgets above.
 constexpr int64_t MAX_EXEMPLAR_RESULTS = 100000;
@@ -457,6 +475,17 @@ constexpr size_t DEFAULT_MAX_SAMPLE_BODY_BYTES = 32768;
 /// MetricsCollector::sample_bodies_dropped so the UI can say the set is
 /// incomplete rather than showing a silently biased subset.
 constexpr size_t DEFAULT_MAX_SAMPLE_BYTES = size_t{ 2 } * 1024 * 1024;
+/// Whole-run budget for the script-validation reservoir's bodies (config key
+/// `maxResponseSampleBytes`). Two orders of magnitude above the capture budget
+/// beside it because the two stores answer different questions: a captured
+/// exchange is an exhibit a person reads, truncated to 32 KiB, while a retained
+/// sample is the *input* to a deferred script or schema check and is kept whole
+/// - truncating it would make that check report a failure the target never
+/// produced. So the budget drops whole samples instead, and this is where it
+/// starts: against a target answering 1 MiB bodies the count cap alone
+/// (`max_response_samples`, 1000) allowed ~1 GB resident, held through the
+/// retention window after the run (issue #1155).
+constexpr size_t DEFAULT_MAX_RESPONSE_SAMPLE_BYTES = size_t{ 256 } * 1024 * 1024;
 /// How many exemplars of each distinct status code a run guarantees to retain.
 /// Small on purpose: exemplars answer "what does a 503 from this target look
 /// like", which the first few answer as well as the first few hundred.

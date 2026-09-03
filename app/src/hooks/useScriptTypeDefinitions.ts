@@ -19,7 +19,7 @@
  */
 
 import { useEffect } from "react";
-import { useMonaco } from "@monaco-editor/react";
+import { useLoadedMonaco } from "@/lib/monaco-loader";
 import { useScriptTypeDefinitionsQuery } from "@/queries";
 
 /**
@@ -107,7 +107,10 @@ export const SCRIPT_COMPILER_OPTIONS = {
 };
 
 export function useScriptTypeDefinitions() {
-	const monaco = useMonaco();
+	// Passive by design: null until an editor has loaded Monaco, so registration
+	// happens then. `@monaco-editor/react`'s `useMonaco` would load it from here,
+	// at startup, and from the CDN - see `lib/monaco-loader.ts` (#1146).
+	const monaco = useLoadedMonaco();
 	const { data } = useScriptTypeDefinitionsQuery();
 	const typeDefinitions = data?.typeDefinitions;
 	const libUri = data?.libUri;

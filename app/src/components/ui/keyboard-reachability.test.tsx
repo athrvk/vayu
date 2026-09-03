@@ -78,7 +78,90 @@ describe("variable token popover", () => {
 		fireEvent.keyDown(token, { key: "Enter" });
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
+
+	/*
+	 * Opening it was never the whole job - focus has to arrive too (issue #1215).
+	 * The popover suppresses its own open-autofocus and each branch compensates
+	 * with `autoFocus` on the control it opens onto; the masked-secret branch had
+	 * none, and since the popover is non-modal and portalled, Tab from the token
+	 * did not reach into it and a click elsewhere dismissed it. A secret was the
+	 * one variable a keyboard user could not read.
+	 */
+	it("puts focus inside the popover, not just on screen", () => {
+		renderToken({ onValueChange: () => {} });
+		fireEvent.keyDown(screen.getByRole("button"), { key: "Enter" });
+
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.contains(document.activeElement)).toBe(true);
+	});
+
+	it("lands a hidden secret on the eye, which is the only thing to do there", () => {
+		openSecret();
+
+		const reveal = screen.getByRole("button", { name: "Reveal value" });
+		expect(document.activeElement).toBe(reveal);
+		expect(screen.getByRole("dialog").contains(reveal)).toBe(true);
+	});
+
+	/*
+	 * Tab itself is not simulated: jsdom implements no sequential focus
+	 * navigation, so a `fireEvent.keyDown(…, { key: "Tab" })` moves nothing and
+	 * would assert against the test environment rather than the component -
+	 * and `userEvent`, which does implement it, is not a dependency of this app
+	 * (the same call `runtime-token-interaction.test.tsx` records). What Tab was
+	 * needed *for* is covered instead: reaching the popover at all, which is the
+	 * test above, and getting on from the eye to the field, which is this one.
+	 */
+	it("hands focus on to the editable field once the secret is revealed", () => {
+		openSecret();
+		fireEvent.click(screen.getByRole("button", { name: "Reveal value" }));
+
+		const field = screen.getByRole("textbox", { name: "Value of api_key" });
+		expect(document.activeElement).toBe(field);
+		expect(field).toHaveValue("hunter2");
+	});
+
+	it("closes on Escape from inside, without revealing anything", () => {
+		openSecret();
+
+		/*
+		 * Two presses, and the first is not lost. Landing on the eye opens its
+		 * own tooltip, because that is what every focused `TooltipIconButton` in
+		 * the app does, and Radix dismisses the innermost layer first - so
+		 * Escape closes the tooltip, then the popover. Asserted rather than
+		 * papered over: it is the layering, not this branch, and a test that
+		 * fired once and passed would only mean the eye had stopped being
+		 * focused.
+		 */
+		expect(screen.getByRole("tooltip")).toBeInTheDocument();
+		fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+		fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		// And nothing was disclosed on the way out.
+		expect(screen.queryByDisplayValue("hunter2")).not.toBeInTheDocument();
+	});
 });
+
+/** A masked secret's popover, opened from the keyboard. */
+function openSecret() {
+	// The eye is a `TooltipIconButton`, so it needs the provider the app mounts
+	// at its root.
+	render(
+		<TooltipProvider>
+			<VariablePopover
+				name="api_key"
+				varInfo={{ value: "hunter2", scope: "global", secret: true }}
+				resolved
+				onValueChange={() => {}}
+				trigger={<span>{"{{api_key}}"}</span>}
+			/>
+		</TooltipProvider>
+	);
+	fireEvent.keyDown(screen.getByRole("button", { name: /api_key/ }), { key: "Enter" });
+}
 
 function createKeyEvent(key: string): KeyboardEvent {
 	return new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });

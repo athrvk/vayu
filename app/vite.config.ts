@@ -8,6 +8,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { woff2Only } from "./vite-plugins/woff2-only";
 import path from "path";
 import { readFileSync } from "fs";
 
@@ -21,7 +22,10 @@ export default defineConfig({
 	// `from` option to `postcss.parse`" on every dev CSS transform. As a Vite
 	// plugin its output is re-parsed with a real `from`, so no fromless nodes.
 	// Autoprefixer stays in postcss.config.cjs, so vendor prefixing is unchanged.
-	plugins: [react(), tailwindcss()],
+	// `woff2Only` drops the legacy `.woff` sibling `@fontsource` names next to
+	// every woff2 - 90 files, 1.18MB, that Chromium never asks for. See the
+	// plugin for why it works on the bundle rather than in a transform.
+	plugins: [react(), tailwindcss(), woff2Only()],
 	define: {
 		__VAYU_VERSION__: JSON.stringify(packageJson.version),
 	},
@@ -50,26 +54,18 @@ export default defineConfig({
 	build: {
 		outDir: "dist",
 		emptyOutDir: true,
-		// Vite 8 / Rolldown: rolldownOptions replaces rollupOptions, and
-		// manualChunks is replaced by codeSplitting.groups (test matches the
-		// module id; [\\/] keeps it cross-platform for Windows CI builds).
-		rolldownOptions: {
-			output: {
-				codeSplitting: {
-					groups: [
-						{
-							name: "react-vendor",
-							test: /node_modules[\\/](react|react-dom)[\\/]/,
-							priority: 20,
-						},
-						{
-							name: "charts",
-							test: /node_modules[\\/]uplot[\\/]/,
-							priority: 15,
-						},
-					],
-				},
-			},
-		},
+		// **No `rolldownOptions.output.codeSplitting` groups, deliberately**
+		// (#1147). What defers a chunk here is a dynamic import - `React.lazy`
+		// on the tab surfaces, `ensureMonaco()` on the editor (#1146) - never a
+		// manual group, and in a packaged app loading from asar there is no
+		// cross-release HTTP cache for a vendor chunk to hit either. The two
+		// groups that used to sit here (`react-vendor`, `charts`/uplot) were
+		// measured against rolldown's own chunking and moved nothing: same 132
+		// chunks, same 14.9MB total, same modules behind the same lazy
+		// boundaries. Adding one for monaco was worse than inert - the named
+		// group turned the 3.7MB editor chunk into a `modulepreload` in
+		// `index.html`, putting back on the startup path exactly what #1146
+		// took off it. Measure before adding a group here, and measure
+		// `dist/index.html`'s preload list, not just chunk sizes.
 	},
 });

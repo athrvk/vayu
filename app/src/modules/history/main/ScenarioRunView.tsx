@@ -30,21 +30,23 @@
  * card. Two things keep that usable and neither drops a step: the four count
  * chips are buttons that filter by outcome - the reader after a failure wants
  * the failures, and the numbers were already sitting there - and the rows
- * arrive through `useGrowingWindow`, the same growing list the response pane's
- * console output uses, rather than a virtualiser this repo would then have to
- * maintain a scroll map for.
+ * arrive through a growing window, the same one the response pane's console
+ * output uses (`useGrowingWindow`, held here by `useFilteredSteps`), rather
+ * than a virtualiser this repo would then have to maintain a scroll map for.
  *
  * **Two controls, one predicate** (issue #832). The chips narrow by outcome and
  * the search box narrows by step name, and `filterSteps` applies both at once -
  * "the failed executions of `POST /checkout`" is the question neither answers
  * alone, since a run's failures are spread across a dozen different steps and a
  * name is repeated once per iteration. One predicate also means one empty
- * state, which names whichever combination emptied the list.
+ * state, which names whichever combination emptied the list. A live run runs
+ * that predicate over the batch that just arrived rather than over the whole
+ * run per commit, and produces only as many rows as the window shows -
+ * `useFilteredSteps` keeps what it has matched (issues #1205, #1297).
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ListOrdered, Loader2, Search } from "lucide-react";
-import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useRunReportQuery } from "@/queries";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
@@ -62,15 +64,17 @@ import {
 import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
 import {
-	countOutcomes,
 	emptyStepListReason,
-	filterSteps,
+	emptyStepSummary,
 	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
+	summarizeSteps,
 	thinningDisclosure,
 	type ScenarioStepRow,
+	type StepListSummary,
 } from "./scenario-steps";
+import { useFilteredSteps } from "./useFilteredSteps";
 import type { Run, StepOutcome } from "@/types";
 import { STEP_OUTCOMES } from "@/types";
 
@@ -84,6 +88,9 @@ interface ScenarioRunViewProps {
  * re-render this view on every unrelated store write.
  */
 const EMPTY_STEPS: ScenarioStepRow[] = [];
+
+/** The same, for the summary beside them - a fresh one per call re-renders too. */
+const EMPTY_SUMMARY: StepListSummary = emptyStepSummary();
 
 /**
  * Chip tint per outcome, matching the step rows.
@@ -105,20 +112,42 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	// time, so a tab for an older run must read an empty list rather than the
 	// steps of whatever is streaming now.
 	const liveSteps = useScenarioRunStore((s) => (s.runId === run.id ? s.steps : EMPTY_STEPS));
+	const liveSummary = useScenarioRunStore((s) =>
+		s.runId === run.id ? s.summary : EMPTY_SUMMARY
+	);
+	// Which live list this is, for the filter that has to know whether the rows
+	// it matched are still the rows below the ones that just arrived. A tab that
+	// is not the streaming run reads `EMPTY_STEPS`: nothing has been matched
+	// from an empty list, so the value it reads here cannot carry anything over.
+	const liveAppendEpoch = useScenarioRunStore((s) => (s.runId === run.id ? s.appendEpoch : 0));
 	const isStreaming = useScenarioRunStore((s) => s.runId === run.id && s.isStreaming);
 	const streamError = useScenarioRunStore((s) => (s.runId === run.id ? s.error : null));
 
 	const storedSteps = useMemo(() => stepRowsFromReport(report), [report]);
-	const steps = storedSteps.length > 0 ? storedSteps : liveSteps;
+	const usingStored = storedSteps.length > 0;
+	const steps = usingStored ? storedSteps : liveSteps;
 
-	// The report's exact whole-run totals when it can give them, the stored rows
-	// only as a fallback. A thinned run keeps every non-passing row but drops
-	// passes, so counting rows would undercount `passed` against the header's own
-	// step total - the report is the one source that agrees with it (issue #726).
-	// A live run has no report yet and reads its streaming rows until one lands.
+	/*
+	 * What the header asks of the whole list, without reading the whole list.
+	 *
+	 * The stored rows arrive complete and change only when the report does, so
+	 * one pass per report answers for them. The live rows arrive one batch at a
+	 * time and carry their summary with them - folded by the store as they land
+	 * (issue #1153) - because a pass per commit is a pass over a list that grows
+	 * for the length of the run.
+	 */
+	const storedSummary = useMemo(() => summarizeSteps(storedSteps), [storedSteps]);
+	const summary = usingStored ? storedSummary : liveSummary;
+
+	// The report's exact whole-run totals when it can give them, the rows on
+	// screen only as a fallback. A thinned run keeps every non-passing row but
+	// drops passes, so counting rows would undercount `passed` against the
+	// header's own step total - the report is the one source that agrees with it
+	// (issue #726). A live run has no report yet and reads its streaming rows
+	// until one lands.
 	const counts = useMemo(
-		() => outcomeCountsFromReport(report) ?? countOutcomes(steps),
-		[report, steps]
+		() => outcomeCountsFromReport(report) ?? summary.counts,
+		[report, summary]
 	);
 	const thinned = thinningDisclosure(report);
 	const scenario = report?.scenario;
@@ -175,18 +204,25 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 	// One iteration is the common case and "Iteration 1" on every row is noise;
 	// more than one and which pass a step belongs to is the whole point.
-	const showIteration = steps.some((s) => s.iteration > 0);
+	const showIteration = summary.iterationSteps > 0;
 
 	// A run bound a data set if any step says which row it took. Read off the
 	// steps rather than the report so the sentence is right for a live run too -
 	// the `step` events carry `dataRowIndex` exactly as the stored rows do.
-	const dataBound = steps.some((s) => s.dataRowIndex !== undefined);
+	const dataBound = summary.dataBoundSteps > 0;
 
 	const [expanded, setExpanded] = useState<string | null>(null);
-	const toggle = (step: ScenarioStepRow) => {
+	/*
+	 * One handler for every card, not one per card. `ScenarioStepCard` is
+	 * memoized, and a memo is only worth having if its props hold their identity
+	 * - an arrow function built per row per render would hand all 200 mounted
+	 * cards a new prop on every keystroke in the search box (issue #1153). The
+	 * card passes its own step back rather than closing over it.
+	 */
+	const toggle = useCallback((step: ScenarioStepRow) => {
 		const key = stepKey(step);
 		setExpanded((current) => (current === key ? null : key));
-	};
+	}, []);
 
 	/*
 	 * Which outcome the list is showing, or all of them (issue #730).
@@ -210,9 +246,39 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 * hide steps from whoever opens it next.
 	 */
 	const [query, setQuery] = useState("");
-	const shownSteps = useMemo(
-		() => filterSteps(steps, { outcome: outcomeFilter, query }),
-		[steps, outcomeFilter, query]
+	/*
+	 * Held across commits rather than recomputed per commit (issues #1205,
+	 * #1297). A narrowing filter ran its predicate over every row the run had
+	 * produced on every batch that arrived - the search lowercasing each step's
+	 * name as it went - because the store hands the view a new array each time.
+	 * The rows already matched cannot stop matching when more arrive at the end,
+	 * so `useFilteredSteps` counts the batch alone and produces only as much of
+	 * the window as is on screen; `appendKey` is what tells it this is the same
+	 * list only longer, and the store's epoch is the only thing that knows (a
+	 * replaced row and an appended one look alike from here). The stored rows
+	 * are their own key: they arrive complete and change only when the report
+	 * does.
+	 *
+	 * It owns the growing window too, because the two are one ordering: the
+	 * window is sized against the count, and the count is what says how far the
+	 * window has to be produced. The rows arrive as the list is scrolled and
+	 * nothing is withheld - `hasMore` drives a line saying how many are still to
+	 * come, and reaching the sentinel renders the next slice.
+	 *
+	 * `run.id` and not the epoch is what keys that window (issue #1153). A
+	 * narrowed list is a new list and starts at its own top, which is what the
+	 * chips and the search box change, and the hook adds them to the key itself;
+	 * a live run's list is the *same* list getting longer, and resetting on its
+	 * length threw the reader back to the first 200 rows on every batch of steps
+	 * that arrived. The changeover to stored rows at run end is deliberately not
+	 * part of the key: the rows are the same ones, and snapping the window there
+	 * would undo a scroll at the exact moment the run finished.
+	 */
+	const shownSteps = useFilteredSteps(
+		steps,
+		{ outcome: outcomeFilter, query },
+		usingStored ? storedSteps : liveAppendEpoch,
+		run.id
 	);
 
 	/*
@@ -224,17 +290,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 * below by its status.
 	 */
 	const emptyReason =
-		shownSteps.length === 0
+		shownSteps.total === 0
 			? emptyStepListReason({ outcome: outcomeFilter, query }, thinned)
 			: null;
 
-	/*
-	 * The rows arrive as the list is scrolled - see the header note. Nothing is
-	 * withheld: `hasMore` drives a line saying how many are still to come, and
-	 * reaching the sentinel renders the next slice.
-	 */
-	const { visible, sentinelRef, hasMore } = useGrowingWindow(shownSteps.length);
-	const rendered = shownSteps.slice(0, visible);
+	const { rows: rendered, sentinelRef, hasMore } = shownSteps;
 
 	return (
 		<div className="flex flex-col h-full overflow-hidden">
@@ -430,7 +490,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 									step={step}
 									showIteration={showIteration}
 									isExpanded={expanded === stepKey(step)}
-									onToggle={() => toggle(step)}
+									onToggle={toggle}
 									runId={run.id}
 								/>
 							</div>
@@ -447,7 +507,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 								className="px-1 py-2 text-xs text-muted-foreground"
 							>
 								Showing {rendered.length.toLocaleString()} of{" "}
-								{shownSteps.length.toLocaleString()} steps - scroll for more.
+								{shownSteps.total.toLocaleString()} steps - scroll for more.
 							</p>
 						)}
 					</>

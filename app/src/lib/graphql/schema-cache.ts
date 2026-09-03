@@ -138,15 +138,16 @@ interface SchemaCacheState {
 	lru: string[];
 	activeKey: string | null;
 	/**
-	 * The target `activeKey` was derived from.
+	 * Point at a target, by the key it hashes to.
 	 *
-	 * Kept alongside the key because a surface outside the request builder - the
-	 * context bar's GraphQL section - can offer Refresh, and `refreshSchema`
-	 * takes a target rather than a key. Deriving one there would mean rebuilding
-	 * the resolved URL and auth a second time, which is the "config one branch
-	 * defines and another re-derives inline" defect by another name.
+	 * The target itself was kept beside the key for a while, because a surface
+	 * outside the request builder - the context bar's GraphQL section - offered a
+	 * Refresh, and `refreshSchema` takes a target rather than a key. That Refresh
+	 * is gone (#1224), and nothing else ever asked for the target back, so the
+	 * field went with it rather than staying as state nobody reads. Whoever needs
+	 * one again should hold the target it already has, the way `GraphQLBody`
+	 * does.
 	 */
-	activeTarget: SchemaTarget | null;
 	setActiveTarget: (target: SchemaTarget | null) => void;
 	/**
 	 * Stop pointing at this target, if it is still the one being pointed at.
@@ -191,18 +192,12 @@ export const useSchemaCache = create<SchemaCacheState>((set, get) => ({
 	byKey: {},
 	lru: [],
 	activeKey: null,
-	activeTarget: null,
 
 	setActiveTarget: (target) =>
-		set(
-			target && target.url
-				? { activeKey: schemaCacheKey(target), activeTarget: target }
-				: { activeKey: null, activeTarget: null }
-		),
+		set({ activeKey: target && target.url ? schemaCacheKey(target) : null }),
 
 	clearActiveTarget: (target) => {
-		if (get().activeKey === schemaCacheKey(target))
-			set({ activeKey: null, activeTarget: null });
+		if (get().activeKey === schemaCacheKey(target)) set({ activeKey: null });
 	},
 
 	getActiveEntry: () => {

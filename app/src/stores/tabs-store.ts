@@ -27,7 +27,12 @@ export interface Tab {
 	entityId: string | null; // requestId, collectionId, runId - null for singletons
 }
 
-const MAX_OPEN_TABS = 12;
+/**
+ * Exported because `response-store`'s cache bound is derived from it: that
+ * store retains the open tabs' responses plus an equal tail, and a guard there
+ * fails if the two numbers drift apart.
+ */
+export const MAX_OPEN_TABS = 12;
 
 /**
  * Singletons: only one tab of this type can exist at a time.
@@ -124,6 +129,16 @@ interface TabsState {
 	 */
 	closeTabsForEntities: (entityIds: Iterable<string>, type?: TabType) => void;
 	focusTab: (tabId: string) => void;
+	/**
+	 * Focus the tab `step` places along from the active one, wrapping at both
+	 * ends. `1` is the next tab, `-1` the previous.
+	 *
+	 * Here rather than at the caller for the reason `closeTab` picks its own
+	 * replacement: "which tab is next" is one rule, and the ⇧⌘] chord, a future
+	 * menu item and anything else that offers it should not each re-derive it
+	 * from `openTabs` and disagree about what happens at the ends.
+	 */
+	focusAdjacentTab: (step: 1 | -1) => void;
 }
 
 /**
@@ -358,8 +373,10 @@ export const useTabsStore = create<TabsState>()(
 
 				// A delete that can name a request takes its response with it: the
 				// collection tree reaches here after deleting a request or a whole
-				// collection, nothing else evicts from that map, and each entry
-				// holds a body plus its raw copy. Skipped for a `type`-scoped sweep
+				// collection, and each entry holds a body plus its raw copy. The
+				// map's own LRU bound (#1156) only puts a ceiling on the session -
+				// a response nothing can reach again should go now, not in
+				// twenty-four sends' time. Skipped for a `type`-scoped sweep
 				// that is not about requests - `"run"` ids cannot key a response, so
 				// walking them would only look like it meant something. Done before
 				// the early return below, since a deleted request with no open tab
@@ -404,6 +421,27 @@ export const useTabsStore = create<TabsState>()(
 						tabFocusedAt: stampFocus(tabFocusedAt, openTabs, tabId),
 					});
 				}
+			},
+
+			focusAdjacentTab: (step) => {
+				const { openTabs, activeTabId } = get();
+				if (openTabs.length === 0) return;
+				/*
+				 * `openTabs` order, not `tabFocusedAt` order: "next" means the tab
+				 * to the right of this one in the strip, which is what the user is
+				 * looking at. The recency stamps answer a different question, and
+				 * the palette is where they are asked.
+				 */
+				const current = openTabs.findIndex((t) => t.id === activeTabId);
+				// With no active tab, forwards starts at the first and backwards at
+				// the last - the same wrap, entered from outside.
+				const next =
+					current === -1
+						? step === 1
+							? 0
+							: openTabs.length - 1
+						: (current + step + openTabs.length) % openTabs.length;
+				get().focusTab(openTabs[next].id);
 			},
 		}),
 		{

@@ -81,6 +81,28 @@ export const DOC_READING_GUARDS = {
 		reader: "app/src/design-system-doc.test.ts",
 		paths: ["docs/design-system.md"],
 	},
+	/*
+	 * The second reader of that page, and the one that reads its prose: the
+	 * Type Scale Conventions table names the weight of the micro/badge step,
+	 * which the components either match or do not (#1199). `design-system-doc`
+	 * checks the page's colour *values* against `index.css` and says so - a
+	 * table cell is not a value, and neither guard covers the other's half.
+	 */
+	typeScale: {
+		reader: "app/src/components/ui/type-scale.test.ts",
+		paths: ["docs/design-system.md"],
+	},
+	/*
+	 * The third reader of that page, and the second of its prose (#1282): the
+	 * Accessibility section enumerates the `jsx-a11y` rules suppressed at the
+	 * line, and the guard holds that list to what `app/src` actually carries. A
+	 * site edited out of the doc alone is the drift it exists to catch, so the
+	 * page is one of its inputs in the same sense the sources are.
+	 */
+	a11ySuppressions: {
+		reader: "app/src/components/a11y-suppressions.test.ts",
+		paths: ["docs/design-system.md"],
+	},
 	rendererState: {
 		reader: "app/src/state-management-doc.test.ts",
 		paths: [
@@ -156,6 +178,16 @@ export const ENGINE_READING_GUARDS = {
 	},
 	variableResolution: {
 		reader: "app/src/lib/variable-resolution.conformance.test.ts",
+		paths: ["engine/tests/fixtures/variable-resolution-conformance.json"],
+	},
+	/*
+	 * The same fixture, read by the third implementation of the resolution order
+	 * (issue #1207): the MCP `resolve_variables` tool cannot import the
+	 * renderer's resolver across the process boundary, so it mirrors it and this
+	 * guard replays the fixture against both.
+	 */
+	mcpVariableOrigins: {
+		reader: "app/electron/mcp/variable-origins.conformance.test.ts",
 		paths: ["engine/tests/fixtures/variable-resolution-conformance.json"],
 	},
 	setCookie: {

@@ -21,8 +21,13 @@
  *   registry; indexing them here would put every settings screen in the group
  *   twice, under two rows that do the same thing.
  * - **It does not own a matcher.** `searchSettings` is the sidebar's ranking,
- *   and a palette that ranked settings differently from the settings sidebar
- *   would be two answers to one question. One index, one ranking, two UIs.
+ *   and a palette that matched settings differently from the settings sidebar
+ *   would be two answers to one question. One index, one matcher, two UIs -
+ *   which rows are settings results is decided once, here. Their order on
+ *   screen is not: `ranking.ts` re-sorts every section by the score it gave the
+ *   row, so the palette can list what it kept in an order the sidebar would
+ *   not, deliberately, since the palette scores these rows by the one measure
+ *   it scores every other kind by and the sidebar ranks them among themselves.
  */
 
 import { useMemo } from "react";
@@ -58,6 +63,9 @@ export function useSettingsItems(query: string): PaletteItem[] {
 		const items: PaletteItem[] = shown.map((entry) => ({
 			id: `setting:${entry.kind}:${entry.id}`,
 			kind: "settings" as const,
+			// `searchSettings` matched this against the whole index entry,
+			// description included - see `PaletteItem.preMatched`.
+			preMatched: true,
 			title: entry.label,
 			// The engine key is part of what the row says, because that is what
 			// docs, logs and MCP calls name the setting; an app setting has no
@@ -66,10 +74,13 @@ export function useSettingsItems(query: string): PaletteItem[] {
 				entry.kind === "engine"
 					? `${entry.categoryLabel} · ${entry.id}`
 					: entry.categoryLabel,
-			// Everything `searchSettings` matched on, so cmdk - which filters the
-			// rendered list a second time - cannot hide a row this source has
-			// already decided matches. Its own `value` covers label and subtitle.
-			keywords: [entry.id, ...entry.keywords, entry.description],
+			// The terms someone types to reach this row: the engine key every
+			// doc and log line names it by, and its aliases. The description
+			// used to be here too - a whole sentence of prose, carried only so
+			// cmdk's second filter could not hide a row this source had already
+			// matched. Nothing filters these rows twice now (`ranking.ts`), so
+			// the defensive half is gone and what remains is search terms.
+			keywords: [entry.id, ...entry.keywords],
 			perform: () => reveal(entry),
 		}));
 
@@ -84,7 +95,6 @@ export function useSettingsItems(query: string): PaletteItem[] {
 				subtitle: `${matches.length} matches`,
 				icon: Search,
 				escape: true,
-				keywords: [needle],
 				perform: () => {
 					// The sidebar's box reads this, so the drawer opens already
 					// filtered - the palette finds, the destination browses.

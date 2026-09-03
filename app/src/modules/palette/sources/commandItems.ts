@@ -29,6 +29,7 @@ export function commandItems(ctx: CommandContext): PaletteItem[] {
 		...(command.subtitle ? { subtitle: command.subtitle } : {}),
 		keywords: [...command.keywords],
 		icon: command.icon,
+		...(command.shortcut ? { shortcut: command.shortcut } : {}),
 		perform: () => command.perform(ctx),
 	}));
 }

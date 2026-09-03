@@ -89,3 +89,67 @@ describe("response body truncation notice", () => {
 		expect(screen.queryByText(/Body truncated for storage/i)).toBeNull();
 	});
 });
+
+/**
+ * The second, separate disclosure (issue #1157): the engine stopped *reading*
+ * at `maxDesignResponseBodyBytes`, so the rest was never received.
+ *
+ * It is not the notice above and must not be worded like it. Storage truncation
+ * shortened a body that arrived whole, so "re-send" recovers it; a capped read
+ * is reproduced exactly by a re-send, and the only thing that changes it is the
+ * setting. Telling a user to re-send here is advice that cannot work.
+ */
+describe("response body cap notice", () => {
+	function renderWith(state: Partial<ResponseState>) {
+		response = baseResponse(state);
+		render(
+			<TooltipProvider>
+				<ResponseViewer />
+			</TooltipProvider>
+		);
+	}
+
+	it("shows the notice when the engine capped the read", () => {
+		renderWith({ body: "PREFIX", bodyCapped: true, size: 33_554_432 });
+
+		expect(screen.getByText(/Body capped while reading/i)).toBeInTheDocument();
+		// The actionable half - and the half that differs from the notice above.
+		expect(screen.getByText(/Raise Max Design Response Body in Settings/i)).toBeInTheDocument();
+	});
+
+	it("shows no notice for an uncapped response", () => {
+		renderWith({});
+
+		expect(screen.queryByText(/Body capped while reading/i)).toBeNull();
+	});
+
+	it("says something different from the storage-truncation notice", () => {
+		// Both facts at once, which is a real state: the engine read a prefix and
+		// storage then shortened even that. Two notices, two remedies - and the
+		// re-send instruction must belong to exactly one of them.
+		renderWith({
+			body: "PREFIX",
+			bodyCapped: true,
+			bodyTruncated: true,
+			bodyBytes: 33_554_432,
+			size: 33_554_432,
+		});
+
+		const truncated = screen.getByText(/Body truncated for storage/i);
+		const capped = screen.getByText(/Body capped while reading/i);
+		expect(truncated).toBeInTheDocument();
+		expect(capped).toBeInTheDocument();
+
+		const truncatedText = truncated.parentElement!.textContent ?? "";
+		const cappedText = capped.parentElement!.textContent ?? "";
+		expect(cappedText).not.toBe(truncatedText);
+
+		// Only the storage notice tells the user to re-send; only the cap notice
+		// names the setting. Swapping either sentence between them would be the
+		// conflation this pair exists to prevent.
+		expect(truncatedText).toMatch(/Re-send the request/i);
+		expect(truncatedText).not.toMatch(/Max Design Response Body/i);
+		expect(cappedText).toMatch(/Max Design Response Body/i);
+		expect(cappedText).toMatch(/re-sending reads the same amount/i);
+	});
+});

@@ -34,6 +34,8 @@ export type ScriptVariant = "pre" | "post";
 export interface ScriptVariantConfig {
 	/** The `RequestState` field this panel edits. */
 	field: Extract<keyof RequestState, "preRequestScript" | "testScript">;
+	/** What the editor announces itself as. Both panels mount one `CodeEditor`. */
+	editorLabel: string;
 	/** Collection scripts that run before this one, when the host supplies them. */
 	inheritedKey: Extract<
 		keyof RequestBuilderContextValue,
@@ -65,6 +67,7 @@ const CODE_CLASS = "bg-muted px-1 rounded-md";
 export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 	pre: {
 		field: "preRequestScript",
+		editorLabel: "Pre-request script",
 		inheritedKey: "inheritedPreScripts",
 		legacyKey: "legacyPreScript",
 		intro: (
@@ -167,6 +170,7 @@ export const SCRIPT_VARIANTS: Record<ScriptVariant, ScriptVariantConfig> = {
 	},
 	post: {
 		field: "testScript",
+		editorLabel: "Test script",
 		inheritedKey: "inheritedPostScripts",
 		legacyKey: "legacyPostScript",
 		intro: (

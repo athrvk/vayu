@@ -41,6 +41,17 @@ int64_t exchange_now_ms () {
 
 } // namespace
 
+size_t design_response_body_bound (vayu::db::Database& db) {
+    return static_cast<size_t> (db.get_config_int ("maxDesignResponseBodyBytes",
+    static_cast<int> (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
+}
+
+size_t load_response_body_bound (vayu::db::Database& db) {
+    return static_cast<size_t> (std::max (0,
+    db.get_config_int ("maxResponseBodyBytes",
+    static_cast<int> (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES))));
+}
+
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response) {
     nlohmann::json trace;
@@ -109,6 +120,20 @@ const vayu::Response& response) {
         trace["response"] = { { "headers", response.headers },
             { "body", response.body }, { "httpVersion", response.http_version },
             { "httpVersionDowngraded", response.http_version_downgraded } };
+
+        // The read cap, carried so a restored response says what the live one
+        // said (issue #1157) - the same rule `clientCertificate` above states,
+        // and the one the app's two funnels are held to. Written only when it
+        // is true, unlike the live body's always-present key: every row stored
+        // before this field would otherwise be indistinguishable from one whose
+        // body was cut, and absent is what those rows mean - not capped.
+        //
+        // `bodyTruncated` on this same node is a different cut, added later by
+        // `cap_trace_bodies`: that one is this body being shortened for
+        // storage, which re-sending recovers from.
+        if (response.body_truncated) {
+            trace["response"]["bodyCapped"] = true;
+        }
     } else {
         trace["error_type"]    = to_string (response.error_code);
         trace["error_message"] = response.error_message;
@@ -500,8 +525,12 @@ bool verbose) {
         ctx.iteration_count = inputs.iteration_count;
         ctx.in_scenario     = inputs.in_scenario;
         // Both scripts' `pm.sendRequest` leaves by the same route the send
-        // below does - see ScriptContext::transport.
-        ctx.transport = inputs.transport;
+        // below does - see ScriptContext::transport - and reads no more of a
+        // body than that send does (issue #1188). The bound is the same value;
+        // what differs is the answer at it, which the script's own send has to
+        // refuse rather than truncate - see ScriptContext::max_response_bytes.
+        ctx.transport          = inputs.transport;
+        ctx.max_response_bytes = inputs.max_response_bytes;
         // Both scripts of a step read the same row: they are the same
         // iteration, and a test script asserting against the row its request
         // was built from is the point of a data-driven run.
@@ -550,6 +579,13 @@ bool verbose) {
         config.cookie_scope  = cookie_scope;
         config.cookie_writes = std::move (pre_cookie_writes);
         config.transport     = inputs.transport;
+        // Design mode's own bound, and the reading of it that keeps the prefix
+        // (issue #1157). A body past it stops being read here rather than
+        // being buffered whole and then found to be too large downstream - the
+        // renderer holds this string too, so the cost of an unbounded one is
+        // paid twice.
+        config.max_response_bytes  = inputs.max_response_bytes;
+        config.truncate_over_limit = true;
         vayu::http::Client client (config);
         outcome.response = client.send (outcome.request).value ();
     }

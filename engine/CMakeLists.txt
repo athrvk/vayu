@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(vayu-engine
-    VERSION 0.24.0
+    VERSION 0.25.0
     DESCRIPTION "High-performance API execution engine"
     LANGUAGES C CXX
 )
@@ -478,6 +478,9 @@ add_library(vayu_core STATIC
     # The only TU that sees VAYU_VERSION_STRING for the User-Agent - keep it
     # that way, or a version bump invalidates the whole compile cache (#659).
     src/core/user_agent.cpp
+    # Beside PLATFORM_SOURCES rather than in it: the refcount and the scope
+    # compile everywhere, only the two timeapi calls inside are Windows' (#1161).
+    src/platform/high_resolution_timer.cpp
     ${PLATFORM_SOURCES}
 )
 

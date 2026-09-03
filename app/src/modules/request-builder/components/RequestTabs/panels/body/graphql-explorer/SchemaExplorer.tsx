@@ -15,12 +15,14 @@
  * to be next to the cursor it inserts at. The bar gets the *status* half in its
  * own section - freshness and an outline are glanceable, browsing is not.
  *
- * **Every schema affordance lives in this header.** Status, freshness, refresh,
- * search and the control that closes the pane again - one subject, one place.
- * Three of them were here already and the other two sat in the Query pane's
- * header, which meant a visible Refresh in each corner doing the same thing and
- * the schema's state described twice in two vocabularies (#455). The Query
- * header now carries one chip, and only while this pane is closed.
+ * **This header carries only what belongs to the pane** - the search box and the
+ * descriptions show/hide. Status, Refresh and the control that opens and closes
+ * the pane are the subject's, not the pane's, and they sit in one fixed place in
+ * the Query header whether this pane is open or shut (#1224). They lived here
+ * for a while because a visible Refresh in each corner doing the same thing, and
+ * the schema's state described twice in two vocabularies, was the split #455 was
+ * filed about; moving them to a home that does not depend on this pane's state
+ * keeps that fixed without the layout changing shape as the pane opens.
  *
  * **It adds no introspection of its own.** The pane renders whatever the schema
  * cache is holding. #382 made the body-tab lifecycle the whole consent budget
@@ -33,17 +35,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-	AlertCircle,
-	ChevronDown,
-	ChevronRight,
-	ListTree,
-	Loader2,
-	PanelRightClose,
-	RefreshCw,
-	Search,
-	Text,
-} from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight, ListTree, Search, Text } from "lucide-react";
 import { Input, TooltipIconButton, EYEBROW_CLASS } from "@/components/ui";
 import { Callout } from "@/components/shared/Callout";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
@@ -61,7 +53,6 @@ import {
 	type TreeLocation,
 } from "@/lib/graphql/schema-tree";
 import type { SchemaEntry } from "@/lib/graphql/schema-cache";
-import { SchemaStatusBadge } from "../SchemaStatusBadge";
 import { formatRelativeTime } from "@/utils/helpers";
 import { cn } from "@/lib/utils";
 
@@ -151,9 +142,6 @@ export interface SchemaExplorerProps {
 	entry: SchemaEntry | null;
 	/** The schema's cache identity - what the view state is remembered under. */
 	schemaKey: string;
-	onRefresh: () => void;
-	/** Close the pane. The only control that does; the Query header has none. */
-	onClose: () => void;
 	/**
 	 * Insert this row into the query document. The explorer does not know what
 	 * the document is; it knows which row was activated.
@@ -169,14 +157,7 @@ export interface SchemaExplorerProps {
 	notice?: string | null;
 }
 
-export function SchemaExplorer({
-	entry,
-	schemaKey,
-	onRefresh,
-	onClose,
-	onInsert,
-	notice = null,
-}: SchemaExplorerProps) {
+export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: SchemaExplorerProps) {
 	const schema = entry?.schema ?? null;
 	const status = entry?.status ?? "idle";
 	const fetchedAt = entry?.fetchedAt ?? null;
@@ -329,53 +310,14 @@ export function SchemaExplorer({
 	return (
 		<div className="flex flex-col h-full min-h-0 bg-panel" data-testid="graphql-explorer">
 			{/*
-			 * Two rows rather than one. Five affordances now live here and the
-			 * pane is as narrow as 18% of the editor area; sharing a single row
-			 * left the search box - the one control that wants width - competing
-			 * with the status text for it.
+			 * One row, since only the two pane-local controls are left. It was two
+			 * while the header also carried the status badge, Refresh and the close:
+			 * five affordances in a pane as narrow as 18% of the editor area left
+			 * the search box - the one control that wants width - competing with the
+			 * status text for it. Those three moved to the Query header (#1224), so
+			 * the search box has the row to itself again.
 			 */}
-			<div className="flex items-center gap-1 px-2 h-7 border-b border-border shrink-0">
-				<span className="flex-1 min-w-0 truncate">
-					<SchemaStatusBadge entry={entry} />
-				</span>
-				{/*
-				 * Descriptions are clipped to one line by default and the full
-				 * text is only in the row's native tooltip, which is no use to
-				 * anyone reading rather than pointing. This is the show/hide for
-				 * it - one pane-level control rather than a per-row disclosure,
-				 * because a third target inside a 24px row is exactly the
-				 * composite-row hit-area trap `drawer-row-hit-area` was written
-				 * against, and it would take its width from the activator.
-				 */}
-				<TooltipIconButton
-					label={showDescriptions ? "Hide full descriptions" : "Show full descriptions"}
-					aria-pressed={showDescriptions}
-					className={cn("h-6 w-6 shrink-0", showDescriptions && "text-primary")}
-					icon={<Text className="w-3 h-3" />}
-					onClick={() => toggleDescriptions(schemaKey)}
-				/>
-				<TooltipIconButton
-					label="Refresh schema"
-					className="h-6 w-6 shrink-0"
-					icon={
-						status === "loading" ? (
-							<Loader2 className="w-3 h-3 animate-spin" />
-						) : (
-							<RefreshCw className="w-3 h-3" />
-						)
-					}
-					onClick={onRefresh}
-					disabled={status === "loading"}
-				/>
-				<TooltipIconButton
-					label="Hide schema"
-					className="h-6 w-6 shrink-0"
-					icon={<PanelRightClose className="w-3 h-3" />}
-					onClick={onClose}
-				/>
-			</div>
-
-			<div className="flex items-center px-2 py-1 border-b border-border shrink-0">
+			<div className="flex items-center gap-1 px-2 py-1 border-b border-border shrink-0">
 				<div className="relative flex-1 min-w-0">
 					<Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
 					<Input
@@ -392,6 +334,22 @@ export function SchemaExplorer({
 						className="h-6 pl-6 text-[11px]"
 					/>
 				</div>
+				{/*
+				 * Descriptions are clipped to one line by default and the full
+				 * text is only in the row's native tooltip, which is no use to
+				 * anyone reading rather than pointing. This is the show/hide for
+				 * it - one pane-level control rather than a per-row disclosure,
+				 * because a third target inside a 24px row is exactly the
+				 * composite-row hit-area trap `drawer-row-hit-area` was written
+				 * against, and it would take its width from the activator.
+				 */}
+				<TooltipIconButton
+					label={showDescriptions ? "Hide full descriptions" : "Show full descriptions"}
+					aria-pressed={showDescriptions}
+					className={cn("h-6 w-6 shrink-0", showDescriptions && "text-primary")}
+					icon={<Text className="w-3 h-3" />}
+					onClick={() => toggleDescriptions(schemaKey)}
+				/>
 			</div>
 
 			{/*
@@ -434,6 +392,7 @@ export function SchemaExplorer({
 						Nothing matches "{term}".
 					</p>
 				) : (
+					// eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it
 					<div
 						ref={treeRef}
 						role="tree"
@@ -565,6 +524,7 @@ function ExplorerRow({
 		 * of the drawer's rows before `drawer-row-hit-area` pinned it.
 		 */
 		<div
+			// eslint-disable-next-line jsx-a11y/role-has-required-aria-props -- this tree has no selection model - a row inserts into the query and nothing stays selected - so `aria-selected` is omitted rather than faked
 			role="treeitem"
 			/*
 			 * Only a row that can actually open says it can. A search result is

@@ -17,6 +17,15 @@
  * user can see, in the order they see them. That avoids maintaining a second,
  * flattenable copy of the tree purely for navigation.
  *
+ * **Depth, though, comes from `aria-level`** - `parentRow` in `tree-focus.ts`,
+ * the same reading the delete refocus uses (#1237). Order is the one thing the
+ * DOM states plainly here; hierarchy it does not, since a row's children are
+ * rendered beside it rather than within it and one tree renders no nesting at
+ * all. Every row of every consumer already announces its level, because that
+ * same shape is why the hierarchy has to be announced. A consumer that omits it
+ * gets a tree of roots: ArrowLeft moves nowhere and `*` calls every row a
+ * sibling.
+ *
  * Rows expose their behaviour through data attributes rather than props, so
  * this needs nothing threaded through CollectionItem's prop list:
  *   data-tree-activate  the primary control (open the collection/request)
@@ -60,8 +69,7 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { TIMING } from "@/config/timing";
 import { isTextEntryTarget } from "@/lib/keyboard";
-
-const ITEM = '[role="treeitem"]';
+import { TREE_ITEM as ITEM, focusTreeRow, parentRow, treeRows } from "./tree-focus";
 
 /**
  * Alt+Arrow moves the row itself, rather than the focus - the keyboard half of
@@ -94,45 +102,17 @@ function labelOf(el: HTMLElement): string {
 	return (el.getAttribute("data-tree-label") ?? el.textContent ?? "").trim().toLowerCase();
 }
 
-/**
- * A row's children are rendered as a *sibling* of that row, both inside a
- * per-collection wrapper - not nested inside the row - so `closest(ITEM)` never
- * finds the parent. Walk up instead, and at each ancestor take the first
- * treeitem it contains: the first wrapper that holds a treeitem other than this
- * one is the parent's wrapper, and that treeitem is the parent row. Stops at the
- * tree so a root row correctly reports no parent instead of picking up its
- * preceding sibling.
- */
-function parentItem(current: HTMLElement): HTMLElement | null {
-	const tree = current.closest('[role="tree"]');
-	let node = current.parentElement;
-	while (node && node !== tree && tree?.contains(node)) {
-		const first = node.querySelector<HTMLElement>(ITEM);
-		if (first && first !== current) return first;
-		node = node.parentElement;
-	}
-	return null;
-}
-
 export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 	// The typeahead buffer and when it was last appended to. A ref, not state:
 	// nothing renders from it, and a render per keystroke would rebuild every
 	// row in the tree just to move focus by one.
 	const typeahead = useRef({ prefix: "", at: 0 });
 
-	const items = useCallback(
-		() => Array.from(treeRef.current?.querySelectorAll<HTMLElement>(ITEM) ?? []),
-		[treeRef]
-	);
+	const items = useCallback(() => treeRows(treeRef.current), [treeRef]);
 
 	const focusItem = useCallback(
-		(el: HTMLElement | undefined) => {
-			if (!el) return;
-			for (const item of items()) item.tabIndex = -1;
-			el.tabIndex = 0;
-			el.focus();
-		},
-		[items]
+		(el: HTMLElement | undefined) => focusTreeRow(treeRef.current, el),
+		[treeRef]
 	);
 
 	// Exactly one row must be tabbable. Rows render with tabIndex -1, so seed
@@ -204,16 +184,16 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 						// div rather than a treeitem, so the next row in document
 						// order is its sibling and stepping to it was an ArrowDown
 						// wearing ArrowRight's key (#931 review). Parentage decides,
-						// the same walk the `*` case uses.
+						// the same reading the `*` case uses.
 						const next = list[i + 1];
-						if (next && parentItem(next) === current) focusItem(next);
+						if (next && parentRow(list, i + 1) === current) focusItem(next);
 					}
 					break;
 				case "ArrowLeft":
 					take();
 					if (expanded === "true") click("[data-tree-toggle]");
 					else {
-						const parent = parentItem(current);
+						const parent = parentRow(list, i);
 						if (parent) focusItem(parent);
 					}
 					break;
@@ -248,14 +228,15 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 				case "*": {
 					take();
 					// Expand every sibling folder of the focused row. Siblinghood
-					// comes from the DOM walk rather than from props: two rows are
-					// siblings when `parentItem` returns the same row, which is
-					// `null` for two roots. Already-expanded rows are skipped, so
-					// this never collapses anything.
-					const parent = parentItem(current);
-					for (const item of list) {
+					// comes from the announced hierarchy rather than from props:
+					// two rows are siblings when `parentRow` returns the same row,
+					// which is `null` for two roots. Already-expanded rows are
+					// skipped, so this never collapses anything.
+					const parent = parentRow(list, i);
+					for (let n = 0; n < list.length; n++) {
+						const item = list[n];
 						if (item.getAttribute("aria-expanded") !== "false") continue;
-						if (parentItem(item) !== parent) continue;
+						if (parentRow(list, n) !== parent) continue;
 						item.querySelector<HTMLElement>("[data-tree-toggle]")?.click();
 					}
 					break;

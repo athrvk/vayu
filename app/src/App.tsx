@@ -15,7 +15,7 @@ import {
 	useConfigQuery,
 	useHealthQuery,
 	usePrefetchCollectionsAndRequests,
-	useRunsQuery,
+	usePrefetchRuns,
 } from "./queries";
 import { useElectronTheme } from "./hooks/useElectronTheme";
 import { useActiveEnvironmentRestore } from "./hooks/useActiveEnvironmentRestore";
@@ -23,6 +23,7 @@ import { useActiveEnvironmentGuard } from "./hooks/useActiveEnvironmentGuard";
 import { useAppearance } from "./hooks/useAppearance";
 import { useScriptCompletionProvider } from "./hooks/useScriptCompletionProvider";
 import { useVariableCompletionProvider } from "./hooks/useVariableCompletionProvider";
+import { useVariableHoverProvider } from "./hooks/useVariableHoverProvider";
 import { useScriptVariableCompletionProvider } from "./hooks/useScriptVariableCompletionProvider";
 import { useScriptTypeDefinitions } from "./hooks/useScriptTypeDefinitions";
 import { useMenuActions } from "./hooks/useMenuActions";
@@ -52,7 +53,11 @@ function App() {
 
 	// Prefetch collections and all their requests (TanStack handles caching automatically)
 	usePrefetchCollectionsAndRequests();
-	useRunsQuery();
+	// Warm the runs list once, rather than observing it from here: History,
+	// Welcome and the palette poll it themselves while they are mounted, and a
+	// root observer polled it for the app's whole life with nobody reading the
+	// result (#1150).
+	usePrefetchRuns();
 
 	// Keep engine config warm - proxied call timeouts derive from its
 	// defaultTimeout setting (see services/api.ts proxiedRequestTimeoutMs)
@@ -63,6 +68,10 @@ function App() {
 	// `{{variable}}` completion in the body editors. Global per language, so one
 	// registration covers every editor instance - same as the line above.
 	useVariableCompletionProvider();
+	// What a `{{variable}}` resolves to, on hover in those same editors - the
+	// reading half of the token affordances the single-line fields already had.
+	// Global per language, like the registration above it.
+	useVariableHoverProvider();
 	// Variable names inside `pm.environment.get("…")` and its siblings - the
 	// script editors' equivalent of the line above, since a script names
 	// variables through the accessors rather than through braces.

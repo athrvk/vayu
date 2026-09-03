@@ -4016,6 +4016,19 @@ void Database::seed_default_config () {
     "1073741824", // 1GB
     std::nullopt, now }));
 
+    upsert_config (unit ("bytes") (ConfigEntry{ "maxResponseSampleBytes",
+    std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES),
+    "integer", "Load-Run Validation Sample Budget",
+    "How much response-body data one load run may hold for its post-run test "
+    "scripts and schema checks. These bodies are kept whole - a truncated one "
+    "would fail a check the target passed - so past the budget whole samples "
+    "are dropped instead, and the report counts them. Lower it for a target "
+    "with large responses; raise it to validate more of them.",
+    "data_retention", std::to_string (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES),
+    "0",          // 0 retains no sample that has a body
+    "1073741824", // 1GB
+    std::nullopt, now }));
+
     upsert_config (ConfigEntry{ "maxScenarioStoredSteps",
     std::to_string (vayu::core::constants::scenario::MAX_STORED_STEPS),
     "integer", "Max Stored Scenario Steps",
@@ -4084,10 +4097,14 @@ void Database::seed_default_config () {
     // =========================================================================
     // LIMITS (limits) - added by #703
     // The sizes and counts a run or a collection may not exceed. Every entry
-    // here is arrived at from a rejection message that names the setting, which
-    // is why they deserve one shelf instead of hiding among infrastructure -
-    // and why none of them truncates: each refuses the oversized input and says
-    // which knob refused it.
+    // here is arrived at from a message that names the setting, which is why
+    // they deserve one shelf instead of hiding among infrastructure. All but
+    // one refuse the oversized input outright and say which knob refused it;
+    // `maxDesignResponseBodyBytes` (issue #1157) is the exception and belongs
+    // here anyway, because what it bounds is a read in flight rather than
+    // anything kept on disk - it stops reading at the bound and the response
+    // viewer says the rest was never read. A bound on what is *stored* is the
+    // shelf above.
     // =========================================================================
 
     upsert_config (ConfigEntry{ "maxScenarioSteps",
@@ -4138,8 +4155,23 @@ void Database::seed_default_config () {
     "memory. A larger response fails that request with an error instead of "
     "being buffered, so load testing a big download or a streaming endpoint "
     "cannot exhaust memory - every in-flight request holds its own body. "
-    "Design-mode sends are not affected.",
+    "Design-mode sends are not affected: they read their own bound, "
+    "Max Design Response Body, and keep what they read instead of failing.",
     "limits", std::to_string (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES),
+    "1024",       // 1KB
+    "1073741824", // 1GB
+    std::nullopt, now }));
+
+    upsert_config (unit ("bytes") (ConfigEntry{ "maxDesignResponseBodyBytes",
+    std::to_string (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES),
+    "integer", "Max Design Response Body",
+    "Largest response body a single Send - or one step of a collection "
+    "run - reads into memory. A larger response stops being read at this "
+    "point: the response viewer shows what arrived and says the rest was "
+    "not read, rather than the whole of it being buffered by the engine and "
+    "held again by the app. Re-sending reads the same amount, so raise this "
+    "to see more of a big download.",
+    "limits", std::to_string (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES),
     "1024",       // 1KB
     "1073741824", // 1GB
     std::nullopt, now }));

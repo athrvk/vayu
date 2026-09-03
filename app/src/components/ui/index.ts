@@ -80,7 +80,14 @@ export type { ToastVariantName } from "./toast";
 
 export { ToggleGroup, ToggleGroupItem } from "./toggle-group";
 export type { ToggleGroupProps } from "./toggle-group";
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipHint, TooltipProvider } from "./tooltip";
+export {
+	Tooltip,
+	TooltipTrigger,
+	TooltipContent,
+	TooltipHint,
+	TooltipValue,
+	TooltipProvider,
+} from "./tooltip";
 export { TooltipIconButton } from "./tooltip-icon-button";
 export type { TooltipIconButtonProps } from "./tooltip-icon-button";
 export { InfoChip } from "./info-chip";
@@ -106,11 +113,14 @@ export {
 	CommandDialog,
 	CommandInput,
 	CommandList,
+	CommandFooter,
 	CommandEmpty,
 	CommandGroup,
 	CommandItem,
 	CommandSeparator,
+	CommandListboxProbe,
 } from "./command";
+export type { CommandListboxState } from "./command";
 
 export { Separator } from "./separator";
 
@@ -130,7 +140,7 @@ export { VariablePopover } from "./variable-popover";
 export type { VariablePopoverProps, VariableInfo as VariablePopoverInfo } from "./variable-popover";
 
 export { VariableAutocomplete } from "./variable-autocomplete";
-export { SuggestionList } from "./suggestion-list";
+export { SuggestionList, SUGGESTION_LIST_LIMIT } from "./suggestion-list";
 export type { SuggestionListProps } from "./suggestion-list";
 export type {
 	VariableAutocompleteProps,

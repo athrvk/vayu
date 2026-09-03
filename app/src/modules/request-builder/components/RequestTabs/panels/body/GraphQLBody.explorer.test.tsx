@@ -59,6 +59,7 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 			// eslint-disable-next-line react-hooks/exhaustive-deps
 		}, []);
 		return (
+			// eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- test stub for the Monaco-backed CodeEditor, driven only by fireEvent.click here
 			<div data-testid={`editor-${language}`} onClick={() => onChange(value)}>
 				{value}
 			</div>
@@ -94,6 +95,7 @@ function Harness({ initialBody, onBody }: { initialBody: string; onBody: (b: str
 				requestId="r1"
 				schemaTarget={TARGET}
 				onEditorMount={() => {}}
+				method="POST"
 				variablesDraft={draft}
 				onVariablesDraftChange={setDraft}
 			/>
@@ -160,72 +162,109 @@ describe("the pane is only there when it has something to browse", () => {
 		expect(screen.queryByTestId("graphql-explorer")).toBeNull();
 	});
 
-	it("opens from the query header's chip and closes from its own header", () => {
+	it("opens and closes from the one control in the Query header", () => {
 		useExplorerStore.setState({ open: false });
 		mount("");
 		fireEvent.click(screen.getByLabelText("Browse schema"));
 		expect(screen.getByTestId("graphql-explorer")).toBeTruthy();
-		// Closing is the pane's own business now - the Query header carries no
-		// schema control while the pane that owns the subject is open.
+		// The same button in the same place, only relabelled: the toggle does not
+		// move into the pane it opened, and the pane carries no close of its own.
 		fireEvent.click(screen.getByLabelText("Hide schema"));
 		expect(screen.queryByTestId("graphql-explorer")).toBeNull();
 	});
 });
 
+/** The explorer toggle, under whichever of its two labels is current. */
+const schemaToggle = () => screen.getByLabelText(/^(Browse|Hide) schema$/);
+/** The Query pane's header bar - the box the toggle sits in. */
+const queryHeader = () => schemaToggle().closest("div")!;
 /**
- * A Refresh that is on screen at rest - the thing #455 allows exactly one of.
- *
- * The chip's own Refresh is transparent until hover or focus, so it is a Refresh
- * that exists without standing. jsdom applies no stylesheet, so the reveal is
- * read off the class list rather than from a computed opacity, the way the
- * keyboard-reachability guard reads its own.
+ * The pane's own title, read inside that header: the schema tree draws a row
+ * called "Query" too, and a document-wide text query finds both.
  */
-const standingRefreshes = () =>
-	screen.queryAllByLabelText("Refresh schema").filter((b) => !b.className.includes("opacity-0"));
+const paneTitle = () =>
+	[...queryHeader().querySelectorAll("span")].find((s) => s.textContent === "Query")!;
+/**
+ * Anything in the Query header that is invisible at rest.
+ *
+ * jsdom applies no stylesheet, so a hover-reveal is read off the class list
+ * rather than a computed opacity - which is also the only way to catch the
+ * transparency #1224 retired coming back.
+ */
+const hiddenAtRest = () =>
+	[...queryHeader().querySelectorAll("*")].filter((n) =>
+		(n.getAttribute("class") ?? "").includes("opacity-0")
+	);
 
-describe("one standing schema Refresh, in one place", () => {
-	it("shows a single chip in the Query header while the explorer is closed, and no standing Refresh", () => {
-		useExplorerStore.setState({ open: false });
-		mount("");
+describe("one schema control, in one place, whatever the pane is doing", () => {
+	it("draws the same three parts ahead of the pane's title in both states", () => {
+		for (const open of [false, true]) {
+			useExplorerStore.setState({ open });
+			mount("");
 
-		// Mutation check: put the old badge + Refresh + toggle trio back in the
-		// Query header and the second of these fails - a Refresh returns to a
-		// header whose subject lives in the pane beside it, standing at rest.
-		expect(screen.getAllByLabelText("Browse schema")).toHaveLength(1);
-		expect(standingRefreshes()).toHaveLength(0);
+			expect(schemaToggle()).toBeTruthy();
+			// The status badge, by the sentence only it carries.
+			expect(screen.getByTitle(/Schema loaded/)).toBeTruthy();
+			expect(screen.getAllByLabelText("Refresh schema")).toHaveLength(1);
+			// Mutation check: put the control back on the right of the header -
+			// the far side from the pane it opens - and this reds.
+			expect(
+				paneTitle().compareDocumentPosition(schemaToggle()) &
+					Node.DOCUMENT_POSITION_PRECEDING
+			).toBeTruthy();
+
+			cleanup();
+		}
 	});
 
-	it("hides the chip's Refresh until it is hovered or focused, without dropping it from the tab order", () => {
-		useExplorerStore.setState({ open: false });
-		mount("");
-
-		const refresh = screen.getByLabelText("Refresh schema");
-		// Mutation check: drop `focus-visible:opacity-100` and a keyboard user
-		// tabs onto a fully transparent control that refetches on Enter.
-		expect(refresh.className).toContain("group-hover:opacity-100");
-		expect(refresh.className).toContain("focus-visible:opacity-100");
-		refresh.focus();
-		expect(document.activeElement).toBe(refresh);
+	it("stands at rest, with nothing waiting for a hover to be found", () => {
+		// Mutation check: give the Refresh back its
+		// `opacity-0 group-hover:opacity-100` and this reds. A control the user
+		// has to already know about does not solve a duplication problem (#507
+		// bought "one standing Refresh" with exactly that trade); one home that
+		// does not move solves it structurally.
+		for (const open of [false, true]) {
+			useExplorerStore.setState({ open });
+			mount("");
+			// The scan is worth nothing if it scanned nothing: a header with the
+			// control in it is a dozen nodes deep, and an empty `querySelectorAll`
+			// would pass this file for free.
+			expect(queryHeader().querySelectorAll("*").length).toBeGreaterThan(5);
+			expect(hiddenAtRest()).toEqual([]);
+			cleanup();
+		}
 	});
 
-	it("never shows two standing Refreshes at once, because the open pane owns the only one", () => {
+	it("points the toggle at the left, where the pane opens, and says whether it is open", () => {
+		useExplorerStore.setState({ open: false });
 		mount("");
-		expect(standingRefreshes()).toHaveLength(1);
-		expect(screen.queryByLabelText("Browse schema")).toBeNull();
+		const toOpen = screen.getByLabelText("Browse schema");
+		expect(toOpen.getAttribute("aria-expanded")).toBe("false");
+		// Mutation check: the `PanelRight*` pair this used to draw names the side
+		// the pane does not open on - the explorer is the group's first panel.
+		expect(toOpen.querySelector(".lucide-panel-left-open")).toBeTruthy();
+		cleanup();
+
+		useExplorerStore.setState({ open: true });
+		mount("");
+		const toClose = screen.getByLabelText("Hide schema");
+		expect(toClose.getAttribute("aria-expanded")).toBe("true");
+		expect(toClose.querySelector(".lucide-panel-left-close")).toBeTruthy();
 	});
 
 	it("still offers the way in before anything is known about the schema", () => {
-		// `idle` is the state the badge itself renders nothing for - the chip
+		// `idle` is the state the badge itself renders nothing for - the row
 		// falls back to a plain label so the pane is still reachable.
 		useSchemaCache.setState({ byKey: {}, lru: [], activeKey: null });
 		useExplorerStore.setState({ open: false });
 		mount("");
 		expect(screen.getByLabelText("Browse schema")).toBeTruthy();
+		expect(screen.getAllByLabelText("Refresh schema")).toHaveLength(1);
 	});
 });
 
-describe("refreshing the schema from the closed chip", () => {
-	it("calls the cache's one refresh path, and leaves the explorer closed", () => {
+describe("refreshing the schema", () => {
+	it("calls the cache's one refresh path from either state, and does not open the pane", () => {
 		const refreshSchema = vi.fn();
 		useSchemaCache.setState({ refreshSchema });
 		useExplorerStore.setState({ open: false });
@@ -233,9 +272,8 @@ describe("refreshing the schema from the closed chip", () => {
 
 		fireEvent.click(screen.getByLabelText("Refresh schema"));
 
-		// The same call the explorer's Refresh makes, on the same target - one
-		// implementation, two entry points. Mutation check: point the chip at a
-		// second copy of the introspection call and the target assertion breaks.
+		// Mutation check: point the header at a second copy of the introspection
+		// call and the target assertion breaks.
 		expect(refreshSchema).toHaveBeenCalledWith(TARGET);
 		// Refreshing is not browsing: the blind refresh #507 is about must not
 		// cost the pane opening on top of it.

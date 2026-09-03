@@ -170,7 +170,7 @@ export default function KeyValueEditor({
 					allowFiles
 						? "grid-cols-[24px_1fr_1fr_20px_20px_28px]"
 						: "grid-cols-[24px_1fr_1fr_20px_28px]"
-				} px-1 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground`}
+				} px-1 text-[11px] font-semibold uppercase tracking-wide text-subtle-foreground`}
 			>
 				<div />
 				<div>Key</div>

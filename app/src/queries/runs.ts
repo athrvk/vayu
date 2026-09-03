@@ -11,6 +11,7 @@
  * TanStack Query hooks for run history operations.
  */
 
+import { useEffect } from "react";
 import {
 	useQuery,
 	useMutation,
@@ -45,11 +46,13 @@ export function runsPollInterval(loadedPages: number): number | false {
 }
 
 /**
- * Fetch run history as an infinite query over the `{data, pagination}`
- * envelope, newest first. The 5s `refetchInterval` keeps the loaded pages
- * fresh - in the default state that is just the first page, so new runs (which
- * land on page 1 under start_time DESC) appear without re-fetching older pages.
- * Older pages are fetched on demand via `fetchNextPage`.
+ * The runs list as infinite-query options, shared by the hook that observes it
+ * and the startup warm-up that only fills it.
+ *
+ * One factory rather than two copies of the key and the fetcher: the entry the
+ * warm-up writes has to be the exact entry the visible surfaces read. A key or
+ * a page shape that drifted apart would leave a cache nobody reads and every
+ * surface fetching on mount anyway - "written but never read" in cache form.
  *
  * @param q Optional server-side substring search over the stored snapshot.
  *          Type/status/sort stay client-side (see history-store `filterRuns`).
@@ -57,25 +60,66 @@ export function runsPollInterval(loadedPages: number): number | false {
  *          a pin older than the loaded pages is reachable. Left unset rather
  *          than passed as `false`, which the engine reads as "only unpinned".
  */
-export function useRunsQuery(q?: string, pinnedOnly = false) {
+export function runsListInfiniteOptions(q?: string, pinnedOnly = false) {
 	const search = q?.trim() || undefined;
 	const baseline = pinnedOnly ? true : undefined;
-	return useInfiniteQuery<RunListResponse, Error>({
+	return {
 		queryKey: queryKeys.runs.list({ q: search, baseline }),
-		queryFn: ({ pageParam = 0 }) =>
+		queryFn: ({ pageParam }: { pageParam: number }): Promise<RunListResponse> =>
 			apiService.listRuns({
 				q: search,
 				baseline,
 				limit: RUNS_PAGE_LIMIT,
-				offset: pageParam as number,
+				offset: pageParam,
 			}),
 		initialPageParam: 0,
-		getNextPageParam: (lastPage) =>
+		getNextPageParam: (lastPage: RunListResponse) =>
 			lastPage.pagination.hasMore
 				? lastPage.pagination.offset + lastPage.pagination.limit
 				: undefined,
+	};
+}
+
+/**
+ * Fetch run history as an infinite query over the `{data, pagination}`
+ * envelope, newest first. The 5s `refetchInterval` keeps the loaded pages
+ * fresh - in the default state that is just the first page, so new runs (which
+ * land on page 1 under start_time DESC) appear without re-fetching older pages.
+ * Older pages are fetched on demand via `fetchNextPage`.
+ *
+ * The interval belongs to this hook rather than to the options above because it
+ * is what an *observer* costs: a surface that renders runs pays it while it is
+ * mounted, and nothing pays it while none is (#1150).
+ */
+export function useRunsQuery(q?: string, pinnedOnly = false) {
+	return useInfiniteQuery({
+		...runsListInfiniteOptions(q, pinnedOnly),
 		refetchInterval: (query) => runsPollInterval(query.state.data?.pages.length ?? 0),
 	});
+}
+
+/**
+ * Warm the unfiltered runs list once, without becoming an observer of it.
+ *
+ * The App root used to call `useRunsQuery()` for this. That warmed the cache
+ * and then kept the 5s poll running for the app's whole visible life - History
+ * closed, nothing running, and nothing at the root reading the result - waking
+ * the renderer, the engine and (through the engine's stdout pipe) the main
+ * process every tick (#1150). A prefetch does the warming half only: the three
+ * surfaces that actually render runs - `HistoryList`, `WelcomeScreen` and the
+ * palette's entity source - observe this same key while they are mounted and
+ * drive the cadence themselves.
+ *
+ * `prefetchInfiniteQuery`, not `prefetchQuery`: those readers are infinite
+ * queries, so the entry has to be written in `InfiniteData` shape. A plain
+ * prefetch would store one bare page under the key and the first reader would
+ * walk a `pages` that is not there.
+ */
+export function usePrefetchRuns() {
+	const queryClient = useQueryClient();
+	useEffect(() => {
+		void queryClient.prefetchInfiniteQuery(runsListInfiniteOptions());
+	}, [queryClient]);
 }
 
 /**

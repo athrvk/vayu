@@ -20,6 +20,12 @@ the shared conformance fixture
 (`engine/tests/fixtures/variable-resolution-conformance.json`), which the
 engine's gtest suite and the renderer's vitest suite both drive.
 
+**A third reader, MCP (issue #1207):** the same rule set is served as the MCP
+resource `vayu://variables/resolution`, and the `resolve_variables` tool
+answers which definition wins for a given collection/environment context and
+every definition it shadowed. See
+[MCP - Variables](../engine/mcp.md#variables).
+
 **One matcher in the renderer.** `{{name}}` is recognised by
 `VARIABLE_PATTERN` in `app/src/constants/variables.ts` and nowhere else -
 import it (or `containsVariableToken` / `isVariableToken`, which wrap the two
@@ -230,9 +236,12 @@ send is about to put on the wire, not composition's guess at it.
 both send *without* a row, so the pick is cleared by one: a row left standing
 across a plain Send would put the file's value in every preview beside a request
 that had just gone out with the environment's, which is this same disagreement
-arrived at from the other side. Nothing else clears it - the picker's memory
+arrived at from the other side. Nothing else *clears* it - the picker's memory
 still survives a tab switch and a return (issue #659), because neither of those
-is a send.
+is a send. Closing the request's tab does drop it, which is not the same act: it
+ends the memory rather than unbinding the row, and it is what bounds a map the
+provider would otherwise hold for the life of the session (issue #1271, see
+[`state-management.md`](state-management.md#requestbuildercontext---the-headers-a-setting-added)).
 
 **Why the renderer can show this and composition cannot.** A plan is composed
 once, before any row exists to bind, so composition still defers both
@@ -261,7 +270,17 @@ popover states plainly that the row's cell, not the environment's value, is
 what the send will use. The hover tooltip reads the same way, from the same
 origins list, because hovering and clicking are two readings of one token and a
 token that answers them differently is worse than one that answers both
-wrongly.
+wrongly. Enter and Space on a focused token are a third way into the same
+popover rather than a fourth reading of the origins (issue #1215): the token is
+a `role="button"` in the field's roving Tab strip, and what opens is the control
+this paragraph describes, unchanged. The Monaco hover provider (issue #1220)
+reads the same origins list again for the body and GraphQL editors - a third
+reading of one answer, not a second one, so a token means the same thing
+whether it sits in a single-line field or in the body beneath it. That provider
+is registered outside the builder, so it takes the bound row from
+`bound-row-store` the way the tab strip does (issue #1074); without it the
+editor would rank the scopes while the field one line above ranks the row over
+them, which is the disagreement this paragraph exists to forbid.
 
 A name that **no** scope defines but the row does is the same claim in the
 other direction, and it stops being reported as undefined: the destructive red
@@ -318,7 +337,10 @@ its tooltip, and a chain that declares nothing keeps the neutral token above. It
 is authoring-time advice in every case - the run's file is the authority, and a
 run with a mismatched file is still the user's to start. Declared columns are
 also completed: `{{data.` offers them in the request fields and the body editors,
-and `pm.iterationData.get("` offers them in the script editors (see below).
+and `pm.iterationData.get("` offers them in the script editors (see below). The
+body editors also colour and explain these tokens on hover, the same three
+states as the request fields; the script editors do not, for the same
+interpolation reason as everywhere else in this document (D16).
 
 The script panel's **"Names mentioned:" chips** read the same three states
 (issue #604). They used to paint a name red whenever no scope defined it, which
@@ -417,6 +439,31 @@ The resolved `Record<string, ResolvedVariable>` is **derived** from that list
 cannot disagree about which definition won. A name whose every definition is
 disabled is absent from the map, not present-and-empty - the red token keys off
 absence, so a present-and-empty entry would paint it resolved and send "".
+
+### `getScopeVariables(scope)`
+
+Returns what **one** scope answers on its own: the names it defines through
+enabled rows, each valued as `pm.<scope>.get` would read it, independent of
+which scope wins the whole ladder (issue #1302).
+
+A different question from `getAllVariables`, and the difference is the point.
+`pm.collectionVariables.get` reads the collection chain and answers from it
+whether or not the environment defines the name too, so a caller that wants
+"what does this scope hold?" cannot get it by filtering the winners: a
+collection's own `shop_domain` disappears from that filter the moment an
+environment shadows it, which is the one configuration where the scoped read
+and the `{{name}}` beside it disagree. The completion list inside a
+single-scope accessor is built from this (below).
+
+Derived from the same origins as `variableMap`, through the same "last enabled
+wins" rule - `scopeAnswer` in `lib/referenced-variables.ts`, which
+`describeScopedRead` reads as well, so what a list offers and what the chip
+above the editor says about it cannot drift apart. A name whose definitions in
+that scope are all disabled is absent rather than present-and-empty, for the
+reason it is absent from `variableMap`: `get` reads enabled rows only.
+
+Display-only, like `getVariableOrigins`. The bound row never appears here - it
+is not a scope, and no accessor reads a single scope through it.
 
 ### `getVariableOrigins(name)`
 
@@ -888,6 +935,20 @@ These rules make the offered set match what the call can actually read:
   variable offered there would be a name that returns `undefined`. Only the
   merged `pm.variables.get` lists all three, and it alone also lists the
   declared columns (below), because it alone reads both.
+- **And the scope answers for itself.** A single-scope list is the names that
+  scope *defines*, through enabled rows - `getScopeVariables` (above) - not the
+  names whose ladder-winner happens to sit there (issue #1302). The two are
+  different lists wherever a name is defined twice: a collection `shop_domain`
+  shadowed by the active environment is still a name
+  `pm.collectionVariables.get` reads and answers, so withholding it would hide
+  the very case the list is worth opening for. `detail` is that scope's own
+  answer for the same reason - its value, `(empty)` for an enabled empty row,
+  or `secret` for a masked one - rather than the winner's value, which the call
+  will not return. Where that answer is an empty row while another scope holds
+  a value, `detail` carries `describeScopedRead`'s sentence (*Empty at
+  collection scope - this read returns ""*) and the documentation names the
+  scope that holds it - the same words the chip above the editor uses, from the
+  same function.
 - **Collection variables come from the active tab.** Collection scope is
   explicit-only (see *Collection scope is explicit only* above) and a Monaco
   completion provider is registered once per *language*, not per editor, so it
@@ -901,7 +962,7 @@ These rules make the offered set match what the call can actually read:
   `pm.collectionVariables.get()` and the merged `pm.variables.get()` - it is a
   name the call can read. This list narrowed to the immediate collection while
   the engine did; the rule underneath is unchanged, which is that the list
-  offers exactly what the call resolves.
+  offers exactly what the call reads.
 - **`pm.iterationData` completes columns, not variables.** The row it reads is
   bound from the collection's data file, so the names offered inside
   `pm.iterationData.get("…")` and `.has("…")` are the declared columns of the

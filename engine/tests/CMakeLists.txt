@@ -25,6 +25,7 @@
 add_executable(vayu_tests
     main.cpp
     http_client_test.cpp
+    design_read_cap_test.cpp
     json_test.cpp
     invariant_test.cpp
     optional_assert_test.cpp
@@ -54,6 +55,7 @@ add_executable(vayu_tests
     sse_stream_test.cpp
     server_bind_test.cpp
     numeric_flag_test.cpp
+    high_resolution_timer_test.cpp
     argument_rules_test.cpp
     transport_policy_test.cpp
     tls_verification_test.cpp
@@ -71,6 +73,7 @@ add_executable(vayu_tests
     load_script_scopes_test.cpp
     script_info_test.cpp
     script_send_request_test.cpp
+    script_send_request_cap_test.cpp
     script_sent_headers_test.cpp
     sent_headers_wire_test.cpp
     set_cookie_test.cpp
@@ -100,6 +103,7 @@ add_executable(vayu_tests
     run_route_test.cpp
     run_stop_test.cpp
     run_shutdown_test.cpp
+    run_retention_release_test.cpp
     run_config_validation_test.cpp
     run_row_seed_test.cpp
     transient_execute_test.cpp
@@ -341,6 +345,7 @@ set(vayu_scratch_database_suites
     RequestsRouteTest
     ResourceWriteRouteTest
     ResponseCaptureTest
+    RunRetentionReleaseTest
     RunShutdownTest
     RunStopAccountingTest
     RunsRouteTest
@@ -349,6 +354,7 @@ set(vayu_scratch_database_suites
     ScenarioRunnerTest
     ScratchDatabaseCleanup
     ScriptRequestNameTest
+    ScriptSendRequestCapLoadTest
     ScriptVariableScopesTest
     ServerBindTest
     SpecBindRouteTest

@@ -21,7 +21,7 @@
  * derives - it does not render metric chrome inline.
  */
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import { formatNumber } from "@/utils";
 import { useDashboardStore } from "@/stores";
@@ -33,13 +33,13 @@ import { STATUS_CLASS_SERIES, STATUS_CLASS_CSS_VAR } from "@/constants/http-stat
 import { useMode } from "../hooks/useMode";
 import {
 	isRateLimitedRun,
-	buildLatencyChartData,
 	buildRampOverlay,
-	buildPercentileChartData,
-	buildStatusOverTime,
+	hasPercentileSignal,
+	hasStatusCodes,
 	latestThroughputMbps,
+	spansMultipleBuckets,
 } from "../utils/metricsTransforms";
-import { detectAnomalies } from "../utils/detectAnomalies";
+import { createAnomalyDetector } from "../utils/detectAnomalies";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
 import {
@@ -79,13 +79,18 @@ function MetricsView({
 	// uPlot (Canvas) renders the whole buffer cheaply, so it's gone.
 	const chartWindow = historicalMetrics;
 
-	const latencyChartData = useMemo(() => buildLatencyChartData(chartWindow), [chartWindow]);
-
-	const percentileChartData = useMemo(() => buildPercentileChartData(chartWindow), [chartWindow]);
-	const hasPercentileData = percentileChartData.some((d) => d.p99 > 0);
-
-	const statusChartData = useMemo(() => buildStatusOverTime(chartWindow), [chartWindow]);
-	const hasStatusData = statusChartData.length > 1;
+	// Which chart cards are worth rendering. Each chart builds its own series
+	// from `chartWindow` (it also needs the user's bucket width, which only it
+	// reads), so these gates ask the cheap question - is there more than one
+	// 0.5s bucket to plot - rather than building the series a second time here
+	// and throwing it away (#1152). Latency and percentiles share the count
+	// gate: both transforms bucket every tick, so they yield the same length.
+	const hasMultiplePoints = useMemo(() => spansMultipleBuckets(chartWindow), [chartWindow]);
+	const hasPercentileData = useMemo(() => hasPercentileSignal(chartWindow), [chartWindow]);
+	const hasStatusData = useMemo(
+		() => spansMultipleBuckets(chartWindow, hasStatusCodes),
+		[chartWindow]
+	);
 	const liveMbps = useMemo(() => latestThroughputMbps(chartWindow), [chartWindow]);
 
 	const rampOverlay = useMemo(
@@ -99,8 +104,20 @@ function MetricsView({
 	 * tick and not on the whole history array, so folding a history-wide scan into
 	 * it would rebuild it at 10 Hz and defeat the React.memo on HeroRow /
 	 * ModeStatsRow. The charts are the consumers, and they take it directly.
+	 *
+	 * The detector is held across commits rather than re-run from scratch on each
+	 * one. `chartWindow`'s identity changes every time the store appends a batch,
+	 * so a pure derivation re-derived the whole retained buffer twice a second -
+	 * a trailing-median sort per tick per series, ~9,000 of them at the default
+	 * window (#1151). Handed the same buffer again it takes only what arrived.
+	 * It answers exactly what the one-shot `detectAnomalies` would, including for
+	 * a buffer that is not a continuation (a second run, a remount), which it
+	 * starts over on - so nothing here depends on the instance surviving. Held in
+	 * `useState` rather than a ref because the state initialiser is the one hook
+	 * that runs exactly once without reading anything during render.
 	 */
-	const anomalies = useMemo(() => detectAnomalies(chartWindow), [chartWindow]);
+	const [detector] = useState(createAnomalyDetector);
+	const anomalies = useMemo(() => detector.detect(chartWindow), [detector, chartWindow]);
 
 	// Read the monotonic aggregates from the store - they are folded into running
 	// values on each tick in addMetricsBatch, so this is O(1) per render instead
@@ -286,7 +303,7 @@ function MetricsView({
 			)}
 
 			{/* Row 2.5 - Latency over time (perceived vs wire, queue-wait gap) */}
-			{latencyChartData.length > 1 && (
+			{hasMultiplePoints && (
 				<div className="bg-card border border-border rounded-md p-3.5">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
@@ -360,7 +377,7 @@ function MetricsView({
 							/>
 						</div>
 					)
-				: percentileChartData.length > 1 &&
+				: hasMultiplePoints &&
 					hasPercentileData && (
 						<div className="bg-card border border-border rounded-md p-3.5">
 							<div className="flex items-baseline justify-between mb-3">

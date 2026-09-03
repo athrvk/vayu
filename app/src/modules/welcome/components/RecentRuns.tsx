@@ -34,15 +34,29 @@ import type { Run } from "@/types";
 
 const RECENT_RUN_LIMIT = 5;
 
-/** Status text is shown only for terminal states worth calling out. */
+/**
+ * Status text is shown only for terminal states worth calling out.
+ *
+ * The `--status-*` family, in the same mapping `RunItem` (the history sidebar)
+ * paints the identical three words with: a run status is what that family is
+ * for, and two lists of the same runs answering in two different colours is the
+ * drift it exists to prevent.
+ *
+ * This is the one place the move is visible rather than a rename: "Stopped" is
+ * the family's orange rather than the general amber, which is what its own
+ * left-bar (`--status-stopped`) and the sidebar row have always been, and
+ * "Failed" shifts a shade (`--destructive-text` 0 60% 48% to
+ * `--status-error-text` 0 70% 45% in light). Both pairs are tuned to clear
+ * 4.5:1; only "Completed" is byte-identical to what it replaced.
+ */
 function statusLabel(status: Run["status"]): { text: string; className: string } | null {
 	switch (status) {
 		case "completed":
-			return { text: "Completed", className: "text-success-text" };
+			return { text: "Completed", className: "text-status-success-text" };
 		case "stopped":
-			return { text: "Stopped", className: "text-warning-text" };
+			return { text: "Stopped", className: "text-status-stopped-text" };
 		case "failed":
-			return { text: "Failed", className: "text-destructive-text" };
+			return { text: "Failed", className: "text-status-error-text" };
 		default:
 			return null;
 	}
@@ -77,7 +91,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 							className="group flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						>
 							<span className="flex min-w-0 flex-1 items-center gap-2">
-								<span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase">
+								<span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase">
 									{run.type === "load" ? "Load" : "Design"}
 								</span>
 								{method && <MethodBadge method={method} size="sm" />}

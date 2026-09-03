@@ -131,7 +131,14 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 			    `--rule` the border reads - a bare border token is invisible on
 			    the panel this header sits on. */}
 			<span className="surface-sunken flex min-w-0 items-center gap-1.5 rounded-md border border-rule px-2 py-1">
-				<ServerCog className="h-3.5 w-3.5 shrink-0 text-success-text" aria-hidden="true" />
+				{/* A server that is up is a run state, so the glyph takes the
+				    `--status-*` family's text pair - the bare indicator token
+				    misses even the 3:1 icon bar on a light surface (2.21:1,
+				    design-system.md). */}
+				<ServerCog
+					className="h-3.5 w-3.5 shrink-0 text-status-success-text"
+					aria-hidden="true"
+				/>
 				<TruncatedText className="font-mono text-xs">{running.url}</TruncatedText>
 				<span className="shrink-0 text-xs text-muted-foreground">
 					{running.routeCount} route{running.routeCount === 1 ? "" : "s"}

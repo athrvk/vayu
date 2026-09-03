@@ -184,25 +184,57 @@ constexpr char path_separator () {
  */
 std::string path_join (const std::string& base, const std::string& component);
 
-#if VAYU_PLATFORM_WINDOWS
 // ============================================================================
-// High-Resolution Timer (Windows)
+// High-Resolution Timer
 // ============================================================================
 /**
- * @brief Enable 1 ms system timer resolution for accurate short sleeps
+ * @brief Holds the system's 1 ms timer resolution for as long as it lives
  *
- * On Windows the default timer resolution is ~15.6 ms, which makes
- * std::this_thread::sleep_for(microseconds) round to 15 ms and severely
- * limits high-RPS load testing. Calling this at startup allows sub-millisecond
- * pacing (e.g. 60k+ RPS). Call disable_high_resolution_timer() at shutdown.
+ * Windows only in effect - on every other platform the class is an empty
+ * bracket the counter still records, so the balance is one invariant tested
+ * everywhere rather than on one CI leg (`high_resolution_timer_holders`).
+ *
+ * Windows' default timer resolution is ~15.6 ms, and `timeBeginPeriod (1)`
+ * lowers it to 1 ms. Two consumers need that, and **both live only while a run
+ * is sending** (issue #1161):
+ *
+ * - the event loop's `curl_multi_poll (..., POLL_TIMEOUT_MS)`, which asks for a
+ *   1 ms wait per iteration and gets ~15.6 ms without this;
+ * - the rate-limited pacing loop's `sleep_for` leg, which runs below ~500 RPS
+ *   (above it the tick's remainder is spun out instead - see
+ *   `wait_for_next_tick`), where a 2.5 ms sleep would likewise round to ~15.6.
+ *
+ * So the request is scoped to runs and not to the process: the sidecar is
+ * resident for the whole app session and idle for almost all of it, and a
+ * process-lifetime request is the classic Windows battery finding. The holder
+ * is the event loop itself (`detail::EventLoopImpl`), which exists only while
+ * a run is sending and is destroyed by `release_execution_resources` as the
+ * run is retained - so nothing has to remember to give the request back, and
+ * a design-mode scenario run, which sends sequentially and builds no loop,
+ * never asks for it.
+ *
+ * Nesting is safe: the underlying request is refcounted, taken by the first
+ * holder and released by the last, under a mutex - the count and the OS call
+ * move together, so a run starting as another finishes cannot end with the
+ * resolution released while a live run needs it.
  */
-void enable_high_resolution_timer ();
+class HighResolutionTimerScope {
+    public:
+    HighResolutionTimerScope ();
+    ~HighResolutionTimerScope ();
+    HighResolutionTimerScope (const HighResolutionTimerScope&) = delete;
+    HighResolutionTimerScope& operator= (const HighResolutionTimerScope&) = delete;
+    HighResolutionTimerScope (HighResolutionTimerScope&&)            = delete;
+    HighResolutionTimerScope& operator= (HighResolutionTimerScope&&) = delete;
+};
 
 /**
- * @brief Restore default system timer resolution
- * Must be called to match each enable_high_resolution_timer().
+ * @brief How many scopes hold the 1 ms request right now
+ *
+ * The refcount itself, so a test can state the invariant the scope exists for -
+ * that what a run takes, a run gives back - on a platform where the OS call is
+ * compiled out.
  */
-void disable_high_resolution_timer ();
-#endif
+[[nodiscard]] int high_resolution_timer_holders ();
 
 } // namespace vayu::platform

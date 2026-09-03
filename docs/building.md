@@ -187,11 +187,20 @@ This will:
 
 ### Output
 
-Production builds are created in `app/release/`:
+Production builds are created in `app/release/`. `artifactName` in
+`app/electron-builder.json` is the source of truth for these names: the
+top-level pattern is `${productName}-${arch}.${ext}`, and the `mac` and
+`appImage` blocks override it to insert `${version}`, so the dmg, the zip and
+the AppImage carry a version while the exe and the deb do not.
 
-- **macOS**: `Vayu-<version>.dmg`
-- **Windows**: `Vayu Setup <version>.exe`
-- **Linux**: `Vayu-<version>.AppImage` and `vayu-client_<version>_amd64.deb`
+- **macOS**: `Vayu-<version>-<arch>.dmg` and `Vayu-<version>-<arch>.zip`. The
+  zip carries the macOS install and update path - `install.sh` downloads it and
+  `latest-mac.yml` names it - while the dmg is the drag-to-Applications route.
+  `<arch>` is `universal` in a released build and the host arch (`x64` or
+  `arm64`) for a local `python build.py`, which has only the host-arch engine
+  to package.
+- **Windows**: `Vayu-<arch>.exe`, the NSIS installer.
+- **Linux**: `Vayu-<version>-x86_64.AppImage` and `Vayu-amd64.deb`.
 
 ### Testing Production Builds
 
@@ -208,12 +217,12 @@ chmod +x app/release/Vayu-*.AppImage
 ./app/release/Vayu-*.AppImage
 
 # Debian package
-sudo dpkg -i app/release/vayu-client_*.deb
+sudo dpkg -i app/release/Vayu-*.deb
 ```
 
 **Windows:**
 ```powershell
-.\app\release\Vayu Setup *.exe
+.\app\release\Vayu-x64.exe
 ```
 
 ## Advanced: Manual CMake Build
@@ -371,7 +380,9 @@ The project uses GitHub Actions for automated builds:
   - Runs on every pull request
   - Tests engine and frontend on Linux/Windows/macOS
   - Lint, formatting and type-check run once, on their own Linux job, rather
-    than in front of a suite they cannot affect
+    than in front of a suite they cannot affect. That job also runs ESLint over
+    the JavaScript outside `app/` (`scripts/perf/*.{mjs,cjs}` today), from the
+    repository root and against its own config - it is where Node already is
   - `Script lint` does the same for the other two languages: shellcheck
     (v0.10.0) over every tracked shell script and ruff (0.15.8) over every
     tracked `.py`, both file lists taken from `git ls-files` so a script added

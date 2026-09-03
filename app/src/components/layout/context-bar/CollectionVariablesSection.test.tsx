@@ -24,6 +24,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CollectionVariablesSection } from "./CollectionVariablesSection";
+import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import type { Collection, VariableValue } from "@/types";
 
@@ -73,7 +74,9 @@ function renderSection() {
 	client.setQueryData(queryKeys.collections.list(), collections);
 	return render(
 		<QueryClientProvider client={client}>
-			<CollectionVariablesSection tab={TAB} />
+			<TooltipProvider>
+				<CollectionVariablesSection tab={TAB} />
+			</TooltipProvider>
 		</QueryClientProvider>
 	);
 }
@@ -112,9 +115,12 @@ describe("CollectionVariablesSection - what it lists", () => {
 		collections = [collection("col_1", { key: def("s3cret", { secret: true }) })];
 		renderSection();
 
-		const input = screen.getByRole("textbox", { name: "Value of key" });
+		// The shared `SecretInput` (#1308): masked `type=password`, read-only, and
+		// reached by label since a password input carries no textbox role. The
+		// collection tab reuses `VariableRow`, so it gets the reveal for free.
+		const input = screen.getByLabelText("Value of key");
 		expect(input).toHaveAttribute("readonly");
-		expect(screen.queryByDisplayValue("s3cret")).not.toBeInTheDocument();
+		expect(input).toHaveAttribute("type", "password");
 	});
 
 	it("says so when the collection defines none", () => {

@@ -26,8 +26,32 @@
 
 // `Zap` is the load-test mark throughout the app - the dashboard tab, a finished
 // load run in the strip (`tab-descriptors.ts`). The palette uses the same bolt.
-import { Download, Play, Plus, Settings, SunMoon, X, Zap } from "lucide-react";
-import { useImportModalStore, useTabsStore } from "@/stores";
+import {
+	Download,
+	PanelLeft,
+	PanelRight,
+	Play,
+	Plus,
+	Save,
+	Send,
+	Settings,
+	SunMoon,
+	X,
+	Zap,
+} from "lucide-react";
+import {
+	CLOSE_TAB_CHORD,
+	DRAWER_VIEW_CHORDS,
+	LOAD_TEST_CHORD,
+	NEW_REQUEST_CHORD,
+	SAVE_CHORD,
+	SEND_CHORD,
+	SETTINGS_CHORD,
+	TOGGLE_CONTEXT_BAR_CHORD,
+	TOGGLE_DRAWER_CHORD,
+} from "@/constants/shortcuts";
+import { DRAWER_VIEWS } from "@/constants/drawer-views";
+import { useImportModalStore, useLayoutStore, useSaveStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
@@ -56,6 +80,8 @@ const ACTION_COMMANDS: readonly Command[] = [
 		keywords: ["create", "add", "http", "endpoint"],
 		group: "action",
 		icon: Plus,
+		// The Shell's ⌘N runs the same flow from its own host - see `Shell.tsx`.
+		shortcut: NEW_REQUEST_CHORD,
 		// The flow can need a collection picker, and a picker needs a host to
 		// render it - see `CommandSurfaces`.
 		available: (ctx) => ctx.surfaces !== undefined,
@@ -85,6 +111,30 @@ const ACTION_COMMANDS: readonly Command[] = [
 		},
 	},
 	{
+		id: "send-request",
+		// Named like the other contextual commands, and for the same reason: the
+		// row says which request Enter puts on the wire.
+		title: (ctx) => (ctx.activeTabLabel ? `Send "${ctx.activeTabLabel}"` : "Send this request"),
+		keywords: ["execute", "fire", "call", "http", "request", "run"],
+		group: "action",
+		// The app has no send mark of its own - the URL bar's Send is a text
+		// button - so the palette takes lucide's, which is the glyph the action
+		// already reads as everywhere else.
+		icon: Send,
+		// The builder's window handler matches this chord and calls the very
+		// `sendRequest` below.
+		shortcut: SEND_CHORD,
+		/*
+		 * Contributed by the mounted builder, like the load test under it - and
+		 * withdrawn while sending is not possible. Send is Stop for the whole of
+		 * an open stream (#574) and does nothing with an empty URL, so a row that
+		 * stayed on screen there would be one the palette offers and the app
+		 * refuses: `canSendRequest` is the single predicate both routes ask.
+		 */
+		available: (ctx) => ctx.surfaces?.sendRequest !== undefined,
+		perform: (ctx) => ctx.surfaces?.sendRequest?.(),
+	},
+	{
 		id: "run-load-test",
 		// Named like the other contextual commands. The label is the tab strip's,
 		// so the row and the tab it acts on cannot read differently.
@@ -93,6 +143,9 @@ const ACTION_COMMANDS: readonly Command[] = [
 		keywords: ["load", "benchmark", "stress", "performance", "rps", "throughput", "start"],
 		group: "action",
 		icon: Zap,
+		// The builder's window handler matches this chord and calls the very
+		// `startLoadTest` below - the one the mounted builder contributes.
+		shortcut: LOAD_TEST_CHORD,
 		/*
 		 * The one surface no host can mount for itself. Starting a load test needs
 		 * the request builder's live draft, so the mounted builder contributes the
@@ -109,10 +162,42 @@ const ACTION_COMMANDS: readonly Command[] = [
 		keywords: ["dismiss", "shut"],
 		group: "action",
 		icon: X,
+		// The Shell's handler closes the same active tab on this chord.
+		shortcut: CLOSE_TAB_CHORD,
 		available: (ctx) => ctx.activeTab !== null,
 		perform: (ctx) => {
 			if (ctx.activeTab) useTabsStore.getState().closeTab(ctx.activeTab.id);
 		},
+	},
+	{
+		id: "save",
+		title: (ctx) => (ctx.activeTabLabel ? `Save "${ctx.activeTabLabel}"` : "Save"),
+		keywords: ["write", "persist", "store", "commit"],
+		group: "action",
+		icon: Save,
+		// The Shell's handler raises the same flag on this chord: the mounted
+		// surface owns what saving means, and both routes ask it the same way.
+		shortcut: SAVE_CHORD,
+		available: (ctx) => ctx.activeTab !== null,
+		perform: () => useSaveStore.getState().triggerSave(),
+	},
+	{
+		id: "toggle-drawer",
+		title: "Show or hide the drawer",
+		keywords: ["sidebar", "panel", "left", "collapse", "expand"],
+		group: "action",
+		icon: PanelLeft,
+		shortcut: TOGGLE_DRAWER_CHORD,
+		perform: () => useLayoutStore.getState().toggleDrawer(),
+	},
+	{
+		id: "toggle-context-bar",
+		title: "Show or hide the context bar",
+		keywords: ["sidebar", "panel", "right", "collapse", "expand"],
+		group: "action",
+		icon: PanelRight,
+		shortcut: TOGGLE_CONTEXT_BAR_CHORD,
+		perform: () => useLayoutStore.getState().toggleContextBar(),
 	},
 	{
 		id: "toggle-theme",
@@ -129,9 +214,43 @@ const ACTION_COMMANDS: readonly Command[] = [
 		keywords: ["preferences", "options", "config"],
 		group: "action",
 		icon: Settings,
+		// The Shell's handler opens the same tab on ⌘, - see `openSettingsTab`.
+		shortcut: SETTINGS_CHORD,
 		perform: openSettingsTab,
 	},
 ];
+
+/**
+ * One command per drawer view, generated from the table the Dock's strip is
+ * drawn from - so the palette cannot offer a seventh view, name one differently
+ * or draw it with another icon.
+ *
+ * Settings is excluded because it already has `open-settings`, which opens the
+ * tab and brings its drawer view along; a second row for the same ⌘, would be
+ * two names for one key.
+ *
+ * `revealDrawerView`, not `activateDrawerView`: the chord toggles, which is
+ * right for a switcher pressed twice, and the store's own note says the
+ * revealing half is what "a palette result" wants - a row read as "Show
+ * history" that hid History because it was already open would be answering a
+ * question nobody asked. The chord still appears on the row, because it is the
+ * key that shows this view.
+ */
+const DRAWER_VIEW_COMMANDS: readonly Command[] = DRAWER_VIEWS.filter(
+	({ view }) => view !== "settings"
+).map(
+	({ view, label, icon }): Command => ({
+		id: `show-${view}`,
+		// The chord's own label ("Show collections"), so the palette row and the
+		// Keyboard Shortcuts panel read the same sentence.
+		title: DRAWER_VIEW_CHORDS[view].label ?? label,
+		keywords: [view, label, "drawer", "sidebar", "show", "view"],
+		group: "action",
+		icon,
+		shortcut: DRAWER_VIEW_CHORDS[view],
+		perform: () => useLayoutStore.getState().revealDrawerView(view),
+	})
+);
 
 /**
  * One command per settings section, generated from the registries the sidebar
@@ -172,7 +291,11 @@ const SETTINGS_COMMANDS: readonly Command[] = [
 ];
 
 /** Every command the app declares, in palette order. */
-export const COMMANDS: readonly Command[] = [...ACTION_COMMANDS, ...SETTINGS_COMMANDS];
+export const COMMANDS: readonly Command[] = [
+	...ACTION_COMMANDS,
+	...DRAWER_VIEW_COMMANDS,
+	...SETTINGS_COMMANDS,
+];
 
 /** The subset that can run right now. */
 export function availableCommands(ctx: CommandContext): Command[] {

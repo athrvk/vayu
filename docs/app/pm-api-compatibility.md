@@ -259,14 +259,21 @@ and [the migration
 note](../engine/scripting.md#status-is-the-reason-phrase-code-is-the-number)
 names the one pattern that degrades silently.
 
-**It is bounded, and both bounds throw.** The request's timeout is clamped to
-whatever is left of the script's own time budget (`scriptTimeout`, 5s by
-default), because QuickJS only checks its deadline *between* bytecode
+**It is bounded three ways, and two of them throw.** The request's timeout is
+clamped to whatever is left of the script's own time budget (`scriptTimeout`,
+5s by default), because QuickJS only checks its deadline *between* bytecode
 operations - a blocking call never yields to it, so without the clamp a 5s
 script would hold its thread for the request's 30s timeout. One script may
 issue at most **10** requests; a load run's Tests script runs once per sampled
 response, so an uncapped loop would turn post-run validation into minutes of
-apparent hang.
+apparent hang. The third is the response body: the fetch reads at most what
+the enclosing execution reads - `maxDesignResponseBodyBytes` for a Send's or a
+collection step's scripts, `maxResponseBodyBytes` for a load run's deferred
+Tests script - and past it the transfer is **refused**, arriving as the
+callback's `err` with `.code` `RESPONSE_TOO_LARGE` rather than as a throw. It
+refuses rather than handing over a prefix because `res` carries no truncation
+flag for a script to check, so a cut body would reach `JSON.parse` as corrupt
+input.
 
 **Agents cannot use it.** Vayu's MCP target allowlist is enforced in the MCP
 server, against the composed URL, *before* it calls the engine - so a request
@@ -414,6 +421,23 @@ these:
                   (chai's language chains: they assert nothing and read as
                    English, and carry the chain's flags like .and)
 ```
+
+**The chain words above are a vocabulary, not a route.** The dotted spellings
+in that table are how the completion popup offers each matcher, not the only
+way to reach it: `to`, `be`, `have`, `at`, `and`, `all`, `not`, `deep`, `nested`
+and every language chain are members of the same expectation and each hands it
+back, so any of them may precede any matcher, exactly as in chai. All four of
+these run, and the editor accepts all four (#1209):
+
+```javascript
+pm.expect(code).to.be.equal(200);                       // `be` asserts nothing
+pm.expect(token).to.be.a('string').and.match(/^prefix_/); // matcher after .and
+pm.expect(scope).to.be.a('string').and.not.empty;         // `not` after .and
+pm.expect(value).not.to.equal(1);                         // `not` before .to
+```
+
+Terminal getters (`.to.be.true`, `.to.exist`) return the chain too, so a chain
+continues past one: `.to.be.true.and.equal(1)`.
 
 **`equal` is `===`; `eql` (and `deep.equal`) is deep.** So
 `expect({a:1}).to.equal({a:1})` **fails** - different references - and

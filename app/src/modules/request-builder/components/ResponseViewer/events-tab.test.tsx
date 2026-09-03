@@ -110,8 +110,8 @@ describe("the Events tab", () => {
 			runId: "run_1",
 			eventsUrl: "/runs/run_1/events",
 		});
-		useExecutionEventsStore.getState().addEvent("run_1", event("first", "token"));
-		useExecutionEventsStore.getState().addEvent("run_1", event("second", "token"));
+		useExecutionEventsStore.getState().addEvents("run_1", [event("first", "token")]);
+		useExecutionEventsStore.getState().addEvents("run_1", [event("second", "token")]);
 
 		renderViewer();
 		openEventsTab();
@@ -129,7 +129,7 @@ describe("the Events tab", () => {
 			runId: "run_1",
 			eventsUrl: "/runs/run_1/events",
 		});
-		useExecutionEventsStore.getState().addEvent("run_1", event("not mine"));
+		useExecutionEventsStore.getState().addEvents("run_1", [event("not mine")]);
 
 		renderViewer();
 		openEventsTab();
@@ -146,7 +146,7 @@ describe("the Events tab", () => {
 			runId: "run_1",
 			eventsUrl: "/runs/run_1/events",
 		});
-		useExecutionEventsStore.getState().addEvent("run_1", event("live row"));
+		useExecutionEventsStore.getState().addEvents("run_1", [event("live row")]);
 		useExecutionEventsStore.getState().endStream("run_1", "completed", 1);
 		state.response = okResponse({
 			events: [event("stored row")],

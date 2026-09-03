@@ -46,7 +46,8 @@ src/
 │   └── welcome/           # Welcome screen
 ├── lib/               # Shared libraries
 │   ├── graphql/       # GraphQL diagnostics, introspection, schema cache, Monaco providers
-│   └── monaco-setup.ts    # Monaco local-bundle config + GraphQL provider registration
+│   ├── monaco-setup.ts    # Monaco local-bundle config + GraphQL provider registration
+│   └── monaco-loader.ts   # Lazy boundary in front of it - Monaco loads with the first editor
 ├── stores/            # Zustand stores (UI state)
 ├── queries/           # TanStack Query hooks (server state)
 ├── hooks/             # Custom hooks

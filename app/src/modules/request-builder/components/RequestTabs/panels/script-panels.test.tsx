@@ -74,6 +74,11 @@ vi.mock("../../../context", () => ({
 		},
 		updateField: () => {},
 		getAllVariables: () => ALL_VARIABLES,
+		// No origins, so no name here can be the shadowed-empty scoped read of
+		// issue #1196 and every chip keeps the paint these cases assert. That
+		// warning has its own suite (`script-data-chip.test.tsx`), which supplies
+		// the origins it needs.
+		getVariableOrigins: () => [],
 		// Distinct per end of the run, so a panel reading the wrong context key
 		// shows the other end's collection name / recorded script.
 		inheritedPreScripts: [{ origin: "collection", id: "c1", name: "PreChain", script: "x" }],

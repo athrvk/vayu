@@ -34,6 +34,17 @@ import {
 	defaultDurationUnderCap,
 } from "./safety.js";
 import { compareReports } from "./compare.js";
+import {
+	collectionChain,
+	collectionParentId,
+	precedenceNote,
+	resolveVariableReports,
+	VARIABLE_PRECEDENCE_SENTENCE,
+	VARIABLE_RESOLUTION_URI,
+	type CollectionLike,
+	type OriginScopes,
+	type StoredVariableBag,
+} from "./variable-origins.js";
 import { HTTP_VERSIONS } from "./http-versions.js";
 
 /** An auth block as stored/forwarded (discriminated by `mode`). */
@@ -235,13 +246,17 @@ function jsonResult(value: unknown): ToolResult {
 /**
  * How much of a body a tool result carries inline (issue #767).
  *
- * A tool-result budget, not an engine one. Neither engine cap fits: the config
- * entry that bounds a single response, `maxResponseBodyBytes`, documents itself
- * as load-only ("Design-mode sends are not affected"), and `maxTraceBodyBytes`
- * (5MB) is a storage bound sized for a human opening one full trace in the UI.
- * Between them a design send returns every byte it read - an ordinary page
- * fetch came back as 1.3M characters and exceeded the tool-result token limit
- * outright, with nothing in between the engine's answer and the agent.
+ * A tool-result budget, not an engine one. No engine cap fits. The config entry
+ * that bounds a single response, `maxResponseBodyBytes`, is still the load
+ * path's alone ("Design-mode sends are not affected"); `maxTraceBodyBytes`
+ * (5MB) is a storage bound sized for a human opening one full trace in the UI;
+ * and `maxDesignResponseBodyBytes` (32MB, issue #1157) does bound a design send
+ * - it is why an agent can no longer be handed an unbounded body - but 32MB is
+ * a "keep the engine's memory finite" number, three orders of magnitude past
+ * what a tool result can carry. Between them a design send returns every byte
+ * it read up to 32MB: an ordinary page fetch came back as 1.3M characters and
+ * exceeded the tool-result token limit outright, with nothing in between the
+ * engine's answer and the agent.
  *
  * 32KB is not a new number: it is `maxSampleBodyBytes`
  * (`DEFAULT_MAX_SAMPLE_BODY_BYTES`, engine `constants.hpp`), this codebase's own
@@ -315,6 +330,13 @@ function boundWireMessage(node: Record<string, unknown>): Record<string, unknown
  * `bodySize` is the engine's own byte count for this body and is exactly what a
  * truncation flag refers to, so it is used rather than recomputed; it is only
  * filled in when the engine sent no usable one.
+ *
+ * The engine's `bodyCapped` (issue #1157) is carried through untouched, and the
+ * two flags must stay distinguishable: `bodyTruncated` set here means this tool
+ * result is showing less than the engine returned, which the app's own history
+ * still has in full, while `bodyCapped` means the engine never read more than
+ * this - re-sending returns the same prefix, and only raising
+ * `maxDesignResponseBodyBytes` changes it. Both can be true of one response.
  */
 function boundExecuteResponse(value: unknown): unknown {
 	if (!isRecord(value)) return value;
@@ -751,6 +773,21 @@ function requireStr(args: Record<string, unknown>, key: string): string {
 	return v;
 }
 
+/**
+ * An optional array-of-strings argument. A non-array, or an array carrying
+ * anything but strings, is the caller's mistake rather than an empty selection:
+ * silently dropping the bad entries would answer a different question than the
+ * one asked and look like the names simply were not defined.
+ */
+function stringArray(args: Record<string, unknown>, key: string): string[] | undefined {
+	const v = args[key];
+	if (v === undefined) return undefined;
+	if (!Array.isArray(v) || v.some((entry) => typeof entry !== "string")) {
+		throw new ToolArgError(`"${key}" must be an array of strings.`);
+	}
+	return v as string[];
+}
+
 class ToolArgError extends Error {}
 
 /**
@@ -1032,8 +1069,106 @@ function variablesInput(subject: string) {
 		.record(VARIABLE_INPUT)
 		.optional()
 		.describe(
-			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. Merges: variables not named here are left alone.`
+			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
 		);
+}
+
+/** The stored `variables` blob off a collection / environment / globals row. */
+function variableBagOf(row: unknown): StoredVariableBag | undefined {
+	if (!isRecord(row)) return undefined;
+	const bag = row.variables;
+	return isRecord(bag) ? (bag as StoredVariableBag) : undefined;
+}
+
+/**
+ * The environment `resolve_variables` should resolve against.
+ *
+ * Three cases, deliberately distinct: a named id must exist (a typo resolving
+ * silently against the active environment would report confident, wrong
+ * answers), `"none"` is the explicit no-environment case that
+ * `activate_environment` already spells that way, and an omitted id means the
+ * active row - the same default a send takes.
+ */
+function pickEnvironment(rows: readonly unknown[], environmentId: string | undefined) {
+	if (environmentId === "none") return undefined;
+	if (environmentId !== undefined && environmentId !== "") {
+		const found = rows.find((row) => isRecord(row) && row.id === environmentId);
+		if (!found) throw new ToolArgError(`No environment with id "${environmentId}".`);
+		return found as Record<string, unknown>;
+	}
+	return rows.find((row) => isRecord(row) && row.isActive === true) as
+		| Record<string, unknown>
+		| undefined;
+}
+
+/**
+ * Read every scope `resolve_variables` needs, in one pass over the engine's
+ * lists. Globals are always read; the collection chain and the environment only
+ * when the context names them.
+ *
+ * A `collectionId` that names nothing is refused rather than resolved as an
+ * empty chain: "this collection defines none of these" and "there is no such
+ * collection" are different answers, and an agent acting on the first when the
+ * second is true writes to a collection that does not exist.
+ */
+async function gatherVariableScopes(
+	ctx: ToolContext,
+	collectionId: string | undefined,
+	environmentId: string | undefined,
+	signal?: AbortSignal
+): Promise<OriginScopes> {
+	const globals = variableBagOf(await ctx.client.getGlobals(signal));
+
+	let chain: OriginScopes["chain"];
+	if (collectionId !== undefined && collectionId !== "") {
+		const listed = await ctx.client.listCollections(signal);
+		const rows = (Array.isArray(listed) ? listed : []) as CollectionLike[];
+		chain = collectionChain(rows, collectionId);
+		if (chain.length === 0) throw new ToolArgError(`No collection with id "${collectionId}".`);
+	}
+
+	let environment: OriginScopes["environment"];
+	if (environmentId !== "none") {
+		const listed = await ctx.client.listEnvironments(signal);
+		const rows = Array.isArray(listed) ? listed : [];
+		const row = pickEnvironment(rows, environmentId);
+		if (row) {
+			environment = {
+				id: typeof row.id === "string" ? row.id : undefined,
+				name: typeof row.name === "string" ? row.name : undefined,
+				variables: variableBagOf(row),
+			};
+		}
+	}
+
+	return { globals, chain, environment };
+}
+
+/**
+ * What context the answer was computed in, echoed back so a report can be read
+ * without re-deriving it. The environment is stated even when there is none:
+ * "no environment was active" is why a value came from a collection, and an
+ * omitted key would leave that to be guessed.
+ */
+function describeScopes(
+	scopes: OriginScopes,
+	collectionId: string | undefined,
+	environmentId: string | undefined
+): Record<string, unknown> {
+	return {
+		collectionId: collectionId ?? null,
+		collectionChain: (scopes.chain ?? []).map((c) => ({ id: c.id, name: c.name })),
+		environmentId: scopes.environment?.id ?? null,
+		environmentName: scopes.environment?.name ?? null,
+		environmentSelection:
+			environmentId === "none"
+				? "explicitly none"
+				: environmentId
+					? "named by the caller"
+					: scopes.environment
+						? "the active environment"
+						: "no environment is active",
+	};
 }
 
 /** The `removeVariables` argument - the delete a blank value cannot express. */
@@ -2713,7 +2848,10 @@ interface CollectionRow {
  * which is a destination that does not exist.
  */
 function collectionParent(row: CollectionRow): string | null {
-	return typeof row.parentId === "string" && row.parentId !== "" ? row.parentId : null;
+	// One definition of the rule, shared with the chain walk `resolve_variables`
+	// does - the two disagreeing about what counts as a root is a defect neither
+	// side's own tests would catch.
+	return collectionParentId(row);
 }
 
 /** The collections list, dropping anything without a usable id. */
@@ -3598,7 +3736,11 @@ export const TOOLS: McpTool[] = [
 		name: "list_collections",
 		category: "read",
 		invalidates: [],
-		description: "List all request collections (folders that organize saved requests).",
+		description:
+			"List all request collections (folders that organize saved requests). Each row carries that collection's own `variables` blob; a request resolves against the whole chain from the root down, not just its own collection. " +
+			precedenceNote(
+				"Collection variables sit between globals and the active environment, and a nested collection outranks its ancestors."
+			),
 		annotations: {
 			title: "List collections",
 			readOnlyHint: true,
@@ -3627,7 +3769,11 @@ export const TOOLS: McpTool[] = [
 		name: "list_environments",
 		category: "read",
 		invalidates: [],
-		description: "List all environments (named sets of variables like baseUrl, apiKey).",
+		description:
+			"List all environments (named sets of variables like baseUrl, apiKey). The row with `isActive: true` is the one requests resolve against when a call names no environmentId. " +
+			precedenceNote(
+				"An environment's variables are the top scope tier: they shadow every collection and global of the same name."
+			),
 		annotations: {
 			title: "List environments",
 			readOnlyHint: true,
@@ -3888,8 +4034,11 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app (environment > collection chain > globals). Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
-			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`.`,
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. The target host must be on Vayu's MCP allowlist. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app. " +
+			VARIABLE_PRECEDENCE_SENTENCE +
+			` See ${VARIABLE_RESOLUTION_URI}.` +
+			" Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. (To replay a saved request with its stored auth and scripts across a whole collection, use run_collection_smoke.) Certificate verification is always on for a send made this way - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it. " +
+			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned.`,
 		annotations: {
 			title: "Send a request",
 			readOnlyHint: false,
@@ -3905,7 +4054,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. File parts are not supported. For graphql, a bare query document is enveloped as `{"query": ...}` and sent as application/json; an envelope you write yourself is sent unchanged. For jsonrpc, a bare call object gains `"jsonrpc":"2.0"` - plus `"id":1` when it names no id - and is sent as application/json; a frame already declaring a string `"jsonrpc"` is sent byte for byte, so write the frame yourself to choose your own id or to send a notification (no id). A top-level array is a batch call and is sent unchanged. An xml `body` is sent byte for byte as application/xml; a Content-Type you set yourself wins.'
+					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. File parts are not supported. For graphql, a bare query document is enveloped as `{"query": ...}` and sent as application/json; an envelope you write yourself is sent unchanged. That is the POST transport: with `method` GET the same document is sent as `query`/`operationName`/`variables` query parameters and no body, which is what GraphQL-over-HTTP defines GET to mean - so use POST for a mutation, and note that a GET is what a request gets by default. For jsonrpc, a bare call object gains `"jsonrpc":"2.0"` - plus `"id":1` when it names no id - and is sent as application/json; a frame already declaring a string `"jsonrpc"` is sent byte for byte, so write the frame yourself to choose your own id or to send a notification (no id). A top-level array is a batch call and is sent unchanged. An xml `body` is sent byte for byte as application/xml; a Content-Type you set yourself wins.'
 				),
 			auth: authInput,
 			httpVersion: z
@@ -4070,7 +4219,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Create a collection (the folder saved requests live in), with the variables, auth and pre/post-request scripts every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`.",
+			"Create a collection (the folder saved requests live in), with the variables, auth and pre/post-request scripts every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`. " +
+			precedenceNote(
+				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
+			),
 		annotations: {
 			title: "Create collection",
 			readOnlyHint: false,
@@ -4117,7 +4269,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Change a collection: its name, description, variables, auth or pre/post-request scripts - the state every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth replaces the stored block whole. This is not a move - to re-parent a collection, use move_item.",
+			"Change a collection: its name, description, variables, auth or pre/post-request scripts - the state every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth replaces the stored block whole. This is not a move - to re-parent a collection, use move_item. " +
+			precedenceNote(
+				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
+			),
 		annotations: {
 			title: "Update collection",
 			readOnlyHint: false,
@@ -4799,7 +4954,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. File parts are not supported here - a multipart file part names a path on the user\'s machine, which an agent cannot choose for them; author it in the app. An xml `body` is stored and sent verbatim as application/xml.'
+					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. File parts are not supported here - a multipart file part names a path on the user\'s machine, which an agent cannot choose for them; author it in the app. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the GET a new request defaults to. An xml `body` is stored and sent verbatim as application/xml.'
 				),
 			description: z.string().optional(),
 			auth: storedAuthInput(
@@ -4870,7 +5025,7 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Body type for `body`: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded. Only meaningful alongside `body`. A jsonrpc `body` is enveloped engine-side exactly as `create_request` describes; an xml `body` is stored and sent verbatim as application/xml. File parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
+					"Body type for `body`: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded. Only meaningful alongside `body`. A jsonrpc `body` is enveloped engine-side exactly as `create_request` describes, and a graphql `body` travels by the same method-dependent rule that tool describes - the JSON envelope on POST, query parameters on GET; an xml `body` is stored and sent verbatim as application/xml. File parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
 				),
 			description: z.string().optional().describe("New description."),
 			auth: storedAuthInput(
@@ -5400,7 +5555,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			precedenceNote(
+				"An environment's variables are the top scope tier: once this one is active they shadow every collection and global of the same name."
+			),
 		annotations: {
 			title: "Create environment",
 			readOnlyHint: false,
@@ -5438,7 +5596,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			precedenceNote(
+				"An environment's variables are the top scope tier: while this environment is active they shadow every collection and global of the same name. Writing here to an inactive environment changes nothing a request resolves until activate_environment makes it current."
+			),
 		annotations: {
 			title: "Update environment",
 			readOnlyHint: false,
@@ -5497,7 +5658,10 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			'Make an environment the active one - the set {{variables}} resolve against when a call names no environmentId of its own, and what the app\'s own switcher shows. Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. Tools that take an explicit environmentId (run_request, start_load_run, run_collection) are unaffected by this - it is the default, not an override. GUARDED: requires write access to be enabled in Vayu Settings.',
+			'Make an environment the active one - the set {{variables}} resolve against when a call names no environmentId of its own, and what the app\'s own switcher shows. Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. Tools that take an explicit environmentId (run_request, start_load_run, run_collection) are unaffected by this - it is the default, not an override. GUARDED: requires write access to be enabled in Vayu Settings. ' +
+			precedenceNote(
+				"This is the one call that changes which tier answers without changing any value: the newly active environment shadows every collection and global of the same name, so a name can start resolving differently with nothing else edited."
+			),
 		annotations: {
 			title: "Activate environment",
 			readOnlyHint: false,
@@ -5605,7 +5769,10 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Read the global variables - the bottom of the resolution order, used by every request whatever environment is active (environment > collection chain > globals). An engine that has never had any answers an empty set rather than an error.",
+			"Read the global variables - used by every request whatever environment is active. An engine that has never had any answers an empty set rather than an error. " +
+			precedenceNote(
+				"Globals are the bottom tier, so a value read back here is not necessarily the one a request resolves: use resolve_variables to see which definition actually wins."
+			),
 		annotations: {
 			title: "Get global variables",
 			readOnlyHint: true,
@@ -5616,11 +5783,79 @@ export const TOOLS: McpTool[] = [
 		handler: (_args, ctx, signal) => callEngine(() => ctx.client.getGlobals(signal)),
 	},
 	{
+		name: "resolve_variables",
+		category: "read",
+		invalidates: [],
+		description:
+			'Answer which definition of a variable name actually wins in a given context, and list the ones it beat - the question get_globals and list_environments cannot, because each shows one tier in isolation. For every name it reports the winning value with the scope and source that supplied it, then every shadowed definition highest-precedence-first, each saying whether it was outranked by a higher tier or simply switched off (`enabled: false`). A switched-off row is the more common answer to "why is this not the value I set?", and a name whose every definition is disabled resolves to nothing at all rather than to an empty string. ' +
+			precedenceNote(
+				"Pass no environmentId to use the active environment, the same default a send takes; pass a collectionId to include its chain."
+			) +
+			" Secret values are withheld here (`valueWithheld: true`) to match the app's popover - note that list_environments, get_globals and vayu://environments still return every value in full, so this is not a security boundary. Reports what is stored: it resolves nothing on the wire and starts no run.",
+		annotations: {
+			title: "Resolve variables",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			collectionId: z
+				.string()
+				.optional()
+				.describe(
+					"Optional collection ID. Includes that collection's chain, merged root-first, between globals and the environment."
+				),
+			environmentId: z
+				.string()
+				.optional()
+				.describe(
+					'Optional environment ID. Omit for the active environment (the default a send takes); pass "none" to resolve as if no environment were active.'
+				),
+			names: z
+				.array(z.string())
+				.optional()
+				.describe(
+					"Optional variable names to report. Omit for every name defined anywhere in the context. A name nothing defines is reported as unresolved rather than omitted."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const collectionId = str(args, "collectionId");
+			const environmentId = str(args, "environmentId");
+			const names = stringArray(args, "names");
+
+			let scopes: OriginScopes;
+			let context: Record<string, unknown>;
+			try {
+				scopes = await gatherVariableScopes(ctx, collectionId, environmentId, signal);
+				context = describeScopes(scopes, collectionId, environmentId);
+			} catch (err) {
+				// A bad id is the caller's mistake and must not be reported as an
+				// engine failure - the same split `pagedRead`'s callers keep.
+				if (err instanceof ToolArgError) return errorResult(err.message);
+				return engineErrorResult(err);
+			}
+
+			const variables = resolveVariableReports(scopes, names);
+			return structuredResult({
+				context,
+				variables,
+				summary: {
+					reported: variables.length,
+					resolved: variables.filter((v) => v.resolved).length,
+					shadowed: variables.filter((v) => v.shadowedBy.length > 0).length,
+				},
+			});
+		},
+	},
+	{
 		name: "update_globals",
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			precedenceNote(
+				"Globals are the bottom tier: any collection or active-environment definition of the same name shadows what you write here, so a request whose value does not change after this call is usually shadowed rather than unwritten - resolve_variables names the definition that won."
+			),
 		annotations: {
 			title: "Update global variables",
 			readOnlyHint: false,
@@ -5724,7 +5959,9 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved (environment > collection chain > globals), the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
+			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
+			VARIABLE_RESOLUTION_URI +
+			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic but does not modify Vayu data.",
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,
@@ -6001,12 +6238,15 @@ export const TOOLS: McpTool[] = [
 			body: z.string().optional().describe("Request body content."),
 			// The two sibling tools have carried this text since they existed and
 			// this one carried nothing, so an agent load-testing a GraphQL endpoint
-			// had no way to discover the mode from the schema.
+			// had no way to discover the mode from the schema. The GET transport
+			// rule is part of that: a load run goes out through the event loop's
+			// `wire_url` / `has_wire_body` pair like any other send (#1228), so a
+			// GraphQL run left on the default GET carries no body at all.
 			bodyType: z
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. File parts are not supported here - a multipart file part names a path on the user\'s machine, which an agent cannot choose for them; author it in the app. An xml `body` is stored and sent verbatim as application/xml.'
+					'Body type: json, text, graphql, jsonrpc, xml, form-data, x-www-form-urlencoded (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the run on the GET an unnamed method defaults to. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. File parts are not supported here - a multipart file part names a path on the user\'s machine, which an agent cannot choose for them; author it in the app. An xml `body` is stored and sent verbatim as application/xml.'
 				),
 			auth: authInput,
 			httpVersion: z

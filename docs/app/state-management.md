@@ -78,8 +78,10 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   keeps a tab that could have closed, under-matching loses work. Nothing is
   flushed *during* eviction; the predicate already refused the tab
 - Response eviction: `closeTabsForEntities` clears each id's entry in
-  `response-store`. Both callers reach it after a delete, and nothing else
-  evicts from that map
+  `response-store`. Both callers reach it after a delete - the map's own LRU
+  bound would get there eventually, but a response nothing can reach again
+  should go at the delete, not twenty-four sends later. `MAX_OPEN_TABS` is
+  exported for that bound: the cache retains twice it
 - Focus recency: `tabFocusedAt` stamps `openTab` and `focusTab`, and is read by
   the command palette, which lists open tabs most-recently-used first. It cannot
   come from `openTabs`, which is insertion order - the tab you were just in sits
@@ -133,7 +135,7 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   drawerWidth: number                    // One width for every view
   contextBarOpen: boolean                // Is the right context bar visible?
   contextBarWidth: number
-  contextBarCollapsedSections: string[]  // Section ids the user collapsed
+  contextBarCollapsedSections: string[]  // Section ids the user collapsed (`code` by default)
   requestSplitRatio: number              // 0–1; left/request pane fraction
   paletteOpen: boolean                   // Is the ⌘K command palette showing?
 }
@@ -173,11 +175,26 @@ consequences worth keeping: a section added in a later release ships *expanded*
 for existing users, because a blob written before it existed cannot name it; and
 it is an array rather than a `Set` because `persist` serializes with JSON, which
 writes a `Set` as `{}` - a collapse would survive exactly until the next launch.
-No migration was needed for the field: `persist` merges a missing key onto the
-initial state, which is `[]`.
 
-**Persistence:** `vayu.layout` (v3, with real migrations for both bumps - the one
-store in the app doing persistence versioning end to end)
+`code` is the one section allowed to break the ships-expanded rule
+(`CONTEXT_BAR_DEFAULT_COLLAPSED`, `constants/layout.ts`, currently `["code"]`):
+an expanded Code section issues a `POST /compose` on mount, so with the bar open
+the app composed a snippet on every request tab opened, whether or not anyone
+looked at it. That default needs both the initial state *and* the v3 -> v4
+migration to actually reach an existing user, and neither alone is enough:
+`persist` merges a missing *key* onto the initial state, never a missing
+*element* into an array that is already there, so seeding
+`contextBarCollapsedSections: ["code"]` in the initial state only reaches a
+fresh install - a user who has ever collapsed anything already has the key, with
+an array `persist` treats as complete. The migration writes `code` into that
+array directly, and at the same time prunes any id in
+`RETIRED_CONTEXT_BAR_SECTIONS` (`environment`, retired the same release), so a
+persisted collapse list never keeps naming a section that no longer exists. It
+is a default, not a policy: once migrated, a user's own toggle on `code`
+overrides it exactly like any other section.
+
+**Persistence:** `vayu.layout` (v4, with real migrations for all three bumps -
+the one store in the app doing persistence versioning end to end)
 
 #### `session-store.ts` - Active Environment
 
@@ -427,9 +444,10 @@ Merged store managing engine connection status and restart-required notification
 **State:**
 ```typescript
 {
-  isEngineConnected: boolean
+  engineStatus: EngineStatus  // "starting" | "connected" | "unreachable"
   engineError: string | null
   recovery: EngineRecovery | null  // What the engine's startup did to the database
+  engineStartWindow: number | null  // When the engine now coming up began, or null
   pendingRestart: boolean
   restartRequiredKeys: string[]  // Config keys requiring restart
 }
@@ -438,9 +456,10 @@ Merged store managing engine connection status and restart-required notification
 **Key Methods:**
 ```typescript
 const {
-  isEngineConnected, setEngineConnected,
+  engineStatus, setEngineStatus,
   engineError, setEngineError,
   recovery, setEngineRecovery,
+  engineStartWindow, openEngineStartWindow, closeEngineStartWindow,
   pendingRestart, addRestartRequiredKey, clearRestartRequired,
 } = useEngineStore();
 ```
@@ -450,10 +469,32 @@ written by the same poll that writes `engineError` and read by `RecoveryBanner`.
 `null` is a clean start; a value means the engine restored the database from its
 backup or deleted it as unrecoverable.
 
+`engineStatus` is `starting` while no poll has succeeded since the engine now
+coming up began coming up and it is still inside its grace window, `connected`
+once a poll has answered `ok`, and `unreachable` once a poll fails past that
+window or an engine that had answered stops answering with nothing starting.
 `engineError` is what the failed health poll recorded (`queries/health.ts`), and
-the Dock's connection indicator renders it in a tooltip when the engine is down -
-"Disconnected" alone read the same for a refused connection, a timeout and a TLS
-failure.
+it is `null` in every state but `unreachable`: an engine still inside its grace
+window has no failure to report. The Dock's connection indicator renders it in a
+tooltip, for `unreachable` alone - "Disconnected" on its own read the same for a
+refused connection, a timeout and a TLS failure.
+
+`engineStartWindow` is the evidence that decision is made against: the moment
+the engine now coming up began coming up, or `null` when none is. It is a
+window rather than a "has ever connected" flag because a cold start is not only
+the app's first (#1227) - `useEngineRestart` kills the running engine and spawns
+a fresh one that repeats the whole startup housekeeping, with the port down for
+all of it, and a flag called that silence a failure on the evidence of an engine
+that no longer existed. **Two paths open it - `useHealthQuery` on mount and the
+restart path before it invokes the IPC - and it is deliberately evidence rather
+than a status, so `useHealthQuery` stays the only writer of `engineStatus`.** It
+is closed by the poll an engine answers, and by a restart the main process
+reports as failed, after which the next failed poll owes the user its reason
+again. A window nobody closes is spent rather than cleared - an engine that
+never arrives leaves its opening time in place, expired - so this is not an "is
+something starting" flag and must not be read as one: only
+`engineStatusAfterFailedPoll` interprets it, and to that an expired timestamp
+and a `null` mean the same thing.
 
 **Non-persisted** (cleared on app restart).
 
@@ -575,7 +616,8 @@ In-memory storage of responses per request ID, persisted across view/tab switche
 **State:**
 ```typescript
 {
-  responses: Map<string, StoredResponse>
+  responses: Map<string, StoredResponse>,
+  lru: string[]  // request ids, least-recently-written first
 }
 ```
 
@@ -586,11 +628,27 @@ In-memory storage of responses per request ID, persisted across view/tab switche
 const { setResponse, getResponse, clearResponse, clearAll } = useResponseStore();
 ```
 
-**Eviction:** `clearResponse` runs from `useDeleteRequestMutation` (the delete is
-what makes the response unreachable) and from `tabs-store`'s
+**Eviction by identity:** `clearResponse` runs from `useDeleteRequestMutation`
+(the delete is what makes the response unreachable) and from `tabs-store`'s
 `closeTabsForEntities` (the collection cascade, which knows every descendant id).
-Nothing else drops an entry, so a map with no eviction at all grew for the whole
-session - each entry holds a body plus its raw copy.
+
+**Eviction by count:** `RESPONSE_CACHE_MAX_ENTRIES` (24) bounds the map (#1156).
+Those two delete seams were once the only ones, so the map grew with every
+distinct request a session sent - each entry a body plus its raw copy - until
+the app quit. What the map holds is the 24 most recently *sent* requests, not
+the open tabs: this store cannot ask `tabs-store` what is open, since that
+store imports this one. The cap is twice `MAX_OPEN_TABS` so that recency covers
+tab reach in practice - a full set of tabs can each be re-sent and every one of
+them still re-opens on its full-fidelity body. The gap is a tab held open
+without being re-sent while 24 other requests are, which tab eviction allows
+only for a dirty tab; it falls back like any older request. Order comes from
+`lru`, not from `executedAt`, which a restored response carries from the run
+that produced it and which therefore says nothing about when this session last
+touched the entry; `setResponse` is the only writer, and it moves a re-sent
+request back to the recent end, so the entry just stored is never the one
+evicted. Past the cap nothing is lost, only unabridged: the request re-opens
+against the backend's stored run, whose body the engine truncated at
+`maxTraceBodyBytes`.
 
 **Non-persisted** (responses are reloadable from backend).
 
@@ -743,21 +801,31 @@ the dashboard then shows no active test while one streams.
 
 #### `scenario-run-store.ts` - Live Collection-Run Steps
 
-The live half of a scenario (collection) run's tab. `ScenarioRunService` pushes each `step` SSE event in here and `ScenarioRunView` reads it, so the stream survives navigating away from the tab and back - the same split, for the same reason, as `LoadTestService` and `dashboard-store`.
+The live half of a scenario (collection) run's tab. `ScenarioRunService` pushes the `step` SSE events in here and `ScenarioRunView` reads them, so the stream survives navigating away from the tab and back - the same split, for the same reason, as `LoadTestService` and `dashboard-store`.
 
-It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. `addStep` drops an event that arrives with no run registered, because the stream is replayable and a step from a replaced run can still land on a socket that has not finished closing.
+It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. `addSteps` drops a batch that arrives with no run registered, because the stream is replayable and a step from a replaced run can still land on a socket that has not finished closing.
 
 **State:**
 ```typescript
 {
   runId: string | null       // The run being streamed, or null
   steps: ScenarioStepRow[]   // Reported so far, in plan order
+  summary: StepListSummary   // The four outcome counts, plus how many steps are
+                             // past the first pass and how many bound a data row
+  appendEpoch: number        // Moves whenever the list changed by anything other
+                             // than growing at its end
   isStreaming: boolean
   error: string | null       // A transport failure on the stream
 }
 ```
 
-Steps are folded in by `appendStepEvent` (`modules/history/main/scenario-steps.ts`), which keys on `(iteration, stepIndex)` rather than arrival order: the engine's SSE ring replays from `Last-Event-ID`, so a reconnect re-delivers events already rendered and an append-only list would double every row it re-saw. It returns the same array reference when a replayed event changes nothing, so an idempotent replay does not re-render the list.
+**A batch per flush, not a commit per event** (issue #1153). `ScenarioRunService` buffers arriving `step` events and commits what it collected on the user's `liveRefreshMs` cadence, the same throttle `LoadTestService` puts on its ticks. The premise for having none - that a scenario's step rate is bounded by request latency - does not hold: the engine's scenario loop is sequential with no pacing, so a local target returns hundreds of steps per second, and each one used to cost a full copy of the step list, a store notify and a re-render of the run tab. The buffer is committed on the leading edge of a window and again on a trailing timer, and drained when the stream closes or fails; a run replaced mid-flight discards whatever it left buffered, since those rows belong to a list the store has already cleared. That mechanism - buffer, leading edge, trailing timer, and the `liveRefreshMs` read behind it - is one implementation, `services/throttled-batcher.ts` (issue #1206), and now has a third caller: `useExecutionEvents` buffers a design-mode request's streamed events through it the same way (issue #1158). When to flush and when to discard stay each caller's own, because the lifecycles genuinely differ - the design-mode hook flushes on teardown rather than discarding, because a teardown there is as often the builder unmounting mid-stream as it is a replacement, and the store's run guard is what drops the leftovers in the second case.
+
+Steps are folded in by `foldStepEvents` (`modules/history/main/scenario-steps.ts`), which keys on `(iteration, stepIndex)` rather than arrival order: the engine's SSE ring replays from `Last-Event-ID`, so a reconnect re-delivers events already rendered and an append-only list would double every row it re-saw. A whole batch costs one array copy, and the fold returns the state it was given when every event in the batch was an idempotent replay, so a reconnect's replay does not re-render the list.
+
+`summary` is maintained by that same fold rather than recounted by the view - the `dashboard-store` aggregate stance, for the same reason: a scan per commit is a scan over a list that grows for the length of the run. `ScenarioRunView` is its reader, for the four count chips and for the two whole-list questions its rows answer. It does **not** displace the report: once `report.scenario` can give the run's own totals those win, because thinning drops passes and the stored rows undercount them (see `docs/app/COMPONENTS.md`). `summarizeSteps` answers for the stored rows, which arrive complete, and is the oracle the incremental summary is tested against.
+
+`appendEpoch` is the second thing that fold publishes, and the reason it has to (issue #1205). Every commit hands the view a new array - immutability, which zustand's change detection depends on - so from the rows alone an appended row and a replaced one look alike, and a reader that wants to keep anything derived from the list has to compare the two lists to find out. The fold already knows, so it says: `foldStepEvents` returns `appendedOnly` beside the fold, and the store turns it into a monotone counter that moves for a replay that replaced a row, a gap-resume that spliced one in, and a `startRun` that emptied the list. `useFilteredSteps` (`modules/history/main/`) is its reader: it counts what the batch that arrived added to a chip's or the search box's match, and produces rows only as far as the growing window it owns has to show them, so a narrowed live list costs one predicate pass over the batch rather than over the whole run per flush - and, once that window is full, no array copy at all (issue #1297). Monotone matters - React may render once for two commits, and a value that could return to one a reader had already seen would let a stale prefix through.
 
 Once a run reaches a terminal status its stored `results` rows are the complete record and the view reads those instead. `ScenarioRunService.handleClose` invalidates `runs.detail(runId)` and refetches `runs.report(runId)` through the query cache - the same keys the tab reads, so a bare fetch would leave the pane on the stale copy. It also invalidates `runs.lists()` (the History row still says "running") and `runs.lastCollectionRuns()` (the context bar's Last run section says it too, from its own family, and is not polled at all).
 
@@ -769,7 +837,7 @@ There is deliberately no `stopMonitoring` on the service and no `clear` on the s
 
 #### `execution-events-store.ts` - Live Streaming-Request Events
 
-The live half of a **streaming design request** (issue #574): `POST /execute` with `stream: true` answers `202 {runId, eventsUrl}` and the upstream's own events arrive over `GET /runs/:id/events`. `modules/request-builder/hooks/useExecutionEvents` pushes each relayed frame in here and the response pane's Events tab reads it, so the rows survive switching to another request tab and back - the same split, and the same reason, as `scenario-run-store` above.
+The live half of a **streaming design request** (issue #574): `POST /execute` with `stream: true` answers `202 {runId, eventsUrl}` and the upstream's own events arrive over `GET /runs/:id/events`. `modules/request-builder/hooks/useExecutionEvents` buffers the relayed frames through `services/throttled-batcher.ts` and commits a batch per flush window on the user's `liveRefreshMs` cadence, so the store pays one copy and one notify per window rather than per frame (issue #1158) - the same batcher `LoadTestService` and `ScenarioRunService` commit through, now with three callers. The response pane's Events tab reads the store, so the rows survive switching to another request tab and back - the same split, and the same reason, as `scenario-run-store` above.
 
 It holds **one** stream: a second Send is what ends the first, so two are not a state the builder can reach. It also holds the **request** the stream belongs to, not only the run - one `RequestBuilderProvider` serves every request tab, so "are these rows mine?" is a question about the request on screen and a run id alone cannot answer it. Both the provider and the viewer select against `requestId`, which is what stops a stream started elsewhere appearing under a request that never streamed.
 
@@ -792,7 +860,7 @@ It holds **one** stream: a second Send is what ends the first, so two are not a 
 
 `totalEvents` is set only from the `complete` frame (falling back to what arrived, so it is never left null once a stream has ended). While the stream runs, the arrived-so-far count is `events.length`; reporting anything else would be a total nothing had counted. It matters because it is **not** the row count once a list has been capped, and the Events tab's truncation disclosure compares the two.
 
-Once the run reaches a terminal status the **stored** trace is the complete record: the provider fetches the report, `restore-response.ts` maps its `events` node onto `ResponseState`, and the tab reads that instead - the two-sources-one-list handoff `ScenarioRunView` makes. What lives here is only ever what arrived on the socket, bounded by the engine's retained ring rather than by anything this side.
+Once the run reaches a terminal status the **stored** trace is the complete record: the provider fetches the report, `restore-response.ts` maps its `events` node onto `ResponseState`, and the tab reads that instead - the two-sources-one-list handoff `ScenarioRunView` makes. What lives here is only ever what arrived on the socket, and it is **not** bounded by the engine's retained ring: that ring (`sseMaxRetainedEvents`, 2,000 by default) is only what a *reconnect* replays, and a client that stays connected is replayed the ring once and then tails the rest of the stream. What actually bounds the list is the per-stream cap instead - `sseMaxStreamEvents` (100,000 by default, 10,000,000 at the ceiling) or `sseMaxStreamDurationMs` (600,000 ms / 10 minutes by default), whichever the stream reaches first - which is orders of magnitude bigger than the ring and why the Events tab cannot assume the list stays short. That is also why the tab (`ResponseEvents.tsx`) renders through `useGrowingWindow` with memoized rows rather than the whole list at once, and why a live stream passes its `runId` as the window's `listKey` - the default reset key is the row count, which would snap the window back to its first slice on every batch a growing-in-place list receives.
 
 **Non-persisted** (fresh per session).
 
@@ -1216,6 +1284,20 @@ are how the app sees what got stamped (`queries/trash.ts`).
     a user ten pages deep drove ~10 engine requests per tick. Only page 1 can
     gain rows (`start_time DESC`) anyway; a paged list refreshes on the next
     mutation or invalidation instead of on a timer.
+  - **Only a surface that renders runs mounts it.** The interval belongs to the
+    hook, so it runs for as long as *any* observer is mounted - and the App root
+    used to be one, which kept the poll alive with History closed, nothing
+    running and nothing at the root reading the result (#1150). The root now
+    calls **`usePrefetchRuns()`** instead: one `prefetchInfiniteQuery` over
+    `runsListInfiniteOptions()`, which warms the same cache entry without
+    observing it. `HistoryList`, `WelcomeScreen` and the palette's
+    `useEntityItems` observe the key while they are visible and drive the
+    cadence themselves.
+  - **`runsListInfiniteOptions(q?, pinnedOnly?)`** - the key, fetcher and page
+    params, shared by the hook and the warm-up so the entry one writes is the
+    entry the other reads. `prefetchInfiniteQuery`, not `prefetchQuery`: the
+    readers are infinite queries and the cache entry has to be in `InfiniteData`
+    shape.
   - **`flattenRunPages(data)`** - flatten the pages into a de-duped `Run[]`
     (dedupe by id guards the momentary double-row a head insertion can cause
     across two refetched pages). **`runsTotal(data)`** - the server's total from
@@ -1307,8 +1389,11 @@ into a pane that can never load on every restart.
 #### Engine Health, Config & OAuth
 
 - **`useHealthQuery()`** - Health check, polled every
-  `TIMING.HEALTH_CHECK_INTERVAL_MS`; it is what sets `isEngineConnected` /
-  `engineError` on `engine-store`, so the connection indicator follows it
+  `TIMING.HEALTH_CHECK_INTERVAL_MS`; it is what sets `engineStatus` /
+  `engineError` on `engine-store`, and is where the starting-vs-unreachable
+  decision gets made, so the connection indicator follows it. It reads that
+  decision off `engineStartWindow`, which `useEngineRestart` also opens - the
+  restart supplies the evidence, the poll still does the classifying
 - **`useConfigQuery()`** / **`useUpdateConfigMutation()`** - Engine configuration
   (`QUERY_CACHE.CONFIG_STALE_TIME_MS`); also the home of the live chart window,
   which is engine config rather than a renderer preference
@@ -1328,7 +1413,9 @@ into a pane that can never load on every restart.
   composes differently per environment and one key for both would serve the
   wrong snippet after a switch. `staleTime: Infinity` with an explicit
   recompose: the section is only mounted while expanded, so this is the "compose
-  on expand, not per keystroke" rule
+  on expand, not per keystroke" rule. The section also ships collapsed by
+  default (`CONTEXT_BAR_DEFAULT_COLLAPSED`), so that round trip now happens on
+  first expansion rather than on every request tab opened (#1310)
 
 ### Query Keys & Cache Invalidation
 
@@ -1412,7 +1499,14 @@ holds the finished document instead, keyed by format because the dialog toggles
 between two serializations of one answer, and by the moment the dialog mounted
 because a *collection* changes under its id in a way a document never does:
 that is what makes it fresh on every open and cached across a toggle, which
-neither `staleTime` alone can say.
+neither `staleTime` alone can say. A key per format also means a switch is a
+cache miss, so this is the one read that carries `placeholderData:
+keepPreviousData` (issue #1311): the counts the dialog prints belong to the
+collection rather than to the serialization, and are the same either way, so
+the previous answer is the honest thing to hold while the next one assembles.
+The dialog gates Copy and Download on `isFetching` for that window - the text
+under them is still the previous format's - and shows a placeholder shaped like
+its summary card on the first read, when there is nothing to keep.
 
 `specs.match(collectionId, fingerprint)` is the third of that family and the one
 that names no document (issue #761): the pairing of a collection's requests
@@ -1454,6 +1548,12 @@ key rather than a stale entry under this one.
   is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so
   creating a collection can invalidate it - it succeeds once at startup and
   would otherwise never re-run for a collection created mid-session.
+- **...but warming a *polled* list must not be a query.** `usePrefetchRuns` is a
+  one-shot `prefetchInfiniteQuery` on mount, not an observer, because
+  `useRunsQuery` carries a `refetchInterval` and observing it from the root
+  bought the warm cache at the price of a poll that never stopped (#1150). An
+  invalidation of `runs.lists()` then marks the warm entry stale without
+  refetching it, which is the wanted behaviour: nothing is displaying it.
 
 **Writes from outside the renderer: `mcp:data-changed`.** An MCP tool call
 mutates the engine from the Electron **main** process, so no mutation runs here
@@ -1596,7 +1696,12 @@ loadTestService.stopMonitoring();
   charts rather than starting blank.
 - Every tick is buffered; commits into `useDashboardStore().addMetricsBatch()`
   are throttled to `METRICS_UI_THROTTLE_MS` so `historicalMetrics` keeps the
-  full 10 Hz signal while renders stay bounded.
+  full 10 Hz signal while renders stay bounded. The buffer, the leading edge and
+  the trailing timer are `services/throttled-batcher.ts`, shared with
+  `ScenarioRunService` (issue #1206) and with `useExecutionEvents` (issue
+  #1158) - a monitor scrape has no timer of its own and rides the next tick's
+  flush, which is why that second buffer stays in the service rather than
+  moving into the batcher.
 - The engine sends an explicit `complete` event, so a `CLOSED` readyState is a
   genuine failure. **There is no custom reconnect**: `EventSource` cannot set
   `Last-Event-ID` on a fresh connection, so a manual reconnect would replay the
@@ -1756,15 +1861,17 @@ getAutoContentType: () => AutoHeader | null
 setAutoContentType: (auto: AutoHeader | null) => void
 getAutoAccept: () => AutoHeader | null
 setAutoAccept: (auto: AutoHeader | null) => void
+getAutoMethod: () => AutoMethod | null
+setAutoMethod: (auto: AutoMethod | null) => void
 ```
 
-Which header row a *setting* added on its way in, so that leaving the setting
-can take it back. Two settings own one each: the body mode's `Content-Type`
-(written by `BodyPanel`) and the Event stream toggle's
-`Accept: text/event-stream` (written by `SettingsPanel`, issue #574). Two named
-slots rather than one map keyed by header name - there are exactly two, each
-owns a different header, and a map would let a caller read the wrong record by
-passing the wrong string.
+Which header row - or, for the third slot, which method - a *setting* added on
+its way in, so that leaving the setting can take it back. Two settings own a
+header row each: the body mode's `Content-Type` (written by `BodyPanel`) and
+the Event stream toggle's `Accept: text/event-stream` (written by
+`SettingsPanel`, issue #574). Named slots rather than one map keyed by header
+name - each owns a different field, and a map would let a caller read the
+wrong record by passing the wrong string.
 
 GraphQL is sent as a JSON envelope and genuinely needs
 `Content-Type: application/json`, so `BodyPanel` appends one - but nothing
@@ -1786,15 +1893,96 @@ Three things it is deliberate about:
   panel wrote are identical apart from their id, and only ours may be removed.
 - **A row whose value has been edited is no longer ours** - retyping it is a
   decision, so it stays and the record is dropped. Merely disabling it is not.
-- **A record naming another request is dropped, not applied.** One provider
-  serves every request tab, and row ids are not unique across a duplicated
-  request.
+- **A record naming another request is dropped, not applied.** Row ids are not
+  unique across a duplicated request, so the rule asks whose record it has been
+  handed rather than trusting the caller. Since issue #1269 the provider cannot
+  hand it the wrong one (see below); the check stays because the rule is a pure
+  function, and the storage is not the only thing that could ever call it.
+
+The third slot, `AutoMethod`, is not a fourth `AutoHeader` (issue #1228). A new
+request is a GET, and GraphQL over GET is a different transport - the document
+travels as query parameters and a mutation cannot be sent that way - so picking
+the GraphQL body mode on a request still holding that default used to build one
+the server answered with a bare `400`. The mode now sets `POST` the same
+reversible way it sets the `Content-Type` header above, and leaving the mode
+puts the method back - but what it owns is a scalar field on the request, not a
+row in an array, so `AutoMethod` is `{ requestId, method, previous }`: the value
+it wrote and the value it replaced, rather than a row id. `switchGraphQLMethod`
+in `panels/body/graphql-method.ts` is the rule that reads it, called from
+`BodyPanel.handleModeChange` beside `switchAutoHeader`. It keeps the same two
+guarantees stated as bullets above, read against a scalar instead of a row: a
+method the user has since chosen - the field's value no longer matching what
+this record wrote - is no longer ours to revert, and a record naming another
+request is dropped rather than applied. A GET still reaches GraphQL through the
+door this side effect does not touch - the user picks GET back, or an import
+wrote one - which is when the Query pane header's `BadgeText` names the
+transport that will be used.
+
+**Each slot holds one record per request, bounded by the open tabs** (issue
+#1269). One provider serves every request tab, and a slot holding a single
+record held whichever request entered the mode last: the request before it kept
+the `Content-Type` row, or the `POST`, that the app had added for it, with
+nothing left that knew it was the app's - the very bug the records exist to
+prevent, one request removed. So a slot is a map from request id to record
+(`context/auto-record-slot.ts`), keyed the way the record already named itself,
+and the accessors keep their argument-free shape: the provider knows which
+request is on screen, and a caller that had to pass the id could pass the wrong
+one. Resetting the records when the active request changes was the smaller
+alternative and is wrong in the same direction as the bug - it strands the first
+request's header at the moment of the switch rather than at the second request's
+mode change.
+
+What bounds the maps is the open tabs. A record can only ever be read by the
+builder it names, so once that builder has no tab it is unreachable, and a
+per-builder store that nothing prunes is how a map becomes a leak; `tabs-store`
+is subscribed to rather than selected from, because a provider that re-rendered
+on every tab focus would charge the request the user is working in for it.
+`MAX_OPEN_TABS` caps the tab strip, so it caps the maps. Both request tabs and
+run tabs are swept, by their `entityId` - a request id and a run id respectively,
+from different tables and so unable to collide. A run tab holding no builder at
+all (a load test, a scenario) only ever keeps a key nothing wrote.
+
+**Which identity a builder files under is one value, resolved once** (issue
+#1272): `memoryKey ?? request.id ?? UNSAVED_AUTO_KEY`, read by every per-builder
+map the provider holds - the three slots above and the picker's row memory
+below. A request tab is its request and passes nothing. The editable copy
+History renders for a stored run passes the run id, because `design-run-seed.ts`
+gives that copy `id: null` on purpose - a null id is one of the two gates that
+stop an edited copy from rewriting the saved request - so every open run copy
+used to share the id-less bucket. That was not a near miss: the rules read a
+`requestId` of `null` against another `null` as a match, so the second run tab
+to pick GraphQL was handed the first one's record, accepted it as its own and
+took the "already in this mode" branch - its method was never set to `POST`, and
+its record was the other tab's. A prop rather than a field on `RequestState`
+that only History would set: `request.id` stays honestly null, and no request
+grows a "which run am I" field for one caller. A run id names a tab, so those
+records are bounded by the same sweep rather than exempt from it.
+
+`UNSAVED_AUTO_KEY` is what remains for a builder declaring neither - nothing in
+the app today - and it is the one key the sweep cannot drop, since a key naming
+no tab cannot be bounded by the tabs. It is kept rather than removed because the
+alternative for such a builder is sharing whichever key was written last, which
+the `null === null` ownership check hands out as owned rather than refusing.
+
+**The same sweep bounds the Send-with-row picker's memory** (issue #1271), the
+provider's other per-request map: which row index each request was last sent
+with (`rowIndexByRequest`, issues #659 and #1062). It survives a tab switch and
+a return, because neither of those is a send - and it goes when the tab does,
+for the reason above, since the request it was picked for can no longer be
+switched to. Two maps, one rule, one sweep, and one identity: the key resolved
+above is the key both file under.
+
+The row memory is `useState` rather than a ref - `lastRowIndex` is read while
+rendering - so its half of the sweep is a `setState`, and `retainKeys`
+(`context/retain-keys.ts`) returns the map it was handed when every key is still
+live. Without that identity guard the provider would re-render on every tab
+focus, which is exactly the cost the subscription was chosen to avoid.
 
 In the provider rather than in the panels for the drafts' reason and one of its
 own: Radix unmounts an inactive `TabsContent`, so a panel-local record is gone
 by the next change - and then nothing removes the header, which is the bug the
 record exists to fix. Ephemeral, like the drafts: what is persisted is the
-header row itself, in `request.headers`.
+header row itself, in `request.headers`, or the method, in `request.method`.
 
 ### `useSaveManager()` - Auto-Save Manager
 
@@ -1971,7 +2159,7 @@ restore) and `save-request-name.test.ts` (the payload).
 4. Request is transformed (frontend → backend format) and sent via HTTP
 5. Response is stored in `useResponseStore()` keyed by request ID
 6. Response viewer component reads the response and displays it
-7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns
+7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns - for the 24 most recently sent requests, past which the store's LRU bound has dropped the entry and the backend's stored run answers instead
 8. If any script ran, the environment / globals / collection query families are invalidated so values the script wrote are visible in the variables editor and the resolver. The gate is `scriptsMayWriteVariables(pre, post)` (`request-builder/utils/execute-mapping.ts`), shared by the builder's send path and the History run view's resend. **Both** script kinds count: `pm.environment.set` and friends persist engine-side from a Tests-tab script exactly as from a pre-request one, and with `refetchOnWindowFocus: false` nothing else is coming to correct a stale value
 
 ### Starting a Load Test Run
@@ -2047,4 +2235,4 @@ starts the engine at import time.
 
 10. **Variable resolution priority:** Always resolve variables in priority order: environment > collection > global. Use `useVariableResolver({ collectionId })` to scope a preview to a collection; the active environment comes from the session store and is not a parameter.
 
-11. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load.
+11. **Lazy loading and prefetch:** Use `usePrefetchCollectionsAndRequests()` and `usePrefetchRuns()` on app init to warm up caches. Lazily fetch environments, globals, and run reports only when needed to reduce initial bundle size and API load. Warm a *polled* list with a prefetch, never by mounting its hook at the root - an observer that lives for the session polls for the session (#1150).

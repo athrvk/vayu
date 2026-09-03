@@ -8,6 +8,7 @@
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/platform/platform.hpp"
 
 using namespace vayu::core;
 
@@ -283,6 +284,99 @@ TEST (RunManagerRetention, RetainMovesOutOfActiveButKeepsLookup) {
     EXPECT_GT (found->completed_at_ms.load (), 0);
 }
 
+// Retention is for the tick topic, and since #1154 that is all it holds: the
+// event loop (curl handle pools, the connections cached against the target,
+// the submission queues), the bound rows and the plan are released as the run
+// is retained, not 60-90s later when the sweeper drops the last reference.
+TEST (RunManagerRetention, RetainReleasesTheMachineryAndKeepsTheTopic) {
+    RunManager mgr;
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> ("run_y", cfg);
+
+    vayu::http::EventLoopConfig loop_cfg;
+    loop_cfg.num_workers    = 1;
+    loop_cfg.max_concurrent = 1;
+    ctx->publish_event_loop (std::make_unique<vayu::http::EventLoop> (loop_cfg));
+    ctx->load_data = std::make_unique<LoadDataSet> ();
+    ctx->scenario  = std::make_shared<const ScenarioExecution> ();
+    ctx->append_tick ("tick-0");
+    ctx->closed.store (true);
+    mgr.register_run ("run_y", ctx);
+
+    mgr.retain_run ("run_y");
+
+    auto found = mgr.get_run_or_retained ("run_y");
+    ASSERT_NE (found, nullptr);
+    EXPECT_EQ (found->event_loop, nullptr);
+    EXPECT_EQ (found->load_data, nullptr);
+    EXPECT_EQ (found->scenario, nullptr);
+    // The one accessor a reader could still be inside answers for a released
+    // loop rather than reading through it.
+    EXPECT_EQ (found->active_transfer_count (), 0u);
+
+    // What a late consumer of /runs/:id/live reads is untouched.
+    ASSERT_EQ (found->ticks_since (0).payloads.size (), 1u);
+    EXPECT_EQ (found->ticks_since (0).payloads[0], "tick-0");
+    EXPECT_EQ (found->published_count.load (), 1u);
+    EXPECT_TRUE (found->closed.load ());
+}
+
+// Windows' 1 ms timer resolution is one of those execution resources since
+// issue #1161: the loop asks curl for a 1ms poll, which the OS default would
+// round to ~15.6ms, so the loop holds the request for its lifetime. Retention
+// is what gives it back - a retained run has stopped sending, and the 60-90s
+// window would otherwise be a run's worth of held resolution per run, on a
+// sidecar that is idle for almost all of an app session.
+TEST (RunManagerRetention, RetainGivesBackTheHighResolutionTimer) {
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+
+    RunManager mgr;
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> ("run_z", cfg);
+    vayu::http::EventLoopConfig loop_cfg;
+    loop_cfg.num_workers    = 1;
+    loop_cfg.max_concurrent = 1;
+    ctx->publish_event_loop (std::make_unique<vayu::http::EventLoop> (loop_cfg));
+    mgr.register_run ("run_z", ctx);
+
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 1);
+
+    mgr.retain_run ("run_z");
+
+    // Still reachable as a retained run, holding nothing of the machinery.
+    auto found = mgr.get_run_or_retained ("run_z");
+    ASSERT_NE (found, nullptr);
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+}
+
+// The narrowing that binding the request to the loop buys: a design-mode
+// scenario run sends its steps sequentially and builds no event loop, so it
+// asks for no timer resolution at all - where a request taken per run would
+// have held 1ms resolution for the length of every collection run.
+TEST (RunManagerRetention, ARunWithNoEventLoopAsksForNoTimerResolution) {
+    nlohmann::json cfg;
+    RunContext ctx ("run_sequential", cfg);
+    ctx.scenario = std::make_shared<const ScenarioExecution> ();
+
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+}
+
+// A loop that never reaches retention - a run that threw before its context
+// was retained, or a manager destroyed under it - gives the request back all
+// the same, because the scope is a member of the loop and not a pair of calls
+// to remember.
+TEST (RunManagerRetention, ADroppedEventLoopGivesBackTheHighResolutionTimer) {
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+    {
+        vayu::http::EventLoopConfig loop_cfg;
+        loop_cfg.num_workers    = 1;
+        loop_cfg.max_concurrent = 1;
+        const vayu::http::EventLoop loop (loop_cfg);
+        EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 1);
+    }
+    EXPECT_EQ (vayu::platform::high_resolution_timer_holders (), 0);
+}
+
 TEST (BuildTickPayload, WrapsStatsAsSseEventWithOffsetId) {
     nlohmann::json stats;
     stats["totalRequests"] = 42;
@@ -501,4 +595,54 @@ TEST (RunManager, ConstructorStillAcceptsAPlainTestString) {
 
     RunContext ctx ("r", config);
     EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});");
+}
+
+// The wiring nobody else covers: what a collector counted has to reach the
+// stored summary. A field the collector grows and `read_retention` forgets
+// reports as zero-or-false forever, which is this repo's most repeated defect -
+// so the two cases the byte-budget marker (issue #1192) exists to separate are
+// checked through the function that carries it, not off the collector alone.
+// Drop the assignment in read_retention and the first half reddens.
+TEST (ReadRetention, CarriesTheResponseSampleBudgetMarkerIntoTheSummary) {
+    MetricsCollectorConfig tight;
+    tight.expected_requests         = 100;
+    tight.response_sample_rate      = 1;
+    tight.max_response_samples      = 1000;
+    tight.max_response_sample_bytes = 250;
+    MetricsCollector spent ("run_read_retention_spent", tight);
+
+    vayu::Response response;
+    response.status_code     = 200;
+    response.body            = std::string (100, 'x');
+    response.timing.total_ms = 1.0;
+    for (int i = 0; i < 10; ++i) {
+        spent.record_response_sample (response);
+    }
+
+    RunSummaryInputs inputs;
+    inputs.retention = read_retention (spent);
+    EXPECT_TRUE (inputs.retention.response_sample_budget_spent);
+    EXPECT_GT (inputs.retention.response_samples_dropped, 0u);
+    EXPECT_TRUE (build_run_summary_payload (
+    inputs)["sampling"]["response_sample_budget_spent"]
+    .get<bool> ());
+
+    MetricsCollectorConfig roomy;
+    roomy.expected_requests         = 100;
+    roomy.response_sample_rate      = 1;
+    roomy.max_response_samples      = 2;
+    roomy.max_response_sample_bytes = 1'000'000;
+    MetricsCollector displaced ("run_read_retention_uniform", roomy);
+    for (int i = 0; i < 10; ++i) {
+        displaced.record_response_sample (response);
+    }
+
+    RunSummaryInputs uniform;
+    uniform.retention = read_retention (displaced);
+    EXPECT_GT (uniform.retention.response_samples_dropped, 0u)
+    << "the count cap has to have displaced something for the two to differ";
+    EXPECT_FALSE (uniform.retention.response_sample_budget_spent);
+    EXPECT_FALSE (build_run_summary_payload (
+    uniform)["sampling"]["response_sample_budget_spent"]
+    .get<bool> ());
 }

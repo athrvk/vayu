@@ -163,6 +163,7 @@ export default function CollectionItem({
 			{/* The row is the treeitem: one tab stop for the whole tree, arrows
 			    move between rows (useRovingTreeFocus). tabIndex starts at -1; the
 			    hook promotes exactly one row to 0. */}
+			{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor */}
 			<div
 				ref={rowRef}
 				role="treeitem"
@@ -312,6 +313,9 @@ export default function CollectionItem({
 				{!isRenaming && (
 					<RowActionsMenu
 						label={`More actions for ${collection.name}`}
+						// The tree is one tab stop: the row holds it, and Shift+F10 /
+						// Menu / Shift+Enter are the way in from here.
+						tabIndex={-1}
 						className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 						// "Move to..." is appended rather than built in
 						// `getCollectionActions`: it belongs to the drag slice, which

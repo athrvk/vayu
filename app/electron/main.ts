@@ -1033,10 +1033,15 @@ app.whenReady().then(async () => {
 		void refreshSystemProxy(proxyResolution());
 	});
 
-	// Start checking for updates once a window exists to receive events. The
-	// updater reads `mainWindow` at send time rather than being handed the window
-	// now: on macOS the app outlives its window, and a dock-activate builds a
-	// replacement that a captured reference would never reach.
+	// Arm the update checks once a window exists to receive events. The updater
+	// reads `mainWindow` at send time rather than being handed the window now: on
+	// macOS the app outlives its window, and a dock-activate builds a replacement
+	// that a captured reference would never reach.
+	//
+	// This arms them rather than running one: the first check waits out
+	// `UPDATE_STARTUP_CHECK_DELAY_MS`, so a silent platform's download does not
+	// start while the window, the engine and the user's first requests are still
+	// competing for the link and the disk.
 	initAutoUpdater(() => mainWindow);
 
 	app.on("activate", () => {

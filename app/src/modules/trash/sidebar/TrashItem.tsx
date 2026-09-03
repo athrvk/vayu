@@ -68,7 +68,18 @@ export default function TrashItem({
 		// RunItem, which carries the same pair for the same reason.
 		// No `group`: nothing here reveals on hover, so a group class would be a
 		// hook with nothing hanging off it.
-		<div className="surface-card border border-rule rounded-md overflow-hidden w-full">
+		<div
+			// Where a purge hands focus on to (#1234). `tabIndex={-1}` makes the row
+			// a target for `.focus()` without adding a tab stop in front of the two
+			// buttons, and it holds even while they are disabled by the purge in
+			// flight - which is exactly when focus needs somewhere to be.
+			data-trash-id={entry.id}
+			tabIndex={-1}
+			// `focus-row`, not the baseline ring: this row is a composite the
+			// baseline would leave unmarked, since it is written
+			// `[tabindex]:not([tabindex="-1"])`.
+			className="focus-row surface-card border border-rule rounded-md overflow-hidden w-full"
+		>
 			<div className="flex items-center gap-2 px-3 py-2 min-w-0">
 				<KindIcon className="w-4 h-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 

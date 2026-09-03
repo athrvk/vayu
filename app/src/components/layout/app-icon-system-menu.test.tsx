@@ -119,6 +119,41 @@ describe("app icon on Windows", () => {
 		const icon = screen.getByRole("button", { name: /system menu/i });
 		expect(appRegion(icon)).toBe("no-drag");
 	});
+
+	/*
+	 * A `role="button"` owes the keyboard what a real button gives for free, and
+	 * this one gave neither half: no tab stop, no key handler (#1216). Alt+Space
+	 * is the OS path to the same menu, which is why it went unnoticed.
+	 */
+	it("is a tab stop", async () => {
+		await renderFor("win32");
+		expect(screen.getByRole("button", { name: /system menu/i })).toHaveAttribute(
+			"tabindex",
+			"0"
+		);
+	});
+
+	it.each([
+		["Enter", { key: "Enter" }],
+		["Space", { key: " " }],
+	])("opens the system menu on %s", async (_name, event) => {
+		await renderFor("win32");
+		fireEvent.keyDown(screen.getByRole("button", { name: /system menu/i }), event);
+		expect(systemMenu).toHaveBeenCalledTimes(1);
+	});
+
+	it("leaves an IME's committing Enter and the app's chords alone", async () => {
+		// The IME commits its buffer with an ordinary keydown (`isCommitEnter`),
+		// and mod+Enter is the Send chord bound on the window - neither is a press
+		// of this control.
+		await renderFor("win32");
+		const icon = screen.getByRole("button", { name: /system menu/i });
+		fireEvent.keyDown(icon, { key: "Enter", isComposing: true });
+		fireEvent.keyDown(icon, { key: "Enter", metaKey: true });
+		fireEvent.keyDown(icon, { key: "Enter", ctrlKey: true });
+		fireEvent.keyDown(icon, { key: "a" });
+		expect(systemMenu).not.toHaveBeenCalled();
+	});
 });
 
 describe("app icon elsewhere", () => {

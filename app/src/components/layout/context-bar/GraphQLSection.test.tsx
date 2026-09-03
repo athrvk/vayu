@@ -59,7 +59,7 @@ function show(request: Partial<Request> | undefined, isLoading = false) {
 }
 
 beforeEach(() => {
-	useSchemaCache.setState({ byKey: {}, lru: [], activeKey: null, activeTarget: null });
+	useSchemaCache.setState({ byKey: {}, lru: [], activeKey: null });
 	useRevealStore.setState({ pending: null });
 	requestQuery.mockReset();
 });
@@ -97,7 +97,6 @@ describe("the schema status", () => {
 			},
 			lru: [key],
 			activeKey: key,
-			activeTarget: TARGET,
 		});
 		show(graphqlRequest(JSON.stringify({ query: "" })));
 
@@ -118,7 +117,6 @@ describe("the schema status", () => {
 			},
 			lru: [key],
 			activeKey: key,
-			activeTarget: TARGET,
 		});
 		show(graphqlRequest(JSON.stringify({ query: "" })));
 
@@ -127,17 +125,25 @@ describe("the schema status", () => {
 		expect(screen.getByText(/Fetched/)).toBeTruthy();
 	});
 
-	it("refreshes the target the request builder registered", () => {
-		const refreshSchema = vi.fn();
-		useSchemaCache.setState({ activeTarget: TARGET, refreshSchema });
+	/*
+	 * The bar states the schema; it does not refresh it. Its Refresh was the
+	 * second standing one whenever the body panel was on screen with this bar
+	 * open - the duplication #455 was filed about, in the one combination its
+	 * guard could not see, since that guard renders `GraphQLBody` alone (#1224).
+	 *
+	 * It could never be the only one either: the button was gated on the store's
+	 * `activeTarget`, which `GraphQLBody` alone set - and only for a non-empty
+	 * URL - and cleared when it unmounted. So it stood exactly when the Query
+	 * header's own control stood beside it, and never when it did not. The field
+	 * went with the button, since nothing else read it.
+	 *
+	 * Registered here anyway, so this is not passing on an unregistered target:
+	 * mutation check - put the button back and this reds.
+	 */
+	it("offers no refresh at all - the Query header owns the only one", () => {
+		useSchemaCache.getState().setActiveTarget(TARGET);
 		show(graphqlRequest(JSON.stringify({ query: "" })));
-
-		fireEvent.click(screen.getByLabelText("Refresh schema"));
-		expect(refreshSchema).toHaveBeenCalledWith(TARGET);
-	});
-
-	it("offers no refresh when no target is registered - there is nothing to fetch", () => {
-		show(graphqlRequest(JSON.stringify({ query: "" })));
+		expect(useSchemaCache.getState().activeKey).not.toBeNull();
 		expect(screen.queryByLabelText("Refresh schema")).toBeNull();
 	});
 });

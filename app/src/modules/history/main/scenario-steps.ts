@@ -134,24 +134,58 @@ function matchesQuery(step: ScenarioStepRow, query: string): boolean {
 }
 
 /**
+ * Whether either control is narrowing the list.
+ *
+ * The one place that question is answered, because three callers ask it and
+ * they must agree: {@link filterSteps} hands the list back untouched when
+ * nothing narrows, {@link emptyStepListReason} has no control to blame an empty
+ * list on, and `useFilteredSteps` has nothing to maintain. A whitespace-only
+ * query narrows nothing, which is the half a second copy of this would get
+ * wrong.
+ */
+export function narrowsSteps(filter: StepListFilter): boolean {
+	return filter.outcome !== null || filter.query.trim() !== "";
+}
+
+/**
+ * The predicate `filter` describes, as a function of one row.
+ *
+ * **The one definition, and the reason it is exported** (issue #1297). A live
+ * list counts its matches and produces its window in two passes that stop at
+ * different places - the count runs to the end of the batch, the window stops
+ * as soon as it has enough rows - so neither can be expressed as a call to
+ * {@link filterSteps}, which always returns every match as an array. Handing
+ * out the predicate itself is what keeps that from becoming a second copy of
+ * the rule: {@link filterSteps} is this function applied to a whole list, and
+ * remains the oracle a windowed reader is checked against.
+ *
+ * The query is trimmed and lowercased once, here, rather than per row.
+ */
+export function stepMatcher(filter: StepListFilter): (step: ScenarioStepRow) => boolean {
+	const query = filter.query.trim().toLowerCase();
+	const { outcome } = filter;
+	return (step) =>
+		(outcome === null || step.outcome === outcome) &&
+		(query === "" || matchesQuery(step, query));
+}
+
+/**
  * The rows to show under `filter`.
  *
  * Returns the same array reference when nothing narrows, so an untouched view
- * hands `useGrowingWindow` the total it already had rather than a new array
- * that only looks like a new list.
+ * hands its window the total it already had rather than a new array that only
+ * looks like a new list.
+ *
+ * One predicate, wherever the rows come from: {@link stepMatcher} holds it, and
+ * a live list (`useFilteredSteps`, issues #1205 and #1297) calls that directly
+ * rather than testing rows a second way.
  */
 export function filterSteps(
 	steps: readonly ScenarioStepRow[],
 	filter: StepListFilter
 ): readonly ScenarioStepRow[] {
-	const query = filter.query.trim().toLowerCase();
-	const { outcome } = filter;
-	if (outcome === null && query === "") return steps;
-	return steps.filter(
-		(step) =>
-			(outcome === null || step.outcome === outcome) &&
-			(query === "" || matchesQuery(step, query))
-	);
+	if (!narrowsSteps(filter)) return steps;
+	return steps.filter(stepMatcher(filter));
 }
 
 /** Why the step list is empty, when a control rather than the run emptied it. */
@@ -176,9 +210,9 @@ export function emptyStepListReason(
 	filter: StepListFilter,
 	thinned: ThinningDisclosure | null
 ): EmptyStepListReason | null {
+	if (!narrowsSteps(filter)) return null;
 	const query = filter.query.trim();
 	const { outcome } = filter;
-	if (outcome === null && query === "") return null;
 
 	// Said wherever the chip is one of the two controls: it counts the whole
 	// run, and this list is what the run's store kept.
@@ -264,51 +298,111 @@ function planOrderIndex(steps: readonly ScenarioStepRow[], row: ScenarioStepRow)
 }
 
 /**
- * Fold a `step` event into the live list.
+ * Whether a replayed event says anything its row does not already say.
  *
- * Returns the same array reference when nothing changed, so a replayed event
- * cannot force a re-render of a list it did not alter. A later event for a key
- * already present replaces it rather than being dropped: the engine sends one
- * event per step execution, so a second one for the same key can only be a
- * replay of that execution, and the newer copy is the one to trust.
+ * The four fields a `step` event carries that can differ between the first
+ * delivery of an execution and a replay of it. Identity is not among them: two
+ * rows only reach this comparison when they sort equal, which is exactly when
+ * `stepKey` would match.
  */
-export function appendStepEvent(
-	steps: readonly ScenarioStepRow[],
-	event: ScenarioStepEvent
-): ScenarioStepRow[] {
-	const row: ScenarioStepRow = { ...event };
-	/*
-	 * One search answers both questions - "is this a replay?" and "where does a
-	 * new row go?" - because plan order *is* the identity order: two rows sort
-	 * equal exactly when `stepKey` would match. The scan this replaces walked
-	 * the whole list per event, which on a long run is the same cost as the
-	 * sort below it.
-	 */
-	const at = planOrderIndex(steps, row);
-	const existing = at < steps.length && byPlanOrder(steps[at], row) === 0 ? at : -1;
+function sameStepRow(current: ScenarioStepRow, row: ScenarioStepRow): boolean {
+	return (
+		current.outcome === row.outcome &&
+		current.statusCode === row.statusCode &&
+		current.latencyMs === row.latencyMs &&
+		current.name === row.name
+	);
+}
 
-	if (existing !== -1) {
-		const current = steps[existing];
-		if (
-			current.outcome === row.outcome &&
-			current.statusCode === row.statusCode &&
-			current.latencyMs === row.latencyMs &&
-			current.name === row.name
-		) {
-			return steps as ScenarioStepRow[];
+/**
+ * A live step list and the summary that describes it, folded together.
+ *
+ * They travel as one because the summary is only correct *for* these rows: the
+ * fold maintains it incrementally ({@link foldStepEvents}), so a caller holding
+ * one without the other holds a number nothing produced.
+ */
+export interface StepFold {
+	steps: ScenarioStepRow[];
+	summary: StepListSummary;
+}
+
+/** A fold, and what the batch that produced it disturbed. */
+export interface StepFoldResult {
+	/** The list and its summary after the batch. */
+	fold: StepFold;
+	/**
+	 * Whether every row the batch changed landed at the end of the list.
+	 *
+	 * False when a replay replaced a row in place or a gap-resume spliced one
+	 * in - the two cases that disturb rows a reader has already been shown.
+	 * True for the ordinary append, and for a batch that changed nothing.
+	 *
+	 * Its reader is `scenario-run-store`, which turns it into the epoch a
+	 * filtered view needs to tell "the same list, longer" from "a different
+	 * list" without comparing the rows (issue #1205). The fold is the only
+	 * place that knows: by the time the list reaches a reader, an appended row
+	 * and a replaced one look alike.
+	 */
+	appendedOnly: boolean;
+}
+
+/**
+ * Fold a batch of `step` events into the live list and its summary.
+ *
+ * **One commit per batch, one copy per batch.** The list is rebuilt once here
+ * however many events the batch carries, where folding them one at a time cost
+ * a full array copy each - quadratic over a run, and the reason
+ * `ScenarioRunService` buffers rather than committing per event (issue #1153).
+ *
+ * Returns the `current` fold itself when no event changed anything, so a
+ * replayed batch cannot force a re-render of a list it did not alter. A later
+ * event for a key already present replaces it rather than being dropped: the
+ * engine sends one event per step execution, so a second one for the same key
+ * can only be a replay of that execution, and the newer copy is the one to
+ * trust.
+ */
+export function foldStepEvents(
+	current: StepFold,
+	events: readonly ScenarioStepEvent[]
+): StepFoldResult {
+	// Null until an event actually changes something, which is what lets an
+	// all-replay batch return `current` and commit nothing.
+	let next: StepFold | null = null;
+	let appendedOnly = true;
+
+	for (const event of events) {
+		const fold = next ?? current;
+		const row: ScenarioStepRow = { ...event };
+		/*
+		 * One search answers both questions - "is this a replay?" and "where
+		 * does a new row go?" - because plan order *is* the identity order: two
+		 * rows sort equal exactly when `stepKey` would match. The scan this
+		 * replaces walked the whole list per event, which on a long run is the
+		 * same cost as the sort below it.
+		 */
+		const at = planOrderIndex(fold.steps, row);
+		const replacing = at < fold.steps.length && byPlanOrder(fold.steps[at], row) === 0;
+		if (replacing && sameStepRow(fold.steps[at], row)) continue;
+
+		next ??= { steps: [...current.steps], summary: cloneStepSummary(current.summary) };
+
+		if (replacing) {
+			applyStepRow(next.summary, next.steps[at], -1);
+			next.steps[at] = row;
+			appendedOnly = false;
+		} else if (at === next.steps.length) {
+			// Events arrive in plan order in the ordinary case, so this is an
+			// append; a gap-resume that lands one out of order still finds its
+			// seat below rather than sitting at the end.
+			next.steps.push(row);
+		} else {
+			next.steps.splice(at, 0, row);
+			appendedOnly = false;
 		}
-		const next = [...steps];
-		next[existing] = row;
-		return next;
+		applyStepRow(next.summary, row, 1);
 	}
 
-	// Placed on insert rather than sorted on render: events arrive in plan order
-	// in the ordinary case, so this is an append, and a gap-resume that lands one
-	// out of order still shows the sequence the run executed.
-	if (at === steps.length) return [...steps, row];
-	const next = [...steps];
-	next.splice(at, 0, row);
-	return next;
+	return { fold: next ?? current, appendedOnly };
 }
 
 /**
@@ -352,21 +446,81 @@ export function stepRowsFromReport(report: RunReport | undefined): ScenarioStepR
 }
 
 /**
- * Count the four outcomes.
+ * Everything the run tab's header says about a step list.
  *
- * `skipped` is its own number and is never folded into `passed`. A step the
- * runner skipped did not assert anything, and reporting it as a pass is the
- * false-pass class the run summary exists to avoid.
+ * Held as one object because the live path maintains all three incrementally
+ * ({@link foldStepEvents}) rather than scanning the list per commit. Three
+ * loose fields would be three things a caller can hold half of; one is one.
  */
-export function countOutcomes(steps: readonly ScenarioStepRow[]): OutcomeCounts {
-	const counts: OutcomeCounts = { passed: 0, failed: 0, skipped: 0, errored: 0 };
-	for (const step of steps) {
-		// A row whose outcome the engine did not name must not silently land in
-		// one of the four buckets - `stepRowFromResult` has already decided what
-		// an unstamped row counts as.
-		if (step.outcome in counts) counts[step.outcome] += 1;
-	}
-	return counts;
+export interface StepListSummary {
+	/**
+	 * The four outcomes.
+	 *
+	 * `skipped` is its own number and is never folded into `passed`. A step the
+	 * runner skipped did not assert anything, and reporting it as a pass is the
+	 * false-pass class the run summary exists to avoid.
+	 */
+	counts: OutcomeCounts;
+	/**
+	 * How many steps are past the first pass. `> 0` means a row should say
+	 * which iteration it belongs to.
+	 */
+	iterationSteps: number;
+	/** How many steps recorded the `data` row their iteration bound. */
+	dataBoundSteps: number;
+}
+
+/** The summary of a list with nothing in it. */
+export function emptyStepSummary(): StepListSummary {
+	return {
+		counts: { passed: 0, failed: 0, skipped: 0, errored: 0 },
+		iterationSteps: 0,
+		dataBoundSteps: 0,
+	};
+}
+
+function cloneStepSummary(summary: StepListSummary): StepListSummary {
+	return {
+		counts: { ...summary.counts },
+		iterationSteps: summary.iterationSteps,
+		dataBoundSteps: summary.dataBoundSteps,
+	};
+}
+
+/**
+ * Add one row to `summary`, or take one back out. Mutates: callers own the
+ * object they pass.
+ *
+ * Every field is a count rather than a flag, and `sign` is what makes the fold
+ * reversible: a replay that replaces a row takes the old one out before putting
+ * the new one in. A latched boolean would be cheaper by two integers and wrong
+ * the moment a replacement stopped binding a data row - a replay is compared on
+ * outcome, status, latency and name, not on `dataRowIndex` - and knowing
+ * whether any *other* row still bound one would mean rescanning the list, which
+ * is the whole-list scan this summary exists to avoid. Counting instead means
+ * the incremental summary equals {@link summarizeSteps} for any sequence of
+ * events, with no assumption about what the engine does or does not replay.
+ */
+function applyStepRow(summary: StepListSummary, row: ScenarioStepRow, sign: 1 | -1): void {
+	// A row whose outcome the engine did not name must not silently land in one
+	// of the four buckets - `stepRowFromResult` has already decided what an
+	// unstamped row counts as.
+	if (row.outcome in summary.counts) summary.counts[row.outcome] += sign;
+	if (row.iteration > 0) summary.iterationSteps += sign;
+	if (row.dataRowIndex !== undefined) summary.dataBoundSteps += sign;
+}
+
+/**
+ * Summarize a whole list in one pass.
+ *
+ * The stored path reads its summary from here - the rows arrive complete, so
+ * there is nothing to fold incrementally - and it is the oracle the live
+ * path's incremental summary is checked against.
+ */
+export function summarizeSteps(steps: readonly ScenarioStepRow[]): StepListSummary {
+	const summary = emptyStepSummary();
+	for (const step of steps) applyStepRow(summary, step, 1);
+	return summary;
 }
 
 /**
@@ -377,7 +531,7 @@ export function countOutcomes(steps: readonly ScenarioStepRow[]): OutcomeCounts 
  * These are the **whole-run** counts - `report.scenario.passed/failed/...`,
  * written from every step the runner executed - not a tally of the stored rows.
  * The rows are thinned by `maxScenarioStoredSteps` and thinning drops only
- * passes, so `countOutcomes(steps)` undercounts `passed` on any run that filled
+ * passes, so counting the rows undercounts `passed` on any run that filled
  * its store: a 6,000-step run keeping 5,000 rows would read "4,990 passed"
  * beside a header claiming 6,000 steps. The stored-row count stays the list's
  * own disclosure line (`thinningDisclosure`); the chips read the truth here.

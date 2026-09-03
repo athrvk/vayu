@@ -122,6 +122,7 @@ function renderBody() {
 				requestId="r1"
 				schemaTarget={TARGET}
 				onEditorMount={() => {}}
+				method="POST"
 				variablesDraft={'{"limit": {{n}}}'}
 				onVariablesDraftChange={() => {}}
 			/>

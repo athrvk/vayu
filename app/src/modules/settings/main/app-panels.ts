@@ -10,23 +10,23 @@
  *
  * The client-side (app) settings panels, declared as data - mirroring how the
  * engine settings side is driven by the `/config` API. The sidebar tree renders
- * `label`/`icon` from here, and `SettingsMain` looks up `Component` instead of
- * branching on a category string. Adding an app category is one entry + one
- * panel file.
+ * `label`/`icon` from here, and `SettingsMain` looks the panel component up in
+ * `app-panel-components.ts` instead of branching on a category string. Adding
+ * an app category is one entry + one panel file + its line in that map, which
+ * the compiler demands.
+ *
+ * **This file holds no component.** It is imported by the Drawer's category
+ * tree and by the command registry, both mounted on every tab, so a static
+ * import of the panels here put all eight of them - and everything they pull -
+ * in the startup chunk, whatever `Shell` did with `SettingsMain` (#1146). The
+ * split is between the data and the components, not between panels: the map is
+ * keyed by `ClientSettingsCategory`, so an id without a panel is a type error
+ * rather than a second list to keep in step.
  */
 
-import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Palette, Code2, LayoutDashboard, Gauge, Bell, Plug, Info, Keyboard } from "lucide-react";
 import type { ClientSettingsCategory, SettingsCategory } from "@/types";
-import AppearancePanel from "./panels/AppearancePanel";
-import EditorPanel from "./panels/EditorPanel";
-import DashboardPanel from "./panels/DashboardPanel";
-import LoadTestingPanel from "./panels/LoadTestingPanel";
-import McpSettingsPanel from "./panels/McpSettingsPanel";
-import NotificationsPanel from "./panels/NotificationsPanel";
-import GeneralPanel from "./panels/GeneralPanel";
-import KeyboardShortcutsPanel from "./panels/KeyboardShortcutsPanel";
 
 export interface AppSettingsPanel {
 	id: ClientSettingsCategory;
@@ -34,7 +34,6 @@ export interface AppSettingsPanel {
 	/** Shown under the panel header. */
 	description: string;
 	icon: LucideIcon;
-	Component: ComponentType;
 	/**
 	 * How this panel saves, stated in its header. Three save models coexist in
 	 * Settings - these panels autosave, the engine view has an explicit Save
@@ -53,49 +52,42 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		label: "General",
 		description: "Storage locations and application info",
 		icon: Info,
-		Component: GeneralPanel,
 	},
 	{
 		id: "appearance",
 		label: "Appearance",
 		description: "Customize the look and feel of the application",
 		icon: Palette,
-		Component: AppearancePanel,
 	},
 	{
 		id: "editor",
 		label: "Editor",
 		description: "Code-editor behavior across scripts and request/response bodies",
 		icon: Code2,
-		Component: EditorPanel,
 	},
 	{
 		id: "dashboard",
 		label: "Dashboard",
 		description: "How live test dashboards and charts behave",
 		icon: LayoutDashboard,
-		Component: DashboardPanel,
 	},
 	{
 		id: "load-testing",
 		label: "Load testing",
 		description: "How far the load-test dialog lets you push a run",
 		icon: Gauge,
-		Component: LoadTestingPanel,
 	},
 	{
 		id: "notifications",
 		label: "Notifications",
 		description: "Where toasts appear, how long they stay, and which ones are worth showing",
 		icon: Bell,
-		Component: NotificationsPanel,
 	},
 	{
 		id: "shortcuts",
 		label: "Keyboard shortcuts",
 		description: "Every chord the app listens for, drawn for this platform",
 		icon: Keyboard,
-		Component: KeyboardShortcutsPanel,
 		// Nothing on this screen is editable, so the autosave note would be
 		// answering a question it does not raise.
 		saveNote: "Shortcuts are fixed; this screen is a reference.",
@@ -107,7 +99,6 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		label: "AI agents (MCP)",
 		description: "Expose Vayu to AI agents like Claude Code, and set the safety guardrails",
 		icon: Plug,
-		Component: McpSettingsPanel,
 		saveNote:
 			"Switches and hosts are saved as you change them; the caps save when you leave the field. Every change is applied to the running server.",
 	},

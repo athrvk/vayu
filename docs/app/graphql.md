@@ -14,6 +14,20 @@ Pick **GraphQL** in the Body tab's mode picker. Vayu appends
 because GraphQL goes on the wire as a JSON envelope
 (`{"query": …, "variables": …}`) rather than as a bare document.
 
+Picking the mode also sets the method to **POST**, when the request still
+holds the default GET a new request starts with. Leaving GraphQL for another
+body mode gives the method back, the same way it removes the header. There is
+no Undo button for this one - the method selector is on screen and already
+shows what changed, which the Headers tab does not. A method you chose
+yourself is never touched, in either direction.
+
+That is because GraphQL means something different on a GET: the query travels
+as URL query parameters instead of a JSON body, and a mutation cannot be sent
+that way at all. A GET still reaches GraphQL when you pick it back yourself, or
+when an import wrote one - the Query pane header then carries a **Sent as query
+parameters** badge naming what will happen, so nothing silently 400s with no
+explanation on screen.
+
 ## The schema
 
 The moment a GraphQL body is on screen with a URL in the bar, Vayu introspects
@@ -39,8 +53,10 @@ an `Authorization` row directly, press Refresh.
 
 ## The schema explorer
 
-Press the panel icon in the Query pane's header - or the **Browse schema**
-control - to dock the explorer beside the editor.
+Press **Browse schema**, the panel icon at the left of the Query pane's header,
+to dock the explorer beside the editor. It opens on that side, which is where
+the icon points; the same button closes it again, so the control does not move
+when the pane appears.
 
 - **Browse** Query, Mutation, Subscription and Types. Fields show their
   arguments and result type; descriptions sit beside them; a deprecated field or
@@ -141,9 +157,19 @@ choice becomes real. Whatever else the envelope carries (`extensions`, an
 ## The context bar
 
 The bar's **GraphQL** section carries the glanceable half: whether a schema is
-loaded, how old it is, the endpoint, a Refresh, and an outline of the operations
-the request defines. Browsing belongs beside the cursor that inserts, which is
-why the tree lives in the editor pane and not here.
+loaded, how old it is, the endpoint, and an outline of the operations the
+request defines. Refreshing is not part of it - there is one Refresh, in the
+Query pane's header, on screen whether the explorer is open or closed. Browsing
+belongs beside the cursor that inserts, which is why the tree lives in the
+editor pane and not here.
+
+The section is hidden outright off a non-GraphQL body (`useGraphQLRelevance`),
+rather than rendering to say the request does not send one - a header every REST
+request used to carry and the reader scanned past on the way to the two sections
+that meant something (#1310). That verdict answers from the same
+`useRequestQuery` data the section itself reads, so a REST tab never even
+requests the section's own lazy ~320KB chunk (#1146): it used to arrive the
+moment the expanded section mounted just to say the request was not GraphQL.
 
 The outline reads the saved request, so it follows the editor as autosave
 catches up rather than keystroke by keystroke.

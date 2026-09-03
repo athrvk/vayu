@@ -25,6 +25,17 @@
  * resolves to `undefined`. `scriptVariableCompletionContext` decides which set
  * applies; this hook only renders it.
  *
+ * **And the scope answers for itself** (issue #1302). A single-scope list is the
+ * names that scope *defines*, through `getScopeVariables`, not the names whose
+ * ladder-winner happens to sit there: `pm.collectionVariables.get` reads the
+ * collection chain and answers from it whether or not the environment defines
+ * the name too, so a list drawn from the winners hid a collection's own
+ * `shop_domain` behind an environment that shadowed it - the one configuration
+ * where the read and the `{{name}}` beside it disagree, and so the one the list
+ * most owes an author. `detail` is that scope's own answer for the same reason,
+ * and where the answer is an empty row masking another scope's value,
+ * `describeScopedRead` says so in the words the chip above the editor uses.
+ *
  * **Collection scope is the whole chain, the same as in a body.** The engine
  * fills a script's collection scope from the request's collection *chain*
  * (issue #234, leaf shadowing ancestor), so an ancestor's variable resolves
@@ -51,12 +62,14 @@
  */
 
 import { useEffect } from "react";
-import { useMonaco } from "@monaco-editor/react";
+import { useLoadedMonaco } from "@/lib/monaco-loader";
 import type * as Monaco from "monaco-editor";
 import { useVariableResolver } from "./useVariableResolver";
 import { useActiveCollectionId } from "./useActiveCollectionId";
 import { useDataContract } from "./useDataContract";
 import { scriptVariableCompletionContext } from "@/lib/script-variable-completion";
+import { describeScopedRead, sourceLabel } from "@/lib/referenced-variables";
+import type { ResolvedVariable } from "@/types";
 import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
 import { ITERATION_VARIABLES } from "@/lib/iteration-variables";
 import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
@@ -66,8 +79,19 @@ const SCRIPT_LANGUAGE = "javascript";
 
 const CLOSE_BRACES = "}}";
 
-/** The resolver's own precedence, so the winning definition sorts first. */
+/**
+ * The resolver's own precedence, so the winning definition sorts first.
+ *
+ * A single-scope list shares one scope, so this prefix is constant there and the
+ * key is already the alphabetical order such a list wants (#1302). A branch that
+ * dropped the prefix for those lists would order nothing differently.
+ */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
+
+/** The value the accessor returns, or the mask a secret gets instead of it. */
+function valueDetail(info: ResolvedVariable): string {
+	return info.secret ? "secret" : info.value || "(empty)";
+}
 
 /**
  * Between the scopes and the data columns, the same slot
@@ -88,7 +112,10 @@ const DATA_SORT_GROUP = 7;
 const DYNAMIC_SORT_GROUP = 8;
 
 export function useScriptVariableCompletionProvider() {
-	const monaco = useMonaco();
+	// Passive by design: null until an editor has loaded Monaco, so registration
+	// happens then. `@monaco-editor/react`'s `useMonaco` would load it from here,
+	// at startup, and from the CDN - see `lib/monaco-loader.ts` (#1146).
+	const monaco = useLoadedMonaco();
 	/*
 	 * The active tab's collection, since a provider registered per language has
 	 * no request builder context to take one from and the resolver offers no
@@ -96,7 +123,9 @@ export function useScriptVariableCompletionProvider() {
 	 * the same chain the engine hands the script.
 	 */
 	const collectionId = useActiveCollectionId();
-	const { getAllVariables } = useVariableResolver({ collectionId });
+	const { getAllVariables, getScopeVariables, getVariableOrigins } = useVariableResolver({
+		collectionId,
+	});
 	/*
 	 * `pm.iterationData.get("` completes columns, not variables (issue #600) -
 	 * the row is bound from the collection's data file, so the names come from
@@ -155,25 +184,51 @@ export function useScriptVariableCompletionProvider() {
 				const closing = !template || rest.startsWith(CLOSE_BRACES) ? "" : CLOSE_BRACES;
 				const wrap = (name: string) => (template ? `{{${name}${closing}` : name);
 
-				const variables = getAllVariables();
-				const suggestions: Monaco.languages.CompletionItem[] = Object.entries(variables)
-					// `pm.environment.get` reads one scope; only the merged
-					// `pm.variables` sees them all.
-					.filter(([, info]) => context.scope === "all" || info.scope === context.scope)
-					.map(([name, info]) => ({
+				/*
+				 * The scope answers for itself (issue #1302). `pm.environment.get`
+				 * reads one scope and only the merged `pm.variables` sees them
+				 * all, so the merged read takes the ladder's winners and a
+				 * single-scope read takes that scope's own definitions - which are
+				 * not the same names. Filtering the winners by scope offered a
+				 * collection's `shop_domain` only while the environment did not
+				 * also define it, hiding from the list the very name the call
+				 * still reads, and printing the winner's value beside every name
+				 * it did offer.
+				 */
+				const scope = context.scope === "all" ? null : context.scope;
+				const variables = scope ? getScopeVariables(scope) : getAllVariables();
+				const suggestions: Monaco.languages.CompletionItem[] = Object.entries(
+					variables
+				).map(([name, info]) => {
+					/*
+					 * The trap at typing time rather than after a failed run
+					 * (#1196's second item): this scope answers emptily while
+					 * another holds the value, so the read returns `""` and the
+					 * `{{name}}` beside it does not. One sentence, from the same
+					 * function the chip above the editor reads - a second
+					 * cross-check here would be a copy that drifts from it.
+					 */
+					const shadowed = scope
+						? describeScopedRead(
+								{ name, via: "pm", reads: "scope", scope },
+								getVariableOrigins(name)
+							)
+						: null;
+					return {
 						label: name,
 						kind: monaco.languages.CompletionItemKind.Variable,
 						insertText: wrap(name),
-						// The resolved value, which is the thing you are actually
-						// checking when you reach for the list.
-						detail: info.secret ? "secret" : info.value || "(empty)",
-						documentation: info.sourceName
-							? `${info.scope} - ${info.sourceName}`
-							: info.scope,
+						// What this call returns, which is the thing you are
+						// actually checking when you reach for the list.
+						detail: shadowed ? shadowed.description : valueDetail(info),
+						documentation: shadowed
+							? `${sourceLabel(info)} - ${shadowed.note}`
+							: sourceLabel(info),
 						sortText: `${SCOPE_ORDER[info.scope] ?? 9}${name}`,
 						filterText: wrap(name),
 						range,
-					}));
+					};
+				});
 
 				/*
 				 * Declared columns, blended into the merged accessor and nowhere
@@ -306,5 +361,5 @@ export function useScriptVariableCompletionProvider() {
 		});
 
 		return () => disposable.dispose();
-	}, [monaco, getAllVariables, collectionId, dataColumns]);
+	}, [monaco, getAllVariables, getScopeVariables, getVariableOrigins, collectionId, dataColumns]);
 }

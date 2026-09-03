@@ -33,8 +33,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CommandPalette } from "./CommandPalette";
 import { useImportModalStore, useLayoutStore, useTabsStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
-import { useLiveCommandSurfaceStore } from "@/lib/commands";
-import { isMac } from "@/lib/platform";
+import { useLiveCommandSurfaceStore, type CommandContext } from "@/lib/commands";
+import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
+import { chordKeys, isMac } from "@/lib/platform";
+import { formatRelativeTime } from "@/utils";
+import { RECENT_LIMIT } from "./ranking";
 
 /**
  * The primary modifier as this platform sends it.
@@ -98,6 +101,28 @@ vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ resolveString: (s: string) => s }),
 }));
 
+/**
+ * The row no source produces yet: a command that also carries a recency stamp.
+ * `ranking.ts` sends anything stamped to Recents (#1197), so such a row reaches
+ * `PaletteRow` with a chord *and* an age to print - the collision the trailing
+ * slots guard against (#1260). `commandItems` has no code path that writes
+ * `recencyAt`, and that is the premise under test rather than an omission, so
+ * the stamp is applied here, to one row, by id.
+ */
+const stampedCommand = vi.hoisted(() => ({ id: null as string | null, at: 0 }));
+
+vi.mock("./sources/commandItems", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./sources/commandItems")>();
+	return {
+		commandItems: (ctx: CommandContext) =>
+			actual
+				.commandItems(ctx)
+				.map((item) =>
+					item.id === stampedCommand.id ? { ...item, recencyAt: stampedCommand.at } : item
+				),
+	};
+});
+
 function renderPalette() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
@@ -147,6 +172,26 @@ function pressEnter() {
 	fireEvent.keyDown(input(), { key: "Enter" });
 }
 
+/** The rows under one heading, in visible order. */
+function rowsUnder(heading: string): string[] {
+	const group = screen.getByText(heading).closest("[cmdk-group]")!;
+	return [...group.querySelectorAll("[cmdk-item]")].map(
+		(el) => el.querySelector("span.flex-1")?.textContent ?? ""
+	);
+}
+
+/** Every group heading on screen, in visible order. */
+function headings(): string[] {
+	return [...document.querySelectorAll("[cmdk-group-heading]")].map((el) => el.textContent ?? "");
+}
+
+/** Every result row on screen, in visible order. Escape rows are not results. */
+function visibleRows(): string[] {
+	return [...document.querySelectorAll("[cmdk-item]")]
+		.filter((el) => el.closest("[cmdk-group]")?.querySelector("[cmdk-group-heading]"))
+		.map((el) => el.querySelector("span.flex-1")?.textContent ?? "");
+}
+
 beforeEach(() => {
 	// cmdk scrolls the highlighted row into view; jsdom has no such method.
 	Element.prototype.scrollIntoView = vi.fn();
@@ -155,7 +200,8 @@ beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	useImportModalStore.setState({ isOpen: false });
 	useSettingsStore.setState({ selectedCategory: "appearance", highlightedKey: null });
-	useLiveCommandSurfaceStore.setState({ startLoadTest: null });
+	stampedCommand.id = null;
+	useLiveCommandSurfaceStore.setState({ startLoadTest: null, sendRequest: null });
 });
 afterEach(cleanup);
 
@@ -223,11 +269,74 @@ describe("searching", () => {
 		expect(screen.getByText("Payments / Auth")).toBeInTheDocument();
 	});
 
-	it("says so when nothing matches", async () => {
+	/*
+	 * Saying so is half of it. A launcher that matched nothing offers what it
+	 * can still do (#1177) - drop the verbs from the no-match branch of
+	 * `ranking.ts` and the palette is a dead end again, which is what the second
+	 * half of this asserts.
+	 */
+	it("says nothing matched, and offers the verbs instead of a dead end", async () => {
 		renderPalette();
 		open();
 		typeQuery("zzzzz");
-		expect(screen.getByText("No matches.")).toBeInTheDocument();
+
+		expect(screen.getByText(/No matches for “zzzzz”/)).toBeInTheDocument();
+		expect(rowsUnder("Quick actions")).toContain("Import collection");
+		// Suggestions are not results: the announcement still says the query
+		// narrowed everything away.
+		expect(screen.getByText(/searchable results$/).textContent).toBe("0 searchable results");
+	});
+
+	/*
+	 * The reported symptom (#1175), end to end. "theme" scores Theme Mode at
+	 * 0.99 and the request rows at 0.01-0.10, and the user saw the requests:
+	 * the sections rendered in a fixed order no score could cross. Put the
+	 * wrapper back in charge - drop the promotion in `ranking.ts` - and the
+	 * first row is a request again.
+	 */
+	it("puts the setting a query names first, above better-placed sections", async () => {
+		renderPalette();
+		open();
+
+		typeQuery("theme");
+
+		expect(visibleRows()[0]).toBe("Theme Mode");
+		const headings = [...document.querySelectorAll("[cmdk-group-heading]")].map(
+			(el) => el.textContent
+		);
+		expect(headings[0]).toBe("Top result");
+	});
+
+	/*
+	 * The floor. Every request here matches "theme" only as scattered
+	 * subsequence noise through a URL, which is how they outranked the setting
+	 * in the first place - so none of them may render at all.
+	 */
+	it("does not render a row that matched only as subsequence noise", async () => {
+		renderPalette();
+		open();
+
+		typeQuery("theme");
+
+		expect(screen.queryByText("Charge card")).not.toBeInTheDocument();
+		expect(screen.queryByText("Refund")).not.toBeInTheDocument();
+		expect(screen.queryByText("Issue token")).not.toBeInTheDocument();
+	});
+
+	/*
+	 * The announced count is the rendered count. It used to be summed from the
+	 * pre-filter groups, so a typed query announced every row the sources had
+	 * produced - the comment above it said as much and the line below did the
+	 * opposite.
+	 */
+	it("announces the number of rows it actually rendered", async () => {
+		renderPalette();
+		open();
+
+		typeQuery("theme");
+
+		const announced = screen.getByText(/searchable results$/).textContent ?? "";
+		expect(announced).toBe(`${visibleRows().length} searchable results`);
 	});
 
 	it("switches to an open tab rather than opening a second one", async () => {
@@ -266,11 +375,10 @@ describe("the empty query", () => {
 		renderPalette();
 		open();
 
-		const tabsGroup = screen.getByText("Tabs").closest("[cmdk-group]")!;
-		const labels = [...tabsGroup.querySelectorAll("[cmdk-item]")].map(
-			(el) => el.querySelector("span.flex-1")?.textContent
-		);
-		expect(labels).toEqual(["Inbox", "Variables", "Settings"]);
+		// Recency is what Recents is ordered by, and a dated row is lifted into
+		// it - so this is where the attention order shows, rather than inside
+		// Tabs as it did before the section existed.
+		expect(rowsUnder("Recents")).toEqual(["Inbox", "Variables", "Settings"]);
 	});
 
 	it("puts the most recently sent request first", async () => {
@@ -285,12 +393,10 @@ describe("the empty query", () => {
 		renderPalette();
 		open();
 
-		const group = screen.getByText("Requests").closest("[cmdk-group]")!;
-		const labels = [...group.querySelectorAll("[cmdk-item]")].map(
-			(el) => el.querySelector("span.flex-1")?.textContent
-		);
-		// Tree order is Charge card, Refund, Issue token; Refund ran last.
-		expect(labels[0]).toBe("Refund");
+		// Tree order is Charge card, Refund, Issue token; Refund ran last, and
+		// Issue token has never run, so it is not recent at all.
+		expect(rowsUnder("Recents")).toEqual(["Refund", "Charge card"]);
+		expect(rowsUnder("Requests")).toEqual(["Issue token"]);
 	});
 
 	it("keeps the groups in a fixed order", async () => {
@@ -303,17 +409,245 @@ describe("the empty query", () => {
 		open();
 
 		expect(screen.getByText("Tabs")).toBeInTheDocument();
-		const headings = [...document.querySelectorAll("[cmdk-group-heading]")].map(
-			(el) => el.textContent
-		);
-		expect(headings).toEqual([
+		// Nothing here is dated - no focus time, no runs - so Recents is absent
+		// and the verbs lead. "Commands" does not appear: on an empty query its
+		// rows are Quick actions.
+		expect(headings()).toEqual([
+			"Quick actions",
 			"Tabs",
 			"Requests",
 			"Collections",
 			"Views",
-			"Commands",
 			"Settings",
 		]);
+	});
+});
+
+/**
+ * The launcher affordances (#1176): the two sections the empty query leads
+ * with, the chord chips, and the hints under the list.
+ *
+ * The thing each of these is guarding is the same one the top result guards -
+ * a section above the fixed order holds rows *lifted* out of the sections
+ * below, never copied into it. Two rows carrying the same cmdk `value` both
+ * read as selected, and both would be counted.
+ */
+describe("the launcher sections", () => {
+	/** Three tabs and two sent requests: five dated rows, one short of the cap. */
+	function withRecentActivity() {
+		useTabsStore.setState({
+			openTabs: [
+				{ id: "t1", type: "settings", entityId: null },
+				{ id: "t2", type: "inbox", entityId: null },
+				{ id: "t3", type: "variables", entityId: null },
+			],
+			activeTabId: "t1",
+			tabFocusedAt: { t1: 9000, t2: 8000, t3: 7000 },
+		});
+		runPages = [
+			{
+				data: [
+					{ id: "run2", requestId: "r2", startTime: 5000 },
+					{ id: "run1", requestId: "r1", startTime: 1000 },
+				],
+			},
+		];
+	}
+
+	it("leads with Recents, then the verbs, above the fixed order", () => {
+		withRecentActivity();
+		renderPalette();
+		open();
+
+		expect(headings().slice(0, 2)).toEqual(["Recents", "Quick actions"]);
+	});
+
+	it("lifts a recent row out of its own section rather than copying it", () => {
+		withRecentActivity();
+		renderPalette();
+		open();
+
+		const rows = visibleRows();
+		// A lifted row appears exactly once in the whole list. Only the request
+		// names are asserted this way: a tab reads as its view does ("Inbox" is
+		// both an open tab and the drawer view), so a count would be testing
+		// that coincidence rather than the lift.
+		for (const label of ["Refund", "Charge card"]) {
+			expect(rows.filter((row) => row === label)).toHaveLength(1);
+		}
+		// The section a row was lifted from no longer lists it - and with every
+		// tab dated, Tabs has nothing left to render at all.
+		expect(screen.queryByText("Tabs")).not.toBeInTheDocument();
+		expect(rowsUnder("Requests")).toEqual(["Issue token"]);
+	});
+
+	it("counts a lifted row once in the announcement", () => {
+		withRecentActivity();
+		renderPalette();
+		open();
+
+		const announced = screen.getByText(/^\d+ results$/).textContent ?? "";
+		expect(announced).toBe(`${visibleRows().length} results`);
+	});
+
+	it("caps Recents, keeping the newest", () => {
+		useTabsStore.setState({
+			openTabs: Array.from({ length: RECENT_LIMIT + 2 }, (_, i) => ({
+				id: `t${i}`,
+				type: "settings" as const,
+				entityId: null,
+			})),
+			activeTabId: "t0",
+			// t0 is the oldest, so the two oldest fall off the end of the cap.
+			tabFocusedAt: Object.fromEntries(
+				Array.from({ length: RECENT_LIMIT + 2 }, (_, i) => [`t${i}`, 1000 + i])
+			),
+		});
+		renderPalette();
+		open();
+
+		expect(rowsUnder("Recents")).toHaveLength(RECENT_LIMIT);
+		// The two that did not fit are still reachable, in the section they
+		// were lifted from - a cap must not make a row unreachable.
+		expect(rowsUnder("Tabs")).toHaveLength(2);
+	});
+
+	it("says how long ago a recent row was touched", () => {
+		const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+		runPages = [{ data: [{ id: "run2", requestId: "r2", startTime: fiveMinutesAgo }] }];
+		renderPalette();
+		open();
+
+		const row = screen.getByText("Refund").closest("[cmdk-item]")!;
+		expect(row.textContent).toContain(formatRelativeTime(fiveMinutesAgo));
+	});
+
+	it("offers the verbs on an empty query and ranks them as Commands on a typed one", () => {
+		renderPalette();
+		open();
+
+		expect(rowsUnder("Quick actions")).toContain("Import collection");
+		expect(screen.queryByText("Commands")).not.toBeInTheDocument();
+
+		typeQuery("import");
+		expect(screen.queryByText("Quick actions")).not.toBeInTheDocument();
+		expect(screen.queryByText("Recents")).not.toBeInTheDocument();
+		expect(visibleRows()).toContain("Import collection");
+	});
+
+	/*
+	 * Nothing here asserts a platform, for the reason `KeyboardShortcutsPanel`'s
+	 * tests give: `chordKeys` answers differently on macOS and elsewhere, and the
+	 * rule being held is that the row reads the chord the handler matches rather
+	 * than spelling one of its own. So the caps are compared to what `chordKeys`
+	 * returns for that same chord, which fails on a hardcoded string, on
+	 * `formatChord`'s single joined cap, and on the wrong chord.
+	 */
+	it("prints a row's chord as key-caps, one Kbd per key", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "inbox", entityId: null }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+
+		const row = screen.getByText('Close "Inbox"').closest("[cmdk-item]")!;
+		const caps = [...row.querySelectorAll("kbd")].map((el) => el.textContent);
+		expect(caps).toEqual(chordKeys(CLOSE_TAB_CHORD));
+	});
+
+	it("prints no caps on a row no chord runs", () => {
+		renderPalette();
+		open();
+
+		// The registry binds no chord to importing - and a made-up one on screen
+		// is worse than none, since nothing would answer it.
+		const row = screen.getByText("Import collection").closest("[cmdk-item]")!;
+		expect(row.querySelectorAll("kbd")).toHaveLength(0);
+	});
+
+	it("prints the chord and not the age on a Recents row carrying both", () => {
+		const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "inbox", entityId: null }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		stampedCommand.id = "command:close-tab";
+		stampedCommand.at = fiveMinutesAgo;
+		renderPalette();
+		open();
+
+		// The stamp is what put it in Recents, and no other row is dated.
+		expect(rowsUnder("Recents")).toEqual(['Close "Inbox"']);
+
+		const row = screen.getByText('Close "Inbox"').closest("[cmdk-item]")!;
+		const caps = [...row.querySelectorAll("kbd")].map((el) => el.textContent);
+		expect(caps).toEqual(chordKeys(CLOSE_TAB_CHORD));
+		// Drop the `!item.shortcut` guard in `PaletteRow` and this is the line
+		// that reds: both slots draw, each with its own `ml-auto`, so the age
+		// no longer pushes right and the row reads `⌘W  5m ago` with the
+		// spacing of neither.
+		expect(row.textContent).not.toContain(formatRelativeTime(fiveMinutesAgo));
+	});
+
+	it("puts the keyboard hints outside the band that scrolls", () => {
+		renderPalette();
+		open();
+
+		const footer = document.querySelector('[data-slot="command-footer"]')!;
+		expect(footer).toBeInTheDocument();
+		expect(footer.textContent).toContain("navigate");
+		// Inside `CommandList` the hints would scroll away with the results
+		// they describe - which is the whole reason the band exists (#773).
+		expect(footer.closest('[data-slot="command-list"]')).toBeNull();
+	});
+});
+
+/**
+ * How much of the list is on screen (#1177). The primitive's 300px showed about
+ * six rows at the old density, so the Settings section a query named sat below
+ * the fold with nothing saying it was there - the search fix put the right row
+ * first, and this is what makes the rest of the answer visible.
+ */
+describe("the list's height", () => {
+	it("caps the list at about eleven rows, and at 60vh before that", () => {
+		renderPalette();
+		open();
+
+		const list = document.querySelector('[data-slot="command-list"]')!;
+		const cls = (list.getAttribute("class") ?? "").split(/\s+/);
+		expect(cls).toContain("max-h-[min(400px,60vh)]");
+		// tailwind-merge has to have dropped the primitive's own cap, or both
+		// declarations ship and the smaller one wins on source order.
+		expect(cls).not.toContain("max-h-[300px]");
+	});
+
+	it("pins the row padding the row count is counted in", () => {
+		/*
+		 * The cap is one input to "about eleven rows"; the row's own height is
+		 * the other, and a padding change would halve the visible count with the
+		 * assertion above still green - jsdom has no layout, so nothing here can
+		 * measure the rows themselves. So pin the padding they are drawn with:
+		 * `CommandItem`'s `px-2 py-1.5` is the row measured at 30.0px in
+		 * Chromium, read off a rendered palette row rather than the primitive,
+		 * since a caller's
+		 * `className` goes through tailwind-merge and can replace it - which is
+		 * exactly what `command.chrome.test.tsx`'s density read of the bare
+		 * primitive cannot see.
+		 *
+		 * The row *count* itself stays a manual measurement: eleven rows and two
+		 * headings in Chromium at a 768px window, nine at 600px (#1177).
+		 */
+		renderPalette();
+		open();
+
+		const row = document.querySelector('[data-slot="command-item"]');
+		expect(row).not.toBeNull();
+		const cls = (row?.getAttribute("class") ?? "").split(/\s+/);
+		expect(cls).toContain("px-2");
+		expect(cls).toContain("py-1.5");
 	});
 });
 
@@ -392,6 +726,31 @@ describe("commands", () => {
 		pressEnter();
 
 		expect(started).toHaveBeenCalledTimes(1);
+		expect(useLayoutStore.getState().paletteOpen).toBe(false);
+	});
+
+	/* The same join, for the second live slot (#1243). */
+	it("offers the send command only while a mounted builder contributes it", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "request", entityId: "r1" }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+		expect(screen.queryByText('Send "Request"')).not.toBeInTheDocument();
+		cleanup();
+
+		const sent = vi.fn();
+		useLiveCommandSurfaceStore.setState({ sendRequest: sent });
+		renderPalette();
+		open();
+		expect(screen.getByText('Send "Request"')).toBeInTheDocument();
+
+		typeQuery('Send "Req');
+		pressEnter();
+
+		expect(sent).toHaveBeenCalledTimes(1);
 		expect(useLayoutStore.getState().paletteOpen).toBe(false);
 	});
 

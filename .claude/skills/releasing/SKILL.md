@@ -176,9 +176,12 @@ Things about it that the code cannot tell you:
   `VAYU_SUDO` lets `install_e2e.sh` substitute a stub, which is the only way CI
   can see the privileged path at all - the runners have passwordless sudo and no
   terminal, which is where three bugs in a row hid.
-- **Every release artifact publishes a `.sha256`** (checksum steps in
+- **Every release installer publishes a `.sha256`** (checksum steps in
   `release.yml`), so the installer's verification is real on all three platforms
-  rather than dead code outside macOS.
+  rather than dead code outside macOS. The `latest*.yml` feeds and the Windows
+  `.exe.blockmap` are excluded: they are electron-updater's own metadata, and
+  what it assembles from them is verified against the sha512 the feed carries,
+  not against a sidecar nothing would fetch.
 - **Errors go through `die()`, never `step || exit 1` at a call site.** Bash
   disables `errexit` for the whole body of a function invoked in an `||`
   context, so an unchecked command inside it falls through - that is how a failed
@@ -195,6 +198,36 @@ Things about it that the code cannot tell you:
   `Vayu-<v>-x86_64.AppImage`) while `Vayu-x64.exe` and `Vayu-amd64.deb` do not,
   so `/releases/latest/download/<name>` **404s for macOS and Linux**. Link the
   installer or `/releases/latest`; never invent an unversioned asset URL.
+
+## Windows updates are differential, and the `.exe.blockmap` is what makes them so
+
+`resolveUpdateStrategy` gives Windows `silent`, so an update there is
+electron-updater's own download rather than a trip to the releases page.
+`NsisUpdater` asks for `<installer>.blockmap` twice - once for the release it is
+installing, once for the release being upgraded from, the second URL derived by
+substituting the old version into the new one's path - compares the two block
+lists and range-requests only the blocks that differ. Both files have to exist
+as release assets, which is why the Windows collect step in `release.yml` fails
+when electron-builder produced no blockmap: through v0.24.0 none were ever
+uploaded, so every Windows update pulled the whole 127MB installer and the only
+trace was one error-level `Cannot download differentially, fallback to full
+download` in the updater log.
+
+Three things to know before reading a release for evidence:
+
+- **The first release carrying a blockmap still updates in full.** The release
+  it is upgrading from has none, so that fetch 404s and the fallback runs. The
+  saving starts one release later.
+- **`latest.yml` does not gain a `blockMapSize`, and does not need one.** That
+  field is written only when the blockmap is appended to the artifact itself,
+  which is the AppImage's arrangement - `blockMapSize` in `latest-linux.yml`,
+  the map read back from the AppImage's own tail, no asset to upload. NSIS
+  writes a sibling file instead and the updater finds it by name, so an absent
+  `blockMapSize` on the exe is correct rather than a symptom.
+- **macOS ships no blockmap on purpose.** Its strategy is `notify`, since an
+  ad-hoc signature gives Squirrel.Mac nothing to verify, so the app never
+  downloads an update there and a `.zip.blockmap` would be an asset with no
+  reader.
 
 ## Windows also publishes to winget, automatically
 

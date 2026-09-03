@@ -171,7 +171,7 @@ jobs:
       # there is no measurement at all. `stable` rather than a pin because
       # mock-server.go is plain net/http with no go.mod and no version floor.
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: 'stable'
 

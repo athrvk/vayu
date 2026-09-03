@@ -26,6 +26,22 @@
 import { useTabsStore } from "@/stores";
 import { useRequestQuery } from "@/queries";
 
+/**
+ * The request the frontmost tab is showing, or null for any other tab.
+ *
+ * Beside `useActiveCollectionId` because it is the same read of the same tab,
+ * and a second spelling of "which tab is in front" is how two answers to it
+ * start to differ. Its reader is `useVariableHoverProvider`, which asks
+ * `boundRowFor` whether the builder has a row bound for this request - the
+ * hover is registered per language, outside the builder, so it cannot take the
+ * row from the context the way the fields below it do.
+ */
+export function useActiveRequestId(): string | null {
+	const { openTabs, activeTabId } = useTabsStore();
+	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	return activeTab?.type === "request" ? activeTab.entityId : null;
+}
+
 export function useActiveCollectionId(): string | undefined {
 	const { openTabs, activeTabId } = useTabsStore();
 	const activeTab = openTabs.find((t) => t.id === activeTabId);

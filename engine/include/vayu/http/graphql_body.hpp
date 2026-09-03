@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <optional>
 #include <string>
 
 /**
@@ -72,5 +73,41 @@ namespace vayu::http {
  * envelope on one side of the bind and a document on the other.
  */
 [[nodiscard]] bool graphql_body_is_enveloped (const std::string& content);
+
+/**
+ * @brief A `graphql` body's `content` as **GET** query parameters, or nothing.
+ *
+ * GraphQL-over-HTTP defines two transports, and the method picks between them:
+ * POST carries the envelope as a JSON body, GET carries the same fields as
+ * query parameters (`?query=…&operationName=…&variables=…`) and **no body**.
+ * A body on GET is undefined by that specification, and the servers that
+ * answer it answer `400 Bad Request` with nothing that says why - which is
+ * exactly what a request built from Vayu's default GET used to get (#1228).
+ *
+ * The parameters come back already percent-encoded and joined, the shape
+ * @ref compose_query answers with, for @ref url_with_query to merge into the
+ * URL. `variables` and `extensions` are JSON-encoded values, as the
+ * specification's GET transport requires; a bare document becomes `query`
+ * alone.
+ *
+ * **Nothing** - meaning "send this the way it has always been sent" - for the
+ * three cases where the fields cannot be recovered:
+ *
+ * - An empty body. There is nothing to carry.
+ * - Content that is shaped like an envelope but does not parse - the same case
+ *   @ref graphql_wire_body passes through rather than wrapping, for the same
+ *   reason: acting on a body we could not read is acting on ignorance, and
+ *   here it would mean sending a request whose query we invented.
+ * - An envelope carrying a member this transport has no parameter for, or one
+ *   whose `operationName`, `variables` or `extensions` is not the type the
+ *   specification gives it. Those members were agreed between a user and their
+ *   server; dropping them silently would send a *different* request, so the
+ *   body transport - which carries them verbatim - stays the honest answer.
+ *
+ * The caller that turns this into a decision is `wire_url` / `has_wire_body`
+ * in `form_body.hpp`, which is where the method is in scope; this function
+ * knows only about content.
+ */
+[[nodiscard]] std::optional<std::string> graphql_get_parameters (const std::string& content);
 
 } // namespace vayu::http

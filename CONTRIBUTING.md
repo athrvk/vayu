@@ -252,6 +252,25 @@ violation, an unformatted file or a type error fails CI. Where a rule genuinely
 cannot be satisfied, suppress it on the single line with a comment saying why -
 an unexplained `eslint-disable` is treated as a defect.
 
+That job also lints the JavaScript that lives **outside** `app/` - the perf
+harnesses under `scripts/perf/` today, anything under `scripts/` or `.github/`
+tomorrow. It is a fourth step rather than part of `pnpm lint`, because ESLint
+matches a config's patterns against the directory it runs in, so the repository
+tree needs a run of its own from the repository root:
+
+```bash
+app/node_modules/.bin/eslint --config app/eslint.repo-js.config.mjs \
+  $(git ls-files -- '*.mjs' '*.cjs' '*.js' | grep -v '^app/' | grep -v '^engine/vendor/')
+```
+
+The config is plain ESLint recommended with Node globals - no TypeScript, React
+or Prettier plugin, since these are Node scripts with no tsc behind them and
+prettier's domain is `app/` alone. Its header says why it sits under `app/`
+while describing the tree above it. The file list comes from `git ls-files` for
+the reason the shell and Python scans do, and the `repo_js` filter that routes a
+change here is derived from that same list by
+`app/src/lib/repo-js-lint-routing.test.ts`, so neither half can move alone.
+
 ### Shell and Python (tooling)
 
 The installer, the git hook, the test harnesses and `build.py` are the
@@ -336,10 +355,34 @@ TEST(HttpClientTest, SendsGetRequest) {
 
 ### App (TypeScript)
 
-Currently, the app does not have automated tests. If you add tests:
+The app is tested with [Vitest](https://vitest.dev/). Tests live beside the code
+they cover as `*.test.ts` / `*.test.tsx`. CI runs the suite on every pull
+request that touches the app, on all three platforms.
 
-- Use Vitest for unit tests
-- Use Playwright for E2E tests (if needed)
+```bash
+cd app
+
+# Run the whole app suite
+pnpm test
+
+# Run only the files matching a pattern
+pnpm test VariablesCategoryTree
+
+# The same run, spelled out
+pnpm exec vitest run VariablesCategoryTree
+
+# Re-run on change
+pnpm test:watch
+```
+
+**Do not write `pnpm test -- <pattern>`.** pnpm forwards the literal `--` into
+the script and vitest then ignores the filter, so that form quietly runs the
+whole suite instead of the file you asked for. Flags need no separator either -
+pass them straight through.
+
+Conventions for writing app tests - the default `node` environment, when to ask
+for `jsdom`, and the timeout rule for render-heavy cases - are in
+`app/CLAUDE.md`.
 
 ## Documentation
 
@@ -509,7 +552,7 @@ git push origin --tags
 Notes:
 
 - The `VERSION` file should be kept accurate. The workflow uses a pushed tag to identify the release and uploads matching artifacts.
-- Electron-generated filenames already include the version (for example `Vayu Setup 0.1.2.exe` and `Vayu-0.1.2-x86_64.AppImage`), so the workflow publishes them as-is.
+- Electron-generated filenames are whatever `artifactName` in `app/electron-builder.json` resolves to (for example `Vayu-0.1.2-x86_64.AppImage`, and `Vayu-x64.exe`, which carries no version at all), and the workflow publishes them as-is.
 - If you want the bump script to also create the tag and push, you may extend it, but this project requires an explicit tag push so releases remain deliberate.
 
 

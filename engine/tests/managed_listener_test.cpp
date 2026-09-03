@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -189,6 +190,35 @@ TEST (ManagedListener, RegisteringARouteAfterStopFailsLoudly) {
     ASSERT_GT (listener.start ("127.0.0.1").port, 0);
     listener.stop ();
     EXPECT_THROW (listener.server (), std::logic_error);
+}
+
+TEST (ManagedListener, AListenerHandedNoServerRefusesAtConstruction) {
+    // A listener owning nothing reads exactly like a stopped one - `server ()`
+    // throws the same way for both - so the two are told apart here, where the
+    // caller that passed the null is still on the stack.
+    EXPECT_THROW ((void)ManagedListener (nullptr), std::invalid_argument);
+}
+
+TEST (ManagedListener, ADeliberateServerIsTheOneTheListenerServesOn) {
+    // The inbox hands its listener an `httplib::Server` subclass (#1140); what
+    // this pins is that the one handed over is the one routes register on and
+    // requests are served by, not a replacement built inside.
+    auto server            = std::make_unique<httplib::Server> ();
+    httplib::Server* given = server.get ();
+
+    ManagedListener listener (std::move (server));
+    EXPECT_EQ (&listener.server (), given);
+
+    listener.server ().Get ("/ping", [] (const httplib::Request&, httplib::Response& res) {
+        res.set_content ("pong", "text/plain");
+    });
+    const int port = listener.start ("127.0.0.1").port;
+    ASSERT_GT (port, 0);
+
+    httplib::Client client ("127.0.0.1", port);
+    auto response = client.Get ("/ping");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->body, "pong");
 }
 
 TEST (ManagedListener, StartingATwiceStartedListenerRefusesRatherThanLeaking) {

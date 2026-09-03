@@ -28,16 +28,23 @@
  * state rather than a missing tab, which is also what makes "was this a
  * stream?" a question you can go and read.
  *
+ * **The list is windowed and its rows are memoized** (issue #1158). A stream
+ * runs to a cap of 100,000 events by default, and every row here is a chip, a
+ * monospace preview and an expandable payload - so rows arrive in slices that
+ * grow as the end is scrolled to, and a row that has not changed does not
+ * re-render because the ones after it arrived.
+ *
  * **Every disclosure is in band.** A stream that ended by a cap and one the
  * server closed are different facts, and a list of 100 rows out of 4,000
  * received is a different thing from a complete list of 100. Neither is left to
  * be inferred from the row count.
  */
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { ChevronDown, ChevronRight, Radio } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { Callout, EmptyState } from "@/components/shared";
+import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { cn } from "@/lib/utils";
 import type { StreamEndReason, StreamEvent } from "@/types";
 
@@ -63,6 +70,16 @@ export interface ResponseEventsProps {
 	isStream?: boolean;
 	/** A transport failure on the relay, if the live stream hit one. */
 	error?: string | null;
+	/**
+	 * What identifies the list, for the render window (issue #1158).
+	 *
+	 * The window resets when this changes, so a live stream passes its run id:
+	 * its list grows in place, and the default - the row count - would reset the
+	 * window to its first slice on every batch that arrived. A list that only
+	 * ever arrives whole (a stored trace, a load run's captured sample) has no
+	 * identity to give and wants exactly that default.
+	 */
+	listKey?: string;
 }
 
 /**
@@ -120,8 +137,18 @@ function formatReceivedAt(receivedAt: number | undefined): string {
 	return new Date(receivedAt).toLocaleTimeString();
 }
 
-/** One event: a summary row that expands to the full payload. */
-function EventRow({ event, index }: { event: StreamEvent; index: number }) {
+/**
+ * One event: a summary row that expands to the full payload.
+ *
+ * Memoized, because a live stream re-renders the list around it (issue #1158).
+ * Up to a window's worth of these are mounted while rows arrive several times a
+ * second, and all but the newest render exactly what they rendered before. Both
+ * props hold their identity across such a render - an event object is appended
+ * once and never replaced, and `index` is a number - so the default shallow
+ * comparison is the whole requirement; a custom comparator would be a second
+ * copy of that fact, free to disagree with it.
+ */
+const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; index: number }) {
 	const [expanded, setExpanded] = useState(false);
 	const Chevron = expanded ? ChevronDown : ChevronRight;
 	const at = formatReceivedAt(event.receivedAt);
@@ -184,7 +211,7 @@ function EventRow({ event, index }: { event: StreamEvent; index: number }) {
 			)}
 		</div>
 	);
-}
+});
 
 export default function ResponseEvents({
 	events,
@@ -194,7 +221,21 @@ export default function ResponseEvents({
 	isStreaming = false,
 	isStream = false,
 	error = null,
+	listKey,
 }: ResponseEventsProps) {
+	/*
+	 * Render a slice and grow it as the end is reached, the way the console and
+	 * a scenario run's steps do (issue #1158). A stream is capped at 100,000
+	 * events by default and ten million at the ceiling, so "how many rows can
+	 * this be asked to draw" has no small answer - and the rows are DOM-heavy,
+	 * with a chip, a monospace preview and an expandable payload each.
+	 */
+	const { visible, sentinelRef, hasMore } = useGrowingWindow(
+		events.length,
+		undefined,
+		listKey ?? events.length
+	);
+
 	// Two different absences, two different answers. A response that was never a
 	// stream has no timeline to show and never will; a stream that has produced
 	// nothing yet is still going to.
@@ -271,12 +312,27 @@ export default function ResponseEvents({
 					/>
 				) : (
 					<div className={cn(error || note || eventsTruncated ? "pt-2" : undefined)}>
-						{events.map((event, i) => (
+						{events.slice(0, visible).map((event, i) => (
 							// Index-keyed deliberately: the list only ever grows at the
 							// end, and an event carries no id of its own that is unique
 							// (`sourceId` is the origin's and repeats freely).
 							<EventRow key={i} event={event} index={i} />
 						))}
+						{hasMore && (
+							/*
+							 * The sentinel. Reaching it renders the next slice -
+							 * nothing is withheld, it arrives when you get there. The
+							 * count is stated rather than left to be inferred from a
+							 * scrollbar, exactly as the console's is.
+							 */
+							<p
+								ref={sentinelRef}
+								className="border-t border-rule px-4 py-2 text-xs text-muted-foreground"
+							>
+								Showing {Math.min(visible, events.length).toLocaleString()} of{" "}
+								{events.length.toLocaleString()} rows - scroll for more.
+							</p>
+						)}
 					</div>
 				)}
 			</div>

@@ -14,13 +14,27 @@
  * - Preview: HTML/image rendering (when applicable)
  *
  * Similar to Postman's response body viewer.
+ *
+ * Past `LARGE_BODY_BYTES` it drops to one mode: no `formatBody`, no syntax
+ * highlighting, and a prefix of the raw body in the editor, with a notice
+ * saying so. Everything this component does to a body it does synchronously
+ * during render, so a multi-megabyte response used to freeze the window between
+ * Send and the pane painting. See the constant in `utils.ts` for the three
+ * passes and why 2MB.
  */
 
 import { useState, useMemo, type ReactNode } from "react";
 import { FileCode, Image as ImageIcon, File, Eye, Code, FileText } from "lucide-react";
 import { CodeEditor, ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { detectBodyType, getMonacoLanguage, formatBody } from "./utils";
+import { Callout } from "../Callout";
+import {
+	detectBodyType,
+	getMonacoLanguage,
+	formatBody,
+	formatSize,
+	LARGE_BODY_BYTES,
+} from "./utils";
 import type { ResponseBodyProps, ViewMode } from "./types";
 
 interface ExtendedResponseBodyProps extends ResponseBodyProps {
@@ -53,10 +67,29 @@ export default function ResponseBody({
 }: ExtendedResponseBodyProps) {
 	const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
 
-	// Detect body type from content and headers
+	/*
+	 * Past `LARGE_BODY_BYTES` the pane stops formatting and shows a raw prefix.
+	 * Whichever of the two strings is bigger decides, because either can end up
+	 * in the editor - `body` in Pretty, `bodyRaw` in Raw - and the cost is the
+	 * one that gets rendered, not the one that was passed first.
+	 */
+	const bodyLength = Math.max(body.length, bodyRaw?.length ?? 0);
+	const isLargeBody = bodyLength > LARGE_BODY_BYTES;
+
+	/*
+	 * Detect body type from content and headers.
+	 *
+	 * Above the gate the *content* half is skipped, because it is itself a pass
+	 * over the whole string: with no content-type header - or a generic
+	 * `text/plain` one - `detectBodyType` trims the body, `JSON.parse`s it and
+	 * lower-cases it looking for markup, which for a 32MB body is the freeze
+	 * this threshold exists to prevent, paid before the gate below is even
+	 * reached. The header still decides where there is one; an unlabelled large
+	 * body reads as text, which is what the pane renders it as either way.
+	 */
 	const detectedType = useMemo(
-		() => detectBodyType(headers, bodyRaw || body),
-		[headers, bodyRaw, body]
+		() => detectBodyType(headers, isLargeBody ? "" : bodyRaw || body),
+		[headers, bodyRaw, body, isLargeBody]
 	);
 
 	// Check if preview is available
@@ -66,12 +99,17 @@ export default function ResponseBody({
 	// Raw mode: use bodyRaw (original raw bytes from server) if available, fallback to body
 	// Pretty mode: use formatted body
 	const formattedBody = useMemo(() => {
+		// The gate, and the reason the toggle is hidden with it: there is one
+		// view left, so `formatBody`'s parse-and-reindent pass never runs and the
+		// editor is handed a bounded prefix rather than a model it will spend
+		// seconds tokenising.
+		if (isLargeBody) return (bodyRaw || body).slice(0, LARGE_BODY_BYTES);
 		if (viewMode === "raw") {
 			// Use bodyRaw for raw view to show actual server response
 			return bodyRaw || body;
 		}
 		return formatBody(body, detectedType);
-	}, [body, bodyRaw, detectedType, viewMode]);
+	}, [body, bodyRaw, detectedType, viewMode, isLargeBody]);
 
 	// Get Monaco language
 	const language = useMemo(() => getMonacoLanguage(detectedType), [detectedType]);
@@ -81,6 +119,9 @@ export default function ResponseBody({
 	const previewHtml = useMemo(() => {
 		const htmlContent = bodyRaw || body;
 		if (detectedType !== "html") return htmlContent;
+		// Unreachable above the gate - the toggle that selects Preview is hidden -
+		// and the injection below is another whole-string scan and copy.
+		if (isLargeBody) return htmlContent;
 
 		// Inject script to disable link navigation and add base styling
 		const disableLinkScript = `
@@ -112,7 +153,7 @@ export default function ResponseBody({
 		} else {
 			return htmlContent + disableLinkScript;
 		}
-	}, [body, bodyRaw, detectedType]);
+	}, [body, bodyRaw, detectedType, isLargeBody]);
 
 	// Handle image types - use bodyRaw for actual image data
 	if (detectedType === "image") {
@@ -224,7 +265,7 @@ export default function ResponseBody({
 				</div>
 
 				<div className="flex items-center gap-2">
-					{showModeToggle && (
+					{showModeToggle && !isLargeBody && (
 						<ToggleGroup
 							value={viewMode}
 							// Radix clears the value when the active item is pressed again.
@@ -254,9 +295,29 @@ export default function ResponseBody({
 				</div>
 			</div>
 
+			{/*
+			 * Said here rather than in either viewer, because this is the
+			 * component that made the decision: it is the pane's own limit, not
+			 * something the engine or the store did to the response. The
+			 * separate "the engine only read this much" notice lives in the
+			 * request builder's viewer and both can be on screen at once.
+			 *
+			 * Download is promised only when there is a Download button - the
+			 * history viewer mounts this with no `actions` slot.
+			 */}
+			{isLargeBody && (
+				<div className="shrink-0 px-4 pt-3">
+					<Callout severity="info" title="Large response">
+						This body is {formatSize(bodyLength)}. Formatting is off and only the first{" "}
+						{formatSize(LARGE_BODY_BYTES)} is shown here, so the pane stays responsive.
+						{actions ? " Download saves the body the app received." : ""}
+					</Callout>
+				</div>
+			)}
+
 			{/* Content */}
 			<div className="flex-1 min-h-0">
-				{viewMode === "preview" && detectedType === "html" ? (
+				{!isLargeBody && viewMode === "preview" && detectedType === "html" ? (
 					<iframe
 						srcDoc={previewHtml}
 						className="w-full h-full bg-white"
@@ -266,7 +327,11 @@ export default function ResponseBody({
 				) : (
 					<CodeEditor
 						height={height}
-						language={viewMode === "raw" ? "plaintext" : language}
+						// Plaintext above the gate too: tokenising a 2MB model for
+						// syntax colours is the third of the three passes the
+						// threshold exists to avoid.
+						language={isLargeBody || viewMode === "raw" ? "plaintext" : language}
+						ariaLabel="Response body"
 						value={formattedBody}
 						readOnly
 						fontSize={compact ? 12 : 13}

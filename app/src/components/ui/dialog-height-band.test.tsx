@@ -136,8 +136,8 @@ describe("the dialogs that can grow", () => {
 		// Bands of its own (header, tab strip, body, footer), each with a
 		// divider, and the scroll already on the one that needs it.
 		["modules/collections/ImportModal.tsx", "manages its own bands"],
-		// A palette is its input plus `CommandList`, which caps and scrolls
-		// itself one level in.
+		// A palette is its input, `CommandList` and a footer of hints. The list
+		// caps and scrolls itself one level in; the bands around it do not grow.
 		["components/ui/command.tsx", "cmdk owns the list scroll"],
 		// Header and footer only - there is no middle to scroll.
 		["components/ui/delete-confirm-dialog.tsx", "no body"],

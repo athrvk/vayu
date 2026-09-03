@@ -34,10 +34,9 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { CommandDialog, CommandInput } from "@/components/ui";
+import { CommandDialog, CommandFooter, CommandInput, Kbd } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
 import { PALETTE_CHORD, matchesChord } from "@/constants/shortcuts";
-import { formatChord } from "@/lib/platform";
 import { useCommandContext } from "@/hooks/useCommandContext";
 import RunCollectionDialog from "@/modules/collections/RunCollectionDialog";
 import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
@@ -115,6 +114,19 @@ export function CommandPalette() {
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (!matchesChord(e, PALETTE_CHORD)) return;
 			e.preventDefault();
+			/*
+			 * And stopped here, not merely prevented. `preventDefault` cancels the
+			 * browser's own action and nothing else: the event still finished its
+			 * journey to Monaco, which treats ⌘K as a chord *leader* and entered
+			 * chord mode behind the open palette - so the next key typed in the
+			 * editor answered "not a command" in its status bar. Capturing a key and
+			 * leaving it in flight is half a claim.
+			 *
+			 * Scoped to this one chord like the capture phase itself: the `return`
+			 * above is the only other way out of this handler, so no other key is
+			 * stopped.
+			 */
+			e.stopPropagation();
 			// Toggling rather than only opening: the chord that summoned it is
 			// the one a user presses again to dismiss it.
 			setPaletteOpen(!useLayoutStore.getState().paletteOpen);
@@ -136,11 +148,21 @@ export function CommandPalette() {
 				title="Command palette"
 				description="Search open tabs, requests, collections, views, commands, settings, variables and past runs."
 				className="max-w-xl"
+				/* Matching belongs to `ranking.ts`, which needs to decide the top
+				   result, the relevance floor and the announced count from one
+				   pass. cmdk scoring the rendered rows again would be a second
+				   authority over the same question - and the one that used to win,
+				   since a section it could not re-order outranked any score. */
+				shouldFilter={false}
 			>
+				{/* No chord in the placeholder: the palette is already open by the
+				    time anyone reads it, so the one thing it would teach has
+				    just been used. The title bar's search bar advertises ⌘K
+				    where it is still worth knowing. */}
 				<CommandInput
 					value={query}
 					onValueChange={setQuery}
-					placeholder={`Search tabs, requests, settings, runs… (${formatChord(PALETTE_CHORD)})`}
+					placeholder="Search tabs, requests, commands, settings…"
 				/>
 				{/*
 				 * Mounted only while open, so a shut palette holds no query observers
@@ -150,6 +172,25 @@ export function CommandPalette() {
 				{paletteOpen && (
 					<PaletteResults query={query} onPick={pick} commandContext={commandContext} />
 				)}
+				{/* Below the list rather than inside it: `CommandList` is the band
+				    that scrolls, and hints that scroll away are hints nobody
+				    reads. Every key here is one the open palette answers - the
+				    arrows and Enter are cmdk's, Escape is the dialog's. */}
+				<CommandFooter>
+					<span className="flex items-center gap-1">
+						<Kbd size="sm">↑</Kbd>
+						<Kbd size="sm">↓</Kbd>
+						<span>navigate</span>
+					</span>
+					<span className="flex items-center gap-1">
+						<Kbd size="sm">↵</Kbd>
+						<span>open</span>
+					</span>
+					<span className="flex items-center gap-1">
+						<Kbd size="sm">esc</Kbd>
+						<span>close</span>
+					</span>
+				</CommandFooter>
 			</CommandDialog>
 			{/* Outside the palette on purpose: a command closes the palette as it
 			    runs, so a dialog rendered inside it would be unmounted by the very

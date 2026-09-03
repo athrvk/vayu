@@ -125,6 +125,30 @@ export function getMonacoLanguage(bodyType: BodyType): string {
 }
 
 /**
+ * Past this much body, the pane stops formatting and shows a raw prefix.
+ *
+ * Nothing about a response this size is free on the main thread, and rendering
+ * one costs three synchronous passes over the whole string plus a Monaco model:
+ * `JSON.parse` of the body, `JSON.stringify` of the parse result with two-space
+ * indent (which is a third copy again, larger than the input), and Monaco
+ * tokenising the result line by line for syntax highlighting. There is no
+ * worker to move them to - `formatBody` is called during render - so all of it
+ * lands between the user pressing Send and the pane painting.
+ *
+ * 2MB is where that stops being a pause and starts being a freeze, and it is
+ * far above any body a person reads in an editor: 2MB of JSON is roughly 50,000
+ * formatted lines. The engine's own design-mode read bound
+ * (`maxDesignResponseBodyBytes`) is 32MB, sixteen times this, precisely because
+ * *keeping* bytes is cheap where *formatting* them is not - the two numbers
+ * answer different questions and are deliberately not the same.
+ *
+ * Characters, not bytes, because that is what the editor and `String.slice`
+ * count; for anything but a body of astral-plane text the two agree closely
+ * enough for a display threshold.
+ */
+export const LARGE_BODY_BYTES = 2 * 1024 * 1024;
+
+/**
  * Format body for display (pretty print JSON, etc.)
  *
  * XML is pretty-printed too (`lib/xml-format.ts`). It was detected here and

@@ -9,20 +9,36 @@
  * VariableAutocomplete Component
  *
  * Use Case 1: Display a list of available variables for selection
- * - Shows filtered list of variables based on search query
+ * - Shows the entries `buildVariableSuggestions` offers for the search query
  * - Displays variable name and scope badge
- * - Handles keyboard navigation and selection
  * - Used when user types {{ to select a variable
+ *
+ * **It does not own the keyboard.** The keys arrive at the text field the list
+ * hangs off, not at this list - nothing here is ever focused - so `VariableInput`
+ * moves the highlight through the controlled `value` prop and calls `onSelect`
+ * itself (issue #1215). The ordering both sides step through is
+ * `lib/variable-suggestions.ts`, so there is one list and not two.
  */
 
 import { useMemo } from "react";
-import { Command, CommandList, CommandEmpty, CommandGroup, CommandItem } from "./command";
+import {
+	Command,
+	CommandList,
+	CommandEmpty,
+	CommandGroup,
+	CommandItem,
+	CommandListboxProbe,
+	type CommandListboxState,
+} from "./command";
 import { VariableScopeBadge } from "./variable-scope-badge";
 import { cn } from "@/lib/utils";
 import type { DataContractScope, ResolvedVariable } from "@/types";
-import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
-import { DYNAMIC_VARIABLES } from "@/lib/dynamic-variables";
-import { ITERATION_VARIABLES } from "@/lib/iteration-variables";
+import {
+	buildVariableSuggestions,
+	variableSuggestionKey,
+	VARIABLE_SUGGESTION_GROUPS,
+	type VariableSuggestion,
+} from "@/lib/variable-suggestions";
 
 // Re-export ResolvedVariable as VariableInfo for backward compatibility
 export type { ResolvedVariable as VariableInfo };
@@ -47,6 +63,28 @@ export interface VariableAutocompleteProps {
 	 * answers `{{data.username}}`.
 	 */
 	dataColumns?: DataContractScope;
+	/**
+	 * The highlighted entry, as a `variableSuggestionKey`. Supplied by
+	 * `VariableInput`, which owns arrow-key navigation because the keys arrive at
+	 * the text field rather than at this list (issue #1215) - so the highlight
+	 * has to be state the field can move. Omitted, `cmdk` highlights on its own,
+	 * which is what a direct render in a test gets.
+	 */
+	value?: string;
+	/** Fires when `cmdk` moves the highlight itself - a pointer over a row. */
+	onValueChange?: (value: string) => void;
+	/**
+	 * Reports the listbox and highlighted-option ids, which `cmdk` mints and
+	 * which the combobox outside this list has to name. Must be stable.
+	 */
+	onListboxState?: (state: CommandListboxState) => void;
+}
+
+/** The secondary text on a row, which differs by group. */
+function suggestionDetail(suggestion: VariableSuggestion): string | undefined {
+	if (suggestion.group === "columns")
+		return `${suggestion.collectionName ?? ""}${suggestion.bare ? " · bare" : ""}`;
+	return suggestion.description;
 }
 
 export function VariableAutocomplete({
@@ -55,147 +93,74 @@ export function VariableAutocomplete({
 	onSelect,
 	className,
 	dataColumns,
+	value,
+	onValueChange,
+	onListboxState,
 }: VariableAutocompleteProps) {
-	// Filter variables based on search query
-	const filteredVariables = useMemo(() => {
-		const entries = Object.entries(variables);
-		if (!searchQuery) return entries;
-		const lowerQuery = searchQuery.toLowerCase();
-		return entries.filter(([name]) => name.toLowerCase().includes(lowerQuery));
-	}, [variables, searchQuery]);
+	const suggestions = useMemo(
+		() => buildVariableSuggestions({ variables, searchQuery, dataColumns }),
+		[variables, searchQuery, dataColumns]
+	);
 
 	/*
-	 * Dynamic variables are offered from the table rather than from `variables`,
-	 * which holds what the workspace defines. They are a second group, below,
-	 * because they exist in every workspace and would otherwise dilute the list
-	 * of names the user actually created. One that a real variable shadows is
-	 * dropped: the resolver would ignore the generator there.
+	 * Drawn group by group, in the one declared order. The groups exist so a name
+	 * no scope defines - a generator, a column, an iteration identity - is not
+	 * interleaved with the ones the user created; `variable-suggestions.ts` says
+	 * which entry falls where and why.
 	 */
-	const filteredDynamic = useMemo(() => {
-		const lowerQuery = searchQuery.toLowerCase();
-		return DYNAMIC_VARIABLES.filter(
-			(v) => !(v.name in variables) && v.name.toLowerCase().includes(lowerQuery)
-		);
-	}, [variables, searchQuery]);
+	const groups = useMemo(
+		() =>
+			VARIABLE_SUGGESTION_GROUPS.map(({ group, heading }) => ({
+				group,
+				heading,
+				items: suggestions.filter((s) => s.group === group),
+			})).filter(({ items }) => items.length > 0),
+		[suggestions]
+	);
 
-	/*
-	 * The reserved identity namespace (issue #994), a group of its own for the
-	 * same reason `data.*` is: it is not a variable a scope could ever define
-	 * (`variable-resolution.ts` reserves the names ahead of the scope lookup),
-	 * so unlike the generators below there is no shadowing check here - both
-	 * names are always offered.
-	 */
-	const filteredIteration = useMemo(() => {
-		const lowerQuery = searchQuery.toLowerCase();
-		return ITERATION_VARIABLES.filter((v) => v.name.toLowerCase().includes(lowerQuery));
-	}, [searchQuery]);
-
-	/*
-	 * Columns are their own group for the same reason generators are: they are
-	 * not variables, and interleaving them would put a name no scope defines
-	 * among the ones the user created. They are offered from the contract rather
-	 * than from `variables` because the namespace is disjoint from the scopes -
-	 * a stored variable named `data.email` cannot shadow the column, so there is
-	 * no shadowing check to make here.
-	 *
-	 * Each column offers both spellings a bound row answers (issue #1007): the
-	 * prefixed one first, then bare - `bare` on the entry is what the row below
-	 * reads to label which is which, since the token text alone does not say it.
-	 */
-	const filteredColumns = useMemo(() => {
-		const lowerQuery = searchQuery.toLowerCase();
-		const entries: Array<{ name: string; bare: boolean }> = [];
-		for (const column of dataColumns?.columns ?? []) {
-			const prefixed = `${DATA_NAMESPACE_PREFIX}${column}`;
-			if (prefixed.toLowerCase().includes(lowerQuery))
-				entries.push({ name: prefixed, bare: false });
-			if (column.toLowerCase().includes(lowerQuery))
-				entries.push({ name: column, bare: true });
-		}
-		return entries;
-	}, [dataColumns, searchQuery]);
-
-	if (
-		filteredVariables.length === 0 &&
-		filteredIteration.length === 0 &&
-		filteredDynamic.length === 0 &&
-		filteredColumns.length === 0
-	) {
+	if (suggestions.length === 0) {
 		return null;
 	}
 
 	return (
 		<div className={cn("w-64 rounded-lg border bg-popover shadow-md", className)}>
-			<Command shouldFilter={false}>
+			<Command shouldFilter={false} value={value} onValueChange={onValueChange}>
 				<CommandList>
+					{onListboxState && <CommandListboxProbe onChange={onListboxState} />}
 					<CommandEmpty>No variables found.</CommandEmpty>
-					{filteredVariables.length > 0 && (
-						<CommandGroup heading="Variables">
-							{filteredVariables.map(([name, varInfo]) => (
-								<CommandItem
-									key={name}
-									value={name}
-									onSelect={() => onSelect(name)}
-									className="flex items-center justify-between cursor-pointer"
-								>
-									<span className="font-mono text-sm">{name}</span>
-									<VariableScopeBadge scope={varInfo.scope} variant="compact" />
-								</CommandItem>
-							))}
+					{groups.map(({ group, heading, items }) => (
+						<CommandGroup key={group} heading={heading}>
+							{items.map((suggestion) => {
+								const key = variableSuggestionKey(suggestion);
+								const detail = suggestionDetail(suggestion);
+								return (
+									<CommandItem
+										key={key}
+										/*
+										 * The key, not the name: a column offered bare can
+										 * collide with a workspace variable of the same name,
+										 * and `cmdk` highlights by value.
+										 */
+										value={key}
+										onSelect={() => onSelect(suggestion.name)}
+										className="flex items-center justify-between cursor-pointer"
+									>
+										<span className="font-mono text-sm">{suggestion.name}</span>
+										{suggestion.scope ? (
+											<VariableScopeBadge
+												scope={suggestion.scope}
+												variant="compact"
+											/>
+										) : (
+											<span className="ml-2 truncate text-[11px] text-muted-foreground">
+												{detail}
+											</span>
+										)}
+									</CommandItem>
+								);
+							})}
 						</CommandGroup>
-					)}
-					{filteredIteration.length > 0 && (
-						<CommandGroup heading="Iteration">
-							{filteredIteration.map((identity) => (
-								<CommandItem
-									key={identity.name}
-									value={identity.name}
-									onSelect={() => onSelect(identity.name)}
-									className="flex items-center justify-between cursor-pointer"
-								>
-									<span className="font-mono text-sm">{identity.name}</span>
-									<span className="ml-2 truncate text-[11px] text-muted-foreground">
-										{identity.description}
-									</span>
-								</CommandItem>
-							))}
-						</CommandGroup>
-					)}
-					{filteredColumns.length > 0 && (
-						<CommandGroup heading="Data columns">
-							{filteredColumns.map(({ name, bare }) => (
-								<CommandItem
-									key={name}
-									value={name}
-									onSelect={() => onSelect(name)}
-									className="flex items-center justify-between cursor-pointer"
-								>
-									<span className="font-mono text-sm">{name}</span>
-									<span className="ml-2 truncate text-[11px] text-muted-foreground">
-										{dataColumns?.collectionName}
-										{bare ? " \u00b7 bare" : ""}
-									</span>
-								</CommandItem>
-							))}
-						</CommandGroup>
-					)}
-					{filteredDynamic.length > 0 && (
-						<CommandGroup heading="Dynamic">
-							{filteredDynamic.map((dynamic) => (
-								<CommandItem
-									key={dynamic.name}
-									value={dynamic.name}
-									onSelect={() => onSelect(dynamic.name)}
-									className="flex items-center justify-between cursor-pointer"
-								>
-									<span className="font-mono text-sm">{dynamic.name}</span>
-									<span className="ml-2 truncate text-[11px] text-muted-foreground">
-										{dynamic.description}
-									</span>
-								</CommandItem>
-							))}
-						</CommandGroup>
-					)}
+					))}
 				</CommandList>
 			</Command>
 		</div>

@@ -252,7 +252,7 @@ so a body that round-trips through storage sends the same bytes.
 |---|---|---|
 | `none` | nothing | no body |
 | `json` / `text` | `content` (string) | `content`, verbatim |
-| `graphql` | `content` (string) | the GraphQL-over-HTTP envelope (see below) |
+| `graphql` | `content` (string) | the GraphQL-over-HTTP envelope on POST, query parameters on GET (see below) |
 | `jsonrpc` | `content` (string) | the JSON-RPC 2.0 call envelope (see below) |
 | `xml` | `content` (string) | `content`, verbatim |
 | `x-www-form-urlencoded` | `fields` | percent-encoded `key=value&…` |
@@ -281,7 +281,9 @@ Five Content-Type rules follow from the encoding:
   straight to `/execute` - sent the wrong type. A declared header still wins, so
   `application/vnd.api+json` reaches the server unchanged.
 - `graphql` and `jsonrpc` set `Content-Type: application/json` under the same
-  rule - a Content-Type the caller wrote wins.
+  rule - a Content-Type the caller wrote wins. `graphql` only on the method
+  that carries a body at all: a GraphQL `GET` has no body and derives no
+  Content-Type, since there is nothing to describe (see below).
 - `xml` sets `Content-Type: application/xml`, again only when the caller
   declared none. It has no envelope and nothing is done to `content`; the header
   is the whole of what the mode adds over `text`, which is why an endpoint
@@ -318,6 +320,30 @@ or a mistyped one - is passed through unchanged rather than wrapped. Wrapping a
 body the engine could not read would turn a broken envelope into a valid
 request carrying the wrong query. A bare GraphQL document cannot take that
 shape, so nothing legitimate falls into it.
+
+GraphQL-over-HTTP defines two transports, and the request's method picks
+between them (issue #1228). Everything above is the POST transport - the
+envelope goes out as a JSON body. On a **GET**, the same fields travel as
+percent-encoded query parameters instead, and the request has **no body and no
+derived Content-Type**:
+
+| Parameter | From |
+|---|---|
+| `query` | the envelope's `query`, or the whole of `content` when it is a bare document |
+| `operationName` | the envelope's `operationName`, when present and not `null` |
+| `variables` | the envelope's `variables`, JSON-encoded, when present and not `null` |
+| `extensions` | the envelope's `extensions`, JSON-encoded, when present and not `null` |
+
+These parameters are merged into whatever query string the request's URL
+already has, not used to replace it - a `GET` sent to `/graphql?debug=1` keeps
+`debug=1` alongside `query=…`. The engine sends a body on a GraphQL `GET` in
+three cases, each because dropping the alternative would send a request the
+caller did not write rather than the one it wrote: `content` is empty, `content`
+is envelope-shaped but does not parse (the same unreadable-envelope case
+above), or the envelope carries a member this transport has no parameter for,
+or one of `operationName` / `variables` / `extensions` whose value is not the
+type the specification gives it. In all three, the request falls back to the
+POST-style JSON body even though the method is `GET`.
 
 #### The `jsonrpc` envelope
 
@@ -634,9 +660,11 @@ governs what a run measures rather than what it keeps:
 | Key                 | Default   | Range        | Effect |
 |---------------------|-----------|--------------|--------|
 | `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
-| `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
+| `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory, and what a `pm.sendRequest` from that run's deferred `tests` script may read. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
+| `maxDesignResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **design-mode** send - `POST /execute`, and each step of a collection run - reads into memory, and what a `pm.sendRequest` from that send's scripts may read. A bigger response is read up to this point and answered with `bodyCapped: true` (see `POST /execute`) rather than failing, because someone is watching for it - a script's own fetch is the exception and refuses, having no way to tell the script its body was cut (see [scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)). Separate from `maxResponseBodyBytes` above, which is the load path's and refuses in every case. |
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
+| `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
 | `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles instead of averages over the retained trace sample. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
 | `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
@@ -3221,12 +3249,19 @@ started, and a running listener keeps what it was started with:
 | `inboxMaxCaptures` | 500 | 1 - 10000 | Captures retained per inbox, oldest evicted first. Also the ceiling on one `limit` of the capture list |
 | `inboxLivePollIntervalMs` | 250 | 25 - 5000 | How often a watched inbox checks for new captures - the delay between a webhook landing and its event |
 
-Two are **not** settings, deliberately. A request over **8 MiB** is refused at
+Three are **not** settings, deliberately. A request over **8 MiB** is refused at
 the transport with a `413` and recorded nowhere: that bounds what an
 unauthenticated remote caller can make the engine buffer, which is not the local
 user's preference to spend. The canned response's **`delayMs` is capped at
 30000**: it holds a listener thread for its whole duration and a stop waits on
-that join, so it bounds how long a stop can be made to take.
+that join, so it bounds how long a stop can be made to take. The **request
+target** - path and query together - is capped at **8192 bytes** by the
+transport, past which it answers `414`.
+
+Below that cap the path's length does not matter, and "any path" is meant
+literally: an inbox routes every request to its capture without matching the
+path against anything, so a signed callback URL, a per-delivery token in the
+path or a deeply nested tenant route is recorded like any other (issue #1140).
 
 ### POST /inbox/start
 
@@ -4238,6 +4273,7 @@ run-shaped way of stating the same field, not a second store.
   "body": { "id": 1, "name": "John" },
   "bodyRaw": "{\"id\":1,\"name\":\"John\"}",
   "bodySize": 20,
+  "bodyCapped": false,
   "httpVersion": "HTTP/1.1",
   "httpVersionDowngraded": true,
   "timing": {
@@ -4279,6 +4315,25 @@ run-shaped way of stating the same field, not a second store.
   }
 }
 ```
+
+**`bodyCapped` says the body is a prefix** (issue #1157). A design-mode send
+reads at most `maxDesignResponseBodyBytes` (Settings → Limits, default 32MB);
+a response past that stops being read there, and `body` / `bodyRaw` /
+`bodySize` describe what arrived rather than what was sent. The status and the
+headers are the server's own - they arrive before the body - so this is a
+successful response carrying a flag, not a transport failure. The field is
+always present, so a client can tell "not capped" from an engine too old to
+say, and re-sending under the same setting reads the same amount: raise the
+setting to read more. Two consequences worth stating, since both follow from
+reading less: a cut JSON body no longer parses, so `body` is `null` and a test
+script's `pm.response.json()` throws, and `validation` below reports
+`checked: false` with `body_not_json` rather than inventing a schema failure.
+
+This is **not** the stored trace's `bodyTruncated` (see `GET /runs/:id`), which
+is `maxTraceBodyBytes` shortening a body for storage after the whole of it was
+read and shown - a re-send recovers from that one. A design run whose live
+response was capped stores `trace_data.response.bodyCapped`, so a restored
+response says what the live one said.
 
 **`validation` is what the response was against the schema its contract
 declares** (issue #628), and it is **absent entirely** for a request whose
@@ -5297,6 +5352,7 @@ default, and whose message names the offending field and why the bound exists:
 | `success_sample_rate` | `1`-`100000` | It is a sampling *period* (keep 1 in N), used as `counter % rate`. A `0` was a division by zero that killed the daemon mid-run. |
 | `response_sample_rate` | `1`-`100000` | Same modulo, same crash. |
 | `max_response_samples` | `0`-`1000000` | Each retained sample holds a full response body, and the vector is reserved up front; a negative value casts to ~1.8e19. |
+| `max_response_sample_bytes` | `0`-`1073741824` | The whole-run budget for those bodies, held in memory for the run *and* its retention window. The count cap above bounds the store only for a target whose bodies are small - at 1 MiB each, 1000 samples is ~1 GB. `0` retains no sample that has a body. Defaults to the `maxResponseSampleBytes` setting. |
 | `max_success_results` | `0`-`1000000` | Each retained record holds a serialised timing breakdown, and the store is reserved up front. `0` means unlimited. |
 | `max_slow_results` | `0`-`1000000` | Same store, same reserve, separate budget. `0` means unlimited. |
 | `slow_threshold_ms` | `0`-`86400000` ms | `0` disables outlier capture; a negative threshold would mark **every** completion an outlier and fill the slow store with the whole run. |
@@ -5344,7 +5400,7 @@ independent budgets:
 |--------|-----------|------------|
 | Sampled timing traces | 1 in `success_sample_rate` completions, only while `save_timing_breakdown` is on | `max_success_results` |
 | Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` |
-| Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples` |
+| Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples`, **and** `max_response_sample_bytes` |
 | Per-status exemplars (captured responses) | the first three completions of each distinct status code **that no other budget already stored** | `max_exemplar_results` |
 
 None of these budgets bound the report's `timingBreakdown.phases`: the per-phase
@@ -5471,8 +5527,22 @@ concurrency; a response past the cap **fails that request** rather than being
 buffered. It is reported like any other transport failure - `statusCode: 0`
 with an `errorCode` of `INTERNAL_ERROR` and a message naming
 `maxResponseBodyBytes` - and the truncated prefix is kept as the body. Design
-mode (`POST /execute`) is **not** capped: it sends one request at a time, and
-truncating a response the user asked to see would be the wrong trade.
+mode (`POST /execute`, and each step of a collection run) has **its own cap and
+its own answer**: `maxDesignResponseBodyBytes`, also 32MB, reached by a send
+that keeps what it read and reports `bodyCapped: true` on an otherwise ordinary
+response. It sends one request at a time, so the concurrency argument above
+does not apply to it - what does is that the body crosses to the app and is
+held there as well, and that failing a response the user asked to see would be
+the wrong trade where showing them the first 32MB of it is not. Neither setting
+reads the other: raising the load cap does not change what a Send reads.
+
+A **script's own fetch** (`pm.sendRequest`) is a third read, and it takes the
+bound of the path it runs on: the design bound in a Send's or a collection
+step's scripts, the load bound in a load run's deferred `tests` script, which
+runs once per sampled response. It refuses at that bound rather than keeping a
+prefix, on either path, because nothing on the object it hands the script could
+say the body was cut - see
+[scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
 **Wire method and body.** A body is sent with whatever method the request
 names: a `GET` carrying one stays a `GET` on the wire (Elasticsearch-style
@@ -5866,6 +5936,18 @@ List test runs (design mode, load tests and collection runs), newest first
 (`start_time DESC` - the only order the UI uses). Rows carry a compact
 `summary` rather than the full `configSnapshot`, so the polled history sidebar
 stays cheap as history grows.
+
+Each row's `summary` is derived from that run's `config_snapshot`, and the
+derivation is **cached per run id** (issue #1150): a snapshot is written once,
+when the run is created, so a repeated poll re-serves what the previous one
+built instead of re-parsing one snapshot per row every tick - 50 at the default
+page size, up to 500 at the cap. The cache is bounded and
+holds nothing a request cannot rebuild, so it changes no answer - a run deleted
+between polls is gone from the list because the query no longer returns it, not
+because anything was invalidated. This route also logs at **debug**, not info: it
+is the one endpoint a visible client polls, and an info line here reached the
+console of every engine started at the default app verbosity, every five
+seconds.
 
 **Query parameters** (passing **any** of them opts into the paginated envelope):
 - `limit` - page size (default 50, invalid/&le;0 falls back to 50, capped at 500).
@@ -6317,7 +6399,7 @@ named it.
     "errorsDropped": 0, "successTracesDropped": 29000,
     "slowTracesDropped": 0, "responseSamplesDropped": 998000,
     "exemplarsDropped": 0, "sampleBodiesDropped": 12,
-    "responseBodiesCaptured": 23
+    "responseBodiesCaptured": 23, "responseSampleBudgetSpent": false
   },
   "monitor": {
     "samples": 60, "failures": 0,
@@ -6478,6 +6560,29 @@ describes.
 count means they are a **uniform sample of the whole run** (reservoir retention)
 rather than a truncated prefix of it. The section is absent on a run recorded
 before it was reported, which is not the same claim as "nothing was dropped".
+
+`responseSamplesDropped` counts responses the post-run test scripts and schema
+checks never saw, for either of the two bounds on that store: the count cap
+(`max_response_samples`), and the byte budget (`max_response_sample_bytes`) that
+drops a whole sample once the run's retained bodies would exceed it. Both mean
+the same thing to a reader - this response was not validated - and neither ever
+stores a *cut* body, because a deferred check reading one reports a failure the
+target never produced. They differ in one way worth knowing: the count cap
+displaces an incumbent, so the tested set stays a uniform sample of the run,
+while an exhausted byte budget stops admitting - a run that spends it is graded
+on the part of the run whose bodies fit. The counter cannot say which bound
+applied on its own; `responseSampleBudgetSpent` is the answer (issue #1192).
+`true` means the byte budget ended at least one sample, so the tested set is
+drawn from the part of the run whose bodies fit; `false` means only the count
+cap displaced anything, so the tested set stays a uniform sample of the whole
+run. It is written by every run recorded since the marker existed, and is
+**absent** on a summary written before that - absent means "not known", not
+"not spent", which matters because weakening the uniform claim for every
+pre-marker run would cost the accurate message in the case that is nearly all
+of them: only a target whose retained bodies average more than ~256 KiB
+reaches the budget at the defaults. The app's retention note drops its
+uniformity sentence only when the key reads `true`; absent or `false` both
+keep it.
 
 Three of its keys are about captured responses rather than retention:
 `responseBodiesCaptured` is how many exchanges the run stored (see
@@ -6737,7 +6842,7 @@ so a client may cache on `version`.
   "version": "1.0.0",
   "engine": "quickjs",
   "libUri": "ts:vayu/pm.d.ts",
-  "typeDefinitions": "interface VayuExpectTo {\n\tequal(expected: any): VayuExpectation;\n…"
+  "typeDefinitions": "interface VayuExpectation {\n\tequal(expected: any): VayuExpectation;\n…"
 }
 ```
 
@@ -6755,13 +6860,37 @@ Declaring the absent globals keeps the real mistake caught ("not callable")
 while that suppression is in force. A test executes `typeof <name>` in the real
 script engine for every entry, so the list cannot drift from the runtime.
 
-Two things the generated file cannot get from the table, both handled in
+**The assertion chain is one interface, read by leaf rather than by path**
+(#1209). A completion label is a dotted spelling - `to.have.deep.property` is
+what someone types - and not the shape of the object: `create_expectation`
+installs `to`, `have`, `deep` and `property` on the same expectation, and every
+one of them hands that expectation back. So the generator takes each label's
+last segment as the member and every earlier segment as evidence that word is a
+chainer, and emits a single `VayuExpectation` where every chain word is a
+property of that type and every matcher a method returning it - chai's own
+model. Read as a path tree it emitted two interfaces instead, and a matcher was
+reachable only along the one route some label happened to spell, so
+`.to.be.a('string').and.match(/x/)` was an editor error on a chain the engine
+runs. Where two labels share a leaf (`to.have.property`,
+`to.have.deep.property`, `to.have.nested.property`), the plainest spelling
+declares the member and the longer ones fold their documentation into its hover
+under their own labels.
+
+The guard is set equality rather than a list of names:
+`TheDeclaredChainIsTheObjectTheRuntimeBuilds` reads the interface's members out
+of the generated text and the expectation's out of the real script engine
+(`Object.getOwnPropertyNames`, so no terminal getter is triggered) and fails on
+a member either side has alone. A matcher added to the runtime and not to the
+table now reddens instead of being missing.
+
+Two things the generated file still cannot get from the table, both handled in
 `script_types.cpp` and guarded by `script_types_test.cpp`:
 
-- **Chain vocabulary.** A getter that *continues* an assertion chain (`.to.not`,
-  `.and`) and one that *performs* an assertion (`.to.be.true`) are identical as
-  completion entries - both are non-functions whose `detail` restates their own
-  name. Only meaning separates them, so the meaning is named in the generator.
+- **Which label roots open the chain.** `that.is.not.empty` is a chain and
+  `console.log` is a global, and nothing in either entry says which; the chain
+  roots (`to`, `and`, and chai's twelve language chains) are named in the
+  generator, so a label rooted at one is filed under the chain rather than
+  declaring a top-level `that` nothing binds.
 - **Unparseable parameter lists.** Two entries document an overload in prose
   TypeScript cannot parse (`upsert({ key, value }) | (name, value)`). Those fall
   back to `(...args: any[])`, keeping the member callable rather than emitting a

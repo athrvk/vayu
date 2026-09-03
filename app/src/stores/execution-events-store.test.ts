@@ -54,15 +54,34 @@ describe("execution events store", () => {
 
 	it("appends events in arrival order", () => {
 		start("run_1");
-		useExecutionEventsStore.getState().addEvent("run_1", event("a"));
-		useExecutionEventsStore.getState().addEvent("run_1", event("b"));
+		useExecutionEventsStore.getState().addEvents("run_1", [event("a")]);
+		useExecutionEventsStore.getState().addEvents("run_1", [event("b")]);
 
 		expect(useExecutionEventsStore.getState().events.map((e) => e.data)).toEqual(["a", "b"]);
 	});
 
+	it("appends a batch in order, and holds the list's identity when nothing arrives", () => {
+		// Issue #1158: the writer is a flush window's worth of frames, not one
+		// frame. Order within the batch is arrival order, and a batch for another
+		// run must not disturb the identity of the array on screen - the response
+		// pane subscribes to it, so a fresh array is a re-render.
+		start("run_1");
+		useExecutionEventsStore.getState().addEvents("run_1", [event("a"), event("b")]);
+		const afterFirst = useExecutionEventsStore.getState().events;
+
+		useExecutionEventsStore.getState().addEvents("run_1", [event("c"), event("d")]);
+		const afterSecond = useExecutionEventsStore.getState().events;
+
+		expect(afterSecond.map((e) => e.data)).toEqual(["a", "b", "c", "d"]);
+		expect(afterSecond).not.toBe(afterFirst);
+
+		useExecutionEventsStore.getState().addEvents("run_2", [event("someone else's")]);
+		expect(useExecutionEventsStore.getState().events).toBe(afterSecond);
+	});
+
 	it("drops an event addressed to a run it is not holding", () => {
 		start("run_2");
-		useExecutionEventsStore.getState().addEvent("run_1", event("from the old socket"));
+		useExecutionEventsStore.getState().addEvents("run_1", [event("from the old socket")]);
 
 		expect(useExecutionEventsStore.getState().events).toEqual([]);
 	});
@@ -82,7 +101,7 @@ describe("execution events store", () => {
 
 	it("starting a stream clears the previous one's rows", () => {
 		start("run_1");
-		useExecutionEventsStore.getState().addEvent("run_1", event("a"));
+		useExecutionEventsStore.getState().addEvents("run_1", [event("a")]);
 		useExecutionEventsStore.getState().endStream("run_1", "completed", 1);
 
 		start("run_2");
@@ -95,7 +114,7 @@ describe("execution events store", () => {
 
 	it("keeps the engine's own total, which is not the row count once capped", () => {
 		start("run_1");
-		useExecutionEventsStore.getState().addEvent("run_1", event("a"));
+		useExecutionEventsStore.getState().addEvents("run_1", [event("a")]);
 		useExecutionEventsStore.getState().endStream("run_1", "maxStreamEvents", 4000);
 
 		const s = useExecutionEventsStore.getState();
@@ -107,7 +126,7 @@ describe("execution events store", () => {
 
 	it("falls back to what arrived when the complete frame named no total", () => {
 		start("run_1");
-		useExecutionEventsStore.getState().addEvent("run_1", event("a"));
+		useExecutionEventsStore.getState().addEvents("run_1", [event("a")]);
 		useExecutionEventsStore.getState().endStream("run_1", "error", null);
 
 		// Never left null once ended: the tab's truncation disclosure compares

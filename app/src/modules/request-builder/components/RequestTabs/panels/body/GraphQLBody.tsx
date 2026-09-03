@@ -22,10 +22,12 @@ import {
 	ChevronDown,
 	ChevronRight,
 	Loader2,
-	PanelRightOpen,
+	PanelLeftClose,
+	PanelLeftOpen,
 	RefreshCw,
 } from "lucide-react";
 import type { OnMount } from "@monaco-editor/react";
+import type { HttpMethod } from "@/types";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import type { editor } from "monaco-editor";
 import {
@@ -60,6 +62,7 @@ import {
 import type { SchemaTreeNode } from "@/lib/graphql/schema-tree";
 import { SchemaExplorer } from "./graphql-explorer/SchemaExplorer";
 import { BadgeText, SchemaStatusBadge } from "./SchemaStatusBadge";
+import { sendsGraphQLInTheUrl } from "./graphql-method";
 import { schemaStatusTitle } from "@/lib/graphql/schema-status";
 import { useLayoutStore } from "@/stores";
 import {
@@ -108,6 +111,15 @@ export interface GraphQLBodyProps {
 	 */
 	variablesDraft: string | null;
 	onVariablesDraftChange: (text: string) => void;
+	/**
+	 * The method this request will be sent with.
+	 *
+	 * Read for one thing: GraphQL over `GET` is a different transport - the
+	 * document travels as query parameters and a mutation cannot be sent that
+	 * way - and the Query header says so when that is what will happen
+	 * (issue #1228).
+	 */
+	method: HttpMethod;
 }
 
 /**
@@ -142,6 +154,31 @@ function VariablesFormBadge({ form }: { form: VariablesForm }) {
 		>
 			<AlertCircle className="w-3 h-3" />
 			Not sent
+		</BadgeText>
+	);
+}
+
+/**
+ * What a `GET` will do with this document, when that is what is about to happen.
+ *
+ * Nothing at all on any other method, which is the common case: choosing the
+ * GraphQL mode on a request still holding the default `GET` moves it to `POST`
+ * (`graphql-method.ts`), so this renders for a `GET` the user chose themselves
+ * or one an import wrote. It describes a transport rather than reporting an
+ * error - `GET` is a legitimate way to send a query, and the wrong way to send
+ * a mutation - which is why the sentence names both halves and the method
+ * selector is one click away.
+ */
+function GetTransportBadge({ method }: { method: HttpMethod }) {
+	if (!sendsGraphQLInTheUrl(method)) return null;
+
+	return (
+		<BadgeText
+			className="text-muted-foreground"
+			title="GraphQL over GET is sent as query parameters, not as a JSON body. A mutation needs POST."
+		>
+			<AlertCircle className="w-3 h-3" />
+			Sent as query parameters
 		</BadgeText>
 	);
 }
@@ -218,76 +255,83 @@ function PaneTitle({ children, collapsed }: { children: string; collapsed?: bool
 }
 
 /**
- * The Query header's one schema control, shown only while the explorer is
- * closed.
+ * Everything about the schema, in one row that does not move: the toggle for
+ * the pane, what state the schema is in, and Refresh.
  *
- * It is the status badge and the open-the-explorer affordance in a single
- * target, because they are one subject: the badge says whether there is a
- * schema, and the pane it opens is where every other thing about the schema now
- * lives. The header used to carry three separate controls for that subject, one
- * of which (Refresh) was also visible inside the explorer at the same time.
+ * **It sits at the Query header's left edge because that is the edge the pane
+ * arrives at.** The explorer is the first panel of the horizontal group below,
+ * so it opens to the *left* of these editors, while the control that opened it
+ * used to sit at the far right of this header drawing a `PanelRightOpen` - a
+ * user reaching for the side the pane appears on found nothing, and the icon
+ * named the opposite side outright (#1224).
  *
- * A schema nothing has been said about yet still needs the way in, so the chip
- * falls back to a plain label rather than the badge's `null`.
+ * **The same three parts render whether the pane is open or closed.** Only the
+ * toggle's icon and label flip. The layout used to be a different shape per
+ * state - a chip here while closed, a badge and two icons in the pane's header
+ * while open - which taught a position and then abandoned it.
  *
- * **Refresh rides inside the chip rather than beside it.** #455 made "no
- * duplicated Refresh" structural by moving the only one into the explorer, which
- * left a blind refresh - the endpoint changed, or an `Authorization` was typed
- * by hand, and the cache key cannot see either - costing open-the-pane plus
- * refresh plus close again (#507). The rule the consolidation was really after
- * is *one standing Refresh*, not *one Refresh*: this one is transparent at rest
- * and appears on hover or keyboard focus, so no state ever shows two at once,
- * and it calls the same `onRefresh` the explorer's does rather than a second
- * copy of the call.
+ * **Nothing here is hover-revealed.** #455 made "no duplicated Refresh"
+ * structural by moving the only one into the explorer, which left a blind
+ * refresh - the endpoint changed, or an `Authorization` was typed by hand, and
+ * the cache key cannot see either - costing open-the-pane plus refresh plus
+ * close again (#507). The answer then was a Refresh transparent at rest, which
+ * bought *one standing Refresh* at the price of a control the user had to know
+ * about already. This is now the app's only Refresh for the subject, standing in
+ * one place, so the rule holds by construction rather than by transparency.
  *
- * The two are separate `<button>`s inside one visual chip because a button
- * cannot nest in a button - the group is what makes them read as a single
- * control.
+ * The three parts are separate elements because a button cannot nest in a
+ * button - the row is what makes them read as one control.
  */
-function SchemaChip({
+function SchemaControls({
 	entry,
-	onOpen,
+	open,
+	onToggle,
 	onRefresh,
 }: {
 	entry: SchemaEntry | null;
-	onOpen: () => void;
+	/** Whether the explorer pane is showing, for the toggle's icon and state. */
+	open: boolean;
+	onToggle: () => void;
 	onRefresh: () => void;
 }) {
 	const status = entry?.status ?? "idle";
 	const loading = status === "loading";
-	/*
-	 * The badge carries the status sentence in its own `title`, so the chip
-	 * wears no second tooltip: a Radix tooltip over an element that already has
-	 * a native one is the same fact told twice, which is what this control was
-	 * built to stop. `aria-label` names the action the text cannot.
-	 */
 	return (
-		<span className="group flex items-center gap-1">
-			<button
-				type="button"
-				onClick={onOpen}
-				aria-label="Browse schema"
-				aria-expanded={false}
-				className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-			>
-				{status === "idle" ? (
-					<BadgeText className="text-muted-foreground" title={schemaStatusTitle(entry)}>
-						Schema
-					</BadgeText>
-				) : (
-					<SchemaStatusBadge entry={entry} />
-				)}
-				<PanelRightOpen className="w-3 h-3" />
-			</button>
+		<span className="flex items-center gap-1">
+			<TooltipIconButton
+				label={open ? "Hide schema" : "Browse schema"}
+				aria-expanded={open}
+				className="h-5 w-5 shrink-0"
+				icon={
+					open ? (
+						<PanelLeftClose className="w-3 h-3" />
+					) : (
+						<PanelLeftOpen className="w-3 h-3" />
+					)
+				}
+				onClick={onToggle}
+			/>
 			{/*
-			 * `focus-visible:opacity-100` is not decoration: revealed on hover
-			 * alone, a keyboard user tabs onto a fully transparent control and
-			 * Enter refetches the schema with nothing on screen to say so
-			 * (`keyboard-reachability.test.tsx`).
+			 * The badge carries the status sentence in its own `title`, so it wears
+			 * no second tooltip: a Radix tooltip over an element that already has a
+			 * native one is the same fact told twice. It is plain text rather than
+			 * a target - the two things a user does about the schema are the
+			 * buttons on either side of it.
+			 *
+			 * A schema nothing has been said about yet falls back to a plain label
+			 * rather than the badge's `null`, so the row keeps its shape from the
+			 * first render.
 			 */}
+			{status === "idle" ? (
+				<BadgeText className="text-muted-foreground" title={schemaStatusTitle(entry)}>
+					Schema
+				</BadgeText>
+			) : (
+				<SchemaStatusBadge entry={entry} />
+			)}
 			<TooltipIconButton
 				label="Refresh schema"
-				className="h-5 w-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+				className="h-5 w-5 shrink-0"
 				icon={
 					loading ? (
 						<Loader2 className="w-3 h-3 animate-spin" />
@@ -310,6 +354,7 @@ export function GraphQLBody({
 	onEditorMount,
 	variablesDraft,
 	onVariablesDraftChange,
+	method,
 }: GraphQLBodyProps) {
 	// One subscription, not three: the entry object is the store's own reference,
 	// so it is a stable snapshot, and status/schema/error/freshness cannot be
@@ -727,8 +772,25 @@ export function GraphQLBody({
 		<ResizablePanelGroup orientation="vertical" className="h-full">
 			<ResizablePanel defaultSize="65%" minSize="25%" className="flex flex-col">
 				<PaneHeader>
-					<PaneTitle>Query</PaneTitle>
+					{/*
+					 * The schema control leads the header, on the edge the explorer
+					 * opens from; the title follows it. Grouped rather than left as
+					 * three children of the bar, whose `justify-between` would push
+					 * the title into the middle.
+					 */}
+					<span className="flex items-center gap-2 min-w-0">
+						{schemaTarget.url && (
+							<SchemaControls
+								entry={entry}
+								open={showExplorer}
+								onToggle={() => setExplorerOpen(!showExplorer)}
+								onRefresh={refresh}
+							/>
+						)}
+						<PaneTitle>Query</PaneTitle>
+					</span>
 					<div className="flex items-center gap-2">
+						<GetTransportBadge method={method} />
 						{names.length > 1 && (
 							<Select
 								value={parts.operationName}
@@ -749,20 +811,6 @@ export function GraphQLBody({
 								</SelectContent>
 							</Select>
 						)}
-						{/*
-						 * One chip about the schema, and only while the pane that
-						 * owns the subject is closed. With the explorer open this
-						 * header is the operation picker and nothing else - status,
-						 * freshness and Refresh are all a pane away, where no two
-						 * of them can stand on screen at once.
-						 */}
-						{schemaTarget.url && !showExplorer && (
-							<SchemaChip
-								entry={entry}
-								onOpen={() => setExplorerOpen(true)}
-								onRefresh={refresh}
-							/>
-						)}
 					</div>
 				</PaneHeader>
 				{/*
@@ -776,6 +824,7 @@ export function GraphQLBody({
 					<CodeEditor
 						height="100%"
 						language="graphql"
+						ariaLabel="GraphQL query"
 						value={query}
 						onChange={(q) => write({ query: q ?? "" })}
 						onMount={handleQueryMount}
@@ -827,6 +876,7 @@ export function GraphQLBody({
 					<CodeEditor
 						height="100%"
 						language="json"
+						ariaLabel="GraphQL variables"
 						value={variables}
 						onChange={(v) => {
 							setVariables(v ?? "");
@@ -867,8 +917,6 @@ export function GraphQLBody({
 					<SchemaExplorer
 						entry={entry}
 						schemaKey={targetKey}
-						onRefresh={refresh}
-						onClose={() => setExplorerOpen(false)}
 						onInsert={handleExplorerInsert}
 						notice={
 							explorerNotice?.requestId === requestId ? explorerNotice.text : null

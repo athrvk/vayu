@@ -84,6 +84,10 @@ export default function ResponseViewer() {
 	);
 	const liveOpen = useExecutionEventsStore((s) => s.open);
 	const liveEvents = useExecutionEventsStore((s) => s.events);
+	// The stream's identity, for the Events tab's render window: its list grows
+	// in place, so the window must reset when the stream changes and not when a
+	// batch lands (issue #1158).
+	const liveRunId = useExecutionEventsStore((s) => s.runId);
 	const liveIsStreaming = useExecutionEventsStore((s) => s.isStreaming);
 	const liveEndReason = useExecutionEventsStore((s) => s.endReason);
 	const liveTotalEvents = useExecutionEventsStore((s) => s.totalEvents);
@@ -426,6 +430,24 @@ export default function ResponseViewer() {
 								</Callout>
 							</div>
 						)}
+						{/*
+						 * A different fact from the one above, and deliberately not
+						 * exclusive with it (issue #1157): that one is storage
+						 * shortening a body the user already saw whole, which a
+						 * re-send undoes. This one is the engine never having read
+						 * past `maxDesignResponseBodyBytes`, which a re-send
+						 * reproduces - so the remedy is the setting, not the button.
+						 */}
+						{shown.bodyCapped && (
+							<div className="px-4 pt-3 shrink-0">
+								<Callout severity="warning" title="Body capped while reading">
+									Only the first {formatSize(shown.size || shown.body.length)} of
+									this response was read - the engine stops a design-mode send
+									there, so re-sending reads the same amount. Raise Max Design
+									Response Body in Settings to read more.
+								</Callout>
+							</div>
+						)}
 						<div className="flex-1 min-h-0">
 							<SharedResponseBody
 								body={shown.body}
@@ -515,6 +537,11 @@ export default function ResponseViewer() {
 						isStreaming={isStreaming}
 						isStream={isStream}
 						error={streamIsMine ? liveError : null}
+						// Only for the live list. A stored trace arrives whole, so the
+						// row count is the identity the window wants there.
+						listKey={
+							!storedEvents && streamIsMine ? (liveRunId ?? undefined) : undefined
+						}
 					/>
 				</TabsContent>
 				<TabsContent value="raw-request" className="mt-0 flex-1 overflow-hidden">

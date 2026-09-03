@@ -48,7 +48,7 @@ function overlayOf(value: string, dataColumns?: DataContractScope) {
 			/>
 		</TooltipProvider>
 	);
-	const overlay = container.querySelector('[aria-hidden="true"]') as HTMLElement;
+	const overlay = container.querySelector("[data-variable-overlay]") as HTMLElement;
 	expect(overlay).toBeTruthy();
 	return overlay;
 }
@@ -121,13 +121,13 @@ describe("a bare token naming a declared column, undefined in every scope", () =
 				/>
 			</TooltipProvider>
 		);
-		const overlay = container.querySelector('[aria-hidden="true"]') as HTMLElement;
+		const overlay = container.querySelector("[data-variable-overlay]") as HTMLElement;
 		expect(overlay).toBeTruthy();
 		return overlay;
 	}
 
 	it("paints as the same muted, informational tone as {{data.column}}", () => {
-		// Revert the `boundColumn` check in `renderOverlayContent` and this token
+		// Revert the bare-column rung of `classifyVariableToken` and this token
 		// falls through to `EditableVariable` with `resolved={false}` instead -
 		// `text-destructive-text`, the exact false alarm #1007 exists to close.
 		const overlay = bareOverlayOf("https://x/{{email}}", contract);
@@ -180,7 +180,7 @@ describe("a bare token a scope already defines, that also names a declared colum
 				/>
 			</TooltipProvider>
 		);
-		const overlay = container.querySelector('[aria-hidden="true"]') as HTMLElement;
+		const overlay = container.querySelector("[data-variable-overlay]") as HTMLElement;
 		const runtimeToken = overlay.querySelector("[data-runtime-token]");
 		expect(runtimeToken).toBeNull();
 		const token = overlay.querySelector("[data-variable-token] span") as HTMLElement;

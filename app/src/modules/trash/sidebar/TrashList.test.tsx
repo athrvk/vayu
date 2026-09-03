@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import TrashList from "./TrashList";
@@ -91,16 +91,29 @@ vi.mock("@/stores", async (importOriginal) => {
 });
 
 function renderTrash() {
-	return render(
-		<QueryClientProvider
-			client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-		>
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	// A fresh element per render: React skips reconciling a referentially equal
+	// one, so a rerender with the same object would show none of the new data.
+	const ui = () => (
+		<QueryClientProvider client={client}>
 			<TooltipProvider>
 				<TrashList />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
+	const view = render(ui());
+
+	return {
+		...view,
+		/** The refetch a purge triggers, which lands after the dialog is gone. */
+		refetchWithout(id: string) {
+			state.items = state.items.filter((entry) => entry.id !== id);
+			act(() => view.rerender(ui()));
+		},
+	};
 }
+
+const rowFor = (id: string) => document.querySelector(`[data-trash-id="${id}"]`);
 
 beforeEach(() => {
 	restore.mockReset().mockResolvedValue({
@@ -290,6 +303,71 @@ describe("delete forever", () => {
 
 		await waitFor(() => expect(screen.queryByText("Delete forever?")).not.toBeInTheDocument());
 		expect(purge).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * The purged row is where the dialog was opened from, and the dialog is
+	 * controlled with no trigger for Radix to restore focus to - so without a
+	 * refocus a keyboard "Delete forever" drops the user on `<body>` (#1234).
+	 * This dialog closes *before* the purge is sent, so the row is always still
+	 * there at close: the move waits for it to go.
+	 */
+	it("hands focus to the next row once the purged one is gone", async () => {
+		state.items = [collectionEntry(), collectionEntry({ id: "c2", name: "Shipping" })];
+		const view = renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete forever$/ }));
+
+		await waitFor(() => expect(purge).toHaveBeenCalledWith("c1"));
+		expect(document.activeElement).toBe(rowFor("c1"));
+
+		view.refetchWithout("c1");
+
+		expect(document.activeElement).toBe(rowFor("c2"));
+	});
+
+	it("falls back to the row before it when the purged row was the last", async () => {
+		state.items = [collectionEntry(), collectionEntry({ id: "c2", name: "Shipping" })];
+		const view = renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete Shipping forever" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete forever$/ }));
+
+		await waitFor(() => expect(purge).toHaveBeenCalledWith("c2"));
+		view.refetchWithout("c2");
+
+		expect(document.activeElement).toBe(rowFor("c1"));
+	});
+
+	it("falls back to the list when the purged row was the only one", async () => {
+		state.items = [collectionEntry()];
+		const view = renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete forever$/ }));
+
+		await waitFor(() => expect(purge).toHaveBeenCalledWith("c1"));
+		view.refetchWithout("c1");
+
+		// Neither a next nor a previous row is left, and Trash has no create
+		// control to hand focus to the way the trees do - so it goes to the list
+		// itself, which is still there holding the empty state. Never `<body>`.
+		const list = document.querySelector<HTMLElement>("[data-trash-list]");
+		expect(document.activeElement).toBe(list);
+	});
+
+	it("leaves focus on the row when the purge fails", async () => {
+		state.items = [collectionEntry(), collectionEntry({ id: "c2", name: "Shipping" })];
+		purge.mockRejectedValue(new Error("database is locked"));
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Delete forever$/ }));
+
+		await waitFor(() => expect(showToast).toHaveBeenCalled());
+		// The row is still there, so it is still where the user was.
+		expect(document.activeElement).toBe(rowFor("c1"));
 	});
 
 	it("reports a failed purge rather than leaving the row silently in place", async () => {

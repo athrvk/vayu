@@ -154,7 +154,11 @@ alive at that point. All four managers run that lifecycle - bind, wait for the a
 join, release - through one shared `ManagedListener`
 (`engine/include/vayu/http/managed_listener.hpp`), so a fix to it reaches every listener rather than
 one of four copies; what stays per-manager is the route registration, the error each bind failure
-answers with, and the OAuth attempt TTL sweep. The mock server is the one built on the helper rather
+answers with, and the OAuth attempt TTL sweep. Since #1140 a manager may hand it the
+`httplib::Server` those routes are registered on, too: the inbox hands it a subclass that routes
+every request as one path, so that a path too long for cpp-httplib's regex matcher still reaches its
+capture, and the other three take the plain server the listener builds for itself. The mock server
+is the one built on the helper rather
 than ported to it: #505 extracted it before this listener existed, which was the whole point of
 extracting it when the third one landed.
 
@@ -212,11 +216,28 @@ system resolver. Three rules make that safe:
 - Max concurrent requests per worker: 1000 (configurable)
 - Max connections per host: 100
 - Poll timeout: 1ms (kept short because a submission interrupts the poll via
-  `curl_multi_wakeup`)
+  `curl_multi_wakeup`; on Windows see **Timer resolution** below for what makes
+  a 1ms wait 1ms)
 - TCP keep-alive: 60s idle, 30s probe interval
 - Max response body per transfer: 32MB (`maxResponseBodyBytes`); a larger
   response fails that request rather than being buffered, since every in-flight
   request holds its own body
+
+**Timer resolution (Windows).** Windows waits at a ~15.6ms granularity by
+default, so both the 1ms poll above and the pacing loop's `sleep_for` leg
+(below ~500 RPS - a faster tick spins its remainder out instead) would return
+roughly fifteen times late. `timeBeginPeriod(1)` buys 1ms, and the engine holds
+that request **only while a run is sending**: the event loop itself holds a
+refcounted `platform::HighResolutionTimerScope` for its lifetime, and
+`release_execution_resources` destroys the loop as the run is retained. The
+sidecar is resident for a whole app session and idle for nearly all of it, so
+the request is scoped to runs rather than to the process - a process-lifetime
+request is the classic Windows idle-power finding. A design-mode scenario run
+builds no loop and asks for nothing. Nesting is why it is refcounted:
+overlapping runs take it once between them, under a mutex that moves the count
+and the OS call together, so one run finishing cannot hand the resolution back
+under another that is still sending. Nothing on Linux or macOS is affected; the
+scope compiles to a counter there.
 
 ### Run Manager
 
@@ -227,7 +248,12 @@ Manages the lifecycle of load test runs:
   **tick topic** (ring of wire-ready metric snapshots) per run
 - **Retained finished runs**: Completed/failed/stopped runs are moved to a separate retained
   map rather than unregistered immediately, so a late SSE client still receives the full metric
-  series. A TTL sweep evicts them after `liveRetentionMs` (default 60s).
+  series. A TTL sweep evicts them after `liveRetentionMs` (default 60s). **The tick topic is
+  what is retained, not the machinery that filled it**: the move releases the run's event loop -
+  its curl handle pools, its multi handles and the connections they cache against the target,
+  its submission queues - along with the bound data rows and the scenario plan, so a finished
+  run holds none of them for the window (issue #1154). The counters and histograms behind the
+  summary stay, because the report and a late `/live` consumer read them.
 - **Stop discards, completion drains (with a deadline)**: a stopped run throws away its queued
   backlog and cancels in-flight transfers, so a stop is not paced by the upstream; a run that
   reaches the end of its duration waits for genuine in-flight requests, but no longer than
@@ -710,8 +736,9 @@ continue-on-failure policy** beyond "an errored step ends its iteration".
 9. Client streams ticks via SSE (/runs/:runId/live), replayed
    from the oldest retained tick then tailed to the `complete` event
    ↓
-10. On completion: batch-write results to DB; run retained (TTL) so
-    late clients still get the full series
+10. On completion: batch-write results to DB; event loop, data rows
+    and plan released; run retained (TTL) so late clients still get
+    the full series
 ```
 
 The metrics thread's exit is gated on `is_running`, not on `should_stop`. A stop
@@ -992,7 +1019,11 @@ row exists - and the executor is the only thing that differs.
   samples the last step of a long plan. The run's `max_response_samples` budget
   is split evenly across the steps that carry a script (not across every step),
   floored at one apiece; a step with no script is never sampled and never
-  counted as a thinned sample. A `pre_script` runs nowhere: it would have to run
+  counted as a thinned sample. The byte budget beside it
+  (`max_response_sample_bytes`) is deliberately *not* split: those bodies are
+  resident in one process, so a forty-step plan must not multiply the ceiling by
+  forty, and a step that drops a sample over it is counted like any other thinned
+  one. A `pre_script` runs nowhere: it would have to run
   before a send this mode never pauses for. `pm.execution` still throws in a
   load run for the reason the flow-control section gives, and there is
   deliberately no inline-script path on the load hot path.

@@ -375,7 +375,7 @@ jobs:
       # longer runs there at all.
       - name: File or update the sanitizer-failure issue
         if: ${{ failure() && github.event_name != 'pull_request' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           SANITIZER: ${{ matrix.sanitizer }}
           PLATFORM: ${{ matrix.os }}

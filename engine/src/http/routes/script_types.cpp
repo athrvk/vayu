@@ -25,7 +25,19 @@
  * every function's `detail` is its signature (`pm.environment.get(name:
  * string): string | undefined`) and a field's `detail` is its type (`number`).
  * The rules below are just the reading of those strings, plus the one thing a
- * completion entry cannot express - see `chain vocabulary`.
+ * completion entry cannot express - which label roots open the assertion chain.
+ *
+ * The assertion chain is the one surface read by *leaf* rather than by path
+ * (issue #1209). A dotted label is how the completion popup spells a chain -
+ * `to.have.deep.property` is what someone types - but it is not the shape of
+ * the object being described: `create_expectation` installs `to`, `have`,
+ * `deep` and `property` as members of the *same* expectation, and every one of
+ * them hands that expectation back. Read as a path tree, the declarations say
+ * a matcher may only be reached along the one route some label happens to
+ * spell, so `.to.be.a('string').and.match(/x/)` is an editor error on a chain
+ * the engine runs. So each label's last segment is the member and every
+ * earlier segment is evidence that word is a chainer, and the whole chain is
+ * one `VayuExpectation` interface - chai's own model, and the object's.
  */
 
 #include <algorithm>
@@ -55,48 +67,30 @@ namespace {
 constexpr int KIND_FUNCTION = 1;
 constexpr int KIND_SNIPPET  = 28;
 
-// The generated interface names. `VayuExpectTo` exists as a *named* interface
-// only because `.to.not` continues the chain it sits in and so has to refer
-// back to it; every other chain node is an inline object type.
+// The generated interface name. One interface, because the runtime is one
+// object: every chain word is a property of this type and every matcher a
+// method returning it, exactly as `@types/chai` declares chai (issue #1209).
 constexpr const char* CHAIN      = "VayuExpectation";
-constexpr const char* CHAIN_TO   = "VayuExpectTo";
 constexpr const char* ANY_OBJECT = "{ [key: string]: any }";
-
-/**
- * @brief The chain vocabulary - names whose type is the chain rather than a
- *        terminal assertion.
- *
- * This is the one fact the completion table genuinely cannot carry. A getter
- * that *continues* the chain (`.to.not`, `.and`) and one that *performs* an
- * assertion (`.to.be.true`) are indistinguishable as entries: both are a
- * non-function whose `detail` is its own dotted name. Only the meaning
- * separates them, so the meaning is written here rather than guessed.
- *
- * `script_types_test.cpp` asserts each of these names is still present in the
- * table, so removing or renaming one fails loudly instead of silently degrading
- * that member to `void` and breaking every `.to.not.` completion downstream.
- */
-constexpr auto CHAIN_CONTINUATIONS = std::to_array<const char*> ({ "not", "and" });
 
 /**
  * @brief chai's language chains - the words that assert nothing (issue #1053).
  *
- * Continuations like `and`, with one thing the declarations have to say that
- * `and` does not. A language word can be followed by anything the chain
- * allows, a matcher included (`.that.is.not.empty`, `.of.length(3)`), so it is
- * typed `VayuExpectTo` the way `not` is, and declared on *both* chain
- * interfaces. The runtime has one object - `create_expectation` installs every
- * member on the same expectation - so declaring these on the chain root alone
- * would make the editor reject `pm.expect(rows).to.be.an('array').that.is.not
- * .empty`, which the runtime runs. That is the defect the `deep` entry hit
- * before it listed more than `equal`; see the note in `scripting.cpp`.
+ * They matter to the *generator* only for where a label rooted at one belongs:
+ * `that.is.not.empty` is a chain, not a global called `that`. What the word
+ * means - a passthrough, `and`, or `not` setting a flag - stopped being a fact
+ * the declarations need when the chain became one interface, because every one
+ * of them hands back the same object and so has the same type.
  *
- * `script_types_test.cpp` asserts each of these is still offered by the table,
- * for the reason above it: a name hardcoded here and dropped there degrades
- * silently to `void`.
+ * `script_types_test.cpp` asserts each of these is still offered by the table:
+ * a name hardcoded here and dropped there would declare a top-level `that`
+ * nothing binds, silently.
  */
 constexpr auto LANGUAGE_CHAINS = std::to_array<const char*> ({ "also", "been",
 "but", "does", "has", "is", "of", "same", "still", "that", "which", "with" });
+
+/// The two chain roots that are not language chains - see `opens_the_chain`.
+constexpr auto CHAIN_ROOTS = std::to_array<const char*> ({ "to", "and" });
 
 bool is_language_chain (const std::string& name) {
     return std::find (std::begin (LANGUAGE_CHAINS), std::end (LANGUAGE_CHAINS),
@@ -163,18 +157,6 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 "Console tab." },
 });
 
-bool is_chain_continuation (const std::string& name) {
-    return is_language_chain (name) ||
-    std::find (std::begin (CHAIN_CONTINUATIONS), std::end (CHAIN_CONTINUATIONS),
-    name) != std::end (CHAIN_CONTINUATIONS);
-}
-
-/// What a continuation hands back: the `to` node for anything a matcher may
-/// follow, the chain root for `and`, which is written before `.to` again.
-const char* continuation_type (const std::string& name) {
-    return (name == "not" || is_language_chain (name)) ? CHAIN_TO : CHAIN;
-}
-
 /**
  * @brief Whether a label's first segment opens the assertion chain.
  *
@@ -183,7 +165,9 @@ const char* continuation_type (const std::string& name) {
  * of those, `.that` would declare a top-level `that` nothing binds.
  */
 bool opens_the_chain (const std::string& root_segment) {
-    return root_segment == "to" || root_segment == "and" || is_language_chain (root_segment);
+    return is_language_chain (root_segment) ||
+    std::find (std::begin (CHAIN_ROOTS), std::end (CHAIN_ROOTS), root_segment) !=
+    std::end (CHAIN_ROOTS);
 }
 
 /// A node in the declaration tree built from the dotted labels.
@@ -537,13 +521,13 @@ std::string field_type (const std::string& detail) {
     return optional ? resolved + std::string (OPTIONAL_SUFFIX) : resolved;
 }
 
-void append_doc (std::string& out, const TypeNode& node, const std::string& indent) {
-    if (node.documentation.empty ()) {
+void append_doc (std::string& out, const std::string& documentation, const std::string& indent) {
+    if (documentation.empty ()) {
         return;
     }
     // A `*/` inside the documentation would close the comment early and take
     // the rest of the file's declarations down with it.
-    std::string body = node.documentation;
+    std::string body = documentation;
     for (size_t pos = body.find ("*/"); pos != std::string::npos;
     pos             = body.find ("*/", pos + 3)) {
         body.replace (pos, 2, "*\\/");
@@ -571,27 +555,26 @@ void append_doc (std::string& out, const TypeNode& node, const std::string& inde
  *
  * `forced_return` is the answer the table cannot write down (`pm.expect` opens
  * the chain and its own entry does not say so); a documented return type is the
- * answer it can; and an assertion that documents none continues the chain it
- * sits in, or yields nothing outside one. Read once here, so a plain function
- * and a function that carries members cannot come to disagree.
+ * answer it can; and a call that documents none yields nothing. Read once here,
+ * so a plain function and a function that carries members cannot come to
+ * disagree. The chain does not ask: every matcher there returns the chain, and
+ * `render_chain_member` says so once rather than per entry.
  */
-std::string function_return_type (const TypeNode& node, const Signature& sig, bool in_chain) {
+std::string function_return_type (const TypeNode& node, const Signature& sig) {
     if (!node.forced_return.empty ()) {
         return node.forced_return;
     }
     if (!sig.return_type.empty ()) {
         return sig.return_type;
     }
-    return in_chain ? CHAIN : "void";
+    return "void";
 }
 
-std::string render_member (const TypeNode& node,
-const std::string& name,
-const std::string& indent,
-bool in_chain);
+std::string
+render_member (const TypeNode& node, const std::string& name, const std::string& indent);
 
 /// Render a node's children as the body of an object type or interface.
-std::string render_body (const TypeNode& node, const std::string& indent, bool in_chain) {
+std::string render_body (const TypeNode& node, const std::string& indent) {
     std::string out;
     // A node whose own `detail` is `object` is indexable as well as having the
     // members the labels gave it - `pm.response.headers['content-type']` is the
@@ -600,17 +583,15 @@ std::string render_body (const TypeNode& node, const std::string& indent, bool i
         out += indent + "[key: string]: any;\n";
     }
     for (const auto& [child_name, child] : node.children) {
-        out += render_member (child, child_name, indent, in_chain);
+        out += render_member (child, child_name, indent);
     }
     return out;
 }
 
-std::string render_member (const TypeNode& node,
-const std::string& name,
-const std::string& indent,
-bool in_chain) {
+std::string
+render_member (const TypeNode& node, const std::string& name, const std::string& indent) {
     std::string out;
-    append_doc (out, node, indent);
+    append_doc (out, node.documentation, indent);
 
     if (!node.children.empty ()) {
         // A member that is both a listed call and the parent of its own
@@ -624,7 +605,7 @@ bool in_chain) {
         if (node.called) {
             const Signature sig = parse_signature (node.detail, name);
             out += indent + name + "(" + (sig.parsed ? sig.params : "") + "): {\n";
-            out += render_body (node, indent + "\t", in_chain);
+            out += render_body (node, indent + "\t");
             out += indent + "};\n";
             return out;
         }
@@ -639,8 +620,8 @@ bool in_chain) {
             const Signature sig = parse_signature (node.detail, name);
             out += indent + name + ": {\n";
             out += indent + "\t(" + (sig.parsed ? sig.params : "...args: any[]") +
-            "): " + function_return_type (node, sig, in_chain) + ";\n";
-            out += render_body (node, indent + "\t", in_chain);
+            "): " + function_return_type (node, sig) + ";\n";
+            out += render_body (node, indent + "\t");
             out += indent + "};\n";
             return out;
         }
@@ -648,7 +629,7 @@ bool in_chain) {
         // See intersection_base.
         if (const std::string base = intersection_base (node.detail); !base.empty ()) {
             out += indent + "get " + name + "(): " + base + " & {\n";
-            out += render_body (node, indent + "\t", in_chain);
+            out += render_body (node, indent + "\t");
             out += indent + "};\n";
             out += indent + "set " + name + "(value: " + base + ");\n";
             return out;
@@ -658,7 +639,7 @@ bool in_chain) {
         // say so. Under the renderer's current compiler options this shows in
         // hover rather than producing a diagnostic; see useScriptTypeDefinitions.
         out += indent + name + (node.optional ? "?: {\n" : ": {\n");
-        out += render_body (node, indent + "\t", in_chain);
+        out += render_body (node, indent + "\t");
         out += indent + "};\n";
         return out;
     }
@@ -667,39 +648,105 @@ bool in_chain) {
         const Signature sig      = parse_signature (node.detail, name);
         const std::string params = sig.parsed ? sig.params : "...args: any[]";
         out += indent + name + "(" + params +
-        "): " + function_return_type (node, sig, in_chain) + ";\n";
+        "): " + function_return_type (node, sig) + ";\n";
         return out;
     }
 
-    if (in_chain && is_chain_continuation (name)) {
-        out += indent + name + ": " + continuation_type (name) + ";\n";
-        return out;
-    }
     out += indent + name + ": " + field_type (node.detail) + ";\n";
     return out;
 }
 
+/// One label that named a chain member, and how deep in the label it sat.
+struct ChainEntry {
+    std::string label;
+    size_t depth         = 0;
+    const TypeNode* node = nullptr;
+};
+
+/// Every chain member by name, with each label that named it. Sorted, because
+/// the output is a generated file the tests compare against.
+using ChainMembers = std::map<std::string, std::vector<ChainEntry>>;
+
 /**
- * @brief Declare the language chains on the `to` node as well as the root.
+ * @brief Collect the chain's members by leaf name rather than by path.
  *
- * A language chain is offered once and belongs on both chain interfaces: the
- * runtime installs every member on one object, so `.that` is reachable after a
- * matcher (which lands on `VayuExpectation`) and after another language word or
- * `.to` (which lands on `VayuExpectTo`). Copied into the `to` node rather than
- * appended at render time, so the declarations stay in the sorted order the
- * checked-in fixture is compared against.
+ * Every segment of every chain label is a member of the one expectation, so
+ * this walks the label tree and files each node under its own last segment,
+ * whatever its depth. A word that is only ever a prefix - `be`, `have`, `at`,
+ * `deep`, `nested`, `all` - is a member with no entry of its own, since the
+ * table lists no `to.be` to describe; a word that is both (nothing today, but
+ * `to.deep` and `to.deep.equal` would be) keeps every entry and picks one in
+ * `render_chain_member`.
  */
-void share_language_chains_with_to (TypeNode& chain_root) {
-    auto to = chain_root.children.find ("to");
-    if (to == chain_root.children.end ()) {
-        return;
-    }
-    for (const char* word : LANGUAGE_CHAINS) {
-        if (auto listed = chain_root.children.find (word);
-        listed != chain_root.children.end ()) {
-            to->second.children[word] = listed->second;
+void collect_chain_members (const TypeNode& node,
+const std::string& path,
+size_t depth,
+ChainMembers& members) {
+    for (const auto& [name, child] : node.children) {
+        std::string label = path;
+        if (!label.empty ()) {
+            label += '.';
         }
+        label += name;
+        std::vector<ChainEntry>& entries = members[name];
+        if (child.listed) {
+            entries.push_back (ChainEntry{ label, depth, &child });
+        }
+        collect_chain_members (child, label, depth + 1, members);
     }
+}
+
+/**
+ * @brief One member's documentation, with its longer spellings folded in.
+ *
+ * `property` is one member of one object, and the table describes it three
+ * times - `to.have.property`, `to.have.deep.property`, `to.have.nested.property`
+ * - because those are three things to type, not three members. The plainest
+ * spelling's documentation leads, since it is the one that describes the member
+ * rather than a flag set before it, and each longer one follows under its own
+ * label so what `deep` or `nested` changes is still readable on hover. Dropping
+ * them would lose the only statement of it in the declarations.
+ */
+std::string chain_member_doc (const std::vector<ChainEntry>& entries) {
+    if (entries.empty ()) {
+        return {};
+    }
+    std::string doc = entries.front ().node->documentation;
+    for (size_t i = 1; i < entries.size (); i++) {
+        const std::string& longer = entries[i].node->documentation;
+        if (longer.empty () || doc.find (longer) != std::string::npos) {
+            continue;
+        }
+        doc += "\n\n`" + entries[i].label + "`:\n" + longer;
+    }
+    return doc;
+}
+
+/**
+ * @brief One member of the chain interface.
+ *
+ * Every non-function member is the chain: a chain word hands the expectation
+ * back, and so does a terminal getter - `expect_true` returns
+ * `expect_chained (...)`, not `undefined`, so `.to.be.true.and.equal(1)` runs.
+ * Typing the two alike is what retires the "chain vocabulary" the table could
+ * not carry: the distinction was only ever needed to keep one of them off
+ * `void`. Every call returns the chain too, whatever its own entry documents,
+ * because `expect_chained` is the one thing every matcher returns.
+ */
+std::string render_chain_member (const std::string& name,
+const std::vector<ChainEntry>& entries) {
+    std::string out;
+    append_doc (out, chain_member_doc (entries), "\t");
+
+    const TypeNode* declared = entries.empty () ? nullptr : entries.front ().node;
+    if (declared != nullptr && declared->kind == KIND_FUNCTION) {
+        const Signature sig      = parse_signature (declared->detail, name);
+        const std::string params = sig.parsed ? sig.params : "...args: any[]";
+        out += "\t" + name + "(" + params + "): " + CHAIN + ";\n";
+        return out;
+    }
+    out += "\t" + name + ": " + CHAIN + ";\n";
+    return out;
 }
 
 } // namespace
@@ -744,8 +791,6 @@ void build_type_tree (TypeNode& global_root, TypeNode& chain_root) {
         node->optional      = split_optional_suffix (node->detail).second;
     }
 
-    share_language_chains_with_to (chain_root);
-
     // `pm.expect(value)` opens the chain the `to.*` entries continue. Nothing
     // in its entry says so - see `forced_return`.
     if (auto pm = global_root.children.find ("pm"); pm != global_root.children.end ()) {
@@ -756,26 +801,22 @@ void build_type_tree (TypeNode& global_root, TypeNode& chain_root) {
     }
 }
 
-/** The assertion chain, as two interfaces so `.to.not` can name what it returns. */
+/** The assertion chain, as the one interface the runtime's one object is. */
 std::string render_chain (const TypeNode& chain_root) {
-    std::string out;
-    // The chain, as two interfaces so `.to.not` can name the type it returns.
-    const auto to_it = chain_root.children.find ("to");
-    if (to_it != chain_root.children.end ()) {
-        out += "interface ";
-        out += CHAIN_TO;
-        out += " {\n" + render_body (to_it->second, "\t", true) + "}\n\n";
-    }
+    ChainMembers members;
+    collect_chain_members (chain_root, "", 0, members);
 
-    out += "interface ";
+    std::string out = "interface ";
     out += CHAIN;
     out += " {\n";
-    for (const auto& [name, child] : chain_root.children) {
-        if (name == "to") {
-            out += std::string ("\tto: ") + CHAIN_TO + ";\n";
-        } else {
-            out += render_member (child, name, "\t", true);
-        }
+    for (auto& [name, entries] : members) {
+        // Plainest spelling first: it is the one whose signature and
+        // documentation describe the member rather than a flag set before it.
+        std::sort (entries.begin (), entries.end (),
+        [] (const ChainEntry& a, const ChainEntry& b) {
+            return a.depth != b.depth ? a.depth < b.depth : a.label < b.label;
+        });
+        out += render_chain_member (name, entries);
     }
     out += "}\n";
     return out;
@@ -792,13 +833,13 @@ std::string render_globals (const TypeNode& global_root) {
     for (const auto& [name, child] : global_root.children) {
         out += "\n";
         if (!child.children.empty ()) {
-            append_doc (out, child, "");
+            append_doc (out, child.documentation, "");
             out += "declare const " + name + ": {\n";
-            out += render_body (child, "\t", false);
+            out += render_body (child, "\t");
             out += "};\n";
             continue;
         }
-        append_doc (out, child, "");
+        append_doc (out, child.documentation, "");
         if (child.kind == KIND_FUNCTION) {
             const Signature sig = parse_signature (child.detail, name);
             const std::string params = sig.parsed ? sig.params : "...args: any[]";

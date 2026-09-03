@@ -24,6 +24,12 @@
  * whatever is off screen. Between them the rendered count stays bounded in
  * *cost* without being bounded in *content*.
  *
+ * **What resets it.** A new list starts at the top again, and `resetKey` is how
+ * a caller says which list it is holding. The length is the default answer and
+ * the right one for a list that only ever changes by being replaced; a list that
+ * grows in place - a run streaming its steps - needs its own key, or every
+ * arrival snaps the window shut on a reader who had scrolled into it.
+ *
  * **Why an observer rather than a scroll handler.** A scroll listener fires
  * continuously and has to be throttled, and it needs to know which element
  * scrolls - here that is an ancestor the hook cannot see. An observer fires
@@ -41,7 +47,22 @@ export interface GrowingWindow {
 	hasMore: boolean;
 }
 
-export function useGrowingWindow(total: number, step = 200): GrowingWindow {
+/** The default window size, and the amount each growth adds to it. */
+export const GROWING_WINDOW_STEP = 200;
+
+export function useGrowingWindow(
+	total: number,
+	step = GROWING_WINDOW_STEP,
+	/**
+	 * What identifies *which* list this is, if the length does not.
+	 *
+	 * Defaults to the length, which is the right answer for a list that only
+	 * changes by being replaced - a different response's logs, a re-filtered set
+	 * of rows. A caller whose list also *grows in place* must say so, because
+	 * there the length changes without the list changing (issue #1153).
+	 */
+	resetKey: unknown = total
+): GrowingWindow {
 	const [visible, setVisible] = useState(step);
 	const observerRef = useRef<IntersectionObserver | null>(null);
 
@@ -50,15 +71,21 @@ export function useGrowingWindow(total: number, step = 200): GrowingWindow {
 	 * fewer logs keeps the previous one's grown count - harmless - while
 	 * switching to a longer one starts already scrolled deep into it.
 	 *
+	 * What it must not do is treat a list that grew as a list that changed: a
+	 * live scenario run appends to the same list for its duration, and resetting
+	 * on the length threw the reader back to the first `step` rows on every
+	 * batch of steps that arrived, scroll position included. That is why the
+	 * comparison is against a key rather than the length itself.
+	 *
 	 * Adjusted during render rather than in an effect. React documents this as
 	 * the way to reset state when a prop changes: it re-renders immediately with
 	 * the new value and never commits the stale one, where an effect paints the
 	 * wrong window first and then corrects it. `react-hooks/set-state-in-effect`
 	 * flags the effect form for exactly that reason.
 	 */
-	const [seenTotal, setSeenTotal] = useState(total);
-	if (seenTotal !== total) {
-		setSeenTotal(total);
+	const [seenKey, setSeenKey] = useState(resetKey);
+	if (!Object.is(seenKey, resetKey)) {
+		setSeenKey(resetKey);
 		setVisible(step);
 	}
 

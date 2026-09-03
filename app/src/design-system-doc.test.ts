@@ -21,27 +21,13 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { declaredValues, indexCss as css } from "@/lib/css-tokens.testkit";
 
 /** Repository-relative, so CI can route the page this reads. See the testkit. */
 const [DESIGN_SYSTEM_DOC] = DOC_READING_GUARDS.designSystem.paths;
 
-const here = dirname(fileURLToPath(import.meta.url));
-const css = readFileSync(join(here, "index.css"), "utf8");
 const doc = readFileSync(fromRepoRoot(DESIGN_SYSTEM_DOC), "utf8");
-
-/** Every declared value for a token, anywhere in the stylesheet. */
-function declaredValues(): Map<string, Set<string>> {
-	const out = new Map<string, Set<string>>();
-	for (const m of css.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)) {
-		const value = m[2].split(/\s+/).join(" ").trim();
-		if (!out.has(m[1])) out.set(m[1], new Set());
-		out.get(m[1])!.add(value);
-	}
-	return out;
-}
 
 // The doc aligns values in columns, so `240  4% 42%` has runs of spaces. An
 // earlier version of this scan required single spaces and silently matched

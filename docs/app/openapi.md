@@ -488,11 +488,15 @@ same method and path (the first wins), an example whose media type was never
 recorded, an example stored only in part (the response is written, the body is
 not, in both of those last two). Nothing is dropped quietly.
 
-A large document takes a moment to put together, and the dialog says
-**Assembling the document…** while it does. Switching between JSON and YAML asks
-for the other format once; switching back is immediate, because the first one is
-still there. Reopening the dialog asks again, so an export always describes the
-collection as it is now.
+A large document takes a moment to put together, and the dialog says so without
+moving anything: on the first read it holds the summary's shape until the
+summary arrives, and after that a spinner beside the format toggle. Switching
+between JSON and YAML asks for the other format once, leaving the summary you
+already have on screen - the counts in it describe the collection, and are the
+same in either format - while Copy and Download wait for the new text rather
+than handing you the previous one. Switching back is immediate, because the
+first one is still there. Reopening the dialog asks again, so an export always
+describes the collection as it is now.
 
 ## Contract coverage
 

@@ -33,21 +33,6 @@ inline int64_t now_ms () {
     .count ();
 }
 
-/// Snapshot what each bounded store thinned away, for the run summary. One
-/// copy so the completed-run and crashed-run summaries cannot report retention
-/// differently.
-SamplingRetention read_retention (const MetricsCollector& mc) {
-    SamplingRetention retention;
-    retention.errors_dropped           = mc.errors_dropped ();
-    retention.success_traces_dropped   = mc.success_results_dropped ();
-    retention.slow_traces_dropped      = mc.slow_results_dropped ();
-    retention.response_samples_dropped = mc.response_samples_dropped ();
-    retention.exemplars_dropped        = mc.exemplar_results_dropped ();
-    retention.sample_bodies_dropped    = mc.sample_bodies_dropped ();
-    retention.response_bodies_captured = mc.response_bodies_captured ();
-    return retention;
-}
-
 /**
  * @brief One deferred replay: a script, the samples it runs against, and the
  *        identity `pm.info` reports while it does.
@@ -74,6 +59,18 @@ struct ScriptReplay {
     /// a stream: every sample in one run is then bounded by one rule rather
     /// than by whatever the settings said when each replay reached it.
     vayu::http::SseLimits sse_limits;
+    /// What a `pm.sendRequest` from this script may read (issue #1188), read
+    /// once for the pass on the same terms as `sse_limits`. The load bound,
+    /// not the design one: this script runs once per sampled response, so its
+    /// fetches belong to the budget sized for a run rather than for a body
+    /// someone is watching for.
+    size_t max_response_bytes = vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES;
+    /// The route a `pm.sendRequest` from this script leaves by (issue #1256) -
+    /// the run's own, carried from `RunContext::transport` rather than resolved
+    /// here. A script that authenticates through a proxy the run's transfers
+    /// went through, or presents the client certificate they presented, is the
+    /// case #705 exists for; the load path was the one caller that never set it.
+    vayu::http::TransportPolicy transport;
 };
 
 /**
@@ -127,8 +124,10 @@ std::vector<std::string>& failure_messages) {
             // - a duration-bounded run has no total to report, and a script
             // that could read it from one mode and not the other is worse than
             // one that never reads it.
-            script_ctx.iteration = sample.iteration;
-            script_ctx.vu        = sample.vu;
+            script_ctx.iteration          = sample.iteration;
+            script_ctx.vu                 = sample.vu;
+            script_ctx.max_response_bytes = replay.max_response_bytes;
+            script_ctx.transport          = replay.transport;
             if (replay.data_rows != nullptr && sample.data_row_index &&
             *sample.data_row_index < replay.data_rows->size ()) {
                 script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
@@ -182,6 +181,19 @@ std::vector<std::string>& failure_messages) {
     return totals;
 }
 } // namespace
+
+SamplingRetention read_retention (const MetricsCollector& mc) {
+    SamplingRetention retention;
+    retention.errors_dropped               = mc.errors_dropped ();
+    retention.success_traces_dropped       = mc.success_results_dropped ();
+    retention.slow_traces_dropped          = mc.slow_results_dropped ();
+    retention.response_samples_dropped     = mc.response_samples_dropped ();
+    retention.exemplars_dropped            = mc.exemplar_results_dropped ();
+    retention.sample_bodies_dropped        = mc.sample_bodies_dropped ();
+    retention.response_bodies_captured     = mc.response_bodies_captured ();
+    retention.response_sample_budget_spent = mc.response_sample_budget_spent ();
+    return retention;
+}
 
 /**
  * The run-level request and identity a single-request replay reads.
@@ -244,6 +256,8 @@ ScriptValidationTotals replay_scenario_steps (vayu::runtime::ScriptEngine& engin
 vayu::http::routes::ScriptVariableScopes& scopes,
 const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
+size_t max_response_bytes,
+const vayu::http::TransportPolicy& transport,
 bool verbose,
 ScriptValidation& validation,
 std::vector<std::string>& failure_messages) {
@@ -287,7 +301,9 @@ std::vector<std::string>& failure_messages) {
         // per-step tallies below.
         replay.failure_prefix =
         step.name.empty () ? "step " + std::to_string (i + 1) + ": " : step.name + ": ";
-        replay.sse_limits = sse_limits;
+        replay.sse_limits         = sse_limits;
+        replay.max_response_bytes = max_response_bytes;
+        replay.transport          = transport;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
         validation.steps[i] = totals;
@@ -376,6 +392,20 @@ bool verbose) {
     vayu::runtime::ScriptEngine engine (script_config);
     // One read for the whole pass, shared by every replay it drives.
     const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
+    // The same, for what a `pm.sendRequest` out of these scripts may read
+    // (issue #1188) - the load bound, because this pass is the load path's.
+    const size_t script_response_bound =
+    vayu::http::routes::load_response_body_bound (db);
+    // The route those fetches leave by (issue #1256), and the one value of this
+    // pass that is NOT re-read from the database here: it is the snapshot the
+    // run's own transfers were sent under, taken at `configure_event_loop` and
+    // kept on the context. A bound is what this pass may read *now*, so
+    // reading it now is right; a route is what the traffic being asserted on
+    // took, and a script that reached the target by a different one than the
+    // run did - a proxy edited mid-run, a client certificate registered since -
+    // would report a healthy target as broken. The run resolves it once, and
+    // both halves of the run use that one answer.
+    const vayu::http::TransportPolicy& script_transport = context->transport;
 
     // The run-level request and identity, for the single-request shape. A
     // scenario takes both off the plan step it is replaying instead, so it does
@@ -437,7 +467,8 @@ bool verbose) {
 
     if (per_step) {
         const ScriptValidationTotals totals = replay_scenario_steps (engine,
-        scopes, context, sse_limits, verbose, validation, failure_messages);
+        scopes, context, sse_limits, script_response_bound, script_transport,
+        verbose, validation, failure_messages);
         sampled                             = totals.sampled;
         passed                              = totals.passed;
         failed                              = totals.failed;
@@ -463,9 +494,11 @@ bool verbose) {
         // `pm.iterationData` `undefined` there.
         replay.data_rows =
         context->load_data == nullptr ? nullptr : &context->load_data->rows;
-        replay.request_id   = script_request_id;
-        replay.request_name = script_request_name;
-        replay.sse_limits   = sse_limits;
+        replay.request_id         = script_request_id;
+        replay.request_name       = script_request_name;
+        replay.sse_limits         = sse_limits;
+        replay.max_response_bytes = script_response_bound;
+        replay.transport          = script_transport;
 
         const auto totals = run_replay (engine, scopes, replay, failure_messages);
         sampled = totals.sampled;
@@ -635,9 +668,15 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
     capture_response_bodies = mc_config.capture_response_bodies;
 
-    // Configure response sampling for script validation
+    // Configure response sampling for script validation. Bounded twice: in
+    // count here, and in bytes by the budget below - a retained sample holds a
+    // whole response body, so the count alone bounds the store's memory only
+    // for a target whose bodies are small (issue #1155).
     mc_config.max_response_samples =
     static_cast<size_t> (config.value ("max_response_samples", 1000));
+    mc_config.max_response_sample_bytes =
+    static_cast<size_t> (config.value ("max_response_sample_bytes",
+    static_cast<int64_t> (engine_defaults.max_response_sample_bytes)));
     mc_config.response_sample_rate =
     static_cast<size_t> (config.value ("response_sample_rate", 100));
 
@@ -699,13 +738,24 @@ void RunManager::unregister_run (const std::string& run_id) {
 }
 
 void RunManager::retain_run (const std::string& run_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = active_runs_.find (run_id);
-    if (it == active_runs_.end ())
-        return;
-    it->second->completed_at_ms.store (now_ms ());
-    retained_runs_[run_id] = it->second;
-    active_runs_.erase (it);
+    std::shared_ptr<RunContext> retained;
+    {
+        std::lock_guard<std::mutex> lock (mutex_);
+        auto it = active_runs_.find (run_id);
+        if (it == active_runs_.end ())
+            return;
+        it->second->completed_at_ms.store (now_ms ());
+        retained               = it->second;
+        retained_runs_[run_id] = it->second;
+        active_runs_.erase (it);
+    }
+    // Retention is for the tick topic, not for the machinery that filled it:
+    // a finished run held its curl handle pools, its cached connections to the
+    // target, its submission queues and its bound rows for the whole window
+    // (issue #1154). Freed here, after the map move and with `mutex_` dropped,
+    // because closing thousands of sockets under it would stall /health, the
+    // runs poll and a starting run for the length of the teardown.
+    retained->release_execution_resources ();
 }
 
 std::shared_ptr<RunContext> RunManager::get_run_or_retained (const std::string& run_id) {
@@ -934,6 +984,9 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         engine_defaults.max_sample_bytes =
         static_cast<size_t> (db.get_config_int ("maxSampleBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BYTES)));
+        engine_defaults.max_response_sample_bytes =
+        static_cast<size_t> (db.get_config_int ("maxResponseSampleBytes",
+        static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES)));
         // The same two settings the design path's stream reads, so a user who
         // tightened them once has tightened them for both (issue #576).
         engine_defaults.stream_max_duration_ms =
@@ -1067,9 +1120,13 @@ int default_max_per_host) {
     // per change. Matching per transfer stays cheap because it reads this
     // snapshot, never the database.
     loop_config.transport = vayu::http::resolve_transport_policy (db);
-    loop_config.max_response_body_bytes = static_cast<size_t> (std::max (0,
-    db.get_config_int ("maxResponseBodyBytes",
-    static_cast<int> (vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES))));
+    // The same snapshot, kept for the deferred script pass at the other end of
+    // the run (issue #1256): a `pm.sendRequest` out of a `tests` script must
+    // leave the way the transfers it is asserting on left, and this is the one
+    // place a load run resolves that. See `RunContext::transport`.
+    context->transport = loop_config.transport;
+    loop_config.max_response_body_bytes =
+    vayu::http::routes::load_response_body_bound (db);
     // Only enable curl verbose if explicitly requested in config,
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);
@@ -1630,7 +1687,14 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
         // by the Samples tab to warn about credentials, so it has to be
         // persisted rather than re-derived - the tab renders from the report
         // long after the collector is gone.
-        { "response_bodies_captured", inputs.retention.response_bodies_captured } };
+        { "response_bodies_captured", inputs.retention.response_bodies_captured },
+        // Which of the two bounds on the response-sample store thinned it. The
+        // count above says how much went unvalidated; this says whether what
+        // was kept is still a uniform sample of the run, which is the sentence
+        // the app's retention note prints (issue #1192). Always written, so an
+        // absent key means an engine too old to have looked - not a run that
+        // kept its uniformity.
+        { "response_sample_budget_spent", inputs.retention.response_sample_budget_spent } };
     // Omitted entirely when validation did not run, so the report keeps
     // distinguishing "no test script" from "a script that passed nothing".
     if (inputs.tests.has_value ()) {

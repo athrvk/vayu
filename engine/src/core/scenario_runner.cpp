@@ -487,6 +487,8 @@ struct StepContext {
     size_t iteration_count      = 0;
     bool fail_on_schema_error   = false;
     size_t max_trace_body_bytes = 0;
+    /// `maxDesignResponseBodyBytes`, read once for the run (issue #1157).
+    size_t max_response_bytes = 0;
 };
 
 /**
@@ -521,9 +523,10 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.iteration    = ctx.iteration;
     // One user walking the sequence, which is what a collection run in design
     // mode is - the same number `{{$vu}}` binds into its requests (issue #994).
-    inputs.vu              = SOLE_VIRTUAL_USER;
-    inputs.iteration_count = ctx.iteration_count;
-    inputs.transport       = ctx.transport;
+    inputs.vu                 = SOLE_VIRTUAL_USER;
+    inputs.iteration_count    = ctx.iteration_count;
+    inputs.transport          = ctx.transport;
+    inputs.max_response_bytes = ctx.max_response_bytes;
     // The one caller that sets it: `pm.execution` throws
     // everywhere else, because nowhere else has a sequence to
     // redirect (issue #355).
@@ -935,6 +938,12 @@ RunManager& manager) {
 
         const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
         "maxTraceBodyBytes", static_cast<int> (constants::json::MAX_TRACE_BODY_BYTES)));
+        // Run-scoped for the reason `transport` is: a step that read a
+        // different bound because Settings changed mid-sequence would make the
+        // run unreproducible. A step of a collection run is a design-mode send,
+        // so it reads the design-mode bound (issue #1157).
+        const auto max_response_bytes =
+        vayu::http::routes::design_response_body_bound (db);
         ScenarioStepStore store (
         static_cast<size_t> (db.get_config_int ("maxScenarioStoredSteps",
         static_cast<int> (constants::scenario::MAX_STORED_STEPS))));
@@ -967,9 +976,9 @@ RunManager& manager) {
             // it: a script may send it backwards, forwards or out early, so the
             // position is a variable and the loop is bounded by the budget
             // above rather than by the plan's length.
-            const StepContext step_ctx{ context, execution, schema_index,
-                transport, cookie_scope, data_rows, data_row_index, iteration,
-                asked.iterations, fail_on_schema_error, max_trace_body_bytes };
+            const StepContext step_ctx{ context, execution, schema_index, transport,
+                cookie_scope, data_rows, data_row_index, iteration, asked.iterations,
+                fail_on_schema_error, max_trace_body_bytes, max_response_bytes };
             run_iteration (script_engine, cookie_jar, cookie_scope, verbose, scopes, step_ctx,
             plan, step_index, max_steps_per_iteration, coverage, summary, store);
 

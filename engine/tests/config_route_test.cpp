@@ -22,6 +22,7 @@
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/types.hpp"
 
 using nlohmann::json;
@@ -56,6 +57,50 @@ class ConfigRouteTest : public ::testing::Test {
     }
     std::unique_ptr<vayu::db::Database> db_;
 };
+
+// ---------------------------------------------------------------------------
+// The design-mode read bound, from the shelf to the send (issue #1157)
+// ---------------------------------------------------------------------------
+//
+// `design_response_body_bound` is the one place `maxDesignResponseBodyBytes` is
+// spelled, and both callers - `POST /execute` and the scenario runner - read it
+// through this. That matters because the failure mode of getting it wrong is
+// silent: a mistyped key falls back to the compiled-in default, so the Settings
+// control would go on reading as though a user could change what a send reads
+// while changing nothing at all. These two drive the setting the way the app
+// does, through the config route, rather than asserting the string.
+
+TEST_F (ConfigRouteTest, TheDesignReadBoundDefaultsToTheCompiledInLimit) {
+    EXPECT_EQ (vayu::http::routes::design_response_body_bound (*db_),
+    vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES);
+}
+
+TEST_F (ConfigRouteTest, TheDesignReadBoundFollowsTheSetting) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"maxDesignResponseBodyBytes":"4096"}})");
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    EXPECT_EQ (vayu::http::routes::design_response_body_bound (*db_), 4096U);
+}
+
+// Its load-path sibling, on the same reasoning (issue #1188): the deferred
+// `tests` pass reads `maxResponseBodyBytes` for what a script's own
+// `pm.sendRequest` may pull, so a mistyped key there would silently leave that
+// fetch on the compiled-in default while the Settings control read as though
+// it governed every read of the run.
+
+TEST_F (ConfigRouteTest, TheLoadReadBoundDefaultsToTheCompiledInLimit) {
+    EXPECT_EQ (vayu::http::routes::load_response_body_bound (*db_),
+    vayu::core::constants::event_loop::MAX_RESPONSE_BODY_BYTES);
+}
+
+TEST_F (ConfigRouteTest, TheLoadReadBoundFollowsTheSetting) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"maxResponseBodyBytes":"4096"}})");
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    EXPECT_EQ (vayu::http::routes::load_response_body_bound (*db_), 4096U);
+}
 
 TEST_F (ConfigRouteTest, InvalidJsonIs400WithReason) {
     auto [status, body] = vayu::http::routes::apply_config_update (*db_, "not json");

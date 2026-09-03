@@ -808,8 +808,14 @@ keys are the wire names the payload declared, carried through unchanged; the rep
 drift apart silently.
 
 Do not confuse this **results** summary with the `summary` key on a `GET /runs` list row - that
-one is a derived view of `config_snapshot` (url/method/mode/duration/concurrency/comment) built
-per request and never stored.
+one is a derived view of `config_snapshot` (url/method/mode/duration/concurrency/comment) and is
+never stored. It is built once per run id and held in a bounded in-memory cache
+for as long as the process lives (issue #1150), which is sound only because
+`config_snapshot` is write-once: `create_run` sets it, and every later write to a
+run row - status, end time, summary, baseline, the startup reconcile - is a
+read-modify-write that puts the same string back. **A change that edits a stored
+snapshot in place breaks that**, and would have to invalidate the cache in
+`engine/include/vayu/http/run_summary_cache.hpp`.
 
 **A scenario run's `summary`** is a different shape, written by
 `vayu::core::build_scenario_summary_payload` (`core/scenario_runner.cpp`): the

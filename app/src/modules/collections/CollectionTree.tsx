@@ -23,6 +23,7 @@ import ExportSpecDialog from "./ExportSpecDialog";
 import RunCollectionDialog from "./RunCollectionDialog";
 import { useRovingTreeFocus } from "./useRovingTreeFocus";
 import { useRevealActiveSelection } from "./useRevealActiveSelection";
+import { useDeleteRefocus } from "./useDeleteRefocus";
 import { useTreeCrud } from "./useTreeCrud";
 import { useTreeDnd } from "./useTreeDnd";
 import { MoveToDialog } from "./MoveToDialog";
@@ -102,6 +103,25 @@ export default function CollectionTree() {
 	});
 
 	/*
+	 * The row the open delete dialog would remove. Collections and requests carry
+	 * their ids on different attributes, which is the one thing the shared
+	 * refocus hook cannot know for a tree.
+	 */
+	const doomedRowSelector = panel.deleteConfirm
+		? `[${panel.deleteConfirm.type === "collection" ? "data-collection-id" : "data-request-id"}="${CSS.escape(panel.deleteConfirm.id)}"]`
+		: null;
+
+	/*
+	 * Where focus goes when the deleted row was the only one in the tree - the
+	 * one case the tree's own rule cannot answer, since a root otherwise falls
+	 * back to the root before it. "Add collection" is the nearest surviving
+	 * control, and the one thing left to do on an emptied tree.
+	 */
+	const addCollectionRef = useRef<HTMLButtonElement>(null);
+
+	const deleteRefocus = useDeleteRefocus(treeRef, doomedRowSelector, addCollectionRef);
+
+	/*
 	 * A row mid-rename or mid-delete is neither a drag source nor a drop target:
 	 * both states already own the row's input, and a move landing on a row that
 	 * is about to disappear is the two-writers problem in its clearest form.
@@ -159,6 +179,7 @@ export default function CollectionTree() {
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button
+								ref={addCollectionRef}
 								variant="ghost"
 								size="icon"
 								onClick={panel.openNewCollectionForm}
@@ -307,6 +328,7 @@ export default function CollectionTree() {
 			    context - see CollectionTreeContext for why it is not props. */}
 				{!isLoadingCollections && rootCollections.length > 0 && (
 					<div className="flex-1 min-h-0">
+						{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
 						<div
 							role="tree"
 							aria-label="Collections"
@@ -373,6 +395,11 @@ export default function CollectionTree() {
 							: `"${panel.deleteConfirm?.name}" will be moved to the Trash, where it can be restored.`
 					}
 					onConfirm={panel.confirmDelete}
+					// The row this dialog was opened from may stop existing, so
+					// Radix's restore has nowhere to land (#1218). Where focus goes
+					// follows the outcome: the row while it is still there, the
+					// successor once the delete has actually removed it (#1234).
+					onCloseAutoFocus={deleteRefocus.onCloseAutoFocus}
 					isDeleting={panel.isDeleteInFlight}
 				/>
 

@@ -194,6 +194,45 @@ describe("TabStrip keyboard navigation", () => {
 		expect(useTabsStore.getState().openTabs.map((t) => t.id)).toEqual(["t2", "t3"]);
 	});
 
+	/*
+	 * The tab holding focus is the one that unmounts, so a close that claims no
+	 * focus drops the user on `<body>` and the next Tab restarts from the top of
+	 * the document (#1218). Where it lands is the store's own next active tab -
+	 * one rule for what follows a close, not a second one here.
+	 */
+	it("leaves focus on the tab that replaces the closed one", () => {
+		renderStrip();
+		screen.getAllByRole("tab")[0].focus();
+
+		press("Delete");
+
+		expect(useTabsStore.getState().activeTabId).toBe("t2");
+		expect(document.activeElement).toBe(document.getElementById(tabElementId("t2")));
+	});
+
+	it("leaves focus on the active tab when the closed one was not active", () => {
+		renderStrip();
+		// t1 is active; closing t2 does not change that, so focus follows the
+		// tab that is still selected rather than a neighbour nothing points at.
+		screen.getAllByRole("tab")[1].focus();
+
+		press("Backspace");
+
+		expect(useTabsStore.getState().activeTabId).toBe("t1");
+		expect(document.activeElement).toBe(document.getElementById(tabElementId("t1")));
+	});
+
+	it("falls back to the New tab button when the last tab closes", () => {
+		useTabsStore.setState({ openTabs: [TABS[0]], activeTabId: "t1" });
+		renderStrip();
+		screen.getAllByRole("tab")[0].focus();
+
+		press("Delete");
+
+		expect(useTabsStore.getState().openTabs).toHaveLength(0);
+		expect(document.activeElement).toBe(screen.getByLabelText("New tab"));
+	});
+
 	it("leaves other keys alone so typing is not swallowed", () => {
 		renderStrip();
 		screen.getAllByRole("tab")[0].focus();

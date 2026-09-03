@@ -78,7 +78,7 @@ AllowShortFunctionsOnASingleLine: None
 #
 # Exactly one include order in the engine is load-bearing, and it is pinned at
 # the site rather than by disabling the sorter everywhere:
-# `engine/src/platform/platform_windows.cpp` wraps `<windows.h>` /
+# `engine/src/platform/high_resolution_timer.cpp` wraps `<windows.h>` /
 # `<timeapi.h>` in `// clang-format off` because timeapi.h uses types
 # (MMRESULT, UINT, WINAPI) that windows.h defines, does not compile standalone,
 # and sorts first alphabetically. Nothing catches that but the Windows CI leg.

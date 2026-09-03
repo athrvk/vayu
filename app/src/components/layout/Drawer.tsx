@@ -7,11 +7,17 @@
 
 import { useLayoutStore } from "@/stores";
 import { PanelResizeHandle } from "./PanelResizeHandle";
+import { regionProps } from "./region-focus";
 import { DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
-import { SettingsCategoryTree } from "@/modules/settings";
+// The tree's own file, not `@/modules/settings`: that barrel also exports
+// `SettingsMain`, so importing it here - the Drawer is mounted on every tab -
+// would pull the settings surface back into the eager graph and undo the split
+// `Shell` makes of it (#1146). The sibling trees above are deep imports for the
+// same reason.
+import SettingsCategoryTree from "@/modules/settings/sidebar/SettingsCategoryTree";
 import { ServicesPanel } from "@/modules/services";
 import { TrashList } from "@/modules/trash";
 
@@ -31,6 +37,9 @@ export function Drawer() {
 			className="relative flex shrink-0 bg-panel"
 			style={{ width }}
 			aria-label={`${drawerView.charAt(0).toUpperCase()}${drawerView.slice(1)} sidebar`}
+			// A stop in the F6 cycle - see `region-focus.ts` for why the bands are
+			// marked rather than found by tag name.
+			{...regionProps("drawer")}
 		>
 			<div className="panel-clip flex-1 overflow-hidden flex flex-col min-w-0">
 				{/* Each view supplies its own DrawerPanel, which owns the header and

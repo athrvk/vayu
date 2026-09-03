@@ -548,6 +548,81 @@ TEST_F (HttpClientTest, ReportsNoTotalWhenTheServerDeclaresNone) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The read cap, and the two readings of it (issue #1157)
+// ---------------------------------------------------------------------------
+//
+// `max_response_bytes` bounds what is read either way. What
+// `truncate_over_limit` decides is what the caller is handed afterwards: the
+// prefix and the status, for a design-mode send someone is watching, or the
+// refusal `/import/fetch` answers a `413` with. The pair is tested together
+// because either one alone reads as the whole rule.
+
+/// Small enough that `/sized` (256 KiB, several write-callback chunks) is cut
+/// well before its end, so the prefix is a prefix and not a rounding.
+constexpr size_t CAP_BYTES = size_t{ 4 } * 1024;
+
+TEST_F (HttpClientTest, KeepsThePrefixAndSaysSoWhenTheCallerAsksToTruncate) {
+    ClientConfig config;
+    config.max_response_bytes  = CAP_BYTES;
+    config.truncate_over_limit = true;
+    Client client (std::move (config));
+
+    auto result = client.get (mock_->url ("/sized"));
+
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+    const auto& response = result.value ();
+    // The transfer curl reports as CURLE_WRITE_ERROR is this engine stopping
+    // it on purpose, so none of it is reported as a failure: the status line
+    // and the headers arrived before the body did and are as real as ever.
+    EXPECT_FALSE (response.has_error ());
+    EXPECT_EQ (response.error_code, ErrorCode::None);
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_FALSE (response.headers.empty ());
+    // The bound is on what is read, not a check run after the whole hostile
+    // body was buffered - which is the only thing that makes it a bound.
+    EXPECT_EQ (response.body.size (), CAP_BYTES);
+    EXPECT_EQ (response.body_size, CAP_BYTES);
+    EXPECT_TRUE (response.body_truncated);
+}
+
+TEST_F (HttpClientTest, RefusesTheTransferWhenTheCallerDoesNotAskToTruncate) {
+    ClientConfig config;
+    config.max_response_bytes = CAP_BYTES;
+    // The default, spelled out: this is the half of the pair that must not
+    // change when the truncating one is added.
+    config.truncate_over_limit = false;
+    Client client (std::move (config));
+
+    auto result = client.get (mock_->url ("/sized"));
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_TRUE (response.has_error ());
+    EXPECT_EQ (response.error_code, ErrorCode::ResponseTooLarge);
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_TRUE (response.body.empty ());
+    // Nothing was kept, so there is no prefix to describe.
+    EXPECT_FALSE (response.body_truncated);
+}
+
+TEST_F (HttpClientTest, ReportsNoTruncationForABodyThatFitsUnderTheCap) {
+    ClientConfig config;
+    config.max_response_bytes  = SIZED_BYTES * 2;
+    config.truncate_over_limit = true;
+    Client client (std::move (config));
+
+    auto result = client.get (mock_->url ("/sized"));
+
+    ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
+    const auto& response = result.value ();
+    EXPECT_FALSE (response.has_error ());
+    EXPECT_EQ (response.body.size (), SIZED_BYTES);
+    // The flag is what a pane reads to decide whether to say a body was cut,
+    // so a false positive here is a warning about a complete response.
+    EXPECT_FALSE (response.body_truncated);
+}
+
 TEST_F (HttpClientTest, StopsTheTransferWhenTheProgressCallbackRefuses) {
     uint64_t seen = 0;
     ClientConfig config;

@@ -55,6 +55,16 @@ namespace vayu::http {
 class ManagedListener {
     public:
     ManagedListener ();
+    /**
+     * Take a server the owner built, for a listener that needs one a plain
+     * `httplib::Server` cannot be - the webhook inbox routes every request as
+     * one path through a `Server` subclass, so that a path cpp-httplib's regex
+     * matcher would refuse still reaches its handler (see routes/inbox.cpp).
+     *
+     * Throws `std::invalid_argument` on a null server rather than letting it
+     * read back as a listener `stop()` has already released.
+     */
+    explicit ManagedListener (std::unique_ptr<httplib::Server> server);
     /// Stops and joins, so a manager destroying its records never leaks a thread.
     ~ManagedListener ();
 

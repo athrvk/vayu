@@ -3,6 +3,7 @@ import typescript from "@typescript-eslint/eslint-plugin";
 import typescriptParser from "@typescript-eslint/parser";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 import prettier from "eslint-plugin-prettier";
 import prettierConfig from "eslint-config-prettier";
 
@@ -67,6 +68,56 @@ export default [
 				},
 			],
 			"prettier/prettier": "error",
+		},
+	},
+
+	// Accessibility: the mechanical net under the behavioural guards (#1216).
+	// Every a11y rule this repository enforced before now was a bespoke test of
+	// one past incident - a real accessible name on icon buttons, a focus reveal
+	// beside every hover reveal - which catches the defect that already happened
+	// and nothing else. `jsx-a11y` recommended is the general case: it costs no
+	// workflow (`pnpm lint` already gates PRs), no runtime and no flake.
+	//
+	// Scoped to `.tsx`, which is where JSX lives; the plugin's own
+	// `languageOptions` only re-declare the JSX parser feature already set above.
+	//
+	// The baseline the recommended set found was 58 errors, not the four #1216
+	// predicted from reading. Every one was read: three were real (they are
+	// fixed), and the rest are two patterns the rules cannot see, suppressed at
+	// the line with the reason - except where the rule takes an option that
+	// teaches it the pattern once, which is these three. The allowlist is
+	// documented under "Accessibility" in docs/design-system.md.
+	{
+		files: ["**/*.tsx"],
+		plugins: jsxA11y.flatConfigs.recommended.plugins,
+		rules: {
+			...jsxA11y.flatConfigs.recommended.rules,
+
+			// 14 sites, every one a field inside a dialog, a rename box opened over
+			// a row, or the command palette - where moving focus into the thing the
+			// user just opened is the WAI-ARIA dialog pattern, not the page-load
+			// autofocus this rule exists to prevent. Off here rather than suppressed
+			// fourteen times, the same call `no-console` gets for `electron/`.
+			"jsx-a11y/no-autofocus": "off",
+
+			// The rule recognises a nested control by lower-case tag name, so it
+			// cannot see that `Switch`, `Input` and `SelectTrigger` each render one
+			// native labelable element and nothing else - the association it asks
+			// for is already there. Naming them is what the option is for.
+			"jsx-a11y/label-has-associated-control": [
+				"error",
+				{ controlComponents: ["Switch", "Input", "SelectTrigger"] },
+			],
+
+			// `separator` is structural in the ARIA role table, but the window
+			// splitter - a focusable `role="separator"` with arrow/Page/Home/End
+			// keys - is the sanctioned interactive form of it, and both resize
+			// handles here implement exactly that. `tabpanel` is the rule's own
+			// default, kept.
+			"jsx-a11y/no-noninteractive-tabindex": [
+				"error",
+				{ tags: [], roles: ["tabpanel", "separator"], allowExpressionValues: true },
+			],
 		},
 	},
 

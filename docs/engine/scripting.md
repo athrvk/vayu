@@ -224,9 +224,16 @@ pm.expect(value).to.satisfy(function (v) { return v > 0; });
 
 // Chainers
 pm.expect(value).to.not.equal(expected);     // negates the rest of the chain
+pm.expect(value).not.to.equal(expected);     // and reads either way round
 pm.expect(value).to.be.above(0).and.to.be.below(10);
 pm.expect(value).to.deep.include({ a: 1 });  // deep applies to include, property,
                                              // members and oneOf as well
+
+// Any chain word may precede any matcher - `be` and `and` assert nothing, so a
+// matcher follows either of them directly
+pm.expect(code).to.be.equal(200);
+pm.expect(token).to.be.a('string').and.match(/^prefix_/);
+pm.expect(scope).to.be.a('string').and.not.empty;
 
 // Language chains - they assert nothing, and make a chain read as English
 pm.expect(value).to.be.an('array').that.include(item);
@@ -325,7 +332,16 @@ Notes on the edges:
   `TypeError` because nothing was asserted, and the response assertions refuse
   a wrong-typed argument the same way (#998). Both throw, so a test fails
   either way; what differs is `e.name`.
-- **`.and` carries the chain's flags**, `not` included, exactly as in chai.
+- **`.and` carries the chain's flags**, `not` included, exactly as in chai. It
+  is a language chain like `.that`, not a return to the start of one: a matcher
+  may follow it directly (`.and.match(/x/)`), and so may `not`.
+- **The grammar is chai's: any chain word before any matcher.** Every word above
+  - `to`, `be`, `have`, `at`, `and`, `all`, `not`, `deep`, `nested` and the
+  language chains - is installed on the same expectation and hands it back, so
+  the editor's declarations describe one type rather than the paths this page
+  happens to spell (#1209). The examples in this section are compiled against
+  those declarations by the app's suite, so a chain that reads correctly here
+  is one the editor accepts.
 
 ## Response Object (`pm.response`)
 
@@ -714,7 +730,11 @@ means the ones the engine derives at send time are there too - the body-implied
 `application/xml`, `x-www-form-urlencoded` ->
 `application/x-www-form-urlencoded`) and the default `User-Agent`. So a test
 asserting on the Content-Type a GraphQL request sent reads the header the engine
-supplied, rather than the `undefined` it read before (#483).
+supplied, rather than the `undefined` it read before (#483) - with one exception
+the method decides: a `graphql` body on a **GET** travels as query parameters
+and sends no body at all, so there is nothing for a Content-Type to describe and
+the engine derives none (issue #1228, see
+[the `graphql` envelope](api-reference.md#the-graphql-envelope)).
 
 Four consequences worth knowing:
 
@@ -1420,6 +1440,8 @@ the network's answer, so they arrive as the callback's `err` - an `Error` with
 a `.code` (`CONNECTION_FAILED`, `DNS_ERROR`, `TIMEOUT`, …) and `res` null. The
 script's own mistakes throw out of the call instead: an unusable argument, an
 unsupported body mode, exceeding the request cap, and the capability being off.
+A response over the byte bound below is the network's answer too, not a
+mistake: it arrives as `err` with `.code` `RESPONSE_TOO_LARGE`.
 
 `res` carries `code`, `status` (the reason phrase, as on `pm.response`),
 `responseTime`, `headers` with `get()`/`has()`/`each()`/`all()`/`count()`/
@@ -1427,7 +1449,7 @@ unsupported body mode, exceeding the request cap, and the capability being off.
 [Reading response headers](#reading-response-headers) - `json()` and `text()`.
 It is a subset of `pm.response` and has no `to.*` assertion chain.
 
-**Two bounds, both hard.**
+**Three bounds, all hard.**
 
 - *The script's deadline.* The wall-clock limit is enforced by a QuickJS
   interrupt handler, and QuickJS only calls it **between bytecode operations** -
@@ -1443,6 +1465,31 @@ It is a subset of `pm.response` and has no `to.*` assertion chain.
   throws. A load run's `tests` script runs once per *sampled* response, serially,
   on the run's worker thread, so an uncapped loop would turn post-run validation
   into minutes of apparent hang.
+- *A response byte bound.* The fetch reads at most what the enclosing execution
+  reads, and **refuses** past it - the callback's `err` says
+  `Response is N bytes, over the M byte limit`, and `res` is null. Which
+  setting supplies `M` follows the path: a design-mode send's scripts (Send, a
+  collection-run step) take `maxDesignResponseBodyBytes`, a load run's deferred
+  `tests` script takes `maxResponseBodyBytes`, because a script that runs once
+  per sampled response belongs to the run's memory budget rather than to the one
+  sized for a body a person is about to look at. Refusing rather than handing
+  over a prefix is the deliberate half: `res` has no truncation flag - nor does
+  `pm.response` - so a cut body would reach `JSON.parse` as corrupt input with
+  nothing to say why. Before issue #1188 this fetch was the one read in the
+  engine with no bound at all.
+
+**It leaves the way its execution leaves.** The fetch takes the transport policy
+its enclosing execution resolved - the proxy mode and URL, the bypass list, the
+custom CA bundle and the client-certificate registry - rather than whatever the
+daemon's own environment would pick up. A script that authenticates through
+`pm.sendRequest` and then lets the real request carry the session has to take the
+same route out of the machine, or one of the two is unreachable behind a
+corporate proxy (issue #705). Which policy that is follows the path, as the byte
+bound above does: a design-mode send's scripts take the one resolved for that
+send, and a load run's deferred `tests` script takes the one the run's own
+transfers left by - resolved once when the run starts and kept for it, so a
+Settings edit made while the run was in flight cannot send an assertion by a
+route the responses it is asserting on never took (issue #1256).
 
 **Not available to agents.** Vayu's MCP target allowlist is checked in the MCP
 server, against the composed URL, before it calls the engine - so a script-issued
@@ -2217,8 +2264,9 @@ The **language** is current; what is missing is the **host environment**:
 - **No Node.js APIs**: No `require()`, `fs`, `http`, etc.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at
-  10 requests per script, bounded by the script's own deadline, and refused
-  outright for agent-started runs.
+  10 requests per script, bounded by the script's own deadline and by the
+  response byte bound its path reads, and refused outright for agent-started
+  runs.
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script (default), enforced by a wall-clock deadline - an
   infinite-loop script is aborted and reported as an error rather than hanging the
@@ -2269,6 +2317,20 @@ The **language** is current; what is missing is the **host environment**:
   response displaces a uniformly chosen incumbent, so a target that starts
   failing halfway through is graded on those failures rather than on the healthy
   window before them
+- A second bound applies to the same store: `max_response_sample_bytes`
+  (`maxResponseSampleBytes`, 256 MiB by default) is the whole-run budget for the
+  retained bodies, because each is kept **whole** and a target answering 1 MiB
+  responses would otherwise put ~1 GB in that store. Past it a sample is dropped
+  entire rather than truncated - a script reading a cut body would fail a
+  response the target got right - and the drop is counted the same way, in
+  `sampling.responseSamplesDropped`
+- **A run that spends that budget is graded on the part of it that fit**, not on
+  a uniform sample: the count cap displaces incumbents and stays uniform, while
+  an exhausted byte budget simply stops admitting. Only a target whose retained
+  bodies average more than ~256 KiB reaches it at the defaults; raise
+  `maxResponseSampleBytes`, or lower `max_response_samples` so fewer, later
+  responses share the budget, if that matters for the run you are grading. The
+  report says which one happened: `sampling.responseSampleBudgetSpent`
 - `samplesTested` in the report (`TestsSampled`) is the **size of that sample**,
   not the run's request count, and `sampling.responseSamplesDropped` beside it
   says how many responses the bound thinned away
