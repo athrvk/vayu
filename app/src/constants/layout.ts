@@ -24,6 +24,38 @@ export const DEFAULT_DRAWER_WIDTH = 260;
 export const DEFAULT_CONTEXT_BAR_WIDTH = 252;
 
 /**
+ * Context-bar sections that start collapsed, against the store's standing rule
+ * that a section ships expanded (`contextBarCollapsedSections`, collapsed by
+ * exception).
+ *
+ * That rule exists so a section added in a later release is never invisible to
+ * an existing user, and `code` is the one entry allowed to break it, for the
+ * reason the rule is about in the first place: an expanded Code section issues a
+ * `POST /compose` on mount, so with the bar open the app composed a snippet on
+ * every request tab the user opened, whether or not they ever looked at it. A
+ * section nobody asked for that costs a server round trip is worse off expanded
+ * than a section nobody can see is off collapsed.
+ *
+ * It is a default, not a policy: the ids here seed a fresh install and are
+ * applied once at the v3 -> v4 migration, and a user's own toggle overrides one
+ * from then on.
+ */
+export const CONTEXT_BAR_DEFAULT_COLLAPSED: readonly string[] = ["code"];
+
+/**
+ * Section ids that no longer exist, pruned from a persisted collapse list on
+ * migration.
+ *
+ * An orphaned id is harmless on its own - nothing looks it up once the section
+ * is gone - but it is a persisted name for something that does not exist, and
+ * the list is small enough that keeping it truthful is free. `environment` was
+ * retired in #1310: the title bar's environment selector shows and switches the
+ * active environment one click away on the same screen, so the section repeated
+ * a control visible at the same moment.
+ */
+export const RETIRED_CONTEXT_BAR_SECTIONS: readonly string[] = ["environment"];
+
+/**
  * Horizontal step per tree depth level (px). Applied as padding *inside* a row
  * so the row still spans the full panel width - see CollectionItem.
  */

@@ -138,5 +138,13 @@ Query pane's header, on screen whether the explorer is open or closed. Browsing
 belongs beside the cursor that inserts, which is why the tree lives in the
 editor pane and not here.
 
+The section is hidden outright off a non-GraphQL body (`useGraphQLRelevance`),
+rather than rendering to say the request does not send one - a header every REST
+request used to carry and the reader scanned past on the way to the two sections
+that meant something (#1310). That verdict answers from the same
+`useRequestQuery` data the section itself reads, so a REST tab never even
+requests the section's own lazy ~320KB chunk (#1146): it used to arrive the
+moment the expanded section mounted just to say the request was not GraphQL.
+
 The outline reads the saved request, so it follows the editor as autosave
 catches up rather than keystroke by keystroke.

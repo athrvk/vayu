@@ -9,6 +9,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
+	CONTEXT_BAR_DEFAULT_COLLAPSED,
 	DEFAULT_CONTEXT_BAR_WIDTH,
 	DEFAULT_DRAWER_WIDTH,
 	DEFAULT_GRAPHQL_VARIABLES_SIZE,
@@ -16,6 +17,7 @@ import {
 	GRAPHQL_VARIABLES_MIN_SIZE,
 	PANEL_MIN_WIDTH,
 	PANEL_MAX_WIDTH,
+	RETIRED_CONTEXT_BAR_SECTIONS,
 } from "@/constants/layout";
 
 export type DrawerView =
@@ -45,6 +47,13 @@ interface LayoutState {
 	 * survive exactly until the next launch. Storing the collapsed ones rather
 	 * than the expanded ones also means a section added in a later release
 	 * ships expanded for existing users instead of invisible.
+	 *
+	 * `CONTEXT_BAR_DEFAULT_COLLAPSED` is the one exception to that, and it needs
+	 * both halves below to land: it seeds the initial state for a fresh install,
+	 * and the v4 migration writes it into an existing blob. Neither alone is
+	 * enough - `persist` merges a *missing key* onto the initial state, never a
+	 * missing element into an array that is already there, so a user who has ever
+	 * collapsed anything has an array that would silently outvote the default.
 	 */
 	contextBarCollapsedSections: string[];
 
@@ -116,7 +125,7 @@ export const useLayoutStore = create<LayoutState>()(
 			drawerWidth: DEFAULT_DRAWER_WIDTH,
 			contextBarOpen: false,
 			contextBarWidth: DEFAULT_CONTEXT_BAR_WIDTH,
-			contextBarCollapsedSections: [],
+			contextBarCollapsedSections: [...CONTEXT_BAR_DEFAULT_COLLAPSED],
 			requestSplitRatio: 0.5,
 			graphqlVariablesCollapsed: false,
 			graphqlVariablesSize: DEFAULT_GRAPHQL_VARIABLES_SIZE,
@@ -168,7 +177,7 @@ export const useLayoutStore = create<LayoutState>()(
 		}),
 		{
 			name: STORAGE_KEYS.LAYOUT_STORE,
-			version: 3,
+			version: 4,
 			migrate: (persisted, version) => {
 				const state = persisted as LayoutState & {
 					drawerWidths?: Record<string, number>;
@@ -185,6 +194,23 @@ export const useLayoutStore = create<LayoutState>()(
 						state.drawerWidths?.variables ??
 						DEFAULT_DRAWER_WIDTH;
 					delete state.drawerWidths;
+				}
+				// v3 opened every section on every request tab. `code` composes a
+				// snippet over the network as soon as it mounts, so the bar spent a
+				// round trip per tab on something nobody had asked to see; it now
+				// starts collapsed and composes when it is opened. Written into the
+				// array rather than left to the initial state because `persist`
+				// merges a missing key, not a missing element - see the field's own
+				// comment. `environment` goes at the same time: the section is gone,
+				// and an id for a section that does not exist should not outlive it.
+				if (version < 4) {
+					const collapsed = Array.isArray(state.contextBarCollapsedSections)
+						? state.contextBarCollapsedSections
+						: [];
+					state.contextBarCollapsedSections = [
+						...collapsed.filter((id) => !RETIRED_CONTEXT_BAR_SECTIONS.includes(id)),
+						...CONTEXT_BAR_DEFAULT_COLLAPSED.filter((id) => !collapsed.includes(id)),
+					];
 				}
 				return state;
 			},

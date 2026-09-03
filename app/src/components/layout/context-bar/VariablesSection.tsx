@@ -25,8 +25,6 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useVariableResolver } from "@/hooks/useVariableResolver";
-import { useRequestQuery, useCollectionAncestors } from "@/queries";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -34,50 +32,27 @@ import {
 	VariableScopeBadge,
 } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
-import { resolveEffectiveAuth } from "@/modules/request-builder/utils/auth-resolution";
-import { referencedVariableNames } from "@/lib/request-references";
 import { SectionEmpty, SectionLoading } from "./Section";
 import { VariableRow } from "./VariableRow";
+import { useRequestVariables } from "./relevance";
 import { useVariableCommit } from "./variable-commit";
 import type { ContextBarSectionProps } from "./types";
-import type { ResolvedVariable } from "@/types";
 
 export function VariablesSection({ tab }: ContextBarSectionProps) {
-	const { data: request } = useRequestQuery(tab.entityId);
-	const ancestors = useCollectionAncestors(request?.collectionId ?? null);
-	const { getVariable, getAllVariables } = useVariableResolver({
-		collectionId: request?.collectionId || undefined,
-	});
+	const derived = useRequestVariables(tab);
 	const commitValue = useVariableCommit();
 	const [showAll, setShowAll] = useState(false);
 
-	if (!request) return <SectionLoading />;
+	if (!derived) return <SectionLoading />;
 
-	// The auth the request *sends* - `inherit` walked - so a `{{token}}` in an
-	// inherited credential counts as a reference.
-	const references = referencedVariableNames({
-		url: request.url ?? "",
-		params: request.params ?? [],
-		headers: request.headers ?? [],
-		body: request.body ?? { mode: "none" },
-		preRequestScript: request.preRequestScript ?? "",
-		postRequestScript: request.postRequestScript ?? "",
-		resolvedAuth: resolveEffectiveAuth(request.auth ?? { mode: "none" }, ancestors),
-	});
-
-	const classified = references.map((name) => ({ name, resolved: getVariable(name) }));
-	const resolvedRefs = classified.filter(
-		(r): r is { name: string; resolved: ResolvedVariable } => r.resolved !== null
-	);
-	const undefinedRefs = classified.filter((r) => r.resolved === null).map((r) => r.name);
-
-	// The disclosure is "everything else in scope": the full resolved set minus the
-	// referenced names already shown above it, so a name is never listed twice.
-	const shownAtTop = new Set(resolvedRefs.map((r) => r.name));
-	const rest = Object.entries(getAllVariables()).filter(([name]) => !shownAtTop.has(name));
+	const { references, resolvedRefs, undefinedRefs, rest } = derived;
 
 	// Nothing referenced *and* nothing in scope: there is genuinely nothing to
 	// say, distinct from "this request uses none but others are in scope" below.
+	// The bar reduces this section to a dimmed header before it gets here
+	// (`useVariablesRelevance`), so this is the honest answer for a caller that
+	// mounts the section directly, and the answer during the render in which the
+	// last definition in scope goes away.
 	if (references.length === 0 && rest.length === 0) {
 		return <SectionEmpty>No variables in scope</SectionEmpty>;
 	}
