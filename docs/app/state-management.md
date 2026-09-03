@@ -475,7 +475,11 @@ restart path before it invokes the IPC - and it is deliberately evidence rather
 than a status, so `useHealthQuery` stays the only writer of `engineStatus`.** It
 is closed by the poll an engine answers, and by a restart the main process
 reports as failed, after which the next failed poll owes the user its reason
-again.
+again. A window nobody closes is spent rather than cleared - an engine that
+never arrives leaves its opening time in place, expired - so this is not an "is
+something starting" flag and must not be read as one: only
+`engineStatusAfterFailedPoll` interprets it, and to that an expired timestamp
+and a `null` mean the same thing.
 
 **Non-persisted** (cleared on app restart).
 

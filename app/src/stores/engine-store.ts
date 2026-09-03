@@ -75,6 +75,14 @@ interface EngineState {
 	 * restart the main process reports as failed - after which nothing is coming
 	 * up and a silent port owes the user its reason again.
 	 *
+	 * A window nobody closes is spent rather than cleared: an engine that simply
+	 * never arrives leaves its opening time here, expired. So this is not a "is
+	 * something starting" flag and must not be read as one - only
+	 * `engineStatusAfterFailedPoll` interprets it, and an expired timestamp and a
+	 * `null` mean the same thing to it. Clearing it on expiry would need a writer
+	 * watching a clock nothing else watches, to say what the timestamp already
+	 * says.
+	 *
 	 * Kept here rather than in `useHealthQuery`'s refs, where it lived until
 	 * #1227, because the restart path has to reach it. Deliberately evidence and
 	 * not a status: the poll stays the only thing that classifies.

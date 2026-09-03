@@ -25,6 +25,7 @@
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEngineStore, useToastStore } from "@/stores";
+import { queryKeys } from "@/queries/keys";
 import { TIMING } from "@/config/timing";
 
 export function useEngineRestart(): { restart: () => Promise<void>; isRestarting: boolean } {
@@ -59,6 +60,13 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 		// classifies, so a restart whose engine never comes back still spends the
 		// window and reaches `unreachable` with its reason, on a cold launch's
 		// budget.
+		//
+		// The poll may already have a question out to the engine about to be
+		// killed, and an answer it sent while alive would report a process that no
+		// longer exists. Since a success closes the window, that straggler would
+		// close this one and hand the failures that follow back to the dead-engine
+		// path. Drop it rather than let it speak for the engine replacing it.
+		await queryClient.cancelQueries({ queryKey: queryKeys.health.status() });
 		openEngineStartWindow(Date.now());
 		try {
 			const result = await window.electronAPI.restartEngine();

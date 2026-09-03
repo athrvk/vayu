@@ -38,6 +38,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { Dock } from "./Dock";
 import { useHealthQuery } from "@/queries/health";
+import { queryKeys } from "@/queries/keys";
 import { useEngineStore } from "@/stores";
 
 // The Dock prints the app version, which Vite `define`s at build time.
@@ -115,6 +116,79 @@ describe("the Dock during a restart the user asked for", () => {
 		expect(reasonAffordance()).toBeNull();
 		// The spinner the contradiction stood beside is still up.
 		expect(screen.getByRole("button", { name: /Restarting…/i })).toBeTruthy();
+	});
+
+	it("is not talked out of the window by an answer from the engine it just killed", async () => {
+		// The poll can have a question already out when the click lands, and that
+		// answer describes the process the restart is about to kill. Letting it
+		// close the window opened a moment earlier would put the next failed poll
+		// back on the unreachable path - the exact contradiction this file exists
+		// to prevent, reached the long way round.
+		getHealth.mockResolvedValueOnce({ status: "ok", version: "1.0.0", workers: 8 });
+		restartEngine.mockReturnValue(new Promise(() => {}));
+		useEngineStore.getState().addRestartRequiredKey("dbCacheSize");
+
+		const client = makeClient();
+		renderDock(client);
+		await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+
+		// A poll in flight against an engine that is still alive. Held open by
+		// hand: the interleaving is the whole case, so it cannot be left to a
+		// timer.
+		let answerTheOldEngine!: (value: unknown) => void;
+		getHealth.mockReturnValue(
+			new Promise((resolve) => {
+				answerTheOldEngine = resolve;
+			})
+		);
+		const inFlight = client.refetchQueries({ queryKey: queryKeys.health.status() });
+		// The precondition, asserted rather than assumed: a case whose poll had
+		// already settled before the click would prove nothing and still pass.
+		expect(client.getQueryState(queryKeys.health.status())?.fetchStatus).toBe("fetching");
+
+		fireEvent.click(restartButton());
+		await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
+		expect(useEngineStore.getState().engineStartWindow).not.toBeNull();
+
+		await act(async () => {
+			// A different payload, so structural sharing cannot hide the update.
+			answerTheOldEngine({ status: "ok", version: "1.0.0", workers: 9 });
+			await inFlight;
+		});
+
+		getHealth.mockImplementation(() =>
+			Promise.reject(new Error("connect ECONNREFUSED 127.0.0.1:9876"))
+		);
+		await act(async () => {
+			await client.refetchQueries({ queryKey: queryKeys.health.status() });
+		});
+
+		await waitFor(() => expect(screen.getByText("Starting…")).toBeTruthy());
+		expect(screen.queryByText("Disconnected")).toBeNull();
+	});
+
+	it("does not sit on Starting… over an engine nobody is bringing up", async () => {
+		// A restart the main process reports as failed leaves nothing coming up,
+		// so the strip owes the user its reason again on the next failed poll.
+		getHealth.mockResolvedValueOnce({ status: "ok", version: "1.0.0", workers: 8 });
+		restartEngine.mockResolvedValue({ success: false, error: "engine did not come back" });
+		useEngineStore.getState().addRestartRequiredKey("dbCacheSize");
+
+		const client = makeClient();
+		renderDock(client);
+		await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+
+		getHealth.mockImplementation(() => Promise.reject(new Error("socket hang up")));
+		fireEvent.click(restartButton());
+		await waitFor(() => expect(useEngineStore.getState().engineStartWindow).toBeNull());
+
+		await act(async () => {
+			await client.refetchQueries({ queryKey: queryKeys.health.status() });
+		});
+
+		await waitFor(() => expect(screen.getByText("Disconnected")).toBeTruthy());
+		expect(screen.queryByText("Starting…")).toBeNull();
+		expect(reasonAffordance()).not.toBeNull();
 	});
 
 	it("still says Disconnected, with its reason, when the engine drops on its own", async () => {
