@@ -273,12 +273,16 @@ token that answers them differently is worse than one that answers both
 wrongly. Enter and Space on a focused token are a third way into the same
 popover rather than a fourth reading of the origins (issue #1215): the token is
 a `role="button"` in the field's roving Tab strip, and what opens is the control
-this paragraph describes, unchanged. The Monaco hover provider (issue #1220)
-reads the same origins list again for the body and GraphQL editors - a third
-reading of one answer, not a second one, so a token means the same thing
-whether it sits in a single-line field or in the body beneath it. That provider
-is registered outside the builder, so it takes the bound row from
-`bound-row-store` the way the tab strip does (issue #1074); without it the
+this paragraph describes, unchanged. The body and GraphQL editors answer the
+same way over their own tokens - a third reading of one answer, not a second
+one, so a token means the same thing whether it sits in a single-line field or
+in the body beneath it - but no longer through a Monaco hover provider. Since
+issue #1320, `EditorVariableTokensProvider` draws the app's own tooltip card
+there instead, over the token's rectangle, from the same `getVariableOrigins`.
+That provider is mounted inside the builder rather than registered per
+language outside it, so the bound row reaches it the ordinary way, through
+`useVariableSupport`, with nothing left to read from `bound-row-store`
+directly the way the tab strip still does (issue #1074); without that the
 editor would rank the scopes while the field one line above ranks the row over
 them, which is the disagreement this paragraph exists to forbid.
 

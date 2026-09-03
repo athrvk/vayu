@@ -72,8 +72,12 @@ export function variableTokenRanges(model: ScannableModel, maxLines = 5000): Var
 	return ranges;
 }
 
-/** The tokens in one line, which is how `variableTokenRanges` walks a model. */
-function variableTokensInLine(line: string, lineNumber: number): VariableTokenRange[] {
+/**
+ * The tokens in one line. How `variableTokenRanges` walks a model, and what a
+ * pointer needs: it is over one position, and scanning five thousand lines to
+ * find out which token that is - on every mouse move - is work nobody reads.
+ */
+export function variableTokensInLine(line: string, lineNumber: number): VariableTokenRange[] {
 	if (!line.includes("{{")) return [];
 	const ranges: VariableTokenRange[] = [];
 	for (const match of line.matchAll(VARIABLE_PATTERN)) {

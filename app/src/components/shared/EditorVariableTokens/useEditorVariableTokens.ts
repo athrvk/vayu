@@ -46,6 +46,7 @@ import type { MonacoApi } from "@/lib/monaco-api";
 import { BODY_LANGUAGES } from "@/hooks/useVariableCompletionProvider";
 import {
 	variableTokenRanges,
+	variableTokensInLine,
 	variableTokenClass,
 	type VariableTokenRange,
 } from "@/lib/monaco-variable-tokens";
@@ -206,10 +207,25 @@ export function useEditorVariableTokens({
 		(editor: Monaco.editor.IStandaloneCodeEditor, position: Monaco.IPosition | null) => {
 			const current = installation.current;
 			const context = live.current.tokens;
-			if (!current || !context) return;
+			if (!current || !context || !live.current.enabled) {
+				// Not enabled any more - a body mode that left the token languages,
+				// say. Whatever is on screen is about a token nothing paints.
+				hideHover();
+				return;
+			}
 			const model = editor.getModel();
+			// One line, not the model: this fires per character of pointer travel,
+			// and the token under the pointer is on the line under the pointer.
 			const range =
-				position && model ? tokenAtPosition(variableTokenRanges(model), position) : null;
+				position && model
+					? tokenAtPosition(
+							variableTokensInLine(
+								model.getLineContent(position.lineNumber),
+								position.lineNumber
+							),
+							position
+						)
+					: null;
 			if (!range) {
 				hideHover();
 				return;

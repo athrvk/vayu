@@ -150,7 +150,10 @@ conclusion about a combination the app never renders is not a finding.
   row.** `TooltipContent` is capped at `max-w-xs`, a `break-all` value has a
   min-content width of about one character, and a `shrink-0` hint keeps its
   intrinsic width, so one long source name leaves the value a vertical strip of
-  letter fragments. Write `TooltipValue`, which holds the stacked shape.
+  letter fragments. Write `TooltipValue`, which holds the stacked shape. The
+  variable popover's source line follows the same rule (#1320); the block scan
+  below reads `TooltipContent` blocks only and a popover is not one, so that
+  line is guarded by a rendered-class check in `variable-popover.test.tsx`.
   → `tooltip-value-layout.test.ts` (the same block scan, from
   `tooltip-blocks.testkit.ts`), plus rendered-class guards in `VariableInput/`
 - **Adding an accent scheme:** `constants/color-schemes.ts` + `index.css`, both

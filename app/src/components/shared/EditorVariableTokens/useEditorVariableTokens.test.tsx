@@ -50,9 +50,11 @@ const monacoStub = {
 
 function stubEditor(lines: string[]) {
 	const decorations = { set: vi.fn(), clear: vi.fn() };
-	// One object for the editor's life, as Monaco's own model is.
+	// One object for the editor's life, as Monaco's own model is. `getLineCount`
+	// is a spy because it is the tell of a whole-model scan - see the hover case
+	// that asserts a mouse move does not perform one.
 	const model = {
-		getLineCount: () => lines.length,
+		getLineCount: vi.fn(() => lines.length),
 		getLineContent: (lineNumber: number) => lines[lineNumber - 1] ?? "",
 	};
 	const handlers: {
@@ -102,6 +104,7 @@ function stubEditor(lines: string[]) {
 	return {
 		editor: editor as unknown as Monaco.editor.IStandaloneCodeEditor,
 		model: model as unknown as Monaco.editor.ITextModel,
+		lineCount: model.getLineCount,
 		decorations,
 		handlers,
 		moveCaretTo: (column: number, lineNumber = 1) => {
@@ -198,6 +201,21 @@ describe("useEditorVariableTokens", () => {
 			name: "baseUrl",
 			rect: { left: 10 + 5 * 8, top: 24, height: 18 },
 		});
+	});
+
+	it("reads one line per mouse move, not the whole model", () => {
+		variables.baseUrl = { value: "https://x", scope: "environment" };
+		const stub = stubEditor(["GET {{baseUrl}}"]);
+		mount(stub);
+
+		// The paint at install walks the model; the pointer must not.
+		stub.lineCount.mockClear();
+		hoverAt(stub, 8);
+		expect(setHoveredToken).toHaveBeenCalledTimes(1);
+		// Mutation check: scan with `variableTokenRanges` here and this fails -
+		// which is a full scan of a body that can be thousands of lines, per
+		// character of pointer travel.
+		expect(stub.lineCount).not.toHaveBeenCalled();
 	});
 
 	it("waits the tooltip delay out, so sweeping across a body opens nothing", () => {
