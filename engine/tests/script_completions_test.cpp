@@ -1036,6 +1036,59 @@ TEST (ScriptCompletions, EveryPreRequestSnippetRunsAsAPreRequestScript) {
     << "no pre-request snippets were exercised, so this guard proved nothing";
 }
 
+// The other half of the pair above: a template offered under the Tests editor
+// has to run there. Without it only the Content-Type snippet was ever
+// executed, so a test template could break and CI would still be green while
+// the panel kept offering it.
+TEST (ScriptCompletions, EveryTestSnippetRunsAsATestScript) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    int checked = 0;
+    for (const auto& item : completions) {
+        if (item.value ("kind", 0) != KIND_SNIPPET) {
+            continue;
+        }
+        const std::string context = item.value ("context", std::string{});
+        if (context != "test" && context != "both") {
+            continue;
+        }
+        const std::string label = item.value ("label", std::string{});
+        checked++;
+
+        vayu::Request request;
+        request.method = vayu::HttpMethod::GET;
+        request.url    = "https://api.example.com/users";
+        vayu::Response response;
+        response.status_code = 200;
+        response.headers = { { "content-type", "application/json; charset=utf-8" } };
+        response.body = R"({"property":"x","token":"abc","name":"vayu","id":1})";
+        // The body carries the names the templates' own placeholder defaults
+        // use once stripped ("property"), so a template asserts against a
+        // response shaped like the one its example describes. `field` is
+        // deliberately absent: the value template compares json.field with the
+        // predeclared `value`, and undefined equals undefined.
+        vayu::Environment env;
+
+        // The same predeclaration the pre-request loop makes, for the
+        // placeholder defaults that read as an identifier rather than a
+        // literal once stripped.
+        const std::string script = "var value, key, id, field, token;\n" +
+        strip_snippet_placeholders (item.value ("insertText", std::string{}));
+
+        auto result = engine.execute_test (script, request, response, env);
+        EXPECT_TRUE (result.success)
+        << label << " threw as a test script: " << result.error_message;
+        for (const auto& test : result.tests) {
+            EXPECT_TRUE (test.passed)
+            << label << " fails against an ordinary JSON response: " << test.error_message;
+        }
+    }
+
+    EXPECT_GT (checked, 0)
+    << "no test snippets were exercised, so this guard proved nothing";
+}
+
 // ---------------------------------------------------------------------------
 // The retired app panel's prose (issue #1223): seven of its nine rules were
 // already in this table's documentation before this change; the other two
@@ -1084,6 +1137,11 @@ TEST (ScriptCompletions, TheRulesTheScriptPanelUsedToStateLiveInTheTable) {
     EXPECT_NE (request.find ("rejects the whole edit"), std::string::npos) << request;
     EXPECT_NE (request.find ("Console tab"), std::string::npos) << request;
     EXPECT_NE (request.find ("a write to it does nothing"), std::string::npos) << request;
+
+    // The collection tab's retired grid said "Response (post only)"; the table
+    // said nothing about which hook has a response at all.
+    const std::string response = documentation_of ("pm.response");
+    EXPECT_NE (response.find ("A **test** script only"), std::string::npos) << response;
 }
 
 } // namespace

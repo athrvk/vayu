@@ -55,10 +55,9 @@ export interface ScriptSnippetsProps {
 	 * it owns the insertion; this list only says which template was chosen.
 	 */
 	onInsert: (snippet: string) => void;
-	className?: string;
 }
 
-export function ScriptSnippets({ context, onInsert, className }: ScriptSnippetsProps) {
+export function ScriptSnippets({ context, onInsert }: ScriptSnippetsProps) {
 	const collapsed = useLayoutStore((s) => s.scriptSnippetsCollapsed);
 	const setCollapsed = useLayoutStore((s) => s.setScriptSnippetsCollapsed);
 	const { data, isPending, isError } = useScriptCompletionsQuery();
@@ -67,11 +66,7 @@ export function ScriptSnippets({ context, onInsert, className }: ScriptSnippetsP
 	const total = countSnippets(groups);
 
 	return (
-		<Collapsible
-			open={!collapsed}
-			onOpenChange={(open) => setCollapsed(!open)}
-			className={className}
-		>
+		<Collapsible open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
 			{/*
 			 * The whole header is the control, per the composite-row hit-area rule:
 			 * a narrow activator in a wide bar leaves most of the row painting a
@@ -94,7 +89,16 @@ export function ScriptSnippets({ context, onInsert, className }: ScriptSnippetsP
 
 			<CollapsibleContent className="mt-2">
 				{!collapsed && (
-					<div className="rounded-md border border-rule surface-sunken overflow-hidden">
+					/*
+					 * A card, not a sunken slab, because `Command` declares
+					 * `bg-card surface-card` itself: a `bg-transparent` override
+					 * would replace the background utility and leave the surface
+					 * class standing, so the filter field's own `border-rule`
+					 * would resolve to the card's value inside a sunken box. One
+					 * surface for the box and its contents is the only spelling
+					 * where every rule inside it reads on what it sits on.
+					 */
+					<div className="rounded-md border border-rule surface-card bg-card overflow-hidden">
 						{isError ? (
 							<p className="px-3 py-2 text-xs text-muted-foreground">
 								Snippets come from the engine, which is not answering right now.
@@ -104,7 +108,7 @@ export function ScriptSnippets({ context, onInsert, className }: ScriptSnippetsP
 								Loading snippets…
 							</p>
 						) : (
-							<Command className="bg-transparent">
+							<Command>
 								<CommandInput placeholder="Filter snippets" />
 								<CommandList className="max-h-56">
 									<CommandEmpty>No snippet matches that.</CommandEmpty>

@@ -116,7 +116,9 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.response" }, { "detail", "Response object" },
     { "documentation",
     "Access the HTTP response data including status code, headers, body, "
-    "and timing information." },
+    "and timing information.\n\nA **test** script only: the response does not "
+    "exist yet while a pre-request script runs, so reading through it there "
+    "throws \"No response available\" rather than answering undefined." },
     { "sortText", "0_pm_response" } });
 
     completions.push_back ({ { "label", "pm.response.code" }, { "kind", KIND_FIELD },

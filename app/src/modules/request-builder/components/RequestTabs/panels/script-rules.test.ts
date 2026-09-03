@@ -79,6 +79,9 @@ const MEMBER_RULES: Array<[string, RegExp]> = [
 	["sendRequest is bounded", /at most 10 requests/i],
 	["signing is synchronous and hex by default", /HMAC-SHA256, hex by default/i],
 	["pm.info says which hook is running", /which hook it is running in/i],
+	// The collection tab's retired grid labelled its response block
+	// "Response (post only)"; the table said nothing about which hook has one.
+	["a response exists only in a test script", /A \*\*test\*\* script only/],
 ];
 
 const HOOK_RULES: Array<[string, RegExp]> = [
