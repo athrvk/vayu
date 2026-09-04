@@ -342,6 +342,12 @@ jobs:
               - '*.py'
               - '**/*.py'
               - 'scripts/pre-commit'
+              # Not a script: the data-directory check below takes the one
+              # allowed directory name from this file's `name`, so it is an
+              # input to the job by the same rule the globs above are, and a
+              # rename that invalidates every script naming it has to be able to
+              # reach the check that would catch it.
+              - 'app/package.json'
               - '.github/workflows/pr-tests.yml'
             # The first-party JavaScript outside `app/` (#1166) - the perf
             # harnesses under `scripts/perf/` today. ESLint is configured a
@@ -1288,6 +1294,39 @@ jobs:
           fi
           printf '  %s\n' "${files[@]}"
           shellcheck "${files[@]}"
+
+      # A script that spells the data directory instead of resolving it gets it
+      # wrong, and silently: the deb hooks removed in #1356 cleaned a lock at
+      # `~/.config/vayu/` for as long as they existed, while the app has always
+      # written `~/.config/vayu-client/`. The directory is
+      # `app.getPath("userData")`, which Electron names after `app/package.json`'s
+      # `name`, so that is the one value a script may name - taken from the file
+      # rather than repeated here, or this check becomes the next stale copy.
+      - name: Shell scripts name the app's real data directory
+        shell: bash
+        run: |
+          mapfile -t files < <(git ls-files -- '*.sh' 'scripts/pre-commit' | grep -v '^engine/vendor/')
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::No shell scripts to check - the file list is broken, not the tree"
+            exit 1
+          fi
+          # Read with sed rather than a JSON parser: this job is defined by
+          # having neither a Node nor a C++ toolchain (see its header), and
+          # `name` is a top-level string literal in a prettier-formatted file.
+          expected=$(sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' app/package.json | head -1)
+          if [[ -z "$expected" ]]; then
+            echo "::error::Could not read \`name\` from app/package.json - the check has no truth to compare against"
+            exit 1
+          fi
+          status=0
+          while IFS= read -r hit; do
+            [[ -z "$hit" ]] && continue
+            dir=${hit##*.config/}
+            [[ "$dir" == "$expected" ]] && continue
+            echo "::error::${hit%:*} names ~/.config/${dir}; the app's data directory is ~/.config/${expected}"
+            status=1
+          done < <(grep -HnoE '\.config/[A-Za-z0-9._-]+' "${files[@]}" || true)
+          exit "$status"
 
       # Pinned for the reason shellcheck is, and one more: ruff's default rule
       # set grows between releases, so an unpinned gate can turn a pull request

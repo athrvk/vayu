@@ -79,6 +79,19 @@ describe("useNotificationActivation", () => {
 		expect(tabs[0]).toMatchObject({ type: "run", entityId: "run_7" });
 	});
 
+	it("opens the inbox a capture notification was about", () => {
+		// Mutation check: drop the `inbox` branch and the click falls through to
+		// the `app` case - the window comes back showing whatever was already
+		// there, not the inbox that captured (#1388).
+		const { activate } = mounted();
+
+		activate({ kind: "inbox-captured", target: { view: "inbox", inboxId: "inbox_a" } });
+
+		const tabs = useTabsStore.getState().openTabs;
+		expect(tabs).toHaveLength(1);
+		expect(tabs[0]).toMatchObject({ type: "inbox", entityId: "inbox_a" });
+	});
+
 	it("opens Settings for an update notification", () => {
 		const { activate } = mounted();
 

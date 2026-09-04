@@ -6,7 +6,7 @@
  */
 
 /**
- * A leading-edge-plus-trailing-timer batcher for a live SSE stream.
+ * A trailing-timer batcher for a live SSE stream, leading edge optional.
  *
  * `LoadTestService` and `ScenarioRunService` both read a stream the renderer
  * cannot commit per event, and both answered it the same way: buffer, commit
@@ -21,6 +21,13 @@
  * flush stay with the caller, whose lifecycles genuinely differ: one has a
  * `stopMonitoring` and a second buffer riding this flush, the other drains on
  * error as well as on close.
+ *
+ * The two options exist for the third caller, the inbox's capture notifier
+ * (#1388), whose window is a rate limit rather than a render budget: it waits
+ * out a full window before saying anything, because a burst that posts once for
+ * the first capture and once for the rest is two notifications where the issue
+ * allows one, and it takes its cadence as a number rather than from the
+ * live-refresh setting, which is about how often a chart repaints.
  */
 
 import { useClientSettingsStore } from "@/stores";
@@ -35,11 +42,31 @@ export interface ThrottledBatcher<T> {
 	discard(): void;
 }
 
+export interface ThrottledBatcherOptions {
+	/**
+	 * Commit the first item at once, then coalesce the window behind it.
+	 *
+	 * Default true, which is what a live view wants. False waits out a whole
+	 * window before committing anything, so one burst is one commit.
+	 */
+	leading?: boolean;
+	/**
+	 * The window, in milliseconds. Omitted reads the live-refresh setting per
+	 * push, as the metrics streams do, so a change to it takes effect on the
+	 * next event rather than on the next run.
+	 */
+	intervalMs?: number;
+}
+
 /**
  * @param commit Receives each batch. Never called with an empty array, and
  * never called re-entrantly from `push` for an item it is not carrying.
  */
-export function createThrottledBatcher<T>(commit: (batch: T[]) => void): ThrottledBatcher<T> {
+export function createThrottledBatcher<T>(
+	commit: (batch: T[]) => void,
+	options: ThrottledBatcherOptions = {}
+): ThrottledBatcher<T> {
+	const leading = options.leading ?? true;
 	let pending: T[] = [];
 	let lastCommitTime = 0;
 	let timer: ReturnType<typeof setTimeout> | null = null;
@@ -66,15 +93,23 @@ export function createThrottledBatcher<T>(commit: (batch: T[]) => void): Throttl
 			// Read per push, not once: a live change to the setting takes effect
 			// on the next event rather than on the next run.
 			const throttleMs =
-				useClientSettingsStore.getState().liveRefreshMs || METRICS_UI_THROTTLE_MS;
-			const elapsed = Date.now() - lastCommitTime;
-			if (elapsed >= throttleMs || lastCommitTime === 0) {
+				options.intervalMs ??
+				(useClientSettingsStore.getState().liveRefreshMs || METRICS_UI_THROTTLE_MS);
+			// Nothing has been committed yet, so nothing is owed a window: the
+			// leading edge takes it now, and a trailing-only batcher waits out a
+			// whole one rather than a window measured from the epoch.
+			const elapsed =
+				lastCommitTime === 0 ? Number.POSITIVE_INFINITY : Date.now() - lastCommitTime;
+			if (leading && elapsed >= throttleMs) {
 				flush();
 			} else if (timer === null) {
-				timer = setTimeout(() => {
-					timer = null;
-					flush();
-				}, throttleMs - elapsed);
+				timer = setTimeout(
+					() => {
+						timer = null;
+						flush();
+					},
+					leading ? throttleMs - elapsed : throttleMs
+				);
 			}
 		},
 		flush,

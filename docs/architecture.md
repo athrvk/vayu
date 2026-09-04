@@ -188,6 +188,15 @@ system notifications cannot be exercised by `pnpm electron:dev` on macOS. That
 refusal is caught, latched, and reported in Settings, with the toast standing in
 as the fallback.
 
+One event carries a second opt-in of its own: an inbox capturing a request
+(issue #1388). Every other kind is terminal and rare - a run ends once, an
+update lands once - and a webhook source can deliver hundreds a minute, so a
+capture notifies only when the global opt-in is on **and** that inbox's own
+toggle is, which sits in the inbox's header rather than in Settings and is off
+by default. The captures of one window are coalesced into a single notification
+naming how many arrived, rather than posted one by one, and the window is a
+property of what a notification is for rather than a setting the user tunes.
+
 Because that answer only exists once something has been posted, Settings can ask
 for one: the Preview beside the toggle posts a real notification over
 `notify:test`, the single path that ignores both the focus check and the opt-in -
@@ -433,10 +442,11 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **macOS**: `Vayu.app/Contents/Resources/bin/vayu-engine`
 - **Windows**: `resources/bin/vayu-engine.exe`
 - **Linux**: `resources/bin/vayu-engine`
-- **Data Directory**:
-  - macOS: `~/Library/Application Support/vayu/`
-  - Windows: `%APPDATA%/vayu/`
-  - Linux: `~/.config/vayu/`
+- **Data Directory** (`app.getPath("userData")`, named after `app/package.json`'s
+  `name` rather than the product name):
+  - macOS: `~/Library/Application Support/vayu-client/`
+  - Windows: `%APPDATA%/vayu-client/`
+  - Linux: `~/.config/vayu-client/`
 
 ---
 

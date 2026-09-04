@@ -46,7 +46,10 @@ interface HostResumedEvent {
  * target, the renderer is the only side that knows what it means.
  */
 export type SystemNotificationTarget =
-	{ view: "run"; runId: string } | { view: "settings" } | { view: "app" };
+	| { view: "run"; runId: string }
+	| { view: "inbox"; inboxId: string }
+	| { view: "settings" }
+	| { view: "app" };
 
 export interface SystemNotificationRequest {
 	/** Which event this is. Echoed on a click, for the renderer's own routing. */

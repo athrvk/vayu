@@ -30,6 +30,12 @@ export function useNotificationActivation(): void {
 				useTabsStore.getState().openTab({ type: "run", entityId: target.runId });
 				return;
 			}
+			if (target.view === "inbox") {
+				// The inbox tab is a singleton that retargets, so this opens the
+				// captured-on inbox whether or not a different one is on screen.
+				useTabsStore.getState().openTab({ type: "inbox", entityId: target.inboxId });
+				return;
+			}
 			if (target.view === "settings") {
 				// Through the command, not two lines of its own: the palette, the
 				// Preferences… menu item and this must not drift into opening

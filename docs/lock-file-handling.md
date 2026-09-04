@@ -12,8 +12,14 @@ This document describes how lock files (`vayu.lock`) are handled during installa
 The lock file (`vayu.lock`) prevents multiple instances of the Vayu engine from running simultaneously. It contains the PID of the running engine process and is located at:
 
 - **Windows**: `%APPDATA%\vayu-client\vayu.lock`
-- **macOS**: `~/Library/Application Support/vayu/vayu.lock`
-- **Linux**: `~/.config/vayu/vayu.lock`
+- **macOS**: `~/Library/Application Support/vayu-client/vayu.lock`
+- **Linux**: `~/.config/vayu-client/vayu.lock`
+
+The directory is `app.getPath("userData")`, which Electron derives from the
+`name` in `app/package.json` (`vayu-client`) rather than from the product name,
+so it is `vayu-client` on every platform. `engineDataDirectory()`
+(`app/electron/sidecar.ts`) is the one place that resolves it; anything else
+naming a directory is a copy that can drift.
 
 ## Platform-Specific Handling
 
@@ -29,15 +35,23 @@ The lock file (`vayu.lock`) prevents multiple instances of the Vayu engine from 
 - "Keep my data" removes only the lock file; "Delete everything" removes the whole data directory, and logs a skip rather than deleting anything if that directory is not there
 - Lock file path: `$APPDATA\${APP_DATA_DIR}\vayu.lock`
 
-The directory name is not `productName`. Electron derives `app.getPath("userData")`
-from `app.getName()`, which reads `name` in `app/package.json`, so the script
-defines `APP_DATA_DIR` from that file rather than spelling a path
-(`app/electron/installer-nsh-paths.test.ts` fails if the two drift apart).
+NSIS cannot read `package.json`, so the script defines `APP_DATA_DIR` once and
+uses it everywhere rather than spelling a path.
+`app/electron/installer-nsh-paths.test.ts` fails if that define drifts from the
+`name`, if any path bypasses it, or if a path segment anywhere in the file -
+comments included - is `productName`. It is the Windows counterpart to the
+`Script lint` job's check over the shell scripts, which covers `~/.config/` and
+cannot see a `.nsh` file.
 
 Both macros also flip NSIS back to the user's shell context around those paths.
 An all-users install leaves NSIS in the machine context, where `$APPDATA` is not
 the roaming profile Electron writes userData to - so a correctly named path
 would still miss the real directory in that install mode.
+
+Until #1393 the script named `productName` for both, so "Delete everything"
+ran `RMDir /r` over `$APPDATA\Vayu` and removed nothing the app owns - the same
+wrong-directory defect the Linux hooks had, and worse, because here it was a
+promise about the user's data rather than a no-op.
 
 ### macOS (DMG)
 
@@ -52,13 +66,35 @@ would still miss the real directory in that install mode.
 ### Linux (.deb Package)
 
 **Installation:**
-- Maintainer scripts available in `build/linux-postinst.sh`
-- Lock file cleanup handled automatically in app startup (see below)
-- Note: electron-builder doesn't inject maintainer scripts automatically, but cleanup happens on app startup
+- No maintainer script of Vayu's. The package's `postinst` is the one
+  electron-builder generates; stale locks are reclaimed by app startup (see
+  below)
 
 **Uninstallation:**
-- Maintainer scripts available in `build/linux-prerm.sh` and `build/linux-postrm.sh`
+- `app/installer/linux-prerm.sh`, wired as fpm's `--before-remove` in
+  `app/electron-builder.json`, kills any running `vayu-engine` so dpkg does not
+  replace or remove the binary underneath a live process. It touches no path,
+  which is why running as root does not break it
 - Lock file cleanup handled automatically in app startup
+
+A postinst and a postrm hook used to clean the lock file here. They were
+removed (#1356): both looked for `$HOME/.config/vayu/vayu.lock`, a directory the
+app has never written, and dpkg runs maintainer scripts as root, so even the
+right directory name would have resolved under `/root` rather than the
+installing user's home. The recovery they attempted - read the PID, verify it
+belongs to `vayu-engine`, remove the file if not - is what startup already does,
+against a path it resolves rather than spells, and at every launch rather than
+only at install time.
+
+They also cost more than they looked. `afterInstall` and `afterRemove` are
+passed to fpm as `--after-install` and `--after-remove`, which **replace**
+electron-builder's generated maintainer scripts rather than running alongside
+them, so every `.deb` built while those hooks existed shipped the lock cleanup
+in place of the `/usr/bin/vayu-client` alternative, the `chrome-sandbox` mode
+fix, the mime and desktop database updates and the AppArmor profile Ubuntu 24
+requires. Removing them restores all of it. Anything a future hook needs to do
+belongs in a script that keeps that generated content, not one that supersedes
+it.
 
 **AppImage:**
 - No install/uninstall hooks
@@ -92,9 +128,9 @@ Remove-Item "$env:APPDATA\vayu-client\vayu.lock"
 
 **macOS/Linux:**
 ```bash
-rm ~/.config/vayu/vayu.lock
+rm ~/.config/vayu-client/vayu.lock
 # or on macOS:
-rm ~/Library/Application\ Support/vayu/vayu.lock
+rm ~/Library/Application\ Support/vayu-client/vayu.lock
 ```
 
 ## Implementation Details
@@ -105,10 +141,14 @@ rm ~/Library/Application\ Support/vayu/vayu.lock
 - File: `app/installer/installer.nsh`
 
 ### Linux Maintainer Scripts
-- `linux-postinst.sh`: Post-installation cleanup
-- `linux-prerm.sh`: Pre-removal (kill processes)
-- `linux-postrm.sh`: Post-removal (cleanup lock file)
-- Note: These are reference scripts. electron-builder doesn't inject them automatically, but the app startup handles cleanup.
+- `app/installer/linux-prerm.sh`: pre-removal, kills a running `vayu-engine`
+- It is the only one Vayu writes. The packaged `.deb` still carries a `postinst`
+  and a `postrm`, both generated by electron-builder: the `/usr/bin/vayu-client`
+  alternative, the `chrome-sandbox` mode, the mime and desktop databases and the
+  AppArmor profile Ubuntu 24 needs. `afterInstall` and `afterRemove` **replace**
+  those generated scripts rather than adding to them, which is what made the two
+  removed hooks worse than dead: every `.deb` built while they existed shipped
+  their lock-file cleanup *instead of* that setup.
 
 ### Electron Sidecar
 - Function: `checkLockFile()` - checks lock file and verifies PID
@@ -123,7 +163,7 @@ To test lock file handling:
 1. **Start Vayu** - lock file should be created
 2. **Kill engine process** - lock file should remain
 3. **Restart Vayu** - stale lock should be detected and removed
-4. **Reinstall** - lock file should be cleaned up during install
+4. **Reinstall** - the first launch after it reclaims any lock left behind
 
 ## Troubleshooting
 
@@ -133,4 +173,4 @@ To test lock file handling:
 
 **Issue**: Multiple instances error after uninstall/reinstall
 
-**Solution**: The installer/uninstaller should handle this. If not, manually remove the lock file before reinstalling.
+**Solution**: Startup reclaims a lock whose PID is not a live `vayu-engine`, so launching the reinstalled app is the fix. If the engine still refuses to start, the PID in the lock file belongs to a live engine - stop it, or remove the lock file manually.

@@ -35,10 +35,19 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { VariablePopover } from "./variable-popover";
 import { TooltipProvider } from "./tooltip";
 import type { VariableOrigin } from "@/types";
+
+/** The component's own source, for the guard that a role is not written here. */
+const SOURCE = readFileSync(
+	join(dirname(fileURLToPath(import.meta.url)), "variable-popover.tsx"),
+	"utf8"
+);
 
 /** Radix opens on pointerdown, which jsdom does not synthesise - use the key. */
 function open() {
@@ -332,32 +341,46 @@ describe("the create row's keyboard model", () => {
 		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "collection");
 	});
 
-	it("is one Tab stop, with the selected chip carrying it", () => {
+	it("is one Tab stop, which hands focus to the selected segment", () => {
 		// Three chips, three tab stops in a two-control form, was the other half
-		// of the defect. Roving tabindex is what makes the group one stop.
-		const { chip } = openCreate();
-		expect(chip("Environment")).toHaveAttribute("tabindex", "0");
+		// of the defect. The primitive keeps the group to one stop by holding it
+		// on the group itself and handing focus on to the chosen segment - the
+		// same single stop from the keyboard, with no roving attribute of ours.
+		const { panel, chip } = openCreate();
+		const group = within(panel).getByRole("radiogroup");
+		expect(group).toHaveAttribute("tabindex", "0");
+		expect(chip("Environment")).toHaveAttribute("tabindex", "-1");
 		expect(chip("Collection")).toHaveAttribute("tabindex", "-1");
 		expect(chip("Global")).toHaveAttribute("tabindex", "-1");
+
+		group.focus();
+		expect(document.activeElement).toBe(chip("Environment"));
 	});
 
-	it("moves selection and focus together on the arrow keys, wrapping at the ends", () => {
+	it("moves selection and focus together on the arrow keys, wrapping at the ends", async () => {
 		const { chip } = openCreate();
 		// Preference order is environment, collection, global.
 		const environment = chip("Environment");
 		environment.focus();
 
+		// Radix moves the focus on a task of its own, and selection follows the
+		// focus - drop the segment's `onFocus` and the arrow lights nothing.
 		fireEvent.keyDown(environment, { key: "ArrowRight" });
+		await waitFor(() => expect(document.activeElement).toBe(chip("Collection")));
 		expect(chip("Collection")).toHaveAttribute("aria-checked", "true");
-		expect(document.activeElement).toBe(chip("Collection"));
 
 		fireEvent.keyDown(chip("Collection"), { key: "ArrowLeft" });
-		expect(chip("Environment")).toHaveAttribute("aria-checked", "true");
+		await waitFor(() => expect(chip("Environment")).toHaveAttribute("aria-checked", "true"));
 
 		// Wrapping: left from the first lands on the last.
 		fireEvent.keyDown(chip("Environment"), { key: "ArrowLeft" });
+		await waitFor(() => expect(document.activeElement).toBe(chip("Global")));
 		expect(chip("Global")).toHaveAttribute("aria-checked", "true");
-		expect(document.activeElement).toBe(chip("Global"));
+
+		// Both axes, as the chips had: the group declares no orientation, so the
+		// vertical pair is not the dead key it is on a horizontal-only control.
+		fireEvent.keyDown(chip("Global"), { key: "ArrowDown" });
+		await waitFor(() => expect(chip("Environment")).toHaveAttribute("aria-checked", "true"));
 	});
 
 	it("reads as one choice out of three, not three independent toggles", () => {
@@ -370,26 +393,26 @@ describe("the create row's keyboard model", () => {
 	});
 
 	it("creates from a chip that has focus, since Enter has nothing else to mean", () => {
-		const { onValueChange, field, chip } = openCreate();
+		const { onValueChange, panel, field, chip } = openCreate();
 		fireEvent.click(chip("Global"));
 		fireEvent.change(field, { target: { value: "abc" } });
-		// Tab from the field lands on the selected chip - the only one in the tab
-		// order - so that is the chip Enter can arrive on.
+		// Tab from the field lands on the group, which hands focus to the chip
+		// already selected - so that is the chip Enter can arrive on.
+		within(panel).getByRole("radiogroup").focus();
 		const global = chip("Global");
-		expect(global).toHaveAttribute("tabindex", "0");
-		global.focus();
+		expect(document.activeElement).toBe(global);
 		fireEvent.keyDown(global, { key: "Enter" });
 		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "global");
 	});
 
 	it("creates from the default chip too, with no pick of its own", () => {
 		// The path a user who accepts the preselected scope takes: type, Tab once
-		// to the chip already holding the tab stop, Enter. No click anywhere.
-		const { onValueChange, field, chip } = openCreate();
+		// into the group, Enter on the chip it hands focus to. No click anywhere.
+		const { onValueChange, panel, field, chip } = openCreate();
 		fireEvent.change(field, { target: { value: "abc" } });
+		within(panel).getByRole("radiogroup").focus();
 		const environment = chip("Environment");
-		expect(environment).toHaveAttribute("tabindex", "0");
-		environment.focus();
+		expect(document.activeElement).toBe(environment);
 		fireEvent.keyDown(environment, { key: "Enter" });
 		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "environment");
 	});
@@ -404,6 +427,70 @@ describe("the create row's keyboard model", () => {
 		expect(onValueChange).not.toHaveBeenCalled();
 		fireEvent.keyDown(field, { key: "Enter" });
 		expect(onValueChange).toHaveBeenCalledWith("merchantId", "ab", "environment");
+	});
+});
+
+/**
+ * The create row is composed, not drawn (issue #1391).
+ *
+ * One flex line held the label, three chips and the Create button, and nothing
+ * in it wrapped or shrank: with all three scopes writable - a request in a
+ * collection with an active environment, the common case - the button's right
+ * edge painted 21px outside the `w-72` card, which `PopoverContent` does not
+ * clip. The chips were also a hand-rolled segmented control one file over from
+ * `toggle-group.tsx`, whose header names that exact shape as the defect it
+ * exists to end. Both go away by using the primitives: the choice is a
+ * `ToggleGroup`, and the action sits in the footer row the edit branch above it
+ * already uses.
+ */
+describe("the create row is composed from the app's primitives", () => {
+	function openCreate() {
+		renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: ["global", "collection", "environment"],
+		});
+		return open();
+	}
+
+	it("draws the scope choice with the shared segmented control", () => {
+		// Mutation check: put the three local `<button role="radio">` back and
+		// the `data-slot` the primitive stamps is nowhere in the row.
+		const panel = openCreate();
+		const group = within(panel).getByRole("radiogroup");
+		expect(group).toHaveAttribute("data-slot", "toggle-group");
+
+		const segments = group.querySelectorAll('[data-slot="toggle-group-item"]');
+		expect(segments).toHaveLength(3);
+		// The active segment is an attribute on one class list, not a second
+		// class list - the copy-per-segment the primitive replaced.
+		expect(new Set([...segments].map((s) => s.className)).size).toBe(1);
+		expect([...segments].filter((s) => s.getAttribute("data-state") === "on")).toHaveLength(1);
+	});
+
+	it("puts Create in a footer row of its own, not beside the choice", () => {
+		// Mutation check: move the button back into the choice's row and its
+		// closest flex ancestor becomes the group's.
+		const panel = openCreate();
+		const group = within(panel).getByRole("radiogroup");
+		const create = within(panel).getByRole("button", { name: "Create" });
+
+		const footer = create.parentElement as HTMLElement;
+		expect(footer.className).toContain("justify-end");
+		expect(footer.contains(group)).toBe(false);
+		expect(create.closest(".flex")).not.toBe(group.closest(".flex"));
+	});
+
+	it("leaves the radio roles to the primitive", () => {
+		/*
+		 * The acceptance check from the issue, as a guard: `role="radio"` written
+		 * here at all means the chips came back. Radix stamps the role from
+		 * inside `ToggleGroupItem`, which is why the tests above can still query
+		 * by it.
+		 */
+		expect(SOURCE.length).toBeGreaterThan(0);
+		expect(SOURCE).not.toContain('role="radio"');
+		expect(SOURCE).toContain("<ToggleGroupItem");
 	});
 });
 
