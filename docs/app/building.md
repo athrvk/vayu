@@ -299,7 +299,7 @@ Key settings in `vite.config.ts`:
   not just chunk sizes, before adding a group here
 - **Monaco's entry is composed, not the package root** (`src/lib/monaco-setup.ts`):
   the editor core, the two language services the app drives, and one Monarch
-  grammar per language id it can open - rather than `editor.main`'s ~85
+  grammar per language id it can open - rather than the package root's ~85
   grammars and four language services. The CSS and HTML language services
   reach their workers through `new Worker(new URL(…))` in monaco's own
   `workerManager`, so importing the root shipped `css.worker` (1.0MB) and
@@ -309,7 +309,12 @@ Key settings in `vite.config.ts`:
   grammars, the non-worker halves of the CSS and HTML language services, and
   the LSP client.
   `src/lib/monaco-setup.contributions.test.ts` builds a fixture from that
-  file's own import list and asserts the emitted worker set (#1147)
+  file's own import list and asserts the emitted worker set (#1147). The
+  specifiers themselves are monaco 0.56's supported entry points - `editor`,
+  `features/<feature>/register`, `languages/definitions/<language>/register`,
+  `languages/features/<service>/register` - because 0.56 put the package behind
+  an `exports` map under which the older `esm/vs/...` paths resolve to
+  `esm/vs/esm/vs/...` and fail (#1342)
 - **`vayu:woff2-only`** (`vite-plugins/woff2-only.ts`): strips the legacy
   `.woff` source from the `@fontsource` stylesheets, which Chromium never asks
   for but Vite would otherwise emit alongside every woff2 (90 unreachable
