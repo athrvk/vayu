@@ -21,7 +21,7 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import KeepAwakePrompt from "./KeepAwakePrompt";
 import { useClientSettingsStore, useDashboardStore } from "@/stores";
-import { LONG_RUN_SECONDS } from "@/modules/dashboard/utils/keepAwake";
+import { LONG_RUN_SECONDS, formatRunLength } from "@/modules/dashboard/utils/keepAwake";
 
 const { mockHold } = vi.hoisted(() => ({ mockHold: vi.fn() }));
 vi.mock("@/services/wake-lock", () => ({
@@ -57,7 +57,10 @@ describe("KeepAwakePrompt", () => {
 		streamRun("run_1", LONG_RUN_SECONDS);
 
 		expect(dialog()).not.toBeNull();
-		expect(screen.getByText(/5 minutes/)).toBeTruthy();
+		// From the constant, not a literal: the threshold is a judgement that will
+		// move, and a case that hardcodes today's number fails on the move rather
+		// than on the behaviour it is here to pin.
+		expect(screen.getByText(new RegExp(formatRunLength(LONG_RUN_SECONDS)))).toBeTruthy();
 	});
 
 	it("stays out of the way for a short run", () => {

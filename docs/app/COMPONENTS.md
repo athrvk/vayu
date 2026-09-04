@@ -410,7 +410,7 @@ The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run con
 While a run streams the app can hold a system wake lock, so the OS does not
 suspend the machine under a test the user walked away from (issue #1357). It is
 off by default and turned on either standing (Settings > Load testing) or per
-run: a load run of five minutes or more asks once as it starts, through
+run: a load run of ten minutes or more asks once as it starts, through
 `components/shared/KeepAwakePrompt.tsx`, which is mounted at the app root
 because the question is about whichever run is streaming rather than about the
 surface that started it. The

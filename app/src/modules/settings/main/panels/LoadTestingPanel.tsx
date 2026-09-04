@@ -186,7 +186,7 @@ function KeepAwakeCard() {
 				<ToggleRow
 					anchor={setting.anchor}
 					label={setting.label}
-					description="Asks the system not to suspend until the run ends. The display still dims and locks as usual, and the request is dropped the moment no run is streaming. Read when a run starts, so it applies from the next one. With this off, a run of five minutes or more asks once."
+					description="Asks the system not to suspend until the run ends. The display still dims and locks as usual, and the request is dropped the moment no run is streaming. Read when a run starts, so it applies from the next one. With this off, a run of ten minutes or more asks once."
 					checked={keepAwake}
 					onChange={setKeepAwake}
 				/>
