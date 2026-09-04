@@ -260,9 +260,7 @@ function descend(
 
 	const owner = schema.getType(typeName);
 	const field =
-		isObjectType(owner) || isInterfaceType(owner)
-			? owner.getFields()[next.name.value]
-			: undefined;
+		isObjectType(owner) || isInterfaceType(owner) ? owner.getFields()[next.name.value] : undefined;
 	if (!field || !next.selectionSet) return null;
 	return { typeName: getNamedType(field.type).name, selectionSet: next.selectionSet };
 }

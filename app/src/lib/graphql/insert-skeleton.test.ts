@@ -374,6 +374,11 @@ describe("a cursor inside an inline fragment", () => {
 		);
 
 		expect(result.placement).toBe("ancestor");
+		// The route the document already has is not written again: one `node(`,
+		// the `$id` it declared, and only the new field's own variable beside it.
+		expect(result.variables).toEqual({ term: "" });
+		expect(result.text.match(/node\(/g)).toHaveLength(1);
+		expect(result.text).not.toContain("$id2");
 		expectValid(result.text);
 	});
 
@@ -432,6 +437,25 @@ describe("a cursor inside an inline fragment", () => {
 		// Inside the narrowed braces, beside `id` - not after them, in the `Node`
 		// set, which is where an overlap-only host puts it.
 		expect(result.text).toContain("... on Post {\n      id\n      ...PostFields\n    }");
+		expectValid(result.text);
+	});
+
+	it("finds a host for a fragment the narrowed set only overlaps, rather than refusing", () => {
+		/*
+		 * A fragment on `Node` is legal inside `... on Post` - `doTypesOverlap`
+		 * says so - so there is a host and the click is answered.
+		 *
+		 * Where it lands is `spreadHost`'s existing tie-break, untouched here: an
+		 * exact type match wins over an overlapping one, and the exact `Node` set
+		 * is the one *outside* the fragment, so that is where the spread goes.
+		 * Preferring the nearer set would be a change to that rule rather than to
+		 * the chain this fix repairs (#1350).
+		 */
+		const result = inserted(insertFragment(schema, inFragment, insideFragment, "Node"));
+
+		expect(result.text).toContain("fragment NodeFields on Node");
+		expect(result.text.match(/node\(/g)).toHaveLength(1);
+		expect(result.text).toContain("...NodeFields");
 		expectValid(result.text);
 	});
 });
