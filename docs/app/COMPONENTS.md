@@ -24,6 +24,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 │   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
 ├── <RecoveryBanner />                   // components/shared/RecoveryBanner.tsx - only when the engine restored or deleted the database
 ├── <UpdateBanner />
+├── <KeepAwakePrompt />                  // components/shared/KeepAwakePrompt.tsx - asks once about a run long enough for the machine to sleep under it (#1357)
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
     ├── <CommandPalette />               // modules/palette/ - ⌘K overlay; open-state in layout-store
@@ -406,6 +407,19 @@ Connects to the engine SSE metrics stream (`/runs/:runId/live`, via the load-tes
 
 The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run config to one of `constant_rps` / `constant_concurrency` / `iterations` / `ramp_up`, and the hero row + stat row + charts render the surfaces appropriate to that mode. `MetricsView` is a thin orchestrator over a modular tree:
 
+While a run streams the app can hold a system wake lock, so the OS does not
+suspend the machine under a test the user walked away from (issue #1357). It is
+off by default and turned on either standing (Settings > Load testing) or per
+run: a load run of five minutes or more asks once as it starts, through
+`components/shared/KeepAwakePrompt.tsx`, which is mounted at the app root
+because the question is about whichever run is streaming rather than about the
+surface that started it. The
+lock is a request, not a guarantee - a closed lid overrides it - so a suspend
+that happens anyway is marked on the time-series charts at the point the run
+reached, labelled with how long the machine was gone. The record is the app's
+own (`stores/host-sleep-store.ts`, keyed by run id): the engine was suspended
+too and its report has no field for it.
+
 **Top-level (`components/`)**
 
 | Component | Role |
@@ -527,7 +541,7 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 | Component | Role |
 |---|---|
 | `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `ContractCoverage`, `SampledSchemaValidation` and `TestValidationSummary` (the last carrying the run's named `pm.test` failures) |
-| `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`); silent for a clean run |
+| `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`), plus any stretch the host spent asleep under the run (`stores/host-sleep-store.ts`, issue #1357); silent for a clean run that the machine stayed awake for |
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response |
 | `ScenarioStepsTab.tsx` | Per-step latency and counts for a **scenario load run** - see below |

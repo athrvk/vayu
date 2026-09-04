@@ -39,18 +39,34 @@ vi.mock("@/stores/scenario-run-store", () => ({
 		}),
 	},
 }));
-// The one thing the service reads from the settings store is the cadence.
+// The service reads the cadence from the settings store, and the user's
+// standing answer on keeping the machine awake (#1357). Off is the default.
+const settings = { keepAwakeDuringRuns: false };
 vi.mock("@/stores", () => ({
-	useClientSettingsStore: { getState: () => ({ liveRefreshMs: FLUSH_MS }) },
+	useClientSettingsStore: {
+		getState: () => ({
+			liveRefreshMs: FLUSH_MS,
+			keepAwakeDuringRuns: settings.keepAwakeDuringRuns,
+		}),
+	},
 }));
 vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn() } }));
 vi.mock("./api", () => ({ apiService: { getRunReport: vi.fn() } }));
+const { mockWakeLockHold, mockWakeLockRelease } = vi.hoisted(() => ({
+	mockWakeLockHold: vi.fn(),
+	mockWakeLockRelease: vi.fn(),
+}));
+vi.mock("./wake-lock", () => ({
+	wakeLock: { hold: mockWakeLockHold, release: mockWakeLockRelease },
+	WAKE_LOCK_KEYS: { loadRun: "load-run", collectionRun: "collection-run" },
+}));
 
 import { scenarioRunService } from "./scenario-run-service";
 import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
+import { WAKE_LOCK_KEYS } from "./wake-lock";
 import type { ScenarioStepEvent } from "@/types";
 
 /** The live-refresh cadence these cases run at. */
@@ -257,5 +273,58 @@ describe("ScenarioRunService", () => {
 		// awaits it, and the stream's own teardown is not the report's business.
 		await expect(closeStream()).resolves.toBeUndefined();
 		expect(mockSetStreaming).toHaveBeenCalledWith(false);
+	});
+
+	describe("wake lock (issue #1357)", () => {
+		afterEach(() => {
+			settings.keepAwakeDuringRuns = false;
+		});
+
+		it("holds nothing on start while the preference is off", () => {
+			// A collection run is never prompted about either - it declares no
+			// duration, so nothing can tell a two-second sequence from a long one.
+			// The standing preference is its only route to a lock.
+			scenarioRunService.startMonitoring("run_10a");
+			expect(mockWakeLockHold).not.toHaveBeenCalled();
+		});
+
+		it("holds the collection-run key on start once the preference is on", () => {
+			settings.keepAwakeDuringRuns = true;
+			scenarioRunService.startMonitoring("run_10");
+			// Pins the `wakeLock.hold(...)` call in `startMonitoring` and the
+			// condition around it.
+			expect(mockWakeLockHold).toHaveBeenCalledWith(
+				WAKE_LOCK_KEYS.collectionRun,
+				expect.any(String)
+			);
+		});
+
+		it("releases the collection-run key when the stream closes, before the awaited fetches resolve", async () => {
+			scenarioRunService.startMonitoring("run_11");
+			mockWakeLockRelease.mockClear();
+
+			let releaseCalledBeforeFetch = false;
+			vi.mocked(apiService.getRunReport).mockImplementationOnce(() => {
+				// Reverting the release's position in `handleClose` (moving it after
+				// the `await Promise.all(...)`) leaves this false.
+				releaseCalledBeforeFetch = mockWakeLockRelease.mock.calls.length > 0;
+				return Promise.resolve(
+					storedReport as unknown as Awaited<ReturnType<typeof apiService.getRunReport>>
+				);
+			});
+
+			await closeStream();
+
+			expect(releaseCalledBeforeFetch).toBe(true);
+			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.collectionRun);
+		});
+
+		it("releases the collection-run key on a stream error", () => {
+			scenarioRunService.startMonitoring("run_12");
+			mockWakeLockRelease.mockClear();
+			failStream("engine gone");
+			// Pins the `wakeLock.release(...)` call in `handleError`.
+			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.collectionRun);
+		});
 	});
 });

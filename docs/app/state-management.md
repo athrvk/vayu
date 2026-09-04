@@ -732,6 +732,7 @@ Central home for renderer-only preferences that aren't part of the pre-paint app
   liveRefreshMs: number          // how often live metrics commit into the store
   autoSave: AutoSavePrefs        // { enabled, delayMs }
   reducedMotion: boolean         // mirrored onto <html data-reduced-motion>
+  keepAwakeDuringRuns: boolean   // standing answer on the run wake lock; default off
   notifications: NotificationPrefs  // position, durationScale, maxVisible, minSeverity
   loadTestCeilings: LoadTestCeilings
 }
@@ -745,6 +746,14 @@ import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by
 `data-reduced-motion`), so their setters and `onRehydrateStorage` both apply
 them - a preference that only lands on the next reload reads as a broken
 setting.
+
+`keepAwakeDuringRuns` is the user's standing answer to whether a run may ask the
+OS to stay awake (issue #1357). It is **read when a run starts** rather than
+watched, by `LoadTestService` and `ScenarioRunService`, so the answer that
+governs a run is the one that was true when it began - flipping the row mid-run
+does not reach a stream already going. Off is the shipped default: with it off a
+load run of five minutes or more asks once (`KeepAwakePrompt`), and that grant
+takes the same wake-lock key the service releases, so it ends with the run.
 
 `loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
 
@@ -826,6 +835,40 @@ the report and the aggregates, and a reset on top of it nulls `currentRunId` -
 the dashboard then shows no active test while one streams.
 
 **Non-persisted** (fresh per session).
+
+#### `host-sleep-store.ts` - When The Machine Slept Under A Run
+
+The intervals the host spent asleep while a run was streaming (issue #1357),
+keyed by run id. The app holds a system wake lock for the length of a run, but
+that lock is a request to the OS: a closed lid or a critical battery overrides
+it, and the run's series is then missing a stretch that nothing in it explains.
+
+The record lives here rather than in the run report because the engine was
+suspended too and knows nothing about it. `useHostSleepRecorder` writes it -
+the main process's `power:suspended` carries the anchor (where the run had got
+to, read off `dashboard-store` on the way down, since the renderer is frozen in
+between) and `power:resumed` carries the duration.
+
+**State:**
+
+```typescript
+{
+  byRun: Record<string, HostSleep[]>  // { at, durationMs, startSeconds }, oldest first
+  runOrder: string[]                  // first-annotated order, for eviction
+}
+```
+
+Two readers, both by run id through the `useHostSleeps(runId)` selector rather
+than one prop drilled to both: `MetricsView` and `PerformanceTab` mark the
+sleeps on the charts, `OverviewTab` states them in `RunEvents`. The selector
+returns one frozen empty array for a run with no sleeps, so a dashboard
+rendering at 10 Hz is not re-rendered by a stable absence.
+
+**Persisted**, bounded to the newest `MAX_RUNS` (20) runs and
+`MAX_SLEEPS_PER_RUN` (20) intervals each: the gap outlives the session that
+produced it, and a user who finds the hole tomorrow needs the same answer, but
+localStorage is a fixed budget shared with the workspace. `migrate` and `merge`
+both normalize, as `recovery-notice-store` does and for the same reason.
 
 #### `scenario-run-store.ts` - Live Collection-Run Steps
 

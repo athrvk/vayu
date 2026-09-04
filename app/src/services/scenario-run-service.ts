@@ -30,7 +30,9 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { useScenarioRunStore } from "@/stores/scenario-run-store";
+import { useClientSettingsStore } from "@/stores";
 import { createThrottledBatcher } from "./throttled-batcher";
+import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import type { ScenarioStepEvent } from "@/types";
 
 class ScenarioRunService {
@@ -42,6 +44,16 @@ class ScenarioRunService {
 	/** Attach to a scenario run's stream and push its steps into the store. */
 	startMonitoring(runId: string): void {
 		if (this.activeRunId === runId) return;
+
+		// Only on the user's standing say-so (#1357), the same read
+		// `LoadTestService` makes. A collection run is never asked about: it
+		// declares no duration, so nothing here can tell a two-second sequence
+		// from a two-hour one, and a prompt on every run would be noise.
+		// Fire-and-forget: the stream below connects the same tick regardless of
+		// whether the main process has answered yet.
+		if (useClientSettingsStore.getState().keepAwakeDuringRuns) {
+			wakeLock.hold(WAKE_LOCK_KEYS.collectionRun, "Collection run streaming");
+		}
 
 		// Whatever the previous run left buffered belongs to a list the store is
 		// about to clear, so it is dropped rather than flushed into this run's.
@@ -92,6 +104,7 @@ class ScenarioRunService {
 
 	private handleError(error: Error): void {
 		console.error("[ScenarioRunService] SSE error:", error);
+		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
 		// Before the error, so the steps that did arrive are on screen under the
 		// notice explaining why no more will be. A buffered batch stranded here
 		// would be the run's last steps, silently missing from a list the reader
@@ -115,6 +128,9 @@ class ScenarioRunService {
 		this.stepBatcher.flush();
 		this.discardPending();
 		useScenarioRunStore.getState().setStreaming(false);
+		// Before the awaited fetches below: the run is over the moment the
+		// stream closed, and the machine must not stay pinned awake through them.
+		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
 		if (!runId) return;
 
 		// Through the cache, not a bare fetch: the run tab reads these exact

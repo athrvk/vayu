@@ -23,10 +23,11 @@ import {
 	type RampOverlay,
 } from "../../../utils/metricsTransforms";
 import type { Breakpoint } from "../../../utils/computeBreakpoint";
-import type { Anomaly, AnomalyKind } from "../../../utils/detectAnomalies";
+import type { Anomaly } from "../../../utils/detectAnomalies";
+import type { HostSleep } from "@/stores/host-sleep-store";
+import { runAnnotations } from "./annotations";
 import { joinMonitorToTimeline } from "../../../utils/monitorSeries";
-import type { ColorRole } from "./uplotTheme";
-import { UPlotChart, type UPlotSeriesSpec, type Marker, type Annotation } from "./UPlotChart";
+import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import {
 	bucketColumns,
 	rebucket,
@@ -60,6 +61,13 @@ interface BaseProps {
 	 * so every chart in a synced stack shades the same windows.
 	 */
 	anomalies?: Anomaly[] | null;
+	/**
+	 * Intervals the host spent asleep under the run (#1357), marked on the same
+	 * layer as the anomaly windows. Not derived from the series - the series is
+	 * exactly what a suspend interrupts - so they arrive from the app's own
+	 * record of the run rather than from a detector.
+	 */
+	sleeps?: readonly HostSleep[] | null;
 }
 
 /** Vertical breakpoint marker (p99 crossed SLO), shared by the time-series charts. */
@@ -75,29 +83,6 @@ function breakpointMarker(breakpoint?: Breakpoint | null): Marker[] {
 	];
 }
 
-/**
- * Anomaly colour by what went wrong - errors read as errors, slowness as a
- * warning. The breakpoint marker is `warning` too and they can coincide, which
- * is correct: both are saying the run degraded there, one against the SLO and
- * one against the run's own baseline.
- */
-const ANOMALY_ROLE: Record<AnomalyKind, ColorRole> = {
-	latency_spike: "warning",
-	error_burst: "destructive",
-	throughput_drop: "warning",
-	first_5xx: "destructive",
-};
-
-/** Anomaly windows as chart-layer bands, shared by the time-series charts. */
-function anomalyAnnotations(anomalies?: Anomaly[] | null): Annotation[] {
-	return (anomalies ?? []).map((a) => ({
-		startSeconds: a.startSeconds,
-		endSeconds: a.endSeconds,
-		label: a.label,
-		role: ANOMALY_ROLE[a.kind],
-	}));
-}
-
 /** Response-time percentiles over time - the canonical "latency vs time" chart. */
 export function LatencyPercentilesChart({
 	history,
@@ -106,9 +91,10 @@ export function LatencyPercentilesChart({
 	height,
 	breakpoint,
 	anomalies,
+	sleeps,
 }: BaseProps) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
-	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
+	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const { data, series } = useMemo(() => {
 		const d = buildPercentileChartData(history);
 		const { times, cols } = rebucket(
@@ -148,9 +134,10 @@ export function LatencyBreakdownChart({
 	syncKey,
 	height,
 	anomalies,
+	sleeps,
 }: BaseProps) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
-	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
+	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const { data, series } = useMemo(() => {
 		const d = buildLatencyChartData(history);
 		const { times, cols } = rebucket(
@@ -203,9 +190,10 @@ export function RequestRateChart({
 	rampOverlay,
 	breakpoint,
 	anomalies,
+	sleeps,
 }: BaseProps & { targetRps?: number; rampOverlay?: RampOverlay | null }) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
-	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
+	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const { data, series, hasRamp } = useMemo(() => {
 		const { times, cols } = bucketColumns(
 			history,
@@ -286,9 +274,10 @@ export function ConnectionsChart({
 	height,
 	breakpoint,
 	anomalies,
+	sleeps,
 }: BaseProps) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
-	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
+	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const data = useMemo<uPlot.AlignedData>(() => {
 		const { times, cols } = bucketColumns(history, [pickConcurrency], bucketSeconds);
 		return [times, cols[0]];
@@ -320,9 +309,10 @@ export function ErrorRateChart({
 	height,
 	breakpoint,
 	anomalies,
+	sleeps,
 }: BaseProps) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
-	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
+	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const data = useMemo<uPlot.AlignedData>(() => {
 		const { times, cols } = bucketColumns(history, [pickErrorRate], bucketSeconds);
 		return [times, cols[0]];
@@ -380,10 +370,11 @@ export function ServerVitalsChart({
 	syncKey,
 	height,
 	anomalies,
+	sleeps,
 }: BaseProps & { samples: MonitorSample[] }) {
 	// The most useful place a degradation window can be shaded: this row is where
 	// "the p99 spike at t=41" gets answered with what the server was doing then.
-	const annotations = useMemo(() => anomalyAnnotations(anomalies), [anomalies]);
+	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const { data, series } = useMemo(() => {
 		const joined = joinMonitorToTimeline(history, samples);
 		const aligned: uPlot.AlignedData = [

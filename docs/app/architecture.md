@@ -325,6 +325,7 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 - **Context Menu**: `setContextTarget()` announces what the pointer landed on over the `context-menu:target` channel, sent synchronously (the app's only `sendSync`) so it pairs with the native menu event that follows; `onContextMenuCommand()` delivers the `context-menu:command` events for the two offers only the renderer can run - importing a pasted curl/wget command and opening a variable's popover (issue #1359)
 - **Platform & Paths**: `platform` constant and `getAppPaths()` for OS and directory detection
 - **Graceful Shutdown**: `onBeforeQuit()` to allow the renderer to flush state (saves, pending requests) before app termination
+- **Wake Lock**: `holdWakeLock(reason)` / `releaseWakeLock(token)` keep the machine from suspending under a streaming run (issue #1357). Ref-counted in `electron/power-save.ts`; the renderer side is `services/wake-lock.ts`, one keyed holder both run services call. `onHostSuspended()` / `onHostResumed()` report a sleep the lock could not prevent, which `useHostSleepRecorder` records against the run
 
 ## Security Considerations
 

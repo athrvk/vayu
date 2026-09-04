@@ -382,7 +382,12 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				<ScrollArea className="flex-1">
 					<div className="p-6">
 						<TabsContent value="overview" className="mt-0 space-y-4">
-							<OverviewTab report={report} derived={derived} anomalies={anomalies} />
+							<OverviewTab
+								report={report}
+								runId={runId}
+								derived={derived}
+								anomalies={anomalies}
+							/>
 						</TabsContent>
 
 						<TabsContent value="performance" className="mt-0 space-y-4">

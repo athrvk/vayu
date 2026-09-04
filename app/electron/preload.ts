@@ -263,6 +263,29 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// force, "" for a direct configuration, or null when it could not be asked.
 	refreshSystemProxy: (): Promise<string | null> => ipcRenderer.invoke("proxy:refreshSystem"),
 
+	// System wake lock, held while a run streams (#1357). Token-based: the main
+	// process ref-counts the holds and only the token taken here releases one, so
+	// two overlapping runs cannot drop each other's lock. Main also drops a
+	// renderer's holds when it goes away or reloads, which is the case a token
+	// cannot cover.
+	holdWakeLock: (reason: string): Promise<string> => ipcRenderer.invoke("power:hold", reason),
+	releaseWakeLock: (token: string): Promise<boolean> =>
+		ipcRenderer.invoke("power:release", token),
+	// The host slept anyway - lid closed, battery critical, a user who forced it.
+	// The lock is a request to the OS, not a guarantee, so the run's series can
+	// still have a gap; these two say where it is. Sent only while a run holds.
+	onHostSuspended: (callback: (event: { at: number }) => void) => {
+		const handler = (_event: unknown, payload: { at: number }) => callback(payload);
+		ipcRenderer.on("power:suspended", handler);
+		return () => ipcRenderer.removeListener("power:suspended", handler);
+	},
+	onHostResumed: (callback: (event: { at: number; durationMs: number }) => void) => {
+		const handler = (_event: unknown, payload: { at: number; durationMs: number }) =>
+			callback(payload);
+		ipcRenderer.on("power:resumed", handler);
+		return () => ipcRenderer.removeListener("power:resumed", handler);
+	},
+
 	// Before quit flush handler. ACKs main once the callback settles so quit
 	// can resume immediately instead of waiting out the fallback timeout.
 	onBeforeQuit: (callback: () => void | Promise<void>) => {

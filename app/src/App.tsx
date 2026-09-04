@@ -11,6 +11,7 @@ import TitleBar from "./components/layout/TitleBar";
 import UpdateBanner from "./components/shared/UpdateBanner";
 import RecoveryBanner from "./components/shared/RecoveryBanner";
 import Toaster from "./components/shared/Toaster";
+import KeepAwakePrompt from "./components/shared/KeepAwakePrompt";
 import {
 	useConfigQuery,
 	useHealthQuery,
@@ -27,6 +28,7 @@ import { useScriptVariableCompletionProvider } from "./hooks/useScriptVariableCo
 import { useScriptTypeDefinitions } from "./hooks/useScriptTypeDefinitions";
 import { useMenuActions } from "./hooks/useMenuActions";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
+import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
 import { useSaveStore } from "./stores/save-store";
 
 function App() {
@@ -86,6 +88,12 @@ function App() {
 	// no query can see. This is the channel that tells the cache to refetch.
 	useMcpDataInvalidation();
 
+	// The app asks the OS not to sleep under a run, but a closed lid overrides
+	// that. Mounted here rather than on the dashboard: the suspend arrives with
+	// no warning and the dashboard may not be the open tab, while the run it
+	// interrupts streams from a service that outlives every view (#1357).
+	useHostSleepRecorder();
+
 	// Register Electron before-quit handler to flush pending saves
 	useEffect(() => {
 		if (!window.electronAPI?.onBeforeQuit) return;
@@ -105,6 +113,9 @@ function App() {
 				<Shell />
 			</div>
 			<Toaster />
+			{/* Asks, once, about a run long enough for the machine to sleep under
+			    it - and only while the standing preference is off (#1357). */}
+			<KeepAwakePrompt />
 		</div>
 	);
 }

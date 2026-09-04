@@ -21,7 +21,7 @@
  * `resolveLoadTestLimits`.
  */
 
-import { Gauge, RotateCcw } from "lucide-react";
+import { Coffee, Gauge, RotateCcw } from "lucide-react";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { useClientSettingsStore } from "@/stores";
 import {
@@ -30,7 +30,7 @@ import {
 	type LoadTestCeilingKey,
 } from "@/constants/load-test";
 import { appSetting, type AppSettingDescriptor } from "../app-settings";
-import { NumberSettingRow } from "./SettingControls";
+import { NumberSettingRow, ToggleRow } from "./SettingControls";
 
 interface CeilingField {
 	key: LoadTestCeilingKey;
@@ -84,62 +84,112 @@ export default function LoadTestingPanel() {
 	const isDefault = FIELDS.every((f) => ceilings[f.key] === DEFAULT_LOAD_TEST_CEILINGS[f.key]);
 
 	return (
+		<>
+			<KeepAwakeCard />
+
+			<Card>
+				<CardHeader className="pb-3">
+					<div className="flex items-start justify-between gap-4">
+						<div>
+							<div className="flex items-center gap-2">
+								<Gauge className="w-5 h-5 text-muted-foreground" />
+								<CardTitle className="text-base">Load test ceilings</CardTitle>
+							</div>
+							<CardDescription className="mt-1">
+								The largest value each field in the Run a load test dialog will
+								offer. Raising one does not change any run you have already
+								configured - it only widens what you can ask for. The engine
+								enforces its own limits regardless, and no value here can exceed
+								them.
+							</CardDescription>
+						</div>
+						{!isDefault && (
+							<Button
+								variant="ghost"
+								size="sm"
+								className="shrink-0 text-xs h-7 px-2"
+								onClick={() => setCeilings(DEFAULT_LOAD_TEST_CEILINGS)}
+							>
+								<RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+								{/* "all", because each row now carries its own Reset
+							    beside its Default line. */}
+								Reset all
+							</Button>
+						)}
+					</div>
+				</CardHeader>
+				<CardContent className="space-y-5">
+					{FIELDS.map((field) => {
+						const bounds = LOAD_TEST_CEILING_BOUNDS[field.key];
+						return (
+							<NumberSettingRow
+								key={field.key}
+								anchor={field.setting.anchor}
+								label={field.setting.label}
+								description={field.description}
+								value={String(ceilings[field.key])}
+								// Applies live: the next load dialog reads the store, so
+								// there is nothing to save and nothing to wait for.
+								commit="change"
+								onCommit={(next) =>
+									setCeilings({ [field.key]: parseInt(next, 10) })
+								}
+								unit={field.unit}
+								min={String(bounds.MIN)}
+								max={String(bounds.MAX)}
+								rangeHint={`${bounds.MIN.toLocaleString()} - ${bounds.MAX.toLocaleString()}`}
+								defaultValue={String(DEFAULT_LOAD_TEST_CEILINGS[field.key])}
+								defaultDisplay={DEFAULT_LOAD_TEST_CEILINGS[
+									field.key
+								].toLocaleString()}
+								onResetToDefault={() =>
+									setCeilings({
+										[field.key]: DEFAULT_LOAD_TEST_CEILINGS[field.key],
+									})
+								}
+							/>
+						);
+					})}
+				</CardContent>
+			</Card>
+		</>
+	);
+}
+
+/**
+ * Whether a run may ask the operating system to stay awake (issue #1357).
+ *
+ * Off by default, and deliberately not a knob the app sets on the user's
+ * behalf: a machine that refuses to sleep is the user's battery and the user's
+ * decision. With it off, a run long enough to be walked away from asks once,
+ * when it starts - see `KeepAwakePrompt`. This row is the standing answer for
+ * people who would rather not be asked at all.
+ */
+function KeepAwakeCard() {
+	const keepAwake = useClientSettingsStore((s) => s.keepAwakeDuringRuns);
+	const setKeepAwake = useClientSettingsStore((s) => s.setKeepAwakeDuringRuns);
+	const setting = appSetting("load-keep-awake");
+
+	return (
 		<Card>
 			<CardHeader className="pb-3">
-				<div className="flex items-start justify-between gap-4">
-					<div>
-						<div className="flex items-center gap-2">
-							<Gauge className="w-5 h-5 text-muted-foreground" />
-							<CardTitle className="text-base">Load test ceilings</CardTitle>
-						</div>
-						<CardDescription className="mt-1">
-							The largest value each field in the Run a load test dialog will offer.
-							Raising one does not change any run you have already configured - it
-							only widens what you can ask for. The engine enforces its own limits
-							regardless, and no value here can exceed them.
-						</CardDescription>
-					</div>
-					{!isDefault && (
-						<Button
-							variant="ghost"
-							size="sm"
-							className="shrink-0 text-xs h-7 px-2"
-							onClick={() => setCeilings(DEFAULT_LOAD_TEST_CEILINGS)}
-						>
-							<RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-							{/* "all", because each row now carries its own Reset
-							    beside its Default line. */}
-							Reset all
-						</Button>
-					)}
+				<div className="flex items-center gap-2">
+					<Coffee className="w-5 h-5 text-muted-foreground" />
+					<CardTitle className="text-base">While a run is streaming</CardTitle>
 				</div>
+				<CardDescription className="mt-1">
+					A load test the machine sleeps through stops with it, and its report comes back
+					with a flat stretch that reads as the server's fault.
+				</CardDescription>
 			</CardHeader>
-			<CardContent className="space-y-5">
-				{FIELDS.map((field) => {
-					const bounds = LOAD_TEST_CEILING_BOUNDS[field.key];
-					return (
-						<NumberSettingRow
-							key={field.key}
-							anchor={field.setting.anchor}
-							label={field.setting.label}
-							description={field.description}
-							value={String(ceilings[field.key])}
-							// Applies live: the next load dialog reads the store, so
-							// there is nothing to save and nothing to wait for.
-							commit="change"
-							onCommit={(next) => setCeilings({ [field.key]: parseInt(next, 10) })}
-							unit={field.unit}
-							min={String(bounds.MIN)}
-							max={String(bounds.MAX)}
-							rangeHint={`${bounds.MIN.toLocaleString()} - ${bounds.MAX.toLocaleString()}`}
-							defaultValue={String(DEFAULT_LOAD_TEST_CEILINGS[field.key])}
-							defaultDisplay={DEFAULT_LOAD_TEST_CEILINGS[field.key].toLocaleString()}
-							onResetToDefault={() =>
-								setCeilings({ [field.key]: DEFAULT_LOAD_TEST_CEILINGS[field.key] })
-							}
-						/>
-					);
-				})}
+			<CardContent>
+				<ToggleRow
+					anchor={setting.anchor}
+					label={setting.label}
+					description="Asks the system not to suspend until the run ends. The display still dims and locks as usual, and the request is dropped the moment no run is streaming. Read when a run starts, so it applies from the next one. With this off, a run of five minutes or more asks once."
+					checked={keepAwake}
+					onChange={setKeepAwake}
+				/>
 			</CardContent>
 		</Card>
 	);

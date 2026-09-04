@@ -18,7 +18,8 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { QUERY_CACHE } from "@/config/cache";
-import { useDashboardStore } from "@/stores";
+import { useDashboardStore, useClientSettingsStore } from "@/stores";
+import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
 // The batcher throttles UI commits to keep render cost bounded, but every tick
@@ -52,6 +53,16 @@ class LoadTestService {
 		// If monitoring a different run, stop it first
 		if (this.activeRunId && this.activeRunId !== runId) {
 			this.stopMonitoring();
+		}
+
+		// Only on the user's standing say-so (#1357). With the setting off, a run
+		// long enough to be walked away from is asked about instead, and that ask
+		// takes the lock itself - see `KeepAwakePrompt`. Read here rather than
+		// watched, so the answer for a run is the one that was true when it
+		// started. Fire-and-forget either way: the stream below connects the same
+		// tick regardless of whether the main process has answered yet.
+		if (useClientSettingsStore.getState().keepAwakeDuringRuns) {
+			wakeLock.hold(WAKE_LOCK_KEYS.loadRun, "Load test run streaming");
 		}
 
 		this.activeRunId = runId;
@@ -89,6 +100,7 @@ class LoadTestService {
 			return;
 		}
 
+		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		this.metricsBatcher.discard();
 		this.pendingMonitor = [];
 		this.activeRunId = null;
@@ -151,6 +163,7 @@ class LoadTestService {
 
 	private handleError(error: Error): void {
 		console.error("[LoadTestService] SSE error:", error);
+		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		const store = useDashboardStore.getState();
 		store.setError(error.message);
 	}
@@ -159,6 +172,10 @@ class LoadTestService {
 		const runId = this.activeRunId;
 		this.flushPending();
 		this.isConnected = false;
+		// Before the awaited report fetch below: the run is over the moment the
+		// stream closed, and the machine must not stay pinned awake through a
+		// slow fetch.
+		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		const store = useDashboardStore.getState();
 		store.setStreaming(false);
 

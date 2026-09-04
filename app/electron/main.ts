@@ -14,6 +14,7 @@ import {
 	nativeTheme,
 	Menu,
 	powerMonitor,
+	powerSaveBlocker,
 	session,
 	shell,
 } from "electron";
@@ -32,6 +33,7 @@ import { setupOAuthIpcHandlers } from "./oauth.js";
 import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
+import { createWakeLock, registerPowerIpc } from "./power-save.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
 import {
@@ -765,6 +767,19 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 function setupIpcHandlers() {
 	// OAuth 2.0 interactive flow (system browser / embedded window)
 	setupOAuthIpcHandlers();
+
+	// The wake lock a streaming run holds, so the OS does not suspend the machine
+	// under a test the user walked away from (#1357). Built here rather than at
+	// module scope because `powerMonitor` is only usable once the app is ready,
+	// and nothing outside these two channels holds it.
+	registerPowerIpc(
+		ipcMain,
+		createWakeLock({
+			blocker: powerSaveBlocker,
+			monitor: powerMonitor,
+			send: (channel, payload) => liveWindow()?.webContents.send(channel, payload),
+		})
+	);
 
 	// Open one of the app's own documentation links in the system browser.
 	// Keyed rather than URL-taking on purpose: the renderer cannot ask for an

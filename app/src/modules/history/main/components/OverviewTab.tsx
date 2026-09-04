@@ -26,10 +26,15 @@ import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
 import { extractTestFailures } from "../test-validation";
+import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { TabProps } from "../../types";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
 
-export default function OverviewTab({ report, derived, anomalies }: TabProps) {
+export default function OverviewTab({ report, runId, derived, anomalies }: TabProps) {
+	// Read by run id rather than passed down: `PerformanceTab` reads the same
+	// list for the chart marks, and one prop drilled through `LoadTestDetail`
+	// for two independent readers is a copy waiting to disagree (#1357).
+	const hostSleeps = useHostSleeps(runId);
 	// The named failures live on a synthetic result row, not on `testValidation`;
 	// lifted here so the Overview says which assertions failed while the Samples
 	// tab drops the row rather than drawing it as a request that never ran.
@@ -84,7 +89,7 @@ export default function OverviewTab({ report, derived, anomalies }: TabProps) {
 			    because those are cumulative and this is the thing they hide: a
 			    3-second collapse and a steady 0.4% failure rate can produce the
 			    same summary row. */}
-			<RunEvents anomalies={anomalies} />
+			<RunEvents anomalies={anomalies} sleeps={hostSleeps} />
 
 			{/* Status Codes */}
 			{report.statusCodes && Object.keys(report.statusCodes).length > 0 && (

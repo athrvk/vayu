@@ -148,6 +148,30 @@ Manager                              Engine
    │◄───────────────────────────────────┤
 ```
 
+For the length of that stream - a load run or a collection run - the Manager can
+hold a system wake lock (`electron/power-save.ts`, `prevent-app-suspension`), so
+an OS sleep timer cannot suspend the machine under a test the user walked away
+from and leave the report with a gap it cannot explain. The lock is ref-counted
+and token-based: the renderer's run services take one each over `power:hold` and
+hand it back on every terminal path, the main process drops a renderer's holds
+when it goes away or reloads, and the blocker stops with the last holder. The
+screen may still dim and lock; only suspension is refused.
+
+**It is off by default, because the machine's power settings are the user's.**
+Two things turn it on. The standing preference (Settings > Load testing > Keep
+the machine awake during runs, `keepAwakeDuringRuns` in `client-settings-store`)
+is read when a run starts, and with it on every run holds. With it off, a load
+run that declares five minutes or more asks once when it starts
+(`KeepAwakePrompt`), and an answer of "keep awake" takes the lock for that run
+only. A collection run is never asked about: it declares no duration, so nothing
+in the app can tell a two-second sequence from a two-hour one.
+
+The lock is a request to the OS, not a guarantee. When the host suspends anyway
+(a closed lid, a critical battery), main reports the interval to the renderer as
+`power:suspended` / `power:resumed`, and the app records it against the run and
+marks it on the charts and in the run's Events tab. The engine cannot carry that
+record: it was suspended too.
+
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 
 ## Sidecar Pattern

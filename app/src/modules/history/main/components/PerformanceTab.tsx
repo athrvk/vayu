@@ -25,6 +25,7 @@ import { PhasePercentiles } from "@/modules/dashboard/components/charts/PhasePer
 import LatencyMetric from "./LatencyMetric";
 import MonitorSummary from "./MonitorSummary";
 import HistoricalChartsSection from "./HistoricalChartsSection";
+import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { PerformanceTabProps } from "../../types";
 
 export default function PerformanceTab({
@@ -38,6 +39,10 @@ export default function PerformanceTab({
 	isFetchingMore,
 	progress,
 }: PerformanceTabProps) {
+	// The run's own record of the host sleeping under it (#1357), read here by
+	// run id rather than drilled from `LoadTestDetail`: Overview states them and
+	// this tab marks them, and neither derives anything the other must match.
+	const hostSleeps = useHostSleeps(runId);
 	// Windowed per-tick percentiles now persist for completed runs (W1), so the
 	// history percentile chart / scatter can render the same views as the live
 	// dashboard. Mirror MetricsView's split: ramp_up → response-time-vs-concurrency
@@ -70,6 +75,7 @@ export default function PerformanceTab({
 					progress={progress}
 					breakpoint={derived.breakpoint}
 					anomalies={anomalies}
+					sleeps={hostSleeps}
 				/>
 			)}
 
@@ -107,6 +113,7 @@ export default function PerformanceTab({
 								syncKey={CHART_SYNC.history}
 								breakpoint={derived.breakpoint}
 								anomalies={anomalies}
+								sleeps={hostSleeps}
 							/>
 						</CardContent>
 					</Card>
