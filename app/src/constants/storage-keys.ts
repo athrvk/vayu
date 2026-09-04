@@ -58,4 +58,11 @@ export const STORAGE_KEYS = {
 	 * because the engine was suspended too.
 	 */
 	HOST_SLEEP_STORE: "vayu.host-sleeps",
+	/**
+	 * Zustand persist name for which inboxes may notify on a capture (issue
+	 * #1388). Keyed by inbox id; the engine's inbox record is in-memory state
+	 * with no field for a client-side preference, and an id it no longer lists
+	 * is pruned on the next list read.
+	 */
+	INBOX_NOTIFY_STORE: "vayu.inbox-notify",
 } as const;

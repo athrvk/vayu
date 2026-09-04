@@ -192,6 +192,46 @@ describe("createThrottledBatcher", () => {
 		expect(commit).not.toHaveBeenCalled();
 	});
 
+	it("waits out a whole window before the first commit when the leading edge is off", () => {
+		// The inbox's capture notifier (#1388): one burst is one notification,
+		// so nothing may be committed on the way in. Mutation check: default
+		// `leading` back to true and the first push commits at once.
+		const commit = vi.fn();
+		const batcher = createThrottledBatcher<number>(commit, { leading: false });
+
+		batcher.push(1);
+		vi.advanceTimersByTime(FLUSH_MS - 1);
+		expect(commit).not.toHaveBeenCalled();
+
+		batcher.push(2);
+		vi.advanceTimersByTime(1);
+		expect(commit).toHaveBeenCalledTimes(1);
+		expect(commit).toHaveBeenLastCalledWith([1, 2]);
+
+		// And the window after it opens on the next item, not on the clock.
+		batcher.push(3);
+		vi.advanceTimersByTime(FLUSH_MS);
+		expect(commit).toHaveBeenCalledTimes(2);
+		expect(commit).toHaveBeenLastCalledWith([3]);
+	});
+
+	it("takes an explicit cadence instead of the live-refresh setting", () => {
+		// A notification's rate limit is not a chart's repaint budget, and a
+		// user who wants faster charts has not asked to be interrupted more.
+		const commit = vi.fn();
+		liveRefreshMs = 50;
+		const batcher = createThrottledBatcher<number>(commit, { intervalMs: FLUSH_MS * 4 });
+
+		batcher.push(1); // leading edge
+		commit.mockClear();
+		batcher.push(2);
+
+		vi.advanceTimersByTime(FLUSH_MS * 4 - 1);
+		expect(commit).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(1);
+		expect(commit).toHaveBeenCalledTimes(1);
+	});
+
 	it("hands each commit its own array, not a buffer it keeps writing into", () => {
 		const batches: number[][] = [];
 		const batcher = createThrottledBatcher<number>((batch) => batches.push(batch));

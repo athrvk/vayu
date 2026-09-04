@@ -311,7 +311,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		kind: string;
 		title: string;
 		body: string;
-		target: { view: "run"; runId: string } | { view: "settings" } | { view: "app" };
+		target:
+			| { view: "run"; runId: string }
+			| { view: "inbox"; inboxId: string }
+			| { view: "settings" }
+			| { view: "app" };
 	}): Promise<string> => ipcRenderer.invoke("notify:show", request),
 	notificationAvailability: (): Promise<{ available: boolean; reason: string | null }> =>
 		ipcRenderer.invoke("notify:availability"),
@@ -326,14 +330,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	onNotificationActivated: (
 		callback: (event: {
 			kind: string;
-			target: { view: "run"; runId: string } | { view: "settings" } | { view: "app" };
+			target:
+				| { view: "run"; runId: string }
+				| { view: "inbox"; inboxId: string }
+				| { view: "settings" }
+				| { view: "app" };
 		}) => void
 	) => {
 		const handler = (
 			_event: unknown,
 			payload: {
 				kind: string;
-				target: { view: "run"; runId: string } | { view: "settings" } | { view: "app" };
+				target:
+					| { view: "run"; runId: string }
+					| { view: "inbox"; inboxId: string }
+					| { view: "settings" }
+					| { view: "app" };
 			}
 		) => callback(payload);
 		ipcRenderer.on("notify:activated", handler);

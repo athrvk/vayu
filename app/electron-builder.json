@@ -92,8 +92,6 @@
 		"license": "build/license.txt"
 	},
 	"deb": {
-		"afterInstall": "installer/linux-postinst.sh",
-		"afterRemove": "installer/linux-postrm.sh",
 		"fpm": ["--before-remove=installer/linux-prerm.sh"]
 	},
 	"win": {

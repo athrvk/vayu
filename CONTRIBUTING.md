@@ -18,7 +18,7 @@ We are committed to providing a friendly, safe, and welcoming environment. Pleas
    - Steps to reproduce
    - Expected vs actual behavior
    - Screenshots/logs if applicable
-   - Engine logs (if relevant): `engine/data/logs/` or `~/.config/vayu/logs/`
+   - Engine logs (if relevant): `engine/data/logs/` or `~/.config/vayu-client/logs/`
 
 ### Suggesting Features
 

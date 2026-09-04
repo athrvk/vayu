@@ -32,3 +32,4 @@ export { useClientSettingsStore, SETTINGS_STORAGE_KEYS } from "./client-settings
 export { useAppearanceStore } from "./appearance-store";
 export { useToastStore, type Toast, type ToastVariant } from "./toast-store";
 export { useRecoveryNoticeStore } from "./recovery-notice-store";
+export { useInboxNotifyStore, inboxNotifiesOnCapture } from "./inbox-notify-store";

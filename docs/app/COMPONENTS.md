@@ -640,7 +640,8 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
 `docs/engine/api-reference.md` (Webhook Inbox).
 
 - `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop/clear/delete, the URL with a copy
-  control, the running/live badge, the inbox switcher, the capture list and the detail pane. Clear
+  control, the running/live badge, the `Notify` toggle (`NotifyOnCaptureToggle`, whose two gates
+  are `capture-notifier.ts` below), the inbox switcher, the capture list and the detail pane. Clear
   (Eraser) empties the capture list; Delete (bin) ends the inbox itself, so the two adjacent
   destructive controls do not share an icon. The switcher is a
   `Select` in the header, shown only when more than one inbox exists (with one, it could pick only
@@ -669,6 +670,19 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   passed - a canned reply is echoed verbatim, so there is nothing to resolve. They were local
   `Input` pairs until #564 made the primitive mountable outside `RequestBuilderProvider`; the
   table's trailing blank row replaced the panel's own "Add header" button.
+- `capture-notifier.ts` - the OS notification a capture raises while Vayu is in the background
+  (issue #1388), and the two gates it passes first: the global opt-in, read by `services/notify.ts`
+  for every kind, and this inbox's own `Notify` toggle in the header, read here and off by default.
+  Both, because a webhook source sets the rate and a busy inbox must not be made loud by the setting
+  the user turned on for run results. One window of captures is one notification naming how many
+  arrived, through `createThrottledBatcher` with its leading edge off - a leading edge would post
+  once for the first capture and once for the rest, which is two notifications for one burst. The
+  window is trailing for that reason and not a setting: it is a property of what a notification is
+  for, not of how fast this user's source is. A click opens the inbox tab the capture landed on
+  (`target: { view: "inbox", inboxId }`), which is why the tab retargets rather than opening a
+  second one. The toggle is stored per inbox in `inbox-notify-store`, not on the engine's record:
+  the engine's inbox is in-memory state that does not outlive its process and does not act on the
+  flag.
 - `CaptureDetail.tsx` - one capture, rendered through `UnifiedResponseViewer` and `buildRawRequest`.
   A capture is an exchange with no response, which that viewer already handles; a request you
   received should read like one you sent.
@@ -1872,14 +1886,29 @@ instead of telling the reader to go and define it. The red itself stays - the
 token genuinely does not resolve. `data.*` is the one state with no list, for
 the same disjointness reason it has no create offer.
 
-**The create offer's scope chips are a radio group, and picking one keeps you in
-the value field** (issue #1380). They are one Tab stop on a roving `tabIndex`,
-arrows move the selection and the focus together wrapping at the ends, and Enter
-on the focused chip creates - a chip that has focus beside a value already typed
-leaves Enter nothing else to mean. A mouse click hands focus back to the field,
-because picking a scope qualifies the value rather than replacing it as the
-destination; as plain buttons the chips kept the focus a click gave them, and
-the next keystroke went nowhere. Create is refused while the field is empty:
+**The create offer's scope choice is a `ToggleGroup`, and picking one keeps you
+in the value field** (issues #1380, #1391). It was three hand-rolled
+`role="radio"` buttons with a roving `tabIndex` and an arrow handler of their
+own, sharing one flex line with the "create in" label and an `ml-auto` Create
+button - 298px of content in a 266px row, so with all three scopes writable the
+button painted 21px outside the card, which `PopoverContent` does not clip. Both
+halves are primitives now: the choice is the app's segmented control, so Radix
+owns the `radiogroup` and `radio` roles, the single tab stop and the arrow keys,
+and Create sits in the same `flex justify-end gap-2` footer the edit branch uses
+one state over, which is what takes the widest line back inside the card. The
+"create in" label stacks above the control rather than sitting beside it, the
+way `LoadTestConfigDialog` labels its own: beside it, the segments have 266px
+less the label to live in, and the two widest UI faces the appearance settings
+offer - System and JetBrains Mono - spend more than that on "Environment
+Collection Global". Above it, the widest of the four measures 230px.
+Selection follows focus, as a radio group's does - Radix moves the tab stop and
+leaves selecting to a press, so each segment picks itself `onFocus` and an arrow
+cannot light one segment while Enter creates in another. Enter on the focused
+segment creates: a segment that has focus beside a value already typed leaves
+Enter nothing else to mean. A mouse click hands focus back to the field, because
+picking a scope qualifies the value rather than replacing it as the destination;
+as plain buttons the chips kept the focus a click gave them, and the next
+keystroke went nowhere. Create is refused while the field is empty:
 `mergeVariable` stores what it is handed, so an empty value defines the name as
 `""`, which resolves - the token stops reading as undefined and answers with
 nothing.
