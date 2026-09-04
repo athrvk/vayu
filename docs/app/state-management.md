@@ -752,7 +752,7 @@ OS to stay awake (issue #1357). It is **read when a run starts** rather than
 watched, by `LoadTestService` and `ScenarioRunService`, so the answer that
 governs a run is the one that was true when it began - flipping the row mid-run
 does not reach a stream already going. Off is the shipped default: with it off a
-load run of five minutes or more asks once (`KeepAwakePrompt`), and that grant
+load run of ten minutes or more asks once (`KeepAwakePrompt`), and that grant
 takes the same wake-lock key the service releases, so it ends with the run.
 
 `loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.

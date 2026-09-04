@@ -21,13 +21,23 @@ import type { LoadTestRunConfig } from "@/stores/dashboard-store";
 /**
  * A run at least this long is worth an ask.
  *
- * Five minutes because that is under the shortest sleep timer a laptop ships
- * with (macOS idles the display at 2 minutes on battery and suspends a few
- * minutes later; Windows' balanced plan sleeps at 15). A run that cannot
- * outlast any of them is not worth interrupting the user over, and a run that
- * can is exactly the one that comes back with a hole in it.
+ * Ten minutes, and the number is a judgement rather than a measurement: the
+ * app cannot read the machine's sleep timer. No Electron API reports it, the
+ * value differs per power source, and even the true number would not answer
+ * the question - the timer counts from the user's last input, not from the
+ * run's start, so the same run suspends or does not depending on when its
+ * owner walked away.
+ *
+ * So this is a proxy for "a run the user is likely to leave", placed among the
+ * timers it wants to sit under: Windows' balanced plan sleeps at 15 minutes on
+ * battery, GNOME at 20, and a MacBook on battery goes within a few minutes of
+ * idle. Ten covers the first two and gives up on the third, which nothing short
+ * of asking about almost every run could catch.
+ *
+ * The costs either side are not symmetric - a needless ask costs one click, a
+ * missing one costs the run - so when this moves, it should move down.
  */
-export const LONG_RUN_SECONDS = 300;
+export const LONG_RUN_SECONDS = 600;
 
 /** Parse the `"600s"` form the run config carries; plain digits too. */
 function seconds(value: string | undefined): number | null {

@@ -161,7 +161,7 @@ screen may still dim and lock; only suspension is refused.
 Two things turn it on. The standing preference (Settings > Load testing > Keep
 the machine awake during runs, `keepAwakeDuringRuns` in `client-settings-store`)
 is read when a run starts, and with it on every run holds. With it off, a load
-run that declares five minutes or more asks once when it starts
+run that declares ten minutes or more asks once when it starts
 (`KeepAwakePrompt`), and an answer of "keep awake" takes the lock for that run
 only. A collection run is never asked about: it declares no duration, so nothing
 in the app can tell a two-second sequence from a two-hour one.

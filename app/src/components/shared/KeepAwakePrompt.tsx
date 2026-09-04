@@ -13,7 +13,7 @@
  * the case the lock exists for - a long run the user starts and walks away from
  * - is also the case where nobody thinks to visit a settings screen first. So
  * the app asks when the situation arises, and only then: a run that declares
- * five minutes or more, with the standing preference off.
+ * ten minutes or more, with the standing preference off.
  *
  * Mounted once, at the app root, rather than at any of the three places a load
  * run can start: the question is about the run that is streaming, and the
