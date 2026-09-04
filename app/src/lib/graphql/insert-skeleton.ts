@@ -896,25 +896,30 @@ function appendOperation(
  *
  * The predicate is `doTypesOverlap`, the one `PossibleFragmentSpreadsRule`
  * validates with, so this cannot write a spread the server then rejects - the
- * failure a hand-rolled subtype walk would eventually produce. An exact match
- * still wins over an overlapping one: it is the set the user is in, not merely
- * one the spread is legal in.
+ * failure a hand-rolled subtype walk would eventually produce.
+ *
+ * **Depth decides, not the kind of match.** The innermost set that can hold the
+ * spread wins, whether its type is the fragment's exactly or merely overlaps it.
+ * Preferring an exact match instead was the same rule while the two candidates
+ * could not both be on the chain; since #1346 the chain descends through inline
+ * fragments, so a cursor inside `... on Post` sits in an overlapping set with the
+ * exactly-matching `Node` set outside it, and exactness would have written the
+ * spread a set out from where the user is looking (#1350). Where both point the
+ * same way - a `User` set beside a `node` selection - the exact set is also the
+ * deeper one, so nothing about that case changes.
  */
 function spreadHost(
 	schema: GraphQLSchema,
 	type: GraphQLCompositeType,
 	chain: EnclosingSet[]
 ): EnclosingSet | null {
-	let overlapping: EnclosingSet | null = null;
 	for (let depth = chain.length - 1; depth >= 0; depth--) {
 		const host = chain[depth];
-		if (host.typeName === type.name) return host;
 		const hostType = schema.getType(host.typeName);
-		if (!overlapping && isCompositeType(hostType) && doTypesOverlap(schema, type, hostType)) {
-			overlapping = host;
-		}
+		if (!isCompositeType(hostType)) continue;
+		if (host.typeName === type.name || doTypesOverlap(schema, type, hostType)) return host;
 	}
-	return overlapping;
+	return null;
 }
 
 export function insertFragment(
