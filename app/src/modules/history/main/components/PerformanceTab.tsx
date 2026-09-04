@@ -185,13 +185,13 @@ export default function PerformanceTab({
 						<div className="grid grid-cols-3 gap-6">
 							<div className="text-center p-4 bg-muted/50">
 								<p className="text-xs text-muted-foreground mb-2">Target RPS</p>
-								<p className="text-2xl font-bold text-foreground">
+								<p className="text-metric font-bold text-foreground">
 									{formatNumber(report.rateControl.targetRps)}
 								</p>
 							</div>
 							<div className="text-center p-4 bg-muted/50">
 								<p className="text-xs text-muted-foreground mb-2">Actual RPS</p>
-								<p className="text-2xl font-bold text-foreground">
+								<p className="text-metric font-bold text-foreground">
 									{formatNumber(report.rateControl.actualRps)}
 								</p>
 							</div>
@@ -205,7 +205,7 @@ export default function PerformanceTab({
 								    one expression speak two vocabularies. */}
 								<p
 									className={cn(
-										"text-2xl font-bold",
+										"text-metric font-bold",
 										report.rateControl.achievement >= 95 &&
 											report.rateControl.achievement <= 105
 											? "text-success-text"

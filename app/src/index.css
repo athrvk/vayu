@@ -112,6 +112,22 @@
 	 */
 	--text-md: 0.9375rem; /* 15px */
 	--text-md--line-height: calc(1.25 / 0.9375); /* 20px */
+
+	/*
+	 * The two metric steps, named for the same reason `--text-md` was (#1409).
+	 * 34px and 22px are what the dashboard's hero and stat cards were designed
+	 * at, and they were written as `text-[34px]` / `text-[22px]` - the two
+	 * arbitrary values the scale still sanctioned above the badge steps, each
+	 * carrying no line-height of its own. Named, they state intent at the call
+	 * site and the pair arrives with them; the pixels are unchanged.
+	 *
+	 * Line-height 1, because a metric value is one line whose box should be its
+	 * own height: every site wrote `leading-none` beside the size already.
+	 */
+	--text-hero: 2.125rem; /* 34px */
+	--text-hero--line-height: 1;
+	--text-metric: 1.375rem; /* 22px */
+	--text-metric--line-height: 1;
 }
 
 /*

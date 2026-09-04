@@ -995,8 +995,9 @@ composes with page zoom.
 | Use | Size | Weight | Class |
 |-----|------|--------|-------|
 | Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
-| Hero metric value | 34px | bold, tabular | `text-[34px] font-bold leading-none font-mono tabular-nums` |
-| Secondary metric value | 22px | bold | `text-[22px] font-bold font-mono` |
+| Hero metric value | 34px | bold, tabular | `text-hero font-bold leading-none font-mono tabular-nums` |
+| Secondary metric value | 22px | bold | `text-metric font-bold font-mono` |
+| View title | 20px | semibold | `text-xl font-semibold` |
 | Tile metric value | 18px | bold | `text-lg font-bold` |
 | Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
@@ -1005,9 +1006,12 @@ composes with page zoom.
 | Micro / badge (UI face) | 10–11px | semibold | `text-[10px] font-semibold` |
 | URL / path | 12–13px | mono | `text-xs font-mono` |
 
-**Only `text-[10px]`, `text-[11px]`, `text-[22px]` and `text-[34px]` may be
-written as arbitrary values.** Everything else has a named step, and
-`type-scale.test.ts` fails on anything outside that set.
+**Only `text-[10px]` and `text-[11px]` may be written as arbitrary values.**
+Everything else has a named step, and `type-scale.test.ts` fails on anything
+outside that set. The two metric sizes were on that list until they became
+`--text-hero` (34px) and `--text-metric` (22px) in `index.css` - the same move
+`--text-md` made, and for the same reason: a named step arrives with its
+line-height, an arbitrary one does not.
 
 **The micro/badge step is semibold because 600 is the heaviest face the code
 font ships.** `fonts.css` loads JetBrains Mono - the default `--font-mono` - at
@@ -1080,11 +1084,25 @@ Postman and VS Code cap around 14px. `Input` is `text-sm` for the same reason:
 stock shadcn ships `text-base md:text-sm`, the web workaround for iOS zooming a
 focused field under 16px, and a narrow desktop window is not a phone.
 
-So **`text-base` (16px) is written nowhere in `src`**, and `text-lg` (18px)
-belongs to the tile metric value row - five bold numeric readouts, no headings.
-`type-scale.test.ts` holds both, and holds `input.tsx` to carrying no responsive
-size variant; the readout files are named in its allowlist, which fails if one
-of them stops using the step.
+So **`text-base` (16px) is written nowhere in `src`**, and every step above the
+15px title is held by file rather than by rule, because "a number in a tile" is
+not something a scan can recognise:
+
+- **`text-lg` (18px)** is the tile metric value - bold numbers in muted tiles,
+  five files, no headings.
+- **`text-xl` (20px)** is the view title, one per view, and only the two
+  settings views write it. A settings view stacks its title, the description
+  under it, and cards whose `CardTitle` is 15px; flattening the title into that
+  last step would lose the level, and reusing `text-lg` would give one step two
+  meanings (#1409).
+- **`text-metric` (22px) and `text-hero` (34px)** are the dashboard's metric
+  values. Nothing in `src` writes `text-2xl` or above: 24px was five strays
+  reaching past the step their siblings were designed at.
+
+`type-scale.test.ts` holds all of it, and holds `input.tsx` to carrying no
+responsive size variant. Each allowlisted file is asserted to still use its
+step, so a file that stops rendering one drops off the list instead of quietly
+licensing a heading there later.
 
 **The type register is a measurement, not a preference.** Perceived size follows
 x-height, not nominal size, and the six bundled faces differ by 13% at the same

@@ -39,7 +39,7 @@ export function SaturationCard({
 	return (
 		<HeroCardShell label="Saturation" tip={TOOLTIPS.saturation}>
 			<div className="flex items-baseline gap-1 mt-1">
-				<span className={`text-[22px] font-bold leading-none ${colorClass}`}>
+				<span className={`text-metric font-bold leading-none ${colorClass}`}>
 					{degrading ? "⚠ degrading" : "✓ healthy"}
 				</span>
 			</div>
