@@ -3,6 +3,14 @@ set -euo pipefail
 
 REPO="athrvk/vayu"
 APP_NAME="Vayu"
+# The bundle identifier the app ships under - `appId` in
+# app/electron-builder.json, and the CFBundleIdentifier macOS keys a bundle's
+# preferences, caches and saved state by. `install_test.sh` compares the two so
+# a rename cannot leave this behind.
+APP_BUNDLE_ID="io.github.athrvk.vayu"
+# What builds before the rename ran as. Kept only so `--uninstall --purge`
+# still finds the state those builds wrote; nothing installs under it.
+LEGACY_APP_BUNDLE_ID="com.vayu.client"
 
 # ---------------------------------------------------------------------------
 # Platform
@@ -1052,16 +1060,24 @@ do_uninstall() {
 
 uninstall_macos() {
 	local support prefs logs caches savedstate paths
+	local legacy_prefs legacy_caches legacy_savedstate
 	# Every copy, not just the default one: leaving the other behind is how
 	# "I uninstalled it" turns into an app that still launches. Falls back to
 	# the default path so a nothing-installed run still says what it looked for.
 	paths="$(existing_app_paths)"
 	[ -n "$paths" ] || paths="$APP_PATH"
 	support="$HOME/Library/Application Support/vayu-client"
-	prefs="$HOME/Library/Preferences/com.vayu.client.plist"
+	prefs="$HOME/Library/Preferences/$APP_BUNDLE_ID.plist"
 	logs="$HOME/Library/Logs/vayu-client"
-	caches="$HOME/Library/Caches/com.vayu.client"
-	savedstate="$HOME/Library/Saved Application State/com.vayu.client.savedState"
+	caches="$HOME/Library/Caches/$APP_BUNDLE_ID"
+	savedstate="$HOME/Library/Saved Application State/$APP_BUNDLE_ID.savedState"
+	# What a build from before the bundle id changed wrote. macOS keys these
+	# directories by the identifier the app ran under, so an install that
+	# predates the rename left its state under the old one and a purge that
+	# only knew the new id would leave it behind for good.
+	legacy_prefs="$HOME/Library/Preferences/$LEGACY_APP_BUNDLE_ID.plist"
+	legacy_caches="$HOME/Library/Caches/$LEGACY_APP_BUNDLE_ID"
+	legacy_savedstate="$HOME/Library/Saved Application State/$LEGACY_APP_BUNDLE_ID.savedState"
 
 	log 'Removing Vayu (you may be prompted for your password)...'
 	printf '%s\n' "$paths" | while IFS= read -r path; do
@@ -1076,6 +1092,9 @@ uninstall_macos() {
 		run rm -rf "$logs"
 		run rm -rf "$caches"
 		run rm -rf "$savedstate"
+		run rm -f "$legacy_prefs"
+		run rm -rf "$legacy_caches"
+		run rm -rf "$legacy_savedstate"
 		log 'Vayu and its data have been removed.'
 	else
 		log 'Vayu removed. User data was kept at:'

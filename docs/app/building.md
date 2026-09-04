@@ -176,9 +176,33 @@ Configuration is in `electron-builder.json`:
 - **Linux**: AppImage and Debian package
 
 **Key Settings:**
-- App ID: `com.vayu.client`
+- App ID: `io.github.athrvk.vayu`
 - Product Name: `Vayu`
 - Engine binary: Packaged in `resources/bin/` (copied to `bin/` in app)
+
+#### The app id, and the two things pinned to it
+
+The id is reverse-DNS of a domain the project holds. It was `com.vayu.client`,
+which claimed `vayu.com` - a domain it does not own - and named the app after
+the npm package rather than the product. It is the macOS `CFBundleIdentifier`,
+so it also names where macOS keeps preferences, caches and saved state, and it
+is the AppUserModelID Windows files the app's notifications under
+(`APP_USER_MODEL_ID` in `electron/constants.ts`, compared to `appId` by
+`app-user-model-id.test.ts`).
+
+Two settings exist because the id changed rather than because anyone wanted
+them:
+
+- `nsis.guid` is pinned to `c6b9dc37-95fd-5c7e-9133-446b81eb3ee5`, the value
+  electron-builder derived from the **old** id. NSIS keys the uninstall entry
+  and the upgrade path off that GUID, so without the pin every existing Windows
+  install would see the next version as a different application and end up
+  listed twice in Add/Remove Programs. It is not a value to regenerate: it is
+  the identity those installs already carry.
+- `install.sh` purges the old identifier's `Preferences`, `Caches` and
+  `Saved Application State` alongside the current one, because macOS wrote them
+  under the id the app ran under at the time, and nothing else would ever
+  remove them.
 
 ## TypeScript Configuration
 

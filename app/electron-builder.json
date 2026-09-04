@@ -1,5 +1,5 @@
 {
-	"appId": "com.vayu.client",
+	"appId": "io.github.athrvk.vayu",
 	"productName": "Vayu",
 	"directories": {
 		"output": "release",
@@ -27,6 +27,7 @@
 	"asar": true,
 	"artifactName": "${productName}-${arch}.${ext}",
 	"nsis": {
+		"guid": "c6b9dc37-95fd-5c7e-9133-446b81eb3ee5",
 		"oneClick": false,
 		"perMachine": false,
 		"allowToChangeInstallationDirectory": true,

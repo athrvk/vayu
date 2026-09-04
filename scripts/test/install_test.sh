@@ -186,9 +186,28 @@ echo "$out" | grep -q -- "--uninstall --purge" || fail "the purge hint should na
 # uninstall --purge: also removes data dirs
 out="$(VAYU_DRYRUN=1 PURGE=1 do_uninstall 2>&1)"
 echo "$out" | grep -q "rm -rf .*Application Support/vayu-client" || fail "purge should remove the data dir"
-echo "$out" | grep -q "rm -f .*com.vayu.client.plist" || fail "purge should remove prefs"
+echo "$out" | grep -q "rm -f .*io.github.athrvk.vayu.plist" || fail "purge should remove prefs"
+# The identifier builds before the rename ran under. macOS keyed their prefs,
+# caches and saved state by it, so a purge that only knew the current id would
+# leave that state on disk with nothing left to ever remove it.
+echo "$out" | grep -q "rm -f .*com.vayu.client.plist" || fail "purge should remove the pre-rename prefs too"
 
 printf 'PASS: macOS uninstall dry-run\n'
+
+# --- the bundle id this script purges is the one the app ships under ----------
+# macOS keys a bundle's preferences, caches and saved state by its
+# CFBundleIdentifier, which electron-builder takes from `appId`. If the two ever
+# disagree, `--purge` silently leaves every one of those behind - and nothing
+# else in the repository would notice, because the installer never reads the
+# packaged app's plist.
+builder_json="$(cd "$(dirname "$0")/../.." && pwd)/app/electron-builder.json"
+[ -f "$builder_json" ] || fail "electron-builder.json not found - the check below reads nothing"
+builder_app_id="$(sed -n 's/.*"appId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$builder_json")"
+[ -n "$builder_app_id" ] || fail "could not read appId from electron-builder.json"
+[ "$builder_app_id" = "$APP_BUNDLE_ID" ] ||
+	fail "APP_BUNDLE_ID ($APP_BUNDLE_ID) does not match electron-builder appId ($builder_app_id)"
+
+printf 'PASS: macOS bundle id matches the packaged app\n'
 
 # --- macOS install target resolution -----------------------------------------
 # An update has to land on the copy the user actually launches. Dragging the app

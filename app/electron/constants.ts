@@ -22,8 +22,12 @@
  * against that shortcut, and a mismatch shows nothing at all rather than
  * showing it under the wrong name. `app-user-model-id.test.ts` compares the
  * two so they cannot drift.
+ *
+ * Reverse-DNS of a domain the project actually holds. The previous value,
+ * `com.vayu.client`, claimed `vayu.com`, which it does not - and named the app
+ * "the client", which is the npm package's name, not the product's.
  */
-export const APP_USER_MODEL_ID = "com.vayu.client";
+export const APP_USER_MODEL_ID = "io.github.athrvk.vayu";
 
 // Engine sidecar (must match src/config/network.ts)
 export const ENGINE_HOST = "127.0.0.1";
