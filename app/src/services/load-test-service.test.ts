@@ -21,6 +21,7 @@ vi.mock("@/stores", () => ({
 	useDashboardStore: {
 		getState: () => ({
 			currentRunId: dashboard.currentRunId,
+			loadTestConfig: null,
 			setStreaming: mockSetStreaming,
 			setError: mockSetError,
 			setFinalReport: mockSetFinalReport,
@@ -30,6 +31,9 @@ vi.mock("@/stores", () => ({
 	useClientSettingsStore: {
 		getState: () => ({ liveRefreshMs: 0, keepAwakeDuringRuns: settings.keepAwakeDuringRuns }),
 	},
+	// The fraction a committed batch carries to the taskbar (#1362). No batch is
+	// committed in this suite; the wiring has its own file.
+	deriveRunProgress: () => null,
 }));
 vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn(), disconnect: vi.fn() } }));
 vi.mock("./api", () => ({

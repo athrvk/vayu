@@ -38,6 +38,10 @@ vi.mock("@/stores", () => ({
 	},
 	// The module default (500ms) applies, so a window is a window.
 	useClientSettingsStore: { getState: () => ({ liveRefreshMs: 0 }) },
+	// The taskbar fraction a flush also carries (#1362). What it derives is
+	// `dashboard-store.test.ts`'s question; this file is about which lists a
+	// flush commits.
+	deriveRunProgress: () => null,
 }));
 vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn(), disconnect: vi.fn() } }));
 vi.mock("./api", () => ({

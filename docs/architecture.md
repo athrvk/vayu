@@ -209,6 +209,22 @@ decide whether to turn the setting on. It waits for the OS rather than reporting
 what was attempted, so a refusal turns the row unavailable there and then instead
 of on the first run that ends.
 
+**A run's progress is also mirrored onto the OS chrome**, over `runs:progress`
+(`services/run-progress.ts` to `electron/run-progress.ts`), so a user in another
+application can see how far along a test is without switching back. The renderer
+says what the fraction is - it is the only side that holds a run's denominator -
+and main says what each platform makes of it: a fill on the Windows taskbar
+button, a bar on the macOS Dock icon, and nothing on Linux, where Electron 44
+removed Unity launcher support. A run with no denominator (an open-ended load
+test, or a collection run, whose plan length only the engine resolves) shows
+indeterminate on Windows and nothing on macOS; a failed run flashes the Windows
+error state; the bar clears on every terminal path, and main clears it itself
+when the renderer that asked for it is destroyed or reloads. One indicator is
+all the OS gives an application, and one run is all the renderer watches: the
+SSE client is a singleton, so starting a second run closes the first one's
+stream. The indicator follows the run being watched, and a superseded run's own
+stop is ignored rather than clearing the bar of the run that took over.
+
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 
 ## Sidecar Pattern
