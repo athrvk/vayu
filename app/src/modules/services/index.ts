@@ -6,4 +6,8 @@
  */
 
 export { default as ServicesPanel } from "./ServicesPanel";
-export { useRunningServiceCount } from "./useRunningServices";
+export {
+	useRunningServiceCount,
+	useRunningServices,
+	useRunningServicesPublisher,
+} from "./useRunningServices";

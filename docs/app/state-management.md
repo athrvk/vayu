@@ -2368,6 +2368,13 @@ that flushed and then closes the window must not ask a dying renderer twice.
 It lives outside `main.ts` so it can be tested - `main.ts` creates windows and
 starts the engine at import time.
 
+**A running service is asked about before either path flushes** (#1363). A close
+or quit that would stop an inbox, mock server or mock issuer names it and waits
+for an answer first, and Cancel leaves the window, the renderer and every
+pending save exactly as they were - a flush run ahead of the question would have
+told the renderer its work was ending. Confirm, and the flush runs as it always
+did on the way out.
+
 ### Variable Resolution Priority
 
 1. User activates a request in a tab. The environment comes from `useSessionStore().activeEnvironmentId`; the collection comes from the request's own `collectionId` - **not** from the session store, which has held no collection scope since the `vayu.session` v2 migration

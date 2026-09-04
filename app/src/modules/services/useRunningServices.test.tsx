@@ -23,13 +23,17 @@
  * mock is gone from the engine's list entirely.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useEngineStore } from "@/stores";
 import type { Inbox, MockIssuer, MockServer } from "@/types";
-import { useRunningServiceCount } from "./useRunningServices";
+import {
+	useRunningServiceCount,
+	useRunningServices,
+	useRunningServicesPublisher,
+} from "./useRunningServices";
 
 const listInboxes = vi.fn();
 const listMockIssuers = vi.fn();
@@ -105,6 +109,19 @@ function wrapper(client: QueryClient) {
 function countHook() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return { client, ...renderHook(() => useRunningServiceCount(), { wrapper: wrapper(client) }) };
+}
+
+function listHook() {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return { client, ...renderHook(() => useRunningServices(), { wrapper: wrapper(client) }) };
+}
+
+function publisherHook() {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return {
+		client,
+		...renderHook(() => useRunningServicesPublisher(), { wrapper: wrapper(client) }),
+	};
 }
 
 beforeEach(() => {
@@ -185,5 +202,130 @@ describe("useRunningServiceCount", () => {
 		useEngineStore.setState({ engineStatus: "starting" });
 
 		await waitFor(() => expect(result.current).toBe(0));
+	});
+});
+
+/*
+ * The close that stops these has to name them (issue #1363), and the count
+ * cannot: it says 3, not which three. The list is what the count is now derived
+ * from, so the Dock and the dialog cannot disagree about what is running.
+ */
+describe("useRunningServices", () => {
+	it("names each running service the way the drawer does", async () => {
+		listInboxes.mockResolvedValue([inbox()]);
+		listMockIssuers.mockResolvedValue([issuer()]);
+		listMockServers.mockResolvedValue([mockServer()]);
+
+		const { result } = listHook();
+
+		await waitFor(() =>
+			expect(result.current).toEqual([
+				{ kind: "inbox", name: null, port: 41234 },
+				// The collection name is the only part of a mock a user recognises;
+				// two mocks of one collection differ only by port.
+				{ kind: "mock-server", name: "Pet Store", port: 43100 },
+				{ kind: "issuer", name: null, port: 42000 },
+			])
+		);
+	});
+
+	it("leaves out a stopped inbox, whose record outlives its listener", async () => {
+		listInboxes.mockResolvedValue([inbox(), inbox({ inboxId: "inbox_b", running: false })]);
+
+		const { result } = listHook();
+
+		await waitFor(() => expect(result.current).toHaveLength(1));
+		expect(result.current[0]).toEqual({ kind: "inbox", name: null, port: 41234 });
+	});
+
+	it("lists nothing while the engine is down, whatever the cache still holds", async () => {
+		listMockServers.mockResolvedValue([mockServer()]);
+
+		const { result } = listHook();
+		await waitFor(() => expect(result.current).toHaveLength(1));
+
+		useEngineStore.setState({ engineStatus: "unreachable" });
+
+		await waitFor(() => expect(result.current).toEqual([]));
+	});
+});
+
+/*
+ * Main cannot read these queries, so the snapshot has to be pushed to it. A
+ * publisher that never fired would leave the dialog naming nothing, which is
+ * the silent close this issue is about; one that fired on every render would
+ * put an IPC message on every poll.
+ */
+describe("useRunningServicesPublisher", () => {
+	function stubBridge() {
+		const setRunningServices = vi.fn();
+		Object.defineProperty(window, "electronAPI", {
+			value: { setRunningServices },
+			configurable: true,
+			writable: true,
+		});
+		return setRunningServices;
+	}
+
+	afterEach(() => {
+		Reflect.deleteProperty(window, "electronAPI");
+	});
+
+	it("publishes what is running to the main process", async () => {
+		const setRunningServices = stubBridge();
+		listInboxes.mockResolvedValue([inbox()]);
+
+		publisherHook();
+
+		await waitFor(() =>
+			expect(setRunningServices).toHaveBeenLastCalledWith([
+				{ kind: "inbox", name: null, port: 41234 },
+			])
+		);
+	});
+
+	it("publishes again when a service stops", async () => {
+		const setRunningServices = stubBridge();
+		listInboxes.mockResolvedValue([inbox()]);
+
+		const { client } = publisherHook();
+		await waitFor(() =>
+			expect(setRunningServices).toHaveBeenLastCalledWith([expect.anything()])
+		);
+
+		listInboxes.mockResolvedValue([inbox({ running: false })]);
+		await client.invalidateQueries();
+
+		await waitFor(() => expect(setRunningServices).toHaveBeenLastCalledWith([]));
+	});
+
+	it("says nothing new when a poll returns the same services", async () => {
+		const setRunningServices = stubBridge();
+		listInboxes.mockResolvedValue([inbox()]);
+
+		const { client } = publisherHook();
+		// The list itself, not merely a first call: the mount publishes an empty
+		// snapshot before the queries answer, and counting from there would leave
+		// this passing on a publisher that fires on every render.
+		await waitFor(() =>
+			expect(setRunningServices).toHaveBeenLastCalledWith([
+				{ kind: "inbox", name: null, port: 41234 },
+			])
+		);
+		const sent = setRunningServices.mock.calls.length;
+
+		await client.invalidateQueries();
+		await waitFor(() => expect(listInboxes.mock.calls.length).toBeGreaterThan(1));
+
+		expect(setRunningServices).toHaveBeenCalledTimes(sent);
+	});
+
+	it("does nothing outside Electron, where there is no bridge", async () => {
+		listInboxes.mockResolvedValue([inbox()]);
+
+		const { result } = publisherHook();
+
+		await waitFor(() => expect(listInboxes).toHaveBeenCalled());
+		expect(result.current).toBeUndefined();
 	});
 });
