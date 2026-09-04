@@ -980,8 +980,8 @@ RunManager& manager) {
         // load run carries `requestsExpected`, so the frame is where the
         // number lives; a watcher that connects past its eviction from the
         // ring reports no fraction rather than a wrong one.
-        context->append_event (
-        "plan", build_plan_payload (plan.steps.size (), asked.iterations).dump ());
+        context->append_event ("plan",
+        build_plan_payload (plan.steps.size (), asked.iterations).dump ());
 
         for (size_t iteration = 0; iteration < asked.iterations; ++iteration) {
             if (context->should_stop) {
