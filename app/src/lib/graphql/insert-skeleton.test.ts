@@ -328,6 +328,114 @@ describe("insertField - when the cursor is in the wrong place", () => {
 	});
 });
 
+describe("a cursor inside an inline fragment", () => {
+	/**
+	 * The Relay-shaped case: `Query.node: Node` is the only route to a `Post`, so
+	 * the document the app itself writes narrows with `... on Post` - and until
+	 * the chain descended through it, a cursor in there was read at `Node`.
+	 */
+	const inFragment = `query E($id: ID!) {\n  node(id: $id) {\n    ... on Post {\n      id\n    }\n  }\n}\n`;
+	const insideFragment = inFragment.indexOf("id\n    }");
+
+	/** The route the explorer hands over for a `Post` field reached via `node`. */
+	function postStep(fieldName: string) {
+		const viaNode = rootPathsToType(schema, "Post").find((p) => p[0].fieldName === "node")!;
+		return {
+			parentTypeName: "Query",
+			fieldName: "node",
+			rootPath: [...viaNode, { parentTypeName: "Post", fieldName: fieldName }],
+		};
+	}
+
+	it("adds the field beside the one in the fragment, not a second copy of the route", () => {
+		/*
+		 * Mutation check: stop `descend` at an inline fragment and this reddens
+		 * with two `node(` selections and a `$id2` to fill in - the whole route
+		 * written again beside the one the user is looking at.
+		 */
+		const result = inserted(insertField(schema, inFragment, insideFragment, postStep("title")));
+
+		expect(result.placement).toBe("cursor");
+		expect(result.text.match(/node\(/g)).toHaveLength(1);
+		expect(result.variables).toEqual({});
+		expect(result.text).toContain("... on Post {\n      id\n      title\n    }");
+		expectValid(result.text);
+	});
+
+	it("still walks outward for a field the fragment's type does not own", () => {
+		// `Query.search` is not on `Post`: the narrowed set is the wrong host and
+		// the enclosing Query set is the right one.
+		const result = inserted(
+			insertField(schema, inFragment, insideFragment, {
+				parentTypeName: "Query",
+				fieldName: "search",
+				rootPath: [{ parentTypeName: "Query", fieldName: "search" }],
+			})
+		);
+
+		expect(result.placement).toBe("ancestor");
+		expectValid(result.text);
+	});
+
+	it("keeps the enclosing type when the fragment narrows nothing", () => {
+		/*
+		 * `... @include(if:)` is a legal fragment with no type condition. It does
+		 * not narrow, so the set is still read at `User` - reading a missing type
+		 * condition as a narrowing would be the guessing this module refuses.
+		 */
+		const doc = `query E($id: ID!, $flag: Boolean!) {\n  user(id: $id) {\n    ... @include(if: $flag) {\n      id\n    }\n  }\n}\n`;
+		const result = inserted(
+			insertField(schema, doc, doc.indexOf("id\n    }"), {
+				parentTypeName: "User",
+				fieldName: "handle",
+				rootPath: [
+					{ parentTypeName: "Query", fieldName: "user" },
+					{ parentTypeName: "User", fieldName: "handle" },
+				],
+			})
+		);
+
+		expect(result.placement).toBe("cursor");
+		expect(result.text).toContain("... @include(if: $flag) {\n      id\n      handle\n    }");
+		expectValid(result.text);
+	});
+
+	it("writes an argument onto the selection inside the fragment", () => {
+		// The argument row (#1322) reaches the document through the same chain, so
+		// it lands on the `posts` in the fragment rather than inserting a route.
+		const doc = `query E($id: ID!) {\n  node(id: $id) {\n    ... on User {\n      posts {\n        id\n      }\n    }\n  }\n}\n`;
+		const result = inserted(
+			insertArgument(schema, doc, doc.indexOf("posts {"), {
+				parentTypeName: "User",
+				fieldName: "posts",
+				argumentName: "first",
+				rootPath: null,
+			})
+		);
+
+		expect(result.placement).toBe("argument");
+		expect(result.text).toContain("posts(first: $first)");
+		expect(result.text.match(/node\(/g)).toHaveLength(1);
+		expectValid(result.text);
+	});
+
+	it("spreads a fragment into the narrowed set, not the interface set above it", () => {
+		/*
+		 * `spreadHost` prefers an exact type match over a merely overlapping one,
+		 * and the exact one is the `... on Post` the cursor is in. Mutation check:
+		 * stop the descent and the spread lands in the `Node` set instead, which
+		 * is legal and is not where the user was looking.
+		 */
+		const result = inserted(insertFragment(schema, inFragment, insideFragment, "Post"));
+
+		expect(result.text).toContain("fragment PostFields on Post");
+		// Inside the narrowed braces, beside `id` - not after them, in the `Node`
+		// set, which is where an overlap-only host puts it.
+		expect(result.text).toContain("... on Post {\n      id\n      ...PostFields\n    }");
+		expectValid(result.text);
+	});
+});
+
 describe("insertField - a document holding {{variables}}", () => {
 	it("still finds the selection set, rather than treating the query as broken", () => {
 		const doc = `query Existing {\n  user(id: "{{userId}}") {\n    id\n  }\n}\n`;
