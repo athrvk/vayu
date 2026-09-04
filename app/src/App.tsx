@@ -30,6 +30,7 @@ import { useMenuActions } from "./hooks/useMenuActions";
 import { useNotificationActivation } from "./hooks/useNotificationActivation";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
+import { useRunningServicesPublisher } from "@/modules/services";
 import { useSaveStore } from "./stores/save-store";
 
 function App() {
@@ -99,6 +100,11 @@ function App() {
 	// no warning and the dashboard may not be the open tab, while the run it
 	// interrupts streams from a service that outlives every view (#1357).
 	useHostSleepRecorder();
+
+	// Everything the Services drawer started keeps listening inside the engine,
+	// and the engine goes down with the app. This is what lets the close name
+	// what it is about to stop instead of taking it silently (#1363).
+	useRunningServicesPublisher();
 
 	// Register Electron before-quit handler to flush pending saves
 	useEffect(() => {

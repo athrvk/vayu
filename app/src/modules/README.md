@@ -70,9 +70,11 @@ Some modules have components displayed in both the sidebar and main content area
 - **Location:** Sidebar only - the `services` drawer view (issue #502)
 - **Components:** `ServicesPanel.tsx` - the local services (webhook inboxes, OAuth issuers):
   status, copy-URL, start/stop, and the issuer's start dialog
-- **Also exports** `useRunningServiceCount()`, which the Dock's ambient indicator reads - one
-  count over all three lists, because they disagree on their own terms (a stopped inbox stays
-  listed, a stopped issuer or mock server does not)
+- **Also exports** `useRunningServices()` and the `useRunningServiceCount()` derived from it, which
+  the Dock's ambient indicator reads - one list over all three sources, because they disagree on
+  their own terms (a stopped inbox stays listed, a stopped issuer or mock server does not), and
+  `useRunningServicesPublisher()`, which pushes that list to the main process so a close can name
+  what it is about to stop (issue #1363)
 - **Usage:**
     ```tsx
     import { ServicesPanel, useRunningServiceCount } from "@/modules/services";

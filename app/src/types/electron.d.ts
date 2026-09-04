@@ -51,6 +51,21 @@ export type RunProgressUpdate =
 	{ state: "running"; value: number | null } | { state: "failed" } | { state: "idle" };
 
 /**
+ * One service the engine is holding for this window - what a close would stop
+ * (issue #1363). Mirrors `RunningService` in `electron/service-stop-guard.ts`;
+ * the two are separated only by the process boundary.
+ *
+ * `name` is what the user recognises the service by where the kind has one - a
+ * mock server serves a named collection - and null where the port is the only
+ * name it has, which is how the Services drawer lists inboxes and issuers too.
+ */
+export interface RunningServiceSummary {
+	kind: "inbox" | "mock-server" | "issuer";
+	name: string | null;
+	port: number;
+}
+
+/**
  * Where a notification's click should land. Mirrors `NotifyTarget` in
  * `electron/notify.ts`, which echoes it back untouched: main carries the
  * target, the renderer is the only side that knows what it means.
@@ -301,6 +316,17 @@ interface ElectronAPI {
 	 * indicator the OS gives an application.
 	 */
 	setRunProgress: (update: RunProgressUpdate) => void;
+
+	/**
+	 * What the engine is holding for this window, so the close that would stop it
+	 * can name it first (issue #1363). Mirrors `RunningService` in
+	 * `electron/service-stop-guard.ts`.
+	 *
+	 * One-way, and published on every change rather than answered on demand: the
+	 * question arrives on the gesture the user is already waiting on, and main
+	 * has no way to read the queries this side derives the list from.
+	 */
+	setRunningServices: (services: RunningServiceSummary[]) => void;
 
 	/**
 	 * System notifications for the events that finish while the user is in
