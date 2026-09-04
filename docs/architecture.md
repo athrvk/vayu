@@ -248,6 +248,19 @@ overlay images are drawn rather than shipped (`electron/os-icon-overlay.ts`),
 which is what lets a test read a count back instead of a person looking at a
 taskbar.
 
+**One of those cues does reach Linux, and it is the one that is conditional.**
+A run reaching a terminal state the user did not ask for flashes the taskbar
+button on Windows and Linux (`flashFrame`) and bounces the macOS Dock once
+(`bounce("informational")`), and it does so **only when the system
+notifications are off** - it is the quieter substitute for the toast the user
+declined, not a second cue beside it. The condition is the renderer's, because
+the opt-in lives in a store main cannot see, so nothing is sent at all when the
+setting is on. macOS takes a bounce rather than a flash on purpose: there
+`flashFrame` bounces until something turns it off, which is the weight a
+*failed* run already gets from `bounce("critical")`, while the informational
+bounce ends by itself and so is the one cue here that needs no clearing. The
+flash is cleared by the window's focus, alongside the failed mark.
+
 **The icon offers a way in as well as a state**, and everything arriving that
 way is one kind of thing: an intent, over `intent:open`
 (`electron/open-intent.ts`). Three doors lead to it. The macOS Dock menu and the

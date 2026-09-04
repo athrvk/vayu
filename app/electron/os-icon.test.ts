@@ -45,6 +45,7 @@ function harness(
 	const overlays: OverlayCall[] = [];
 	const bounces: string[] = [];
 	const menus: unknown[] = [];
+	const flashes: boolean[] = [];
 	const tasks: UserTask[][] = [];
 	const activations: OsIconActivation[] = [];
 	let focused = options.focused ?? false;
@@ -66,6 +67,7 @@ function harness(
 				: {
 						setOverlayIcon: (image: unknown | null, description: string) =>
 							overlays.push({ image, description }),
+						flashFrame: (flag: boolean) => flashes.push(flag),
 					},
 		dock: () => (options.dock === false ? null : dock),
 		setBadgeCount: (count) => badges.push(count),
@@ -85,6 +87,7 @@ function harness(
 		painter,
 		badges,
 		overlays,
+		flashes,
 		bounces,
 		menus: menus as { label: string; click: () => void }[][],
 		tasks,
@@ -270,13 +273,84 @@ describe("createOsIcon - the icon's menu", () => {
 	});
 });
 
+describe("createOsIcon - a run that ended, the quieter cue", () => {
+	it("flashes the taskbar button on Windows and Linux", () => {
+		for (const platform of ["win32", "linux"] as const) {
+			const os = harness(platform);
+			os.painter.apply({ kind: "runFinished" });
+			expect(os.flashes, platform).toEqual([true]);
+		}
+	});
+
+	/*
+	 * macOS gets the cue too, in its own idiom. Mutation check: send the
+	 * critical bounce here instead and this reddens - which matters because
+	 * `runFailed` already sends that one, and a user who cannot tell the two
+	 * bounces apart learns nothing from either.
+	 */
+	it("bounces the macOS Dock once, informationally, rather than flashing", () => {
+		const os = harness("darwin");
+		os.painter.apply({ kind: "runFinished" });
+		expect(os.bounces).toEqual(["informational"]);
+		// `flashFrame` exists on macOS and is deliberately not used: there it
+		// bounces until turned off, which is the weight a failure gets.
+		expect(os.flashes).toEqual([]);
+	});
+
+	it("needs no clear on macOS, because the informational bounce ends itself", () => {
+		const os = harness("darwin");
+		os.painter.apply({ kind: "runFinished" });
+		os.setFocused(true);
+		os.painter.focused();
+		expect(os.bounces).toEqual(["informational"]);
+		expect(os.flashes).toEqual([]);
+	});
+
+	it("says nothing when the user was already watching", () => {
+		const os = harness("win32", { focused: true });
+		os.painter.apply({ kind: "runFinished" });
+		expect(os.flashes).toEqual([]);
+	});
+
+	/*
+	 * Mutation check: drop `stopFlashing()` from `focused()` and this reddens -
+	 * which on a platform that flashes until told otherwise is a taskbar button
+	 * blinking for a run the user has already come back and looked at.
+	 */
+	it("stops flashing when the window comes back", () => {
+		for (const platform of ["win32", "linux"] as const) {
+			const os = harness(platform);
+			os.painter.apply({ kind: "runFinished" });
+			os.setFocused(true);
+			os.painter.focused();
+			expect(os.flashes, platform).toEqual([true, false]);
+		}
+	});
+
+	it("does not turn off a flash it never started", () => {
+		const os = harness("win32");
+		os.painter.focused();
+		os.painter.clear();
+		expect(os.flashes).toEqual([]);
+	});
+
+	it("stops flashing when the renderer that asked goes away", () => {
+		const os = harness("linux");
+		os.painter.apply({ kind: "runFinished" });
+		os.painter.clear();
+		expect(os.flashes).toEqual([true, false]);
+	});
+});
+
 describe("createOsIcon - the platforms with no surface", () => {
 	/*
 	 * Electron 44 removed Unity launcher support, so Linux has no badge, no
 	 * overlay and no icon menu. Calling into a no-op would pass here by
 	 * accident on the CI runner's own platform; painting nothing is the claim.
 	 */
-	it("paints nothing at all on Linux", () => {
+	it("paints none of the three surfaces Electron 44 took on Linux", () => {
+		// `runFinished` is deliberately absent here: it is the one row Linux
+		// kept, and it has its own cases above.
 		const os = harness("linux");
 		os.painter.apply({ kind: "captured" });
 		os.painter.apply({ kind: "runFailed" });
@@ -324,6 +398,7 @@ describe("parseOsIconSignal", () => {
 		expect(parseOsIconSignal({ kind: "captured" })).toEqual({ kind: "captured" });
 		expect(parseOsIconSignal({ kind: "inboxOpened" })).toEqual({ kind: "inboxOpened" });
 		expect(parseOsIconSignal({ kind: "runFailed" })).toEqual({ kind: "runFailed" });
+		expect(parseOsIconSignal({ kind: "runFinished" })).toEqual({ kind: "runFinished" });
 		expect(
 			parseOsIconSignal({ kind: "recents", collections: [{ id: "a", name: "A" }] })
 		).toEqual({ kind: "recents", collections: [{ id: "a", name: "A" }] });

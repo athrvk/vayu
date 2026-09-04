@@ -92,12 +92,16 @@ vi.mock("./run-progress", () => ({
 // The Dock/taskbar mark for a failed run (#1364), mocked at the same boundary
 // as `notify` above: whether and how the OS shows it is `electron/os-icon.ts`'s
 // question.
-const { mockOsIconRunFailed } = vi.hoisted(() => ({ mockOsIconRunFailed: vi.fn() }));
+const { mockOsIconRunFailed, mockOsIconRunFinished } = vi.hoisted(() => ({
+	mockOsIconRunFailed: vi.fn(),
+	mockOsIconRunFinished: vi.fn(),
+}));
 vi.mock("./os-icon", () => ({
 	osIcon: {
 		captured: vi.fn(),
 		inboxOpened: vi.fn(),
 		runFailed: mockOsIconRunFailed,
+		runFinished: mockOsIconRunFinished,
 		recents: vi.fn(),
 	},
 }));
@@ -627,6 +631,21 @@ describe("ScenarioRunService", () => {
 			await closeStream();
 
 			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+		});
+
+		/*
+		 * The quieter cue (#1364 item 4). This service has no stopped kind -
+		 * every terminal state it reports is one the user did not ask for - so
+		 * the cue follows all of them. Mutation check: drop the `runFinished`
+		 * call and a user with notifications off learns nothing when a
+		 * collection run ends.
+		 */
+		it("raises the quieter end-of-run cue when a collection run ends", async () => {
+			scenarioRunService.startMonitoring("run_31");
+
+			await closeStream();
+
+			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
 		});
 	});
 });

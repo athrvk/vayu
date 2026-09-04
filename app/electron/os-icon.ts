@@ -30,6 +30,21 @@
  * | unread captures | `app.setBadgeCount` | `setOverlayIcon`, a drawn count | - |
  * | a failed run | `dock.bounce("critical")` | `setOverlayIcon`, a drawn mark | - |
  * | the icon's menu | `dock.setMenu` | `app.setUserTasks` | - |
+ * | a run that ended | `dock.bounce("informational")` | `flashFrame` | `flashFrame` |
+ *
+ * **The last row is the one Linux still has**, which is why it is answered
+ * before the gate the other three share rather than inside it. It is also the
+ * only row that is conditional: it fires just when the user has the system
+ * notifications off, because it is the quieter substitute for the toast they
+ * declined, not a second cue beside it. That condition is the renderer's - the
+ * opt-in lives in a store main cannot see - so it never sends when the setting
+ * is on.
+ *
+ * macOS takes a single informational bounce rather than `flashFrame`, which it
+ * does have: there a flash bounces the Dock continuously until something turns
+ * it off, which is the wrong weight for a run that merely ended, and the
+ * critical bounce is already what a *failed* run gets. The informational bounce
+ * stops on its own, so it is the one cue here that needs no clearing.
  *
  * **Windows has one overlay and two things to say through it.** A failed run
  * wins while it stands, because it is the newer and the more urgent of the two,
@@ -96,6 +111,11 @@ export type OsIconSignal =
 	| { kind: "inboxOpened" }
 	/** A load or collection run ended badly. */
 	| { kind: "runFailed" }
+	/**
+	 * A run reached a terminal state the user did not ask for. Sent only when
+	 * the system notifications are off - see the header.
+	 */
+	| { kind: "runFinished" }
 	/** The collections the user has been in, most recent first. */
 	| { kind: "recents"; collections: OsIconCollection[] };
 
@@ -106,6 +126,7 @@ export type OsIconActivation =
 /** The slice of `BrowserWindow` the Windows overlay needs. */
 export interface OverlayWindowLike {
 	setOverlayIcon(overlay: unknown | null, description: string): void;
+	flashFrame(flag: boolean): void;
 }
 
 /** The slice of `app.dock` this needs, which exists on macOS alone. */
@@ -180,11 +201,15 @@ export function createOsIcon(deps: OsIconDeps): OsIconPainter {
 	const isWindows = platform === "win32";
 	/** Electron 44 left Linux with none of these surfaces. See the header. */
 	const paints = isMac || isWindows;
+	/** The one surface Linux kept, and the one macOS is kept out of. */
+	const flashes = isWindows || platform === "linux";
 
 	/** Captures that arrived while the user was elsewhere and are still unread. */
 	let unread = 0;
 	/** A run ended badly while the user was elsewhere, and they have not looked yet. */
 	let failed = false;
+	/** The taskbar button is flashing for a run that ended while they were away. */
+	let flashing = false;
 
 	function paintMac(): void {
 		deps.setBadgeCount(unread);
@@ -234,6 +259,33 @@ export function createOsIcon(deps: OsIconDeps): OsIconPainter {
 		if (isMac) deps.dock()?.bounce("critical");
 	}
 
+	function recordFinish(): void {
+		// Same rule as the marks: a run the user watched end needs no cue. The
+		// renderer has already decided this is wanted at all, by not sending it
+		// when the notifications it substitutes for are on.
+		if (deps.isFocused()) return;
+		if (isMac) {
+			// One bounce rather than a flash, and the informational one. macOS
+			// has `flashFrame`, but there it bounces the Dock continuously until
+			// something turns it off, which is the wrong weight for a run that
+			// merely ended - and `bounce("critical")` is already what a *failed*
+			// run gets, so reusing it would make the two indistinguishable. The
+			// informational bounce is the platform's own "this is done": it
+			// stops on its own, which is why nothing below has to clear it.
+			deps.dock()?.bounce("informational");
+			return;
+		}
+		if (!flashes) return;
+		flashing = true;
+		deps.window()?.flashFrame(true);
+	}
+
+	function stopFlashing(): void {
+		if (!flashing) return;
+		flashing = false;
+		deps.window()?.flashFrame(false);
+	}
+
 	function setRecents(collections: readonly OsIconCollection[]): void {
 		const shown = collections.slice(0, OS_ICON_MAX_RECENTS);
 		if (isMac) setDockMenu(shown);
@@ -277,6 +329,12 @@ export function createOsIcon(deps: OsIconDeps): OsIconPainter {
 
 	return {
 		apply(signal: OsIconSignal): void {
+			// Answered ahead of the gate below: this is the one surface Linux
+			// still has, so `paints` is the wrong question for it.
+			if (signal.kind === "runFinished") {
+				recordFinish();
+				return;
+			}
 			if (!paints) return;
 			switch (signal.kind) {
 				case "captured":
@@ -296,6 +354,10 @@ export function createOsIcon(deps: OsIconDeps): OsIconPainter {
 		},
 
 		focused(): void {
+			// Before the gate, and unconditionally: on macOS a flash that is
+			// never turned off bounces the Dock forever, and Linux never reaches
+			// the gate at all.
+			stopFlashing();
 			if (!paints) return;
 			// The count is not cleared here: those captures are still unread, and
 			// opening the Inbox is what says otherwise. The failure is, because
@@ -307,6 +369,7 @@ export function createOsIcon(deps: OsIconDeps): OsIconPainter {
 		},
 
 		clear(): void {
+			stopFlashing();
 			if (!paints) return;
 			unread = 0;
 			failed = false;
@@ -344,6 +407,7 @@ export function parseOsIconSignal(raw: unknown): OsIconSignal | null {
 	if (typeof raw !== "object" || raw === null) return null;
 	const { kind, collections } = raw as { kind?: unknown; collections?: unknown };
 	if (kind === "captured" || kind === "inboxOpened" || kind === "runFailed") return { kind };
+	if (kind === "runFinished") return { kind };
 	if (kind !== "recents") return null;
 	const parsed = parseCollections(collections);
 	return parsed ? { kind: "recents", collections: parsed } : null;

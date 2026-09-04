@@ -17,6 +17,7 @@
  * states for its own calls: nothing may wait on the OS to draw an icon.
  */
 
+import { useClientSettingsStore } from "@/stores";
 import type { OsIconCollection, OsIconSignal } from "@/types/electron";
 
 type Bridge = NonNullable<Window["electronAPI"]>;
@@ -73,6 +74,22 @@ export const osIcon = {
 	/** A load or collection run ended badly. */
 	runFailed(): void {
 		send({ kind: "runFailed" });
+	},
+
+	/**
+	 * A run reached a terminal state the user did not ask for, so the taskbar
+	 * button flashes on Windows and Linux until they come back.
+	 *
+	 * **Only when the system notifications are off.** This is the quieter
+	 * substitute for the toast, not a second cue beside it - a user who opted in
+	 * to being told already is, and #1364 scoped this cue to exactly that
+	 * condition. The opt-in lives in a localStorage-backed store main cannot
+	 * see, which is why the check is here rather than there, the same split
+	 * `services/notify.ts` makes for the same setting.
+	 */
+	runFinished(): void {
+		if (useClientSettingsStore.getState().systemNotifications) return;
+		send({ kind: "runFinished" });
 	},
 
 	/** The collections the user has been in, most recent first. */

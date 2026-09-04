@@ -17,7 +17,8 @@
 
 import { useEffect } from "react";
 import { useImportModalStore, useTabsStore } from "@/stores";
-import { baseCommandContext, commandById } from "@/lib/commands";
+import { dispatchChord } from "@/lib/editor-chords";
+import { NEW_REQUEST_CHORD } from "@/constants/shortcuts";
 
 export function useOpenIntent(): void {
 	useEffect(() => {
@@ -25,9 +26,20 @@ export function useOpenIntent(): void {
 		// method, and `?.` on electronAPI alone would not guard that.
 		return window.electronAPI?.onOpenIntent?.((intent) => {
 			if (intent.kind === "newRequest") {
-				// Through the command, not a second way to open a request - the
+				// Re-dispatched to the one window handler rather than called a
+				// second way, which is what `editor-chords.ts` exists for and the
 				// same reasoning `useNotificationActivation` gives for settings.
-				commandById("new-request").perform(baseCommandContext());
+				//
+				// It cannot go through `commandById("new-request")` the way that
+				// hook goes through `open-settings`: the command is declared
+				// `available: (ctx) => ctx.surfaces !== undefined`, because the
+				// flow can need a collection picker and a picker needs a mounted
+				// host to render it. `baseCommandContext()` has no `surfaces` by
+				// design, so `perform` there is `ctx.surfaces?.newRequest()` - a
+				// silent no-op, and a Dock menu entry that opens nothing.
+				// `Shell` owns the chord, the picker and the no-collections case;
+				// this hands it the keypress and lets it keep all three.
+				dispatchChord(NEW_REQUEST_CHORD);
 				return;
 			}
 			if (intent.kind === "collection") {

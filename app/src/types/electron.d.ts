@@ -86,6 +86,7 @@ export type OsIconSignal =
 	| { kind: "captured" }
 	| { kind: "inboxOpened" }
 	| { kind: "runFailed" }
+	| { kind: "runFinished" }
 	| { kind: "recents"; collections: OsIconCollection[] };
 
 /**

@@ -313,6 +313,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			| { kind: "captured" }
 			| { kind: "inboxOpened" }
 			| { kind: "runFailed" }
+			| { kind: "runFinished" }
 			| { kind: "recents"; collections: Array<{ id: string; name: string }> }
 	): void => ipcRenderer.send("icon:signal", signal),
 

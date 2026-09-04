@@ -17,17 +17,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useTabsStore, useImportModalStore } from "@/stores";
+import { matchesChord, NEW_REQUEST_CHORD } from "@/constants/shortcuts";
 import type { OpenIntent } from "@/types/electron";
 
-const performSpy = vi.fn();
-const BASE_CTX = { marker: "base-ctx" };
-
-vi.mock("@/lib/commands", () => ({
-	baseCommandContext: () => BASE_CTX,
-	commandById: vi.fn(() => ({ perform: performSpy })),
-}));
-
-import { commandById } from "@/lib/commands";
 import { useOpenIntent } from "./useOpenIntent";
 
 type Bridge = NonNullable<Window["electronAPI"]>;
@@ -61,22 +53,36 @@ afterEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 	useImportModalStore.setState({ isOpen: false, pendingPath: null });
 	bridged(null);
-	performSpy.mockClear();
-	vi.mocked(commandById).mockClear();
 });
 
 describe("useOpenIntent", () => {
-	it("runs the new-request command through the registry, not a second way", () => {
-		// Through the command rather than a store call of its own - the same
-		// reasoning `useNotificationActivation` gives for opening Settings - so
-		// the palette, the menu and this cannot drift apart on what "new
-		// request" means.
+	/*
+	 * Not `commandById("new-request").perform(baseCommandContext())`, which is
+	 * what `useNotificationActivation` does for Settings and what this hook
+	 * first did: that command declares `available: (ctx) => ctx.surfaces !==
+	 * undefined`, because the flow can need a collection picker and a picker
+	 * needs a mounted host. `baseCommandContext()` carries no `surfaces` by
+	 * design - `registry.test.ts` pins exactly that - so `perform` there is
+	 * `ctx.surfaces?.newRequest()`, a silent no-op and a Dock menu entry that
+	 * opens nothing.
+	 *
+	 * Mutation check: go back to the command call and no keydown is dispatched,
+	 * so this reddens on the assertion below rather than passing on a mock.
+	 */
+	it("hands New Request to the one window handler as a real chord press", () => {
+		const seen: KeyboardEvent[] = [];
+		const listener = (event: Event) => seen.push(event as KeyboardEvent);
+		window.addEventListener("keydown", listener);
 		const { open } = mounted();
 
 		open({ kind: "newRequest" });
+		window.removeEventListener("keydown", listener);
 
-		expect(commandById).toHaveBeenCalledWith("new-request");
-		expect(performSpy).toHaveBeenCalledWith(BASE_CTX);
+		// It has to reach `window`, where `Shell` binds the chord, and it has to
+		// be the chord `Shell` matches - a keydown that bubbles nowhere or
+		// carries the wrong modifier would satisfy neither half.
+		expect(seen).toHaveLength(1);
+		expect(matchesChord(seen[0], NEW_REQUEST_CHORD)).toBe(true);
 	});
 
 	it("opens the collection tab for a collection intent", () => {

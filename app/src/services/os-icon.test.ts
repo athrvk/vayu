@@ -13,6 +13,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { osIcon } from "./os-icon";
+import { useClientSettingsStore } from "@/stores";
 import type { OsIconSignal } from "@/types/electron";
 
 function stubBridge() {
@@ -24,6 +25,8 @@ function stubBridge() {
 afterEach(() => {
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
+	// The store is a module singleton, and its default is off (#1358).
+	useClientSettingsStore.setState({ systemNotifications: false });
 });
 
 describe("osIcon", () => {
@@ -43,6 +46,27 @@ describe("osIcon", () => {
 		const send = stubBridge();
 		osIcon.runFailed();
 		expect(send).toHaveBeenCalledWith({ kind: "runFailed" });
+	});
+
+	/*
+	 * The quieter cue for a run that ended, and the only signal here with a
+	 * condition on it: it substitutes for the system notification rather than
+	 * accompanying it. Mutation check: drop the opt-in read in `runFinished`
+	 * and the second case sends anyway, giving a user who asked to be notified
+	 * a flashing taskbar button on top of the toast they already got.
+	 */
+	it("sends that a run ended when the notifications it replaces are off", () => {
+		useClientSettingsStore.setState({ systemNotifications: false });
+		const send = stubBridge();
+		osIcon.runFinished();
+		expect(send).toHaveBeenCalledWith({ kind: "runFinished" });
+	});
+
+	it("says nothing about a run ending when the user opted into notifications", () => {
+		useClientSettingsStore.setState({ systemNotifications: true });
+		const send = stubBridge();
+		osIcon.runFinished();
+		expect(send).not.toHaveBeenCalled();
 	});
 
 	/*

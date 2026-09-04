@@ -214,6 +214,10 @@ class LoadTestService {
 		// once per run, and every terminal path reaches it - the SSE error
 		// handler and a clean close alike - not only the failure one.
 		if (kind === NOTIFY_KINDS.loadRunFailed) osIcon.runFailed();
+		// Not for a stopped run: the user pressed Stop, so they were here and
+		// already know. The service itself sends nothing when the notifications
+		// this substitutes for are on (#1364).
+		if (kind !== NOTIFY_KINDS.loadRunStopped) osIcon.runFinished();
 	}
 
 	private handleMetrics(metrics: LoadTestMetrics): void {

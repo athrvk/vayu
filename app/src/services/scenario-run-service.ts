@@ -226,6 +226,9 @@ class ScenarioRunService {
 		// once per run, and every terminal path reaches it - the SSE error
 		// handler and a clean close alike - not only the failure one.
 		if (kind === NOTIFY_KINDS.collectionRunFailed) osIcon.runFailed();
+		// Every terminal kind this service has is one the user did not ask for -
+		// it has no stopped kind - so the flash follows all of them (#1364).
+		osIcon.runFinished();
 	}
 
 	private handleError(error: Error): void {

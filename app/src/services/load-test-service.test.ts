@@ -58,12 +58,16 @@ vi.mock("./notify", async (importOriginal) => ({
 // The Dock/taskbar mark for a failed run (#1364), mocked at the same boundary
 // as `notify` above: whether and how the OS shows it is `electron/os-icon.ts`'s
 // question.
-const { mockOsIconRunFailed } = vi.hoisted(() => ({ mockOsIconRunFailed: vi.fn() }));
+const { mockOsIconRunFailed, mockOsIconRunFinished } = vi.hoisted(() => ({
+	mockOsIconRunFailed: vi.fn(),
+	mockOsIconRunFinished: vi.fn(),
+}));
 vi.mock("./os-icon", () => ({
 	osIcon: {
 		captured: vi.fn(),
 		inboxOpened: vi.fn(),
 		runFailed: mockOsIconRunFailed,
+		runFinished: mockOsIconRunFinished,
 		recents: vi.fn(),
 	},
 }));
@@ -337,6 +341,38 @@ describe("LoadTestService", () => {
 			await closeStream();
 
 			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+		});
+
+		/*
+		 * The quieter cue (#1364 item 4): a run the user was not watching ended,
+		 * so the taskbar button flashes where the notification they turned off
+		 * would have spoken. The service sends it for every terminal state; the
+		 * opt-in check and the platform rules are the two layers below.
+		 *
+		 * Mutation check: drop the `runFinished` call from `notifyTerminal` and
+		 * this reddens - a user with notifications off would get nothing at all
+		 * when a run ends, which is the gap the cue exists to close.
+		 */
+		it("raises the quieter end-of-run cue for a run that finished", async () => {
+			dashboard.currentRunId = "run_15b";
+			loadTestService.startMonitoring("run_15b");
+
+			await closeStream();
+
+			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
+		});
+
+		/*
+		 * Mutation check: send it for every kind and this reddens. A stopped run
+		 * is one the user pressed Stop on, so they were at the window and need
+		 * no cue that it ended.
+		 */
+		it("raises no cue for a run the user stopped themselves", () => {
+			loadTestService.startMonitoring("run_15c");
+
+			loadTestService.stopMonitoring();
+
+			expect(mockOsIconRunFinished).not.toHaveBeenCalled();
 		});
 
 		it("does not mark the icon for a run the user stopped", () => {
