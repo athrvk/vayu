@@ -2,7 +2,16 @@
 	"compilerOptions": {
 		"target": "ES2020",
 		"useDefineForClassFields": true,
-		"lib": ["ES2020", "DOM", "DOM.Iterable"],
+		/*
+		 * ES2020 plus one sliver of ES2022: `ErrorOptions`, which is what types
+		 * `new Error(message, { cause })`. The runtime has had `cause` since
+		 * Chromium 93 and Node 16 - `electron/updater.ts` already reads it off a
+		 * caught error - so this line describes the runtime rather than changing
+		 * it, and the emit target stays ES2020. ESLint's `preserve-caught-error`
+		 * (recommended since 10.0) is what made the gap load-bearing: without the
+		 * type, the fix the rule asks for does not compile.
+		 */
+		"lib": ["ES2020", "ES2022.Error", "DOM", "DOM.Iterable"],
 		"module": "ESNext",
 		"skipLibCheck": true,
 

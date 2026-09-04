@@ -274,7 +274,13 @@ describe("EngineSidecar - adoption", () => {
 		const sidecar = new EngineSidecar(TEST_PORT, system);
 		await sidecar.start();
 
-		await expect(sidecar.restart(0)).rejects.toThrow(/close the Application/i);
+		const failure = await sidecar.restart(0).catch((error: unknown) => error);
+		expect(failure).toBeInstanceOf(Error);
+		expect((failure as Error).message).toMatch(/close the Application/i);
+		// The sentence is written for the user and says nothing about the engine.
+		// Why it would not come back is only recoverable through the cause, so a
+		// restart that gives up carries the attempt's own failure with it.
+		expect((failure as Error).cause).toBeInstanceOf(Error);
 	});
 });
 

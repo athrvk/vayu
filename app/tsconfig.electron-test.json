@@ -23,8 +23,12 @@
 		"composite": false,
 		"noEmit": true,
 		"rootDir": ".",
-		/* Renderer sources reached from a test are DOM code; `electron/` is not. */
-		"lib": ["ES2020", "DOM", "DOM.Iterable"],
+		/*
+		 * Renderer sources reached from a test are DOM code; `electron/` is not.
+		 * `ES2022.Error` for the same reason as in tsconfig.json - see the note
+		 * there.
+		 */
+		"lib": ["ES2020", "ES2022.Error", "DOM", "DOM.Iterable"],
 		"types": ["node", "vitest/globals"],
 		/*
 		 * No `baseUrl`, so targets are written relative to this file (`app/`) -

@@ -114,7 +114,7 @@ function tokenize(source: string): Token[] | null {
 		// The five shapes that cannot contain children, each ended by its own
 		// terminator rather than by the next `>`: a comment or a CDATA section may
 		// hold any number of them.
-		let end = -1;
+		let end: number;
 		if (source.startsWith("<!--", i)) end = endOfSpan(source, i + 4, "-->");
 		else if (source.startsWith("<![CDATA[", i)) end = endOfSpan(source, i + 9, "]]>");
 		else if (source.startsWith("<?", i)) end = endOfSpan(source, i + 2, "?>");

@@ -23,7 +23,7 @@
 		"clean:app": "rimraf -g dist dist-electron release build node_modules/.vite \"*.tsbuildinfo\"",
 		"clean": "pnpm run clean:app && rimraf ../engine/build ../engine/build-release ../engine/build-test ../engine/out",
 		"clean:all": "pnpm clean && rimraf node_modules",
-		"lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+		"lint": "eslint . --report-unused-disable-directives --max-warnings 0",
 		"format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,scss,md,html,yml,yaml,cjs,mjs}\"",
 		"format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,scss,md,html,yml,yaml,cjs,mjs}\"",
 		"type-check": "concurrently --group --names renderer,electron,electron-tests \"node node_modules/tsc7/bin/tsc --noEmit\" \"node node_modules/tsc7/bin/tsc -p tsconfig.node.json --noEmit\" \"node node_modules/tsc7/bin/tsc -p tsconfig.electron-test.json\"",
@@ -82,7 +82,7 @@
 		"zustand": "^5.0.15"
 	},
 	"devDependencies": {
-		"@eslint/js": "^9.39.4",
+		"@eslint/js": "^10.0.1",
 		"@tailwindcss/vite": "^4.3.3",
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/react": "^16.3.3",
@@ -96,8 +96,8 @@
 		"cross-env": "^10.1.0",
 		"electron": "^44.0.0",
 		"electron-builder": "^26.15.3",
-		"eslint": "^9.39.4",
-		"eslint-config-prettier": "^9.1.2",
+		"eslint": "^10.9.1",
+		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-jsx-a11y": "^6.10.2",
 		"eslint-plugin-prettier": "^5.5.6",
 		"eslint-plugin-react-hooks": "^7.1.1",

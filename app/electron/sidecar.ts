@@ -851,7 +851,6 @@ export class EngineSidecar {
 	private async runRestart(maxRetries: number): Promise<void> {
 		console.log("[Sidecar] Restarting engine...");
 
-		let lastError: Error | null = null;
 		const baseDelay = ENGINE_RESTART_BASE_DELAY_MS;
 
 		for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -876,7 +875,7 @@ export class EngineSidecar {
 				console.log("[Sidecar] Engine restarted successfully");
 				return;
 			} catch (error) {
-				lastError = error instanceof Error ? error : new Error(String(error));
+				const lastError = error instanceof Error ? error : new Error(String(error));
 				console.error(
 					`[Sidecar] Restart attempt ${attempt + 1}/${maxRetries + 1} failed:`,
 					lastError.message
@@ -888,9 +887,15 @@ export class EngineSidecar {
 					throw lastError;
 				}
 
-				// If this was the last attempt, throw the error
+				// If this was the last attempt, throw the error. The sentence is
+				// written for the user and says nothing about the engine, so the
+				// attempt's own failure rides along as the cause - without it, why
+				// the engine would not come back is not recoverable from what was
+				// thrown.
 				if (attempt === maxRetries) {
-					throw new Error(`Please close the Application and reopen it.`);
+					throw new Error(`Please close the Application and reopen it.`, {
+						cause: error,
+					});
 				}
 			}
 		}
