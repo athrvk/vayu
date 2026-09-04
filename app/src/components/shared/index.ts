@@ -79,3 +79,8 @@ export * from "./DetailSkeleton";
 
 // The insertable templates under a script editor, for both script hosts
 export * from "./ScriptSnippets";
+
+// The same row actions on right-click, for rows that carry a "⋯" menu
+export * from "./RowContextMenu";
+export * from "./RowActionBody";
+export * from "./row-actions";

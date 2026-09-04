@@ -166,6 +166,26 @@ interface TabsState {
 	clearDataRowTarget: () => void;
 	closeTab: (tabId: string) => void;
 	/**
+	 * Close every tab except one - the strip's "Close Others".
+	 *
+	 * A bulk close is one close, not a loop of closes: it removes the whole set
+	 * in a single `set`, and records at most one visit for wherever the user
+	 * ends up. Closing them one at a time would record a visit per tab and walk
+	 * the user through a history of places they never went.
+	 */
+	closeOtherTabs: (tabId: string) => void;
+	/** Close every tab after this one in the strip. Nothing to its left moves. */
+	closeTabsToRight: (tabId: string) => void;
+	/**
+	 * Close every tab that holds no unsaved edits, keeping the dirty ones.
+	 *
+	 * "Saved" is `isTabDirty` read backwards - the same answer that decides
+	 * which tab LRU eviction may take - so the one definition of a dirty tab
+	 * serves both, and a tab type that learns to be dirty is covered here for
+	 * free.
+	 */
+	closeSavedTabs: () => void;
+	/**
 	 * Close every tab bound to one of the given entity ids (e.g. after deletion).
 	 *
 	 * `type` narrows the sweep to one kind of tab. Ids are engine-generated and
@@ -272,6 +292,87 @@ function forgetLocations(
 	});
 	if (nextIndex === -1 && kept.length > 0) nextIndex = 0;
 	return { navHistory: kept, navIndex: nextIndex };
+}
+
+/**
+ * Remove every tab the id set names, and answer where that leaves the user.
+ *
+ * One function behind every close in this store, because "which tab takes the
+ * place of the one that was showing" is a single rule in three parts - the
+ * nearest still-open place behind the cursor, then the neighbour to the left,
+ * then the one to the right - and a second copy of it would answer a bulk close
+ * differently from a single one.
+ *
+ * A bulk close is one close, not a loop of them: the whole set goes in one
+ * `set` and at most one visit is recorded. Calling `closeTab` per tab would
+ * record a visit for every intermediate tab it focused on the way, leaving Back
+ * to walk the user through places they never went.
+ *
+ * `null` means nothing matched, so the caller leaves the store untouched rather
+ * than publishing an identical state.
+ *
+ * The history itself is left alone. A closed tab is still somewhere the user has
+ * been, and Back is what puts it back (#1245); only a *deleted* entity leaves
+ * the history, which is `closeTabsForEntities`' own concern.
+ */
+function closeTabs(
+	state: Pick<TabsState, "openTabs" | "activeTabId" | "navHistory" | "navIndex">,
+	closing: ReadonlySet<string>
+): Partial<TabsState> | null {
+	const { openTabs, activeTabId, navHistory, navIndex } = state;
+	const remaining = openTabs.filter((t) => !closing.has(t.id));
+	if (remaining.length === openTabs.length) return null;
+
+	// The tab in view is staying, so nothing has to take its place.
+	const activeIndex = openTabs.findIndex((t) => t.id === activeTabId);
+	if (activeIndex === -1 || !closing.has(openTabs[activeIndex].id)) {
+		return { openTabs: remaining };
+	}
+
+	/*
+	 * The active tab is going, and the history is what knows where the user came
+	 * from - which is where a browser lands you when you close the page you are
+	 * on. The cursor lands on that earlier entry rather than dropping the ones it
+	 * passed, so the closed tabs stay ahead of it and Forward reopens them.
+	 */
+	for (let i = navIndex - 1; i >= 0; i--) {
+		const open = remaining.find((t) => sameLocation(t, navHistory[i]));
+		if (open) return { openTabs: remaining, activeTabId: open.id, navIndex: i };
+	}
+
+	/*
+	 * Nothing behind is open, so the strip's own rule answers: the nearest tab
+	 * that is staying, preferring the left.
+	 *
+	 * Recorded as a visit, because the user is now somewhere the history did not
+	 * send them. The cursor always names where they are - the invariant every
+	 * other path here holds - and what was just closed stays behind it.
+	 */
+	const survivor = nearestSurvivor(openTabs, activeIndex, closing);
+	if (!survivor) return { openTabs: remaining, activeTabId: null };
+	return {
+		openTabs: remaining,
+		activeTabId: survivor.id,
+		...recordVisit(navHistory, navIndex, {
+			type: survivor.type,
+			entityId: survivor.entityId,
+		}),
+	};
+}
+
+/** The tab nearest `index` that is staying open, preferring the one to the left. */
+function nearestSurvivor(
+	tabs: Tab[],
+	index: number,
+	closing: ReadonlySet<string>
+): Tab | undefined {
+	for (let i = index - 1; i >= 0; i--) {
+		if (!closing.has(tabs[i].id)) return tabs[i];
+	}
+	for (let i = index + 1; i < tabs.length; i++) {
+		if (!closing.has(tabs[i].id)) return tabs[i];
+	}
+	return undefined;
 }
 
 /**
@@ -525,60 +626,36 @@ export const useTabsStore = create<TabsState>()(
 			clearDataRowTarget: () => set({ dataRowTarget: null }),
 
 			closeTab: (tabId) => {
-				const { openTabs, activeTabId, navHistory, navIndex } = get();
-				const idx = openTabs.findIndex((t) => t.id === tabId);
-				if (idx === -1) return;
+				const next = closeTabs(get(), new Set([tabId]));
+				if (next) set(next);
+			},
 
-				const remaining = openTabs.filter((t) => t.id !== tabId);
+			closeOtherTabs: (tabId) => {
+				const { openTabs } = get();
+				if (!openTabs.some((t) => t.id === tabId)) return;
+				const closing = new Set(openTabs.filter((t) => t.id !== tabId).map((t) => t.id));
+				const next = closeTabs(get(), closing);
+				if (next) set(next);
+			},
 
-				if (activeTabId !== tabId) {
-					set({ openTabs: remaining });
-					return;
-				}
+			closeTabsToRight: (tabId) => {
+				const { openTabs } = get();
+				const index = openTabs.findIndex((t) => t.id === tabId);
+				if (index === -1) return;
+				const closing = new Set(openTabs.slice(index + 1).map((t) => t.id));
+				const next = closeTabs(get(), closing);
+				if (next) set(next);
+			},
 
-				/*
-				 * The active tab is going, so something has to take its place, and
-				 * the history is what knows where the user came from - which is where
-				 * a browser lands you when you close the page you are on (#1245). The
-				 * strip's left neighbour is the fallback, not the rule: it is the
-				 * answer to "which tab is beside this one", and the user asked to
-				 * leave, not to move one step left.
-				 *
-				 * The cursor lands on that earlier entry rather than dropping the
-				 * ones it passed, so the closed tab stays ahead of it: Forward
-				 * reopens what was just closed, for free and by the same rule Back
-				 * reopens anything else.
-				 */
-				for (let i = navIndex - 1; i >= 0; i--) {
-					const open = remaining.find((t) => sameLocation(t, navHistory[i]));
-					if (open) {
-						set({ openTabs: remaining, activeTabId: open.id, navIndex: i });
-						return;
-					}
-				}
-
-				/*
-				 * Nothing behind is open, so the strip's own rule answers: the tab
-				 * to the left, or the new last tab.
-				 *
-				 * Recorded as a visit, because the user is now somewhere the history
-				 * did not send them. The cursor always names where they are - the
-				 * invariant every other path here holds - and the place just closed
-				 * stays behind it, so Back is what reopens it.
-				 */
-				const newFocus = remaining[Math.max(0, idx - 1)];
-				if (!newFocus) {
-					set({ openTabs: remaining, activeTabId: null });
-					return;
-				}
-				set({
-					openTabs: remaining,
-					activeTabId: newFocus.id,
-					...recordVisit(navHistory, navIndex, {
-						type: newFocus.type,
-						entityId: newFocus.entityId,
-					}),
-				});
+			closeSavedTabs: () => {
+				const contexts = useSaveStore.getState().contexts;
+				const closing = new Set(
+					get()
+						.openTabs.filter((t) => !isTabDirty(t, contexts))
+						.map((t) => t.id)
+				);
+				const next = closeTabs(get(), closing);
+				if (next) set(next);
 			},
 
 			closeTabsForEntities: (entityIds, type) => {

@@ -25,7 +25,7 @@ import { COMMANDS, availableCommands, commandById } from "./registry";
 import { baseCommandContext } from "./context";
 import { commandTitle, type Command, type CommandContext, type CommandSurfaces } from "./types";
 import { SEND_CHORD } from "@/constants/shortcuts";
-import { useImportModalStore, useTabsStore } from "@/stores";
+import { useImportModalStore, useTabsStore, useSaveStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
@@ -66,6 +66,7 @@ beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	useSettingsStore.setState({ selectedCategory: "appearance", highlightedKey: null });
 	useImportModalStore.setState({ isOpen: false });
+	useSaveStore.setState({ contexts: new Map() });
 });
 
 describe("the roster", () => {
@@ -229,6 +230,50 @@ describe("performing", () => {
 
 		commandById("close-tab").perform(ctx);
 		expect(useTabsStore.getState().openTabs).toHaveLength(0);
+	});
+
+	/*
+	 * The strip's bulk closes (#1360). The tab menu names the tab under the
+	 * pointer and these name the one on screen, but both reach the same store
+	 * action - so what is asserted here is that the command is a pointer to it,
+	 * not a second way to close a set of tabs.
+	 */
+	it("closes every tab but the active one", () => {
+		for (const type of ["welcome", "settings", "variables"] as const) {
+			useTabsStore.getState().openTab({ type, entityId: null });
+		}
+		const ctx = baseCommandContext();
+
+		commandById("close-other-tabs").perform(ctx);
+
+		const { openTabs } = useTabsStore.getState();
+		expect(openTabs.map((t) => t.type)).toEqual(["variables"]); // the last opened is active
+	});
+
+	it("offers neither bulk close where it would do nothing", () => {
+		useTabsStore.getState().openTab({ type: "settings", entityId: null });
+		const ids = availableCommands(baseCommandContext()).map((c) => c.id);
+
+		// One tab open, and it is the rightmost: nothing else to close, nothing
+		// to its right. An item that is offered and inert is worse than absent.
+		expect(ids).not.toContain("close-other-tabs");
+		expect(ids).not.toContain("close-tabs-to-right");
+		expect(ids).toContain("close-saved-tabs");
+	});
+
+	it("keeps a tab with unsaved edits when closing the saved ones", () => {
+		useTabsStore.getState().openTab({ type: "welcome", entityId: null });
+		useTabsStore.getState().openTab({ type: "settings", entityId: null });
+		useSaveStore.getState().registerContext({
+			id: "settings",
+			name: "settings",
+			save: () => Promise.resolve(),
+			hasPendingChanges: true,
+		});
+
+		commandById("close-saved-tabs").perform(baseCommandContext());
+
+		expect(useTabsStore.getState().openTabs.map((t) => t.type)).toEqual(["settings"]);
 	});
 
 	it("starts a load test through the contributed handler, never a copy of one", () => {

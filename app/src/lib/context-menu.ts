@@ -44,10 +44,16 @@ export const VARIABLE_ATTRIBUTE = "data-context-variable";
  *
  * Short by design: a read-only pane needs no marker, because the selection
  * already says Copy is the only offer, and a plain editable field needs none
- * either, because `isEditable` says the rest. Only these two carry an offer the
- * params cannot imply. Mirrors `ContextKind` in `electron/context-menu.ts`.
+ * either, because `isEditable` says the rest. Only these carry an offer, or a
+ * refusal, the params cannot imply. Mirrors `ContextKind` in
+ * `electron/context-menu.ts`.
+ *
+ * `own-menu` is that refusal: a surface that draws its own right-click menu -
+ * a collection row, a tab (#1360) - and wants no second one over it. Monaco
+ * keeps its own name because it is not one of ours; the two are answered the
+ * same way.
  */
-export type ContextKind = "url-bar" | "monaco";
+export type ContextKind = "url-bar" | "monaco" | "own-menu";
 
 /**
  * The props that mark a surface, spread onto it:
@@ -76,7 +82,7 @@ export interface ResolvedContext {
 
 function markedKind(element: Element | null): ContextKind | null {
 	const value = element?.closest(`[${CONTEXT_ATTRIBUTE}]`)?.getAttribute(CONTEXT_ATTRIBUTE);
-	return value === "url-bar" || value === "monaco" ? value : null;
+	return value === "url-bar" || value === "monaco" || value === "own-menu" ? value : null;
 }
 
 /** Read what a right-click landed on, in the terms the menu is composed from. */

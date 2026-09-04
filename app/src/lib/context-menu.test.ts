@@ -76,6 +76,15 @@ describe("resolveContext", () => {
 		});
 	});
 
+	it("reports a surface that draws its own menu", () => {
+		document.body.innerHTML = `<div ${CONTEXT_ATTRIBUTE}="own-menu"><span id="row-label">Orders</span></div>`;
+
+		expect(resolveContext(document.getElementById("row-label")).target).toEqual({
+			kind: "own-menu",
+			variable: null,
+		});
+	});
+
 	it("says nothing about an unmarked surface", () => {
 		urlBarWithToken();
 

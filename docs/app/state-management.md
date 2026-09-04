@@ -79,6 +79,14 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   a `Tab` does not record which editor the sidebar has selected - over-matching
   keeps a tab that could have closed, under-matching loses work. Nothing is
   flushed *during* eviction; the predicate already refused the tab
+- Bulk close (issue #1360): `closeOtherTabs`, `closeTabsToRight` and
+  `closeSavedTabs` - the tab strip's right-click menu - go through the same
+  `closeTabs` core as `closeTab` and `closeTabsForEntities`, so "which tab
+  takes the place of the one that was showing" stays one rule. A bulk close is
+  one `set` and at most one recorded navigation visit, never a loop of single
+  closes: closing tabs one at a time would focus and record a visit for every
+  intermediate tab on the way to the last, leaving Back to walk the user
+  through places they never went.
 - Response eviction: `closeTabsForEntities` clears each id's entry in
   `response-store`. Both callers reach it after a delete - the map's own LRU
   bound would get there eventually, but a response nothing can reach again
@@ -137,6 +145,11 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
 const { openTab, closeTab, focusTab, closeTabsForEntities } = useTabsStore();
 openTab({ type: "request", entityId: "req-123" });
 closeTabsForEntities(["req-123"]); // after a delete: closes tabs, drops responses
+
+const { closeOtherTabs, closeTabsToRight, closeSavedTabs } = useTabsStore();
+closeOtherTabs("tab-1"); // keeps tab-1, one set-and-visit for the rest
+closeTabsToRight("tab-1");
+closeSavedTabs(); // keeps every dirty tab
 openCollectionSpecTab("col-123"); // opens the collection, on its Spec tab
 openRequestWithDataRow("req-123", 500); // opens the request, on row 501 of its data file
 

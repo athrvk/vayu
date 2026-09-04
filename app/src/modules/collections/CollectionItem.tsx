@@ -15,7 +15,7 @@ import type { TreeEntity } from "./drop-position";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
-import { RowActionsMenu, TruncatedText } from "@/components/shared";
+import { RowActionsMenu, RowContextMenu, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { childInsetPx, rowInsetPx } from "@/constants/layout";
 
@@ -178,205 +178,216 @@ export default function CollectionItem({
 	 */
 	const childIndentPx = childInsetPx(depth);
 
+	/*
+	 * One list, three ways in: the ⋯ button, the tree's Shift+F10 / Menu /
+	 * Shift+Enter keys, and right-click (#1360).
+	 *
+	 * "Move to..." is appended rather than built in `getCollectionActions`: it
+	 * belongs to the drag slice, which mounts after the CRUD slice and would
+	 * otherwise have to be threaded backwards into it.
+	 */
+	const rowActions = dnd.moveAction
+		? [...getCollectionActions(collection), dnd.moveAction]
+		: getCollectionActions(collection);
+	const menuLabel = `More actions for ${collection.name}`;
+
 	return (
 		<div className={cn("select-none", isDeleting && "opacity-50")}>
 			{/* Collection Header */}
 			{/* The row is the treeitem: one tab stop for the whole tree, arrows
 			    move between rows (useRovingTreeFocus). tabIndex starts at -1; the
 			    hook promotes exactly one row to 0. */}
-			{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor */}
-			<div
-				ref={rowRef}
-				role="treeitem"
-				tabIndex={-1}
-				// Lets the tree scroll a selected collection into view, the way
-				// `data-request-id` on RequestItem already does for a request.
-				data-collection-id={collection.id}
-				// The folder block this row sits in, for the drag hit test - it has
-				// the element, not the row's model. Absent at the root, which is
-				// exactly the `null` parent scope the reorder batch names.
-				data-parent-id={collection.parentId ?? undefined}
-				data-tree-label={collection.name}
-				aria-expanded={isExpanded}
-				aria-selected={isSelected}
-				// The hierarchy a screen reader announces. Without these the whole
-				// tree reads as a flat list: level is 1-based, so a root row is 1.
-				aria-level={depth + 1}
-				aria-posinset={posInSet}
-				aria-setsize={setSize}
-				// A row's children are rendered as its *sibling*, not inside it (see
-				// useRovingTreeFocus for why the DOM is that shape), so nothing
-				// connects the group to this row. `aria-owns` is the attribute-only
-				// way to say "that group belongs to me" without restructuring the
-				// DOM the roving-focus walk and the hit-area rules depend on.
-				aria-owns={isExpanded ? childrenId : undefined}
-				aria-describedby={isExpanded && showsEmptyPlaceholder ? emptyId : undefined}
-				onClick={(e) => isRowSurface(e) && handleClick(e)}
-				onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
-				// Whole-row drag handle: the gesture is captured here and only
-				// becomes a drag past the movement threshold, so every click
-				// affordance the hit-area rules bought is untouched.
-				{...dnd.handlers}
-				data-drop-blocked={dnd.isBlocked || undefined}
-				className={cn(
-					// focus-row: this row is the perceived target, not the narrower
-					// label button inside it - it paints the keyboard focus ring.
-					// The transition deliberately omits outline-color (which
-					// `transition-colors` includes in Tailwind v4): a focus ring must
-					// appear instantly, otherwise it visibly fades between rows as
-					// Tab moves. Hover may ease; focus may not.
-					// h-8: the shared drawer row height. Row height used to be an
-					// accident of content - the 28px chevron set it here, padding set
-					// it elsewhere - so sibling drawer views ran 34/36/38/40px and the
-					// rhythm shifted every time you switched view.
-					"focus-row flex h-8 items-center gap-1 pr-2 group transition-[color,background-color,border-color] cursor-pointer",
-					isSelected
-						? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
-						: "hover:bg-accent",
-					// Last, so a drop target's ring wins over the selected row's -
-					// same colour, and the drop is the transient one.
-					rowDndClasses(dnd)
-				)}
-				style={{ paddingLeft: indentPx }}
+			<RowContextMenu
+				label={menuLabel}
+				actions={rowActions}
+				disabled={isRenaming || isDeleting}
 			>
-				<RowDropIndicator edge={dnd.dropEdge} indentPx={indentPx} />
-				<button
-					onClick={handleToggleClick}
+				{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor */}
+				<div
+					ref={rowRef}
+					role="treeitem"
 					tabIndex={-1}
-					data-tree-toggle
+					// Lets the tree scroll a selected collection into view, the way
+					// `data-request-id` on RequestItem already does for a request.
+					data-collection-id={collection.id}
+					// The folder block this row sits in, for the drag hit test - it has
+					// the element, not the row's model. Absent at the root, which is
+					// exactly the `null` parent scope the reorder batch names.
+					data-parent-id={collection.parentId ?? undefined}
+					data-tree-label={collection.name}
+					aria-expanded={isExpanded}
+					aria-selected={isSelected}
+					// The hierarchy a screen reader announces. Without these the whole
+					// tree reads as a flat list: level is 1-based, so a root row is 1.
+					aria-level={depth + 1}
+					aria-posinset={posInSet}
+					aria-setsize={setSize}
+					// A row's children are rendered as its *sibling*, not inside it (see
+					// useRovingTreeFocus for why the DOM is that shape), so nothing
+					// connects the group to this row. `aria-owns` is the attribute-only
+					// way to say "that group belongs to me" without restructuring the
+					// DOM the roving-focus walk and the hit-area rules depend on.
+					aria-owns={isExpanded ? childrenId : undefined}
+					aria-describedby={isExpanded && showsEmptyPlaceholder ? emptyId : undefined}
+					onClick={(e) => isRowSurface(e) && handleClick(e)}
+					onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
+					// Whole-row drag handle: the gesture is captured here and only
+					// becomes a drag past the movement threshold, so every click
+					// affordance the hit-area rules bought is untouched.
+					{...dnd.handlers}
+					data-drop-blocked={dnd.isBlocked || undefined}
 					className={cn(
-						// focus-self: this toggles expansion rather than opening the
-						// collection, so it keeps its own ring instead of lighting
-						// up the whole row.
-						// w-6 h-6 (24px) so the chevron fits the 32px row. Still an
-						// adequate pointer target, and the row itself remains clickable.
-						"focus-self flex items-center justify-center w-6 h-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+						// focus-row: this row is the perceived target, not the narrower
+						// label button inside it - it paints the keyboard focus ring.
+						// The transition deliberately omits outline-color (which
+						// `transition-colors` includes in Tailwind v4): a focus ring must
+						// appear instantly, otherwise it visibly fades between rows as
+						// Tab moves. Hover may ease; focus may not.
+						// h-8: the shared drawer row height. Row height used to be an
+						// accident of content - the 28px chevron set it here, padding set
+						// it elsewhere - so sibling drawer views ran 34/36/38/40px and the
+						// rhythm shifted every time you switched view.
+						"focus-row flex h-8 items-center gap-1 pr-2 group transition-[color,background-color,border-color] cursor-pointer",
 						isSelected
-							? "text-primary/90 hover:text-primary"
-							: "text-muted-foreground hover:text-foreground"
+							? "bg-primary/10 hover:bg-primary/15 ring-1 ring-inset ring-primary/20"
+							: "hover:bg-accent",
+						// Last, so a drop target's ring wins over the selected row's -
+						// same colour, and the drop is the transient one.
+						rowDndClasses(dnd)
 					)}
-					disabled={isDeleting || isRenaming}
-					aria-label={isExpanded ? "Collapse collection" : "Expand collection"}
+					style={{ paddingLeft: indentPx }}
 				>
-					{isDeleting ? (
-						<Loader2 className="w-[18px] h-[18px] animate-spin" />
-					) : isExpanded ? (
-						<ChevronDown className="w-[18px] h-[18px]" />
-					) : (
-						<ChevronRight className="w-[18px] h-[18px]" />
-					)}
-				</button>
-				<button
-					onClick={handleClick}
-					onDoubleClick={handleDoubleClick}
-					tabIndex={-1}
-					data-tree-activate
-					// self-stretch: see RequestItem. The row is `items-center`, so
-					// this button - the only thing wired to onCollectionClick - was
-					// as tall as its 18px label inside a 32px row, leaving ~7px of
-					// dead space above and below that still showed the hover fill
-					// and the pointer cursor.
-					className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
-					disabled={isDeleting || isRenaming}
-				>
-					<FolderIcon
+					<RowDropIndicator edge={dnd.dropEdge} indentPx={indentPx} />
+					<button
+						onClick={handleToggleClick}
+						tabIndex={-1}
+						data-tree-toggle
 						className={cn(
-							"w-4 h-4 shrink-0",
-							depth === 0 ? "text-primary" : "text-primary/70"
+							// focus-self: this toggles expansion rather than opening the
+							// collection, so it keeps its own ring instead of lighting
+							// up the whole row.
+							// w-6 h-6 (24px) so the chevron fits the 32px row. Still an
+							// adequate pointer target, and the row itself remains clickable.
+							"focus-self flex items-center justify-center w-6 h-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+							isSelected
+								? "text-primary/90 hover:text-primary"
+								: "text-muted-foreground hover:text-foreground"
 						)}
-					/>
-					{isRenaming ? (
-						<Input
-							type="text"
-							value={renameValue}
-							onChange={(e) => onRenameChange(e.target.value)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									returnFocusToRow.current = true;
-									onRenameSubmit(collection.id);
-								} else if (e.key === "Escape") {
-									returnFocusToRow.current = true;
-									onRenameCancel();
-								}
-							}}
-							onBlur={() => onRenameSubmit(collection.id)}
-							className="flex-1 h-6 text-sm"
-							autoFocus
-							onClick={(e) => e.stopPropagation()}
+						disabled={isDeleting || isRenaming}
+						aria-label={isExpanded ? "Collapse collection" : "Expand collection"}
+					>
+						{isDeleting ? (
+							<Loader2 className="w-[18px] h-[18px] animate-spin" />
+						) : isExpanded ? (
+							<ChevronDown className="w-[18px] h-[18px]" />
+						) : (
+							<ChevronRight className="w-[18px] h-[18px]" />
+						)}
+					</button>
+					<button
+						onClick={handleClick}
+						onDoubleClick={handleDoubleClick}
+						tabIndex={-1}
+						data-tree-activate
+						// self-stretch: see RequestItem. The row is `items-center`, so
+						// this button - the only thing wired to onCollectionClick - was
+						// as tall as its 18px label inside a 32px row, leaving ~7px of
+						// dead space above and below that still showed the hover fill
+						// and the pointer cursor.
+						className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
+						disabled={isDeleting || isRenaming}
+					>
+						<FolderIcon
+							className={cn(
+								"w-4 h-4 shrink-0",
+								depth === 0 ? "text-primary" : "text-primary/70"
+							)}
 						/>
-					) : (
-						<>
-							{/*
-							 * truncate + min-w-0 on the button: a flex item won't
-							 * shrink below its content by default, so without both a
-							 * long name widens the row and scrolls the whole panel
-							 * sideways instead of ellipsing.
-							 */}
-							<TruncatedText
-								className={cn(
-									"text-sm text-foreground cursor-pointer",
-									depth === 0 && "font-medium"
-								)}
-							>
-								{collection.name}
-							</TruncatedText>
-							{/* shrink-0: the count is short and load-bearing - the name
+						{isRenaming ? (
+							<Input
+								type="text"
+								value={renameValue}
+								onChange={(e) => onRenameChange(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") {
+										returnFocusToRow.current = true;
+										onRenameSubmit(collection.id);
+									} else if (e.key === "Escape") {
+										returnFocusToRow.current = true;
+										onRenameCancel();
+									}
+								}}
+								onBlur={() => onRenameSubmit(collection.id)}
+								className="flex-1 h-6 text-sm"
+								autoFocus
+								onClick={(e) => e.stopPropagation()}
+							/>
+						) : (
+							<>
+								{/*
+								 * truncate + min-w-0 on the button: a flex item won't
+								 * shrink below its content by default, so without both a
+								 * long name widens the row and scrolls the whole panel
+								 * sideways instead of ellipsing.
+								 */}
+								<TruncatedText
+									className={cn(
+										"text-sm text-foreground cursor-pointer",
+										depth === 0 && "font-medium"
+									)}
+								>
+									{collection.name}
+								</TruncatedText>
+								{/* shrink-0: the count is short and load-bearing - the name
 							    yields first. */}
-							<span className="shrink-0 text-xs text-muted-foreground">
-								({requests.length + childCollections.length})
-							</span>
-						</>
-					)}
-				</button>
+								<span className="shrink-0 text-xs text-muted-foreground">
+									({requests.length + childCollections.length})
+								</span>
+							</>
+						)}
+					</button>
 
-				{/* Same ⋯ menu component as request and environment rows. Revealed on
+					{/* Same ⋯ menu component as request and environment rows. Revealed on
 				    keyboard focus as well as hover, so a keyboard user never lands on
 				    an invisible control. */}
-				{!isRenaming && (
-					<RowActionsMenu
-						label={`More actions for ${collection.name}`}
-						// The tree is one tab stop: the row holds it, and Shift+F10 /
-						// Menu / Shift+Enter are the way in from here.
-						tabIndex={-1}
-						className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-						// "Move to..." is appended rather than built in
-						// `getCollectionActions`: it belongs to the drag slice, which
-						// mounts after the CRUD slice and would otherwise have to be
-						// threaded backwards into it.
-						actions={
-							dnd.moveAction
-								? [...getCollectionActions(collection), dnd.moveAction]
-								: getCollectionActions(collection)
-						}
-					/>
-				)}
-				{/* Keyboard-only rename and delete targets: F2 and Delete click them
+					{!isRenaming && (
+						<RowActionsMenu
+							label={menuLabel}
+							// The tree is one tab stop: the row holds it, and Shift+F10 /
+							// Menu / Shift+Enter are the way in from here.
+							tabIndex={-1}
+							className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+							actions={rowActions}
+						/>
+					)}
+					{/* Keyboard-only rename and delete targets: F2 and Delete click them
 				    (see useRovingTreeFocus). Never shown; the same actions live in
 				    the row's menu. The delete one used to exist on request rows
 				    only, so Delete on a folder was swallowed silently - the hook
 				    preventDefaults the key either way. It opens the same confirm
 				    dialog the menu does: a cascade delete is never one keystroke. */}
-				<button
-					type="button"
-					className="hidden"
-					aria-hidden="true"
-					tabIndex={-1}
-					data-tree-rename
-					onClick={() => onStartRename(collection)}
-				/>
-				<button
-					type="button"
-					className="hidden"
-					aria-hidden="true"
-					tabIndex={-1}
-					data-tree-delete
-					onClick={() => {
-						if (isDeleting) return;
-						onCollectionDeleteClick(collection.id, collection.name);
-					}}
-				/>
-				<RowMoveControls entity={entity} />
-			</div>
+					<button
+						type="button"
+						className="hidden"
+						aria-hidden="true"
+						tabIndex={-1}
+						data-tree-rename
+						onClick={() => onStartRename(collection)}
+					/>
+					<button
+						type="button"
+						className="hidden"
+						aria-hidden="true"
+						tabIndex={-1}
+						data-tree-delete
+						onClick={() => {
+							if (isDeleting) return;
+							onCollectionDeleteClick(collection.id, collection.name);
+						}}
+					/>
+					<RowMoveControls entity={entity} />
+				</div>
+			</RowContextMenu>
 
 			{/* Children (Subfolders + Requests) - indented by depth */}
 			{isExpanded && (

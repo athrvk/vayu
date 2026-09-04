@@ -69,7 +69,7 @@ export type UpdateCheckResult =
  * cannot read from Chromium's own context-menu params.
  */
 export interface ContextMenuTarget {
-	kind: "url-bar" | "monaco" | null;
+	kind: "url-bar" | "monaco" | "own-menu" | null;
 	variable: string | null;
 }
 
