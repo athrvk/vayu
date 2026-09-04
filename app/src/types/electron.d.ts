@@ -24,6 +24,22 @@ interface ThemeInfo {
 	themeSource: ThemeSource;
 }
 
+/**
+ * The host went to sleep under a running test, and came back. Mirrors
+ * `HostSuspendedEvent` / `HostResumedEvent` in `electron/power-save.ts`; the two
+ * are separated only by the process boundary. Wall-clock milliseconds, because
+ * the gap is the thing being reported and the engine's own clock is exactly
+ * what the suspend stopped.
+ */
+interface HostSuspendedEvent {
+	at: number;
+}
+
+interface HostResumedEvent {
+	at: number;
+	durationMs: number;
+}
+
 type UpdateStrategy = "silent" | "notify" | "disabled";
 
 interface UpdateAvailableInfo {
@@ -173,6 +189,28 @@ interface ElectronAPI {
 	 * caller may be as eager as it likes.
 	 */
 	refreshSystemProxy: () => Promise<string | null>;
+
+	/**
+	 * System wake lock, held while a run streams (issue #1357). Resolves to the
+	 * token that releases this hold; `releaseWakeLock` answers `false` for a
+	 * token that was never live or has already been handed back, which is what
+	 * makes a double release safe. Mirrors `power-save.ts` in the main process,
+	 * which ref-counts the holds and drops a renderer's own when it goes away.
+	 *
+	 * Renderer callers go through `@/services/wake-lock` rather than these
+	 * directly: one holder per run, and the token bookkeeping in one place.
+	 */
+	holdWakeLock: (reason: string) => Promise<string>;
+	releaseWakeLock: (token: string) => Promise<boolean>;
+
+	/**
+	 * The host suspended and resumed anyway, while a run held the lock. The lock
+	 * is a request to the OS, not a guarantee - a closed lid or a critical
+	 * battery overrides it - so a run's series can still have a gap, and these
+	 * are what let the app say how long it was instead of leaving a hole.
+	 */
+	onHostSuspended: (callback: (event: HostSuspendedEvent) => void) => () => void;
+	onHostResumed: (callback: (event: HostResumedEvent) => void) => () => void;
 
 	// Before quit flush handler
 	onBeforeQuit: (callback: () => void | Promise<void>) => () => void;
