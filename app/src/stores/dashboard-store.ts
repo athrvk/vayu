@@ -42,6 +42,55 @@ export interface LoadTestRunConfig {
 	startConcurrency?: number;
 }
 
+/**
+ * Seconds in a duration the engine accepts: a number with an optional
+ * `ms`/`s`/`m`/`h` unit, where a bare number is seconds (see
+ * `parse_duration_ms` in `engine/src/core/load_strategy.cpp`). `null` for
+ * anything else, including the absent duration of an open-ended run.
+ */
+const DURATION_UNIT_SECONDS: Record<string, number> = { ms: 0.001, s: 1, m: 60, h: 3600 };
+
+function durationSeconds(duration: string | undefined): number | null {
+	if (!duration) return null;
+	const match = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h)?\s*$/.exec(duration);
+	if (!match) return null;
+	const seconds = Number(match[1]) * (match[2] ? DURATION_UNIT_SECONDS[match[2]] : 1);
+	return seconds > 0 ? seconds : null;
+}
+
+/**
+ * How far through a load run one tick is, as 0..1, or `null` when the run has
+ * no denominator to be a fraction of (issue #1362).
+ *
+ * Two denominators, in this order, because they are not equally good. The
+ * engine publishes `requestsExpected` for every mode that can know it - a rate
+ * times a duration, or an iteration count (`load_strategy.cpp`) - and that is
+ * the run's own arithmetic rather than the client's. A duration-bounded
+ * `constant_concurrency` run publishes no such count, so elapsed-over-duration
+ * is what is left; it is the same fraction the run's clock is counting down.
+ *
+ * Not held as state: the one reader is the taskbar and Dock indicator, and a
+ * field the store recorded for nobody is the defect the repo names most often.
+ */
+export function deriveRunProgress(
+	config: LoadTestRunConfig | null,
+	tick: LoadTestMetrics | null
+): number | null {
+	const clamp = (value: number): number => Math.min(1, Math.max(0, value));
+
+	const expected = tick?.requests_expected;
+	const sent = tick?.requests_sent;
+	if (typeof expected === "number" && expected > 0 && typeof sent === "number") {
+		return clamp(sent / expected);
+	}
+
+	const total = durationSeconds(config?.duration);
+	const elapsed = tick?.elapsed_seconds;
+	if (total !== null && typeof elapsed === "number") return clamp(elapsed / total);
+
+	return null;
+}
+
 // Request info passed when starting a load test
 export interface LoadTestRequestInfo {
 	method: string;

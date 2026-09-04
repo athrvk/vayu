@@ -41,6 +41,16 @@ interface HostResumedEvent {
 }
 
 /**
+ * What the OS should show for the run in front. Mirrors `RunProgressUpdate` in
+ * `electron/run-progress.ts`; the two are separated only by the process
+ * boundary. `value` is a 0..1 fraction, or null for a run with no denominator -
+ * an open-ended load test, or a collection run, whose plan length only the
+ * engine resolves.
+ */
+export type RunProgressUpdate =
+	{ state: "running"; value: number | null } | { state: "failed" } | { state: "idle" };
+
+/**
  * Where a notification's click should land. Mirrors `NotifyTarget` in
  * `electron/notify.ts`, which echoes it back untouched: main carries the
  * target, the renderer is the only side that knows what it means.
@@ -276,6 +286,18 @@ interface ElectronAPI {
 	 */
 	onHostSuspended: (callback: (event: HostSuspendedEvent) => void) => () => void;
 	onHostResumed: (callback: (event: HostResumedEvent) => void) => () => void;
+
+	/**
+	 * A run's progress on the Windows taskbar button and the macOS Dock icon
+	 * (issue #1362). Mirrors `RunProgressUpdate` in `electron/run-progress.ts`.
+	 *
+	 * One-way: nothing the OS answers would change what the run does, and a run
+	 * that waited on a repaint would be waiting on a window it does not own.
+	 * Renderer callers go through `@/services/run-progress`, which holds the one
+	 * rule this side cannot: which of two overlapping runs owns the single
+	 * indicator the OS gives an application.
+	 */
+	setRunProgress: (update: RunProgressUpdate) => void;
 
 	/**
 	 * System notifications for the events that finish while the user is in

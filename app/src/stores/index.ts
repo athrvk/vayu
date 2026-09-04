@@ -9,7 +9,7 @@
 export { useEngineStore, type EngineStatus } from "./engine-store";
 
 // Domain stores
-export { useDashboardStore } from "./dashboard-store";
+export { useDashboardStore, deriveRunProgress } from "./dashboard-store";
 export { useScenarioRunStore } from "./scenario-run-store";
 export { useExecutionEventsStore } from "./execution-events-store";
 export { useImportModalStore } from "./import-modal-store";

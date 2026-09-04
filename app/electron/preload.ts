@@ -290,6 +290,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("power:resumed", handler);
 	},
 
+	// A run's progress on the taskbar button and the Dock icon (#1362). One-way
+	// and unacknowledged: this is painted at most twice a second off the metrics
+	// flush, an answer would tell the renderer nothing it acts on, and a run must
+	// never wait on the OS to draw. `value` is null for a run with no
+	// denominator; main decides what each platform makes of that.
+	setRunProgress: (update: {
+		state: "running" | "failed" | "idle";
+		value?: number | null;
+	}): void => ipcRenderer.send("runs:progress", update),
+
 	// System notifications for what finishes while the user is elsewhere
 	// (#1358). The renderer sends what happened; main decides whether to post
 	// it - the window's focus and the platform's support are its to answer -

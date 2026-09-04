@@ -70,6 +70,21 @@ vi.mock("./notify", async (importOriginal) => ({
 	...(await importOriginal<typeof import("./notify")>()),
 	systemNotify: { post: mockNotifyPost, availability: vi.fn() },
 }));
+// The taskbar and Dock indicator (#1362), mocked at the same boundary: which
+// platform paints what is `electron/run-progress.ts`'s question.
+const { mockProgressReport, mockProgressFail, mockProgressClear } = vi.hoisted(() => ({
+	mockProgressReport: vi.fn(),
+	mockProgressFail: vi.fn(),
+	mockProgressClear: vi.fn(),
+}));
+vi.mock("./run-progress", () => ({
+	runProgress: {
+		report: mockProgressReport,
+		fail: mockProgressFail,
+		clear: mockProgressClear,
+	},
+	RUN_PROGRESS_KEYS: { loadRun: "load-run", collectionRun: "collection-run" },
+}));
 
 import { NOTIFY_KINDS } from "./notify";
 import { scenarioRunService } from "./scenario-run-service";
@@ -78,6 +93,7 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { WAKE_LOCK_KEYS } from "./wake-lock";
+import { RUN_PROGRESS_KEYS } from "./run-progress";
 import type { ScenarioStepEvent } from "@/types";
 
 /** The live-refresh cadence these cases run at. */
@@ -384,6 +400,38 @@ describe("ScenarioRunService", () => {
 					body: "engine gone",
 				})
 			);
+		});
+	});
+
+	describe("the OS progress indicator (#1362)", () => {
+		it("claims it with no fraction - the plan's length is the engine's to resolve", () => {
+			scenarioRunService.startMonitoring("run_20");
+			expect(mockProgressReport).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun, null);
+		});
+
+		it("gives it up when the run ends", async () => {
+			scenarioRunService.startMonitoring("run_21");
+			await closeStream();
+			expect(mockProgressClear).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+		});
+
+		it("says failed when the stream errors", () => {
+			scenarioRunService.startMonitoring("run_22");
+			failStream("engine gone");
+			expect(mockProgressFail).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+		});
+
+		/*
+		 * Mutation check: drop the `progressFailedRunId` guard in `handleClose`
+		 * and the failed state is cleared in the same tick it was painted, so a
+		 * run that failed looks exactly like one that finished.
+		 */
+		it("leaves a failed run's flash alone when its stream closes", async () => {
+			scenarioRunService.startMonitoring("run_23");
+			failStream("engine gone");
+			await closeStream();
+			expect(mockProgressFail).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+			expect(mockProgressClear).not.toHaveBeenCalled();
 		});
 	});
 });
