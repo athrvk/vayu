@@ -30,10 +30,19 @@ vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn(), disconnect: vi.f
 vi.mock("./api", () => ({
 	apiService: { getRunReport: vi.fn().mockResolvedValue({ summary: {}, latency: {} }) },
 }));
+const { mockWakeLockHold, mockWakeLockRelease } = vi.hoisted(() => ({
+	mockWakeLockHold: vi.fn(),
+	mockWakeLockRelease: vi.fn(),
+}));
+vi.mock("./wake-lock", () => ({
+	wakeLock: { hold: mockWakeLockHold, release: mockWakeLockRelease },
+	WAKE_LOCK_KEYS: { loadRun: "load-run", collectionRun: "collection-run" },
+}));
 
 import { loadTestService } from "./load-test-service";
 import { sseClient } from "./sse-client";
 import { apiService } from "./api";
+import { WAKE_LOCK_KEYS } from "./wake-lock";
 
 /** `handleClose` is private; the SSE client is what calls it in production. */
 function closeStream(): Promise<void> {
@@ -111,5 +120,54 @@ describe("LoadTestService", () => {
 		expect(mockSetError).toHaveBeenCalledWith(null);
 		expect(mockSetFinalReport).not.toHaveBeenCalled();
 		expect(mockAddMetricsBatch).not.toHaveBeenCalled();
+	});
+
+	describe("wake lock (issue #1357)", () => {
+		it("holds the load-run key on start", () => {
+			loadTestService.startMonitoring("run_4");
+			// Pins the `wakeLock.hold(...)` call in `startMonitoring`.
+			expect(mockWakeLockHold).toHaveBeenCalledWith(
+				WAKE_LOCK_KEYS.loadRun,
+				expect.any(String)
+			);
+		});
+
+		it("releases the load-run key on stop", () => {
+			loadTestService.startMonitoring("run_5");
+			mockWakeLockRelease.mockClear();
+			loadTestService.stopMonitoring();
+			// Pins the `wakeLock.release(...)` call in `stopMonitoring`.
+			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.loadRun);
+		});
+
+		it("releases the load-run key when the stream closes, before the report fetch resolves", async () => {
+			dashboard.currentRunId = "run_6";
+			loadTestService.startMonitoring("run_6");
+			mockWakeLockRelease.mockClear();
+
+			let releaseCalledBeforeFetch = false;
+			vi.mocked(apiService.getRunReport).mockImplementationOnce(() => {
+				// The lock must already be gone by the time the report fetch is
+				// even asked for - reverting the release's position in `handleClose`
+				// (moving it after the `await`) leaves this false.
+				releaseCalledBeforeFetch = mockWakeLockRelease.mock.calls.length > 0;
+				return Promise.resolve({ summary: {}, latency: {} } as never);
+			});
+
+			await closeStream();
+
+			expect(releaseCalledBeforeFetch).toBe(true);
+			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.loadRun);
+		});
+
+		it("releases the load-run key on a stream error", () => {
+			loadTestService.startMonitoring("run_7");
+			mockWakeLockRelease.mockClear();
+			(loadTestService as unknown as { handleError: (e: Error) => void }).handleError(
+				new Error("transport gone")
+			);
+			// Pins the `wakeLock.release(...)` call in `handleError`.
+			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.loadRun);
+		});
 	});
 });

@@ -19,6 +19,7 @@ import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { useDashboardStore } from "@/stores";
+import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
 // The batcher throttles UI commits to keep render cost bounded, but every tick
@@ -53,6 +54,10 @@ class LoadTestService {
 		if (this.activeRunId && this.activeRunId !== runId) {
 			this.stopMonitoring();
 		}
+
+		// Fire-and-forget: the stream below connects the same tick regardless of
+		// whether the main process has answered yet.
+		wakeLock.hold(WAKE_LOCK_KEYS.loadRun, "Load test run streaming");
 
 		this.activeRunId = runId;
 		this.isConnected = true;
@@ -89,6 +94,7 @@ class LoadTestService {
 			return;
 		}
 
+		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		this.metricsBatcher.discard();
 		this.pendingMonitor = [];
 		this.activeRunId = null;
@@ -151,6 +157,7 @@ class LoadTestService {
 
 	private handleError(error: Error): void {
 		console.error("[LoadTestService] SSE error:", error);
+		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		const store = useDashboardStore.getState();
 		store.setError(error.message);
 	}
@@ -159,6 +166,10 @@ class LoadTestService {
 		const runId = this.activeRunId;
 		this.flushPending();
 		this.isConnected = false;
+		// Before the awaited report fetch below: the run is over the moment the
+		// stream closed, and the machine must not stay pinned awake through a
+		// slow fetch.
+		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		const store = useDashboardStore.getState();
 		store.setStreaming(false);
 
