@@ -136,7 +136,10 @@ const contextTargets = createContextTargetStore();
 /** Do what a context-menu item promised, in whichever process owns the action. */
 function runMenuCommand(command: ContextCommand): void {
 	runContextCommand(command, {
-		writeClipboard: (text) => clipboard.writeText(text),
+		// Electron 44 made the clipboard writes promises. Nothing waits on the
+		// copy - the menu item is done when the text is queued - so the promise
+		// is discarded deliberately rather than left floating.
+		writeClipboard: (text) => void clipboard.writeText(text),
 		openExternal: (url) => {
 			void shell.openExternal(url);
 		},
@@ -275,6 +278,12 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
+		// Electron 43 made frameless windows rounded by default on Linux, which
+		// is the shape Vayu wants there - it matches the frame macOS has always
+		// drawn. Stated rather than inherited, so the window's shape does not
+		// move with whichever default the current Electron ships. Windows
+		// ignores the option.
+		roundedCorners: true,
 		// Centre the macOS traffic lights in the bar. The frame height is a named
 		// constant because it has been wrong twice: 16 originally, then 12 (the
 		// visible circle) - Electron positions the button frame, which is 14.

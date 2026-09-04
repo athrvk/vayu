@@ -43,7 +43,7 @@ function target(overrides: Partial<ContextTarget> = {}): ContextTarget {
 	return { ...NO_CONTEXT_TARGET, ...overrides };
 }
 
-const noClipboard = () => "";
+const noClipboard = async () => "";
 
 /** The roles a template offers, in order, with whether each is enabled. */
 function roles(items: ContextMenuItem[]): Array<[string, boolean]> {
@@ -62,8 +62,8 @@ afterEach(() => {
 });
 
 describe("menuTemplateFor - editable fields", () => {
-	it("offers the four edit roles, Select All behind a separator", () => {
-		const items = menuTemplateFor(params({ isEditable: true }), target(), noClipboard);
+	it("offers the four edit roles, Select All behind a separator", async () => {
+		const items = await menuTemplateFor(params({ isEditable: true }), target(), noClipboard);
 
 		expect(roles(items)).toEqual([
 			["cut", true],
@@ -74,8 +74,8 @@ describe("menuTemplateFor - editable fields", () => {
 		expect(items[3]).toEqual({ kind: "separator" });
 	});
 
-	it("disables the items the edit flags say cannot act", () => {
-		const items = menuTemplateFor(
+	it("disables the items the edit flags say cannot act", async () => {
+		const items = await menuTemplateFor(
 			params({
 				isEditable: true,
 				editFlags: { ...ALL_FLAGS, canPaste: false, canCut: false },
@@ -94,11 +94,11 @@ describe("menuTemplateFor - editable fields", () => {
 });
 
 describe("menuTemplateFor - the URL bar's Paste as offer", () => {
-	it("offers the import when the clipboard holds a curl command", () => {
-		const items = menuTemplateFor(
+	it("offers the import when the clipboard holds a curl command", async () => {
+		const items = await menuTemplateFor(
 			params({ isEditable: true }),
 			target({ kind: "url-bar" }),
-			() => "curl https://api.example.com -H 'X-Key: 1'"
+			async () => "curl https://api.example.com -H 'X-Key: 1'"
 		);
 
 		expect(labels(items)).toEqual(["Paste as curl"]);
@@ -108,30 +108,34 @@ describe("menuTemplateFor - the URL bar's Paste as offer", () => {
 		});
 	});
 
-	it("names wget when that is what the clipboard holds", () => {
-		const items = menuTemplateFor(
+	it("names wget when that is what the clipboard holds", async () => {
+		const items = await menuTemplateFor(
 			params({ isEditable: true }),
 			target({ kind: "url-bar" }),
-			() => "wget https://api.example.com"
+			async () => "wget https://api.example.com"
 		);
 
 		expect(labels(items)).toEqual(["Paste as wget"]);
 	});
 
-	it("offers nothing extra for ordinary clipboard text", () => {
-		const items = menuTemplateFor(
+	it("offers nothing extra for ordinary clipboard text", async () => {
+		const items = await menuTemplateFor(
 			params({ isEditable: true }),
 			target({ kind: "url-bar" }),
-			() => "https://api.example.com"
+			async () => "https://api.example.com"
 		);
 
 		expect(labels(items)).toEqual([]);
 	});
 
-	it("does not read the clipboard at all outside the URL bar", () => {
-		const readClipboardText = vi.fn(() => "curl https://api.example.com");
+	it("does not read the clipboard at all outside the URL bar", async () => {
+		const readClipboardText = vi.fn(async () => "curl https://api.example.com");
 
-		const items = menuTemplateFor(params({ isEditable: true }), target(), readClipboardText);
+		const items = await menuTemplateFor(
+			params({ isEditable: true }),
+			target(),
+			readClipboardText
+		);
 
 		expect(readClipboardText).not.toHaveBeenCalled();
 		expect(labels(items)).toEqual([]);
@@ -139,8 +143,8 @@ describe("menuTemplateFor - the URL bar's Paste as offer", () => {
 });
 
 describe("menuTemplateFor - variable tokens", () => {
-	it("offers Edit variable for the token under the pointer", () => {
-		const items = menuTemplateFor(
+	it("offers Edit variable for the token under the pointer", async () => {
+		const items = await menuTemplateFor(
 			params({ isEditable: true }),
 			target({ kind: "url-bar", variable: "baseUrl" }),
 			noClipboard
@@ -152,8 +156,8 @@ describe("menuTemplateFor - variable tokens", () => {
 		});
 	});
 
-	it("offers it in any editable field, not only the URL bar", () => {
-		const items = menuTemplateFor(
+	it("offers it in any editable field, not only the URL bar", async () => {
+		const items = await menuTemplateFor(
 			params({ isEditable: true }),
 			target({ variable: "token" }),
 			noClipboard
@@ -164,18 +168,22 @@ describe("menuTemplateFor - variable tokens", () => {
 });
 
 describe("menuTemplateFor - read-only surfaces", () => {
-	it("offers Copy for selected text", () => {
-		const items = menuTemplateFor(params({ selectionText: "200 OK" }), target(), noClipboard);
+	it("offers Copy for selected text", async () => {
+		const items = await menuTemplateFor(
+			params({ selectionText: "200 OK" }),
+			target(),
+			noClipboard
+		);
 
 		expect(roles(items)).toEqual([["copy", true]]);
 	});
 
-	it("shows nothing on empty chrome", () => {
-		expect(menuTemplateFor(params(), target(), noClipboard)).toEqual([]);
+	it("shows nothing on empty chrome", async () => {
+		expect(await menuTemplateFor(params(), target(), noClipboard)).toEqual([]);
 	});
 
-	it("shows nothing inside a Monaco editor, which draws its own", () => {
-		const items = menuTemplateFor(
+	it("shows nothing inside a Monaco editor, which draws its own", async () => {
+		const items = await menuTemplateFor(
 			params({ isEditable: true, selectionText: "{}", linkURL: "https://example.com" }),
 			target({ kind: "monaco" }),
 			noClipboard
@@ -186,8 +194,8 @@ describe("menuTemplateFor - read-only surfaces", () => {
 });
 
 describe("menuTemplateFor - links", () => {
-	it("offers both link actions, separated from the edit items", () => {
-		const items = menuTemplateFor(
+	it("offers both link actions, separated from the edit items", async () => {
+		const items = await menuTemplateFor(
 			params({ isEditable: true, linkURL: "https://vayu.sh/docs" }),
 			target(),
 			noClipboard
@@ -204,8 +212,8 @@ describe("menuTemplateFor - links", () => {
 		expect(items[last - 2]).toEqual({ kind: "separator" });
 	});
 
-	it("offers a link on a read-only surface with no selection", () => {
-		const items = menuTemplateFor(
+	it("offers a link on a read-only surface with no selection", async () => {
+		const items = await menuTemplateFor(
 			params({ linkURL: "http://localhost:9876" }),
 			target(),
 			noClipboard
@@ -215,8 +223,8 @@ describe("menuTemplateFor - links", () => {
 		expect(items[0]).not.toEqual({ kind: "separator" });
 	});
 
-	it("does not offer to open a scheme a browser does not answer for", () => {
-		const items = menuTemplateFor(
+	it("does not offer to open a scheme a browser does not answer for", async () => {
+		const items = await menuTemplateFor(
 			params({ linkURL: "file:///etc/passwd", selectionText: "x" }),
 			target(),
 			noClipboard
@@ -233,22 +241,22 @@ describe("menuTemplateFor - platform", () => {
 	 * platform branch to get wrong. Driving both platforms is what proves that:
 	 * an app-drawn accelerator would show up here as a difference.
 	 */
-	function templateOn(platform: NodeJS.Platform): ContextMenuItem[] {
+	async function templateOn(platform: NodeJS.Platform): Promise<ContextMenuItem[]> {
 		Object.defineProperty(process, "platform", { value: platform, configurable: true });
 		return menuTemplateFor(
 			params({ isEditable: true, linkURL: "https://vayu.sh" }),
 			target({ kind: "url-bar", variable: "host" }),
-			() => "curl https://vayu.sh"
+			async () => "curl https://vayu.sh"
 		);
 	}
 
-	it("builds the same menu on macOS and on Windows", () => {
-		expect(templateOn("darwin")).toEqual(templateOn("win32"));
+	it("builds the same menu on macOS and on Windows", async () => {
+		expect(await templateOn("darwin")).toEqual(await templateOn("win32"));
 	});
 
-	it("leaves every edit item a role rather than a hand-drawn accelerator", () => {
+	it("leaves every edit item a role rather than a hand-drawn accelerator", async () => {
 		for (const platform of ["darwin", "win32", "linux"] as const) {
-			const editItems = templateOn(platform).filter((item) => item.kind === "role");
+			const editItems = (await templateOn(platform)).filter((item) => item.kind === "role");
 			expect(editItems.map((item) => (item.kind === "role" ? item.role : ""))).toEqual([
 				"cut",
 				"copy",
@@ -409,33 +417,83 @@ describe("installContextMenu", () => {
 		};
 	}
 
-	it("pops the menu the pointer's context earns", () => {
+	/**
+	 * The clipboard read is a promise (Electron 44), so the menu is popped a
+	 * turn after the native event. `setImmediate` runs behind every microtask
+	 * the handler queues, which a fixed number of `await`s would only guess at.
+	 */
+	const settled = () => new Promise((resolve) => setImmediate(resolve));
+
+	it("pops the menu the pointer's context earns", async () => {
 		const contents = fakeContents();
 		const showMenu = vi.fn();
 		installContextMenu(contents, {
 			takeTarget: () => target({ kind: "url-bar" }),
-			readClipboardText: () => "curl https://vayu.sh",
+			readClipboardText: async () => "curl https://vayu.sh",
 			showMenu,
 		});
 
 		contents.rightClick(params({ isEditable: true }));
+		await settled();
 
 		expect(showMenu).toHaveBeenCalledTimes(1);
 		expect(labels(showMenu.mock.calls[0][0])).toEqual(["Paste as curl"]);
 	});
 
-	it("pops nothing where the template is empty", () => {
+	it("pops nothing where the template is empty", async () => {
 		const contents = fakeContents();
 		const showMenu = vi.fn();
 		installContextMenu(contents, {
 			takeTarget: () => target({ kind: "monaco" }),
-			readClipboardText: () => "",
+			readClipboardText: async () => "",
+			showMenu,
+		});
+
+		contents.rightClick(params({ isEditable: true }));
+		await settled();
+
+		expect(showMenu).not.toHaveBeenCalled();
+	});
+
+	it("takes the announcement for the click before awaiting the clipboard", async () => {
+		const contents = fakeContents();
+		const showMenu = vi.fn();
+		const takeTarget = vi.fn(() => target({ kind: "url-bar" }));
+		installContextMenu(contents, {
+			takeTarget,
+			readClipboardText: async () => "curl https://vayu.sh",
 			showMenu,
 		});
 
 		contents.rightClick(params({ isEditable: true }));
 
-		expect(showMenu).not.toHaveBeenCalled();
+		// Consume-once has to pair with the click that raised the event: a take
+		// deferred past the await would answer a right-click with the target of
+		// whichever one announced last.
+		expect(takeTarget).toHaveBeenCalledTimes(1);
+		await settled();
+	});
+
+	it("still pops the plain menu when the clipboard refuses to be read", async () => {
+		const contents = fakeContents();
+		const showMenu = vi.fn();
+		installContextMenu(contents, {
+			takeTarget: () => target({ kind: "url-bar" }),
+			readClipboardText: () => Promise.reject(new Error("clipboard unavailable")),
+			showMenu,
+		});
+
+		contents.rightClick(params({ isEditable: true }));
+		await settled();
+
+		expect(showMenu).toHaveBeenCalledTimes(1);
+		expect(roles(showMenu.mock.calls[0][0]).map(([role]) => role)).toEqual([
+			"cut",
+			"copy",
+			"paste",
+			"selectAll",
+		]);
+		expect(labels(showMenu.mock.calls[0][0])).toEqual([]);
 	});
 });
 
