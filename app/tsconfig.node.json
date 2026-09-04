@@ -31,6 +31,14 @@
 		"allowSyntheticDefaultImports": true,
 		"esModuleInterop": true,
 		"target": "ES2020",
+		/*
+		 * Stated because `ErrorOptions` is not in the ES2020 lib and
+		 * `new Error(message, { cause })` needs it - the longer note is in
+		 * tsconfig.json. The rest of the list is what `target: ES2020` already
+		 * implied through `lib.es2020.full.d.ts`, so nothing else changes here;
+		 * tsconfig.electron-test.json narrows it the same way for the same reason.
+		 */
+		"lib": ["ES2020", "ES2022.Error", "DOM", "DOM.Iterable"],
 		"outDir": "dist-electron",
 		"rootDir": "electron",
 		"noEmit": false

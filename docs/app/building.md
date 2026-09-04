@@ -231,10 +231,20 @@ The two compilers are held to identical diagnostics on all three projects - see
 ### React App (`tsconfig.json`)
 
 - Target: ES2020
+- Lib: `ES2020`, `ES2022.Error`, `DOM`, `DOM.Iterable`
 - Module: ESNext
 - JSX: React
 - Path aliases: `@/*` → `./src/*`
 - `types: ["node"]`
+
+`ES2022.Error` is one sliver of a later standard library, not a target move: it
+declares `ErrorOptions`, which is what types `new Error(message, { cause })`.
+The runtime has had `cause` since Chromium 93 and Node 16, and `updater.ts`
+already reads it off a caught error, so the entry describes what the app runs
+on rather than changing it. ESLint's `preserve-caught-error` is what made the
+gap load-bearing: it asks that an error thrown from a `catch` carry the caught
+one as its cause, and without the type that fix does not compile. All three
+configs carry the same entry.
 
 The last two are written the way they are because TypeScript 7 removes `baseUrl`
 and changes the default of `types` from "every package under `node_modules/@types`"
@@ -250,6 +260,9 @@ neither reads this file, so a new alias has to be added in all three.
 ### Electron main process (`tsconfig.node.json`)
 
 - Target: ES2020
+- Lib: stated rather than inherited, and identical to the renderer's - `ES2020`
+  alone would leave out `ErrorOptions` (see the renderer config above), and the
+  rest of the list is what `target: ES2020` already implied
 - Module: ESNext (the app is `"type": "module"`)
 - Includes `electron/`, emitting to `dist-electron/`
 - Excludes `electron/**/*.test.ts` - tests are not part of the main process, and
@@ -422,7 +435,10 @@ Key settings in `vite.config.ts`:
 - **TypeScript 7** (installed as `tsc7`): the `pnpm type-check` gate - see
   [Two compilers, one on purpose](#two-compilers-one-on-purpose)
 - **Vite**: Build tool
-- **ESLint**: Linting
+- **ESLint 10**: Linting, with `@eslint/js` and `eslint-config-prettier` on
+  their own 10.x lines. `eslint:recommended` gained `no-unassigned-vars`,
+  `no-useless-assignment` and `preserve-caught-error` in 10.0, and the 9.x line
+  went end-of-life on 2026-08-06
 - **Electron Builder**: Packaging
 
 ## Troubleshooting

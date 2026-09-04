@@ -34,6 +34,11 @@ function respondWith(status: number, body: unknown, ok = false) {
 	);
 }
 
+/** A fetch that rejects, which is how a transport failure reaches the client. */
+function rejectWith(error: unknown) {
+	vi.stubGlobal("fetch", vi.fn().mockRejectedValue(error));
+}
+
 async function failedGet(): Promise<ApiError> {
 	try {
 		await httpClient.get("/collections");
@@ -109,5 +114,41 @@ describe("httpClient error bodies", () => {
 
 		const error = await failedGet();
 		expect((error.response as { error: { item: string } }).error.item).toBe("c1");
+	});
+});
+
+/**
+ * A transport failure never reaches the pane as itself: it is rewritten into a
+ * sentence a user can act on, and that sentence drops every detail of what
+ * actually failed - "Request timeout" does not say which socket gave up. The
+ * detail survives on `cause` and only because something puts it there, so
+ * there is a case per branch of the ladder.
+ */
+describe("httpClient transport failures", () => {
+	it("calls an abort a timeout, and keeps the abort itself", async () => {
+		const aborted = new Error("The operation was aborted");
+		aborted.name = "AbortError";
+		rejectWith(aborted);
+
+		const error = await failedGet();
+		expect(error.message).toBe("Request timeout");
+		expect(error.cause).toBe(aborted);
+	});
+
+	it("names a network failure and keeps the rejection fetch raised", async () => {
+		const refused = new TypeError("fetch failed");
+		rejectWith(refused);
+
+		const error = await failedGet();
+		expect(error.message).toBe("Network error: fetch failed");
+		expect(error.cause).toBe(refused);
+	});
+
+	it("keeps a thrown non-error, which nothing else records", async () => {
+		rejectWith("socket hang up");
+
+		const error = await failedGet();
+		expect(error.message).toBe("Unknown error occurred");
+		expect(error.cause).toBe("socket hang up");
 	});
 });
