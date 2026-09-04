@@ -1013,6 +1013,16 @@ outside that set. The two metric sizes were on that list until they became
 `--text-md` made, and for the same reason: a named step arrives with its
 line-height, an arbitrary one does not.
 
+**A step whose name is not a size word has to be registered in `cn()`.**
+`text-<x>` is either a font size or a text colour, and tailwind-merge tells the
+two apart from a list of size labels it ships - so it read `text-hero` as a
+colour and dropped it from `cn("text-hero …", "text-foreground")`, leaving the
+dashboard's largest number at body size with nothing in the source to look
+wrong. `lib/utils.ts` extends the merge's `font-size` group with the app's own
+steps; `text-md` never showed the defect only because "md" is already one of
+the labels it knows. Add a step, add it there, and `cn-font-size.test.ts` is
+where that is held.
+
 **The micro/badge step is semibold because 600 is the heaviest face the code
 font ships.** `fonts.css` loads JetBrains Mono - the default `--font-mono` - at
 400/500/600, and Fira Code and IBM Plex Mono at 400/500; only Space Mono, one of
