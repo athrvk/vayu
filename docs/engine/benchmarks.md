@@ -396,17 +396,31 @@ The rate is exact because `take_due_requests` accrues the debt; the
 spin threshold in `wait_for_next_tick`, not of the scope, and it predates it.
 
 **Idle.** The fix's actual claim is that a daemon with no run active holds no
-request. `powercfg /energy` reports outstanding timer requests by process but
-needs an elevated shell, which this session did not have, so the readout is
-`NtQueryTimerResolution` taken from inside a probe process that has itself
-requested a deliberately coarse **10 ms**. Since Windows 10 2004 the
-resolution a process observes is the finest period requested by *any* process,
-once it has made a request of its own - so the probe reads **10.0 ms** when
-nothing else holds a request and **1.0 ms** when anything does, while a
+request, and `powercfg /energy` is the tool that reports the request itself:
+its "Outstanding Timer Request" entries name each requesting process and the
+period it asked for. Taken from an elevated shell against the 0.25.0 daemon
+(pid 7688), 5 s report windows, a Chrome tab holding its own 1 ms request
+throughout as the control that the report does see holders:
+
+| daemon state | outstanding requests in the report |
+|---|---|
+| daemon up, idle 5 s | `chrome.exe`, period 10000 (1 ms). **No entry for `vayu-engine.exe`.** |
+| 3 s into a 200 RPS run | **`vayu-engine.exe` (pid 7688), period 10000 (1 ms)**, and `chrome.exe` |
+| 3 s after the run completed | none (Chrome's had lapsed too). **No entry for `vayu-engine.exe`.** |
+
+The system-wide "Current Timer Resolution" line read 156250 (15.6 ms) in all
+three reports, including the one with two holders listed - since Windows 10
+2004 a request raises the resolution for the requesting process, not the
+platform, which is also why `timeGetDevCaps` (a 0.5-15.625 ms capability
+range that never moves) says nothing here.
+
+The same three states, plus the two daemons side by side, were also read
+without elevation through `NtQueryTimerResolution` from a probe process that
+has itself requested a deliberately coarse **10 ms**: a requesting process
+observes the finest period any process holds, so the probe reads **10.0 ms**
+when nothing else holds a request and **1.0 ms** when anything does, while a
 process that never asked keeps sleeping at 15.6 ms regardless. Calibrated
 against a helper holding `timeBeginPeriod(1)`: 10.0 without it, 1.0 with it.
-`timeGetDevCaps` is not used; it reports the 0.5-15.625 ms capability range and
-never moved.
 
 | daemon state | before (0.24.0) | **after (0.25.0)** |
 |---|---:|---:|
