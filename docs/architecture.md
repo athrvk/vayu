@@ -172,6 +172,18 @@ The lock is a request to the OS, not a guarantee. When the host suspends anyway
 marks it on the charts and in the run's Events tab. The engine cannot carry that
 record: it was suspended too.
 
+**System notifications for a run's end are opt-in and off by default.** The
+renderer decides *what* is worth saying - it is the only side that knows a run
+reached a terminal state, and the only side that can read the opt-in, which
+lives in a localStorage-backed store main cannot see - over `notify:show`
+(`services/notify.ts`); `electron/notify.ts` decides *whether and how*, from the
+window's focus and the platform's support, and answers `notify:availability`
+for the settings row. Nothing is posted while the window is focused - the toast
+already said it. Windows shows nothing at all unless `app.setAppUserModelId`
+matches the shortcut's id; macOS may refuse a build without a Developer ID
+signature, and Vayu is ad-hoc signed, so that refusal is caught, latched, and
+reported in Settings, with the toast standing in as the fallback.
+
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 
 ## Sidecar Pattern

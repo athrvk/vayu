@@ -420,6 +420,9 @@ reached, labelled with how long the machine was gone. The record is the app's
 own (`stores/host-sleep-store.ts`, keyed by run id): the engine was suspended
 too and its report has no field for it.
 
+A run reaching its end also posts a system notification when the user has
+opted in and Vayu is not the window in front (issue #1358).
+
 **Top-level (`components/`)**
 
 | Component | Role |
@@ -567,7 +570,7 @@ A **scenario load run** lands in `LoadTestDetail`, not `ScenarioRunView`: it is 
 Same nav/content split as Variables: the category tree renders in the **Drawer** (`settings` view), not inside the settings tab. Selecting a category sets `useSettingsStore.selectedCategory` **and** opens the settings tab, so `SettingsMain` shows that panel. There is no `SettingsLayout` two-pane wrapper anymore - the Drawer is the left pane.
 
 - **Sidebar (`sidebar/SettingsCategoryTree.tsx`)** - settings category navigation and the search over every setting; rendered by the Drawer.
-- **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `LoadTestingPanel.tsx`, `GeneralPanel.tsx`, `McpSettingsPanel.tsx`, `NotificationsPanel.tsx`, `EditorPanel.tsx` and `KeyboardShortcutsPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `GeneralPanel` composes two cards of its own: `UpdatesCard.tsx` and `CookiesCard.tsx` (the engine's cookie jar - what it holds per environment, and the button that empties it). `app-panels.ts` is the panel registry/metadata and `main/app-panel-components.ts` the map from a category to its component - two files rather than one because the registry is read by the Drawer's category tree and the command registry, both mounted on every tab, so a component named there loads at startup rather than with the settings surface (#1146). `app-settings.ts` is the catalogue of the settings inside those panels (see Search), and `engine-categories.ts` the engine-side registry. An engine category may also declare `Cards` - components rendered above its `/config` entries, in order, for engine surfaces the generic entry renderer cannot draw because `GET /config` does not describe them; Network & connectivity declares `ClientCertificatesCard.tsx`, the host-to-certificate registry for mTLS endpoints (issue #707), and `ConnectionTestCard.tsx`, which sends one request under the settings on that screen and reports which hop answered - proxy, TLS or the endpoint (issue #708). The test card also holds this screen's half of system-proxy resolution (`useSystemProxyRefresh`), so the resolved `proxySystemUrl` row above it is true for whoever is reading it. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
+- **Main (`main/`)** - `SettingsMain.tsx` (screen `"settings"`) hosts the app-settings category panels under `main/panels/`: `AppearancePanel.tsx`, `DashboardPanel.tsx`, `LoadTestingPanel.tsx`, `GeneralPanel.tsx`, `McpSettingsPanel.tsx`, `NotificationsPanel.tsx`, `EditorPanel.tsx` and `KeyboardShortcutsPanel.tsx`, plus the shared `ClientSettingsPanel.tsx` wrapper, `FontPicker.tsx`, and `SettingControls.tsx` primitives. `NotificationsPanel.tsx` now carries two cards: the opt-in for OS notifications while Vayu is in the background, and the four toast preferences (issue #1358). `GeneralPanel` composes two cards of its own: `UpdatesCard.tsx` and `CookiesCard.tsx` (the engine's cookie jar - what it holds per environment, and the button that empties it). `app-panels.ts` is the panel registry/metadata and `main/app-panel-components.ts` the map from a category to its component - two files rather than one because the registry is read by the Drawer's category tree and the command registry, both mounted on every tab, so a component named there loads at startup rather than with the settings surface (#1146). `app-settings.ts` is the catalogue of the settings inside those panels (see Search), and `engine-categories.ts` the engine-side registry. An engine category may also declare `Cards` - components rendered above its `/config` entries, in order, for engine surfaces the generic entry renderer cannot draw because `GET /config` does not describe them; Network & connectivity declares `ClientCertificatesCard.tsx`, the host-to-certificate registry for mTLS endpoints (issue #707), and `ConnectionTestCard.tsx`, which sends one request under the settings on that screen and reports which hop answered - proxy, TLS or the endpoint (issue #708). The test card also holds this screen's half of system-proxy resolution (`useSystemProxyRefresh`), so the resolved `proxySystemUrl` row above it is true for whoever is reading it. (The former monolithic `UISettingsPanel.tsx` was split into these panels in PR #55.)
 
 The engine categories render from `GET /config` metadata alone - no per-key branching in the component. Two flags on each entry shape the screen: `requiresRestart` draws the "Restart Required" chip (and, once saved, the "Pending" chip plus the banner and the Dock's signal), and `advanced` moves the entry into a collapsed **Advanced** section at the bottom of its category. Both are read as fields; the `"(Requires Restart)"` label substring they replaced is gone, and `config_route_test.cpp` guards it from coming back. The collapsed state is deliberately not persisted, and resets when the category changes.
 
@@ -1115,11 +1118,14 @@ the shadcn/Radix primitive in `components/ui/toast.tsx`, which owns the dismiss
 timer, pausing on hover / focus / window blur, swipe-to-dismiss, and the
 `data-state` the exit animation keys off. `F8` moves focus into the stack.
 
-Toasts are the app's **single** channel for reporting the outcome of an action
-the user took, including save failures (see `save-store.failSave`). Four
-variants - `info`, `success`, `warning`, `error` - each carried by an icon and a
-left rail rather than colour alone; tokens and durations in
-`docs/design-system.md` -> Toasts.
+Toasts are the app's **single in-app** channel for reporting the outcome of an
+action the user took, including save failures (see `save-store.failSave`). The
+one exception leaves the app entirely: a terminal event that lands while Vayu
+is not the window in front may also raise an opt-in OS notification
+(`services/notify.ts`, issue #1358), and every one of those events still raises
+its toast too. Four variants - `info`, `success`, `warning`, `error` - each
+carried by an icon and a left rail rather than colour alone; tokens and
+durations in `docs/design-system.md` -> Toasts.
 
 ## Stop Run Button (`components/shared/StopRunButton.tsx`)
 

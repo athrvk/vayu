@@ -26,6 +26,7 @@ import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEngineStore, useToastStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
+import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { TIMING } from "@/config/timing";
 
 export function useEngineRestart(): { restart: () => Promise<void>; isRestarting: boolean } {
@@ -75,9 +76,18 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 				// failed poll back on the unreachable path, so the strip cannot sit
 				// on "Starting…" over an engine nobody is starting.
 				closeEngineStartWindow();
+				const reason = result.error ?? "unknown error";
 				showToast({
-					message: `Failed to restart engine: ${result.error ?? "unknown error"}`,
+					message: `Failed to restart engine: ${reason}`,
 					variant: "error",
+				});
+				// A restart is slow enough to walk away from, and this is its
+				// terminal answer (#1358). The toast above is the whole of it for a
+				// user who stayed.
+				systemNotify.post({
+					kind: NOTIFY_KINDS.engineRestartFailed,
+					title: "The engine could not be restarted",
+					body: reason,
 				});
 				return;
 			}

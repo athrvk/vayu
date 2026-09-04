@@ -286,6 +286,39 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("power:resumed", handler);
 	},
 
+	// System notifications for what finishes while the user is elsewhere
+	// (#1358). The renderer sends what happened; main decides whether to post
+	// it - the window's focus and the platform's support are its to answer -
+	// and resolves with what became of it. `notificationAvailability` is what
+	// the settings row asks before saying the toggle works on this build: an
+	// unsigned macOS build cannot show one, and says so after the first try.
+	showNotification: (request: {
+		kind: string;
+		title: string;
+		body: string;
+		target: { view: "run"; runId: string } | { view: "settings" } | { view: "app" };
+	}): Promise<string> => ipcRenderer.invoke("notify:show", request),
+	notificationAvailability: (): Promise<{ available: boolean; reason: string | null }> =>
+		ipcRenderer.invoke("notify:availability"),
+	// A notification was clicked. Carries what it was about, so the renderer can
+	// open it - main has no opinion about the app's own surfaces.
+	onNotificationActivated: (
+		callback: (event: {
+			kind: string;
+			target: { view: "run"; runId: string } | { view: "settings" } | { view: "app" };
+		}) => void
+	) => {
+		const handler = (
+			_event: unknown,
+			payload: {
+				kind: string;
+				target: { view: "run"; runId: string } | { view: "settings" } | { view: "app" };
+			}
+		) => callback(payload);
+		ipcRenderer.on("notify:activated", handler);
+		return () => ipcRenderer.removeListener("notify:activated", handler);
+	},
+
 	// Before quit flush handler. ACKs main once the callback settles so quit
 	// can resume immediately instead of waiting out the fallback timeout.
 	onBeforeQuit: (callback: () => void | Promise<void>) => {

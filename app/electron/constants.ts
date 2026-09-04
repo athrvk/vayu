@@ -14,6 +14,17 @@
  * them in sync.
  */
 
+/**
+ * The identity Windows files the app's toasts under (issue #1358).
+ *
+ * Must equal `appId` in `electron-builder.json`, which is what the NSIS target
+ * stamps on the Start Menu shortcut: Windows matches a toast's AppUserModelID
+ * against that shortcut, and a mismatch shows nothing at all rather than
+ * showing it under the wrong name. `app-user-model-id.test.ts` compares the
+ * two so they cannot drift.
+ */
+export const APP_USER_MODEL_ID = "com.vayu.client";
+
 // Engine sidecar (must match src/config/network.ts)
 export const ENGINE_HOST = "127.0.0.1";
 export const ENGINE_PORT = 9876;

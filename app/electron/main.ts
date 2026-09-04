@@ -13,6 +13,7 @@ import {
 	ipcMain,
 	nativeTheme,
 	Menu,
+	Notification,
 	powerMonitor,
 	powerSaveBlocker,
 	session,
@@ -34,6 +35,7 @@ import { loadWindowState, trackWindowState } from "./window-state.js";
 import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updater.js";
 import { installQuitOnSignal } from "./quit-signals.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
+import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
 import {
@@ -97,6 +99,7 @@ import {
 	MCP_HOST,
 	MCP_PORT,
 	MCP_ENDPOINT_URL,
+	APP_USER_MODEL_ID,
 } from "./constants.js";
 
 const isDev = process.env.NODE_ENV === "development";
@@ -112,6 +115,14 @@ const isDev = process.env.NODE_ENV === "development";
 // Developer ID signature (then "Always Allow" would persist on its own).
 app.commandLine.appendSwitch("use-mock-keychain");
 
+// Windows files a toast under the AppUserModelID of the shortcut that launched
+// the app, and refuses to show one whose id it does not recognise. Electron's
+// default is a generic "electron" identity, so without this the notifications
+// from #1358 would simply not appear on Windows - no error, no toast. Set here,
+// at module scope, because it must precede the first notification and the
+// documented requirement is "before app is ready".
+app.setAppUserModelId(APP_USER_MODEL_ID);
+
 // __dirname is not defined in ES modules. Derive it from import.meta.url
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -125,6 +136,24 @@ let mainWindow: BrowserWindow | null = null;
 /** The window as it is right now, or null if there isn't a usable one. */
 function liveWindow(): BrowserWindow | null {
 	return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+}
+
+/**
+ * Bring the window back to the user, from wherever it is: minimized, hidden,
+ * or behind another application.
+ *
+ * Three calls rather than one, because they answer different states and none of
+ * them covers the others - `focus()` on a minimized window raises nothing. One
+ * definition, because both callers (a second launch handing the user over to
+ * this instance, and a click on a system notification) mean the same thing by
+ * "come back".
+ */
+function focusMainWindow(): void {
+	const win = liveWindow();
+	if (!win) return;
+	if (win.isMinimized()) win.restore();
+	win.show();
+	win.focus();
 }
 
 /**
@@ -790,6 +819,23 @@ function setupIpcHandlers() {
 		})
 	);
 
+	// The OS notifications a run finishing, an engine dropping out or an update
+	// landing raise while the user is in another application (#1358). The
+	// renderer says what happened and whether the user asked to hear about it;
+	// only this side can answer whether the window is the one in front, and
+	// whether the platform will show anything at all.
+	registerNotifyIpc(
+		ipcMain,
+		createNotifier({
+			create: (options) => new Notification(options),
+			isSupported: () => Notification.isSupported(),
+			isFocused: () => liveWindow()?.isFocused() ?? false,
+			hasWindow: () => liveWindow() !== null,
+			focus: focusMainWindow,
+			send: (channel, payload) => liveWindow()?.webContents.send(channel, payload),
+		})
+	);
+
 	// Open one of the app's own documentation links in the system browser.
 	// Keyed rather than URL-taking on purpose: the renderer cannot ask for an
 	// arbitrary URL, so this does not hand the web layer a general "open
@@ -1077,10 +1123,7 @@ if (!isPrimaryInstance) {
 	app.quit();
 } else {
 	app.on("second-instance", () => {
-		if (!mainWindow) return;
-		if (mainWindow.isMinimized()) mainWindow.restore();
-		mainWindow.show();
-		mainWindow.focus();
+		focusMainWindow();
 	});
 }
 

@@ -20,11 +20,45 @@ import { queryKeys } from "@/queries/keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { useDashboardStore, useClientSettingsStore } from "@/stores";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
-import type { LoadTestMetrics, MonitorSample } from "@/types";
+import { systemNotify, NOTIFY_KINDS } from "./notify";
+import { formatNumber } from "@/utils/helpers";
+import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
 // The batcher throttles UI commits to keep render cost bounded, but every tick
 // the engine sends is BUFFERED, so historicalMetrics keeps the full 10 Hz signal.
 import { createThrottledBatcher } from "./throttled-batcher";
+
+/** The three ways a load run ends, as the user hears about them (#1358). */
+type LoadRunNotifyKind =
+	| typeof NOTIFY_KINDS.loadRunFinished
+	| typeof NOTIFY_KINDS.loadRunStopped
+	| typeof NOTIFY_KINDS.loadRunFailed;
+
+const NOTIFY_TITLES: Record<LoadRunNotifyKind, string> = {
+	[NOTIFY_KINDS.loadRunFinished]: "Load test finished",
+	[NOTIFY_KINDS.loadRunStopped]: "Load test stopped",
+	[NOTIFY_KINDS.loadRunFailed]: "Load test failed",
+};
+
+/**
+ * "12,400 requests, p95 210 ms, 0.3% errors", or `null` when the report cannot
+ * supply all three.
+ *
+ * The numbers, not an adjective: a notification that says only "finished"
+ * makes the user open the app to learn what a glance should have told them.
+ * Checked rather than trusted, because the report crosses a process boundary
+ * and a partial one must not turn into "0 requests, p95 0 ms" - a number the
+ * user would read as the run's own.
+ */
+function runSummaryLine(report: RunReport): string | null {
+	const requests = report.summary?.totalRequests;
+	const p95 = report.latency?.p95;
+	const errorRate = report.summary?.errorRate;
+	if (typeof requests !== "number" || typeof p95 !== "number" || typeof errorRate !== "number") {
+		return null;
+	}
+	return `${formatNumber(requests)} requests, p95 ${Math.round(p95)} ms, ${errorRate.toFixed(1)}% errors`;
+}
 
 class LoadTestService {
 	private activeRunId: string | null = null;
@@ -39,6 +73,15 @@ class LoadTestService {
 	// They stay this service's own buffer - the batcher carries one list, and
 	// which lists ride a flush together is a caller's decision.
 	private pendingMonitor: MonitorSample[] = [];
+	/**
+	 * The run this service has already told the user about (#1358).
+	 *
+	 * A failing run reports its error and *then* closes its stream, so both
+	 * terminal paths run for one run. The user gets the first of them - the one
+	 * that says what went wrong - and never a second notification saying the
+	 * same run finished.
+	 */
+	private notifiedRunId: string | null = null;
 
 	/**
 	 * Start monitoring a load test run
@@ -101,6 +144,11 @@ class LoadTestService {
 		}
 
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
+		this.notifyTerminal(
+			this.activeRunId,
+			NOTIFY_KINDS.loadRunStopped,
+			"The run was stopped before it finished."
+		);
 		this.metricsBatcher.discard();
 		this.pendingMonitor = [];
 		this.activeRunId = null;
@@ -126,6 +174,21 @@ class LoadTestService {
 	}
 
 	// --- Private handlers ---
+
+	/**
+	 * Tell the user their run ended, once, and only if they are elsewhere -
+	 * `electron/notify.ts` answers the "elsewhere" half.
+	 */
+	private notifyTerminal(runId: string | null, kind: LoadRunNotifyKind, body: string): void {
+		if (!runId || this.notifiedRunId === runId) return;
+		this.notifiedRunId = runId;
+		systemNotify.post({
+			kind,
+			title: NOTIFY_TITLES[kind],
+			body,
+			target: { view: "run", runId },
+		});
+	}
 
 	private handleMetrics(metrics: LoadTestMetrics): void {
 		this.metricsBatcher.push(metrics);
@@ -164,6 +227,7 @@ class LoadTestService {
 	private handleError(error: Error): void {
 		console.error("[LoadTestService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
+		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.loadRunFailed, error.message);
 		const store = useDashboardStore.getState();
 		store.setError(error.message);
 	}
@@ -187,6 +251,9 @@ class LoadTestService {
 		// History reads `runs.report(runId)` and would otherwise re-fetch a
 		// report that cannot change.
 		if (runId) {
+			// Stands unless the report arrives with all three numbers in it: a run
+			// that ended is worth saying even when what it did cannot be read.
+			let summary: string | null = null;
 			try {
 				const report = await queryClient.fetchQuery({
 					queryKey: queryKeys.runs.report(runId),
@@ -201,9 +268,19 @@ class LoadTestService {
 				if (useDashboardStore.getState().currentRunId === runId) {
 					useDashboardStore.getState().setFinalReport(report);
 				}
+				// Last inside the try: the dashboard is the terminal surface that
+				// matters, and nothing done for a notification may come before it.
+				summary = runSummaryLine(report);
 			} catch (e) {
 				console.warn("[LoadTestService] report fetch failed", e);
 			}
+			// After the fetch, so the body carries the run's own numbers. A run
+			// that already reported a failure has had its one notification.
+			this.notifyTerminal(
+				runId,
+				NOTIFY_KINDS.loadRunFinished,
+				summary ?? "The run ended, but its report could not be read."
+			);
 			// The run has reached a terminal state, so the lists that carry its
 			// status are stale until the next 5s poll - and once the user has
 			// paged History, that poll is off.

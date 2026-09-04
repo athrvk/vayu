@@ -18,8 +18,18 @@
  * exactly the state the "None" severity floor puts it in.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+
+// What the build can do is the main process's answer (#1358). Available is the
+// ordinary case; the case that matters is a build that cannot notify at all.
+const { mockAvailability } = vi.hoisted(() => ({
+	mockAvailability: vi.fn().mockResolvedValue({ available: true, reason: null }),
+}));
+vi.mock("@/services/notify", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/services/notify")>()),
+	systemNotify: { post: vi.fn(), availability: mockAvailability },
+}));
 
 import NotificationsPanel from "./NotificationsPanel";
 import { useClientSettingsStore } from "@/stores";
@@ -28,8 +38,12 @@ import { DEFAULT_NOTIFICATION_PREFS } from "@/constants/toast";
 
 beforeEach(() => {
 	cleanup();
+	mockAvailability.mockResolvedValue({ available: true, reason: null });
 	useToastStore.setState({ toasts: [] });
-	useClientSettingsStore.setState({ notifications: { ...DEFAULT_NOTIFICATION_PREFS } });
+	useClientSettingsStore.setState({
+		notifications: { ...DEFAULT_NOTIFICATION_PREFS },
+		systemNotifications: false,
+	});
 });
 
 const prefs = () => useClientSettingsStore.getState().notifications;
@@ -90,5 +104,41 @@ describe("NotificationsPanel", () => {
 	it("shows no warning for the floors that still surface failures", () => {
 		render(<NotificationsPanel />);
 		expect(screen.queryByText(/errors are hidden too/i)).not.toBeInTheDocument();
+	});
+
+	describe("system notifications (issue #1358)", () => {
+		it("is off until the user turns it on, and writes through", () => {
+			render(<NotificationsPanel />);
+			const toggle = screen.getByRole("switch", { name: /notify through the system/i });
+
+			expect(toggle).not.toBeChecked();
+
+			fireEvent.click(toggle);
+
+			expect(useClientSettingsStore.getState().systemNotifications).toBe(true);
+		});
+
+		it("says so when the build cannot show one, rather than offering a toggle that does nothing", async () => {
+			mockAvailability.mockResolvedValue({
+				available: false,
+				reason: "System notifications are unavailable on this build",
+			});
+			render(<NotificationsPanel />);
+
+			// Mutation check: drop the availability read and this line never
+			// appears - an ad-hoc signed macOS build then shows a switch that
+			// silently posts nothing.
+			await waitFor(() =>
+				expect(screen.getByText(/unavailable on this build/i)).toBeInTheDocument()
+			);
+			expect(screen.getByText(/keep reporting these events as toasts/i)).toBeInTheDocument();
+		});
+
+		it("says nothing about availability on a build that can notify", async () => {
+			render(<NotificationsPanel />);
+
+			await waitFor(() => expect(mockAvailability).toHaveBeenCalled());
+			expect(screen.queryByText(/unavailable on this build/i)).not.toBeInTheDocument();
+		});
 	});
 });
