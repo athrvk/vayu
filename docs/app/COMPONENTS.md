@@ -1847,6 +1847,18 @@ instead of telling the reader to go and define it. The red itself stays - the
 token genuinely does not resolve. `data.*` is the one state with no list, for
 the same disjointness reason it has no create offer.
 
+**The create offer's scope chips are a radio group, and picking one keeps you in
+the value field** (issue #1380). They are one Tab stop on a roving `tabIndex`,
+arrows move the selection and the focus together wrapping at the ends, and Enter
+on the focused chip creates - a chip that has focus beside a value already typed
+leaves Enter nothing else to mean. A mouse click hands focus back to the field,
+because picking a scope qualifies the value rather than replacing it as the
+destination; as plain buttons the chips kept the focus a click gave them, and
+the next keystroke went nowhere. Create is refused while the field is empty:
+`mergeVariable` stores what it is handed, so an empty value defines the name as
+`""`, which resolves - the token stops reading as undefined and answers with
+nothing.
+
 Reaching the list into those states also reached the bound-row note into them,
 and it could not be carried over as written: "the definition above still
 resolves on a send that carries no row" is exactly what a switched-off
