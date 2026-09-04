@@ -70,7 +70,7 @@ import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
 import { useRequestDefaultsQuery } from "@/queries";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
-import { describeDefaultHeaderDifference } from "./defaultHeaders";
+import { describeDefaultHeaderDifference } from "./default-headers";
 import {
 	BUDGET_FIELDS,
 	type BudgetDraft,

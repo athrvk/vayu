@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { describeDefaultHeaderDifference } from "./defaultHeaders";
+import { describeDefaultHeaderDifference } from "./default-headers";
 import type { RequestDefaults } from "@/types";
 
 function defaults(headers: RequestDefaults["headers"]): RequestDefaults {

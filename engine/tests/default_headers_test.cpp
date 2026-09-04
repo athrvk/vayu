@@ -359,10 +359,14 @@ TEST_F (DefaultHeaderConfigTest, ADefaultSwitchedOffIsNotDeclared) {
     }
 }
 
-// Whether a scope's answer holds a row of this name.
+// Whether a scope's answer holds a row of this name. The name is read out of
+// the row before comparing: MSVC finds `json == std::string_view` ambiguous
+// between nlohmann's own operator and the string_view one.
 bool declares (const nlohmann::json& body, std::string_view name) {
     return std::any_of (body["headers"].begin (), body["headers"].end (),
-    [name] (const nlohmann::json& row) { return row["name"] == name; });
+    [name] (const nlohmann::json& row) {
+        return row.at ("name").get<std::string> () == name;
+    });
 }
 
 TEST_F (DefaultHeaderConfigTest, TheAnswerIsForTheScopeTheCallerNames) {
