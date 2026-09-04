@@ -37,6 +37,11 @@ import { installQuitOnSignal } from "./quit-signals.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
 import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
+import {
+	createServiceStopGuard,
+	holdForConfirmation,
+	registerRunningServicesIpc,
+} from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
 import {
@@ -272,6 +277,26 @@ const rendererRecovery = createRendererRecovery({
 	onRecovered: () => saveFlusher.reset(),
 });
 
+// What a close is about to stop, said before it stops it (#1363). The renderer
+// publishes what the engine is holding for it; the wording, the platform rule
+// and the button order are this side's. See service-stop-guard.ts.
+const serviceStopGuard = createServiceStopGuard({
+	ask: async (prompt) => {
+		const choice = await askOnWindow({
+			type: "question",
+			message: prompt.message,
+			detail: prompt.detail,
+			buttons: [...prompt.buttons],
+			defaultId: 0,
+			cancelId: 1,
+		});
+		return choice === 0;
+	},
+	// A renderer that is gone publishes nothing, including the snapshot that
+	// says its services went with it.
+	rendererGone: () => rendererRecovery.isRendererGone(),
+});
+
 /**
  * Forward OS theme changes to whichever window is up.
  *
@@ -434,6 +459,16 @@ function createWindow() {
 	// window when it settles.
 	const closingWindow = mainWindow;
 	closingWindow.on("close", (event) => {
+		// Asked before the flush, because Cancel has to leave the window, the
+		// renderer and every running service exactly as they were - a flush that
+		// already happened would have told the renderer its work was ending. A
+		// confirmed close comes back through here with the guard cleared and falls
+		// into the flush below.
+		const mayClose = holdForConfirmation(serviceStopGuard, "window-close", event, () => {
+			if (!closingWindow.isDestroyed()) closingWindow.close();
+		});
+		if (!mayClose) return;
+
 		if (saveFlusher.hasSettled()) return;
 		event.preventDefault();
 		saveFlusher.flush(() => {
@@ -867,6 +902,11 @@ function setupIpcHandlers() {
 			window: () => liveWindow(),
 		})
 	);
+
+	// What the Services drawer has listening, kept current for the close that
+	// would stop it (#1363). One snapshot per change, not a question asked while
+	// the user waits on the close - see service-stop-guard.ts.
+	registerRunningServicesIpc(ipcMain, serviceStopGuard);
 
 	// Open one of the app's own documentation links in the system browser.
 	// Keyed rather than URL-taking on purpose: the renderer cannot ask for an
@@ -1316,6 +1356,12 @@ const quitShutdown = createQuitShutdown({
 
 // Ensure saves are flushed and engine is stopped when the app quits
 app.on("before-quit", (event) => {
+	// Before any of it: a quit stops the running services on every platform,
+	// macOS included, so it asks the same question the X does. Cancelling here
+	// leaves the app up with everything still serving; confirming quits again,
+	// through the flush and the shutdown below.
+	if (!holdForConfirmation(serviceStopGuard, "quit", event, resumeQuit)) return;
+
 	// First pass: ask the renderer to flush pending saves. Quit resumes as
 	// soon as the renderer ACKs, with a 2s ceiling in case it is stuck. Only a
 	// flush that has *settled* falls through to the second pass - a second quit
@@ -1342,4 +1388,11 @@ app.on("will-quit", () => {
 // orphaned. This routes them into the same shutdown Cmd-Q takes. It matters
 // most on Linux, where install.sh has no Apple Event to quit the app with
 // before it replaces the AppImage, only a signal.
-installQuitOnSignal(process, () => app.quit());
+//
+// Nobody is behind a signal, so it is also the one quit that must not ask about
+// running services: the dialog would wait for an answer that is never coming,
+// and install.sh's AppImage replacement would wait with it (#1363).
+installQuitOnSignal(process, () => {
+	serviceStopGuard.markQuitUnattended();
+	app.quit();
+});

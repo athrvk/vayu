@@ -31,6 +31,7 @@ import { useNotificationActivation } from "./hooks/useNotificationActivation";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
 import { useInboxWatchers } from "./hooks/useInboxWatchers";
+import { useRunningServicesPublisher } from "@/modules/services";
 import { useSaveStore } from "./stores/save-store";
 
 function App() {
@@ -106,6 +107,11 @@ function App() {
 	// while it is the active one, so the streams that hear those captures are
 	// held here instead (#1400).
 	useInboxWatchers();
+
+	// Everything the Services drawer started keeps listening inside the engine,
+	// and the engine goes down with the app. This is what lets the close name
+	// what it is about to stop instead of taking it silently (#1363).
+	useRunningServicesPublisher();
 
 	// Register Electron before-quit handler to flush pending saves
 	useEffect(() => {
