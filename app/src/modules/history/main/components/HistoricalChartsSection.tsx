@@ -18,6 +18,7 @@ import { Loader2 } from "lucide-react";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
 import type { Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
+import type { HostSleep } from "@/stores/host-sleep-store";
 import {
 	RequestRateChart,
 	ConnectionsChart,
@@ -35,6 +36,8 @@ interface HistoricalChartsSectionProps {
 	progress?: { loaded: number; total: number };
 	breakpoint?: Breakpoint | null;
 	anomalies?: Anomaly[] | null;
+	/** Intervals the host slept under the run, marked beside the anomaly windows. */
+	sleeps?: readonly HostSleep[] | null;
 }
 
 const SYNC_KEY = CHART_SYNC.history;
@@ -47,6 +50,7 @@ export default function HistoricalChartsSection({
 	progress,
 	breakpoint,
 	anomalies,
+	sleeps,
 }: HistoricalChartsSectionProps) {
 	if (isLoading && data.length === 0) {
 		return (
@@ -98,6 +102,7 @@ export default function HistoricalChartsSection({
 						syncKey={SYNC_KEY}
 						breakpoint={breakpoint}
 						anomalies={anomalies}
+						sleeps={sleeps}
 					/>
 				</CardContent>
 			</Card>
@@ -113,6 +118,7 @@ export default function HistoricalChartsSection({
 						syncKey={SYNC_KEY}
 						breakpoint={breakpoint}
 						anomalies={anomalies}
+						sleeps={sleeps}
 					/>
 				</CardContent>
 			</Card>
@@ -140,6 +146,7 @@ export default function HistoricalChartsSection({
 							isCompleted
 							syncKey={SYNC_KEY}
 							anomalies={anomalies}
+							sleeps={sleeps}
 						/>
 					</CardContent>
 				</Card>

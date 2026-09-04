@@ -27,6 +27,7 @@ import { useScriptVariableCompletionProvider } from "./hooks/useScriptVariableCo
 import { useScriptTypeDefinitions } from "./hooks/useScriptTypeDefinitions";
 import { useMenuActions } from "./hooks/useMenuActions";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
+import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
 import { useSaveStore } from "./stores/save-store";
 
 function App() {
@@ -85,6 +86,12 @@ function App() {
 	// An agent writing over MCP mutates the engine from the main process, which
 	// no query can see. This is the channel that tells the cache to refetch.
 	useMcpDataInvalidation();
+
+	// The app asks the OS not to sleep under a run, but a closed lid overrides
+	// that. Mounted here rather than on the dashboard: the suspend arrives with
+	// no warning and the dashboard may not be the open tab, while the run it
+	// interrupts streams from a service that outlives every view (#1357).
+	useHostSleepRecorder();
 
 	// Register Electron before-quit handler to flush pending saves
 	useEffect(() => {

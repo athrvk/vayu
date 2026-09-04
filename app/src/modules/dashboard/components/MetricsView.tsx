@@ -25,6 +25,7 @@ import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import { formatNumber } from "@/utils";
 import { useDashboardStore } from "@/stores";
+import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { MetricsViewProps, DashboardDerived } from "../types";
 import { InfoChip } from "./shared";
 import { fmt } from "./format";
@@ -127,6 +128,11 @@ function MetricsView({
 	// Empty for a run that configured no monitor - the row below reads that
 	// rather than the config, so it is right for a replayed run too.
 	const monitorSamples = useDashboardStore((s) => s.monitorSamples);
+	// Marked on the same layer as the anomaly windows: a stretch where the host
+	// was asleep is a hole in the series no detector can account for, because the
+	// engine was suspended with it (#1357).
+	const currentRunId = useDashboardStore((s) => s.currentRunId);
+	const hostSleeps = useHostSleeps(currentRunId);
 
 	// Only the latest tick's elapsed_seconds is consumed below - depending on the
 	// whole historicalMetrics array would rebuild `derived` every tick (10 Hz) and
@@ -274,6 +280,7 @@ function MetricsView({
 						syncKey={CHART_SYNC.live}
 						breakpoint={breakpoint}
 						anomalies={anomalies}
+						sleeps={hostSleeps}
 					/>
 					{rampOverlay && (
 						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-[11px] font-mono text-muted-foreground">
@@ -339,6 +346,7 @@ function MetricsView({
 						isCompleted={isCompleted}
 						syncKey={CHART_SYNC.live}
 						anomalies={anomalies}
+						sleeps={hostSleeps}
 					/>
 				</div>
 			)}
@@ -415,6 +423,7 @@ function MetricsView({
 								syncKey={CHART_SYNC.live}
 								breakpoint={breakpoint}
 								anomalies={anomalies}
+								sleeps={hostSleeps}
 							/>
 						</div>
 					)}
@@ -481,6 +490,7 @@ function MetricsView({
 						isCompleted={isCompleted}
 						syncKey={CHART_SYNC.live}
 						anomalies={anomalies}
+						sleeps={hostSleeps}
 					/>
 				</div>
 			)}

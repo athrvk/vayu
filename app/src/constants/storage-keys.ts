@@ -52,4 +52,10 @@ export const STORAGE_KEYS = {
 	 * seen (issue #922). One timestamp - the engine keeps the record itself.
 	 */
 	RECOVERY_NOTICE_STORE: "vayu.recovery-notice",
+	/**
+	 * Zustand persist name for the intervals the host spent asleep under a run
+	 * (issue #1357). Keyed by run id; the engine's report cannot carry them,
+	 * because the engine was suspended too.
+	 */
+	HOST_SLEEP_STORE: "vayu.host-sleeps",
 } as const;

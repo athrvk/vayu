@@ -20,6 +20,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { Anomaly, AnomalyKind } from "@/modules/dashboard/utils/detectAnomalies";
+import { formatSleepDuration } from "@/modules/dashboard/utils/hostSleep";
+import type { HostSleep } from "@/stores/host-sleep-store";
 
 /**
  * How each kind reads on screen. The tone follows the finding: an error burst
@@ -41,11 +43,19 @@ function at(seconds: number): string {
 
 export interface RunEventsProps {
 	anomalies?: Anomaly[] | null;
+	/**
+	 * Intervals the host spent asleep under the run (#1357). Listed beside the
+	 * detected windows because a reader looking at a flat stretch is asking the
+	 * same question of both - and this is the one answer the series cannot give,
+	 * since the engine was suspended too.
+	 */
+	sleeps?: readonly HostSleep[] | null;
 	className?: string;
 }
 
-export function RunEvents({ anomalies, className }: RunEventsProps) {
-	if (!anomalies || anomalies.length === 0) return null;
+export function RunEvents({ anomalies, sleeps, className }: RunEventsProps) {
+	const hostSleeps = sleeps ?? [];
+	if ((!anomalies || anomalies.length === 0) && hostSleeps.length === 0) return null;
 
 	return (
 		<Card className={className}>
@@ -54,11 +64,26 @@ export function RunEvents({ anomalies, className }: RunEventsProps) {
 			</CardHeader>
 			<CardContent>
 				<p className="mb-3 text-xs text-muted-foreground">
-					Windows where the run departed from its own baseline. Shaded on the charts in
-					the Performance tab.
+					Windows where the run departed from its own baseline, and any stretch the host
+					spent asleep under it. Both are marked on the charts in the Performance tab.
 				</p>
 				<ul className="space-y-1.5">
-					{anomalies.map((a) => (
+					{hostSleeps.map((sleep) => (
+						<li
+							key={`host-sleep-${sleep.at}`}
+							className="flex items-baseline justify-between gap-3 p-2 bg-muted rounded-md text-sm"
+						>
+							<span className="font-medium text-warning-text">Host asleep</span>
+							<span className="flex-1 text-muted-foreground">
+								The machine slept for {formatSleepDuration(sleep.durationMs)}; the
+								run could not send during it
+							</span>
+							<span className="font-mono text-xs text-muted-foreground">
+								{at(sleep.startSeconds)}
+							</span>
+						</li>
+					))}
+					{(anomalies ?? []).map((a) => (
 						<li
 							key={`${a.kind}-${a.startSeconds}`}
 							className="flex items-baseline justify-between gap-3 p-2 bg-muted rounded-md text-sm"
