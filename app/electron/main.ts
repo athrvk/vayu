@@ -8,6 +8,7 @@
 import {
 	app,
 	BrowserWindow,
+	clipboard,
 	dialog,
 	ipcMain,
 	nativeTheme,
@@ -33,6 +34,13 @@ import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updat
 import { installQuitOnSignal } from "./quit-signals.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
+import {
+	createContextTargetStore,
+	installContextMenu,
+	runContextCommand,
+	toElectronTemplate,
+	type ContextCommand,
+} from "./context-menu.js";
 import { createSaveFlusher } from "./save-flush.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
@@ -115,6 +123,25 @@ let mainWindow: BrowserWindow | null = null;
 /** The window as it is right now, or null if there isn't a usable one. */
 function liveWindow(): BrowserWindow | null {
 	return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+}
+
+/**
+ * What the renderer said was under the pointer for the right-click being
+ * answered. See context-menu.ts; the announcement is consumed by one menu.
+ */
+const contextTargets = createContextTargetStore();
+
+/** Do what a context-menu item promised, in whichever process owns the action. */
+function runMenuCommand(command: ContextCommand): void {
+	runContextCommand(command, {
+		writeClipboard: (text) => clipboard.writeText(text),
+		openExternal: (url) => {
+			void shell.openExternal(url);
+		},
+		sendToRenderer: (forwarded) => {
+			liveWindow()?.webContents.send("context-menu:command", forwarded);
+		},
+	});
 }
 
 /** Show a recovery dialog on the window, and answer with the button index. */
@@ -354,6 +381,23 @@ function createWindow() {
 	// The mouse's back/forward buttons as the OS reports them, and the macOS
 	// swipe - neither of which reaches the renderer. See nav-history.ts.
 	watchNavigationGestures(mainWindow, sendNavigationCommand);
+
+	// Electron draws no context menu of its own, so a right-click outside Monaco
+	// showed nothing at all until this (#1359). The window is captured here
+	// rather than read back through `liveWindow()`: the menu belongs to the
+	// contents that raised the event, which may not be the current `mainWindow`
+	// by the time a replacement exists. See context-menu.ts.
+	const menuWindow = mainWindow;
+	installContextMenu(menuWindow.webContents, {
+		takeTarget: () => contextTargets.take(),
+		readClipboardText: () => clipboard.readText(),
+		showMenu: (items) => {
+			if (menuWindow.isDestroyed()) return;
+			Menu.buildFromTemplate(toElectronTemplate(items, runMenuCommand)).popup({
+				window: menuWindow,
+			});
+		},
+	});
 
 	mainWindow.on("closed", () => {
 		mainWindow = null;
@@ -905,6 +949,25 @@ function setupIpcHandlers() {
 			window: mainWindow,
 			...(position ? { x: Math.round(position.x), y: Math.round(position.y) } : {}),
 		});
+	});
+
+	/**
+	 * What the renderer sees under the pointer, announced as it right-clicks.
+	 *
+	 * Synchronous on purpose, and it is the only `sendSync` in the app. The
+	 * renderer's `contextmenu` listener runs before Chromium asks the browser
+	 * process for a menu, so blocking there until this returns is what makes the
+	 * announcement and the `context-menu` event a matched pair rather than two
+	 * messages racing on separate channels. It costs one right-click a fraction
+	 * of a millisecond and buys a menu that cannot be built from the previous
+	 * click's context.
+	 *
+	 * `returnValue` is set first: a `sendSync` whose handler returns without one
+	 * blocks the renderer for good.
+	 */
+	ipcMain.on("context-menu:target", (event, target: unknown) => {
+		event.returnValue = true;
+		contextTargets.announce(target);
 	});
 
 	// Listen for maximize/unmaximize to notify renderer

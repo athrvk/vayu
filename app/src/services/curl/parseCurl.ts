@@ -32,6 +32,12 @@ import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { autoHeaderToAdd } from "@/modules/request-builder/utils/auto-header";
 import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import { tokenize } from "./tokenize";
+// Re-exported rather than defined here: the main process asks the same question
+// of the clipboard, and a leaf module is what its test can import (#1359).
+import { detectCommand, type CommandKind } from "./detect-command";
+
+export { detectCommand };
+export type { CommandKind };
 
 /** The subset of RequestState a curl/wget command can populate. */
 export type ParsedRequest = Pick<
@@ -49,7 +55,6 @@ export type ParsedRequest = Pick<
 	| "verifySSL"
 >;
 
-type CommandKind = "curl" | "wget";
 
 // ============================================================================
 // The disclosure ledger (issue #708)
@@ -166,15 +171,6 @@ export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: Disclos
 	"-P": { what: "chose a download directory" },
 	"--directory-prefix": { what: "chose a download directory" },
 };
-
-/** Detect whether pasted text is a curl or wget command. */
-export function detectCommand(text: string): CommandKind | null {
-	const stripped = text.trim().replace(/^[$>]\s+/, "");
-	const first = stripped.split(/\s/, 1)[0]?.toLowerCase();
-	if (first === "curl") return "curl";
-	if (first === "wget") return "wget";
-	return null;
-}
 
 /**
  * Parse a pasted curl/wget command into a request-shape partial and the ledger
