@@ -61,13 +61,13 @@ describe("runAnnotations", () => {
 		// endSeconds, not startSeconds + durationMs / 1000.
 		const s = sleep(50, 90_000);
 
-		const [window] = runAnnotations(null, [s]);
+		const [mark] = runAnnotations(null, [s]);
 
-		expect(window.startSeconds).toBe(50);
-		expect(window.endSeconds).toBe(50);
-		expect(window.startSeconds).toBe(window.endSeconds);
-		expect(window.label).toBe(hostSleepLabel(s));
-		expect(window.role).toBe("warning");
+		expect(mark.startSeconds).toBe(50);
+		expect(mark.endSeconds).toBe(50);
+		expect(mark.startSeconds).toBe(mark.endSeconds);
+		expect(mark.label).toBe(hostSleepLabel(s));
+		expect(mark.role).toBe("warning");
 	});
 
 	it("lists anomalies and sleeps together when both are present", () => {

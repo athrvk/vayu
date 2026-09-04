@@ -80,10 +80,36 @@ describe("wakeLock", () => {
 		pending.resolve("token-late");
 		await flushMicrotasks();
 
-		// Pins the `state.releasePending` branch in the `.then` handler: without
-		// it the token that arrives after `release()` is stored and never handed
-		// back, leaking the lock for the rest of the session.
+		// Pins the `state.released` branch in the `.then` handler: without it the
+		// token that arrives after `release()` is stored and never handed back,
+		// leaking the lock for the rest of the session.
 		expect(releaseWakeLock).toHaveBeenCalledWith("token-late");
+	});
+
+	it("takes a fresh lock for a run that replaces one still waiting on its token", async () => {
+		const { holdWakeLock, releaseWakeLock } = stubElectron();
+		const first = deferred<string>();
+		holdWakeLock.mockReturnValueOnce(first.promise).mockResolvedValueOnce("token-b");
+
+		// What `LoadTestService.startMonitoring` does when one run replaces
+		// another: `stopMonitoring()` releases and the new run holds, in the same
+		// tick, while the first hold's round trip is still out.
+		wakeLock.hold(WAKE_LOCK_KEYS.loadRun, "run A");
+		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
+		wakeLock.hold(WAKE_LOCK_KEYS.loadRun, "run B");
+
+		// Pins `release()` freeing the key before the token arrives. Leave the
+		// released hold under its key and this is 1: run B's hold is swallowed as
+		// a duplicate, run A's token is handed back, and the machine is free to
+		// sleep under a run that believes it is protected.
+		expect(holdWakeLock).toHaveBeenCalledTimes(2);
+
+		first.resolve("token-a");
+		await flushMicrotasks();
+
+		// Run A's late token goes back; run B's stays live.
+		expect(releaseWakeLock).toHaveBeenCalledTimes(1);
+		expect(releaseWakeLock).toHaveBeenCalledWith("token-a");
 	});
 
 	it("swallows a rejected hold, logs it, and leaves the key re-holdable", async () => {

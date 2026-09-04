@@ -29,15 +29,21 @@ export const WAKE_LOCK_KEYS = {
 
 export type WakeLockKey = (typeof WAKE_LOCK_KEYS)[keyof typeof WAKE_LOCK_KEYS];
 
+/**
+ * One hold, tracked by the object rather than by its key.
+ *
+ * The distinction is load-bearing: `release()` frees the key immediately, so a
+ * hold that is still in flight when its run ends is reconciled through the
+ * object its own round trip closed over. Keeping the released hold under the
+ * key instead would swallow the next `hold()` on that key as a duplicate - and
+ * `LoadTestService.startMonitoring` releases and re-holds in the same tick when
+ * one run replaces another, which is exactly that case.
+ */
 interface HoldState {
 	/** What `holdWakeLock` resolved with, or `null` while that call is in flight. */
 	token: string | null;
-	/**
-	 * `release()` ran before `token` arrived. Honored the moment the promise
-	 * settles, so a run shorter than the IPC round trip does not leak a lock it
-	 * already asked to drop.
-	 */
-	releasePending: boolean;
+	/** The run let go. The token is handed back on arrival if it is not here yet. */
+	released: boolean;
 }
 
 const holds = new Map<WakeLockKey, HoldState>();
@@ -60,6 +66,11 @@ function warnFailure(key: WakeLockKey, what: string, error: unknown): void {
 	console.warn(`[wake-lock] ${what} for "${key}" failed`, error);
 }
 
+/** Hand one token back. A failure here is logged, never thrown at a run. */
+function releaseToken(api: Bridge, key: WakeLockKey, token: string): void {
+	void api.releaseWakeLock(token).catch((error: unknown) => warnFailure(key, "release", error));
+}
+
 export const wakeLock = {
 	/**
 	 * Ask the OS to stay awake under `key`. A key that is already held (or
@@ -71,30 +82,25 @@ export const wakeLock = {
 		if (!api) return;
 		if (holds.has(key)) return;
 
-		const state: HoldState = { token: null, releasePending: false };
+		const state: HoldState = { token: null, released: false };
 		// Recorded before the round trip: a second `hold()` on this key, called
 		// before this one answers, must see it as already in flight.
 		holds.set(key, state);
 
 		api.holdWakeLock(reason)
 			.then((token) => {
-				if (!state.releasePending) {
-					state.token = token;
-					return;
-				}
+				state.token = token;
 				// Released while still in flight - the token is only good for
 				// handing straight back, never for staying live.
-				holds.delete(key);
-				void api
-					.releaseWakeLock(token)
-					.catch((error: unknown) => warnFailure(key, "late release", error));
+				if (state.released) releaseToken(api, key, token);
 			})
 			.catch((error: unknown) => {
 				warnFailure(key, "hold", error);
 				// No token ever arrived, so there is nothing to release later - drop
 				// the entry rather than leaving the key wedged against a lock that
-				// will never come.
-				holds.delete(key);
+				// will never come. Only if it is still this hold's: a `release` and a
+				// fresh `hold` may already have replaced it.
+				if (holds.get(key) === state) holds.delete(key);
 			});
 	},
 
@@ -103,18 +109,13 @@ export const wakeLock = {
 		const state = holds.get(key);
 		if (!state) return;
 
-		if (state.token === null) {
-			// Still waiting on `holdWakeLock` - mark it and let the `.then` above
-			// release the token the moment it arrives.
-			state.releasePending = true;
-			return;
-		}
-
+		// Free the key first, whatever stage the hold is at, so the next run can
+		// take a lock of its own in this same tick.
 		holds.delete(key);
+		state.released = true;
+		if (state.token === null) return;
+
 		const api = bridge();
-		if (!api) return;
-		void api
-			.releaseWakeLock(state.token)
-			.catch((error: unknown) => warnFailure(key, "release", error));
+		if (api) releaseToken(api, key, state.token);
 	},
 };

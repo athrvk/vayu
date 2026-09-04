@@ -88,14 +88,19 @@ export interface WakeLock {
 
 export function createWakeLock(deps: WakeLockDeps): WakeLock {
 	const now = deps.now ?? Date.now;
-	const holds = new Map<string, { reason: string; ownerId: number | null }>();
+	const holds = new Map<string, { ownerId: number | null }>();
 	let blockerId: number | null = null;
 	/** Set only between an announced suspend and its resume. */
 	let suspendedAt: number | null = null;
 
-	function startBlocker(): void {
+	function startBlocker(reason: string): void {
 		if (blockerId !== null) return;
 		blockerId = deps.blocker.start(WAKE_LOCK_BLOCKER_TYPE);
+		// The main process's console is the app's log, and "why is this machine
+		// refusing to sleep" is a question a user does ask - `pmset -g assertions`
+		// and `powercfg /requests` name Vayu but not what it is doing. This is the
+		// only place that can answer, so the reason a holder gives is stated here.
+		console.log(`[power] holding the system wake lock: ${reason}`);
 	}
 
 	function stopBlockerIfIdle(): void {
@@ -104,6 +109,7 @@ export function createWakeLock(deps: WakeLockDeps): WakeLock {
 		// it no longer knows throws on some platforms.
 		if (deps.blocker.isStarted(blockerId)) deps.blocker.stop(blockerId);
 		blockerId = null;
+		console.log("[power] system wake lock released");
 	}
 
 	/*
@@ -137,8 +143,8 @@ export function createWakeLock(deps: WakeLockDeps): WakeLock {
 	return {
 		hold(reason: string, ownerId?: number): string {
 			const token = randomUUID();
-			holds.set(token, { reason, ownerId: ownerId ?? null });
-			startBlocker();
+			holds.set(token, { ownerId: ownerId ?? null });
+			startBlocker(reason);
 			return token;
 		},
 

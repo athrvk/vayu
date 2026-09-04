@@ -12,7 +12,7 @@
  * the machine sleep mid-run, which is the bug #1357 exists to fix.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createWakeLock,
 	registerPowerIpc,
@@ -68,9 +68,17 @@ function harness(clock?: () => number) {
 	const blocker = fakeBlocker();
 	const monitor = fakeMonitor();
 	const send = vi.fn();
+	// Held rather than let through: these lines are the app's log in production
+	// (see the eslint override for `electron/`), and a test suite that prints
+	// them is a test suite nobody reads the output of.
+	const log = vi.spyOn(console, "log").mockImplementation(() => {});
 	const lock = createWakeLock({ blocker, monitor, send, now: clock });
-	return { blocker, monitor, send, lock };
+	return { blocker, monitor, send, lock, log };
 }
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 describe("createWakeLock - reference counting", () => {
 	it("starts the blocker on the first hold, and only once", () => {
@@ -81,6 +89,20 @@ describe("createWakeLock - reference counting", () => {
 
 		expect(blocker.startCalls).toEqual([WAKE_LOCK_BLOCKER_TYPE]);
 		expect(lock.activeHolds()).toBe(2);
+	});
+
+	it("says what is holding the machine awake, and when it lets go", () => {
+		// The reason a holder gives has exactly one reader, and this is it: the
+		// OS tools name Vayu but not what it is doing, so a reason that reached
+		// nothing would be a string threaded through three layers for nobody.
+		const { lock, log } = harness();
+		const token = lock.hold("Load test run streaming");
+
+		expect(log.mock.calls[0]?.[0]).toContain("Load test run streaming");
+
+		log.mockClear();
+		lock.release(token);
+		expect(log).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps the blocker while another holder remains", () => {
