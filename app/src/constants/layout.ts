@@ -61,6 +61,26 @@ export const RETIRED_CONTEXT_BAR_SECTIONS: readonly string[] = ["environment"];
  */
 export const INDENT_STEP = 12;
 
+/** Left edge of a tree row at `depth` (px), the root row's padding included. */
+export function rowInsetPx(depth: number): number {
+	return 8 + depth * INDENT_STEP;
+}
+
+/**
+ * Left edge for anything rendered *inside* a row's `role="group"` at `depth` -
+ * a placeholder, an inline form, a skeleton, an inline error.
+ *
+ * It is the inset a child row of that group takes, not a padding of its own:
+ * the group's contents belong to one level, so they line up whether the level
+ * currently holds rows, one message, or a half-typed name. Derived from
+ * `rowInsetPx` rather than restated, because the two drifting apart is the
+ * defect (#1372) - a nested folder's "Empty folder" sat at the tree's left
+ * edge, left of its own parent's label.
+ */
+export function childInsetPx(depth: number): number {
+	return rowInsetPx(depth + 1);
+}
+
 /* ── Document tab strip (over the content column) ────────────────────────── */
 
 /**

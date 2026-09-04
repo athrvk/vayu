@@ -32,7 +32,7 @@ import { isDescendant } from "./tree-utils";
 import type { TreeEntity } from "./drop-position";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
-import { INDENT_STEP } from "@/constants/layout";
+import { rowInsetPx } from "@/constants/layout";
 
 export interface MoveToDialogProps {
 	/** The row being moved; `null` closes the dialog. */
@@ -110,7 +110,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 							key={collection.id}
 							variant="ghost"
 							className="w-full justify-start gap-2 h-8"
-							style={{ paddingLeft: 8 + depth * INDENT_STEP }}
+							style={{ paddingLeft: rowInsetPx(depth) }}
 							onClick={() => onMove(entity, collection.id)}
 						>
 							<Folder className="w-4 h-4 shrink-0 text-primary/70" />

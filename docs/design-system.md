@@ -1559,7 +1559,17 @@ header band, body below it.
   the row's _background_ in too, so a nested row's hover and selection fill stops
   short of the panel edge while a top-level row's reaches it. Depth is shown by
   where the content sits, not where the row starts:
-  `paddingLeft: 8 + depth * INDENT_STEP` (`constants/layout`).
+  `paddingLeft: rowInsetPx(depth)` (`constants/layout`, `8 + depth * INDENT_STEP`).
+- **Non-row content inside a level takes a child row's left edge.** A
+  placeholder, an inline form, a loading skeleton and an inline error all stand
+  in for the rows that are not there, so they start where those rows would:
+  `childInsetPx(depth)` in the collections tree, the named `GROUP_CHILD_INSET`
+  in the two-level variables tree. Each carrying its own `px-*` is how one
+  expanded folder came to show up to five different left edges, with "Empty
+  folder" left of its own parent's label (#1372). An empty level also has to
+  _say_ so: its group holds no `treeitem`, so the folder row carries
+  `aria-describedby` pointing at the placeholder rather than the placeholder
+  taking a role inside a group that owns rows.
 - **A control with an outward focus ring needs clearance from the body's top
   edge.** The body scrolls, so it clips at its own bounds, and a ring drawn
   outside the border box gets its top cut off when the control sits flush. Rows
