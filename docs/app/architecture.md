@@ -320,6 +320,7 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 - **Navigation History**: `onNavigateHistory()` delivers a `menu:navigate` step, sent by the View menu's Back/Forward items, the mouse's back/forward buttons where the OS reports them as `app-command`, and the macOS three-finger swipe (issue #1245)
 - **Platform & Paths**: `platform` constant and `getAppPaths()` for OS and directory detection
 - **Graceful Shutdown**: `onBeforeQuit()` to allow the renderer to flush state (saves, pending requests) before app termination
+- **Wake Lock**: `holdWakeLock(reason)` / `releaseWakeLock(token)` keep the machine from suspending under a streaming run (issue #1357). Ref-counted in `electron/power-save.ts`; the renderer side is `services/wake-lock.ts`, one keyed holder both run services call. `onHostSuspended()` / `onHostResumed()` report a sleep the lock could not prevent, which `useHostSleepRecorder` records against the run
 
 ## Security Considerations
 

@@ -23,12 +23,11 @@ import {
 	type RampOverlay,
 } from "../../../utils/metricsTransforms";
 import type { Breakpoint } from "../../../utils/computeBreakpoint";
-import type { Anomaly, AnomalyKind } from "../../../utils/detectAnomalies";
-import { hostSleepLabel } from "../../../utils/hostSleep";
+import type { Anomaly } from "../../../utils/detectAnomalies";
 import type { HostSleep } from "@/stores/host-sleep-store";
+import { runAnnotations } from "./annotations";
 import { joinMonitorToTimeline } from "../../../utils/monitorSeries";
-import type { ColorRole } from "./uplotTheme";
-import { UPlotChart, type UPlotSeriesSpec, type Marker, type Annotation } from "./UPlotChart";
+import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import {
 	bucketColumns,
 	rebucket,
@@ -82,52 +81,6 @@ function breakpointMarker(breakpoint?: Breakpoint | null): Marker[] {
 			label: breakpoint.p99Ms != null ? `SLO · ${Math.round(breakpoint.p99Ms)}ms` : "SLO",
 		},
 	];
-}
-
-/**
- * Anomaly colour by what went wrong - errors read as errors, slowness as a
- * warning. The breakpoint marker is `warning` too and they can coincide, which
- * is correct: both are saying the run degraded there, one against the SLO and
- * one against the run's own baseline.
- */
-const ANOMALY_ROLE: Record<AnomalyKind, ColorRole> = {
-	latency_spike: "warning",
-	error_burst: "destructive",
-	throughput_drop: "warning",
-	first_5xx: "destructive",
-};
-
-/**
- * Everything shaded on the time axis: the detected anomaly windows, plus the
- * host sleeps the run could not prevent.
- *
- * A sleep is drawn as an instant, not a band. Whether the engine's elapsed
- * clock advanced through a suspend is a per-platform answer, so a band drawn
- * `durationMs` wide would be a claim about the series that may be fiction; the
- * mark says where the machine went down and the label says for how long.
- *
- * Exported for its own test: every chart below calls it and none of them can be
- * read for what it produced, since uPlot draws to a canvas.
- */
-export function runAnnotations(
-	anomalies?: Anomaly[] | null,
-	sleeps?: readonly HostSleep[] | null
-): Annotation[] {
-	const windows: Annotation[] = (anomalies ?? []).map((a) => ({
-		startSeconds: a.startSeconds,
-		endSeconds: a.endSeconds,
-		label: a.label,
-		role: ANOMALY_ROLE[a.kind],
-	}));
-	for (const sleep of sleeps ?? []) {
-		windows.push({
-			startSeconds: sleep.startSeconds,
-			endSeconds: sleep.startSeconds,
-			label: hostSleepLabel(sleep),
-			role: "warning",
-		});
-	}
-	return windows;
 }
 
 /** Response-time percentiles over time - the canonical "latency vs time" chart. */
