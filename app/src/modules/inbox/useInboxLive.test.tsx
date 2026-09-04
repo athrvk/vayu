@@ -10,57 +10,27 @@
  */
 
 /**
- * The inbox live stream owns its reconnect (issue #506).
+ * The view's reference to an inbox stream it no longer owns (issue #1400).
  *
- * `EventSource` treats a non-200 as fatal and never retries it, and a reconnect
- * landing inside the engine's dead-socket detection window meets a 409 from the
- * previous stream's claim - so a single unlucky disconnect used to end the
- * stream for the life of the tab with nothing said. These pin both halves of the
- * fix: the stream comes back on its own, and when it cannot, it says so instead
- * of leaving the badge on `Running`.
+ * The socket, the reconnect and the merge belong to `inbox-watch-service`, and
+ * its own tests pin those. What is left here is the part a surface can get
+ * wrong: holding the stream while the tab is on screen, letting go of it
+ * without closing one somebody else still wants, and rendering the state the
+ * service reports for the inbox this view is addressing rather than the one it
+ * was addressing a render ago.
+ *
+ * Driven through the real service with a stubbed `EventSource`, not a mocked
+ * service: a test that asserted "retain was called" would pass with the socket
+ * closed on unmount, which is the bug this issue is about.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, renderHook } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
-import { queryKeys, useInboxesQuery } from "@/queries";
-import { useClientSettingsStore, useInboxNotifyStore } from "@/stores";
-import type { Inbox, InboxCapturesResponse } from "@/types";
-import {
-	INBOX_LIVE_MAX_RETRIES,
-	INBOX_LIVE_RETRY_BASE_MS,
-	INBOX_LIVE_RETRY_MAX_MS,
-	inboxLiveRetryDelayMs,
-	useInboxLive,
-} from "./useInboxLive";
-import { INBOX_CAPTURE_NOTIFY_WINDOW_MS } from "./capture-notifier";
+import { act, render, renderHook } from "@testing-library/react";
+import { queryClient } from "@/lib/query-client";
+import { inboxWatchService } from "@/services/inbox-watch-service";
+import { useInboxLive } from "./useInboxLive";
 
-const listInboxes = vi.fn();
-
-vi.mock("@/services/api", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@/services/api")>();
-	return {
-		...actual,
-		apiService: { ...actual.apiService, listInboxes: () => listInboxes() },
-	};
-});
-
-function record(overrides: Partial<Inbox> = {}): Inbox {
-	return {
-		inboxId: "inbox_a",
-		url: "http://127.0.0.1:4100/",
-		bind: "127.0.0.1",
-		port: 4100,
-		running: true,
-		loopback: true,
-		captureCount: 0,
-		response: { status: 200, body: "", headers: {}, delayMs: 0 },
-		...overrides,
-	};
-}
-
-/** Every source the hook opened, in order, with its callbacks reachable. */
+/** Every source the service opened, in order, with its callbacks reachable. */
 class MockEventSource {
 	static instances: MockEventSource[] = [];
 	onopen: (() => void) | null = null;
@@ -87,342 +57,118 @@ function latest() {
 	return all[all.length - 1];
 }
 
-function makeClient() {
-	return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
-}
-
-function wrapper(client: QueryClient) {
-	return ({ children }: { children: ReactNode }) => (
-		<QueryClientProvider client={client}>{children}</QueryClientProvider>
-	);
-}
-
-/**
- * Fail the open stream and let its scheduled retry fire.
- *
- * Async because the reconnect is: before spending a retry the hook asks the
- * engine whether the listener is still there (issue #554), so the timer is
- * scheduled a microtask after the error rather than inside it.
- */
-async function dropAndWait() {
-	await act(async () => void latest().onerror?.());
-	await act(async () => void vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 2));
-}
-
 beforeEach(() => {
 	MockEventSource.instances = [];
-	listInboxes.mockReset().mockResolvedValue([record()]);
 	vi.stubGlobal("EventSource", MockEventSource);
-	vi.useFakeTimers();
-	// Both notification gates start off, so only the cases that ask for one
-	// (#1388) can post: every other case here drives the same stream.
-	useClientSettingsStore.setState({ systemNotifications: false });
-	useInboxNotifyStore.setState({ enabled: {} });
+	queryClient.clear();
 });
 
 afterEach(() => {
-	vi.useRealTimers();
+	inboxWatchService.stopAll();
 	vi.unstubAllGlobals();
 });
 
-describe("inboxLiveRetryDelayMs", () => {
-	it("clears the engine's default 250ms claim window on the first attempt", () => {
-		// The app cannot read `inboxLivePollIntervalMs`, so the first step has to
-		// outlast the default cadence on its own or the retry meets the same 409.
-		expect(inboxLiveRetryDelayMs(1, () => 0)).toBeGreaterThan(250);
-		expect(inboxLiveRetryDelayMs(1, () => 0)).toBe(INBOX_LIVE_RETRY_BASE_MS);
-	});
-
-	it("doubles up to the cap, and jitters within the step", () => {
-		expect(inboxLiveRetryDelayMs(3, () => 0)).toBe(INBOX_LIVE_RETRY_BASE_MS * 4);
-		expect(inboxLiveRetryDelayMs(20, () => 0)).toBe(INBOX_LIVE_RETRY_MAX_MS);
-		// Jitter only ever adds, so a delay never drops back inside the window
-		// the previous step was chosen to clear.
-		const jittered = inboxLiveRetryDelayMs(1, () => 1);
-		expect(jittered).toBeGreaterThan(INBOX_LIVE_RETRY_BASE_MS);
-		expect(jittered).toBe(INBOX_LIVE_RETRY_BASE_MS * 1.5);
-	});
-});
-
 describe("useInboxLive", () => {
-	it("reports Live only while a stream is open", () => {
-		const { result } = renderHook(() => useInboxLive("inbox_a", true), {
-			wrapper: wrapper(makeClient()),
-		});
+	it("holds a stream for the inbox on screen and reports Live only while it is open", () => {
+		const { result } = renderHook(() => useInboxLive("inbox_a", true));
 
 		expect(sources()).toHaveLength(1);
 		expect(result.current.watching).toBe(false);
+
 		act(() => latest().onopen?.());
+
 		expect(result.current.watching).toBe(true);
 		expect(result.current.stopped).toBe(false);
-	});
-
-	it("merges a streamed capture into the list the first fetch filled", () => {
-		const client = makeClient();
-		client.setQueryData<InboxCapturesResponse>(queryKeys.inbox.captures("inbox_a"), {
-			data: [],
-			pagination: { total: 0, limit: 50, offset: 0, returned: 0, hasMore: false },
-		});
-		renderHook(() => useInboxLive("inbox_a", true), { wrapper: wrapper(client) });
-
-		act(() =>
-			latest().onmessage?.(
-				new MessageEvent("message", {
-					lastEventId: "7",
-					data: JSON.stringify({
-						id: 7,
-						inboxId: "inbox_a",
-						method: "POST",
-						path: "/hook",
-					}),
-				})
-			)
-		);
-
-		const cached = client.getQueryData<InboxCapturesResponse>(
-			queryKeys.inbox.captures("inbox_a")
-		);
-		expect(cached?.data.map((c) => c.id)).toEqual([7]);
-	});
-
-	it("hands a streamed capture to this inbox's notifier", () => {
-		// The wiring #1388 turns on: the stream is the only place the app hears
-		// about a capture, so a notifier that is not fed here never fires.
-		// Mutation check: drop the `notifier.record` call and nothing is posted.
-		const showNotification = vi.fn().mockResolvedValue("shown");
-		vi.stubGlobal("electronAPI", { showNotification });
-		useClientSettingsStore.setState({ systemNotifications: true });
-		useInboxNotifyStore.getState().setEnabled("inbox_a", true);
-
-		renderHook(() => useInboxLive("inbox_a", true), { wrapper: wrapper(makeClient()) });
-		act(() =>
-			latest().onmessage?.(
-				new MessageEvent("message", {
-					lastEventId: "3",
-					data: JSON.stringify({
-						id: 3,
-						inboxId: "inbox_a",
-						method: "POST",
-						path: "/hook",
-					}),
-				})
-			)
-		);
-		act(() => void vi.advanceTimersByTime(INBOX_CAPTURE_NOTIFY_WINDOW_MS));
-
-		expect(showNotification).toHaveBeenCalledTimes(1);
-		expect(showNotification.mock.calls[0][0]).toMatchObject({
-			kind: "inbox-captured",
-			body: "POST /hook",
-			target: { view: "inbox", inboxId: "inbox_a" },
-		});
-	});
-
-	it("drops the pending notification when the stream is torn down", () => {
-		// A window still armed after the user switched inbox would speak for a
-		// stream that no longer exists.
-		const showNotification = vi.fn().mockResolvedValue("shown");
-		vi.stubGlobal("electronAPI", { showNotification });
-		useClientSettingsStore.setState({ systemNotifications: true });
-		useInboxNotifyStore.getState().setEnabled("inbox_a", true);
-
-		const { unmount } = renderHook(() => useInboxLive("inbox_a", true), {
-			wrapper: wrapper(makeClient()),
-		});
-		act(() =>
-			latest().onmessage?.(
-				new MessageEvent("message", {
-					data: JSON.stringify({
-						id: 4,
-						inboxId: "inbox_a",
-						method: "GET",
-						path: "/hook",
-					}),
-				})
-			)
-		);
-		unmount();
-		act(() => void vi.advanceTimersByTime(INBOX_CAPTURE_NOTIFY_WINDOW_MS * 2));
-
-		expect(showNotification).not.toHaveBeenCalled();
-	});
-
-	it("reconnects after a drop and comes back to Live", async () => {
-		const { result } = renderHook(() => useInboxLive("inbox_a", true), {
-			wrapper: wrapper(makeClient()),
-		});
-		act(() => latest().onopen?.());
-
-		const dropped = latest();
-		await dropAndWait();
-
-		// The dead source is closed rather than left to a browser retry that a
-		// 409 has already made fatal, and a fresh one takes its place.
-		expect(dropped.closed).toBe(true);
-		expect(sources()).toHaveLength(2);
-		expect(result.current.stopped).toBe(false);
-
-		act(() => latest().onopen?.());
-		expect(result.current.watching).toBe(true);
-	});
-
-	it("resumes from the last capture it saw, so the gap is not lost", async () => {
-		renderHook(() => useInboxLive("inbox_a", true), { wrapper: wrapper(makeClient()) });
-		act(() => latest().onopen?.());
-		expect(latest().url).not.toContain("lastEventId");
-
-		act(() =>
-			latest().onmessage?.(
-				new MessageEvent("message", {
-					lastEventId: "12",
-					data: JSON.stringify({
-						id: 12,
-						inboxId: "inbox_a",
-						method: "GET",
-						path: "/hook",
-					}),
-				})
-			)
-		);
-		await dropAndWait();
-
-		// A header is not settable on a fresh EventSource, so the resume point
-		// travels as the query parameter the engine reads on the same terms.
-		expect(latest().url).toContain("lastEventId=12");
-	});
-
-	it("gives up after a bounded number of refusals and offers a resume", async () => {
-		const { result } = renderHook(() => useInboxLive("inbox_a", true), {
-			wrapper: wrapper(makeClient()),
-		});
-
-		// A persistent 409 never opens, so every attempt fails the same way.
-		for (let attempt = 0; attempt <= INBOX_LIVE_MAX_RETRIES; attempt++) {
-			await dropAndWait();
-		}
-
-		expect(sources()).toHaveLength(INBOX_LIVE_MAX_RETRIES + 1);
-		expect(result.current.watching).toBe(false);
-		expect(result.current.stopped).toBe(true);
-
-		// And it stays given up on: no further source appears on its own.
-		act(() => void vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 10));
-		expect(sources()).toHaveLength(INBOX_LIVE_MAX_RETRIES + 1);
-
-		act(() => result.current.resume());
-		expect(sources()).toHaveLength(INBOX_LIVE_MAX_RETRIES + 2);
-		expect(result.current.stopped).toBe(false);
-		act(() => latest().onopen?.());
-		expect(result.current.watching).toBe(true);
-	});
-
-	it("cancels a scheduled retry on unmount", async () => {
-		const { unmount } = renderHook(() => useInboxLive("inbox_a", true), {
-			wrapper: wrapper(makeClient()),
-		});
-		act(() => latest().onopen?.());
-		await act(async () => void latest().onerror?.());
-
-		const openedBeforeUnmount = sources().length;
-		unmount();
-		act(() => void vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 10));
-
-		expect(sources()).toHaveLength(openedBeforeUnmount);
-	});
-
-	it("cancels a scheduled retry when the inbox changes, and starts the new one clean", async () => {
-		const { result, rerender } = renderHook(
-			({ id }: { id: string }) => useInboxLive(id, true),
-			{ wrapper: wrapper(makeClient()), initialProps: { id: "inbox_a" } }
-		);
-		act(() => latest().onopen?.());
-		act(() =>
-			latest().onmessage?.(
-				new MessageEvent("message", {
-					lastEventId: "3",
-					data: JSON.stringify({
-						id: 3,
-						inboxId: "inbox_a",
-						method: "GET",
-						path: "/hook",
-					}),
-				})
-			)
-		);
-		await act(async () => void latest().onerror?.());
-		const openedForA = sources().length;
-
-		rerender({ id: "inbox_b" });
-		act(() => void vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 10));
-
-		// One new source, for the new inbox - the old inbox's pending retry did
-		// not fire - and no resume point, since a capture id belongs to the
-		// inbox that recorded it.
-		expect(sources()).toHaveLength(openedForA + 1);
-		expect(latest().url).toContain("inbox_b");
-		expect(latest().url).not.toContain("lastEventId");
-		expect(result.current.watching).toBe(false);
 	});
 
 	it("opens nothing for a stopped inbox", () => {
-		const { result } = renderHook(() => useInboxLive("inbox_a", false), {
-			wrapper: wrapper(makeClient()),
-		});
+		const { result } = renderHook(() => useInboxLive("inbox_a", false));
+
 		expect(sources()).toHaveLength(0);
 		expect(result.current.watching).toBe(false);
 		expect(result.current.stopped).toBe(false);
 	});
-});
 
-/**
- * What the tab does: the engine's record decides whether a stream is wanted, so
- * a stop issued anywhere reaches the stream through the list (issue #554).
- */
-function useWatchedInbox(inboxId: string) {
-	const { data: inboxes = [] } = useInboxesQuery();
-	const inbox = inboxes.find((i) => i.inboxId === inboxId);
-	const live = useInboxLive(inboxId, inbox?.running !== false);
-	return { live, running: inbox?.running };
-}
-
-describe("a stop issued outside this tab", () => {
-	it("reaches the surface within the close, not on the next poll", async () => {
-		const { result } = renderHook(() => useWatchedInbox("inbox_a"), {
-			wrapper: wrapper(makeClient()),
-		});
-		await act(async () => {});
+	it("adopts a stream the service already holds, on the first render", () => {
+		// The tab is reopened on an inbox that has been notifying in the
+		// background: one socket, and the badge reads Live from the first frame.
+		// Mutation check: read the service through state-plus-effect instead of
+		// `useSyncExternalStore` and the first frame is `Running`, which is the
+		// badge flicking on every reopen.
+		inboxWatchService.reconcile(["inbox_a"]);
 		act(() => latest().onopen?.());
-		expect(result.current.live.watching).toBe(true);
 
-		// Stopped from the drawer, an MCP tool or curl: the listener goes and
-		// the stream ends exactly the way a dropped connection does.
-		listInboxes.mockResolvedValue([record({ running: false })]);
-		await act(async () => void latest().onerror?.());
+		const rendered: boolean[] = [];
+		function Probe() {
+			rendered.push(useInboxLive("inbox_a", true).watching);
+			return null;
+		}
+		render(<Probe />);
 
-		// No timer has advanced, so this cannot have come from the poll.
-		expect(result.current.running).toBe(false);
-
-		await act(async () => void vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 2));
-
-		// And the retry budget is untouched: no reconnect was attempted against
-		// a listener that is gone on purpose, and the surface does not offer the
-		// Resume that belongs to a stream which gave up.
 		expect(sources()).toHaveLength(1);
-		expect(result.current.live.watching).toBe(false);
-		expect(result.current.live.stopped).toBe(false);
+		expect(rendered[0]).toBe(true);
 	});
 
-	it("is told apart from a genuine drop, which still reconnects", async () => {
-		const { result } = renderHook(() => useWatchedInbox("inbox_a"), {
-			wrapper: wrapper(makeClient()),
-		});
-		await act(async () => {});
+	it("leaves the socket open on unmount when something else still wants it", () => {
+		// The regression this issue is about, at the seam the view owns: the tab
+		// switch that precedes leaving the window must not take the stream with
+		// it.
+		// Mutation check: drop the refcount in the service, or close on release
+		// unconditionally, and this reddens.
+		inboxWatchService.reconcile(["inbox_a"]);
+		const { unmount } = renderHook(() => useInboxLive("inbox_a", true));
+
+		unmount();
+
+		expect(sources()).toHaveLength(1);
+		expect(latest().closed).toBe(false);
+	});
+
+	it("closes the socket on unmount when it was the only holder", () => {
+		const { unmount } = renderHook(() => useInboxLive("inbox_a", true));
+		const source = latest();
+
+		unmount();
+
+		expect(source.closed).toBe(true);
+	});
+
+	it("moves its reference when the addressed inbox changes", () => {
+		const { result, rerender } = renderHook(
+			({ id }: { id: string }) => useInboxLive(id, true),
+			{
+				initialProps: { id: "inbox_a" },
+			}
+		);
+		const first = latest();
+		act(() => first.onopen?.());
+
+		rerender({ id: "inbox_b" });
+
+		expect(first.closed).toBe(true);
+		expect(latest().url).toContain("inbox_b");
+		// The new inbox's own state, not the badge the previous one left behind.
+		expect(result.current.watching).toBe(false);
+	});
+
+	it("releases the stream when the inbox is stopped", () => {
+		const { rerender } = renderHook(
+			({ running }: { running: boolean }) => useInboxLive("inbox_a", running),
+			{ initialProps: { running: true } }
+		);
+		const source = latest();
+
+		rerender({ running: false });
+
+		expect(source.closed).toBe(true);
+	});
+
+	it("offers a resume that re-subscribes the service", () => {
+		const { result } = renderHook(() => useInboxLive("inbox_a", true));
 		act(() => latest().onopen?.());
 
-		// Same close, but the engine still lists the listener as running.
-		await dropAndWait();
+		act(() => result.current.resume());
 
 		expect(sources()).toHaveLength(2);
-		expect(result.current.running).toBe(true);
 	});
 });

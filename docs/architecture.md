@@ -196,6 +196,10 @@ toggle is, which sits in the inbox's header rather than in Settings and is off
 by default. The captures of one window are coalesced into a single notification
 naming how many arrived, rather than posted one by one, and the window is a
 property of what a notification is for rather than a setting the user tunes.
+The stream that hears those captures is held app-wide, for every running inbox
+whose toggle is on, rather than by the inbox tab: one tab's surface is mounted
+at a time, so a view-owned stream was silenced by the click onto another tab
+that ordinarily precedes leaving the window (issue #1400).
 
 Because that answer only exists once something has been posted, Settings can ask
 for one: the Preview beside the toggle posts a real notification over

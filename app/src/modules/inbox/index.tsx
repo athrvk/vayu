@@ -25,7 +25,7 @@
  * showing a different inbox than the row it was clicked on.
  */
 
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { Copy, Eraser, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from "lucide-react";
 import {
 	Badge,
@@ -170,21 +170,14 @@ export default function InboxView() {
 	const showToast = useToastStore((s) => s.showToast);
 	const copy = useCopy();
 	const { openTabs, activeTabId, openTab } = useTabsStore();
-	const { data: inboxes = [], isError, isSuccess, error, refetch } = useInboxesQuery();
+	const { data: inboxes = [], isError, error, refetch } = useInboxesQuery();
 	// Which capture, and of which inbox: ids are per-inbox, so a bare number
 	// carried across a switch can select a row in the inbox switched *to*.
 	const [selection, setSelection] = useState<{ inboxId: string; captureId: number } | null>(null);
 
-	// An inbox id belongs to the engine process that minted it - none survives a
-	// restart - so a notify preference keyed by one is dead the moment the
-	// engine's own list stops naming it. Pruned here, against an answer the
-	// engine actually gave: a failed or unsettled read leaves the map alone,
-	// because "no inboxes" and "could not ask" are not the same list (#1388).
-	const retainInboxes = useInboxNotifyStore((s) => s.retainInboxes);
-	useEffect(() => {
-		if (!isSuccess) return;
-		retainInboxes(inboxes.map((i) => i.inboxId));
-	}, [isSuccess, inboxes, retainInboxes]);
+	// The notify map is pruned against the engine's list by `useInboxWatchers`,
+	// at the app level: an id is dead once the engine that minted it exits, and
+	// pruning here meant pruning only while this tab was open (#1400).
 
 	const startInbox = useStartInboxMutation();
 	const stopInbox = useStopInboxMutation();

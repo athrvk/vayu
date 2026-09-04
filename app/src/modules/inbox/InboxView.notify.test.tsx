@@ -14,9 +14,10 @@
  *
  * The toggle is here rather than in the Notifications settings panel because it
  * belongs to one listener, and the panel governs the events that happen once.
- * Two things are pinned: the control reads and writes the per-inbox store, and
- * the preferences of inboxes the engine has stopped listing do not accumulate -
- * an inbox id belongs to the engine process that minted it.
+ * What is pinned here is the control itself: it reads and writes the per-inbox
+ * store. Pruning the preferences of inboxes the engine no longer lists moved to
+ * the app level with the streams (#1400) - `useInboxWatchers.test.tsx` holds
+ * those cases, because the view is mounted only while its tab is on screen.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -38,14 +39,11 @@ const inbox: Inbox = {
 
 const noop = { mutate: vi.fn(), isPending: false };
 
-/** What the inbox list read answered, so a case can make it fail. */
-const listing = { isSuccess: true, isError: false };
-
 vi.mock("@/queries", () => ({
 	useInboxesQuery: () => ({
-		data: listing.isError ? undefined : [inbox],
-		isError: listing.isError,
-		isSuccess: listing.isSuccess,
+		data: [inbox],
+		isError: false,
+		isSuccess: true,
 		error: null,
 		refetch: vi.fn(),
 	}),
@@ -73,8 +71,6 @@ function toggle() {
 }
 
 beforeEach(() => {
-	listing.isSuccess = true;
-	listing.isError = false;
 	useInboxNotifyStore.setState({ enabled: {} });
 	vi.clearAllMocks();
 });
@@ -100,22 +96,10 @@ describe("InboxView capture notifications", () => {
 		expect(useInboxNotifyStore.getState().enabled).toEqual({});
 	});
 
-	it("forgets the preference of an inbox the engine no longer lists", () => {
-		// Mutation check: remove the `retainInboxes` effect and this entry - and
-		// one for every inbox ever started - is persisted forever, unreachable,
-		// because the engine mints a new id for every listener it opens.
-		useInboxNotifyStore.setState({ enabled: { inbox_a: true, inbox_gone: true } });
-
-		render(<InboxView />);
-
-		expect(useInboxNotifyStore.getState().enabled).toEqual({ inbox_a: true });
-	});
-
-	it("keeps every preference when the list could not be read", () => {
-		// "No inboxes" and "could not ask" are not the same answer, and only one
-		// of them is evidence that an id is dead.
-		listing.isSuccess = false;
-		listing.isError = true;
+	it("leaves the map alone - pruning it is the app-level watcher's job", () => {
+		// The view is mounted only while its tab is active, so a prune bound to
+		// it ran on an accident of navigation (#1400). Mutation check: put the
+		// `retainInboxes` effect back in the view and this reddens.
 		useInboxNotifyStore.setState({ enabled: { inbox_a: true, inbox_gone: true } });
 
 		render(<InboxView />);
