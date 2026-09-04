@@ -83,6 +83,36 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("window:maximized", handler);
 	},
 
+	// Context menu (#1359). The main process composes it from Chromium's own
+	// editing state; these two carry the half only the renderer knows.
+	//
+	// Synchronous, and deliberately the only `sendSync` in the app: this is
+	// called from a `contextmenu` listener, and blocking there until the main
+	// process has the announcement is what pairs it with the `context-menu`
+	// event that follows. The shape mirrors `ContextTarget` in
+	// electron/context-menu.ts, inlined because this file is a CommonJS script
+	// and must not grow imports.
+	setContextTarget: (target: {
+		kind: "url-bar" | "monaco" | null;
+		variable: string | null;
+	}): void => {
+		ipcRenderer.sendSync("context-menu:target", target);
+	},
+	// The two menu offers the renderer owns: importing a curl or wget command
+	// from the clipboard, and opening a `{{token}}`'s popover. Mirrors the
+	// forwarded half of `ContextCommand` in electron/context-menu.ts.
+	onContextMenuCommand: (
+		callback: (
+			command:
+				{ type: "import-command"; text: string } | { type: "edit-variable"; name: string }
+		) => void
+	) => {
+		const handler = (_event: unknown, command: unknown) =>
+			callback(command as Parameters<typeof callback>[0]);
+		ipcRenderer.on("context-menu:command", handler);
+		return () => ipcRenderer.removeListener("context-menu:command", handler);
+	},
+
 	// Auto-update
 	onUpdateAvailable: (
 		callback: (info: {

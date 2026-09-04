@@ -47,6 +47,24 @@ export type UpdateCheckResult =
 	| ({ status: "available" } & UpdateAvailableInfo)
 	| { status: "error"; message: string };
 
+/**
+ * What the renderer says sits under the pointer for a right-click. Mirrors
+ * `ContextTarget` in `electron/context-menu.ts`; only what the main process
+ * cannot read from Chromium's own context-menu params.
+ */
+export interface ContextMenuTarget {
+	kind: "url-bar" | "monaco" | null;
+	variable: string | null;
+}
+
+/**
+ * A context-menu item the renderer has to run, forwarded from main. Mirrors the
+ * forwarded half of `ContextCommand` in `electron/context-menu.ts` - the link
+ * actions never leave the main process, so they are not in this union.
+ */
+export type ContextMenuCommand =
+	{ type: "import-command"; text: string } | { type: "edit-variable"; name: string };
+
 interface ElectronAPI {
 	// Engine management
 	restartEngine: () => Promise<{ success: boolean; error?: string }>;
@@ -74,6 +92,16 @@ interface ElectronAPI {
 	windowClose: () => void;
 	windowIsMaximized: () => Promise<boolean>;
 	onWindowMaximized: (callback: (isMaximized: boolean) => void) => () => void;
+
+	// Context menu (#1359)
+	/**
+	 * Announce what is under the pointer, from the renderer's own `contextmenu`
+	 * listener. Mirrors `ContextTarget` in `electron/context-menu.ts`; the call
+	 * is synchronous so the announcement lands before the menu it describes.
+	 */
+	setContextTarget: (target: ContextMenuTarget) => void;
+	/** The menu items the renderer owns: a command import, a token's popover. */
+	onContextMenuCommand: (callback: (command: ContextMenuCommand) => void) => () => void;
 
 	// Auto-update
 	onUpdateAvailable: (callback: (info: UpdateAvailableInfo) => void) => () => void;

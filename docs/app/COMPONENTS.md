@@ -246,6 +246,22 @@ Footer bar (h-8, shrink-0). Horizontal layout:
 - **Middle - pending restart:** once a setting the engine marks `requiresRestart` has been saved, a "Restart pending" button appears beside the connection status and restarts the engine in place (`useEngineRestart`, shared with the Settings banner so the two cannot diverge). It tracks saves made since this renderer connected - not a comparison against the engine's running values, which it does not report - so it says *saved*, not *in effect*, and does not survive a renderer reload. A failed restart leaves the signal standing and reports the reason as a toast.
 - **Right - toggles:** Context bar toggle (⌘I). Pressed when the bar is open *and* the active tab is one it has content for, so the highlight always matches what is on screen.
 
+### Right-click menu (`electron/context-menu.ts`, `lib/context-menu.ts`)
+
+Electron draws no context menu of its own. `electron/context-menu.ts` composes one in the main process from Chromium's `context-menu` params (`isEditable`, `selectionText`, `linkURL`, `editFlags`) plus a target the renderer announces on the way past - a capture-phase `contextmenu` listener installed once by `useMenuActions` (mounted in `App`), through `installContextMenuBridge` in `lib/context-menu.ts` (issue #1359).
+
+| Under the pointer | Menu items |
+|---|---|
+| An editable field | Cut / Copy / Paste (enabled per `editFlags`), a separator, Select All - all Electron roles, so the OS supplies the accelerator |
+| The URL bar | The above, plus "Paste as curl" / "Paste as wget" when the clipboard holds one - imports through `UrlInput`'s existing paste import |
+| A `{{token}}` | The above, plus "Edit variable" - clicks the token, the popover's own way in |
+| A link (http/https only) | "Copy Link" and "Open in Browser" |
+| Read-only text with a selection | Copy |
+| A Monaco editor | Nothing - it draws its own menu |
+| Anything else | No menu |
+
+The renderer marks what a surface means with `data-context` ("url-bar" | "monaco", spread from `contextProps`) and `data-context-variable` (spread from `variableProps` on the token in `EditableVariable`); the main process reads only those markers plus what Chromium's params already say, since it has no way to read the DOM itself.
+
 ## Request Builder (`modules/request-builder/`)
 
 The request editor. Entry: `modules/request-builder/index.tsx`.

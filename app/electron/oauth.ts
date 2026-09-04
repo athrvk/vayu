@@ -19,6 +19,7 @@
 
 import { ipcMain, shell, BrowserWindow } from "electron";
 import { createAuthWindowFlow, type AuthWindowResult } from "./oauth-window.js";
+import { isBrowsableUrl, urlProtocol } from "./external-url.js";
 
 export interface OpenAuthWindowParams {
 	authorizeUrl: string;
@@ -95,15 +96,15 @@ function openAuthWindow(params: OpenAuthWindowParams): Promise<OpenAuthWindowRes
 export function setupOAuthIpcHandlers(): void {
 	// Loopback mode: open the system browser (engine hosts the callback listener).
 	// Only http(s) is ever a valid authorize URL - reject anything else so a
-	// compromised renderer can't hand arbitrary protocol handlers to the OS.
+	// compromised renderer can't hand arbitrary protocol handlers to the OS. The
+	// rule itself lives in external-url.ts, shared with the context menu's "Open
+	// in Browser", which asks the same question of an arbitrary `href`.
 	ipcMain.handle("shell:openExternalUrl", async (_e, url: string) => {
-		let scheme: string;
-		try {
-			scheme = new URL(url).protocol;
-		} catch {
+		const scheme = urlProtocol(url);
+		if (scheme === null) {
 			throw new Error("Invalid authorize URL");
 		}
-		if (scheme !== "http:" && scheme !== "https:") {
+		if (!isBrowsableUrl(url)) {
 			throw new Error(`Refusing to open non-HTTP(S) URL: ${scheme}`);
 		}
 		await shell.openExternal(url);

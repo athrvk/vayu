@@ -34,6 +34,7 @@ import { useMonacoTheme } from "@/hooks/useMonacoTheme";
 import { useEditorVariableTokens } from "@/components/shared/EditorVariableTokens/useEditorVariableTokens";
 import { LEAVE_EDITOR_CHORD } from "@/constants/shortcuts";
 import { chordKeys } from "@/lib/platform";
+import { contextProps } from "@/lib/context-menu";
 import { Kbd } from "./kbd";
 import { Skeleton } from "./skeleton";
 import { cn } from "@/lib/utils";
@@ -266,6 +267,10 @@ export function CodeEditor({
 		 * shape as this one.
 		 */
 		<div
+			// Monaco carries its own context menu, so the app's must not open a
+			// second one over it (#1359). Marked rather than detected: an editor
+			// that stops the event before it bubbles still gets one menu, not two.
+			{...contextProps("monaco")}
 			className={cn("relative", className)}
 			style={{ height }}
 			onFocus={() => setHasFocus(true)}

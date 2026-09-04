@@ -28,6 +28,7 @@ import {
 } from "@/components/ui";
 import type { VariableScope } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { variableProps } from "@/lib/context-menu";
 // The specific module, not the `../../context` barrel - matching the sibling
 // `VariableInput/index.tsx`, whose tests mock this exact path.
 import type { VariableScope as RequestBuilderVariableScope, VariableSupport } from "@/types";
@@ -115,7 +116,14 @@ export default function EditableVariable({
 	 * was trying to prevent.
 	 */
 	const token = (
-		<span className="font-[inherit]" contentEditable={false} suppressContentEditableWarning>
+		<span
+			className="font-[inherit]"
+			contentEditable={false}
+			suppressContentEditableWarning
+			// Names the token for the right-click menu's "Edit variable", which
+			// opens this popover by clicking the trigger this span sits in (#1359).
+			{...variableProps(name)}
+		>
 			{`{{${name}}}`}
 		</span>
 	);
