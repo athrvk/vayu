@@ -10,7 +10,17 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// An update becoming installable is one of the events that may land while the
+// user is in another application (#1358).
+const { mockNotifyPost } = vi.hoisted(() => ({ mockNotifyPost: vi.fn() }));
+vi.mock("@/services/notify", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/services/notify")>()),
+	systemNotify: { post: mockNotifyPost, availability: vi.fn() },
+}));
+
 import { useAppUpdate } from "./useAppUpdate";
+import { NOTIFY_KINDS } from "@/services/notify";
 
 type AvailableCb = (info: {
 	version: string;
@@ -26,6 +36,7 @@ let downloadedCb: DownloadedCb | null;
 beforeEach(() => {
 	availableCb = null;
 	downloadedCb = null;
+	mockNotifyPost.mockClear();
 	(window as unknown as { electronAPI: unknown }).electronAPI = {
 		onUpdateAvailable: (cb: AvailableCb) => {
 			availableCb = cb;
@@ -100,6 +111,44 @@ describe("useAppUpdate", () => {
 		});
 		expect(result.current.readyToInstall).toBe(true);
 		expect(result.current.update?.version).toBe("1.3.0");
+	});
+
+	test("tells the user once the update is theirs to install", () => {
+		renderHook(() => useAppUpdate());
+
+		// The silent path: the announcement is not actionable, the download is.
+		act(() => {
+			availableCb?.({ version: "1.2.3", strategy: "silent", releaseUrl: "u" });
+		});
+		expect(mockNotifyPost).not.toHaveBeenCalled();
+
+		act(() => {
+			downloadedCb?.({ version: "1.2.3" });
+		});
+		expect(mockNotifyPost).toHaveBeenCalledWith({
+			kind: NOTIFY_KINDS.updateReady,
+			title: "Vayu 1.2.3 is ready",
+			body: "Restart Vayu to update.",
+			target: { view: "settings" },
+		});
+	});
+
+	test("tells the user about a notify-path update, where the announcement is all there is", () => {
+		renderHook(() => useAppUpdate());
+
+		// macOS: nothing downloads on its own, so this announcement is the whole
+		// story. Drop the `strategy === "notify"` guard and the silent path above
+		// starts notifying twice for one version.
+		act(() => {
+			availableCb?.({ version: "1.2.3", strategy: "notify", releaseUrl: "u" });
+		});
+
+		expect(mockNotifyPost).toHaveBeenCalledWith(
+			expect.objectContaining({
+				kind: NOTIFY_KINDS.updateReady,
+				title: "Vayu 1.2.3 is available",
+			})
+		);
 	});
 
 	test("dismiss hides the banner", () => {

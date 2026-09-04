@@ -25,6 +25,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getHealth = vi.fn();
 vi.mock("@/services/api", () => ({ apiService: { getHealth: () => getHealth() } }));
+// The engine dropping out is one of the events that may reach the user in
+// another application (#1358). Mocked at the service boundary: whether the OS
+// shows it is `electron/notify.ts`'s question.
+const { mockNotifyPost } = vi.hoisted(() => ({ mockNotifyPost: vi.fn() }));
+vi.mock("@/services/notify", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/services/notify")>()),
+	systemNotify: { post: mockNotifyPost, availability: vi.fn() },
+}));
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -34,6 +42,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { useHealthQuery, healthPollIntervalMs, engineStatusAfterFailedPoll } from "./health";
 import { useEngineStore } from "@/stores";
+import { NOTIFY_KINDS } from "@/services/notify";
 import { TIMING } from "@/config/timing";
 import type { EngineRecovery } from "@/types/domain";
 
@@ -259,6 +268,51 @@ describe("useHealthQuery - a cold start is not a dead engine", () => {
 
 		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
 		expect(useEngineStore.getState().engineError).toContain("socket hang up");
+	});
+
+	it("tells the user once when the engine they were using stops answering", async () => {
+		// The transition, not the state. A failing poll is on the fast cadence, so
+		// re-posting on each one would put a notification on screen every few
+		// hundred milliseconds - drop the `previousStatus` guard in health.ts and
+		// the second assertion here fails.
+		const client = clientWithFastRetries();
+		getHealth.mockResolvedValueOnce({ status: "ok", version: "1.0.0", workers: 8 });
+
+		const { result } = renderHook(() => useHealthQuery(), { wrapper: wrapperFor(client) });
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("connected"));
+
+		getHealth.mockRejectedValue(new Error("socket hang up"));
+		await act(async () => {
+			await result.current.refetch();
+		});
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
+
+		expect(mockNotifyPost).toHaveBeenCalledWith({
+			kind: NOTIFY_KINDS.engineLost,
+			title: "Vayu's engine stopped responding",
+			body: expect.stringContaining("socket hang up"),
+		});
+
+		mockNotifyPost.mockClear();
+		await act(async () => {
+			await result.current.refetch();
+		});
+
+		expect(mockNotifyPost).not.toHaveBeenCalled();
+	});
+
+	it("says nothing while a launch is still inside the start window", async () => {
+		// A cold start is not a lost engine, and the app itself says so - the
+		// status is "starting" and the Dock shows it. Notifying here would tell
+		// every user their engine died once per launch.
+		const client = clientWithFastRetries();
+		getHealth.mockRejectedValue(new Error("Network error: fetch failed"));
+
+		const { result } = renderHook(() => useHealthQuery(), { wrapper: wrapperFor(client) });
+		await waitFor(() => expect(result.current.isError).toBe(true));
+
+		expect(useEngineStore.getState().engineStatus).toBe("starting");
+		expect(mockNotifyPost).not.toHaveBeenCalled();
 	});
 
 	it("holds the window open across a poll that never succeeded", async () => {
