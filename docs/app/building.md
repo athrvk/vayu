@@ -261,8 +261,12 @@ neither reads this file, so a new alias has to be added in all three.
 
 - Target: ES2020
 - Lib: stated rather than inherited, and identical to the renderer's - `ES2020`
-  alone would leave out `ErrorOptions` (see the renderer config above), and the
-  rest of the list is what `target: ES2020` already implied
+  alone would leave out `ErrorOptions` (see the renderer config above). Stating
+  it drops three entries `target: ES2020` used to imply through
+  `lib.es2020.full`: `ScriptHost` and `WebWorker.ImportScripts`, which describe
+  environments the main process is not, and `DOM.AsyncIterable`, which types
+  `for await` over a DOM stream - `electron/` does none of the three, and
+  neither sibling config admits them either
 - Module: ESNext (the app is `"type": "module"`)
 - Includes `electron/`, emitting to `dist-electron/`
 - Excludes `electron/**/*.test.ts` - tests are not part of the main process, and
