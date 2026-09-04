@@ -112,7 +112,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 
 ## Install
 
-Windows (x64), macOS (universal), and Linux (AppImage). No account, no sign-in.
+Windows (x64), macOS 13+ (universal), and Linux (AppImage). No account, no sign-in.
 
 **Windows** - [winget](https://learn.microsoft.com/windows/package-manager/winget/), or the [installer](https://github.com/athrvk/vayu/releases/latest/download/Vayu-x64.exe):
 
@@ -222,7 +222,8 @@ Yes. Drop in an OpenAPI 3.1, OpenAPI 3.0 or Swagger 2.0 file (JSON or YAML) and 
 QuickJS implementing the `pm.*` API (`pm.test()`, `pm.expect()`, `pm.environment.get/set()`, `pm.response.*`), so most Postman test scripts run without modification.
 
 **Which platforms does Vayu support?**
-Windows (x64), macOS (Apple Silicon + Intel universal), and Linux (x86_64 AppImage).
+Windows (x64), macOS 13 (Ventura) or later (Apple Silicon + Intel universal), and Linux
+(x86_64 AppImage).
 
 ---
 

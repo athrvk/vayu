@@ -140,11 +140,11 @@ function joinGroups(groups: ContextMenuItem[][]): ContextMenuItem[] {
 }
 
 /** The edit items and the Vayu offers that only an editable field can carry. */
-function editableGroups(
+async function editableGroups(
 	params: ContextMenuParams,
 	target: ContextTarget,
-	readClipboardText: () => string
-): ContextMenuItem[][] {
+	readClipboardText: () => Promise<string>
+): Promise<ContextMenuItem[][]> {
 	const { canCut, canCopy, canPaste, canSelectAll } = params.editFlags;
 	const extras: ContextMenuItem[] = [];
 
@@ -153,7 +153,7 @@ function editableGroups(
 	// a second one, and it is offered nowhere else: a header value holding a
 	// command is text, not a request. Read behind that test rather than before
 	// it, so an ordinary right-click does not touch the clipboard at all.
-	const clipboardText = target.kind === "url-bar" ? readClipboardText() : "";
+	const clipboardText = target.kind === "url-bar" ? await readClipboardText() : "";
 	const command = clipboardText ? commandOnClipboard(clipboardText) : null;
 	if (command) {
 		extras.push({
@@ -184,11 +184,11 @@ function editableGroups(
  * the editor's own menu is the answer, and on empty chrome with nothing
  * selected there is nothing to offer, which is what a native app does.
  */
-export function menuTemplateFor(
+export async function menuTemplateFor(
 	params: ContextMenuParams,
 	target: ContextTarget,
-	readClipboardText: () => string
-): ContextMenuItem[] {
+	readClipboardText: () => Promise<string>
+): Promise<ContextMenuItem[]> {
 	if (target.kind === "monaco") return [];
 
 	const linkGroup: ContextMenuItem[] =
@@ -208,7 +208,10 @@ export function menuTemplateFor(
 			: [];
 
 	if (params.isEditable) {
-		return joinGroups([...editableGroups(params, target, readClipboardText), linkGroup]);
+		return joinGroups([
+			...(await editableGroups(params, target, readClipboardText)),
+			linkGroup,
+		]);
 	}
 
 	// Read-only text: Copy, and only when there is something to copy. No marker
@@ -289,7 +292,7 @@ export interface ContextMenuDeps {
 	/** The announcement for this click, cleared as it is read. */
 	takeTarget(): ContextTarget;
 	/** The system clipboard's text, read only where an offer depends on it. */
-	readClipboardText(): string;
+	readClipboardText(): Promise<string>;
 	/** Build and pop the menu. Never called with an empty template. */
 	showMenu(items: ContextMenuItem[]): void;
 }
@@ -322,11 +325,24 @@ export function toElectronTemplate(
 	});
 }
 
-/** Answer this window's right-clicks with the menu the pointer's context earns. */
+/**
+ * Answer this window's right-clicks with the menu the pointer's context earns.
+ *
+ * The announcement is taken synchronously, before the clipboard read the URL
+ * bar's offer may need: consume-once has to pair with the click that raised the
+ * event, and Electron 44's `clipboard.readText` is a promise, so anything after
+ * the await belongs to a later turn. A clipboard that refuses to be read costs
+ * the offer and not the menu, for the reason `readContextTarget` gives - a
+ * decoration is not worth a right-click that opens nothing.
+ */
 export function installContextMenu(contents: ContextMenuContents, deps: ContextMenuDeps): void {
 	contents.on("context-menu", (_event, params) => {
-		const items = menuTemplateFor(params, deps.takeTarget(), () => deps.readClipboardText());
-		if (items.length === 0) return;
-		deps.showMenu(items);
+		const target = deps.takeTarget();
+		void menuTemplateFor(params, target, () => deps.readClipboardText().catch(() => "")).then(
+			(items) => {
+				if (items.length === 0) return;
+				deps.showMenu(items);
+			}
+		);
 	});
 }
