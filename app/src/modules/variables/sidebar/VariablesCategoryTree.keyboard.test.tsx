@@ -326,6 +326,32 @@ describe("the actions that had no keyboard path", () => {
  * `<body>` - the defect #1218 and #1234 fixed for the other two lists, on a tree
  * that grew its Delete key afterwards.
  */
+describe("right-click reaches the same menu (#1360)", () => {
+	it("offers the row's own actions, and duplicates the row it opened over", async () => {
+		const tree = renderTree();
+
+		fireEvent.contextMenu(row(tree, "Production"));
+
+		const menu = await screen.findByRole("menu");
+		expect(within(menu).getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+		fireEvent.click(within(menu).getByRole("menuitem", { name: "Duplicate" }));
+
+		await waitFor(() => expect(createEnvironment).toHaveBeenCalledTimes(1));
+		// The row under the pointer, not the one the sidebar had selected.
+		expect(createEnvironment.mock.calls[0][0]).toMatchObject({ name: "Production (Copy)" });
+	});
+
+	it("hands focus back to the row on Escape, keeping the tree's one tab stop", async () => {
+		const tree = renderTree();
+		const staging = row(tree, "Staging");
+
+		fireEvent.contextMenu(staging);
+		fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+
+		await waitFor(() => expect(document.activeElement).toBe(staging));
+	});
+});
+
 describe("a delete never strands focus", () => {
 	/** Delete on the row, then Confirm, waiting for the dialog to actually go. */
 	async function deleteFromKeyboard(target: HTMLElement) {

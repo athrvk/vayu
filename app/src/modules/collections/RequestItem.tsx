@@ -13,7 +13,13 @@ import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
 import type { Request } from "@/types";
 import { Input } from "@/components/ui";
-import { RowActionsMenu, MethodBadge, TruncatedText } from "@/components/shared";
+import {
+	RowActionsMenu,
+	RowContextMenu,
+	MethodBadge,
+	TruncatedText,
+	type RowAction,
+} from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { rowInsetPx } from "@/constants/layout";
 
@@ -124,165 +130,163 @@ export default function RequestItem({
 		onRequestDeleteClick(request.id, request.name);
 	};
 
+	// One list, three ways in: the ⋯ button, the tree's Shift+F10 / Menu /
+	// Shift+Enter keys, and right-click (#1360).
+	const rowActions: RowAction[] = [
+		{ label: "Rename", icon: Edit2, onSelect: () => onStartRequestRename(request) },
+		{ label: "Duplicate", icon: Copy, onSelect: () => onDuplicateRequest(request) },
+		...(dnd.moveAction ? [dnd.moveAction] : []),
+		{ label: "Delete", icon: Trash2, onSelect: handleDelete, destructive: true },
+	];
+	const menuLabel = `More actions for request ${request.name}`;
+	// A row mid-rename or mid-delete offers nothing: its ⋯ menu is unmounted for
+	// the same reason, and the rename field wants the platform's own Cut/Copy/
+	// Paste rather than a menu of row actions over what is being typed.
+	const isBusy = isRenaming || isDeleting;
+
 	return (
-		// eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor
-		<div
-			ref={rowRef}
-			data-request-id={request.id}
-			// The collection this row's requests block belongs to. Read by the drag
-			// hit test, which has the element and no way to derive its owner: a
-			// request is not in the loaded collections list.
-			data-owner-id={collectionId}
-			data-tree-label={request.name}
-			role="treeitem"
-			tabIndex={-1}
-			aria-selected={isSelected}
-			// The hierarchy a screen reader announces. Without these every row in
-			// the tree reads as a flat list item: the group wrapper that nests a
-			// folder's children is not a treeitem, so depth is invisible unless
-			// each row states it. Level is 1-based, so a root row is level 1.
-			aria-level={depth + 1}
-			aria-posinset={posInSet}
-			aria-setsize={setSize}
-			onClick={(e) => isRowSurface(e) && handleClick(e)}
-			onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
-			// The drag is captured on the row, so the whole row is the handle -
-			// there is no grip icon to hunt for, and below the movement threshold
-			// every click affordance above is untouched.
-			{...dnd.handlers}
-			data-drop-blocked={dnd.isBlocked || undefined}
-			// Indent inside the row (see CollectionItem) so the fill still
-			// reaches both panel edges.
-			style={{ paddingLeft: rowInsetPx(depth) }}
-			className={cn(
-				// focus-row: this row is the perceived target, not the narrower
-				// label button inside it - it paints the keyboard focus ring.
-				// The transition omits outline-color (see CollectionItem) so the
-				// focus ring appears instantly instead of fading between rows.
-				// h-8: shared drawer row height (see CollectionItem).
-				"focus-row flex h-8 items-center gap-2 pr-3 group cursor-pointer transition-[color,background-color,border-color]",
-				isDeleting && "opacity-50",
-				isSelected
-					? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
-					: "hover:bg-accent",
-				// Last, so a drop target's ring wins over the selected row's - the
-				// two are the same colour and the drop is the transient one.
-				rowDndClasses(dnd)
-			)}
-		>
-			<RowDropIndicator edge={dnd.dropEdge} indentPx={rowInsetPx(depth)} />
-			<button
-				onClick={handleClick}
-				onDoubleClick={handleDoubleClick}
+		<RowContextMenu label={menuLabel} actions={rowActions} disabled={isBusy}>
+			{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor */}
+			<div
+				ref={rowRef}
+				data-request-id={request.id}
+				// The collection this row's requests block belongs to. Read by the drag
+				// hit test, which has the element and no way to derive its owner: a
+				// request is not in the loaded collections list.
+				data-owner-id={collectionId}
+				data-tree-label={request.name}
+				role="treeitem"
 				tabIndex={-1}
-				data-tree-activate
-				// self-stretch: the row is `items-center`, which makes every child
-				// content-height - so this button, the only thing wired to the open
-				// handler, was ~22px tall inside a 32px row that paints a full-height
-				// hover fill and `cursor-pointer`. The top and bottom ~5px of the row
-				// looked clickable and were not. Stretching to the row's height
-				// costs nothing (the button's own `items-center` still centres the
-				// badge and label) and `focus-row` keeps painting the ring.
-				className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
-				disabled={isDeleting || isRenaming}
-			>
-				{/*
-				 * A bordered chip on every row was a second shape competing with the
-				 * tree's own hover fill and selection ring, and paid `7ch` of width on
-				 * every row so the two verbs almost nobody has in a tree could fit.
-				 * The text variant in a fixed `5ch` column (the caller-set pattern the
-				 * import preview already uses) is colour alone, aligned with the same
-				 * column every sibling row uses. `MethodBadge` abbreviates the three
-				 * standard methods longer than five characters (`DEL`, `OPT`, `CONN`)
-				 * and reveals the full name on hover, so no method overflows the box.
-				 */}
-				<MethodBadge
-					method={request.method}
-					variant="text"
-					size="sm"
-					className="w-[5ch] text-center"
-				/>
-				{isRenaming ? (
-					<Input
-						type="text"
-						value={renameRequestValue}
-						onChange={(e) => onRequestRenameChange(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") {
-								returnFocusToRow.current = true;
-								onRequestRenameSubmit(request.id);
-							} else if (e.key === "Escape") {
-								returnFocusToRow.current = true;
-								onRequestRenameCancel();
-							}
-						}}
-						onBlur={() => onRequestRenameSubmit(request.id)}
-						className="flex-1 h-6 text-sm"
-						autoFocus
-						onClick={(e) => e.stopPropagation()}
-					/>
-				) : (
-					<TruncatedText className="text-sm text-foreground cursor-pointer">
-						{request.name}
-					</TruncatedText>
+				aria-selected={isSelected}
+				// The hierarchy a screen reader announces. Without these every row in
+				// the tree reads as a flat list item: the group wrapper that nests a
+				// folder's children is not a treeitem, so depth is invisible unless
+				// each row states it. Level is 1-based, so a root row is level 1.
+				aria-level={depth + 1}
+				aria-posinset={posInSet}
+				aria-setsize={setSize}
+				onClick={(e) => isRowSurface(e) && handleClick(e)}
+				onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
+				// The drag is captured on the row, so the whole row is the handle -
+				// there is no grip icon to hunt for, and below the movement threshold
+				// every click affordance above is untouched.
+				{...dnd.handlers}
+				data-drop-blocked={dnd.isBlocked || undefined}
+				// Indent inside the row (see CollectionItem) so the fill still
+				// reaches both panel edges.
+				style={{ paddingLeft: rowInsetPx(depth) }}
+				className={cn(
+					// focus-row: this row is the perceived target, not the narrower
+					// label button inside it - it paints the keyboard focus ring.
+					// The transition omits outline-color (see CollectionItem) so the
+					// focus ring appears instantly instead of fading between rows.
+					// h-8: shared drawer row height (see CollectionItem).
+					"focus-row flex h-8 items-center gap-2 pr-3 group cursor-pointer transition-[color,background-color,border-color]",
+					isDeleting && "opacity-50",
+					isSelected
+						? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
+						: "hover:bg-accent",
+					// Last, so a drop target's ring wins over the selected row's - the
+					// two are the same colour and the drop is the transient one.
+					rowDndClasses(dnd)
 				)}
-			</button>
-
-			{isDeleting && (
-				<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive-text" />
-			)}
-
-			{/*
-			 * Keyboard-only targets for the roving tree (see useRovingTreeFocus):
-			 * F2 clicks data-tree-rename, Delete clicks data-tree-delete. Never
-			 * shown, never announced - the same actions live in the ⋯ menu.
-			 */}
-			<button
-				type="button"
-				className="hidden"
-				aria-hidden="true"
-				tabIndex={-1}
-				data-tree-rename
-				onClick={() => onStartRequestRename(request)}
-			/>
-			<button
-				type="button"
-				className="hidden"
-				aria-hidden="true"
-				tabIndex={-1}
-				data-tree-delete
-				onClick={handleDelete}
-			/>
-			<RowMoveControls entity={entity} />
-
-			{!isRenaming && !isDeleting && (
-				<RowActionsMenu
-					label={`More actions for request ${request.name}`}
-					// The tree is one tab stop: the row holds it, and Shift+F10 /
-					// Menu / Shift+Enter are the way in from here.
+			>
+				<RowDropIndicator edge={dnd.dropEdge} indentPx={rowInsetPx(depth)} />
+				<button
+					onClick={handleClick}
+					onDoubleClick={handleDoubleClick}
 					tabIndex={-1}
-					className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-					actions={[
-						{
-							label: "Rename",
-							icon: Edit2,
-							onSelect: () => onStartRequestRename(request),
-						},
-						{
-							label: "Duplicate",
-							icon: Copy,
-							onSelect: () => onDuplicateRequest(request),
-						},
-						...(dnd.moveAction ? [dnd.moveAction] : []),
-						{
-							label: "Delete",
-							icon: Trash2,
-							onSelect: handleDelete,
-							destructive: true,
-						},
-					]}
+					data-tree-activate
+					// self-stretch: the row is `items-center`, which makes every child
+					// content-height - so this button, the only thing wired to the open
+					// handler, was ~22px tall inside a 32px row that paints a full-height
+					// hover fill and `cursor-pointer`. The top and bottom ~5px of the row
+					// looked clickable and were not. Stretching to the row's height
+					// costs nothing (the button's own `items-center` still centres the
+					// badge and label) and `focus-row` keeps painting the ring.
+					className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
+					disabled={isDeleting || isRenaming}
+				>
+					{/*
+					 * A bordered chip on every row was a second shape competing with the
+					 * tree's own hover fill and selection ring, and paid `7ch` of width on
+					 * every row so the two verbs almost nobody has in a tree could fit.
+					 * The text variant in a fixed `5ch` column (the caller-set pattern the
+					 * import preview already uses) is colour alone, aligned with the same
+					 * column every sibling row uses. `MethodBadge` abbreviates the three
+					 * standard methods longer than five characters (`DEL`, `OPT`, `CONN`)
+					 * and reveals the full name on hover, so no method overflows the box.
+					 */}
+					<MethodBadge
+						method={request.method}
+						variant="text"
+						size="sm"
+						className="w-[5ch] text-center"
+					/>
+					{isRenaming ? (
+						<Input
+							type="text"
+							value={renameRequestValue}
+							onChange={(e) => onRequestRenameChange(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") {
+									returnFocusToRow.current = true;
+									onRequestRenameSubmit(request.id);
+								} else if (e.key === "Escape") {
+									returnFocusToRow.current = true;
+									onRequestRenameCancel();
+								}
+							}}
+							onBlur={() => onRequestRenameSubmit(request.id)}
+							className="flex-1 h-6 text-sm"
+							autoFocus
+							onClick={(e) => e.stopPropagation()}
+						/>
+					) : (
+						<TruncatedText className="text-sm text-foreground cursor-pointer">
+							{request.name}
+						</TruncatedText>
+					)}
+				</button>
+
+				{isDeleting && (
+					<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive-text" />
+				)}
+
+				{/*
+				 * Keyboard-only targets for the roving tree (see useRovingTreeFocus):
+				 * F2 clicks data-tree-rename, Delete clicks data-tree-delete. Never
+				 * shown, never announced - the same actions live in the ⋯ menu.
+				 */}
+				<button
+					type="button"
+					className="hidden"
+					aria-hidden="true"
+					tabIndex={-1}
+					data-tree-rename
+					onClick={() => onStartRequestRename(request)}
 				/>
-			)}
-		</div>
+				<button
+					type="button"
+					className="hidden"
+					aria-hidden="true"
+					tabIndex={-1}
+					data-tree-delete
+					onClick={handleDelete}
+				/>
+				<RowMoveControls entity={entity} />
+
+				{!isRenaming && !isDeleting && (
+					<RowActionsMenu
+						label={menuLabel}
+						// The tree is one tab stop: the row holds it, and Shift+F10 /
+						// Menu / Shift+Enter are the way in from here.
+						tabIndex={-1}
+						className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+						actions={rowActions}
+					/>
+				)}
+			</div>
+		</RowContextMenu>
 	);
 }

@@ -29,6 +29,8 @@
 import {
 	ArrowLeft,
 	ArrowRight,
+	CheckCheck,
+	ChevronsRight,
 	Download,
 	PanelLeft,
 	PanelRight,
@@ -39,6 +41,7 @@ import {
 	Settings,
 	SunMoon,
 	X,
+	XCircle,
 	Zap,
 } from "lucide-react";
 import {
@@ -180,6 +183,56 @@ const ACTION_COMMANDS: readonly Command[] = [
 		perform: (ctx) => {
 			if (ctx.activeTab) useTabsStore.getState().closeTab(ctx.activeTab.id);
 		},
+	},
+	/*
+	 * The strip's bulk closes (#1360). Declared here because the rule at the top
+	 * of this file is what it says: the tab menu is a way of reaching them, not
+	 * a second definition. The menu and these differ only in which tab they name
+	 * - it acts on the tab under the pointer, a palette row can only mean the
+	 * one on screen - and both call the same store action, which is where the
+	 * action itself lives.
+	 *
+	 * No chord for any of them: they are deliberate, occasional operations, and
+	 * a chord that closes several tabs at once is a keystroke away from losing a
+	 * strip full of work.
+	 */
+	{
+		id: "close-other-tabs",
+		title: (ctx) =>
+			ctx.activeTabLabel
+				? `Close all tabs except "${ctx.activeTabLabel}"`
+				: "Close other tabs",
+		keywords: ["others", "dismiss", "shut", "clean"],
+		group: "action",
+		icon: XCircle,
+		available: (ctx) => ctx.activeTab !== null && useTabsStore.getState().openTabs.length > 1,
+		perform: (ctx) => {
+			if (ctx.activeTab) useTabsStore.getState().closeOtherTabs(ctx.activeTab.id);
+		},
+	},
+	{
+		id: "close-tabs-to-right",
+		title: "Close tabs to the right",
+		keywords: ["dismiss", "shut", "clean", "trailing"],
+		group: "action",
+		icon: ChevronsRight,
+		available: (ctx) => {
+			if (!ctx.activeTab) return false;
+			const { openTabs } = useTabsStore.getState();
+			return openTabs.findIndex((t) => t.id === ctx.activeTab?.id) < openTabs.length - 1;
+		},
+		perform: (ctx) => {
+			if (ctx.activeTab) useTabsStore.getState().closeTabsToRight(ctx.activeTab.id);
+		},
+	},
+	{
+		id: "close-saved-tabs",
+		title: "Close saved tabs",
+		keywords: ["dismiss", "shut", "clean", "unsaved", "dirty"],
+		group: "action",
+		icon: CheckCheck,
+		available: () => useTabsStore.getState().openTabs.length > 0,
+		perform: () => useTabsStore.getState().closeSavedTabs(),
 	},
 	{
 		id: "go-back",

@@ -53,10 +53,12 @@ import {
 } from "@/queries";
 import {
 	RowActionsMenu,
+	RowContextMenu,
 	DrawerPanel,
 	ErrorState,
 	TruncatedText,
 	ListSkeleton,
+	type RowAction,
 } from "@/components/shared";
 import type { Environment } from "@/types";
 import {
@@ -494,6 +496,30 @@ export default function VariablesCategoryTree() {
 											? Object.keys(environment.variables).length
 											: 0;
 										const isDeleting = deletingEnvId === environment.id;
+										const isRenaming = renamingEnvId === environment.id;
+										// One list, three ways in: the ⋯ button, the tree's Shift+F10 /
+										// Menu / Shift+Enter keys, and right-click (#1360).
+										const rowActions: RowAction[] = [
+											{
+												label: "Rename",
+												icon: Edit2,
+												onSelect: () => startRenameEnvironment(environment),
+											},
+											{
+												label: "Duplicate",
+												icon: Copy,
+												onSelect: () =>
+													void duplicateEnvironment(environment),
+											},
+											{
+												label: "Delete",
+												icon: Trash2,
+												destructive: true,
+												onSelect: () =>
+													setDeleteConfirmEnvId(environment.id),
+											},
+										];
+										const menuLabel = `More actions for environment ${environment.name}`;
 										return (
 											/*
 											 * Container + inner activator, never a
@@ -513,150 +539,136 @@ export default function VariablesCategoryTree() {
 											 * go. RequestItem carries the rule and why
 											 * the target check is what it is.
 											 */
-											// eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor
-											<div
+											<RowContextMenu
+												// The key belongs to the element the map
+												// returns, not to the row inside it: on a
+												// refetch React would otherwise rebuild every
+												// row, and a row that remounts drops the focus
+												// a delete just handed it.
 												key={environment.id}
-												role="treeitem"
-												tabIndex={-1}
-												// The row a rename hands focus back to,
-												// found by id rather than by a ref map.
-												data-environment-id={environment.id}
-												data-tree-label={environment.name}
-												aria-selected={isSelected({
-													type: "environment",
-													environmentId: environment.id,
-												})}
-												aria-level={2}
-												aria-posinset={index + 1}
-												aria-setsize={environments.length}
-												onClick={(e) => {
-													if (e.target !== e.currentTarget) return;
-													if (isDeleting) return;
-													if (renamingEnvId === environment.id) return;
-													selectCategory({
-														type: "environment",
-														environmentId: environment.id,
-													});
-												}}
-												className={cn(
-													"focus-row group flex h-8 cursor-pointer items-center gap-2 px-3 text-sm hover:bg-accent transition-colors",
-													GROUP_CHILD_INSET,
-													isSelected({
-														type: "environment",
-														environmentId: environment.id,
-													}) &&
-														"bg-scope-environment/10 text-scope-environment hover:bg-scope-environment/20"
-												)}
+												label={menuLabel}
+												actions={rowActions}
+												disabled={isRenaming || isDeleting}
 											>
-												{/* <Cloud className="w-4 h-4 text-blue-400 shrink-0" /> */}
-												{renamingEnvId === environment.id ? (
-													<Input
-														autoFocus
-														value={renameEnvValue}
-														onChange={(e) =>
-															setRenameEnvValue(e.target.value)
-														}
-														onClick={(e) => e.stopPropagation()}
-														onBlur={() =>
-															submitRenameEnvironment(environment.id)
-														}
-														onKeyDown={(e) => {
-															e.stopPropagation();
-															if (isCommitEnter(e)) {
-																returnFocusToEnvId.current =
-																	environment.id;
+												{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor */}
+												<div
+													role="treeitem"
+													tabIndex={-1}
+													// The row a rename hands focus back to,
+													// found by id rather than by a ref map.
+													data-environment-id={environment.id}
+													data-tree-label={environment.name}
+													aria-selected={isSelected({
+														type: "environment",
+														environmentId: environment.id,
+													})}
+													aria-level={2}
+													aria-posinset={index + 1}
+													aria-setsize={environments.length}
+													onClick={(e) => {
+														if (e.target !== e.currentTarget) return;
+														if (isDeleting) return;
+														if (renamingEnvId === environment.id)
+															return;
+														selectCategory({
+															type: "environment",
+															environmentId: environment.id,
+														});
+													}}
+													className={cn(
+														"focus-row group flex h-8 cursor-pointer items-center gap-2 px-3 text-sm hover:bg-accent transition-colors",
+														GROUP_CHILD_INSET,
+														isSelected({
+															type: "environment",
+															environmentId: environment.id,
+														}) &&
+															"bg-scope-environment/10 text-scope-environment hover:bg-scope-environment/20"
+													)}
+												>
+													{/* <Cloud className="w-4 h-4 text-blue-400 shrink-0" /> */}
+													{renamingEnvId === environment.id ? (
+														<Input
+															autoFocus
+															value={renameEnvValue}
+															onChange={(e) =>
+																setRenameEnvValue(e.target.value)
+															}
+															onClick={(e) => e.stopPropagation()}
+															onBlur={() =>
 																submitRenameEnvironment(
 																	environment.id
-																);
+																)
 															}
-															if (e.key === "Escape") {
-																returnFocusToEnvId.current =
-																	environment.id;
-																cancelRenameEnvironment();
+															onKeyDown={(e) => {
+																e.stopPropagation();
+																if (isCommitEnter(e)) {
+																	returnFocusToEnvId.current =
+																		environment.id;
+																	submitRenameEnvironment(
+																		environment.id
+																	);
+																}
+																if (e.key === "Escape") {
+																	returnFocusToEnvId.current =
+																		environment.id;
+																	cancelRenameEnvironment();
+																}
+															}}
+															className="h-6 flex-1 text-sm"
+														/>
+													) : (
+														<button
+															type="button"
+															tabIndex={-1}
+															data-tree-activate
+															onClick={() =>
+																selectCategory({
+																	type: "environment",
+																	environmentId: environment.id,
+																})
 															}
-														}}
-														className="h-6 flex-1 text-sm"
-													/>
-												) : (
-													<button
-														type="button"
-														tabIndex={-1}
-														data-tree-activate
-														onClick={() =>
-															selectCategory({
-																type: "environment",
-																environmentId: environment.id,
-															})
-														}
-														// self-stretch: the row above is
-														// `items-center`, which leaves this
-														// button - the only thing wired to
-														// selectCategory - as tall as its 18px
-														// label inside a 32px row. The band above
-														// and below it took the hover fill but
-														// not the click. Same fix as the
-														// collection and request rows.
-														className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left"
-													>
-														<TruncatedText className="flex-1">
-															{environment.name}
-														</TruncatedText>
-														{/* `chip`: `secondary` brings
+															// self-stretch: the row above is
+															// `items-center`, which leaves this
+															// button - the only thing wired to
+															// selectCategory - as tall as its 18px
+															// label inside a 32px row. The band above
+															// and below it took the hover fill but
+															// not the click. Same fix as the
+															// collection and request rows.
+															className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left"
+														>
+															<TruncatedText className="flex-1">
+																{environment.name}
+															</TruncatedText>
+															{/* `chip`: `secondary` brings
 														    `hover:bg-secondary/80`, which outlives
 														    the scope tint below and greyed the
 														    badge on hover. */}
-														{variableCount > 0 && (
-															<Badge
-																variant="chip"
-																className="text-xs bg-scope-environment/10 text-scope-environment px-1.5 py-0 shrink-0"
-															>
-																{variableCount}
-															</Badge>
-														)}
-													</button>
-												)}
-												{isDeleting && (
-													<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive-text" />
-												)}
-												{!isDeleting &&
-													renamingEnvId !== environment.id && (
+															{variableCount > 0 && (
+																<Badge
+																	variant="chip"
+																	className="text-xs bg-scope-environment/10 text-scope-environment px-1.5 py-0 shrink-0"
+																>
+																	{variableCount}
+																</Badge>
+															)}
+														</button>
+													)}
+													{isDeleting && (
+														<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive-text" />
+													)}
+													{!isDeleting && !isRenaming && (
 														<RowActionsMenu
-															label={`More actions for environment ${environment.name}`}
+															label={menuLabel}
 															// The tree is one tab stop: the row
 															// holds it, and Shift+F10 / Menu /
 															// Shift+Enter are the way in from here.
 															tabIndex={-1}
 															className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-															actions={[
-																{
-																	label: "Rename",
-																	icon: Edit2,
-																	onSelect: () =>
-																		startRenameEnvironment(
-																			environment
-																		),
-																},
-																{
-																	label: "Duplicate",
-																	icon: Copy,
-																	onSelect: () =>
-																		void duplicateEnvironment(
-																			environment
-																		),
-																},
-																{
-																	label: "Delete",
-																	icon: Trash2,
-																	destructive: true,
-																	onSelect: () =>
-																		setDeleteConfirmEnvId(
-																			environment.id
-																		),
-																},
-															]}
+															actions={rowActions}
 														/>
 													)}
-												{/* Keyboard-only rename and delete targets: F2 and
+													{/* Keyboard-only rename and delete targets: F2 and
 												    Delete/Backspace click them (see
 												    useRovingTreeFocus). Never shown; the same two
 												    actions live in the row's menu, so this row
@@ -664,35 +676,36 @@ export default function VariablesCategoryTree() {
 												    than swallowing two of them silently - the hook
 												    preventDefaults them either way. Delete opens
 												    the same confirm dialog the menu does. */}
-												<button
-													type="button"
-													className="hidden"
-													aria-hidden="true"
-													tabIndex={-1}
-													data-tree-rename
-													onClick={() => {
-														// Parity with the delete target below,
-														// not a live path: the confirm dialog is
-														// modal, so while a deletion runs the tree
-														// is inert and no key reaches this row.
-														// It costs a line and holds if that ever
-														// stops being true.
-														if (isDeleting) return;
-														startRenameEnvironment(environment);
-													}}
-												/>
-												<button
-													type="button"
-													className="hidden"
-													aria-hidden="true"
-													tabIndex={-1}
-													data-tree-delete
-													onClick={() => {
-														if (isDeleting) return;
-														setDeleteConfirmEnvId(environment.id);
-													}}
-												/>
-											</div>
+													<button
+														type="button"
+														className="hidden"
+														aria-hidden="true"
+														tabIndex={-1}
+														data-tree-rename
+														onClick={() => {
+															// Parity with the delete target below,
+															// not a live path: the confirm dialog is
+															// modal, so while a deletion runs the tree
+															// is inert and no key reaches this row.
+															// It costs a line and holds if that ever
+															// stops being true.
+															if (isDeleting) return;
+															startRenameEnvironment(environment);
+														}}
+													/>
+													<button
+														type="button"
+														className="hidden"
+														aria-hidden="true"
+														tabIndex={-1}
+														data-tree-delete
+														onClick={() => {
+															if (isDeleting) return;
+															setDeleteConfirmEnvId(environment.id);
+														}}
+													/>
+												</div>
+											</RowContextMenu>
 										);
 									})
 								)}

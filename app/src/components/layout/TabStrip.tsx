@@ -45,7 +45,7 @@ import { X, Plus, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
 import { TAB_NEW_BUTTON_WIDTH } from "@/constants/layout";
-import { ScrollOnOverflow } from "@/components/shared";
+import { ScrollOnOverflow, RowContextMenu } from "@/components/shared";
 import {
 	DropdownMenu,
 	DropdownMenuTrigger,
@@ -56,6 +56,8 @@ import { fitTabs, makeTextMeasurer, naturalTabWidth } from "./tab-fit";
 // Labels and icons live beside this file, not in it: the command palette lists
 // the same tabs and must name them identically. See tab-descriptors.ts.
 import { useTabDescriptors, type TabDescriptor } from "./tab-descriptors";
+// What a tab can do, beside what it is called and for the same reason.
+import { useTabActions } from "./tab-actions";
 import { getMethodColor } from "@/utils";
 // The tab -> panel ids, shared with Shell, which renders the panel end of the
 // relationship. See tab-aria.ts.
@@ -74,6 +76,8 @@ function TabItem({
 	descriptor: TabDescriptor;
 }) {
 	const { focusTab, closeTab } = useTabsStore();
+	// What this tab can do, beside what it is called. See tab-actions.ts.
+	const actions = useTabActions(tab, descriptor);
 	// Roving tabindex: the strip is one Tab stop, and Left/Right move within it.
 	// Previously every tab carried tabIndex={0}, so a developer with a dozen tabs
 	// open had to press Tab a dozen times to get past the strip.
@@ -81,90 +85,99 @@ function TabItem({
 	const Icon = descriptor.icon;
 
 	return (
-		<div
-			role="tab"
-			id={tabElementId(tab.id)}
-			aria-selected={isActive}
-			aria-controls={tabPanelElementId(tab.id)}
-			tabIndex={rovingTabIndex}
-			data-tab-id={tab.id}
-			title={descriptor.title}
-			style={{ width, minWidth: width }}
-			onClick={() => focusTab(tab.id)}
-			onKeyDown={(e) => {
-				if (e.key === "Enter" || e.key === " ") {
-					// Space would otherwise scroll the strip's overflow container.
-					e.preventDefault();
-					focusTab(tab.id);
-				}
-				// Closing was mouse-only: the X is `tabIndex={-1}` and only appears
-				// on hover, and no close shortcut existed anywhere in the app. Delete
-				// on the focused tab is the WAI-ARIA pattern for a deletable tab.
-				// Backspace is the same key on a Mac keyboard: the one labelled
-				// "delete" there reports `"Backspace"`, and `"Delete"` is
-				// forward-delete (Fn+Delete), so a `"Delete"`-only handler closes
-				// nothing on macOS (#931). Accepted on every platform rather than
-				// behind an `isMac` fork - a tab is a view, so closing one loses no
-				// work and the request it showed is still in its collection.
-				if (e.key === "Delete" || e.key === "Backspace") {
-					e.preventDefault();
-					// Through the shared helper, because this tab is what holds
-					// focus: closing it plainly drops the user on `<body>` (#1218).
-					closeTabFromKeyboard(tab.id);
-				}
-			}}
-			onAuxClick={(e) => {
-				// Middle-click closes, like browsers
-				if (e.button === 1) closeTab(tab.id);
-			}}
-			className={cn(
-				"group relative flex h-full shrink-0 cursor-pointer select-none items-center gap-1.5",
-				"border-r border-border/40 pl-2 pr-2.5 text-sm",
-				isActive
-					? // The rule sits on the edge the content is on, and matches the
-						// section tabs. It reads identically in both themes, unlike a
-						// surface shift, which light mode carries far more weakly
-						// (see --tab-active).
-						"bg-tab-active text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary"
-					: "border-b border-b-border bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-			)}
-		>
-			{/* The method, as 2px of colour rather than up to 36px of text. */}
-			{descriptor.method && (
-				<span
-					aria-hidden="true"
-					className="absolute inset-y-1.5 left-0 w-0.5 rounded-full"
-					style={{ background: `hsl(${getMethodColor(descriptor.method)})` }}
-				/>
-			)}
-			{Icon && <Icon className="w-3 h-3 shrink-0" />}
-			{/*
-			 * ScrollOnOverflow is kept: it reads the full name on hover, which an
-			 * ellipsis cannot. The ellipsis is what was missing - it clipped
-			 * mid-glyph with no mark at all when nothing was hovering.
-			 */}
-			<ScrollOnOverflow className="min-w-0 flex-1">
-				<span className={cn("block truncate", descriptor.isPath && "tab-path")}>
-					{descriptor.label}
-				</span>
-			</ScrollOnOverflow>
-			{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- close is a keyboard action on the focused `role="tab"` row (Delete/Backspace, TabStrip.tsx:109-114); this span is `tabIndex={-1}` on purpose, a pointer affordance for the same thing */}
-			<span
-				role="button"
-				tabIndex={-1}
-				aria-label="Close tab"
-				onClick={(e) => {
-					e.stopPropagation();
-					closeTab(tab.id);
+		/*
+		 * Right-click, and the Menu key and Shift+F10 the platform raises the
+		 * same `contextmenu` event for - so the keyboard path here is the
+		 * browser's own, not a second handler that would open a menu beside the
+		 * one Chromium already asked for. The tree needs its own key handling
+		 * because its keys reach a `⋯` button; a tab has none to reach.
+		 */
+		<RowContextMenu label={`More actions for ${descriptor.title}`} actions={actions}>
+			<div
+				role="tab"
+				id={tabElementId(tab.id)}
+				aria-selected={isActive}
+				aria-controls={tabPanelElementId(tab.id)}
+				tabIndex={rovingTabIndex}
+				data-tab-id={tab.id}
+				title={descriptor.title}
+				style={{ width, minWidth: width }}
+				onClick={() => focusTab(tab.id)}
+				onKeyDown={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						// Space would otherwise scroll the strip's overflow container.
+						e.preventDefault();
+						focusTab(tab.id);
+					}
+					// Closing was mouse-only: the X is `tabIndex={-1}` and only appears
+					// on hover, and no close shortcut existed anywhere in the app. Delete
+					// on the focused tab is the WAI-ARIA pattern for a deletable tab.
+					// Backspace is the same key on a Mac keyboard: the one labelled
+					// "delete" there reports `"Backspace"`, and `"Delete"` is
+					// forward-delete (Fn+Delete), so a `"Delete"`-only handler closes
+					// nothing on macOS (#931). Accepted on every platform rather than
+					// behind an `isMac` fork - a tab is a view, so closing one loses no
+					// work and the request it showed is still in its collection.
+					if (e.key === "Delete" || e.key === "Backspace") {
+						e.preventDefault();
+						// Through the shared helper, because this tab is what holds
+						// focus: closing it plainly drops the user on `<body>` (#1218).
+						closeTabFromKeyboard(tab.id);
+					}
 				}}
-				// Absolute, over the trailing padding: in the flow it reserved 22px on
-				// every tab for a control only the hovered or active one ever shows.
-				className="absolute right-0.5 rounded-md p-0.5 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
-				data-active={isActive}
+				onAuxClick={(e) => {
+					// Middle-click closes, like browsers
+					if (e.button === 1) closeTab(tab.id);
+				}}
+				className={cn(
+					"group relative flex h-full shrink-0 cursor-pointer select-none items-center gap-1.5",
+					"border-r border-border/40 pl-2 pr-2.5 text-sm",
+					isActive
+						? // The rule sits on the edge the content is on, and matches the
+							// section tabs. It reads identically in both themes, unlike a
+							// surface shift, which light mode carries far more weakly
+							// (see --tab-active).
+							"bg-tab-active text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary"
+						: "border-b border-b-border bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+				)}
 			>
-				<X className="w-3 h-3" />
-			</span>
-		</div>
+				{/* The method, as 2px of colour rather than up to 36px of text. */}
+				{descriptor.method && (
+					<span
+						aria-hidden="true"
+						className="absolute inset-y-1.5 left-0 w-0.5 rounded-full"
+						style={{ background: `hsl(${getMethodColor(descriptor.method)})` }}
+					/>
+				)}
+				{Icon && <Icon className="w-3 h-3 shrink-0" />}
+				{/*
+				 * ScrollOnOverflow is kept: it reads the full name on hover, which an
+				 * ellipsis cannot. The ellipsis is what was missing - it clipped
+				 * mid-glyph with no mark at all when nothing was hovering.
+				 */}
+				<ScrollOnOverflow className="min-w-0 flex-1">
+					<span className={cn("block truncate", descriptor.isPath && "tab-path")}>
+						{descriptor.label}
+					</span>
+				</ScrollOnOverflow>
+				{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- close is a keyboard action on the focused `role="tab"` row (Delete/Backspace, TabStrip.tsx:109-114); this span is `tabIndex={-1}` on purpose, a pointer affordance for the same thing */}
+				<span
+					role="button"
+					tabIndex={-1}
+					aria-label="Close tab"
+					onClick={(e) => {
+						e.stopPropagation();
+						closeTab(tab.id);
+					}}
+					// Absolute, over the trailing padding: in the flow it reserved 22px on
+					// every tab for a control only the hovered or active one ever shows.
+					className="absolute right-0.5 rounded-md p-0.5 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
+					data-active={isActive}
+				>
+					<X className="w-3 h-3" />
+				</span>
+			</div>
+		</RowContextMenu>
 	);
 }
 
