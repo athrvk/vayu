@@ -278,13 +278,12 @@ function createWindow() {
 		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
-		// Electron 43 made frameless windows rounded by default on Linux. The
-		// renderer paints its own chrome square to the window edge, so the
-		// native shape is pinned here rather than inherited from whichever
-		// default the current Electron ships: macOS keeps the rounded frame it
-		// has always drawn, Linux keeps the square one Vayu shipped with, and
-		// Windows ignores the option.
-		roundedCorners: process.platform !== "linux",
+		// Electron 43 made frameless windows rounded by default on Linux, which
+		// is the shape Vayu wants there - it matches the frame macOS has always
+		// drawn. Stated rather than inherited, so the window's shape does not
+		// move with whichever default the current Electron ships. Windows
+		// ignores the option.
+		roundedCorners: true,
 		// Centre the macOS traffic lights in the bar. The frame height is a named
 		// constant because it has been wrong twice: 16 originally, then 12 (the
 		// visible circle) - Electron positions the button frame, which is 14.

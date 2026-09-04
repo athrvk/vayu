@@ -8,12 +8,12 @@
 /**
  * The shell window's native shape is decided here, not inherited (#1335).
  *
- * Electron 43 made frameless windows rounded by default on Linux. Vayu's shell
- * is frameless - the titlebar, its buttons and the window's edge are drawn by
- * the renderer, square to the boundary - so the platform default is the one
- * thing that can change what the window looks like without a line of this app
- * changing. Pinning `roundedCorners` costs one property and makes the next
- * Electron's default a non-event; leaving it out is how the corners moved.
+ * Electron 43 made frameless windows rounded by default on Linux, and Vayu's
+ * shell is frameless - the titlebar, its buttons and the window's edge are
+ * drawn by the renderer. Rounded is the shape wanted there, matching macOS, so
+ * this is not a change being resisted; what the guard holds is that the app
+ * *states* it. Otherwise the platform default is the one thing that can change
+ * what the window looks like without a line of this app changing.
  *
  * main.ts creates the window at import time, so the option can only be read -
  * the characterization approach `startup-order.test.ts` and
@@ -37,10 +37,10 @@ describe("the shell window's chrome", () => {
 		expect(main).toContain("frame: false,");
 	});
 
-	it("pins the native corners rather than taking the platform default", () => {
-		// macOS has always rounded its windows and keeps doing so; Linux keeps
-		// the square shape Vayu shipped with, because nothing in the renderer
-		// paints around a rounded native edge. Windows ignores the option.
-		expect(main).toContain('roundedCorners: process.platform !== "linux",');
+	it("states the native corners rather than taking the platform default", () => {
+		// One value on every platform: macOS has always rounded its windows,
+		// Linux rounds a frameless one since Electron 43, and Windows ignores
+		// the option.
+		expect(main).toContain("roundedCorners: true,");
 	});
 });
