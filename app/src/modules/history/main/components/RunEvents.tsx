@@ -60,7 +60,7 @@ export function RunEvents({ anomalies, sleeps, className }: RunEventsProps) {
 	return (
 		<Card className={className}>
 			<CardHeader>
-				<CardTitle className="text-base">Events</CardTitle>
+				<CardTitle>Events</CardTitle>
 			</CardHeader>
 			<CardContent>
 				<p className="mb-3 text-xs text-muted-foreground">

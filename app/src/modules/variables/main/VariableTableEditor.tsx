@@ -643,7 +643,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						<Icon className={cn("w-5 h-5", editorConfig.iconColor)} />
 						<div>
 							<div className="flex items-center gap-2">
-								<h2 className="text-lg font-semibold text-foreground">{title}</h2>
+								<h2 className="text-md font-semibold text-foreground">{title}</h2>
 							</div>
 							<p className="text-xs text-muted-foreground">{editorConfig.subtitle}</p>
 						</div>

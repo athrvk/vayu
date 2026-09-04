@@ -95,7 +95,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			{report.statusCodes && Object.keys(report.statusCodes).length > 0 && (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-base">Status Code Distribution</CardTitle>
+						<CardTitle>Status Code Distribution</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -143,7 +143,7 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			{report.errors && report.errors.total > 0 && (
 				<Card className="border-destructive/30">
 					<CardHeader>
-						<CardTitle className="text-base flex items-center gap-2 text-destructive-text">
+						<CardTitle className="flex items-center gap-2 text-destructive-text">
 							<AlertCircle className="w-5 h-5" />
 							Error Summary
 						</CardTitle>

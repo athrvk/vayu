@@ -93,7 +93,7 @@ export default function LoadTestingPanel() {
 						<div>
 							<div className="flex items-center gap-2">
 								<Gauge className="w-5 h-5 text-muted-foreground" />
-								<CardTitle className="text-base">Load test ceilings</CardTitle>
+								<CardTitle>Load test ceilings</CardTitle>
 							</div>
 							<CardDescription className="mt-1">
 								The largest value each field in the Run a load test dialog will
@@ -175,7 +175,7 @@ function KeepAwakeCard() {
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<Coffee className="w-5 h-5 text-muted-foreground" />
-					<CardTitle className="text-base">While a run is streaming</CardTitle>
+					<CardTitle>While a run is streaming</CardTitle>
 				</div>
 				<CardDescription className="mt-1">
 					A load test the machine sleeps through stops with it, and its report comes back

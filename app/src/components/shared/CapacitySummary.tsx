@@ -94,7 +94,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 	return (
 		<Card className={className}>
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-				<CardTitle className="text-base">Capacity</CardTitle>
+				<CardTitle>Capacity</CardTitle>
 				{/*
 				 * `Badge variant="chip"`, not a hand-rolled span. The variant is
 				 * the one that lets a caller own the colour without inheriting a

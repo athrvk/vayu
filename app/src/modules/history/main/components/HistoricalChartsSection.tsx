@@ -91,9 +91,7 @@ export default function HistoricalChartsSection({
 
 			<Card>
 				<CardHeader className="pb-2">
-					<CardTitle className="text-base">
-						Request Rate (throughput vs send rate)
-					</CardTitle>
+					<CardTitle>Request Rate (throughput vs send rate)</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<RequestRateChart
@@ -109,7 +107,7 @@ export default function HistoricalChartsSection({
 
 			<Card>
 				<CardHeader className="pb-2">
-					<CardTitle className="text-base">Active Connections</CardTitle>
+					<CardTitle>Active Connections</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<ConnectionsChart
@@ -125,7 +123,7 @@ export default function HistoricalChartsSection({
 
 			<Card>
 				<CardHeader className="pb-2">
-					<CardTitle className="text-base">Status Codes Over Time</CardTitle>
+					<CardTitle>Status Codes Over Time</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<StatusCodesOverTimeChart history={data} isCompleted syncKey={SYNC_KEY} />
@@ -137,7 +135,7 @@ export default function HistoricalChartsSection({
 			{monitorSamples.length > 0 && (
 				<Card>
 					<CardHeader className="pb-2">
-						<CardTitle className="text-base">Server Vitals</CardTitle>
+						<CardTitle>Server Vitals</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<ServerVitalsChart

@@ -65,7 +65,7 @@ export function ContractCoverage({ coverage, inheritedBinding, className }: Cont
 	return (
 		<Card className={className}>
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-				<CardTitle className="text-base">Contract coverage</CardTitle>
+				<CardTitle>Contract coverage</CardTitle>
 				{/*
 				 * `Badge variant="chip"` for the reason `ThresholdVerdict` states
 				 * at its own chip: it is the one variant that lets a caller own

@@ -55,7 +55,7 @@ export default function SamplesTab({ report }: TabProps) {
 		<Card>
 			<CardHeader>
 				<div className="flex items-center justify-between">
-					<CardTitle className="text-base">Sampled Request Details</CardTitle>
+					<CardTitle>Sampled Request Details</CardTitle>
 					<Badge variant="secondary" className="text-xs">
 						{samples.length} samples shown
 					</Badge>

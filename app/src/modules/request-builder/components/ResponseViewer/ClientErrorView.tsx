@@ -108,7 +108,7 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 				</div>
 
 				<div className="space-y-2">
-					<h3 className="text-lg font-semibold text-foreground">{title}</h3>
+					<h3 className="text-md font-semibold text-foreground">{title}</h3>
 					<p className="text-sm text-muted-foreground">
 						{errorMessage || "The request failed before reaching the server"}
 					</p>

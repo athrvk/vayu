@@ -555,7 +555,7 @@ export default function McpSettingsPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Plug className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{CONNECTION.label}</CardTitle>
+						<CardTitle>{CONNECTION.label}</CardTitle>
 						{isLoading ? (
 							<Skeleton className="h-5 w-16 ml-1" />
 						) : !status ? (
@@ -683,7 +683,7 @@ export default function McpSettingsPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Wrench className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{TOOLS.label}</CardTitle>
+						<CardTitle>{TOOLS.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Choose which tools agents can use. A disabled tool is hidden from the
@@ -761,7 +761,7 @@ export default function McpSettingsPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Globe className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{ALLOWLIST.label}</CardTitle>
+						<CardTitle>{ALLOWLIST.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Hosts an agent is permitted to send traffic to. Empty means no outbound
@@ -861,7 +861,7 @@ export default function McpSettingsPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Gauge className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{CAPS.label}</CardTitle>
+						<CardTitle>{CAPS.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Hard ceilings on agent-started load runs. A request over any cap is rejected
@@ -900,7 +900,7 @@ export default function McpSettingsPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<ShieldCheck className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{WRITES.label}</CardTitle>
+						<CardTitle>{WRITES.label}</CardTitle>
 					</div>
 					<CardDescription>
 						When off (default), agents can read and send requests but cannot change

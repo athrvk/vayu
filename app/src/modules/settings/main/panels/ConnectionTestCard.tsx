@@ -124,7 +124,7 @@ export function ConnectionTestCard() {
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<PlugZap className="w-5 h-5 text-muted-foreground" />
-					<CardTitle className="text-base">Connection test</CardTitle>
+					<CardTitle>Connection test</CardTitle>
 				</div>
 				<CardDescription>
 					Sends one request with the settings on this screen and reports which hop

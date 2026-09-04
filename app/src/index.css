@@ -766,6 +766,12 @@
 		/* Drives from --font-sans so the UI-font preference (useAppearance) can
 		 * override it at runtime; defaults to Space Grotesk via @theme inline. */
 		font-family: var(--font-sans);
+		/* The documented body step, so text that names no size is body text
+		 * rather than the browser's 16px (#1202). Every step in the scale is a
+		 * `text-*` utility on the element that wants it; this is what everything
+		 * between them inherits, and it was a size the scale does not contain. */
+		font-size: var(--text-sm);
+		line-height: var(--text-sm--line-height);
 		height: 100%;
 		margin: 0;
 		padding: 0;

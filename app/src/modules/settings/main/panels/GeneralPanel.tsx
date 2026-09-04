@@ -143,7 +143,7 @@ export default function GeneralPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Save className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{AUTO_SAVE.label}</CardTitle>
+						<CardTitle>{AUTO_SAVE.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Automatically save edits to requests after you stop typing. Manual save{" "}
@@ -180,7 +180,7 @@ export default function GeneralPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Database className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{DATA_MANAGEMENT.label}</CardTitle>
+						<CardTitle>{DATA_MANAGEMENT.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Stored load-test runs and their metrics live in the engine database.
@@ -243,7 +243,7 @@ export default function GeneralPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<FolderOpen className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{STORAGE_PATHS.label}</CardTitle>
+						<CardTitle>{STORAGE_PATHS.label}</CardTitle>
 					</div>
 					<CardDescription>
 						File system locations used by the application.
@@ -283,7 +283,7 @@ export default function GeneralPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<RotateCcw className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{RESET.label}</CardTitle>
+						<CardTitle>{RESET.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Restore every app preference to its default: appearance, editor, dashboard,

@@ -56,7 +56,7 @@ export function ThresholdVerdict({ verdict, className }: ThresholdVerdictProps) 
 	return (
 		<Card className={className}>
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-				<CardTitle className="text-base">Pass/fail budgets</CardTitle>
+				<CardTitle>Pass/fail budgets</CardTitle>
 				{/*
 				 * `Badge variant="chip"`, not a hand-rolled span. `chip` is the
 				 * one variant that lets a caller own the background without

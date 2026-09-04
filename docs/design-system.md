@@ -997,6 +997,7 @@ composes with page zoom.
 | Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
 | Hero metric value | 34px | bold, tabular | `text-[34px] font-bold leading-none font-mono tabular-nums` |
 | Secondary metric value | 22px | bold | `text-[22px] font-bold font-mono` |
+| Tile metric value | 18px | bold | `text-lg font-bold` |
 | Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
 | Small label | 12px | medium | `text-xs font-medium` |
@@ -1068,6 +1069,47 @@ redefined in `@theme` (`index.css`) to **13px/18px**, so the utility *is* the
 documented body size. `text-xs` already matches the 12px label, so that was the
 only size that diverged. `text-[13px]` still works but skips the paired
 line-height - prefer `text-sm`.
+
+**The heading register stops at 15px, and a heading never names its own size.**
+`CardTitle` and `DialogTitle` carry `text-md`; a card or dialog heading that
+writes a size is overriding the primitive rather than using it. That is how the
+app got here (#1202): `CardTitle` named no size at all, so all 51 card headings
+in the app named one, 45 at `text-base` and 6 at `text-lg` - a settings panel
+and a report tab heading at 16-18px against 13px body, which is the register
+Postman and VS Code cap around 14px. `Input` is `text-sm` for the same reason:
+stock shadcn ships `text-base md:text-sm`, the web workaround for iOS zooming a
+focused field under 16px, and a narrow desktop window is not a phone.
+
+So **`text-base` (16px) is written nowhere in `src`**, and `text-lg` (18px)
+belongs to the tile metric value row - five bold numeric readouts, no headings.
+`type-scale.test.ts` holds both, and holds `input.tsx` to carrying no responsive
+size variant; the readout files are named in its allowlist, which fails if one
+of them stops using the step.
+
+**The type register is a measurement, not a preference.** Perceived size follows
+x-height, not nominal size, and the six bundled faces differ by 13% at the same
+`font-size`. Ratios are `OS/2.sxHeight / head.unitsPerEm`, read from the bundled
+`@fontsource` files by `appearance.font-metrics.test.ts`:
+
+| Face | Role | x-height ratio | at 13px | at 12px |
+|------|------|----------------|---------|---------|
+| Space Grotesk | UI default | 0.486 | 6.32px | 5.83px |
+| Inter | UI alternate | 0.546 | 7.10px | 6.55px |
+| JetBrains Mono | code default | 0.550 | 7.15px | 6.60px |
+| Fira Code | code option | 0.526 | 6.84px | 6.32px |
+| IBM Plex Mono | code option | 0.516 | 6.71px | 6.19px |
+| Space Mono | code option | 0.496 | 6.45px | 5.95px |
+| Segoe UI | not bundled, the reference | 0.50 | 6.50px | 6.00px |
+
+Two decisions come out of that table. **The 13px body step stays**: the default
+UI face renders a 6.32px x-height there, *below* the 6.50px a system face gives
+at the same size, so body text was never what read large - the 16px chrome
+above was. And **the code font default is 12px, not 13px**: JetBrains Mono has
+the largest x-height ratio of the six, which put 13px at 7.15px where an editor
+shipping Menlo or Consolas at its own default sits between 6.3 and 6.6px; 12px
+measures 6.60px. Settings → Editor still offers 11 through 16, and the
+interface-scale slider still multiplies everything: these are the defaults the
+register is judged on, not a ceiling on the user.
 
 **Icon sizing goes on `className`, not lucide's `size` prop.** Mixing the two
 hides icons from a scale audit and lets off-grid values (15px) creep in. Use

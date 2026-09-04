@@ -98,7 +98,7 @@ export function CookiesCard() {
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<Cookie className="w-5 h-5 text-muted-foreground" />
-					<CardTitle className="text-base">{COOKIES.label}</CardTitle>
+					<CardTitle>{COOKIES.label}</CardTitle>
 				</div>
 				<CardDescription>
 					Cookies the engine stores while you send requests, so a session survives to the

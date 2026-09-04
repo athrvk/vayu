@@ -90,7 +90,7 @@ export function WorkspaceBackupCard() {
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<HardDriveDownload className="w-5 h-5 text-muted-foreground" />
-					<CardTitle className="text-base">{WORKSPACE_BACKUP.label}</CardTitle>
+					<CardTitle>{WORKSPACE_BACKUP.label}</CardTitle>
 				</div>
 				<CardDescription>
 					Writes a complete, compacted copy of the workspace - collections, environments,
