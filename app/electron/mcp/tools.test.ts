@@ -3347,6 +3347,11 @@ describe("start_load_run scenario runs", () => {
 			// per request sent, so a payload carrying both would have one of the
 			// two silently dropped.
 			["data", [{ id: "1" }]],
+			// The send's default-header refusals (issue #1337): the engine reads
+			// them off one request's payload, and a scenario's steps are each
+			// composed from their own saved request, so a run-level list would be
+			// an argument written and never read.
+			["disabledDefaultHeaders", ["User-Agent"]],
 		] as Array<[string, unknown]>) {
 			const res = await dispatchTool(
 				"start_load_run",
@@ -5578,6 +5583,91 @@ describe("dispatchTool", () => {
 		expect(
 			parsed.reliability.find((m) => m.metric === "summary.totalRequests")?.direction
 		).toBe("neutral");
+	});
+});
+
+/**
+ * An agent can refuse a header the engine adds (issue #1337).
+ *
+ * The engine has taken `disabledDefaultHeaders` on `POST /execute` and
+ * `POST /runs` since #1229; what an agent could not do was name it, because the
+ * MCP SDK parses arguments through each tool's zod `inputSchema` and a zod
+ * object strips what it does not declare. So every case here parses through the
+ * tool's own schema first, exactly as the SDK does: handing `dispatchTool` the
+ * field directly would pass with the schema entry removed and prove nothing.
+ */
+describe("default-header opt-outs reach the engine", () => {
+	const parseArgs = (name: string, args: Record<string, unknown>) =>
+		z
+			.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodTypeAny>)
+			.parse(args);
+
+	test("run_request forwards the refused names to /execute", async () => {
+		const client = fakeClient();
+		const args = parseArgs("run_request", {
+			url: "https://api.example.com/users",
+			disabledDefaultHeaders: ["User-Agent", "Accept-Encoding"],
+		});
+		expect(args.disabledDefaultHeaders).toEqual(["User-Agent", "Accept-Encoding"]);
+
+		const res = await dispatchTool(
+			"run_request",
+			args,
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// The whole point of the argument: this send carries no User-Agent at
+		// all, which writing one yourself cannot express.
+		expect(payload.disabledDefaultHeaders).toEqual(["User-Agent", "Accept-Encoding"]);
+	});
+
+	test("run_request sends no such key when the agent names none", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			parseArgs("run_request", { url: "https://api.example.com/users" }),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// An empty list and no list say the same thing to the engine, so saying
+		// it here would be this layer making a claim the agent did not.
+		expect(payload).not.toHaveProperty("disabledDefaultHeaders");
+	});
+
+	test("start_load_run forwards the refused names to /runs", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				disabledDefaultHeaders: ["Accept-Encoding"],
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.disabledDefaultHeaders).toEqual(["Accept-Encoding"]);
+	});
+
+	test("the shared sentence names the two tools that take the argument", () => {
+		const description = (name: string) => TOOLS.find((t) => t.name === name)!.description;
+		// One sentence carried by the three tools that send traffic, so it has to
+		// tell them apart: a paraphrase per tool is what it exists to prevent.
+		for (const name of ["run_request", "start_load_run"]) {
+			expect(description(name), name).toContain("disabledDefaultHeaders");
+			expect(description(name), name).toMatch(
+				/run_request and start_load_run take it as an argument/
+			);
+		}
+		expect(description("run_collection_smoke")).toMatch(
+			/run_collection_smoke does not: it replays each saved request exactly as stored/
+		);
 	});
 });
 
