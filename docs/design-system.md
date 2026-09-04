@@ -1586,8 +1586,9 @@ header band, body below it.
   placeholder, an inline form, a loading skeleton and an inline error all stand
   in for the rows that are not there, so they start where those rows would:
   `childInsetPx(depth)` in the collections tree, the named `GROUP_CHILD_INSET`
-  in the two-level variables tree, `rowInsetPx(0)` in the GraphQL schema
-  explorer, whose search results are one flat level. Each carrying its own
+  in the two-level variables tree, and `rowInsetPx(0)` - a root row's own inset,
+  there being no parent row to be a child of - in the GraphQL schema explorer,
+  whose search results are one flat level. Each carrying its own
   `px-*` is how one expanded folder came to show up to five different left
   edges, with "Empty folder" left of its own parent's label (#1372). An empty
   level also has to _say_ so: its group holds no `treeitem`, so the folder row
@@ -1598,11 +1599,11 @@ header band, body below it.
   the one case #1372 left open, because an uppercase label over a flat group
   reads as a heading rather than as a row that escaped its level. Looked at in
   the running app (#1378) that held - what did not was the pane drawing three
-  left edges in 185px: rows on a private base offset, the headings and both
-  stand-in lines on their own `px-2`, and neither on the search field above
-  them. The headings stayed where they were and the rows came to meet them,
-  because the pane reuses `rowInsetPx` now instead of a second copy of
-  `INDENT_STEP`.
+  left edges at once: rows on a private base offset, the headings and both
+  stand-in lines on their own `px-2`, and the rows' column matching neither the
+  headings nor the search field above them. The headings stayed where they were
+  and the rows came to meet them, because the pane reuses `rowInsetPx` now
+  instead of a second copy of `INDENT_STEP`.
 - **A control with an outward focus ring needs clearance from the body's top
   edge.** The body scrolls, so it clips at its own bounds, and a ring drawn
   outside the border box gets its top cut off when the control sits flush. Rows
