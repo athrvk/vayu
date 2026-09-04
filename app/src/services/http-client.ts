@@ -99,6 +99,25 @@ function abortError(): Error {
 }
 
 /**
+ * The one translation from a transport-level rejection to the sentence a caller
+ * shows, shared by the plain request path and the streaming one.
+ *
+ * Every branch carries the original as `cause`. The messages here are written
+ * for a user - "Request timeout" says nothing about which socket gave up - so
+ * without the chain the underlying failure is not recoverable from what was
+ * thrown, which is what `preserve-caught-error` is about.
+ */
+function asTransportError(error: unknown): Error {
+	if (error instanceof Error) {
+		if (error.name === "AbortError") {
+			return new Error("Request timeout", { cause: error });
+		}
+		return new Error(`Network error: ${error.message}`, { cause: error });
+	}
+	return new Error("Unknown error occurred", { cause: error });
+}
+
+/**
  * Split a buffer into whole SSE frames, keeping whatever is still incomplete.
  *
  * A `ReadableStream` hands over whatever arrived, not whole frames, so a frame
@@ -196,13 +215,7 @@ class HttpClient {
 			if (error instanceof ApiError) {
 				throw error;
 			}
-			if (error instanceof Error) {
-				if (error.name === "AbortError") {
-					throw new Error("Request timeout");
-				}
-				throw new Error(`Network error: ${error.message}`);
-			}
-			throw new Error("Unknown error occurred");
+			throw asTransportError(error);
 		} finally {
 			clearTimeout(timeoutId);
 		}
@@ -310,13 +323,7 @@ class HttpClient {
 			if (caller?.aborted) {
 				throw abortError();
 			}
-			if (error instanceof Error) {
-				if (error.name === "AbortError") {
-					throw new Error("Request timeout");
-				}
-				throw new Error(`Network error: ${error.message}`);
-			}
-			throw new Error("Unknown error occurred");
+			throw asTransportError(error);
 		} finally {
 			caller?.removeEventListener("abort", onCallerAbort);
 			clearTimeout(idleTimer);

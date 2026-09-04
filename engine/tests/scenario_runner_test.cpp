@@ -398,6 +398,23 @@ class ScenarioRunnerTest : public ::testing::Test {
         return context;
     }
 
+    /// The run's `step` frames alone, in order.
+    ///
+    /// The stream opens with the plan's size (issue #1398), so a test that
+    /// indexed the ring directly to reach a step would be counting past a
+    /// frame it is not asking about. Filtering here keeps each such test
+    /// asserting its own subject.
+    [[nodiscard]] static std::vector<std::string> step_frames (
+    const std::shared_ptr<vayu::core::RunContext>& context) {
+        std::vector<std::string> steps;
+        for (const auto& payload : context->ticks_since (0).payloads) {
+            if (payload.find ("event: step\n") != std::string::npos) {
+                steps.push_back (payload);
+            }
+        }
+        return steps;
+    }
+
     [[nodiscard]] json summary_of (const std::string& run_id) {
         auto run = db_->get_run (run_id);
         if (!run.has_value ()) {
@@ -845,13 +862,67 @@ TEST_F (ScenarioRunnerTest, TheRunPublishesOneStepEventPerStepAndClosesTheStream
     ASSERT_TRUE (context != nullptr);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
-    EXPECT_EQ (context->published_count.load (), 4u);
+    // Five frames for four steps: the stream opens with the plan's size
+    // (issue #1398) and carries one `step` per step after it.
+    EXPECT_EQ (context->published_count.load (), 5u);
     EXPECT_TRUE (context->closed.load ());
     auto batch = context->ticks_since (0);
-    ASSERT_EQ (batch.payloads.size (), 4u);
-    for (const auto& payload : batch.payloads) {
-        EXPECT_NE (payload.find ("event: step\n"), std::string::npos);
-    }
+    ASSERT_EQ (batch.payloads.size (), 5u);
+    EXPECT_NE (batch.payloads[0].find ("event: plan\n"), std::string::npos)
+    << batch.payloads[0];
+    EXPECT_EQ (step_frames (context).size (), 4u);
+}
+
+// The plan frame itself (issue #1398): a collection run publishes no `metrics`
+// ticks, so the size it resolved reaches a watcher here or nowhere, and a
+// taskbar with no denominator can only paint an indeterminate bar.
+TEST_F (ScenarioRunnerTest, TheStreamOpensWithTheSizeTheRunResolved) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/3);
+    auto context      = context_for (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto batch = context->ticks_since (0);
+    ASSERT_FALSE (batch.payloads.empty ());
+    // First, not merely present: a client reads the total once and then counts
+    // steps against it, so a frame published after the steps it describes
+    // would leave the run indeterminate for as long as it took to arrive.
+    const auto& opening = batch.payloads[0];
+    EXPECT_NE (opening.find ("event: plan\n"), std::string::npos) << opening;
+    const auto data_at = opening.find ("data: ");
+    ASSERT_NE (data_at, std::string::npos) << opening;
+    const auto plan = json::parse (opening.substr (data_at + 6));
+    EXPECT_EQ (plan["stepsPerIteration"].get<size_t> (), 2u);
+    EXPECT_EQ (plan["iterations"].get<size_t> (), 3u);
+    EXPECT_EQ (plan["stepsExpected"].get<size_t> (), 6u);
+}
+
+// The count a data set implies is the resolved one, not the one asked for: a
+// run with rows and no explicit `iterations` runs once per row, and a client
+// that had to derive the total itself would be reading a field that is absent.
+TEST_F (ScenarioRunnerTest, ThePlanFrameCountsTheIterationsADataSetImplies) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+
+    const auto run_id = start_with_data (json::array ({ { { "marker", "row-0" } },
+    { { "marker", "row-1" } }, { { "marker", "row-2" } } }));
+    auto context = context_for (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto batch = context->ticks_since (0);
+    ASSERT_FALSE (batch.payloads.empty ());
+    const auto data_at = batch.payloads[0].find ("data: ");
+    ASSERT_NE (data_at, std::string::npos) << batch.payloads[0];
+    const auto plan = json::parse (batch.payloads[0].substr (data_at + 6));
+    EXPECT_EQ (plan["stepsPerIteration"].get<size_t> (), 1u);
+    EXPECT_EQ (plan["iterations"].get<size_t> (), 3u);
+    EXPECT_EQ (plan["stepsExpected"].get<size_t> (), 3u);
+    EXPECT_EQ (step_frames (context).size (), 3u);
 }
 
 // ============================================================================
@@ -1401,9 +1472,9 @@ TEST_F (ScenarioRunnerTest, ARunOfAnUnboundCollectionCarriesNoVerdictAnywhere) {
     // stored row above proves the trace; this proves the `step` frame, which is
     // built on a separate path - a key added there unconditionally (even as a
     // null) would leave the watcher showing a verdict the report never writes.
-    const auto batch = context->ticks_since (0);
-    ASSERT_EQ (batch.payloads.size (), 1u);
-    const auto& payload = batch.payloads[0];
+    const auto steps = step_frames (context);
+    ASSERT_EQ (steps.size (), 1u);
+    const auto& payload = steps[0];
     const auto data_at  = payload.find ("data: ");
     ASSERT_NE (data_at, std::string::npos) << payload;
     EXPECT_FALSE (json::parse (payload.substr (data_at + 6)).contains ("validation"))
@@ -1743,8 +1814,8 @@ TEST_F (ScenarioRunnerTest, StepFramesCarryTheTallyOnTheSameTermsAsTheStoredList
     ASSERT_TRUE (context != nullptr);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
-    const auto batch = context->ticks_since (0);
-    ASSERT_EQ (batch.payloads.size (), 2u);
+    const auto steps = step_frames (context);
+    ASSERT_EQ (steps.size (), 2u);
     const auto frame_of = [] (const std::string& payload) {
         const auto data_at = payload.find ("data: ");
         EXPECT_NE (data_at, std::string::npos) << payload;
@@ -1753,15 +1824,15 @@ TEST_F (ScenarioRunnerTest, StepFramesCarryTheTallyOnTheSameTermsAsTheStoredList
 
     // Two numbers, not the list: a step is free to make hundreds of assertions
     // and the tick ring is the fixed-size buffer every watcher replays from.
-    const auto tested = frame_of (batch.payloads[0]);
-    ASSERT_TRUE (tested.contains ("tests")) << batch.payloads[0];
+    const auto tested = frame_of (steps[0]);
+    ASSERT_TRUE (tested.contains ("tests")) << steps[0];
     EXPECT_EQ (tested["tests"]["passed"].get<size_t> (), 1u);
     EXPECT_EQ (tested["tests"]["failed"].get<size_t> (), 1u);
     EXPECT_FALSE (tested["tests"].contains ("testResults")) << tested.dump ();
 
     // Absent here is absent there: a step that asserted nothing sends no node,
     // so a live view cannot show a `0/0` the stored row will not back up.
-    EXPECT_FALSE (frame_of (batch.payloads[1]).contains ("tests")) << batch.payloads[1];
+    EXPECT_FALSE (frame_of (steps[1]).contains ("tests")) << steps[1];
 }
 
 // A pre-request assertion is the step's, on every surface that speaks about the
@@ -1820,12 +1891,12 @@ TEST_F (ScenarioRunnerTest, APreRequestAssertionIsListedCountedAndNamedTogether)
 
     // And the live half counts what the stored list holds, so a run being
     // watched does not renumber itself when its rows arrive.
-    const auto batch = context->ticks_since (0);
-    ASSERT_EQ (batch.payloads.size (), 1u);
-    const auto data_at = batch.payloads[0].find ("data: ");
-    ASSERT_NE (data_at, std::string::npos) << batch.payloads[0];
-    const auto frame = json::parse (batch.payloads[0].substr (data_at + 6));
-    ASSERT_TRUE (frame.contains ("tests")) << batch.payloads[0];
+    const auto steps = step_frames (context);
+    ASSERT_EQ (steps.size (), 1u);
+    const auto data_at = steps[0].find ("data: ");
+    ASSERT_NE (data_at, std::string::npos) << steps[0];
+    const auto frame = json::parse (steps[0].substr (data_at + 6));
+    ASSERT_TRUE (frame.contains ("tests")) << steps[0];
     EXPECT_EQ (frame["tests"]["passed"].get<size_t> (), 2u);
     EXPECT_EQ (frame["tests"]["failed"].get<size_t> (), 1u);
 }

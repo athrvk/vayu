@@ -848,7 +848,10 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 		return { success: true };
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
-		console.error("[Main] Failed to restart engine:", errorMessage);
+		// The error itself, not its text: the sidecar gives up with a sentence
+		// written for the user and attaches the attempt that failed as `cause`,
+		// which the string form drops. The renderer still gets the sentence.
+		console.error("[Main] Failed to restart engine:", error);
 		return { success: false, error: errorMessage };
 	}
 }

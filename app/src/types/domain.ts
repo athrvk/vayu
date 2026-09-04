@@ -852,6 +852,32 @@ export const STEP_OUTCOMES: readonly StepOutcome[] = [
 ] as const;
 
 /**
+ * The size a collection run resolved to - the `plan` SSE event that opens
+ * `GET /runs/:runId/live` for a sequential run, built by `build_plan_data`
+ * (engine/src/core/scenario_runner.cpp), issue #1398.
+ *
+ * The engine is the only side that holds these numbers: the client sends no
+ * step count, so a run's denominator arrives here or not at all. It arrives
+ * once, ahead of the first `step` frame, and a client that attached past its
+ * eviction from the tick ring simply never sees it.
+ */
+export interface ScenarioRunPlanEvent {
+	/** The plan's length - steps in one pass, not executions. */
+	stepsPerIteration: number;
+	/**
+	 * Passes over the plan, as the engine resolved them - a data set's row
+	 * count where the request named no count of its own.
+	 */
+	iterations: number;
+	/**
+	 * `stepsPerIteration * iterations`, an upper bound rather than a promise:
+	 * a run stops early on an errored step or a stop request, and
+	 * `setNextRequest` can walk an iteration in fewer steps than the plan holds.
+	 */
+	stepsExpected: number;
+}
+
+/**
  * One step execution as the live stream reports it - the `step` SSE event on
  * `GET /runs/:runId/live`, built by `build_step_payload`
  * (engine/src/core/scenario_runner.cpp). It carries no exchange: the stored

@@ -256,6 +256,23 @@ resolve_next_step (const ScenarioStepIndex& index, const std::string& target);
 [[nodiscard]] std::string build_step_payload (const StepRecord& record, size_t offset);
 
 /**
+ * @brief The `plan` event's data: the size a sequential run resolved to
+ *        (issue #1398).
+ *
+ * Published once, ahead of the first `step` frame, because this side is the
+ * only one that can resolve it - a client sends no step count precisely so
+ * that the rule has one copy - and a watcher with no denominator can only
+ * paint an indeterminate bar.
+ *
+ * `stepsExpected` is an upper bound rather than a promise, on the same terms
+ * as the load path's `requestsExpected`: an errored step ends its iteration,
+ * `POST /runs/:id/stop` ends the run, `setNextRequest` can walk an iteration
+ * in fewer steps than the plan holds, and the `maxStepsPerIteration` cap can
+ * end one that walks in more. Extracted for testing.
+ */
+[[nodiscard]] nlohmann::json build_plan_payload (size_t steps_per_iteration, size_t iterations);
+
+/**
  * @brief Read `failOnSchemaError` off a `POST /runs` payload (issue #681).
  *
  * Default false, and the default is the decision: a schema verdict is its own

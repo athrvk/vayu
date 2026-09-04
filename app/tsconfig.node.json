@@ -31,6 +31,20 @@
 		"allowSyntheticDefaultImports": true,
 		"esModuleInterop": true,
 		"target": "ES2020",
+		/*
+		 * Stated because `ErrorOptions` is not in the ES2020 lib and
+		 * `new Error(message, { cause })` needs it - the longer note is in
+		 * tsconfig.json.
+		 *
+		 * Stating it is not free: `target: ES2020` alone pulled in
+		 * `lib.es2020.full.d.ts`, which also carries `ScriptHost`,
+		 * `WebWorker.ImportScripts` and `DOM.AsyncIterable`. The first two
+		 * describe environments the main process is not (Windows Script Host and
+		 * a web worker); the third types `for await` over a DOM stream, which
+		 * `electron/` does not do and neither sibling config admits either. The
+		 * three configs now carry the same four entries.
+		 */
+		"lib": ["ES2020", "ES2022.Error", "DOM", "DOM.Iterable"],
 		"outDir": "dist-electron",
 		"rootDir": "electron",
 		"noEmit": false

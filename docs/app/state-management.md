@@ -942,16 +942,22 @@ opened it, and it does not act on this flag - only the desktop app does.
 }
 ```
 
-Two readers, both at the moment a capture arrives:
+Three readers. Two at the moment a capture arrives:
 `modules/inbox/capture-notifier.ts` gates on it (the second gate;
 `services/notify.ts` reads the global opt-in), and the header toggle in
-`modules/inbox/index.tsx` writes it.
+`modules/inbox/index.tsx` writes it. The third is `hooks/useInboxWatchers.ts`,
+which reads the whole map continuously to decide which inboxes
+`services/inbox-watch-service.ts` should hold a live stream for: the toggle
+promises a notification while Vayu is in the background, and the inbox tab is
+mounted only while it is the active tab (issue #1400).
 
 **Persisted**, and pruned: an inbox id belongs to the engine process that minted
 it, so `retainInboxes` drops every id a successful `GET /inbox` no longer names,
-called from `InboxView` on a list read the engine actually answered - a failed
-read leaves the map alone, because "no inboxes" and "could not ask" are not the
-same list. `migrate` and `merge` both normalize, as `host-sleep-store` does.
+called from `useInboxWatchers` on a list read the engine actually answered - a
+failed read leaves the map alone, because "no inboxes" and "could not ask" are
+not the same list. It was called from `InboxView` until #1400, which pruned the
+map only while that tab happened to be open. `migrate` and `merge` both
+normalize, as `host-sleep-store` does.
 
 #### `scenario-run-store.ts` - Live Collection-Run Steps
 

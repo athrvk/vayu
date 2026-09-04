@@ -19,17 +19,28 @@
  * stands. The superseded run keeps running on the engine, but nothing here sees
  * another tick of it, and its terminal handlers never fire.
  *
- * So `report` takes the indicator over, and `fail`/`clear` from a run that has
- * already been superseded are ignored. Without that guard the older run's stop -
- * the dashboard calls `stopMonitoring` for a run it finds already finished -
- * would wipe the bar of the run that is actually being watched.
+ * So a run `claim`s the indicator when the renderer starts watching it, and
+ * every later call names the run it speaks for: one that no longer holds the
+ * claim is ignored, whether it reports, fails or clears. Without that guard the
+ * older run's stop - the dashboard calls `stopMonitoring` for a run it finds
+ * already finished - would wipe the bar of the run that is actually being
+ * watched.
+ *
+ * The claim is a run, not a `RunProgressKey` (issue #1405). The key names a
+ * *kind* of run and the thing that owns the indicator is one run, so keying by
+ * kind left two gaps: two runs of the same kind, where the superseded one's
+ * terminal calls pass the guard outright, and a stranded reporter, where a
+ * service that has lost the stream can still paint. Nothing tells a superseded
+ * run that it lost - `sseClient.connect` closes the previous `EventSource`
+ * without invoking a handler - so the run itself cannot know, and only the side
+ * holding the claim can.
  *
  * Nothing here throttles: a caller reports off the metrics flush, which is
  * already the live-refresh cadence (`throttled-batcher.ts`), so a second timer
  * would only add a second answer to "how often does this paint".
  *
- * `report`/`fail`/`clear` are fire-and-forget by design - no run may wait on the
- * OS to draw a rectangle.
+ * Every call here is fire-and-forget by design - no run may wait on the OS to
+ * draw a rectangle.
  */
 
 import type { RunProgressUpdate } from "@/types/electron";
@@ -43,7 +54,22 @@ export const RUN_PROGRESS_KEYS = {
 export type RunProgressKey = (typeof RUN_PROGRESS_KEYS)[keyof typeof RUN_PROGRESS_KEYS];
 
 /** The run the indicator is showing, or null when it is showing nothing. */
-let shownFor: RunProgressKey | null = null;
+let shownFor: { key: RunProgressKey; runId: string } | null = null;
+
+/**
+ * Whether `runId` is the run the indicator is showing.
+ *
+ * The run id is the identity - it is unique across both kinds, since every run
+ * is one `POST /runs` - and the key rides with it so that a caller naming a run
+ * under the wrong kind cannot paint on the strength of the id alone.
+ *
+ * A caller with no run id at all holds no claim: `null` here is a service whose
+ * run has already been forgotten, and the indicator belongs to whichever run is
+ * being watched now.
+ */
+function isShown(key: RunProgressKey, runId: string | null): boolean {
+	return shownFor !== null && shownFor.key === key && shownFor.runId === runId;
+}
 
 /**
  * The last running update sent, so an unmoved fraction is not re-sent on every
@@ -87,30 +113,45 @@ function send(update: RunProgressUpdate): void {
 
 export const runProgress = {
 	/**
-	 * Say where `key`'s run is: a 0..1 fraction, or null for a run with no
+	 * Take the indicator for `runId`, because watching this run is what stopped
+	 * the renderer watching any other.
+	 *
+	 * It starts with no fraction - nothing has ticked yet, so how far along the
+	 * run is has no answer, and "running, length unknown" is the honest one. The
+	 * run's first `report` replaces it where the run has a denominator at all.
+	 */
+	claim(key: RunProgressKey, runId: string): void {
+		shownFor = { key, runId };
+		send({ state: "running", value: null });
+	},
+
+	/**
+	 * Say where `runId` is: a 0..1 fraction, or null for a run with no
 	 * denominator, which shows as indeterminate where the platform has one.
 	 *
-	 * Reporting takes the indicator over, because watching this run is what
-	 * stopped the renderer watching any other.
+	 * A run that no longer holds the claim paints nothing. It can still get
+	 * here: a batched commit fires on a trailing timer, so a run superseded
+	 * inside that window reports once more, with a fraction of its own.
 	 */
-	report(key: RunProgressKey, value: number | null): void {
-		shownFor = key;
+	report(key: RunProgressKey, runId: string | null, value: number | null): void {
+		if (!isShown(key, runId)) return;
 		send({ state: "running", value });
 	},
 
 	/**
-	 * `key`'s run ended badly. The indicator says so - briefly, and only where a
-	 * platform has a failed state.
+	 * `runId` ended badly. The indicator says so - briefly, and only where a
+	 * platform has a failed state - and the claim is given up with it, so
+	 * nothing this run does afterwards repaints over the flash.
 	 */
-	fail(key: RunProgressKey): void {
-		if (shownFor !== key) return;
+	fail(key: RunProgressKey, runId: string | null): void {
+		if (!isShown(key, runId)) return;
 		shownFor = null;
 		send({ state: "failed" });
 	},
 
-	/** `key`'s run is over. A run the indicator is not showing is a no-op. */
-	clear(key: RunProgressKey): void {
-		if (shownFor !== key) return;
+	/** `runId` is over. A run the indicator is not showing is a no-op. */
+	clear(key: RunProgressKey, runId: string | null): void {
+		if (!isShown(key, runId)) return;
 		shownFor = null;
 		send({ state: "idle" });
 	},

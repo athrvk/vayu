@@ -72,13 +72,17 @@ vi.mock("./notify", async (importOriginal) => ({
 }));
 // The taskbar and Dock indicator (#1362), mocked at the same boundary: which
 // platform paints what is `electron/run-progress.ts`'s question.
-const { mockProgressReport, mockProgressFail, mockProgressClear } = vi.hoisted(() => ({
-	mockProgressReport: vi.fn(),
-	mockProgressFail: vi.fn(),
-	mockProgressClear: vi.fn(),
-}));
+const { mockProgressClaim, mockProgressReport, mockProgressFail, mockProgressClear } = vi.hoisted(
+	() => ({
+		mockProgressClaim: vi.fn(),
+		mockProgressReport: vi.fn(),
+		mockProgressFail: vi.fn(),
+		mockProgressClear: vi.fn(),
+	})
+);
 vi.mock("./run-progress", () => ({
 	runProgress: {
+		claim: mockProgressClaim,
 		report: mockProgressReport,
 		fail: mockProgressFail,
 		clear: mockProgressClear,
@@ -130,6 +134,38 @@ function deliverStep(stepIndex: number): void {
 	});
 }
 
+/**
+ * Deliver the opening `plan` frame the same way - through the handler the
+ * service registered, which is the wiring the fraction depends on.
+ */
+function deliverPlan(stepsPerIteration: number, iterations: number): void {
+	const calls = vi.mocked(sseClient.connect).mock.calls;
+	const onPlan = calls[calls.length - 1]?.[6];
+	if (!onPlan) throw new Error("the service registered no plan handler");
+	onPlan({
+		stepsPerIteration,
+		iterations,
+		stepsExpected: stepsPerIteration * iterations,
+	});
+}
+
+/** Every value the OS indicator has been told, in order. */
+function reportedFractions(): (number | null)[] {
+	return mockProgressReport.mock.calls.map((call) => call[2] as number | null);
+}
+
+/** The run each of those reports named - the claim `runProgress` checks. */
+function reportedRunIds(): (string | null)[] {
+	return mockProgressReport.mock.calls.map((call) => call[1] as string | null);
+}
+
+/** The latest of those - what the bar is showing now. */
+function lastReportedFraction(): number | null {
+	const reported = reportedFractions();
+	if (reported.length === 0) throw new Error("the indicator was told nothing");
+	return reported[reported.length - 1];
+}
+
 /** Every step of every batch committed so far, in order. */
 function committedSteps(): ScenarioStepEvent[] {
 	return mockAddSteps.mock.calls.flatMap((call) => call[0] as ScenarioStepEvent[]);
@@ -169,6 +205,10 @@ describe("ScenarioRunService", () => {
 			expect.any(Function),
 			expect.any(Function),
 			expect.any(Function),
+			expect.any(Function),
+			// No monitor handler: a collection run scrapes no vitals. The plan
+			// handler after it is what makes the run's progress a fraction.
+			undefined,
 			expect.any(Function)
 		);
 	});
@@ -404,21 +444,128 @@ describe("ScenarioRunService", () => {
 	});
 
 	describe("the OS progress indicator (#1362)", () => {
+		/*
+		 * Every call names this run, not just its kind (#1405): `runProgress`
+		 * ignores a call from a run it is not showing, and a service that named
+		 * only `collection-run` would be indistinguishable from the collection
+		 * run this one superseded. Mutation check on each case: pass any other
+		 * id and it reddens.
+		 */
 		it("claims it with no fraction - the plan's length is the engine's to resolve", () => {
 			scenarioRunService.startMonitoring("run_20");
-			expect(mockProgressReport).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun, null);
+			expect(mockProgressClaim).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_20"
+			);
+		});
+
+		/*
+		 * Issue #1398. The engine publishes the size it resolved before the
+		 * first step; these pin what the renderer does with it, and what it does
+		 * without it.
+		 */
+		describe("the fraction the engine's plan frame makes possible (#1398)", () => {
+			beforeEach(() => {
+				vi.useFakeTimers();
+			});
+			afterEach(() => {
+				vi.useRealTimers();
+			});
+
+			it("paints steps against the total the run resolved", () => {
+				scenarioRunService.startMonitoring("run_24");
+				// Two steps a pass, two passes: four steps to fill the bar.
+				deliverPlan(2, 2);
+				// Determinate at zero the moment the total lands, rather than at
+				// the end of the first flush window. The indeterminate state
+				// before it was the claim's, not a report.
+				expect(reportedFractions()).toEqual([0]);
+
+				deliverStep(0);
+				expect(lastReportedFraction()).toBe(0.25);
+
+				deliverStep(1);
+				vi.advanceTimersByTime(FLUSH_MS);
+				expect(lastReportedFraction()).toBe(0.5);
+
+				// Every one of them named this run, which is what lets
+				// `runProgress` ignore a report from a run it stopped showing.
+				expect(reportedRunIds()).toEqual(["run_24", "run_24", "run_24"]);
+			});
+
+			/*
+			 * Mutation check: drop the null fallback in `runFraction` (divide by
+			 * `stepsExpected ?? 0`) and this run reports `1` on every batch -
+			 * `Infinity` through the clamp - so a run on its first step shows a
+			 * bar that has already finished. Either way the fraction would be
+			 * made up: nobody sent a total.
+			 */
+			it("stays indeterminate for a run whose total never arrives", () => {
+				scenarioRunService.startMonitoring("run_25");
+				deliverStep(0);
+				deliverStep(1);
+				vi.advanceTimersByTime(FLUSH_MS);
+
+				// One per committed batch, the leading flush and the trailing
+				// one, and neither can be a fraction of a total nobody sent.
+				expect(reportedFractions()).toEqual([null, null]);
+			});
+
+			/*
+			 * `stepsExpected` is an upper bound the run can pass: `setNextRequest`
+			 * can walk an iteration back over steps it has already run. Mutation
+			 * check: drop the clamp and this reports 1.5.
+			 */
+			it("holds at full when a run outruns its own plan", () => {
+				scenarioRunService.startMonitoring("run_26");
+				deliverPlan(2, 1);
+				for (let i = 0; i < 3; i += 1) deliverStep(i);
+				vi.advanceTimersByTime(FLUSH_MS);
+
+				expect(lastReportedFraction()).toBe(1);
+			});
+
+			/*
+			 * A run that has ended names no run, so its last flush cannot pass
+			 * `runProgress`'s claim check (#1405) - which is where "a failed run
+			 * keeps its flash" and "a superseded run paints nothing" are pinned,
+			 * on the real module rather than on this file's mock of it. What is
+			 * this service's half of that contract is the id it passes.
+			 */
+			it("names no run once the stream has closed, so a stranded flush cannot paint", async () => {
+				vi.mocked(apiService.getRunReport).mockResolvedValue(
+					storedReport as unknown as Awaited<ReturnType<typeof apiService.getRunReport>>
+				);
+				scenarioRunService.startMonitoring("run_27");
+				deliverPlan(4, 1);
+				deliverStep(0);
+				expect(lastReportedFraction()).toBe(0.25);
+
+				await closeStream();
+				mockProgressReport.mockClear();
+				deliverStep(1);
+				vi.advanceTimersByTime(FLUSH_MS);
+
+				expect(reportedRunIds()).not.toContain("run_27");
+			});
 		});
 
 		it("gives it up when the run ends", async () => {
 			scenarioRunService.startMonitoring("run_21");
 			await closeStream();
-			expect(mockProgressClear).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+			expect(mockProgressClear).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_21"
+			);
 		});
 
 		it("says failed when the stream errors", () => {
 			scenarioRunService.startMonitoring("run_22");
 			failStream("engine gone");
-			expect(mockProgressFail).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+			expect(mockProgressFail).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_22"
+			);
 		});
 
 		/*
@@ -430,7 +577,10 @@ describe("ScenarioRunService", () => {
 			scenarioRunService.startMonitoring("run_23");
 			failStream("engine gone");
 			await closeStream();
-			expect(mockProgressFail).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+			expect(mockProgressFail).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_23"
+			);
 			expect(mockProgressClear).not.toHaveBeenCalled();
 		});
 	});

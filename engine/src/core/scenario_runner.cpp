@@ -405,6 +405,12 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     return build_sse_frame ("step", data.dump (), offset);
 }
 
+nlohmann::json build_plan_payload (size_t steps_per_iteration, size_t iterations) {
+    return nlohmann::json{ { "stepsPerIteration", steps_per_iteration },
+        { "iterations", iterations },
+        { "stepsExpected", steps_per_iteration * iterations } };
+}
+
 bool read_fail_on_schema_error (const nlohmann::json& config) {
     auto field = config.find ("failOnSchemaError");
     return field != config.end () && field->is_boolean () && field->get<bool> ();
@@ -968,6 +974,14 @@ RunManager& manager) {
         // The rows this run was given, bound one per iteration. Empty is the
         // ordinary case and keeps `pm.iterationData` undefined throughout.
         const auto& data_rows = execution->data_rows;
+
+        // The run's resolved size, ahead of the first step and once (issue
+        // #1398). This run publishes no `metrics` ticks to carry it the way a
+        // load run carries `requestsExpected`, so the frame is where the
+        // number lives; a watcher that connects past its eviction from the
+        // ring reports no fraction rather than a wrong one.
+        context->append_event ("plan",
+        build_plan_payload (plan.steps.size (), asked.iterations).dump ());
 
         for (size_t iteration = 0; iteration < asked.iterations; ++iteration) {
             if (context->should_stop) {

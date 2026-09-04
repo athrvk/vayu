@@ -165,6 +165,20 @@ describe("httpClient.stream", () => {
 		);
 	});
 
+	it("keeps the abort that stalled it as the timeout's cause", async () => {
+		// The streaming path rewrites its failures through the same translation
+		// the buffered one uses, so the abort that ended the read survives on
+		// `cause` here too - "Request timeout" alone says nothing about it.
+		streamOf(["never arrives"], 10_000);
+
+		await expect(drain("/import/fetch", { idleTimeout: 50 })).rejects.toThrow(
+			expect.objectContaining({
+				message: "Request timeout",
+				cause: expect.objectContaining({ name: "AbortError" }) as Error,
+			}) as Error
+		);
+	});
+
 	it("lets go of the stream when the consumer stops reading", async () => {
 		// Closing the import dialog mid-download has to stop the download. The
 		// engine abandons its transfer the moment its SSE sink refuses a write,

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { mapSseMetrics, parseMonitorEvent, parseStepEvent } from "./sse-client";
+import { mapSseMetrics, parseMonitorEvent, parsePlanEvent, parseStepEvent } from "./sse-client";
 
 describe("mapSseMetrics", () => {
 	it("maps bytes and the full status-code map", () => {
@@ -196,5 +196,29 @@ describe("parseMonitorEvent", () => {
 				series: { cpu: 0.5, name: "web-1", broken: Number.NaN },
 			})
 		).toEqual({ timestamp: 1700, series: { cpu: 0.5 } });
+	});
+});
+
+describe("parsePlanEvent", () => {
+	it("reads the size the run resolved", () => {
+		expect(parsePlanEvent({ stepsPerIteration: 4, iterations: 3, stepsExpected: 12 })).toEqual({
+			stepsPerIteration: 4,
+			iterations: 3,
+			stepsExpected: 12,
+		});
+	});
+
+	it("drops a frame missing any of the three numbers", () => {
+		// This frame is a denominator: a field defaulted to 0 would make every
+		// fraction drawn from it either a division by zero or a bar that is full
+		// from the first step. Rejecting it leaves the run indeterminate, which
+		// is what a client that was told nothing should show.
+		expect(parsePlanEvent({ iterations: 3, stepsExpected: 12 })).toBeNull();
+		expect(parsePlanEvent({ stepsPerIteration: 4, stepsExpected: 12 })).toBeNull();
+		expect(parsePlanEvent({ stepsPerIteration: 4, iterations: 3 })).toBeNull();
+		expect(
+			parsePlanEvent({ stepsPerIteration: "4", iterations: 3, stepsExpected: 12 })
+		).toBeNull();
+		expect(parsePlanEvent(null)).toBeNull();
 	});
 });

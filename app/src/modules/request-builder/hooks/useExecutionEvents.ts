@@ -17,9 +17,10 @@
  * **A per-endpoint `EventSource`, not the `SSEClient` singleton.** That client
  * belongs to load and scenario runs: it is a single connection whose lifetime
  * is the dashboard's, and it deliberately does not reconnect. Neither property
- * fits here. The shape this follows instead is `useInboxLive`'s, for the reason
- * that hook was written (#506): `EventSource` treats any non-200 as fatal and
- * never retries it, and a reconnect landing inside the engine's dead-socket
+ * fits here. The shape this follows instead is the inbox capture stream's
+ * (`services/inbox-watch-service.ts`), for the reason it was written (#506):
+ * `EventSource` treats any non-200 as fatal and never retries it, and a
+ * reconnect landing inside the engine's dead-socket
  * window meets a `409 run_events_in_use` from the claim the previous socket is
  * still holding - so one unlucky disconnect would end the stream for the life
  * of the tab, silently.

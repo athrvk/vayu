@@ -231,10 +231,20 @@ The two compilers are held to identical diagnostics on all three projects - see
 ### React App (`tsconfig.json`)
 
 - Target: ES2020
+- Lib: `ES2020`, `ES2022.Error`, `DOM`, `DOM.Iterable`
 - Module: ESNext
 - JSX: React
 - Path aliases: `@/*` → `./src/*`
 - `types: ["node"]`
+
+`ES2022.Error` is one sliver of a later standard library, not a target move: it
+declares `ErrorOptions`, which is what types `new Error(message, { cause })`.
+The runtime has had `cause` since Chromium 93 and Node 16, and `updater.ts`
+already reads it off a caught error, so the entry describes what the app runs
+on rather than changing it. ESLint's `preserve-caught-error` is what made the
+gap load-bearing: it asks that an error thrown from a `catch` carry the caught
+one as its cause, and without the type that fix does not compile. All three
+configs carry the same entry.
 
 The last two are written the way they are because TypeScript 7 removes `baseUrl`
 and changes the default of `types` from "every package under `node_modules/@types`"
@@ -250,6 +260,13 @@ neither reads this file, so a new alias has to be added in all three.
 ### Electron main process (`tsconfig.node.json`)
 
 - Target: ES2020
+- Lib: stated rather than inherited, and identical to the renderer's - `ES2020`
+  alone would leave out `ErrorOptions` (see the renderer config above). Stating
+  it drops three entries `target: ES2020` used to imply through
+  `lib.es2020.full`: `ScriptHost` and `WebWorker.ImportScripts`, which describe
+  environments the main process is not, and `DOM.AsyncIterable`, which types
+  `for await` over a DOM stream - `electron/` does none of the three, and
+  neither sibling config admits them either
 - Module: ESNext (the app is `"type": "module"`)
 - Includes `electron/`, emitting to `dist-electron/`
 - Excludes `electron/**/*.test.ts` - tests are not part of the main process, and
@@ -275,6 +292,9 @@ guard-proved values are no-ops without it.
 ### Electron tests (`tsconfig.electron-test.json`)
 
 - `noEmit` - it exists to type-check what `tsconfig.node.json` excludes
+- Lib: the same four entries as the other two configs, stated here rather than
+  inherited - a test that reaches into `app/src/` is DOM code, and this config
+  said so back when the main-process one left its list implicit
 - Adds the `@/*` → `./src/*` alias, which the main-process config deliberately
   lacks: only a test may cross into `app/src/` (`resolve.test.ts` compares the
   renderer's dynamic-variable table against the main-process copy)
@@ -422,7 +442,10 @@ Key settings in `vite.config.ts`:
 - **TypeScript 7** (installed as `tsc7`): the `pnpm type-check` gate - see
   [Two compilers, one on purpose](#two-compilers-one-on-purpose)
 - **Vite**: Build tool
-- **ESLint**: Linting
+- **ESLint 10**: Linting, with `@eslint/js` and `eslint-config-prettier` on
+  their own 10.x lines. `eslint:recommended` gained `no-unassigned-vars`,
+  `no-useless-assignment` and `preserve-caught-error` in 10.0, and the 9.x line
+  went end-of-life on 2026-08-06
 - **Electron Builder**: Packaging
 
 ## Troubleshooting

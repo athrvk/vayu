@@ -1037,7 +1037,7 @@ Send does not - and only the last two steps differ:
 **A different `EventSource` from the `SSEClient` singleton below.** That client
 belongs to load and scenario runs, is a single connection whose lifetime is the
 dashboard's, and deliberately never reconnects. This one owns its retry, for
-the reason `useInboxLive` does (issue #506): `EventSource` treats any non-200
+the reason the inbox capture stream does (issue #506): `EventSource` treats any non-200
 as fatal, and a reconnect landing inside the engine's stale-claim window meets
 a `409 run_events_in_use` from the claim the previous socket still holds - so a
 single unlucky disconnect would otherwise end the stream for the life of the
