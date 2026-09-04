@@ -331,9 +331,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				hasPendingChangesRef.current = false;
 				setHasPendingChanges(false);
 			}
-			completeSaveThenIdle();
+			completeSaveThenIdle(contextId);
 		},
-		[completeSaveThenIdle]
+		[completeSaveThenIdle, contextId]
 	);
 
 	// Auto-save function (payload order by createdAt so round-trip preserves order)

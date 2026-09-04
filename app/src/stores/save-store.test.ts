@@ -24,6 +24,16 @@ import { TIMING } from "@/config/timing";
 import { useSaveStore } from "./save-store";
 import { useToastStore } from "./toast-store";
 
+/** A registered context, dirty or clean, with a `save` nothing in here calls. */
+function registerContext(id: string, hasPendingChanges: boolean) {
+	useSaveStore.getState().registerContext({
+		id,
+		name: id,
+		save: () => Promise.resolve(),
+		hasPendingChanges,
+	});
+}
+
 describe("completeSaveThenIdle", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -78,5 +88,71 @@ describe("completeSaveThenIdle", () => {
 
 		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS / 2);
 		expect(useSaveStore.getState().status).toBe("idle");
+	});
+});
+
+/**
+ * The Dock shows one status for the whole app, so "Saved" is a claim about the
+ * editor and not about the round trip that just returned. `runSave` has held
+ * that rule since #1381 for the contexts that go through it; the collection
+ * tree's renames go through nothing, and published their success straight onto
+ * the shared status - "Saved", over a Tests script the user had not saved.
+ */
+describe("completeSaveThenIdle with other unsaved work on screen", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		useToastStore.setState({ toasts: [] });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("reports 'pending', not 'saved', for a direct writer while a context is dirty", () => {
+		registerContext("request-1", true);
+
+		// The shape of a sidebar rename: no registered context of its own.
+		useSaveStore.getState().startSaving();
+		useSaveStore.getState().completeSaveThenIdle();
+
+		expect(useSaveStore.getState().status).toBe("pending");
+
+		// And it stays that way - the dirty context clears it when it writes.
+		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
+	it("still reports 'saved' for a direct writer when nothing else is dirty", () => {
+		// The control: a guard that never completes would pass the case above.
+		registerContext("request-1", false);
+
+		useSaveStore.getState().startSaving();
+		useSaveStore.getState().completeSaveThenIdle();
+
+		expect(useSaveStore.getState().status).toBe("saved");
+
+		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("does not hold a context's own success against it", () => {
+		// A registered context's entry is refreshed by an effect, so it still
+		// reads dirty at the moment it reports the write that cleaned it. Naming
+		// itself is what keeps that from reading as "somebody else is dirty".
+		registerContext("request-1", true);
+
+		useSaveStore.getState().completeSaveThenIdle("request-1");
+
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	it("holds another context's unsaved work against a context's own success", () => {
+		registerContext("request-1", true);
+		registerContext("settings", true);
+
+		useSaveStore.getState().completeSaveThenIdle("settings");
+
+		expect(useSaveStore.getState().status).toBe("pending");
 	});
 });

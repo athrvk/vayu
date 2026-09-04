@@ -58,6 +58,12 @@ import { useEngineRestart } from "@/hooks/useEngineRestart";
 const ENGINE_SAVE_NOTE = "Changes are staged here and written when you save.";
 
 /**
+ * The save registry id this panel holds. At module scope because the write
+ * reports its success under it, and that call sits above the registration.
+ */
+const SAVE_CONTEXT_ID = "settings";
+
+/**
  * Check if a config entry requires a restart when changed
  *
  * `requiresRestart` is a typed field the engine serializes on every entry
@@ -282,7 +288,7 @@ export default function SettingsMain() {
 					}
 					return next;
 				});
-				completeSaveThenIdle();
+				completeSaveThenIdle(SAVE_CONTEXT_ID);
 
 				// Track restart-required configs
 				for (const key of restartKeys) {
@@ -364,7 +370,6 @@ export default function SettingsMain() {
 	}, [handleSave]);
 
 	// Register save context when settings are ready (not loading, no error, category selected)
-	const contextId = "settings";
 	useEffect(() => {
 		// Only register when we have a valid settings view (not loading, no error, category selected, not a client-side category)
 		if (isLoading || error || !selectedCategory || isClientCategory(selectedCategory)) {
@@ -372,15 +377,15 @@ export default function SettingsMain() {
 		}
 
 		registerContext({
-			id: contextId,
+			id: SAVE_CONTEXT_ID,
 			name: "Settings",
 			save: () => handleSaveRef.current?.() ?? Promise.resolve(),
 			hasPendingChanges: hasChanges && !hasInvalidValues,
 		});
-		setActiveContext(contextId);
+		setActiveContext(SAVE_CONTEXT_ID);
 
 		return () => {
-			unregisterContext(contextId);
+			unregisterContext(SAVE_CONTEXT_ID);
 		};
 	}, [
 		isLoading,
@@ -398,7 +403,7 @@ export default function SettingsMain() {
 		if (isLoading || error || !selectedCategory || isClientCategory(selectedCategory)) {
 			return;
 		}
-		updateContext(contextId, {
+		updateContext(SAVE_CONTEXT_ID, {
 			hasPendingChanges: hasChanges && !hasInvalidValues,
 			save: () => handleSaveRef.current?.() ?? Promise.resolve(),
 		});

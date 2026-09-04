@@ -85,8 +85,16 @@ interface SaveState {
 	 * surface published to the Dock, or wipes a `pending` from an edit made since.
 	 * `triggerSave` has always guarded its own reset this way; the five callers
 	 * that hand-rolled the timer did not.
+	 *
+	 * `reportingContextId` names the registered context whose save this is, when
+	 * there is one. A context's own `hasPendingChanges` is not consulted: the
+	 * registry entry is refreshed by a React effect, so a context that has just
+	 * written still reads dirty at the moment it reports. Every *other*
+	 * registered context is consulted (see the implementation), and a direct
+	 * writer - the collection tree's two renames, which register nothing - names
+	 * nobody and is therefore measured against all of them.
 	 */
-	completeSaveThenIdle: () => void;
+	completeSaveThenIdle: (reportingContextId?: string) => void;
 	failSave: (error: string) => void;
 	reset: () => void;
 
@@ -134,7 +142,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			// silence.
 			const published = get().status;
 			if (published === "error" || published === "pending") return;
-			get().completeSaveThenIdle();
+			get().completeSaveThenIdle(context.id);
 		} catch (error) {
 			get().failSave(error instanceof Error ? error.message : "Save failed");
 		}
@@ -151,7 +159,27 @@ export const useSaveStore = create<SaveState>((set, get) => {
 
 		startSaving: () => set({ status: "saving" }),
 
-		completeSaveThenIdle: () => {
+		completeSaveThenIdle: (reportingContextId) => {
+			// "Saved" is a claim about the editor, not about one round trip. That
+			// is the rule #1381 wrote for `runSave`, and `runSave` only covers the
+			// contexts that go through it: a direct writer publishes its success
+			// straight onto the one status the Dock renders, so renaming a folder
+			// while the open request holds an unsaved edit said "Saved" - true of
+			// the rename, false of everything else on screen.
+			//
+			// So a success is only `saved` when nothing else is dirty. `pending`
+			// is the honest answer otherwise, and it is the Dock's "Unsaved
+			// changes" - the context still holding the edit clears it when it
+			// writes. Guarding here rather than at the call sites covers the ones
+			// added later, which is the half a per-caller fix cannot do.
+			const othersDirty = [...get().contexts.values()].some(
+				(context) => context.id !== reportingContextId && context.hasPendingChanges
+			);
+			if (othersDirty) {
+				set({ status: "pending" });
+				return;
+			}
+
 			set({ status: "saved" });
 			const armed = ++idleResetGeneration;
 			setTimeout(() => {
