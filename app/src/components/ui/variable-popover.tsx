@@ -698,10 +698,19 @@ export function VariablePopover({
 								aria-label={`Value for new variable ${name}`}
 								autoFocus
 							/>
-							<div className="flex items-center gap-1.5">
+							{/*
+							 * The label sits above the control, not beside it, which is
+							 * how `LoadTestConfigDialog` labels its own segmented control.
+							 * Beside it, the three segments have 266px less the label to
+							 * live in, and the two widest UI faces the appearance settings
+							 * offer - System and JetBrains Mono - spend more than that on
+							 * "Environment Collection Global". Above it, the widest of the
+							 * four measures 230px inside 266.
+							 */}
+							<div className="space-y-1.5">
 								<span
 									id={createScopeLabelId}
-									className="shrink-0 text-[10px] text-muted-foreground"
+									className="block text-[10px] text-muted-foreground"
 								>
 									create in
 								</span>

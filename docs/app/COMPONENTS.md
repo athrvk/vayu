@@ -1868,7 +1868,12 @@ button painted 21px outside the card, which `PopoverContent` does not clip. Both
 halves are primitives now: the choice is the app's segmented control, so Radix
 owns the `radiogroup` and `radio` roles, the single tab stop and the arrow keys,
 and Create sits in the same `flex justify-end gap-2` footer the edit branch uses
-one state over, which is what takes the widest line back inside the card.
+one state over, which is what takes the widest line back inside the card. The
+"create in" label stacks above the control rather than sitting beside it, the
+way `LoadTestConfigDialog` labels its own: beside it, the segments have 266px
+less the label to live in, and the two widest UI faces the appearance settings
+offer - System and JetBrains Mono - spend more than that on "Environment
+Collection Global". Above it, the widest of the four measures 230px.
 Selection follows focus, as a radio group's does - Radix moves the tab stop and
 leaves selecting to a press, so each segment picks itself `onFocus` and an arrow
 cannot light one segment while Enter creates in another. Enter on the focused
