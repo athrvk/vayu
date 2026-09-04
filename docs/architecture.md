@@ -433,10 +433,11 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **macOS**: `Vayu.app/Contents/Resources/bin/vayu-engine`
 - **Windows**: `resources/bin/vayu-engine.exe`
 - **Linux**: `resources/bin/vayu-engine`
-- **Data Directory**:
-  - macOS: `~/Library/Application Support/vayu/`
-  - Windows: `%APPDATA%/vayu/`
-  - Linux: `~/.config/vayu/`
+- **Data Directory** (`app.getPath("userData")`, named after `app/package.json`'s
+  `name` rather than the product name):
+  - macOS: `~/Library/Application Support/vayu-client/`
+  - Windows: `%APPDATA%/vayu-client/`
+  - Linux: `~/.config/vayu-client/`
 
 ---
 
