@@ -77,6 +77,7 @@ The main process is responsible for:
 - **Window Management**: Creates and manages the Electron `BrowserWindow`
 - **Engine Lifecycle**: Starts and stops the C++ engine via `EngineSidecar`
 - **App Lifecycle**: Handles app ready, window close, and quit events
+- **Context Menu**: Composes the right-click menu from Chromium's `context-menu` params and the target the renderer announces (`context-menu.ts`, issue #1359)
 
 **Key Responsibilities:**
 - Spawns the engine binary as a child process
@@ -318,6 +319,7 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 - **Auto-update**: Listeners for `onUpdateAvailable()`, `onUpdateDownloaded()`, plus `restartToInstallUpdate()`, `openReleasePage()`
 - **Menu Integration**: `onOpenSettings()` to receive open-settings commands from the app menu
 - **Navigation History**: `onNavigateHistory()` delivers a `menu:navigate` step, sent by the View menu's Back/Forward items, the mouse's back/forward buttons where the OS reports them as `app-command`, and the macOS three-finger swipe (issue #1245)
+- **Context Menu**: `setContextTarget()` announces what the pointer landed on over the `context-menu:target` channel, sent synchronously (the app's only `sendSync`) so it pairs with the native menu event that follows; `onContextMenuCommand()` delivers the `context-menu:command` events for the two offers only the renderer can run - importing a pasted curl/wget command and opening a variable's popover (issue #1359)
 - **Platform & Paths**: `platform` constant and `getAppPaths()` for OS and directory detection
 - **Graceful Shutdown**: `onBeforeQuit()` to allow the renderer to flush state (saves, pending requests) before app termination
 

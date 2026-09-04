@@ -461,6 +461,18 @@ describe("the wiring in main.ts", () => {
 		expect(main).toContain("installContextMenu(menuWindow.webContents");
 	});
 
+	it("registers that channel before any window exists to send on it", () => {
+		// The announcement is synchronous, so a right-click reaching a channel
+		// nobody is listening on is the one way it could cost the renderer more
+		// than a fraction of a millisecond. Ordering is what rules that out.
+		const handlersAt = main.indexOf("\n\tsetupIpcHandlers();");
+		const windowAt = main.indexOf("\n\tcreateWindow();");
+
+		expect(handlersAt).toBeGreaterThan(-1);
+		expect(windowAt).toBeGreaterThan(-1);
+		expect(handlersAt).toBeLessThan(windowAt);
+	});
+
 	it("takes the announcement over an IPC channel that always answers", () => {
 		const handlerAt = main.indexOf('ipcMain.on("context-menu:target"');
 		expect(handlerAt).toBeGreaterThan(-1);

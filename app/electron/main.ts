@@ -963,7 +963,9 @@ function setupIpcHandlers() {
 	 * click's context.
 	 *
 	 * `returnValue` is set first: a `sendSync` whose handler returns without one
-	 * blocks the renderer for good.
+	 * blocks the renderer for good. For the same reason this registration has to
+	 * precede the first window, which it does - `setupIpcHandlers()` runs ahead
+	 * of `createWindow()` in the ready handler, and a test pins that order.
 	 */
 	ipcMain.on("context-menu:target", (event, target: unknown) => {
 		event.returnValue = true;
