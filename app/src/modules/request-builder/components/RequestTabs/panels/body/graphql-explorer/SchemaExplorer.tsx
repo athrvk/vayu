@@ -38,6 +38,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ChevronDown, ChevronRight, ListTree, Search, Text } from "lucide-react";
 import { Input, TooltipIconButton, EYEBROW_CLASS } from "@/components/ui";
 import { Callout } from "@/components/shared/Callout";
+import { rowInsetPx } from "@/constants/layout";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
 import { useExplorerStore } from "@/lib/graphql/explorer-store";
@@ -58,8 +59,6 @@ import { cn } from "@/lib/utils";
 
 /** How many rows to render before the window grows. */
 const ROW_WINDOW = 200;
-/** One level of indentation, in pixels. Matches the collection tree's step. */
-const INDENT_STEP = 12;
 
 /**
  * A row on screen: a node, how deep it sits, and where the search term matched
@@ -377,14 +376,27 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 				className="flex-1 min-h-0 overflow-auto"
 				onScroll={(e) => setScrollTop(schemaKey, e.currentTarget.scrollTop)}
 			>
+				{/*
+				 * The two lines that stand in for the tree, and the group headings
+				 * below, take a root row's own inset rather than a padding of their
+				 * own: `rowInsetPx(0)` is where a branch row starts, so the pane keeps
+				 * one left edge whether it is holding rows or explaining why it is not
+				 * (#1378, the rule from #1372).
+				 */}
 				{!schema ? (
-					<p className="px-2 py-2 m-0 text-[11px] text-muted-foreground">
+					<p
+						className="pr-2 py-2 m-0 text-[11px] text-muted-foreground"
+						style={{ paddingLeft: rowInsetPx(0) }}
+					>
 						{status === "loading"
 							? "Loading the schema…"
 							: "No schema loaded. Refresh to introspect the endpoint."}
 					</p>
 				) : rows.length === 0 ? (
-					<p className="px-2 py-2 m-0 text-[11px] text-muted-foreground">
+					<p
+						className="pr-2 py-2 m-0 text-[11px] text-muted-foreground"
+						style={{ paddingLeft: rowInsetPx(0) }}
+					>
 						Nothing matches "{term}".
 					</p>
 				) : (
@@ -402,7 +414,8 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 									key={row.key}
 									role="presentation"
 									data-tree-group={row.label}
-									className={cn(EYEBROW_CLASS, "px-2 pt-2 pb-0.5 m-0")}
+									className={cn(EYEBROW_CLASS, "pr-2 pt-2 pb-0.5 m-0")}
+									style={{ paddingLeft: rowInsetPx(0) }}
 								>
 									{row.label}
 								</p>
@@ -564,7 +577,7 @@ function ExplorerRow({
 			data-tree-id={node.id}
 			tabIndex={-1}
 			title={title || undefined}
-			style={{ paddingLeft: 4 + depth * INDENT_STEP }}
+			style={{ paddingLeft: rowInsetPx(depth) }}
 			className="focus-row flex min-h-6 items-center gap-1 pr-2 hover:bg-accent transition-colors"
 		>
 			{reveal ? (
