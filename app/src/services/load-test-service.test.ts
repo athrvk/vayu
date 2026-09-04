@@ -55,6 +55,18 @@ vi.mock("./notify", async (importOriginal) => ({
 	...(await importOriginal<typeof import("./notify")>()),
 	systemNotify: { post: mockNotifyPost, availability: vi.fn() },
 }));
+// The Dock/taskbar mark for a failed run (#1364), mocked at the same boundary
+// as `notify` above: whether and how the OS shows it is `electron/os-icon.ts`'s
+// question.
+const { mockOsIconRunFailed } = vi.hoisted(() => ({ mockOsIconRunFailed: vi.fn() }));
+vi.mock("./os-icon", () => ({
+	osIcon: {
+		captured: vi.fn(),
+		inboxOpened: vi.fn(),
+		runFailed: mockOsIconRunFailed,
+		recents: vi.fn(),
+	},
+}));
 
 import { loadTestService } from "./load-test-service";
 import { sseClient } from "./sse-client";
@@ -283,6 +295,56 @@ describe("LoadTestService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunStopped })
 			);
+		});
+	});
+
+	describe("Dock/taskbar mark for a failed run (issue #1364)", () => {
+		function failStream(message: string): void {
+			(loadTestService as unknown as { handleError: (e: Error) => void }).handleError(
+				new Error(message)
+			);
+		}
+
+		it("marks the icon when a run fails", () => {
+			loadTestService.startMonitoring("run_13");
+
+			failStream("transport gone");
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		/*
+		 * Mutation check: call `osIcon.runFailed()` beside `runProgress.fail` in
+		 * `handleError` instead of inside `notifyTerminal`, and this reddens -
+		 * `notifyTerminal`'s `notifiedRunId` latch is what a genuinely once-only
+		 * mark depends on; a call sitting beside `runProgress.fail` would fire
+		 * again for a run whose failure had already been reported.
+		 */
+		it("does not mark the icon a second time for a run already reported failed", async () => {
+			dashboard.currentRunId = "run_14";
+			loadTestService.startMonitoring("run_14");
+
+			failStream("transport gone");
+			await closeStream();
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not mark the icon for a run that finishes cleanly", async () => {
+			dashboard.currentRunId = "run_15";
+			loadTestService.startMonitoring("run_15");
+
+			await closeStream();
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+		});
+
+		it("does not mark the icon for a run the user stopped", () => {
+			loadTestService.startMonitoring("run_16");
+
+			loadTestService.stopMonitoring();
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
 		});
 	});
 });

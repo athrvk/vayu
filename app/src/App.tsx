@@ -28,6 +28,8 @@ import { useScriptVariableCompletionProvider } from "./hooks/useScriptVariableCo
 import { useScriptTypeDefinitions } from "./hooks/useScriptTypeDefinitions";
 import { useMenuActions } from "./hooks/useMenuActions";
 import { useNotificationActivation } from "./hooks/useNotificationActivation";
+import { useOsIcon } from "./hooks/useOsIcon";
+import { useOpenIntent } from "./hooks/useOpenIntent";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
 import { useInboxWatchers } from "./hooks/useInboxWatchers";
@@ -91,6 +93,18 @@ function App() {
 	// answered by bringing the window back. Mounted here for the same reason
 	// the line above is: one listener, one tab per click (#1358).
 	useNotificationActivation();
+
+	// What the Dock/taskbar icon shows: the collections the user has been in,
+	// and when the Inbox is on screen. Mounted here rather than in the Inbox
+	// view for the reason `useInboxWatchers` is: main's focus question can land
+	// while any tab is on screen, and a listener that came and went with one
+	// view would miss most of it (#1364).
+	useOsIcon();
+
+	// Something the OS asked Vayu to open - a dropped file, an icon-menu pick,
+	// a Jump List task. Mounted here for the same reason `useNotificationActivation`
+	// is: one listener on the preload bridge, one action per request (#1364).
+	useOpenIntent();
 
 	// An agent writing over MCP mutates the engine from the main process, which
 	// no query can see. This is the channel that tells the cache to refetch.

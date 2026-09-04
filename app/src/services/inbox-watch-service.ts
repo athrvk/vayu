@@ -38,6 +38,7 @@ import { queryClient } from "@/lib/query-client";
 import { mergeCapture } from "@/queries/inbox";
 import { queryKeys } from "@/queries/keys";
 import { createCaptureNotifier, type CaptureNotifier } from "@/modules/inbox/capture-notifier";
+import { osIcon } from "@/services/os-icon";
 import type { Inbox, InboxCapture, InboxCapturesResponse } from "@/types";
 
 /** Narrow one SSE payload to a capture, or reject it. */
@@ -334,6 +335,10 @@ class InboxWatchService {
 		// After the merge, not before: the list is what a click on the
 		// notification opens, and it is written first for that reason.
 		stream.notifier.record(capture);
+		// Whether this counts toward the Dock/taskbar badge is main's call, not
+		// this stream's - only main can answer whether the window is in front
+		// (#1364).
+		osIcon.captured();
 	}
 
 	/**

@@ -22,6 +22,7 @@ import { useDashboardStore, useClientSettingsStore, deriveRunProgress } from "@/
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
+import { osIcon } from "./os-icon";
 import { formatNumber } from "@/utils/helpers";
 import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
@@ -208,6 +209,11 @@ class LoadTestService {
 			body,
 			target: { view: "run", runId },
 		});
+		// Here rather than beside `runProgress.fail` (#1364), deliberately:
+		// `notifyTerminal` is guarded by `notifiedRunId`, so it fires exactly
+		// once per run, and every terminal path reaches it - the SSE error
+		// handler and a clean close alike - not only the failure one.
+		if (kind === NOTIFY_KINDS.loadRunFailed) osIcon.runFailed();
 	}
 
 	private handleMetrics(metrics: LoadTestMetrics): void {

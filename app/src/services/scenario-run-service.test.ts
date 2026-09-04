@@ -89,6 +89,18 @@ vi.mock("./run-progress", () => ({
 	},
 	RUN_PROGRESS_KEYS: { loadRun: "load-run", collectionRun: "collection-run" },
 }));
+// The Dock/taskbar mark for a failed run (#1364), mocked at the same boundary
+// as `notify` above: whether and how the OS shows it is `electron/os-icon.ts`'s
+// question.
+const { mockOsIconRunFailed } = vi.hoisted(() => ({ mockOsIconRunFailed: vi.fn() }));
+vi.mock("./os-icon", () => ({
+	osIcon: {
+		captured: vi.fn(),
+		inboxOpened: vi.fn(),
+		runFailed: mockOsIconRunFailed,
+		recents: vi.fn(),
+	},
+}));
 
 import { NOTIFY_KINDS } from "./notify";
 import { scenarioRunService } from "./scenario-run-service";
@@ -582,6 +594,39 @@ describe("ScenarioRunService", () => {
 				"run_23"
 			);
 			expect(mockProgressClear).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("Dock/taskbar mark for a failed run (issue #1364)", () => {
+		it("marks the icon when a run fails", () => {
+			scenarioRunService.startMonitoring("run_28");
+
+			failStream("engine gone");
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		/*
+		 * Mutation check: call `osIcon.runFailed()` beside `runProgress.fail` in
+		 * `handleError` instead of inside `notifyTerminal`, and this reddens -
+		 * `notifyTerminal`'s `notifiedRunId` latch is what keeps the mark to
+		 * once per run; a call beside `runProgress.fail` has no such guard.
+		 */
+		it("does not mark the icon a second time for a run already reported failed", async () => {
+			scenarioRunService.startMonitoring("run_29");
+
+			failStream("engine gone");
+			await closeStream();
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not mark the icon for a run that finishes cleanly", async () => {
+			scenarioRunService.startMonitoring("run_30");
+
+			await closeStream();
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
 		});
 	});
 });

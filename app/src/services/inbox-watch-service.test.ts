@@ -124,13 +124,18 @@ async function dropAndWait(source = latest()) {
 }
 
 const showNotification = vi.fn();
+/** The Dock/taskbar icon channel (#1364), stubbed the way `showNotification`
+ *  is above - the real bridge call, not a mock of `@/services/os-icon`, so
+ *  what reaches main is what is under test. */
+const setOsIconSignal = vi.fn();
 
 beforeEach(async () => {
 	MockEventSource.instances = [];
 	listInboxes.mockReset();
 	showNotification.mockReset().mockResolvedValue("shown");
+	setOsIconSignal.mockReset();
 	vi.stubGlobal("EventSource", MockEventSource);
-	vi.stubGlobal("electronAPI", { showNotification });
+	vi.stubGlobal("electronAPI", { showNotification, setOsIconSignal });
 	vi.useFakeTimers();
 	queryClient.clear();
 	await seedInboxList([record()]);
@@ -270,6 +275,17 @@ describe("what a capture reaches with no view mounted", () => {
 		expect(showNotification).not.toHaveBeenCalled();
 	});
 
+	it("marks the Dock/taskbar icon, leaving whether it counts to main (#1364)", () => {
+		// Mutation check: drop the `osIcon.captured()` call in `receive` and this
+		// reddens - a capture would fill the list this stream owns and never
+		// reach the badge that is supposed to say so.
+		inboxWatchService.reconcile(["inbox_a"]);
+
+		latest().onmessage?.(frame(9));
+
+		expect(setOsIconSignal).toHaveBeenCalledWith({ kind: "captured" });
+	});
+
 	it("ignores a frame that is not a capture", () => {
 		inboxWatchService.reconcile(["inbox_a"]);
 
@@ -279,6 +295,7 @@ describe("what a capture reaches with no view mounted", () => {
 		expect(
 			queryClient.getQueryData<InboxCapturesResponse>(queryKeys.inbox.captures("inbox_a"))
 		).toBeUndefined();
+		expect(setOsIconSignal).not.toHaveBeenCalled();
 	});
 });
 

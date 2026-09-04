@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	Upload,
 	CheckCircle2,
@@ -56,6 +56,7 @@ import {
 	type BatchEntry,
 } from "@/services/importers/batch";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
+import { fileBaseName } from "@/lib/file-path";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
 import { MethodBadge } from "@/components/shared";
 import { isCommitEnter } from "@/lib/keyboard";
@@ -290,6 +291,76 @@ export function ImportModal() {
 				: { phase: "preview" as const }),
 		});
 	};
+
+	/**
+	 * Read and preview a file the OS handed Vayu (issue #1364): dropped on the
+	 * Dock or taskbar icon, or a file path on the command line.
+	 *
+	 * Goes through the File tab's own path - `setTab`, `supersede`, `runBatch` -
+	 * so this is a fourth *source* of a `BatchDocument`, not a fourth way to
+	 * apply one.
+	 */
+	const importPendingFile = async (path: string): Promise<void> => {
+		setTab("file");
+		const at = supersede("file");
+		patchTab("file", at, { phase: "detecting", progress: { stage: "reading" } });
+		const readSpecFile = window.electronAPI?.readSpecFile;
+		if (!readSpecFile) {
+			// Outside Electron there is no gated channel to read the path
+			// through, and no path here is safe to fetch as a URL instead.
+			patchTab("file", at, {
+				error: "Could not read this file outside the desktop app.",
+				phase: "error",
+			});
+			return;
+		}
+		try {
+			// `readSpecFile(specPath, refPath)` resolves `refPath` against
+			// `dirname(specPath)` - the same channel a `$ref` inside a spec reads
+			// a sibling document through. Passing the file's own base name back
+			// as the "reference" reads exactly that file, and inherits the
+			// extension allowlist and byte cap that channel already enforces,
+			// rather than this dialog opening a second door onto the filesystem.
+			const name = fileBaseName(path);
+			const { bytes, fileName } = await readSpecFile(path, name);
+			// UTF-8, matching every other document this dialog reads.
+			const text = new TextDecoder("utf-8").decode(bytes);
+			await runBatch("file", at, [
+				{ fileName, relativePath: fileName, specPath: path, text },
+			]);
+		} catch (e) {
+			// Missing file, over the byte cap, or an extension `readSpecFile`
+			// refuses - whichever it is, the message it rejected with already
+			// names it in words a user can act on.
+			patchTab("file", at, {
+				error: e instanceof Error ? e.message : "Could not read this file.",
+				phase: "error",
+			});
+		}
+	};
+
+	// The dialog opening with a path already waiting for it (issue #1364). Read
+	// via `isOpen` rather than a prop: the store is the one place `useOpenIntent`
+	// and this dialog agree on, and `takePendingPath` clears it in the same step
+	// so a second render of this effect - the dialog closing and reopening some
+	// other way - cannot import the same file twice.
+	useEffect(() => {
+		if (!isOpen) return;
+		const path = useImportModalStore.getState().takePendingPath();
+		if (!path) return;
+		// `importPendingFile` sets `tab` and this tab's phase as its first act,
+		// synchronously - a one-shot handoff of state the store is handing this
+		// dialog, which is the shape `McpSettingsPanel` and `VariableTableEditor`
+		// suppress this rule for rather than restructuring around it.
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+		void importPendingFile(path);
+		// `importPendingFile` closes over this render's tab state and is rebuilt
+		// every render, so naming it here would re-run the effect continuously.
+		// The take above has already cleared the path, so every run past the
+		// first finds nothing regardless: the open is the event, and the dep
+		// list says exactly that.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isOpen]);
 
 	/**
 	 * Re-parse when an option toggle changes, from the text already bundled -
