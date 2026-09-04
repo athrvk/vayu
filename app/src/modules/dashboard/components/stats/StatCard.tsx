@@ -30,7 +30,7 @@ export function StatCard({
 				{infoTip && <InfoChip tip={infoTip} />}
 			</p>
 			<div className="flex items-baseline gap-1">
-				<span className="text-[22px] font-bold font-mono tabular-nums text-foreground leading-none">
+				<span className="text-metric font-bold font-mono tabular-nums text-foreground leading-none">
 					{value}
 				</span>
 				{unit && <span className="text-xs text-muted-foreground">{unit}</span>}

@@ -67,7 +67,7 @@ export default function EditorPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Code2 className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Editor</CardTitle>
+						<CardTitle>Editor</CardTitle>
 					</div>
 					<CardDescription>
 						Applies to every code editor in the app - scripts and request/response
@@ -143,7 +143,7 @@ export default function EditorPanel() {
 			    minimap, tab width) and the code font. */}
 			<Card>
 				<CardHeader className="pb-3">
-					<CardTitle className="text-base">Preview</CardTitle>
+					<CardTitle>Preview</CardTitle>
 					<CardDescription>
 						A live sample using your current editor settings.
 					</CardDescription>

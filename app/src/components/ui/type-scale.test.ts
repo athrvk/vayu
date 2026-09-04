@@ -29,7 +29,7 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
+import { join, dirname, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
@@ -44,8 +44,9 @@ const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ALLOWED_ARBITRARY = new Set([
 	"text-[10px]", // micro / badge
 	"text-[11px]", // section label / eyebrow
-	"text-[22px]", // secondary metric value
-	"text-[34px]", // hero metric value
+	// The two metric sizes left this set in #1409: 34px and 22px are
+	// `--text-hero` and `--text-metric` now, which is what carries their paired
+	// line-height. Only the badge steps, which have no token, remain arbitrary.
 ]);
 
 const files = globSync("**/*.{ts,tsx}", { cwd: srcRoot }).filter((f) => !f.includes(".test."));
@@ -66,7 +67,7 @@ describe("type scale", () => {
 					if (ALLOWED_ARBITRARY.has(m[0])) continue;
 					offences.push(
 						`${relative(".", file)}:${i + 1}  ${m[0]} is not on the scale. ` +
-							`Use text-xs (12), text-sm (13), text-md (15), text-base (16), ` +
+							`Use text-xs (12), text-sm (13), text-md (15), ` +
 							`or one of ${[...ALLOWED_ARBITRARY].join(", ")}.`
 					);
 				}
@@ -175,6 +176,24 @@ describe("the micro/badge step's weight", () => {
 		// about mono must not hand them a `font-mono` to paste with it.
 		expect(klass.includes("font-mono")).toBe(isMono);
 	});
+
+	// The named steps, size cell against class cell. The table is what a
+	// contributor reads before picking one, and until #1202 nothing checked that
+	// the size it states is the size the utility renders.
+	it.each([
+		["Hero metric value", "34px", "text-hero"],
+		["Secondary metric value", "22px", "text-metric"],
+		["View title", "20px", "text-xl"],
+		["Tile metric value", "18px", "text-lg"],
+		["Title / small heading", "15px", "text-md"],
+		["Body / default", "13px", "text-sm"],
+		["Small label", "12px", "text-xs"],
+	])("%s is %s, written as %s", (use, size, klass) => {
+		const row = rows.find((cells) => cells[0] === use);
+		expect(row, `no '${use}' row in the Type Scale Conventions table`).toBeDefined();
+		expect((row as string[])[1]).toBe(size);
+		expect((row as string[])[3]).toContain(klass);
+	});
 });
 
 describe("no chip at the micro/badge step is heavier than the step", () => {
@@ -244,8 +263,160 @@ describe("the scale steps carry paired line-heights", () => {
 		expect(css.length).toBeGreaterThan(1000);
 	});
 
-	it.each(["sm", "md"])("--text-%s declares a line-height", (step) => {
+	it.each(["sm", "md", "hero", "metric"])("--text-%s declares a line-height", (step) => {
 		expect(css).toContain(`--text-${step}:`);
 		expect(css).toContain(`--text-${step}--line-height:`);
+	});
+
+	// Every step the app defines, pinned to the pixel. Nothing held these values
+	// until #1202: the doc guard next door reads colour triples, so `--text-sm`
+	// could have become 14px with the page still claiming 13. The two metric
+	// steps joined them in #1409, where they stopped being arbitrary values.
+	it.each([
+		["sm", "0.8125rem", 13],
+		["md", "0.9375rem", 15],
+		["metric", "1.375rem", 22],
+		["hero", "2.125rem", 34],
+	])("--text-%s is %s", (step, rem, px) => {
+		expect(css).toContain(`--text-${step}: ${rem};`);
+		expect(Number(rem.replace("rem", "")) * 16).toBe(px);
+	});
+});
+
+/**
+ * The ceiling the register decision put on chrome (#1202).
+ *
+ * `CardTitle` named no size of its own, so all 51 card headings in the app
+ * named one - 45 at `text-base`, 6 at `text-lg` - and a settings panel heading
+ * rendered 16px against 13px body. The primitive owns `text-md` now, and the
+ * two sizes above it are gone from the app's chrome: `text-base` entirely, and
+ * `text-lg` down to the tile metric readouts, which are bold numbers rather
+ * than headings.
+ *
+ * An allowlist by file rather than by rule, because "a number in a tile" is not
+ * something a scan can recognise - and each entry is asserted to still use the
+ * step, so a file that stops rendering one drops off the list instead of
+ * silently licensing a heading there later.
+ */
+/**
+ * Source with its comments removed, because the rule is about what renders. The
+ * prose explaining why `text-base` is gone names `text-base`, and a scan that
+ * counted that would make the explanation the violation.
+ */
+const withoutComments = (source: string): string =>
+	source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(?<!:)\/\/.*$/gm, " ");
+
+const TILE_READOUTS = [
+	"modules/collections/CollectionDetail/shared.tsx",
+	"modules/dashboard/components/RequestResponseView.tsx",
+	"modules/history/main/components/OverviewTab.tsx",
+	"modules/history/main/components/LatencyMetric.tsx",
+	// Three run-summary numbers that were 20px until #1409, in the same shape as
+	// the four above: a bold number in a muted tile.
+	"modules/history/main/LoadTestDetail.tsx",
+] as const;
+
+/**
+ * The one step above 18px, and the two files that may write it (#1409).
+ *
+ * A settings view stacks three levels - the view title, its description, and
+ * the cards whose `CardTitle` is `text-md` - so the title keeps a step of its
+ * own rather than flattening into the headings under it. It cannot be `text-lg`
+ * either: that step means "tile metric value" here, and a title reusing it
+ * would give one step two meanings.
+ */
+const VIEW_TITLES = [
+	"modules/settings/main/SettingsMain.tsx",
+	"modules/settings/main/panels/ClientSettingsPanel.tsx",
+] as const;
+
+/** Every named Tailwind step above the view title. None of them is on the scale. */
+const ABOVE_THE_SCALE = /\btext-(2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl)\b/;
+
+describe("the register above body is held by file", () => {
+	const sizes = files.map((file) => ({
+		file,
+		source: withoutComments(readFileSync(join(srcRoot, file), "utf8")),
+	}));
+
+	it("scans a real set of files", () => {
+		expect(sizes.length).toBeGreaterThan(150);
+	});
+
+	it("writes text-base nowhere", () => {
+		const offences = sizes
+			.filter(({ source }) => /\btext-base\b/.test(source))
+			.map(
+				({ file }) =>
+					`${relative(".", file)}  text-base (16px) is above the chrome ceiling. ` +
+					`A heading is text-md, body is text-sm; CardTitle and DialogTitle ` +
+					`carry the step already.`
+			);
+		expect(offences.join("\n")).toBe("");
+	});
+
+	it("writes text-lg only in the tile metric readouts", () => {
+		const offences = sizes
+			.filter(({ file, source }) => {
+				const posix = file.split(sep).join("/");
+				return /\btext-lg\b/.test(source) && !TILE_READOUTS.some((r) => posix === r);
+			})
+			.map(
+				({ file }) =>
+					`${relative(".", file)}  text-lg (18px) is the tile metric value step, ` +
+					`not a heading. Use text-md.`
+			);
+		expect(offences.join("\n")).toBe("");
+	});
+
+	it.each(TILE_READOUTS)("%s still renders a tile metric value", (readout) => {
+		const entry = sizes.find(({ file }) => file.split(sep).join("/") === readout);
+		expect(entry, `${readout} is allowlisted for text-lg but no longer exists`).toBeDefined();
+		expect(entry?.source).toMatch(/\btext-lg\b/);
+	});
+
+	it("writes text-xl only in the two view titles", () => {
+		const offences = sizes
+			.filter(({ file, source }) => {
+				const posix = file.split(sep).join("/");
+				return /\btext-xl\b/.test(source) && !VIEW_TITLES.some((v) => posix === v);
+			})
+			.map(
+				({ file }) =>
+					`${relative(".", file)}  text-xl (20px) is the view title step, one per ` +
+					`view. A number in a tile is text-lg; a heading is text-md.`
+			);
+		expect(offences.join("\n")).toBe("");
+	});
+
+	it.each(VIEW_TITLES)("%s still renders a view title", (title) => {
+		const entry = sizes.find(({ file }) => file.split(sep).join("/") === title);
+		expect(entry, `${title} is allowlisted for text-xl but no longer exists`).toBeDefined();
+		expect(entry?.source).toMatch(/\btext-xl\b/);
+	});
+
+	it("writes nothing above the view title step", () => {
+		// 24px and up have no row in the table and no token behind them. The
+		// metric values that reached for `text-2xl` are `text-metric` (22px) now,
+		// which is the size the dashboard's own cards were designed at (#1409).
+		const offences = sizes
+			.filter(({ source }) => ABOVE_THE_SCALE.test(source))
+			.map(
+				({ file, source }) =>
+					`${relative(".", file)}  ${ABOVE_THE_SCALE.exec(source)?.[0]} is off the ` +
+					`scale. A metric value is text-metric (22) or text-hero (34).`
+			);
+		expect(offences.join("\n")).toBe("");
+	});
+
+	it("leaves the input primitive one size at every window width", () => {
+		// Stock shadcn's `text-base md:text-sm` is the iOS zoom workaround, and a
+		// narrow desktop pane is not a phone: below `md` it rendered every input
+		// at 16px, the one size the scale does not contain.
+		const input = withoutComments(
+			readFileSync(join(srcRoot, "components", "ui", "input.tsx"), "utf8")
+		);
+		expect(input).toContain("text-sm");
+		expect(input).not.toMatch(/\bmd:text-/);
 	});
 });

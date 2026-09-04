@@ -103,7 +103,7 @@ export default function AppearancePanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<SunMoon className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{THEME_MODE.label}</CardTitle>
+						<CardTitle>{THEME_MODE.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Sets the app&apos;s light or dark palette. System follows your operating
@@ -152,7 +152,7 @@ export default function AppearancePanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<SwatchBook className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{COLOR_SCHEME.label}</CardTitle>
+						<CardTitle>{COLOR_SCHEME.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Choose your preferred accent color. This affects buttons, highlights, and
@@ -209,7 +209,7 @@ export default function AppearancePanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Type className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Interface</CardTitle>
+						<CardTitle>Interface</CardTitle>
 					</div>
 					<CardDescription>
 						Choose the interface font and how large the app is drawn.

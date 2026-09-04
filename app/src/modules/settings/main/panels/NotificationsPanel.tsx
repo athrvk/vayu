@@ -110,7 +110,7 @@ export default function NotificationsPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Bell className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Notifications</CardTitle>
+						<CardTitle>Notifications</CardTitle>
 					</div>
 					<CardDescription>
 						Where toasts appear, how long they stay, how many stack at once, and what is
@@ -328,7 +328,7 @@ function SystemNotificationsCard() {
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<MonitorDot className="w-5 h-5 text-muted-foreground" />
-					<CardTitle className="text-base">While Vayu is in the background</CardTitle>
+					<CardTitle>While Vayu is in the background</CardTitle>
 				</div>
 				<CardDescription className="mt-1">
 					A run that finishes while you are in another application is one you find out

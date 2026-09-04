@@ -52,7 +52,7 @@ export default function KeyboardShortcutsPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Keyboard className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">{SHORTCUTS.label}</CardTitle>
+						<CardTitle>{SHORTCUTS.label}</CardTitle>
 					</div>
 					<CardDescription>
 						Every shortcut the app listens for, drawn for this platform. They are not

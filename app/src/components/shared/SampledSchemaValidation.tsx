@@ -63,7 +63,7 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 	return (
 		<Card className={className}>
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-				<CardTitle className="text-base">Schema validation</CardTitle>
+				<CardTitle>Schema validation</CardTitle>
 				{/*
 				 * `Badge variant="chip"` for the reason `ContractCoverage` states at
 				 * its own: it is the variant that lets a caller own the background

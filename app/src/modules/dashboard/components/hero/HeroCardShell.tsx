@@ -57,7 +57,7 @@ export function HeroValue({
 		<div className="flex items-baseline gap-1 mt-0.5">
 			<span
 				className={cn(
-					"text-[34px] font-bold leading-none font-mono tabular-nums",
+					"text-hero font-bold leading-none font-mono tabular-nums",
 					!color && "text-foreground"
 				)}
 				style={color ? { color } : undefined}

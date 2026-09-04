@@ -63,7 +63,7 @@ export function TestValidationSummary({
 	return (
 		<Card className={className}>
 			<CardHeader>
-				<CardTitle className="text-lg">Test Validation</CardTitle>
+				<CardTitle>Test Validation</CardTitle>
 			</CardHeader>
 			<CardContent>
 				{testValidation && (

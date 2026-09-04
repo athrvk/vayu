@@ -87,9 +87,7 @@ export default function PerformanceTab({
 				(isRampUp ? (
 					<Card>
 						<CardHeader className="pb-2">
-							<CardTitle className="text-base">
-								Response Time vs Concurrency
-							</CardTitle>
+							<CardTitle>Response Time vs Concurrency</CardTitle>
 						</CardHeader>
 						<CardContent>
 							<ResponseTimeVsConcurrencyChart
@@ -102,9 +100,7 @@ export default function PerformanceTab({
 				) : (
 					<Card>
 						<CardHeader className="pb-2">
-							<CardTitle className="text-base">
-								Response Time Percentiles Over Time
-							</CardTitle>
+							<CardTitle>Response Time Percentiles Over Time</CardTitle>
 						</CardHeader>
 						<CardContent>
 							<LatencyPercentilesChart
@@ -126,7 +122,7 @@ export default function PerformanceTab({
 			{report.monitor && (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-base">Server Vitals Summary</CardTitle>
+						<CardTitle>Server Vitals Summary</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<MonitorSummary monitor={report.monitor} />
@@ -137,7 +133,7 @@ export default function PerformanceTab({
 			{/* Latency Statistics */}
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-base">Latency Distribution</CardTitle>
+					<CardTitle>Latency Distribution</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -171,7 +167,7 @@ export default function PerformanceTab({
 			{report.timingBreakdown?.phases && (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-base">Phase Latency Percentiles</CardTitle>
+						<CardTitle>Phase Latency Percentiles</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<PhasePercentiles report={report} />
@@ -183,19 +179,19 @@ export default function PerformanceTab({
 			{report.rateControl && isRateLimitedRun(derived.mode, derived.targetRps) && (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-base">Rate Control Performance</CardTitle>
+						<CardTitle>Rate Control Performance</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<div className="grid grid-cols-3 gap-6">
 							<div className="text-center p-4 bg-muted/50">
 								<p className="text-xs text-muted-foreground mb-2">Target RPS</p>
-								<p className="text-2xl font-bold text-foreground">
+								<p className="text-metric font-bold text-foreground">
 									{formatNumber(report.rateControl.targetRps)}
 								</p>
 							</div>
 							<div className="text-center p-4 bg-muted/50">
 								<p className="text-xs text-muted-foreground mb-2">Actual RPS</p>
-								<p className="text-2xl font-bold text-foreground">
+								<p className="text-metric font-bold text-foreground">
 									{formatNumber(report.rateControl.actualRps)}
 								</p>
 							</div>
@@ -209,7 +205,7 @@ export default function PerformanceTab({
 								    one expression speak two vocabularies. */}
 								<p
 									className={cn(
-										"text-2xl font-bold",
+										"text-metric font-bold",
 										report.rateControl.achievement >= 95 &&
 											report.rateControl.achievement <= 105
 											? "text-success-text"

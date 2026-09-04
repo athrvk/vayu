@@ -995,8 +995,10 @@ composes with page zoom.
 | Use | Size | Weight | Class |
 |-----|------|--------|-------|
 | Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
-| Hero metric value | 34px | bold, tabular | `text-[34px] font-bold leading-none font-mono tabular-nums` |
-| Secondary metric value | 22px | bold | `text-[22px] font-bold font-mono` |
+| Hero metric value | 34px | bold, tabular | `text-hero font-bold leading-none font-mono tabular-nums` |
+| Secondary metric value | 22px | bold | `text-metric font-bold font-mono` |
+| View title | 20px | semibold | `text-xl font-semibold` |
+| Tile metric value | 18px | bold | `text-lg font-bold` |
 | Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
 | Small label | 12px | medium | `text-xs font-medium` |
@@ -1004,9 +1006,22 @@ composes with page zoom.
 | Micro / badge (UI face) | 10–11px | semibold | `text-[10px] font-semibold` |
 | URL / path | 12–13px | mono | `text-xs font-mono` |
 
-**Only `text-[10px]`, `text-[11px]`, `text-[22px]` and `text-[34px]` may be
-written as arbitrary values.** Everything else has a named step, and
-`type-scale.test.ts` fails on anything outside that set.
+**Only `text-[10px]` and `text-[11px]` may be written as arbitrary values.**
+Everything else has a named step, and `type-scale.test.ts` fails on anything
+outside that set. The two metric sizes were on that list until they became
+`--text-hero` (34px) and `--text-metric` (22px) in `index.css` - the same move
+`--text-md` made, and for the same reason: a named step arrives with its
+line-height, an arbitrary one does not.
+
+**A step whose name is not a size word has to be registered in `cn()`.**
+`text-<x>` is either a font size or a text colour, and tailwind-merge tells the
+two apart from a list of size labels it ships - so it read `text-hero` as a
+colour and dropped it from `cn("text-hero …", "text-foreground")`, leaving the
+dashboard's largest number at body size with nothing in the source to look
+wrong. `lib/utils.ts` extends the merge's `font-size` group with the app's own
+steps; `text-md` never showed the defect only because "md" is already one of
+the labels it knows. Add a step, add it there, and `cn-font-size.test.ts` is
+where that is held.
 
 **The micro/badge step is semibold because 600 is the heaviest face the code
 font ships.** `fonts.css` loads JetBrains Mono - the default `--font-mono` - at
@@ -1068,6 +1083,61 @@ redefined in `@theme` (`index.css`) to **13px/18px**, so the utility *is* the
 documented body size. `text-xs` already matches the 12px label, so that was the
 only size that diverged. `text-[13px]` still works but skips the paired
 line-height - prefer `text-sm`.
+
+**The heading register stops at 15px, and a heading never names its own size.**
+`CardTitle` and `DialogTitle` carry `text-md`; a card or dialog heading that
+writes a size is overriding the primitive rather than using it. That is how the
+app got here (#1202): `CardTitle` named no size at all, so all 51 card headings
+in the app named one, 45 at `text-base` and 6 at `text-lg` - a settings panel
+and a report tab heading at 16-18px against 13px body, which is the register
+Postman and VS Code cap around 14px. `Input` is `text-sm` for the same reason:
+stock shadcn ships `text-base md:text-sm`, the web workaround for iOS zooming a
+focused field under 16px, and a narrow desktop window is not a phone.
+
+So **`text-base` (16px) is written nowhere in `src`**, and every step above the
+15px title is held by file rather than by rule, because "a number in a tile" is
+not something a scan can recognise:
+
+- **`text-lg` (18px)** is the tile metric value - bold numbers in muted tiles,
+  five files, no headings.
+- **`text-xl` (20px)** is the view title, one per view, and only the two
+  settings views write it. A settings view stacks its title, the description
+  under it, and cards whose `CardTitle` is 15px; flattening the title into that
+  last step would lose the level, and reusing `text-lg` would give one step two
+  meanings (#1409).
+- **`text-metric` (22px) and `text-hero` (34px)** are the dashboard's metric
+  values. Nothing in `src` writes `text-2xl` or above: 24px was five strays
+  reaching past the step their siblings were designed at.
+
+`type-scale.test.ts` holds all of it, and holds `input.tsx` to carrying no
+responsive size variant. Each allowlisted file is asserted to still use its
+step, so a file that stops rendering one drops off the list instead of quietly
+licensing a heading there later.
+
+**The type register is a measurement, not a preference.** Perceived size follows
+x-height, not nominal size, and the six bundled faces differ by 13% at the same
+`font-size`. Ratios are `OS/2.sxHeight / head.unitsPerEm`, read from the bundled
+`@fontsource` files by `appearance.font-metrics.test.ts`:
+
+| Face | Role | x-height ratio | at 13px | at 12px |
+|------|------|----------------|---------|---------|
+| Space Grotesk | UI default | 0.486 | 6.32px | 5.83px |
+| Inter | UI alternate | 0.546 | 7.10px | 6.55px |
+| JetBrains Mono | code default | 0.550 | 7.15px | 6.60px |
+| Fira Code | code option | 0.526 | 6.84px | 6.32px |
+| IBM Plex Mono | code option | 0.516 | 6.71px | 6.19px |
+| Space Mono | code option | 0.496 | 6.45px | 5.95px |
+| Segoe UI | not bundled, the reference | 0.50 | 6.50px | 6.00px |
+
+Two decisions come out of that table. **The 13px body step stays**: the default
+UI face renders a 6.32px x-height there, *below* the 6.50px a system face gives
+at the same size, so body text was never what read large - the 16px chrome
+above was. And **the code font default is 12px, not 13px**: JetBrains Mono has
+the largest x-height ratio of the six, which put 13px at 7.15px where an editor
+shipping Menlo or Consolas at its own default sits between 6.3 and 6.6px; 12px
+measures 6.60px. Settings → Editor still offers 11 through 16, and the
+interface-scale slider still multiplies everything: these are the defaults the
+register is judged on, not a ceiling on the user.
 
 **Icon sizing goes on `className`, not lucide's `size` prop.** Mixing the two
 hides icons from a scale audit and lets off-grid values (15px) creep in. Use

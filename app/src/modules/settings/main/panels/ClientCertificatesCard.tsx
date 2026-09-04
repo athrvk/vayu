@@ -284,7 +284,7 @@ export function ClientCertificatesCard() {
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<KeyRound className="w-5 h-5 text-muted-foreground" />
-					<CardTitle className="text-base">Client certificates</CardTitle>
+					<CardTitle>Client certificates</CardTitle>
 				</div>
 				<CardDescription>
 					Certificates Vayu presents to hosts that require mutual TLS. A registered host

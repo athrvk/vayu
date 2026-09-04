@@ -454,7 +454,7 @@ export default function SettingsMain() {
 			<div className="flex-1 flex flex-col items-center justify-center text-destructive-text gap-4 p-8">
 				<AlertCircle className="w-12 h-12" />
 				<div className="text-center">
-					<p className="text-lg font-medium">Failed to load settings</p>
+					<p className="text-md font-medium">Failed to load settings</p>
 					<p className="text-sm mt-1 text-muted-foreground">
 						{error instanceof Error ? error.message : "Unknown error"}
 					</p>
@@ -614,7 +614,7 @@ export default function SettingsMain() {
 					<div className="flex items-start justify-between">
 						<div>
 							<div className="flex items-center gap-2">
-								<CardTitle className="text-base">{entry.label}</CardTitle>
+								<CardTitle>{entry.label}</CardTitle>
 								{needsRestart && (
 									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
 										<RefreshCw className="w-2.5 h-2.5" />

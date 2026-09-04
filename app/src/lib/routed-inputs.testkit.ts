@@ -113,6 +113,17 @@ export const DOC_READING_GUARDS = {
 		reader: "app/src/components/a11y-suppressions.test.ts",
 		paths: ["docs/design-system.md"],
 	},
+	/*
+	 * The fourth reader of that page (#1202), and the only one that checks it
+	 * against something other than the app's own source: the x-height table in
+	 * the Typography section states what each bundled face measures, and the
+	 * guard parses the `@fontsource` files to hold the table to them. A number
+	 * edited into the page alone is the drift it exists to catch.
+	 */
+	fontMetrics: {
+		reader: "app/src/constants/appearance.font-metrics.test.ts",
+		paths: ["docs/design-system.md"],
+	},
 	rendererState: {
 		reader: "app/src/state-management-doc.test.ts",
 		paths: [

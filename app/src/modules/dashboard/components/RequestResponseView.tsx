@@ -88,7 +88,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 			{/* Status Code Distribution */}
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-lg">Status Code Distribution</CardTitle>
+					<CardTitle>Status Code Distribution</CardTitle>
 				</CardHeader>
 				<CardContent>
 					{hasStatusCodes ? (
@@ -130,7 +130,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 			{report.errors && report.errors.total > 0 && (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-lg">Error Summary</CardTitle>
+						<CardTitle>Error Summary</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<div className="space-y-3">
@@ -158,7 +158,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 			{hasPhaseAverages(report.timingBreakdown) && (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-lg">Timing Breakdown</CardTitle>
+						<CardTitle>Timing Breakdown</CardTitle>
 					</CardHeader>
 					<CardContent>
 						{/* Run-level averages: five label/value pairs, driven by the
@@ -198,7 +198,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 			{report.slowRequests && report.slowRequests.count > 0 && (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-lg">Slow Requests</CardTitle>
+						<CardTitle>Slow Requests</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
@@ -243,7 +243,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 			{report.results && report.results.length > 0 && (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-lg flex items-center gap-2">
+						<CardTitle className="flex items-center gap-2">
 							Sampled Requests
 							<Badge variant="secondary" className="text-xs">
 								{report.results.length} shown

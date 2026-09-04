@@ -72,7 +72,7 @@ export function ErrorRateCard({
 		<HeroCardShell label="Error Rate" tip={TOOLTIPS.errorRate}>
 			<div className="flex items-baseline gap-2 mt-0.5">
 				<span
-					className="text-[34px] font-bold leading-none font-mono tabular-nums"
+					className="text-hero font-bold leading-none font-mono tabular-nums"
 					style={{ color: valueColor }}
 				>
 					{errorRate.toFixed(1)}

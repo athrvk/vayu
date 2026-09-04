@@ -323,7 +323,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							<TrendingUp className="w-4 h-4 text-purple-500" />
 							<span className="text-xs text-muted-foreground">P99 Latency</span>
 						</div>
-						<p className="text-xl font-bold text-foreground">
+						<p className="text-lg font-bold text-foreground">
 							{formatNumber(report.latency.p99)}ms
 						</p>
 					</div>
@@ -332,7 +332,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							<Activity className="w-4 h-4 text-primary" />
 							<span className="text-xs text-muted-foreground">Total Requests</span>
 						</div>
-						<p className="text-xl font-bold text-foreground">
+						<p className="text-lg font-bold text-foreground">
 							{formatNumber(report.summary.totalRequests)}
 						</p>
 					</div>
@@ -341,7 +341,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							<CheckCircle className="w-4 h-4 text-status-success-text" />
 							<span className="text-xs text-muted-foreground">Success Rate</span>
 						</div>
-						<p className="text-xl font-bold text-foreground">
+						<p className="text-lg font-bold text-foreground">
 							{successRate.toFixed(1)}%
 						</p>
 					</div>

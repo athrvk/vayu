@@ -162,7 +162,7 @@ export function UpdatesCard() {
 			<CardHeader className="pb-3">
 				<div className="flex items-center gap-2">
 					<ArrowUpCircle className="w-5 h-5 text-muted-foreground" />
-					<CardTitle className="text-base">{UPDATES.label}</CardTitle>
+					<CardTitle>{UPDATES.label}</CardTitle>
 				</div>
 				<CardDescription>
 					Vayu checks for new releases on its own; this asks right now.

@@ -61,7 +61,7 @@ export default function DashboardPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<History className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Live charts</CardTitle>
+						<CardTitle>Live charts</CardTitle>
 					</div>
 					<CardDescription>
 						How the charts behave while a run is in flight. Completed runs in History
@@ -119,7 +119,7 @@ export default function DashboardPanel() {
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">
 						<Gauge className="w-5 h-5 text-muted-foreground" />
-						<CardTitle className="text-base">Capacity</CardTitle>
+						<CardTitle>Capacity</CardTitle>
 					</div>
 					<CardDescription>
 						What Vayu treats as the edge of a target&apos;s capacity.
