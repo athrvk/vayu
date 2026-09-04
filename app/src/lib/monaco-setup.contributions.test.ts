@@ -107,7 +107,9 @@ describe("the two language services monaco-setup.ts composes are honest at runti
 	 * this case - the four assertions below it are property reads.
 	 *
 	 * 6.85s measured on an idle Linux container (`vitest --reporter=verbose`,
-	 * this case alone). The budget was 20s, call it 3x, and it was not enough:
+	 * this case alone); 6.54s re-measured the same way on 0.56's graph, which
+	 * is what this case imports since #1342. The budget was 20s, call it 3x,
+	 * and it was not enough:
 	 * on `windows-latest` shard 1 it timed out twice in a row at 20s (#1219),
 	 * where this file shares two cores with the rest of the shard *and* with
 	 * the real `vite build` the last case in this file runs. Windows is the
@@ -137,8 +139,9 @@ describe("the two language services monaco-setup.ts composes are honest at runti
 	// Still 20s, and deliberately not raised with its neighbour: this one runs
 	// warm. The json case above has already pulled monaco's shared editor graph
 	// through the transform, so what is left here is the typescript language
-	// module alone - 18ms in the same measured run. If these two are ever
-	// reordered or split, this is the number that has to move.
+	// module alone - 18ms in the same measured run, 9ms re-measured on 0.56.
+	// If these two are ever reordered or split, this is the number that has to
+	// move.
 	it(
 		"the typescript register entry exports what monaco.typescript's call sites read",
 		{ timeout: 20_000 },
@@ -276,7 +279,9 @@ describe("the composed entry registers those languages and really tokenizes them
 
 	// Loads the app's real setup module, which transforms monaco's editor core
 	// plus the grammars cold. Measured 8-11s locally; 40s is roughly 4x that for
-	// a slower or shared-core CI runner.
+	// a slower or shared-core CI runner. Re-measured at 3.3s on 0.56's graph,
+	// warm behind the json case above - well inside the same budget, so the
+	// number stands rather than being retuned to one container's figure.
 	it("colorizes each into more than one token class", { timeout: 40_000 }, async () => {
 		const { monaco } = await import("./monaco-setup");
 
@@ -377,7 +382,9 @@ describe("the emitted worker set, from a real build", () => {
 
 	// Measured 5.6-7.4s locally for this exact fixture (13 specifiers, ~1055
 	// modules transformed). 30s is roughly 4x the upper end, for a slower or
-	// shared-core CI runner.
+	// shared-core CI runner. Re-measured on 0.56 (#1342): still 13 specifiers,
+	// 1084 modules, 6.7s - inside the range the budget was set from, so the
+	// budget is unchanged.
 	it("emits exactly editor/json/ts workers, never css or html", { timeout: 30_000 }, async () => {
 		// Guards everything below against a fixture that had no imports to
 		// build, which would otherwise pass this test by building nothing.
@@ -438,7 +445,8 @@ describe("the composed entry registers the app's theme", () => {
 	 * There is no public way to ask Monaco which themes it knows (`defineTheme`
 	 * validates a *base* against the built-ins only, so a probe theme cannot ask
 	 * either), so the call itself is what is observed: `monaco-setup` spreads
-	 * `editor.api`'s own `editor` namespace into what it exports, so a spy
+	 * the `editor` entry point's own `editor` namespace into what it exports,
+	 * and both sides reach the same module instance through it, so a spy
 	 * installed on that namespace before the module is evaluated sees the call
 	 * it makes. The module registry is reset first because an earlier case in
 	 * this file has already imported the setup module, and a cached module
