@@ -435,6 +435,13 @@ too and its report has no field for it.
 A run reaching its end also posts a system notification when the user has
 opted in and Vayu is not the window in front (issue #1358).
 
+The run's progress is also mirrored onto the OS chrome: the Windows taskbar
+button and the macOS Dock icon fill as it advances and clear when it ends, and
+a failed run flashes the taskbar's error state on Windows, which macOS has no
+equivalent of (issue #1362). Linux paints nothing - Electron 44 dropped Unity
+launcher support. A collection run shows only an indeterminate bar, since only
+the engine resolves the plan's length.
+
 **Top-level (`components/`)**
 
 | Component | Role |

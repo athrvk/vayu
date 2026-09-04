@@ -36,6 +36,7 @@ import { initAutoUpdater, checkForUpdatesNow, disposeAutoUpdater } from "./updat
 import { installQuitOnSignal } from "./quit-signals.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
 import { createNotifier, registerNotifyIpc } from "./notify.js";
+import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
 import {
@@ -852,6 +853,18 @@ function setupIpcHandlers() {
 			hasWindow: () => liveWindow() !== null,
 			focus: focusMainWindow,
 			send: (channel, payload) => liveWindow()?.webContents.send(channel, payload),
+		})
+	);
+
+	// A run's progress on the taskbar button and the Dock icon (#1362), for the
+	// user who is watching something else while it runs. The renderer holds the
+	// run's denominator and says what the fraction is; the platform rules -
+	// Windows and macOS only, since Electron 44 dropped the Linux launcher - are
+	// this side's, along with clearing a bar whose renderer went away.
+	registerRunProgressIpc(
+		ipcMain,
+		createRunProgress({
+			window: () => liveWindow(),
 		})
 	);
 

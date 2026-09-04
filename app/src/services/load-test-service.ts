@@ -18,8 +18,9 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { QUERY_CACHE } from "@/config/cache";
-import { useDashboardStore, useClientSettingsStore } from "@/stores";
+import { useDashboardStore, useClientSettingsStore, deriveRunProgress } from "@/stores";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
+import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
 import { formatNumber } from "@/utils/helpers";
 import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
@@ -82,6 +83,15 @@ class LoadTestService {
 	 * same run finished.
 	 */
 	private notifiedRunId: string | null = null;
+	/**
+	 * The run whose failure the OS indicator has already been told about (#1362).
+	 *
+	 * A failing run reports its error and *then* closes its stream, and the
+	 * failed state is a two-second flash the main process clears on its own
+	 * timer. Clearing again as the stream closes would wipe it in the same tick
+	 * it was painted, which is the whole of what this remembers.
+	 */
+	private progressFailedRunId: string | null = null;
 
 	/**
 	 * Start monitoring a load test run
@@ -121,6 +131,13 @@ class LoadTestService {
 		store.setStreaming(true);
 		store.setError(null);
 
+		// The OS indicator starts the moment the run does (#1362), without a
+		// fraction: nothing has ticked yet, so how far along this run is has no
+		// answer, and "running, length unknown" is the honest one. The first
+		// committed batch below replaces it with a real fraction where the run
+		// has a denominator at all.
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, null);
+
 		// Connect immediately. The engine retains a replayable tick topic per run
 		// (N1), so even a sub-second run that finishes before we attach is fully
 		// replayed from offset 0 - no need to delay and risk missing it.
@@ -144,6 +161,7 @@ class LoadTestService {
 		}
 
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
+		runProgress.clear(RUN_PROGRESS_KEYS.loadRun);
 		this.notifyTerminal(
 			this.activeRunId,
 			NOTIFY_KINDS.loadRunStopped,
@@ -209,6 +227,18 @@ class LoadTestService {
 		const store = useDashboardStore.getState();
 		store.addMetricsBatch(batch);
 		store.addMonitorSamples(monitor);
+
+		// The taskbar and Dock ride the flush rather than the tick (#1362): this
+		// is already the live-refresh cadence, so the OS repaints as often as the
+		// chart does and no more. An empty batch is a scrape-only flush and says
+		// nothing new about progress.
+		const latest = batch[batch.length - 1];
+		if (latest) {
+			runProgress.report(
+				RUN_PROGRESS_KEYS.loadRun,
+				deriveRunProgress(store.loadTestConfig, latest)
+			);
+		}
 	}
 
 	/**
@@ -227,6 +257,8 @@ class LoadTestService {
 	private handleError(error: Error): void {
 		console.error("[LoadTestService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
+		runProgress.fail(RUN_PROGRESS_KEYS.loadRun);
+		this.progressFailedRunId = this.activeRunId;
 		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.loadRunFailed, error.message);
 		const store = useDashboardStore.getState();
 		store.setError(error.message);
@@ -240,6 +272,12 @@ class LoadTestService {
 		// stream closed, and the machine must not stay pinned awake through a
 		// slow fetch.
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
+		// Same reason, and the same moment: the run is over, so the taskbar stops
+		// claiming one is going. A run that already reported its failure keeps
+		// that flash instead - see `progressFailedRunId`.
+		if (runId === null || this.progressFailedRunId !== runId) {
+			runProgress.clear(RUN_PROGRESS_KEYS.loadRun);
+		}
 		const store = useDashboardStore.getState();
 		store.setStreaming(false);
 

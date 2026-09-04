@@ -33,6 +33,7 @@ import { useScenarioRunStore } from "@/stores/scenario-run-store";
 import { useClientSettingsStore } from "@/stores";
 import { createThrottledBatcher } from "./throttled-batcher";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
+import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
 import type { OutcomeCounts } from "@/modules/history/main/scenario-steps";
 import type { ScenarioStepEvent } from "@/types";
@@ -58,6 +59,13 @@ class ScenarioRunService {
 	 * ending, so it is one notification.
 	 */
 	private notifiedRunId: string | null = null;
+	/**
+	 * The run whose failure the OS indicator has already been told about
+	 * (#1362), for the same reason `notifiedRunId` exists: a failed run closes
+	 * its stream a moment later, and clearing there would wipe a flash the main
+	 * process is already timing out on its own.
+	 */
+	private progressFailedRunId: string | null = null;
 	private stepBatcher = createThrottledBatcher<ScenarioStepEvent>((batch) =>
 		useScenarioRunStore.getState().addSteps(batch)
 	);
@@ -81,6 +89,14 @@ class ScenarioRunService {
 		this.discardPending();
 		this.activeRunId = runId;
 		useScenarioRunStore.getState().startRun(runId);
+
+		// Indeterminate, and it stays that way for the whole run (#1362). A
+		// fraction needs the plan's length, and this client deliberately does not
+		// compute one - `RunCollectionDialog` sends no step count precisely
+		// because the engine resolves it, and a second copy of that rule here
+		// would be a number only one side can be right about. So the OS says a
+		// run is going, which is what a taskbar can honestly say about it.
+		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
 
 		// Connect immediately: the engine retains a replayable topic per run, so
 		// even a sequence that finishes before we attach replays from offset 0.
@@ -145,6 +161,8 @@ class ScenarioRunService {
 	private handleError(error: Error): void {
 		console.error("[ScenarioRunService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
+		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun);
+		this.progressFailedRunId = this.activeRunId;
 		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.collectionRunFailed, error.message);
 		// Before the error, so the steps that did arrive are on screen under the
 		// notice explaining why no more will be. A buffered batch stranded here
@@ -172,6 +190,11 @@ class ScenarioRunService {
 		// Before the awaited fetches below: the run is over the moment the
 		// stream closed, and the machine must not stay pinned awake through them.
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
+		// And the OS stops saying a run is going. A run that already reported its
+		// failure keeps that flash - see `progressFailedRunId`.
+		if (runId === null || this.progressFailedRunId !== runId) {
+			runProgress.clear(RUN_PROGRESS_KEYS.collectionRun);
+		}
 		if (!runId) return;
 
 		// From the store's own fold rather than the report fetched below: the

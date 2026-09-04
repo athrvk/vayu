@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { useDashboardStore } from "./dashboard-store";
+import { useDashboardStore, deriveRunProgress } from "./dashboard-store";
 import type { LoadTestMetrics } from "@/types";
 
 function tick(elapsed: number, p99 = 10): LoadTestMetrics {
@@ -131,5 +131,59 @@ describe("dashboard-store monitor samples", () => {
 		s.addMonitorSamples([{ timestamp: 1000, series: { cpu: 1 } }]);
 		useDashboardStore.getState().startRun("r2");
 		expect(useDashboardStore.getState().monitorSamples).toEqual([]);
+	});
+});
+
+/**
+ * How far through a run one tick is, for the taskbar and Dock indicator
+ * (#1362). Pure, and read by `LoadTestService` on every committed batch.
+ */
+describe("deriveRunProgress", () => {
+	it("prefers the engine's own expected count", () => {
+		const progress = deriveRunProgress(
+			{ duration: "60s" },
+			{ ...tick(30), requests_sent: 250, requests_expected: 1000 }
+		);
+		// Elapsed over duration would say 0.5 here; the engine's arithmetic wins.
+		expect(progress).toBe(0.25);
+	});
+
+	it("falls back to elapsed over duration when no count is published", () => {
+		expect(deriveRunProgress({ duration: "60s" }, tick(15))).toBe(0.25);
+	});
+
+	it("reads the units the engine accepts", () => {
+		expect(deriveRunProgress({ duration: "2m" }, tick(30))).toBe(0.25);
+		expect(deriveRunProgress({ duration: "1h" }, tick(900))).toBe(0.25);
+		expect(deriveRunProgress({ duration: "60000ms" }, tick(15))).toBe(0.25);
+		// A bare number is seconds, the way the engine reads a numeric duration.
+		expect(deriveRunProgress({ duration: "60" }, tick(15))).toBe(0.25);
+	});
+
+	it("has no fraction for an open-ended run", () => {
+		expect(deriveRunProgress({ targetRps: 100 }, tick(30))).toBeNull();
+		expect(deriveRunProgress(null, tick(30))).toBeNull();
+		expect(deriveRunProgress({ duration: "60s" }, null)).toBeNull();
+		// An expected count of 0 is how the engine says "open-ended", not "done".
+		expect(
+			deriveRunProgress({}, { ...tick(30), requests_sent: 250, requests_expected: 0 })
+		).toBeNull();
+	});
+
+	it("refuses a duration it cannot read rather than guessing at one", () => {
+		expect(deriveRunProgress({ duration: "soon" }, tick(30))).toBeNull();
+		expect(deriveRunProgress({ duration: "0s" }, tick(30))).toBeNull();
+	});
+
+	/*
+	 * Mutation check: drop the clamp and a run that overshoots its own expected
+	 * count - the last window's requests land after the bound - reports a
+	 * fraction above 1, which Electron reads as an indeterminate bar.
+	 */
+	it("stays inside 0..1 when a run overshoots", () => {
+		expect(
+			deriveRunProgress({}, { ...tick(30), requests_sent: 1100, requests_expected: 1000 })
+		).toBe(1);
+		expect(deriveRunProgress({ duration: "10s" }, tick(30))).toBe(1);
 	});
 });
