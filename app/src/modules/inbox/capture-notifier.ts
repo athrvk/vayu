@@ -111,7 +111,10 @@ export function createCaptureNotifier(inboxId: string): CaptureNotifier {
 		dispose(): void {
 			// Discarded rather than flushed. A stream ends because the user
 			// switched inbox, closed the tab or quit - all of which happen in a
-			// focused window, where a notification is suppressed anyway.
+			// focused window, where a notification is suppressed anyway - or
+			// because the toggle went off, the engine stopped the inbox, or the
+			// stream cap evicted it, and none of those three is an inbox to
+			// announce a capture for either.
 			batcher.discard();
 		},
 	};

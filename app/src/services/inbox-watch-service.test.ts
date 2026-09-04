@@ -27,6 +27,7 @@ import { useClientSettingsStore, useInboxNotifyStore } from "@/stores";
 import type { Inbox, InboxCapturesResponse } from "@/types";
 import { INBOX_CAPTURE_NOTIFY_WINDOW_MS } from "@/modules/inbox/capture-notifier";
 import {
+	INBOX_LIVE_BACKGROUND_RESUME_MS,
 	INBOX_LIVE_MAX_RETRIES,
 	INBOX_LIVE_RETRY_BASE_MS,
 	INBOX_LIVE_RETRY_MAX_MS,
@@ -121,6 +122,17 @@ async function seedInboxList(inboxes: Inbox[]) {
 async function dropAndWait(source = latest()) {
 	source.onerror?.();
 	await vi.advanceTimersByTimeAsync(INBOX_LIVE_RETRY_MAX_MS * 2);
+}
+
+/**
+ * Fail every attempt the budget allows, leaving the stream given up on.
+ *
+ * The last refusal is failed here rather than through {@link dropAndWait},
+ * whose wait would spend part of the cadence the give-up starts.
+ */
+async function spendTheLadder() {
+	for (let attempt = 0; attempt < INBOX_LIVE_MAX_RETRIES; attempt++) await dropAndWait();
+	latest().onerror?.();
 }
 
 const showNotification = vi.fn();
@@ -350,8 +362,11 @@ describe("the stream's own reconnect", () => {
 		expect(sources()).toHaveLength(INBOX_LIVE_MAX_RETRIES + 1);
 		expect(inboxWatchService.getState("inbox_a")).toEqual({ watching: false, stopped: true });
 
-		// And it stays given up on: no further source appears on its own.
-		vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 10);
+		// And it stays given up on for as long as the reconnect itself runs: no
+		// further source appears on the ladder's own timescale. What happens a
+		// minute later is the background resume, which is the last block's
+		// subject and a different rate on purpose (#1403).
+		vi.advanceTimersByTime(INBOX_LIVE_RETRY_MAX_MS * 4);
 		expect(sources()).toHaveLength(INBOX_LIVE_MAX_RETRIES + 1);
 
 		inboxWatchService.resume("inbox_a");
@@ -382,5 +397,203 @@ describe("the stream's own reconnect", () => {
 
 		expect(sources()).toHaveLength(1);
 		expect(inboxWatchService.getState("inbox_a")).toEqual({ watching: false, stopped: false });
+	});
+});
+
+describe("the fresh budget a background stream gets and a watched one does not", () => {
+	it("resumes a stream nothing is watching after the cadence, and not before", async () => {
+		// The failure #1403 is about: nothing renders a stream no tab is showing,
+		// so the give-up that the inbox view would report with a Resume button
+		// ended the toggle's promise for the rest of the session in silence.
+		// Mutation check: drop the scheduling call and neither wait opens a socket.
+		inboxWatchService.reconcile(["inbox_a"]);
+		await spendTheLadder();
+		expect(sources()).toHaveLength(INBOX_LIVE_MAX_RETRIES + 1);
+		expect(inboxWatchService.getState("inbox_a")).toEqual({ watching: false, stopped: true });
+
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS - 1);
+		expect(sources()).toHaveLength(INBOX_LIVE_MAX_RETRIES + 1);
+
+		await vi.advanceTimersByTimeAsync(1);
+
+		// One socket for the whole ladder plus one for the resume: the budget is
+		// refilled, not exempted.
+		expect(sources()).toHaveLength(INBOX_LIVE_MAX_RETRIES + 2);
+		expect(latest().closed).toBe(false);
+		expect(inboxWatchService.getState("inbox_a")).toEqual({ watching: false, stopped: false });
+	});
+
+	it("spends one ladder a cadence against an engine that keeps refusing", async () => {
+		// The rate is the whole argument for resuming at all: a minute apart, a
+		// resumed stream costs what one burst costs, not what an unbounded ladder
+		// would. Mutation check: resume on a shorter clock and the counts move.
+		inboxWatchService.reconcile(["inbox_a"]);
+		await spendTheLadder();
+		const oneLadder = sources().length;
+
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS);
+		await spendTheLadder();
+		expect(sources()).toHaveLength(oneLadder * 2);
+		expect(inboxWatchService.getState("inbox_a").stopped).toBe(true);
+
+		// And it keeps coming back: the give-up that ends the second ladder arms
+		// the next resume exactly as the first did.
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS);
+		expect(sources()).toHaveLength(oneLadder * 2 + 1);
+	});
+
+	it("notifies again on the resumed stream, which is the point of resuming", async () => {
+		// The headline of #1403, end to end: the toggle keeps its promise after an
+		// outage without the user opening the inbox tab. The notifier belongs to
+		// the stream, so a resume that built a new one would have re-armed a
+		// silent socket instead.
+		useClientSettingsStore.setState({ systemNotifications: true });
+		useInboxNotifyStore.getState().setEnabled("inbox_a", true);
+		inboxWatchService.reconcile(["inbox_a"]);
+		await spendTheLadder();
+
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS);
+		latest().onopen?.();
+		latest().onmessage?.(frame(9));
+		await vi.advanceTimersByTimeAsync(INBOX_CAPTURE_NOTIFY_WINDOW_MS);
+
+		expect(showNotification).toHaveBeenCalledTimes(1);
+		expect(showNotification.mock.calls[0][0]).toMatchObject({
+			kind: "inbox-captured",
+			body: "POST /hook",
+			target: { view: "inbox", inboxId: "inbox_a" },
+		});
+	});
+
+	it("resumes from the last capture the spent stream saw", async () => {
+		// What the stream missed while it was down is what the resume point is
+		// for: the engine replays from it, so a capture is late rather than lost.
+		inboxWatchService.reconcile(["inbox_a"]);
+		latest().onopen?.();
+		latest().onmessage?.(frame(31));
+		await spendTheLadder();
+
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS);
+
+		expect(latest().url).toContain("lastEventId=31");
+	});
+
+	it("arms nothing for a stream that is merely reconnecting", async () => {
+		// Only a spent budget is resumed. A stream inside its ladder has a retry
+		// of its own scheduled, and a second connect would race it.
+		inboxWatchService.reconcile(["inbox_a"]);
+		await dropAndWait();
+		const reconnected = sources().length;
+		latest().onopen?.();
+
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS * 2);
+
+		expect(sources()).toHaveLength(reconnected);
+	});
+
+	it("leaves a stream the view is holding to the callout and the Resume", async () => {
+		// A view renders the give-up and offers a Resume, so the user is told and
+		// can act; a resume underneath it would be a callout that cleared itself.
+		// Mutation check: drop the holder check and this reddens.
+		inboxWatchService.retain("inbox_a");
+		await spendTheLadder();
+		const spent = sources().length;
+
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS * 3);
+
+		expect(sources()).toHaveLength(spent);
+		expect(inboxWatchService.getState("inbox_a")).toEqual({ watching: false, stopped: true });
+	});
+
+	it("takes that stream up once the view leaves", async () => {
+		// The stream watched a moment ago is the background stream this exists
+		// for: leaving the tab is what puts it there, and it must not need a
+		// give-up of its own to qualify.
+		inboxWatchService.reconcile(["inbox_a"]);
+		inboxWatchService.retain("inbox_a");
+		await spendTheLadder();
+		const spent = sources().length;
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS * 2);
+		expect(sources()).toHaveLength(spent);
+
+		inboxWatchService.release("inbox_a");
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS);
+
+		expect(sources()).toHaveLength(spent + 1);
+	});
+
+	it("does not resume a stream whose inbox is no longer wanted", async () => {
+		// The want going away closes the stream, and a resume that read the
+		// engine's list instead of the streams it actually holds would reopen an
+		// inbox the user has just turned the toggle off for.
+		inboxWatchService.reconcile(["inbox_a"]);
+		await spendTheLadder();
+		const spent = sources().length;
+
+		inboxWatchService.reconcile([]);
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS * 2);
+
+		expect(sources()).toHaveLength(spent);
+	});
+});
+
+describe("what a surface listing every inbox reads", () => {
+	it("names a wanted inbox the cap left out, and stops when a slot frees up", async () => {
+		// `wantedInboxIds` slices the union to the cap and used to forget what it
+		// dropped, so the ninth notify-enabled inbox was unwatched with nothing
+		// anywhere able to say so (issue #1412).
+		// Mutation check: slice without recording the remainder and this reddens.
+		const wanted = Array.from({ length: MAX_INBOX_WATCH_STREAMS + 1 }, (_, i) => `inbox_${i}`);
+		inboxWatchService.reconcile(wanted);
+
+		expect(inboxWatchService.getSummary().unwatched).toEqual([
+			`inbox_${MAX_INBOX_WATCH_STREAMS}`,
+		]);
+
+		inboxWatchService.reconcile(wanted.slice(1));
+
+		expect(inboxWatchService.getSummary().unwatched).toEqual([]);
+	});
+
+	it("names a stream that gave up, and clears it on the connection that follows", async () => {
+		inboxWatchService.reconcile(["inbox_a"]);
+		expect(inboxWatchService.getSummary().stalled).toEqual([]);
+
+		await spendTheLadder();
+		expect(inboxWatchService.getSummary().stalled).toEqual(["inbox_a"]);
+
+		// The resume alone is not the clear: a reconnect that is refused again
+		// never stopped being silent, so the socket has to open.
+		await vi.advanceTimersByTimeAsync(INBOX_LIVE_BACKGROUND_RESUME_MS);
+		expect(inboxWatchService.getSummary().stalled).toEqual(["inbox_a"]);
+
+		latest().onopen?.();
+
+		expect(inboxWatchService.getSummary().stalled).toEqual([]);
+	});
+
+	it("answers with the same object until the answer changes", async () => {
+		// The drawer reads this through `useSyncExternalStore`, which compares
+		// snapshots by identity: a fresh object per call is an infinite render.
+		const seen = vi.fn();
+		const unsubscribe = inboxWatchService.subscribeSummary(seen);
+		inboxWatchService.reconcile(["inbox_a"]);
+		const before = inboxWatchService.getSummary();
+
+		// A reconcile that changes nothing, and a capture: neither is news.
+		inboxWatchService.reconcile(["inbox_a"]);
+		latest().onopen?.();
+		latest().onmessage?.(frame(2));
+		expect(inboxWatchService.getSummary()).toBe(before);
+		expect(seen).not.toHaveBeenCalled();
+
+		await spendTheLadder();
+
+		expect(inboxWatchService.getSummary()).not.toBe(before);
+		expect(seen).toHaveBeenCalledTimes(1);
+
+		unsubscribe();
+		latest().onopen?.();
+		expect(seen).toHaveBeenCalledTimes(1);
 	});
 });
