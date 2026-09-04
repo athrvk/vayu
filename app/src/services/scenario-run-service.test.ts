@@ -470,9 +470,11 @@ describe("ScenarioRunService", () => {
 			});
 
 			/*
-			 * Mutation check: drop the null fallback in `runFraction` (return a
-			 * fraction of `stepsExpected ?? 0`) and this run reports `0` on every
-			 * batch - an empty determinate bar for a run that is going fine.
+			 * Mutation check: drop the null fallback in `runFraction` (divide by
+			 * `stepsExpected ?? 0`) and this run reports `1` on every batch -
+			 * `Infinity` through the clamp - so a run on its first step shows a
+			 * bar that has already finished. Either way the fraction would be
+			 * made up: nobody sent a total.
 			 */
 			it("stays indeterminate for a run whose total never arrives", () => {
 				scenarioRunService.startMonitoring("run_25");

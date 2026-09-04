@@ -114,7 +114,7 @@ std::string& error) {
     }
     if (auto failed = describe_failed_tests (
         exchange.pre_script_result, exchange.post_script_result);
-        !failed.empty ()) {
+    !failed.empty ()) {
         error = failed;
         return StepOutcome::Failed;
     }
@@ -405,7 +405,7 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     return build_sse_frame ("step", data.dump (), offset);
 }
 
-nlohmann::json build_plan_data (size_t steps_per_iteration, size_t iterations) {
+nlohmann::json build_plan_payload (size_t steps_per_iteration, size_t iterations) {
     return nlohmann::json{ { "stepsPerIteration", steps_per_iteration },
         { "iterations", iterations },
         { "stepsExpected", steps_per_iteration * iterations } };
@@ -465,7 +465,7 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     // (issue #681 on #682's block), with the two things only this mode knows
     // added on top.
     if (auto validation = build_sampled_validation_payload (inputs.validation);
-        !validation.empty ()) {
+    !validation.empty ()) {
         // **The denominator is every step, not a reservoir.** #682's block is
         // sampled by construction and its readers say so; this one is not, and
         // a reader told "no sampled response failed" about a run that checked
@@ -563,7 +563,7 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     // and `{{$iteration}}` is the run's own iteration index.
     if (auto bound = bind_step_iteration (inputs.request, step, ctx.data_rows,
         ctx.data_row_index, IterationIdentity{ SOLE_VIRTUAL_USER, ctx.iteration });
-        !bound.ok) {
+    !bound.ok) {
         data_bind_error = std::move (bound.error);
     }
 
@@ -702,7 +702,7 @@ bool& end_iteration) {
                 // form - `setNextRequest("null")`, which Postman's runner
                 // reads as the real `null` this switch's other arm handles.
                 switch (auto next = resolve_next_step (step_index, control.target);
-                        next.kind) {
+                next.kind) {
                 case NextStepResolution::Kind::Unresolved:
                     record.outcome = StepOutcome::Errored;
                     record.error   = next.error;
@@ -760,7 +760,7 @@ ScenarioStepStore& store) {
     // of nothing on every stored step.
     if (auto scripts = vayu::http::routes::build_script_result_node (
         exchange.pre_script_result, exchange.post_script_result);
-        !scripts.empty ()) {
+    !scripts.empty ()) {
         record.trace["scripts"] = std::move (scripts);
     }
 
@@ -920,8 +920,8 @@ RunManager& manager) {
         // behaviour rather than anything this runner adds.
         std::optional<std::string> environment_id;
         if (auto it = context->config.find ("environmentId");
-            it != context->config.end () && it->is_string () &&
-            !it->get<std::string> ().empty ()) {
+        it != context->config.end () && it->is_string () &&
+        !it->get<std::string> ().empty ()) {
             environment_id = it->get<std::string> ();
         }
         const std::string cookie_scope =
@@ -981,7 +981,7 @@ RunManager& manager) {
         // number lives; a watcher that connects past its eviction from the
         // ring reports no fraction rather than a wrong one.
         context->append_event (
-        "plan", build_plan_data (plan.steps.size (), asked.iterations).dump ());
+        "plan", build_plan_payload (plan.steps.size (), asked.iterations).dump ());
 
         for (size_t iteration = 0; iteration < asked.iterations; ++iteration) {
             if (context->should_stop) {

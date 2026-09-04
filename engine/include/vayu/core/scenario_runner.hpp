@@ -270,7 +270,7 @@ resolve_next_step (const ScenarioStepIndex& index, const std::string& target);
  * in fewer steps than the plan holds, and the `maxStepsPerIteration` cap can
  * end one that walks in more. Extracted for testing.
  */
-[[nodiscard]] nlohmann::json build_plan_data (size_t steps_per_iteration, size_t iterations);
+[[nodiscard]] nlohmann::json build_plan_payload (size_t steps_per_iteration, size_t iterations);
 
 /**
  * @brief Read `failOnSchemaError` off a `POST /runs` payload (issue #681).
