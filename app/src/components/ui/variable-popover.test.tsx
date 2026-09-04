@@ -382,6 +382,18 @@ describe("the create row's keyboard model", () => {
 		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "global");
 	});
 
+	it("creates from the default chip too, with no pick of its own", () => {
+		// The path a user who accepts the preselected scope takes: type, Tab once
+		// to the chip already holding the tab stop, Enter. No click anywhere.
+		const { onValueChange, field, chip } = openCreate();
+		fireEvent.change(field, { target: { value: "abc" } });
+		const environment = chip("Environment");
+		expect(environment).toHaveAttribute("tabindex", "0");
+		environment.focus();
+		fireEvent.keyDown(environment, { key: "Enter" });
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "environment");
+	});
+
 	it("ignores an Enter that only commits an IME buffer", () => {
 		// The same guard the edit field carries (#939): the composition commit
 		// arrives as an ordinary Enter keydown, so an unguarded field creates a
@@ -430,6 +442,28 @@ describe("creating with nothing typed", () => {
 		expect(onValueChange).not.toHaveBeenCalled();
 		// And the popover is still open to type into.
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
+	});
+
+	it("takes a value of spaces, which is a value the user typed", () => {
+		/*
+		 * The line the refusal is drawn on, asserted rather than left to be
+		 * rediscovered: empty means empty. Trimming would be this popover having
+		 * an opinion about a value that a header, a path segment or a delimiter
+		 * may legitimately want, and the variables editor - which stores the same
+		 * string without trimming it - would then disagree with the popover about
+		 * what the user typed.
+		 */
+		const { onValueChange } = renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: ["global", "environment"],
+		});
+		const panel = open();
+		fireEvent.change(within(panel).getByLabelText(/value for new variable/i), {
+			target: { value: " " },
+		});
+		fireEvent.click(within(panel).getByRole("button", { name: "Create" }));
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", " ", "environment");
 	});
 
 	it("enables Create as soon as something is typed", () => {
