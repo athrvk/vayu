@@ -342,6 +342,12 @@ jobs:
               - '*.py'
               - '**/*.py'
               - 'scripts/pre-commit'
+              # Not a script: the data-directory check below takes the one
+              # allowed directory name from this file's `name`, so it is an
+              # input to the job by the same rule the globs above are, and a
+              # rename that invalidates every script naming it has to be able to
+              # reach the check that would catch it.
+              - 'app/package.json'
               - '.github/workflows/pr-tests.yml'
             # The first-party JavaScript outside `app/` (#1166) - the perf
             # harnesses under `scripts/perf/` today. ESLint is configured a
@@ -1304,7 +1310,14 @@ jobs:
             echo "::error::No shell scripts to check - the file list is broken, not the tree"
             exit 1
           fi
-          expected=$(node -p 'require("./app/package.json").name')
+          # Read with sed rather than a JSON parser: this job is defined by
+          # having neither a Node nor a C++ toolchain (see its header), and
+          # `name` is a top-level string literal in a prettier-formatted file.
+          expected=$(sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' app/package.json | head -1)
+          if [[ -z "$expected" ]]; then
+            echo "::error::Could not read \`name\` from app/package.json - the check has no truth to compare against"
+            exit 1
+          fi
           status=0
           while IFS= read -r hit; do
             [[ -z "$hit" ]] && continue
