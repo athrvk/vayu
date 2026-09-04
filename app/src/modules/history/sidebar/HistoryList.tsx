@@ -162,8 +162,10 @@ export default function HistoryList() {
 	const deleteConfirmStopsRun =
 		runToDelete?.status === "running" || runToDelete?.status === "pending";
 
-	const handleDeleteClick = (runId: string, event: React.MouseEvent) => {
-		event.stopPropagation();
+	const handleDeleteClick = (runId: string, event?: React.MouseEvent) => {
+		// Absent when the row's menu is what asked: a menu selection is not a
+		// click on the card behind it, so there is nothing to stop.
+		event?.stopPropagation();
 		setDeleteConfirmRunId(runId);
 	};
 
@@ -175,9 +177,9 @@ export default function HistoryList() {
 	const handleToggleBaseline = async (
 		runId: string,
 		baseline: boolean,
-		event: React.MouseEvent
+		event?: React.MouseEvent
 	) => {
-		event.stopPropagation();
+		event?.stopPropagation();
 		setPinningId(runId);
 		try {
 			await setBaselineMutation.mutateAsync({ runId, baseline });

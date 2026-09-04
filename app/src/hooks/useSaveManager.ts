@@ -19,6 +19,14 @@ import { useEffect, useRef, useCallback } from "react";
 import { useSaveStore } from "@/stores/save-store";
 import { useClientSettingsStore } from "@/stores";
 
+/**
+ * The registry id this hook saves under. Three places in this file need it -
+ * the registration, the `hasPendingChanges` update, and the success this hook
+ * reports for itself - and a fourth spelling of the same template string is how
+ * the three drift apart.
+ */
+const saveContextId = (entityId: string) => `request-${entityId}`;
+
 interface UseSaveManagerOptions {
 	/** Unique identifier for this save context (e.g., request ID) */
 	entityId: string | null;
@@ -155,7 +163,7 @@ export function useSaveManager({
 				// edit nobody had persisted. The caller re-arms the save; this
 				// only refuses to mislabel it.
 				if (changeTokenRef.current === savedGeneration) {
-					completeSaveThenIdle();
+					completeSaveThenIdle(saveContextId(entityId));
 				} else {
 					markPendingSave();
 				}
@@ -172,7 +180,7 @@ export function useSaveManager({
 	useEffect(() => {
 		if (!entityId || !enabled) return;
 
-		const contextId = `request-${entityId}`;
+		const contextId = saveContextId(entityId);
 
 		registerContext({
 			id: contextId,
@@ -199,7 +207,7 @@ export function useSaveManager({
 	// Update context when hasChanges changes
 	useEffect(() => {
 		if (!entityId || !enabled) return;
-		const contextId = `request-${entityId}`;
+		const contextId = saveContextId(entityId);
 		updateContext(contextId, { hasPendingChanges: hasChanges, save: performSave });
 	}, [entityId, enabled, hasChanges, performSave, updateContext]);
 

@@ -62,6 +62,14 @@ export {
 	DropdownMenuRadioGroup,
 } from "./dropdown-menu";
 
+export {
+	ContextMenu,
+	ContextMenuTrigger,
+	ContextMenuContent,
+	ContextMenuItem,
+	ContextMenuSeparator,
+} from "./context-menu";
+
 export { Tabs, TabsList, TabsTrigger, TabsContent, TabLabel, TabCount, TabErrorDot } from "./tabs";
 export { Eyebrow, EYEBROW_CLASS } from "./eyebrow";
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "./table";

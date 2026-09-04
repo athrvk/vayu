@@ -1539,6 +1539,13 @@ on a click reporting `detail === 0` - the keyboard's kind - and takes a
 `tabIndex` prop, `0` unless the row sits in a roving-tabindex tree. See Tree
 Navigation for why.
 
+**Right-click reaches the same actions through `RowContextMenu`** (issue
+#1360): one list, two menus. `row-actions.ts` holds the one rule about the
+list's shape - the first destructive action gets a separator above it -
+and `RowActionBody` holds what an item draws, so the `⋯` dropdown and the
+context menu cannot describe a row's actions differently. Collection rows,
+request rows, environment rows and history rows all take it.
+
 ---
 
 ## Drawer Panel Frame
@@ -1714,6 +1721,11 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   Backspace** deletes, **Shift+F10 / Menu / Shift+Enter** opens row actions,
   **typeahead** jumps to the next row whose name starts with what you type,
   **`*`** expands every folder at the focused row's level.
+- **Right-click is the pointer equivalent of Shift+F10 / Menu / Shift+Enter**
+  (issue #1360): it opens the same row-actions list through `RowContextMenu`
+  and focuses the row on the way past, so Escape returns focus there rather
+  than dropping it to `<body>` - the tree still has to hold its one tab stop
+  after the menu closes, whichever way it opened.
 - **The second binding on those two is what a Mac keyboard can reach.** The key
   labelled "delete" on a Mac reports `"Backspace"` (`"Delete"` is forward-delete,
   Fn+Delete), and Mac keyboards have no Menu key and default F10 to a media key -

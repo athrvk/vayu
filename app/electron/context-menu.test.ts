@@ -191,6 +191,19 @@ describe("menuTemplateFor - read-only surfaces", () => {
 
 		expect(items).toEqual([]);
 	});
+
+	it("shows nothing over a surface that draws its own menu", async () => {
+		// A collection row or a tab (#1360). The selection is what makes this
+		// case real: a row right-clicked while text is selected elsewhere would
+		// otherwise put Copy over a menu of its own.
+		const items = await menuTemplateFor(
+			params({ selectionText: "orders" }),
+			target({ kind: "own-menu" }),
+			noClipboard
+		);
+
+		expect(items).toEqual([]);
+	});
 });
 
 describe("menuTemplateFor - links", () => {
@@ -291,13 +304,17 @@ describe("commandOnClipboard", () => {
 });
 
 describe("readContextTarget", () => {
-	it("keeps the two markers it knows", () => {
+	it("keeps the markers it knows", () => {
 		expect(readContextTarget({ kind: "url-bar", variable: "baseUrl" })).toEqual({
 			kind: "url-bar",
 			variable: "baseUrl",
 		});
 		expect(readContextTarget({ kind: "monaco", variable: null })).toEqual({
 			kind: "monaco",
+			variable: null,
+		});
+		expect(readContextTarget({ kind: "own-menu", variable: null })).toEqual({
+			kind: "own-menu",
 			variable: null,
 		});
 	});

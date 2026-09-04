@@ -20,6 +20,7 @@
 import { Folder, Zap, Braces, Clock, Settings, Inbox } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import { requestDetailOptions, runDetailOptions, useCollectionsQuery } from "@/queries";
+import { walkAncestors } from "@/modules/collections/tree-utils";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
@@ -66,6 +67,17 @@ export interface TabDescriptor {
 	icon?: typeof Folder;
 	/** True when the label is a URL path, which is cut from the left instead. */
 	isPath?: boolean;
+	/**
+	 * Where the request lives, as the breadcrumb reads it: its collection chain
+	 * and then its own name. Request tabs only, and absent until the request has
+	 * loaded - what the tab menu's "Copy Path" copies (#1360).
+	 *
+	 * Built here rather than in the menu because this hook already holds both
+	 * halves - the request and the collections list - and a menu that fetched
+	 * them again would make every open tab a second subscriber to answer a
+	 * question only the right-clicked one asks.
+	 */
+	path?: string;
 }
 
 /**
@@ -168,6 +180,12 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 					// A request with no name of its own falls back to its path, so
 					// path labels are not confined to run tabs.
 					isPath: name.startsWith("/"),
+					// `walkAncestors` returns the chain root-first and carries the
+					// cycle guard a hand-rolled parent walk would not.
+					path: [
+						...walkAncestors(request.collectionId, collections).map((c) => c.name),
+						name,
+					].join(" / "),
 				};
 			}
 			case "run": {

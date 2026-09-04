@@ -24,8 +24,8 @@
  * is what separates that click from a real one; see the handler.
  */
 
-import { useRef, useState } from "react";
-import { MoreVertical, type LucideIcon } from "lucide-react";
+import { Fragment, useRef, useState } from "react";
+import { MoreVertical } from "lucide-react";
 import {
 	Button,
 	DropdownMenu,
@@ -35,15 +35,11 @@ import {
 	DropdownMenuSeparator,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-
-export interface RowAction {
-	label: string;
-	icon: LucideIcon;
-	onSelect: () => void;
-	/** Renders in destructive colour and is separated from the actions above. */
-	destructive?: boolean;
-	disabled?: boolean;
-}
+// The list, its grouping rule and what an item draws live beside this file:
+// right-click offers the same actions through a different Radix family
+// (`RowContextMenu`), and one of the two would otherwise drift.
+import { rowActionRows, rowActionItemClass, type RowAction } from "./row-actions";
+import { RowActionBody } from "./RowActionBody";
 
 interface RowActionsMenuProps {
 	/** Names the control for screen readers, e.g. "More actions for Get users". */
@@ -65,8 +61,6 @@ export function RowActionsMenu({ label, actions, className, tabIndex = 0 }: RowA
 	const trigger = useRef<HTMLButtonElement>(null);
 
 	if (actions.length === 0) return null;
-
-	const firstDestructive = actions.findIndex((a) => a.destructive);
 
 	return (
 		<DropdownMenu open={open} onOpenChange={setOpen}>
@@ -109,23 +103,17 @@ export function RowActionsMenu({ label, actions, className, tabIndex = 0 }: RowA
 					row.focus();
 				}}
 			>
-				{actions.map((action, i) => (
-					<div key={action.label}>
-						{action.destructive && i === firstDestructive && i > 0 && (
-							<DropdownMenuSeparator />
-						)}
+				{rowActionRows(actions).map(({ action, separatorBefore }) => (
+					<Fragment key={action.label}>
+						{separatorBefore && <DropdownMenuSeparator />}
 						<DropdownMenuItem
 							disabled={action.disabled}
 							onSelect={action.onSelect}
-							className={cn(
-								"gap-2 text-sm",
-								action.destructive && "text-destructive-text"
-							)}
+							className={rowActionItemClass(action)}
 						>
-							<action.icon className="h-4 w-4 shrink-0" />
-							{action.label}
+							<RowActionBody action={action} />
 						</DropdownMenuItem>
-					</div>
+					</Fragment>
 				))}
 			</DropdownMenuContent>
 		</DropdownMenu>

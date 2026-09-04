@@ -35,8 +35,14 @@
 
 import { isBrowsableUrl } from "./external-url.js";
 
-/** Where the pointer is, in Vayu's terms rather than Chromium's. */
-export type ContextKind = "url-bar" | "monaco";
+/**
+ * Where the pointer is, in Vayu's terms rather than Chromium's.
+ *
+ * `own-menu` marks a surface that draws its own right-click menu - a collection
+ * row, a tab (#1360) - and so wants none from here. Monaco keeps its own name
+ * because it is not one of ours; both are answered the same way.
+ */
+export type ContextKind = "url-bar" | "monaco" | "own-menu";
 
 /**
  * What the renderer says sits under the pointer.
@@ -121,7 +127,10 @@ export function commandOnClipboard(text: string): ClipboardCommand | null {
 export function readContextTarget(value: unknown): ContextTarget {
 	if (typeof value !== "object" || value === null) return NO_CONTEXT_TARGET;
 	const source = value as { kind?: unknown; variable?: unknown };
-	const kind = source.kind === "url-bar" || source.kind === "monaco" ? source.kind : null;
+	const kind =
+		source.kind === "url-bar" || source.kind === "monaco" || source.kind === "own-menu"
+			? source.kind
+			: null;
 	const variable =
 		typeof source.variable === "string" && source.variable ? source.variable : null;
 	return { kind, variable };
@@ -189,7 +198,11 @@ export async function menuTemplateFor(
 	target: ContextTarget,
 	readClipboardText: () => Promise<string>
 ): Promise<ContextMenuItem[]> {
-	if (target.kind === "monaco") return [];
+	// A surface that draws its own menu gets no second one over it. The renderer
+	// cannot suppress this from its side: Chromium raises the `context-menu`
+	// event on the web contents whatever the page's own listener does with the
+	// DOM event, so the marker is the only refusal that reaches here.
+	if (target.kind === "monaco" || target.kind === "own-menu") return [];
 
 	const linkGroup: ContextMenuItem[] =
 		params.linkURL && isBrowsableUrl(params.linkURL)
