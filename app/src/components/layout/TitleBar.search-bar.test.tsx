@@ -27,7 +27,7 @@
  *
  * The platform flags are module-level constants read at import time, so the
  * platform is stubbed *before* the import - the same dynamic-import shape
- * `app-icon-system-menu.test.tsx` uses, and for the same reason.
+ * `app-icon-menus.test.tsx` uses, and for the same reason.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";

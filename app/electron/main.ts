@@ -43,6 +43,7 @@ import {
 	toElectronTemplate,
 	type ContextCommand,
 } from "./context-menu.js";
+import { showApplicationMenu } from "./app-menu.js";
 import { createSaveFlusher } from "./save-flush.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
@@ -982,6 +983,26 @@ function setupIpcHandlers() {
 	});
 
 	/**
+	 * The application menu, for the two platforms that never draw it (#1361).
+	 *
+	 * `createMenu` installs the same template everywhere, but a frameless window
+	 * has no menu bar on Windows or Linux, so there the template contributes
+	 * accelerators and nothing else - Help > Documentation, About Vayu and Check
+	 * for Updates were reachable by no mouse at all. This pops the menu that is
+	 * already installed rather than building a second template: one definition,
+	 * two surfaces, and no way for the popup to fall behind the menu bar macOS
+	 * still draws from the same object. See app-menu.ts for the decision.
+	 */
+	ipcMain.on("window:appMenu", (_event, position?: unknown) => {
+		showApplicationMenu({
+			platform: process.platform,
+			menu: Menu.getApplicationMenu(),
+			window: mainWindow,
+			position,
+		});
+	});
+
+	/**
 	 * What the renderer sees under the pointer, announced as it right-clicks.
 	 *
 	 * Synchronous on purpose, and it is the only `sendSync` in the app. The
@@ -1121,6 +1142,13 @@ app.whenReady().then(async () => {
 		copyright: "© 2026 Atharva Kusumbia",
 		website: "https://github.com/athrvk/vayu",
 		iconPath: aboutIconPath,
+		// The panel's fields are platform-scoped, and the two halves cover
+		// different platforms: `website` and `authors` are Linux-only, `credits`
+		// is macOS and Windows. Both are set so the panel names where to go on
+		// every platform - it was version and copyright alone on the two that
+		// could not open it at all until #1361.
+		authors: ["Atharva Kusumbia"],
+		credits: `${DOCS_URL}\nhttps://github.com/athrvk/vayu`,
 	});
 
 	// Create application menu
