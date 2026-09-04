@@ -32,14 +32,26 @@ naming a directory is a copy that can drift.
 
 **Uninstallation (`installer.nsh`):**
 - Kills running Vayu and engine processes before uninstall
-- Removes lock file when user chooses to keep or remove data
-- Lock file path: `$APPDATA\Vayu\vayu.lock`
+- "Keep my data" removes only the lock file; "Delete everything" removes the whole data directory, and logs a skip rather than deleting anything if that directory is not there
+- Lock file path: `$APPDATA\${APP_DATA_DIR}\vayu.lock`
 
-The path in those two lines is the script's, not the app's: `installer.nsh`
-targets `$APPDATA\Vayu` while the app writes `%APPDATA%\vayu-client`, the same
-wrong-directory defect the Linux hooks had. It is tracked in #1393, which needs
-a Windows machine to verify before the script changes; the lines above describe
-the script as it is until then.
+NSIS cannot read `package.json`, so the script defines `APP_DATA_DIR` once and
+uses it everywhere rather than spelling a path.
+`app/electron/installer-nsh-paths.test.ts` fails if that define drifts from the
+`name`, if any path bypasses it, or if a path segment anywhere in the file -
+comments included - is `productName`. It is the Windows counterpart to the
+`Script lint` job's check over the shell scripts, which covers `~/.config/` and
+cannot see a `.nsh` file.
+
+Both macros also flip NSIS back to the user's shell context around those paths.
+An all-users install leaves NSIS in the machine context, where `$APPDATA` is not
+the roaming profile Electron writes userData to - so a correctly named path
+would still miss the real directory in that install mode.
+
+Until #1393 the script named `productName` for both, so "Delete everything"
+ran `RMDir /r` over `$APPDATA\Vayu` and removed nothing the app owns - the same
+wrong-directory defect the Linux hooks had, and worse, because here it was a
+promise about the user's data rather than a no-op.
 
 ### macOS (DMG)
 
