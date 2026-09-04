@@ -1,14 +1,29 @@
 ; Vayu NSIS Installer Script
 ; Handles closing running instances, reinstalls, and cleanup
 ;
-; Process names and directories must match:
-;   - productName in electron-builder.json: "Vayu" → Vayu.exe
-;   - Electron userData: app.getPath("userData") → AppData\Roaming\Vayu
+; Process name: productName in electron-builder.json is "Vayu", so the packaged
+; executable is Vayu.exe. That name applies to the *process* and nothing else.
+;
+; Data directory: Electron builds app.getPath("userData") from app.getName(),
+; which reads the `name` field of the packaged app/package.json - not
+; productName from electron-builder.json - and nothing calls app.setName(). So
+; the two differ, and this script spelled productName for both until #1393,
+; which made "Delete everything" at uninstall delete a directory the app has
+; never written. APP_DATA_DIR below is the only place the directory name
+; appears; app/package.json decides its value, and
+; app/electron/installer-nsh-paths.test.ts fails if the two ever disagree.
+;
+; Everything the app owns lives under that one directory: the engine's database
+; and logs, the renderer's settings, and Chromium's caches. Nothing of the
+; app's is under %LOCALAPPDATA% except the install root, which the uninstaller
+; removes on its own.
 ;
 ; Lock file handling:
-;   - Lock file path: %APPDATA%\Vayu\vayu.lock
+;   - Lock file path: %APPDATA%\${APP_DATA_DIR}\vayu.lock
 ;   - Cleaned up during install (stale locks) and uninstall
 ;   - Also handled automatically in app startup (sidecar.ts)
+
+!define APP_DATA_DIR "vayu-client"
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
@@ -21,7 +36,7 @@
   nsExec::ExecToStack 'tasklist /FI "IMAGENAME eq Vayu.exe" /NH'
   Pop $0  ; Exit code
   Pop $1  ; Output
-  
+
   ; Check if the output actually contains "Vayu.exe" (means it's running)
   ; When tasklist finds the process, output starts with "Vayu.exe"
   ; When not found, output is empty or contains "INFO: No tasks..."
@@ -32,7 +47,7 @@
     MessageBox MB_OKCANCEL|MB_ICONINFORMATION \
       "Vayu is currently running.$\n$\nClick OK to close it and continue installation, or Cancel to abort." \
       IDOK closeApp IDCANCEL abortInstall
-      
+
     closeApp:
       ; Kill both the app and engine processes
       nsExec::ExecToStack 'taskkill /F /IM "Vayu.exe"'
@@ -40,7 +55,7 @@
       ; Wait for processes to fully terminate
       Sleep 1000
       Goto cleanupLock
-      
+
     abortInstall:
       Abort
   ${Else}
@@ -50,17 +65,16 @@
     Pop $0  ; Discard result
     Goto cleanupLock
   ${EndIf}
-  
+
   cleanupLock:
     ; Clean up any stale lock files from previous installations or crashes
-    ; Lock file path: %APPDATA%\Vayu\vayu.lock
     ; Check if lock file exists and if the process is still running
-    IfFileExists "$APPDATA\Vayu\vayu.lock" 0 initDone
+    IfFileExists "$APPDATA\${APP_DATA_DIR}\vayu.lock" 0 initDone
       ; Lock file exists, check if process is running by reading PID
       ; For simplicity, just remove stale lock files during install
       ; The engine will create a new one if needed
-      Delete "$APPDATA\Vayu\vayu.lock"
-  
+      Delete "$APPDATA\${APP_DATA_DIR}\vayu.lock"
+
   initDone:
 !macroend
 
@@ -89,22 +103,28 @@
     Yes = Keep my data$\n\
     No = Delete everything" \
     IDYES keepData IDNO removeData
-  
+
   keepData:
     ; User chose to keep data
     ; Still remove the lock file to prevent issues on reinstall
-    ; Lock file path: %APPDATA%\Vayu\vayu.lock (not in db subdirectory)
-    Delete "$APPDATA\Vayu\vayu.lock"
+    ; (the lock sits beside the db directory, not inside it)
+    Delete "$APPDATA\${APP_DATA_DIR}\vayu.lock"
     Goto cleanupDone
-    
-  removeData:
-    ; Remove main app data directory (Electron userData)
-    ; Path: %APPDATA%\Vayu (from productName in electron-builder.json)
-    RMDir /r "$APPDATA\Vayu"
 
-    ; Remove Electron cache/local storage
-    ; Path: %LOCALAPPDATA%\Vayu
-    RMDir /r "$LOCALAPPDATA\Vayu"
-    
+  removeData:
+    ; Remove the app's userData directory - database, logs, settings, caches.
+    ;
+    ; Guarded rather than unconditional. This branch spent its whole life
+    ; deleting a tree it only believed was the app's, and a wrong RMDir /r is
+    ; silent in both directions: it removes nothing when the name is wrong, and
+    ; removes someone else's data if it is wrong the other way. If the
+    ; directory is not there, say so in the log and leave the disk alone.
+    IfFileExists "$APPDATA\${APP_DATA_DIR}\*.*" 0 dataDirMissing
+      RMDir /r "$APPDATA\${APP_DATA_DIR}"
+      Goto cleanupDone
+
+  dataDirMissing:
+    DetailPrint "No Vayu data directory at $APPDATA\${APP_DATA_DIR} - nothing to delete."
+
   cleanupDone:
 !macroend

@@ -11,7 +11,7 @@ This document describes how lock files (`vayu.lock`) are handled during installa
 
 The lock file (`vayu.lock`) prevents multiple instances of the Vayu engine from running simultaneously. It contains the PID of the running engine process and is located at:
 
-- **Windows**: `%APPDATA%\Vayu\vayu.lock`
+- **Windows**: `%APPDATA%\vayu-client\vayu.lock`
 - **macOS**: `~/Library/Application Support/vayu/vayu.lock`
 - **Linux**: `~/.config/vayu/vayu.lock`
 
@@ -26,8 +26,13 @@ The lock file (`vayu.lock`) prevents multiple instances of the Vayu engine from 
 
 **Uninstallation (`installer.nsh`):**
 - Kills running Vayu and engine processes before uninstall
-- Removes lock file when user chooses to keep or remove data
-- Lock file path: `$APPDATA\Vayu\vayu.lock`
+- "Keep my data" removes only the lock file; "Delete everything" removes the whole data directory, and logs a skip rather than deleting anything if that directory is not there
+- Lock file path: `$APPDATA\${APP_DATA_DIR}\vayu.lock`
+
+The directory name is not `productName`. Electron derives `app.getPath("userData")`
+from `app.getName()`, which reads `name` in `app/package.json`, so the script
+defines `APP_DATA_DIR` from that file rather than spelling a path
+(`app/electron/installer-nsh-paths.test.ts` fails if the two drift apart).
 
 ### macOS (DMG)
 
@@ -77,7 +82,7 @@ If needed, users can manually remove the lock file:
 
 **Windows:**
 ```powershell
-Remove-Item "$env:APPDATA\Vayu\vayu.lock"
+Remove-Item "$env:APPDATA\vayu-client\vayu.lock"
 ```
 
 **macOS/Linux:**
@@ -92,7 +97,7 @@ rm ~/Library/Application\ Support/vayu/vayu.lock
 ### Windows Implementation
 - Uses `tasklist` and `taskkill` commands
 - NSIS macros: `customInit`, `customUnInit`, `customUnInstall`
-- File: `app/build/installer.nsh`
+- File: `app/installer/installer.nsh`
 
 ### Linux Maintainer Scripts
 - `linux-postinst.sh`: Post-installation cleanup
