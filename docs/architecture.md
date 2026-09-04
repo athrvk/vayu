@@ -343,6 +343,11 @@ Variables are resolved with priority: **Environment > Collection > Global**
 - **Local-Only Communication**: Control API only binds to `127.0.0.1:9876`
 - **Context Isolation**: Electron renderer runs in isolated context (no Node.js access)
 - **No Cloud Sync**: All data stored locally in SQLite database
+- **No spellchecker**: every window the app opens - the shell and the OAuth
+  sign-in window - is created with `spellcheck: false`, so Chromium checks
+  nothing the user types and never fetches Hunspell dictionaries, which it
+  otherwise downloads from a Google CDN at first use on Windows and Linux.
+  Monaco's editors are unaffected either way; they own their own text area.
 - **Proxy credentials**: stored in the `proxyUrl` setting as plaintext in
   SQLite, the same way every other stored credential is. libcurl derives the
   `Proxy-Authorization` header from the URL, and that header is on the

@@ -263,7 +263,6 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 						<Textarea
 							id="new-issuer-claims"
 							rows={4}
-							spellCheck={false}
 							placeholder={'{ "sub": "alice", "roles": ["admin"] }'}
 							value={claimsText}
 							onChange={(e) => setClaimsText(e.target.value)}
