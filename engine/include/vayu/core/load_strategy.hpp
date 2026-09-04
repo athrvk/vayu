@@ -134,6 +134,36 @@ const std::function<bool (int64_t)>& should_continue);
 duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t default_ms);
 
 /**
+ * @brief How long a `constant_rps` tick sleeps before it spins out the rest of
+ *        @p remainder_us, in microseconds. 0 means spin the whole remainder.
+ *
+ * The tick's wait is split because a Windows `sleep_for` overshoots by ~0.6-1.8
+ * ms typical whatever it is asked for, so a tick that sleeps its whole
+ * remainder always lands late and the next one dispatches two requests at once
+ * to catch up - the rate stays exact, the arrival interval does not (issue
+ * #1370). Sleeping all but the last `pacing::SPIN_TAIL_US` puts the overshoot
+ * inside the spin instead of inside the gap, and bounds the spin at the tail
+ * however slow the rate.
+ *
+ * Only the Windows leg calls this; every other platform sleeps the remainder
+ * whole. It is declared here, and unconditionally, because the arithmetic is
+ * the whole of the decision and is worth testing on any host.
+ */
+[[nodiscard]] constexpr int64_t tick_sleep_leg_us (int64_t remainder_us, int64_t spin_tail_us) {
+    return remainder_us > spin_tail_us ? remainder_us - spin_tail_us : 0;
+}
+
+// The rule itself, checked by every build that reaches this header rather than
+// only by the one CI leg whose test binary links. The literals are the stock
+// tail: 400 RPS, 200 RPS, the boundary, a ~500 RPS tick, and a remainder a
+// slow caller has already overrun.
+static_assert (tick_sleep_leg_us (2500, 2000) == 500);
+static_assert (tick_sleep_leg_us (5000, 2000) == 3000);
+static_assert (tick_sleep_leg_us (2000, 2000) == 0);
+static_assert (tick_sleep_leg_us (1000, 2000) == 0);
+static_assert (tick_sleep_leg_us (-100, 2000) == 0);
+
+/**
  * @brief Facts about a completion that only the executor knows, attached to
  *        whatever record the completion produces.
  *

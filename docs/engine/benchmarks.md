@@ -394,8 +394,9 @@ quarter of the gaps being the double-dispatch that pays the overshoot back.
 The rate is exact because `take_due_requests` accrues the debt; the
 *regularity* is bounded by the OS sleep granularity. That is a property of the
 spin threshold in `wait_for_next_tick`, not of the scope, and it predates it;
-[#1370](https://github.com/athrvk/vayu/issues/1370) tracks whether the
-threshold should move.
+[#1370](https://github.com/athrvk/vayu/issues/1370) moved it, and
+[The sleep a Windows tick cannot trust](#the-sleep-a-windows-tick-cannot-trust-2026-09-04-windows)
+below carries the same three rates measured again after that change.
 
 **Idle.** The fix's actual claim is that a daemon with no run active holds no
 request, and `powercfg /energy` is the tool that reports the request itself:
@@ -441,7 +442,118 @@ and `release_execution_resources` hands it back as the run is retained.
 spin threshold and the 1000 us `tick_us` floor are the two named mechanisms
 the issue said to check if a regression appeared; none did. The
 [Timer resolution paragraph](architecture.md#event-loop-curl_multi) in the architecture
-doc stands as written.
+doc stands as written. The 2000 us constant has since changed *role* rather
+than value - #1370 made it the length of a spin tail every tick ends on, not a
+threshold below which the whole remainder is spun - so this table's arms are
+still the two it names and its numbers still describe the code they were taken
+against.
+
+### The sleep a Windows tick cannot trust (2026-09-04, Windows)
+
+[#1370](https://github.com/athrvk/vayu/issues/1370) is the observation the
+table above records: below ~500 RPS a `constant_rps` tick slept its whole
+remainder, landed late, and the next tick paid the overshoot back as a double
+dispatch. The fix sizes a spin tail to that overshoot, so the number the tail
+has to cover is the measurement that matters.
+
+**What `sleep_for` actually costs.** Same host as the section above (i5-8300H,
+Windows 11 24H2), a process holding `timeBeginPeriod(1)` for its whole life -
+the condition a run's pacing thread is in - 400 samples per row, reported as
+`actual - requested`:
+
+| requested | p50 | p90 | p99 | max |
+|---:|---:|---:|---:|---:|
+| 100 us | 1817 us | 2099 us | 3143 us | 17770 us |
+| 500 us | 1377 us | 1626 us | 2157 us | 2908 us |
+| 1000 us | 912 us | 1141 us | 1740 us | 2341 us |
+| 2000 us | 641 us | 1104 us | 1700 us | 2180 us |
+| 2500 us | 961 us | 1616 us | 2220 us | 2837 us |
+| 3500 us | 1139 us | 1639 us | 2209 us | 2256 us |
+| 5000 us | 596 us | 1068 us | 1571 us | 1683 us |
+
+**The overshoot is a wakeup latency, not a proportional error.** It barely
+moves with the duration asked for - asking for 100 us costs about as much extra
+as asking for 5000 us - so a *fixed* tail covers every target rate, and the
+spin's cost stops tracking the rate. That is what picked the hybrid shape over
+simply raising the old threshold: a threshold sized to cover a 2.5 ms tick
+spins the whole 2.5 ms, and a slower rate needs a bigger one again.
+
+`pacing::SPIN_TAIL_US` is **2000 us**, the old threshold's value unchanged. It
+covers the p50 and p90 of every row, which is what turns the 400 RPS arrival
+gap regular; sizing it to p99 instead would roughly double the spin for the
+last few percent of ticks, and a sidecar that pins a core is not an
+improvement. Keeping the value also leaves every tick from ~500 RPS up
+byte-identical, since there the remainder never exceeds the tail.
+
+**Before and after, at the receiver.** Same instrument as the section above - a
+copy of `scripts/test/mock-server.go`'s `/fast` that stamps a monotonic arrival
+time per request - 20 s runs, 3 rounds, the two arms alternated within each
+round, a fresh daemon and a scratch data dir per run. "Nominal" is `1e6 / RPS`;
+"within 25%" is the share of gaps inside a quarter of nominal either side,
+"under 10%" the share that are catch-up bursts. The CPU column is the daemon's
+busiest thread over the middle 10 s, which at these rates is the producer -
+eight workers sharing a handful of requests per millisecond are not the ones
+burning it.
+
+| target RPS | arm | sent rate | dropped | gap p50 / p90 / p99 (us) | within 25% | under 10% | producer CPU |
+|---:|---|---:|---:|---|---:|---:|---:|
+| 200 | before | 199.93 | 0 | 5456 / 6123 / 8612 | 75.7% | 8.0% | 4.2% |
+| 200 | **after** | 199.93 | 0 | **5004** / 5678 / 6412 | **95.7%** | **0.0%** | 26.6% |
+| 400 | before | 399.86 | 0 | 3116 / 4073 / 5312 | 16.5% | 19.4% | 11.2% |
+| 400 | **after** | 399.90 | 0 | **2501** / 3321 / 5011 | **58.5%** | **1.2%** | 32.3% |
+| 1500 | before | 1499.87 | 0 | 502 / 1544 / 3997 | 25.1% | 48.3% | 99.7% |
+| 1500 | **after** | 1499.84 | 0 | 523 / 1505 / 2386 | 26.4% | 32.6% | 99.7% |
+
+Medians of 3 runs per cell, 18 runs in all, **no run dropped a request**.
+
+**The 400 RPS row is the one the issue was filed for**, and it moves the way the
+mechanism predicts: the median gap falls from 3116 us to 2501 us against a
+2500 us nominal, the share of gaps within a quarter of nominal goes from a
+minority to a majority, and the catch-up bursts - the double dispatch paying
+back the overshoot - all but disappear (19.4% to 1.2%). 200 RPS moves the same
+way from a better starting point. **1500 RPS does not move at all**, which is
+the check that the change is confined to the leg it was meant for: there
+`tick_us` is 1000 us, never exceeds the 2000 us tail, and is spun whole on both
+arms. Its `within 25%` sits near 25% on both arms because a 1 ms tick against a
+667 us nominal pays out 1 or 2 requests per tick by design - that is the
+`tick_us` floor, not this change, and it is unchanged.
+
+**At the tick itself, the change is total.** The receiver-side figures above
+carry the network path's own jitter on top of the pacing. Reading the interval
+between consecutive `submit_due` calls instead - a temporary instrumented build,
+not committed - isolates the tick, and there the leg does exactly what it was
+rewritten to do:
+
+| target RPS | nominal | before p50 / within 25% | after p50 / within 25% |
+|---:|---:|---|---|
+| 200 | 5000 us | 5598 us / 94.8% | **5000 us / 100.0%** |
+| 400 | 2500 us | 3724 us / 1.8% | **2500 us / 100.0%** |
+| 1500 | 667 us | 1000 us / 0.0% | 1000 us / 0.0% |
+
+600 ticks per cell. The 400 RPS before arm is the defect in one number: a 2500 us
+tick that fires every 3724 us. After, the tick fires on its nominal interval and
+the spread is gone. The 1500 RPS row is identical on both arms and sits at the
+1000 us `tick_us` floor, by design. The same build shows why: with the tail in
+place a 2486 us remainder sleeps 486 us and the sleep returns after 1088-2295 us
+- always before the tick - so the spin carries it home every time.
+
+**What it costs.** The producer thread goes from 4-11% of one core to 27-32%.
+That is the point of a *tail* rather than a raised threshold: the spin runs from
+when the sleep returns to the tick, so it costs `tail - overshoot` and not the
+whole tail - about 0.6-0.9 ms of the 2 ms per tick in practice. A spin bounded
+at ~1.5 ms per tick, which is what the issue asked this to be no worse than,
+would be 60% of a core at 400 RPS and 30% at 200; the measured 32.3% and 26.6%
+are inside both. The 1500 RPS rows are at 99.7% on **both** arms - that leg
+already spun every tick before this change, and it is the reason the tail is
+capped rather than sized to the p99 of the overshoot.
+
+**One caveat on this host.** Under heavy background load the whole picture
+degrades on both arms - a `before` run in round 2 read a gap p50 of 0 with 52%
+catch-up bursts, and the producer thread at 68% - because a sleeping thread
+needs the scheduler to wake it and a loaded box will not. Runs taken while
+another build or a virus scan is going are measuring that, not this. The numbers
+above were taken on an otherwise idle machine, and the arms were alternated
+inside each round so a drift would show up in both.
 
 ### The in-app proof run
 
@@ -617,6 +729,20 @@ on the tick length (1ms above 1000 RPS, the request interval below it) - timer
 jitter is corrected on the following tick, and a rate like 1500 RPS is delivered
 as asked rather than floored to the nearest 1000. Comparing against wrk/vegeta
 at a fixed rate, `sent + dropped` should equal `targetRps × duration`.
+
+**How a tick waits, on Windows.** Rate fidelity is not arrival *regularity*, and
+the two have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)
+every Windows tick ends on a busy-spin and only the stretch before it is slept:
+`sleep_for(remainder - pacing::SPIN_TAIL_US)`, then spin to the tick. A
+remainder no longer than the tail is spun whole, which is what every tick from
+~500 RPS up already was - `tick_us` is 1000us there, and the tail is 2000us -
+so nothing above that point moved. Below it the tick used to sleep its whole
+remainder and land late by the sleep's overshoot, which the next tick paid back
+as a double dispatch. The overshoot now lands inside the tail instead of inside
+the arrival gap, and the spin is bounded by the tail rather than by the tick, so
+its cost does not grow as the target rate falls. Elsewhere the tick sleeps the
+whole remainder; the leg exists because Windows' is the sleep that cannot be
+trusted to the microsecond.
 
 ### Recommended settings
 
