@@ -439,8 +439,10 @@ The run's progress is also mirrored onto the OS chrome: the Windows taskbar
 button and the macOS Dock icon fill as it advances and clear when it ends, and
 a failed run flashes the taskbar's error state on Windows, which macOS has no
 equivalent of (issue #1362). Linux paints nothing - Electron 44 dropped Unity
-launcher support. A collection run shows only an indeterminate bar, since only
-the engine resolves the plan's length.
+launcher support. A collection run now fills too, from the size the engine
+publishes on its stream as the run opens (issue #1398), and stays indeterminate
+only where that frame never reaches the client - an older engine, or an attach
+after the frame left the run's retained ring.
 
 **Top-level (`components/`)**
 

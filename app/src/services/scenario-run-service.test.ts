@@ -130,6 +130,33 @@ function deliverStep(stepIndex: number): void {
 	});
 }
 
+/**
+ * Deliver the opening `plan` frame the same way - through the handler the
+ * service registered, which is the wiring the fraction depends on.
+ */
+function deliverPlan(stepsPerIteration: number, iterations: number): void {
+	const calls = vi.mocked(sseClient.connect).mock.calls;
+	const onPlan = calls[calls.length - 1]?.[6];
+	if (!onPlan) throw new Error("the service registered no plan handler");
+	onPlan({
+		stepsPerIteration,
+		iterations,
+		stepsExpected: stepsPerIteration * iterations,
+	});
+}
+
+/** Every value the OS indicator has been told, in order. */
+function reportedFractions(): (number | null)[] {
+	return mockProgressReport.mock.calls.map((call) => call[1] as number | null);
+}
+
+/** The latest of those - what the bar is showing now. */
+function lastReportedFraction(): number | null {
+	const reported = reportedFractions();
+	if (reported.length === 0) throw new Error("the indicator was told nothing");
+	return reported[reported.length - 1];
+}
+
 /** Every step of every batch committed so far, in order. */
 function committedSteps(): ScenarioStepEvent[] {
 	return mockAddSteps.mock.calls.flatMap((call) => call[0] as ScenarioStepEvent[]);
@@ -169,6 +196,10 @@ describe("ScenarioRunService", () => {
 			expect.any(Function),
 			expect.any(Function),
 			expect.any(Function),
+			expect.any(Function),
+			// No monitor handler: a collection run scrapes no vitals. The plan
+			// handler after it is what makes the run's progress a fraction.
+			undefined,
 			expect.any(Function)
 		);
 	});
@@ -407,6 +438,82 @@ describe("ScenarioRunService", () => {
 		it("claims it with no fraction - the plan's length is the engine's to resolve", () => {
 			scenarioRunService.startMonitoring("run_20");
 			expect(mockProgressReport).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun, null);
+		});
+
+		/*
+		 * Issue #1398. The engine publishes the size it resolved before the
+		 * first step; these pin what the renderer does with it, and what it does
+		 * without it.
+		 */
+		describe("the fraction the engine's plan frame makes possible (#1398)", () => {
+			beforeEach(() => {
+				vi.useFakeTimers();
+			});
+			afterEach(() => {
+				vi.useRealTimers();
+			});
+
+			it("paints steps against the total the run resolved", () => {
+				scenarioRunService.startMonitoring("run_24");
+				// Two steps a pass, two passes: four steps to fill the bar.
+				deliverPlan(2, 2);
+				// Determinate at zero the moment the total lands, rather than at
+				// the end of the first flush window.
+				expect(reportedFractions()).toEqual([null, 0]);
+
+				deliverStep(0);
+				expect(lastReportedFraction()).toBe(0.25);
+
+				deliverStep(1);
+				vi.advanceTimersByTime(FLUSH_MS);
+				expect(lastReportedFraction()).toBe(0.5);
+			});
+
+			/*
+			 * Mutation check: drop the null fallback in `runFraction` (return a
+			 * fraction of `stepsExpected ?? 0`) and this run reports `0` on every
+			 * batch - an empty determinate bar for a run that is going fine.
+			 */
+			it("stays indeterminate for a run whose total never arrives", () => {
+				scenarioRunService.startMonitoring("run_25");
+				deliverStep(0);
+				deliverStep(1);
+				vi.advanceTimersByTime(FLUSH_MS);
+
+				expect(reportedFractions()).toEqual([null, null, null]);
+			});
+
+			/*
+			 * `stepsExpected` is an upper bound the run can pass: `setNextRequest`
+			 * can walk an iteration back over steps it has already run. Mutation
+			 * check: drop the clamp and this reports 1.5.
+			 */
+			it("holds at full when a run outruns its own plan", () => {
+				scenarioRunService.startMonitoring("run_26");
+				deliverPlan(2, 1);
+				for (let i = 0; i < 3; i += 1) deliverStep(i);
+				vi.advanceTimersByTime(FLUSH_MS);
+
+				expect(lastReportedFraction()).toBe(1);
+			});
+
+			/*
+			 * Mutation check: drop the `progressFailedRunId` guard in
+			 * `reportProgress` and the flush inside `handleError` repaints the bar
+			 * as running, wiping the failed flash that was painted a line earlier.
+			 */
+			it("does not repaint a failed run as running when its last steps flush", () => {
+				scenarioRunService.startMonitoring("run_27");
+				deliverPlan(4, 1);
+				deliverStep(0);
+				mockProgressReport.mockClear();
+
+				deliverStep(1);
+				failStream("engine gone");
+
+				expect(mockProgressFail).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+				expect(mockProgressReport).not.toHaveBeenCalled();
+			});
 		});
 
 		it("gives it up when the run ends", async () => {

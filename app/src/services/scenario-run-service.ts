@@ -36,7 +36,7 @@ import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
 import type { OutcomeCounts } from "@/modules/history/main/scenario-steps";
-import type { ScenarioStepEvent } from "@/types";
+import type { ScenarioRunPlanEvent, ScenarioStepEvent } from "@/types";
 
 /**
  * "41 passed, 2 failed" - what the run did, not that it is over (#1358).
@@ -66,9 +66,23 @@ class ScenarioRunService {
 	 * process is already timing out on its own.
 	 */
 	private progressFailedRunId: string | null = null;
-	private stepBatcher = createThrottledBatcher<ScenarioStepEvent>((batch) =>
-		useScenarioRunStore.getState().addSteps(batch)
-	);
+	/**
+	 * The run's total steps, from the `plan` frame that opens its stream
+	 * (#1398), and null until one arrives - which for an older engine, or a
+	 * client that attached past the frame's eviction from the tick ring, is for
+	 * the whole run.
+	 */
+	private stepsExpected: number | null = null;
+	/** Steps committed to the store so far - the numerator over the above. */
+	private stepsCompleted = 0;
+	private stepBatcher = createThrottledBatcher<ScenarioStepEvent>((batch) => {
+		useScenarioRunStore.getState().addSteps(batch);
+		// The OS indicator rides the commit rather than the event, the way
+		// `LoadTestService` rides its flush: this is already the cadence the run
+		// tab repaints at, and a taskbar has no use for a finer one.
+		this.stepsCompleted += batch.length;
+		this.reportProgress();
+	});
 
 	/** Attach to a scenario run's stream and push its steps into the store. */
 	startMonitoring(runId: string): void {
@@ -88,14 +102,17 @@ class ScenarioRunService {
 		// about to clear, so it is dropped rather than flushed into this run's.
 		this.discardPending();
 		this.activeRunId = runId;
+		this.stepsExpected = null;
+		this.stepsCompleted = 0;
 		useScenarioRunStore.getState().startRun(runId);
 
-		// Indeterminate, and it stays that way for the whole run (#1362). A
-		// fraction needs the plan's length, and this client deliberately does not
-		// compute one - `RunCollectionDialog` sends no step count precisely
-		// because the engine resolves it, and a second copy of that rule here
-		// would be a number only one side can be right about. So the OS says a
-		// run is going, which is what a taskbar can honestly say about it.
+		// Indeterminate until the engine says how long the run is (#1362,
+		// #1398). This client still computes no denominator of its own -
+		// `RunCollectionDialog` sends no step count precisely because the engine
+		// resolves it, and a second copy of that rule here would be a number
+		// only one side can be right about - so what it shows before the `plan`
+		// frame arrives, and for a run whose frame never does, is that a run is
+		// going.
 		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
 
 		// Connect immediately: the engine retains a replayable topic per run, so
@@ -109,8 +126,49 @@ class ScenarioRunService {
 			() => {},
 			this.handleError.bind(this),
 			this.handleClose.bind(this),
-			this.handleStep.bind(this)
+			this.handleStep.bind(this),
+			// A collection run scrapes no vitals; the plan frame sits after the
+			// monitor slot because the load path already passes that one.
+			undefined,
+			this.handlePlan.bind(this)
 		);
+	}
+
+	/**
+	 * The run's size, as the engine resolved it (#1398).
+	 *
+	 * Reported straight away rather than waiting for the next batch: the frame
+	 * arrives before the first step, so this is what turns the bar determinate
+	 * at zero instead of at the end of the first flush window.
+	 */
+	private handlePlan(plan: ScenarioRunPlanEvent): void {
+		this.stepsExpected = plan.stepsExpected;
+		this.reportProgress();
+	}
+
+	/**
+	 * Where the OS indicator is, or `null` for a run with no denominator.
+	 *
+	 * Clamped, because `stepsExpected` is an upper bound in one direction only
+	 * on paper: `setNextRequest` can send an iteration back over steps it has
+	 * already run, up to the engine's `maxStepsPerIteration` cap, so a run can
+	 * execute more steps than its plan holds. A bar past full is worse than a
+	 * bar that sits at full for the last few steps.
+	 */
+	private runFraction(): number | null {
+		if (this.stepsExpected === null || this.stepsExpected <= 0) return null;
+		return Math.min(1, this.stepsCompleted / this.stepsExpected);
+	}
+
+	/** Paint the fraction, unless this run's indicator is no longer ours. */
+	private reportProgress(): void {
+		// The run is over and `handleClose` is clearing the indicator; the last
+		// flush must not repaint it as running on the way out.
+		if (this.activeRunId === null) return;
+		// A run that reported its failure keeps that flash - the error arrives
+		// before the final flush, for the reason `progressFailedRunId` exists.
+		if (this.progressFailedRunId === this.activeRunId) return;
+		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, this.runFraction());
 	}
 
 	/**
