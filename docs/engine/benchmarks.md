@@ -393,7 +393,9 @@ above which the tick sleeps rather than spins) the median is 3.5-3.7 ms with a
 quarter of the gaps being the double-dispatch that pays the overshoot back.
 The rate is exact because `take_due_requests` accrues the debt; the
 *regularity* is bounded by the OS sleep granularity. That is a property of the
-spin threshold in `wait_for_next_tick`, not of the scope, and it predates it.
+spin threshold in `wait_for_next_tick`, not of the scope, and it predates it;
+[#1370](https://github.com/athrvk/vayu/issues/1370) tracks whether the
+threshold should move.
 
 **Idle.** The fix's actual claim is that a daemon with no run active holds no
 request, and `powercfg /energy` is the tool that reports the request itself:
