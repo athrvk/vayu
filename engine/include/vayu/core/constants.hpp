@@ -225,6 +225,43 @@ constexpr size_t SLO_BREACH_WINDOWS = 2;
 } // namespace capacity
 
 /**
+ * @brief How a `constant_rps` tick waits out its remainder.
+ *
+ * Windows only in effect: the sleep leg below exists because a Windows tick
+ * cannot sleep accurately even with the run's 1 ms timer request in force.
+ * Elsewhere the tick sleeps its whole remainder and reads nothing here.
+ */
+namespace pacing {
+/// How much of each tick's remainder is busy-spun rather than slept, in
+/// microseconds. The tick sleeps `remainder - SPIN_TAIL_US` and spins the
+/// rest; a remainder no longer than this is spun whole.
+///
+/// The value is the sleep overshoot it has to cover. Measured on Windows 11
+/// 24H2 (i5-8300H) with a 1 ms timer request held, 400 samples per row, as
+/// `actual - requested` for the durations this leg actually asks for:
+///
+///     requested   100    500   1000   2000   3500   5000  us
+///     p50        1817   1377    912    641   1139    596  us
+///     p90        2099   1626   1141   1104   1639   1068  us
+///     p99        3143   2157   1740   1700   2209   1571  us
+///
+/// The overshoot is a wakeup latency, not a proportional error - it barely
+/// moves with the duration asked for - so a fixed tail covers every rate. At
+/// 2000 us it absorbs the median and p90 of every row, which is what turns
+/// the 400 RPS arrival gap from "sleep, then pay two requests back" into a
+/// regular interval. Sizing it to p99 instead would roughly double the spin
+/// for the last few percent of ticks, and a sidecar that pins a core is not
+/// an improvement (issue #1370).
+///
+/// It is also the old spin *threshold*, unchanged in value: before #1370 a
+/// remainder at or under 2000 us was spun whole and anything longer was slept
+/// whole. The first half of that rule is what this constant still says, so
+/// every tick from ~500 RPS up - where the remainder never exceeds the tail -
+/// paces exactly as it did.
+constexpr int64_t SPIN_TAIL_US = 2000;
+} // namespace pacing
+
+/**
  * @brief Server configuration
  */
 namespace server {

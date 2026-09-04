@@ -567,23 +567,27 @@ class ConstantLoadStrategy : public LoadStrategy {
     }
 
     /**
-     * Wait out the remainder of a tick. Oversleeping is self-correcting - the
-     * next tick accrues the extra elapsed time - so the sleep can be the full
-     * remainder; on Windows short waits spin instead.
+     * Wait out the remainder of a tick. Oversleeping is self-correcting in
+     * *rate* - the next tick accrues the extra elapsed time - so a run's
+     * `sendRate` never showed what this function does; only a target
+     * timestamping its arrivals does.
      *
      * Not because of 15.6ms rounding, which is what this said until issue
      * #1161 read the two mechanisms against each other: this run's event loop
      * holds `platform::HighResolutionTimerScope` for as long as it exists, so
      * in-process the resolution is already 1ms while a run is sending, on the
      * pacing thread as much as in the loop. The spin is for the residual -
-     * even at 1ms, `sleep_for(1000us)` returns at ~1-2ms, and a tick is
-     * exactly 1000us from 1000 RPS up (`tick_us` below), so sleeping the
-     * remainder would make an open-loop generator's arrivals bursty and its
-     * latency numbers dishonest. The 2000us threshold puts every tick from
-     * ~500 RPS on the spin and leaves the sleep to the slower ticks, which are
-     * long enough to absorb a 1ms overshoot - and which would round to ~15.6ms
-     * without the loop's request, so the sleep leg is the second thing that
-     * request buys.
+     * even at 1ms, `sleep_for` returns ~0.6-1.8ms late whatever it is asked
+     * for, so an open-loop generator that sleeps a whole remainder lands late
+     * every tick and pays the overshoot back as a double dispatch on the next
+     * one.
+     *
+     * So every Windows tick ends on a spin, and only the stretch before it is
+     * slept (issue #1370): the overshoot lands inside the tail rather than
+     * inside the arrival gap, and the spin is bounded by the tail rather than
+     * by the tick, so its cost does not grow as the target rate falls. A
+     * remainder no longer than the tail is spun whole - which is what every
+     * tick from ~500 RPS up already was, `tick_us` below being 1000us there.
      *
      * @p context is read only by that spin, so the leg without it leaves the
      * parameter unused.
@@ -597,14 +601,16 @@ class ConstantLoadStrategy : public LoadStrategy {
             return;
         }
 #ifdef _WIN32
-        if (sleep_us <= 2000) {
-            while (std::chrono::steady_clock::now () < next_tick && !context->should_stop) {
-                /* spin */
-            }
-            return;
+        const int64_t leg = tick_sleep_leg_us (sleep_us, constants::pacing::SPIN_TAIL_US);
+        if (leg > 0) {
+            std::this_thread::sleep_for (std::chrono::microseconds (leg));
         }
-#endif
+        while (std::chrono::steady_clock::now () < next_tick && !context->should_stop) {
+            /* spin */
+        }
+#else
         std::this_thread::sleep_for (std::chrono::microseconds (sleep_us));
+#endif
     }
 
     /**
