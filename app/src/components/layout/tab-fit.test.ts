@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { fitTabs, naturalTabWidth, TAB_CHROME, TAB_ICON_SPACE } from "./tab-fit";
+import { fitTabs, naturalTabWidth, TAB_CHROME, TAB_CLOSE_SPACE, TAB_ICON_SPACE } from "./tab-fit";
 import {
 	TAB_MIN_WIDTH,
 	TAB_MAX_WIDTH,
@@ -32,6 +32,16 @@ describe("naturalTabWidth", () => {
 		expect(naturalTabWidth({ label: "abcdefghij", hasIcon: false }, measure)).toBe(
 			TAB_CHROME + 100
 		);
+	});
+
+	it("leaves the close button a strip the name cannot reach", () => {
+		// The button is absolutely positioned, which takes it out of layout and
+		// not out of the way: budget it at 0 and the name of an active tab runs
+		// under it (#1202). Drop TAB_TRAILING back to the old 10px and this reds.
+		const label = "abcdefghij";
+		const width = naturalTabWidth({ label, hasIcon: false }, measure);
+		const trailing = width - measure(label) - 8 - 2 - 1;
+		expect(trailing).toBeGreaterThanOrEqual(TAB_CLOSE_SPACE);
 	});
 
 	it("charges for a type icon only when there is one", () => {

@@ -283,7 +283,11 @@ export function TabStrip() {
 			 * had to opt out; down here nothing drags the window, so the opt-outs
 			 * were guarding against a rule that no longer applies to this subtree.
 			 */
-			className="panel-clip flex h-[var(--tabstrip-height)] w-full shrink-0 items-stretch overflow-hidden border-b border-border bg-panel"
+			// `text-sm` is the tab label's own size, declared here because this is
+			// the element the width measurement reads its font from. Inheriting it
+			// from `body` measured whatever the document default happened to be -
+			// 16px until #1202 - so every tab came out ~23% wider than its name.
+			className="panel-clip flex h-[var(--tabstrip-height)] w-full shrink-0 items-stretch overflow-hidden border-b border-border bg-panel text-sm"
 		>
 			{/*
 			 * The tablist holds tabs and nothing else. The overflow trigger and the

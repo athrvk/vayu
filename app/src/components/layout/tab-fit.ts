@@ -28,14 +28,31 @@ import {
 } from "@/constants/layout";
 
 /**
+ * The close button's footprint at the trailing edge: a 12px glyph in 2px of
+ * padding either side, offset 2px from the edge (`TabStrip.tsx`).
+ */
+export const TAB_CLOSE_SPACE = 2 + 2 + 12 + 2;
+
+/** What the name must stop short of at the trailing edge: the button, and air. */
+export const TAB_TRAILING = TAB_CLOSE_SPACE + 2;
+
+/**
  * Everything a tab draws that is not the name, in px.
  *
- * 8px leading padding, 10px trailing, a 2px method rail, a 1px separator, and
- * 6px of gap when an icon is present. The close button is absolutely positioned
- * over the trailing padding, so unlike the old strip it costs nothing here -
- * that alone was 22px on every tab, reserved for a control shown on one.
+ * 8px leading padding, the trailing strip above, a 2px method rail, a 1px
+ * separator, and 6px of gap when an icon is present.
+ *
+ * The trailing strip is the close button's own footprint plus air. The button is
+ * absolutely positioned, so it draws over that strip rather than sitting in the
+ * flow, and it used to be budgeted at 0: absolute takes it out of layout, but
+ * not out of the way. The name filling its tab ran under the button on the one
+ * tab showing it, which was every active tab (#1202). It was invisible while
+ * this measurement read the strip's inherited 16px font against a 13px label
+ * and over-measured every tab by ~23%; correcting the font is what surfaced it.
+ * Still far short of the old strip's 22px per tab, which reserved the button
+ * *and* the method word on all of them.
  */
-export const TAB_CHROME = 8 + 10 + 2 + 1;
+export const TAB_CHROME = 8 + TAB_TRAILING + 2 + 1;
 /** Extra when the tab carries a type icon (collection, run, settings…). */
 export const TAB_ICON_SPACE = 12 + 6;
 
