@@ -19,28 +19,40 @@ import {
 	NOTIFY_ACTIVATED_CHANNEL,
 	NOTIFY_AVAILABILITY_CHANNEL,
 	NOTIFY_SHOW_CHANNEL,
+	NOTIFY_TEST_BODY,
+	NOTIFY_TEST_CHANNEL,
+	NOTIFY_TEST_TITLE,
 	NOTIFY_UNAVAILABLE_REASON,
 	type NotifyDeps,
 	type NotifyRequest,
 	type Notifier,
 } from "./notify.js";
 
-/** One built notification, with the two events Electron can fire on it. */
+type NotificationEvent = "click" | "failed" | "show";
+
+/**
+ * One built notification, with the events Electron can fire on it.
+ *
+ * Listeners are held per event in a list, not a slot: `Notification` is an
+ * emitter, and a fake that kept only the last registration would let a second
+ * `on("failed", …)` silently replace the module's own latch.
+ */
 function fakeNotification() {
-	const listeners = new Map<string, () => void>();
+	const listeners = new Map<NotificationEvent, (() => void)[]>();
 	return {
 		shown: 0,
-		on(event: "click" | "failed", listener: () => void) {
-			listeners.set(event, listener);
+		options: undefined as { title: string; body: string; icon?: string } | undefined,
+		on(event: NotificationEvent, listener: () => void) {
+			listeners.set(event, [...(listeners.get(event) ?? []), listener]);
 			return this;
 		},
 		show() {
 			this.shown++;
 		},
-		fire(event: "click" | "failed") {
-			const listener = listeners.get(event);
-			if (!listener) throw new Error(`nothing subscribed to ${event}`);
-			listener();
+		fire(event: NotificationEvent) {
+			const registered = listeners.get(event);
+			if (!registered?.length) throw new Error(`nothing subscribed to ${event}`);
+			for (const listener of registered) listener();
 		},
 	};
 }
@@ -49,6 +61,9 @@ interface HarnessOptions {
 	supported?: boolean;
 	focused?: boolean;
 	hasWindow?: boolean;
+	iconPath?: string;
+	/** Left unfired by default, so a test's timeout never decides an assertion. */
+	runTimeouts?: boolean;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -60,22 +75,40 @@ function harness(options: HarnessOptions = {}) {
 	};
 	const focus = vi.fn();
 	const send = vi.fn();
+	const timeouts: (() => void)[] = [];
 	// Held rather than let through: `console.warn` here is the app's log in
 	// production, and a test suite that prints it is one nobody reads.
 	const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 	const deps: NotifyDeps = {
-		create: () => {
+		create: (createOptions) => {
 			const notification = fakeNotification();
+			notification.options = createOptions;
 			built.push(notification);
 			return notification;
 		},
+		iconPath: options.iconPath,
 		isSupported: () => state.supported,
 		isFocused: () => state.focused,
 		hasWindow: () => state.hasWindow,
 		focus,
 		send,
+		after: (_ms, fn) => {
+			timeouts.push(fn);
+			if (options.runTimeouts) fn();
+		},
 	};
-	return { built, state, focus, send, warn, notifier: createNotifier(deps) };
+	return {
+		built,
+		state,
+		focus,
+		send,
+		warn,
+		/** Fire whatever the notifier scheduled, as the clock eventually would. */
+		runTimeouts: () => {
+			for (const fn of timeouts) fn();
+		},
+		notifier: createNotifier(deps),
+	};
 }
 
 function request(patch: Partial<NotifyRequest> = {}): NotifyRequest {
@@ -200,6 +233,76 @@ describe("createNotifier - a build that cannot show one", () => {
 	});
 });
 
+describe("createNotifier - the test notification", () => {
+	it("posts while the window is focused, which every other path refuses", async () => {
+		const { notifier, built } = harness({ focused: true });
+
+		const outcome = notifier.test();
+		built[0].fire("show");
+
+		// The whole point: the user is looking at the settings panel when they
+		// press the button. Route it through the focus check and the one
+		// notification they explicitly asked for is the one they never see.
+		await expect(outcome).resolves.toBe("shown");
+		expect(built).toHaveLength(1);
+	});
+
+	it("answers with what the system did, not with what was attempted", async () => {
+		const { notifier, built } = harness();
+
+		const outcome = notifier.test();
+		// A macOS bundle the OS will not authorize refuses here, after the post.
+		// Mutation check: resolve on `show()` returning instead and this reads
+		// "shown" - the one answer a test button must never give wrongly.
+		built[0].fire("failed");
+
+		await expect(outcome).resolves.toBe("unavailable");
+	});
+
+	it("latches the refusal a test uncovered, so the settings row can say so", async () => {
+		const { notifier, built } = harness();
+
+		const outcome = notifier.test();
+		built[0].fire("failed");
+		await outcome;
+
+		expect(notifier.availability()).toEqual({
+			available: false,
+			reason: NOTIFY_UNAVAILABLE_REASON,
+		});
+	});
+
+	it("carries the app's icon, which Linux draws and has nothing else to draw", async () => {
+		const { notifier, built } = harness({ iconPath: "/opt/vayu/icon.png", runTimeouts: true });
+
+		await notifier.test();
+
+		expect(built[0].options).toEqual({
+			title: NOTIFY_TEST_TITLE,
+			body: NOTIFY_TEST_BODY,
+			icon: "/opt/vayu/icon.png",
+		});
+	});
+
+	it("answers rather than hanging when the platform reports neither way", async () => {
+		const { notifier, runTimeouts } = harness();
+
+		const outcome = notifier.test();
+		runTimeouts();
+
+		// Not a claim that it appeared - the settings row's wording says as much.
+		// Without the timeout the button spins for the rest of the session.
+		await expect(outcome).resolves.toBe("shown");
+	});
+
+	it("refuses before posting on a platform with no notification service", async () => {
+		const { notifier, built } = harness({ supported: false });
+
+		await expect(notifier.test()).resolves.toBe("unsupported");
+		expect(built).toHaveLength(0);
+	});
+});
+
 describe("readNotifyRequest", () => {
 	it("refuses a request with no title, at the line that sent it", () => {
 		expect(() => readNotifyRequest({ kind: "k", body: "b" })).toThrow(TypeError);
@@ -247,12 +350,13 @@ describe("registerNotifyIpc", () => {
 		return { ipc, notifier };
 	}
 
-	it("wires both channels", () => {
+	it("wires all three channels", () => {
 		const { ipc } = wired();
 
 		expect([...ipc.handlers.keys()]).toEqual([
 			NOTIFY_SHOW_CHANNEL,
 			NOTIFY_AVAILABILITY_CHANNEL,
+			NOTIFY_TEST_CHANNEL,
 		]);
 	});
 

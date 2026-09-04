@@ -18,11 +18,15 @@ import { useClientSettingsStore } from "@/stores";
 function stubElectron(): {
 	showNotification: ReturnType<typeof vi.fn>;
 	notificationAvailability: ReturnType<typeof vi.fn>;
+	sendTestNotification: ReturnType<typeof vi.fn>;
 } {
 	const showNotification = vi.fn().mockResolvedValue("shown");
 	const notificationAvailability = vi.fn().mockResolvedValue({ available: true, reason: null });
-	vi.stubGlobal("window", { electronAPI: { showNotification, notificationAvailability } });
-	return { showNotification, notificationAvailability };
+	const sendTestNotification = vi.fn().mockResolvedValue("shown");
+	vi.stubGlobal("window", {
+		electronAPI: { showNotification, notificationAvailability, sendTestNotification },
+	});
+	return { showNotification, notificationAvailability, sendTestNotification };
 }
 
 const request = {
@@ -96,6 +100,32 @@ describe("systemNotify.post", () => {
 		await Promise.resolve();
 
 		expect(warn).toHaveBeenCalled();
+	});
+});
+
+describe("systemNotify.sendTest", () => {
+	it("posts whatever the opt-in says - it is how someone decides to turn it on", async () => {
+		const { sendTestNotification } = stubElectron();
+		sendTestNotification.mockResolvedValue("shown");
+
+		// Deliberately not gated the way `post` is. Add the setting check here
+		// and the button does nothing on exactly the machine someone is trying
+		// to find out about.
+		await expect(systemNotify.sendTest()).resolves.toBe("shown");
+		expect(sendTestNotification).toHaveBeenCalledTimes(1);
+	});
+
+	it("passes the system's refusal through rather than smoothing it over", async () => {
+		const { sendTestNotification } = stubElectron();
+		sendTestNotification.mockResolvedValue("unavailable");
+
+		await expect(systemNotify.sendTest()).resolves.toBe("unavailable");
+	});
+
+	it("answers null outside Electron instead of throwing at the button", async () => {
+		vi.stubGlobal("window", {});
+
+		await expect(systemNotify.sendTest()).resolves.toBeNull();
 	});
 });
 

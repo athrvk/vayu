@@ -21,6 +21,15 @@
  * drawn, so changing them does not restyle what is already on screen - which is
  * why this panel has a Preview button. Choosing a position or a duration
  * without being able to see it is guessing.
+ *
+ * **Each card carries exactly one Preview, and they are the same control.**
+ * Same word, same icon, same row under the settings it demonstrates, and the
+ * same shape of hint beside it - including what it says when it cannot fire,
+ * which is a floor on one card and the build on the other. Two names for one
+ * verb ("Preview" here, "Send a test notification" there) would read as two
+ * unrelated features rather than one channel each. Only the accessible name
+ * distinguishes them, because a screen reader hearing "Preview" twice on one
+ * screen learns nothing.
  */
 
 import { useEffect, useState } from "react";
@@ -35,6 +44,7 @@ import {
 	Eyebrow,
 } from "@/components/ui";
 import { systemNotify } from "@/services/notify";
+import type { SystemNotificationOutcome } from "@/types/electron";
 import { useClientSettingsStore, useToastStore } from "@/stores";
 import {
 	TOAST_POSITIONS,
@@ -127,6 +137,9 @@ export default function NotificationsPanel() {
 							<Button
 								variant="outline"
 								size="sm"
+								// See the system card: two buttons print "Preview",
+								// and the accessible name is what tells them apart.
+								aria-label="Preview a toast"
 								onClick={preview}
 								disabled={previewable.length === 0}
 								className="gap-1.5"
@@ -217,6 +230,27 @@ export default function NotificationsPanel() {
 }
 
 /**
+ * What became of a preview, including the case the main process cannot answer:
+ * outside Electron there is no bridge, and a button that then said nothing at
+ * all would read as broken rather than as inapplicable.
+ */
+type PreviewResult = SystemNotificationOutcome | "no-bridge";
+
+/** The line beside the button once a preview has been asked for. */
+const PREVIEW_RESULT_HINTS: Record<PreviewResult, string> = {
+	// Not a promise that it appeared: a system set to hide Vayu's notifications
+	// accepts the post and draws nothing, and only the user can see which.
+	shown: "Sent. If nothing appeared, check how your system treats notifications from Vayu.",
+	unavailable: "Your system refused it.",
+	unsupported: "This system has no notification service for Vayu to post to.",
+	"no-window": "Vayu has no window to post from.",
+	// The system preview bypasses the focus check, so this cannot arrive here.
+	// Worded for what it would mean rather than left to read as a failure.
+	focused: "Sent.",
+	"no-bridge": "Only available in the desktop app.",
+};
+
+/**
  * The one interruption Vayu makes outside its own window.
  *
  * A card of its own rather than a fifth row among the toast settings: it is not
@@ -235,6 +269,9 @@ function SystemNotificationsCard() {
 	const enabled = useClientSettingsStore((s) => s.systemNotifications);
 	const setEnabled = useClientSettingsStore((s) => s.setSystemNotifications);
 	const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
+	/** What the last preview did, or null before one is asked for. */
+	const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
+	const [previewing, setPreviewing] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -248,6 +285,43 @@ function SystemNotificationsCard() {
 			cancelled = true;
 		};
 	}, []);
+
+	/**
+	 * Post a real one, and say what the system did with it.
+	 *
+	 * The toast card's Preview exists because three of its settings only apply
+	 * to the *next* toast, so nothing on screen answers "what will this look
+	 * like". This card has the same question with a harder answer: whether the
+	 * OS will show one at all is not knowable from here, and on macOS the
+	 * refusal arrives *after* the notification is posted. So the outcome is
+	 * waited for rather than assumed, and the availability line is re-read once
+	 * it lands - the refusal latches in main, and this is what surfaces it
+	 * without a run having to finish first.
+	 */
+	const previewSystem = async () => {
+		setPreviewing(true);
+		setPreviewResult(null);
+		try {
+			const outcome = await systemNotify.sendTest();
+			setPreviewResult(outcome ?? "no-bridge");
+			const availability = await systemNotify.availability();
+			setUnavailableReason(availability?.available === false ? availability.reason : null);
+		} finally {
+			setPreviewing(false);
+		}
+	};
+
+	/*
+	 * The same shape the toast card's Preview uses, including what it says when
+	 * it cannot fire: a button that silently does nothing is indistinguishable
+	 * from a setting that did not apply, which is the defect that card's hint
+	 * was written to prevent. Here the reason is the build rather than a floor.
+	 */
+	const previewHint = previewResult
+		? PREVIEW_RESULT_HINTS[previewResult]
+		: unavailableReason
+			? "Nothing to preview - this build cannot post system notifications."
+			: "Posts a real one now, whether or not the setting above is on.";
 
 	return (
 		<Card>
@@ -269,6 +343,28 @@ function SystemNotificationsCard() {
 					checked={enabled}
 					onChange={setEnabled}
 				/>
+				{/*
+				 * One Preview per channel, in the same row idiom, so the panel
+				 * offers one verb rather than two names for it. Enabled whether or
+				 * not the setting above is on, deliberately: previewing is how
+				 * someone decides whether to turn it on.
+				 */}
+				<div className="flex items-center gap-2 mt-3">
+					<Button
+						variant="outline"
+						size="sm"
+						// Both cards print "Preview"; only the accessible name says
+						// which channel, so the two are not one word twice.
+						aria-label="Preview a system notification"
+						onClick={() => void previewSystem()}
+						disabled={previewing || unavailableReason !== null}
+						className="gap-1.5"
+					>
+						<Play className="w-3.5 h-3.5" />
+						Preview
+					</Button>
+					<p className="text-xs text-muted-foreground">{previewHint}</p>
+				</div>
 				{unavailableReason && (
 					<p className="mt-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-status-warning-text">
 						{unavailableReason}. Vayu will keep reporting these events as toasts.

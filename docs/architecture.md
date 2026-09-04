@@ -188,6 +188,14 @@ system notifications cannot be exercised by `pnpm electron:dev` on macOS. That
 refusal is caught, latched, and reported in Settings, with the toast standing in
 as the fallback.
 
+Because that answer only exists once something has been posted, Settings can ask
+for one: the Preview beside the toggle posts a real notification over
+`notify:test`, the single path that ignores both the focus check and the opt-in -
+the user is looking at the panel when they press it, and previewing is how they
+decide whether to turn the setting on. It waits for the OS rather than reporting
+what was attempted, so a refusal turns the row unavailable there and then instead
+of on the first run that ends.
+
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 
 ## Sidecar Pattern
