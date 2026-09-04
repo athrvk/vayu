@@ -72,13 +72,17 @@ vi.mock("./notify", async (importOriginal) => ({
 }));
 // The taskbar and Dock indicator (#1362), mocked at the same boundary: which
 // platform paints what is `electron/run-progress.ts`'s question.
-const { mockProgressReport, mockProgressFail, mockProgressClear } = vi.hoisted(() => ({
-	mockProgressReport: vi.fn(),
-	mockProgressFail: vi.fn(),
-	mockProgressClear: vi.fn(),
-}));
+const { mockProgressClaim, mockProgressReport, mockProgressFail, mockProgressClear } = vi.hoisted(
+	() => ({
+		mockProgressClaim: vi.fn(),
+		mockProgressReport: vi.fn(),
+		mockProgressFail: vi.fn(),
+		mockProgressClear: vi.fn(),
+	})
+);
 vi.mock("./run-progress", () => ({
 	runProgress: {
+		claim: mockProgressClaim,
 		report: mockProgressReport,
 		fail: mockProgressFail,
 		clear: mockProgressClear,
@@ -404,21 +408,37 @@ describe("ScenarioRunService", () => {
 	});
 
 	describe("the OS progress indicator (#1362)", () => {
+		/*
+		 * Every call names this run, not just its kind (#1405): `runProgress`
+		 * ignores a call from a run it is not showing, and a service that named
+		 * only `collection-run` would be indistinguishable from the collection
+		 * run this one superseded. Mutation check on each case: pass any other
+		 * id and it reddens.
+		 */
 		it("claims it with no fraction - the plan's length is the engine's to resolve", () => {
 			scenarioRunService.startMonitoring("run_20");
-			expect(mockProgressReport).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun, null);
+			expect(mockProgressClaim).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_20"
+			);
 		});
 
 		it("gives it up when the run ends", async () => {
 			scenarioRunService.startMonitoring("run_21");
 			await closeStream();
-			expect(mockProgressClear).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+			expect(mockProgressClear).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_21"
+			);
 		});
 
 		it("says failed when the stream errors", () => {
 			scenarioRunService.startMonitoring("run_22");
 			failStream("engine gone");
-			expect(mockProgressFail).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+			expect(mockProgressFail).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_22"
+			);
 		});
 
 		/*
@@ -430,7 +450,10 @@ describe("ScenarioRunService", () => {
 			scenarioRunService.startMonitoring("run_23");
 			failStream("engine gone");
 			await closeStream();
-			expect(mockProgressFail).toHaveBeenCalledWith(RUN_PROGRESS_KEYS.collectionRun);
+			expect(mockProgressFail).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_23"
+			);
 			expect(mockProgressClear).not.toHaveBeenCalled();
 		});
 	});

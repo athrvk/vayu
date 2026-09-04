@@ -222,8 +222,11 @@ error state; the bar clears on every terminal path, and main clears it itself
 when the renderer that asked for it is destroyed or reloads. One indicator is
 all the OS gives an application, and one run is all the renderer watches: the
 SSE client is a singleton, so starting a second run closes the first one's
-stream. The indicator follows the run being watched, and a superseded run's own
-stop is ignored rather than clearing the bar of the run that took over.
+stream. The indicator follows the run being watched: a run claims it by id when
+the renderer starts watching it, and a run that no longer holds that claim is
+ignored whether it reports, fails or stops - including a run of the same kind as
+the one that took over, and one whose last batched flush lands after it was
+superseded, neither of which a claim by kind could tell apart from the live run.
 
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 
