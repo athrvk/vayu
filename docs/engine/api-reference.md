@@ -896,9 +896,17 @@ A default that is switched off is **absent** rather than listed as disabled.
 `generated: true` means the value is made per send, so the row carries no
 `value` at all - an empty string would be a value a client would print.
 `configKey` names the setting that governs the row, and is absent for the
-`User-Agent`, which is always added. The answer describes a design-mode send;
-a load run reads `loadNegotiateCompression` instead, which is the one way the
-two can differ.
+`User-Agent`, which is always added.
+
+**`?scope=design|load` names the send the answer describes**, and defaults to
+`design`. Compression is the one default the two resolve differently: a design
+send (a Send, a collection run, a script's own request) reads
+`negotiateCompression` and a load run reads `loadNegotiateCompression`, so with
+the two disagreeing the `Accept-Encoding` row is present under one scope and
+absent under the other. A scope that is neither is refused with `400` and code
+`invalid_scope` rather than served the design answer, which would describe a
+run the caller is not asking about; an empty `?scope=` is absent rather than a
+scope of `""`, and answers for `design`.
 
 ### POST /config
 
