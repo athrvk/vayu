@@ -111,7 +111,6 @@ export function FontPicker({
 						onChange={(e) => onCustomChange(e.target.value)}
 						placeholder={placeholder}
 						className="max-w-sm"
-						spellCheck={false}
 						autoComplete="off"
 					/>
 					<p className="mt-1.5 text-xs text-muted-foreground">

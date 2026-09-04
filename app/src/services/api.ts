@@ -65,6 +65,7 @@ import type {
 	WorkspaceBackupResult,
 	GetConfigResponse,
 	RequestDefaults,
+	RequestDefaultsScope,
 	UpdateConfigRequest,
 	GlobalsResponse,
 	ImportFetchProgress,
@@ -178,8 +179,9 @@ export const apiService = {
 		return await httpClient.post<GetConfigResponse>(API_ENDPOINTS.CONFIG, config);
 	},
 
-	async getRequestDefaults(): Promise<RequestDefaults> {
-		return await httpClient.get<RequestDefaults>(API_ENDPOINTS.REQUEST_DEFAULTS);
+	async getRequestDefaults(scope?: RequestDefaultsScope): Promise<RequestDefaults> {
+		const params = scope ? { scope } : undefined;
+		return await httpClient.get<RequestDefaults>(API_ENDPOINTS.REQUEST_DEFAULTS, params);
 	},
 
 	// Collections

@@ -16,7 +16,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
-import type { GetConfigResponse, UpdateConfigRequest } from "@/types";
+import type { GetConfigResponse, RequestDefaultsScope, UpdateConfigRequest } from "@/types";
 
 /**
  * Fetch all configuration entries
@@ -37,11 +37,16 @@ export function useConfigQuery() {
  * which encodings it can even ask for), so a client that worked it out from the
  * config entries would be a second definition of the same rule. Cached like
  * config, and for the same reason - it changes only when config does.
+ *
+ * @param scope Defaults to `"design"` - what sending this request right now
+ *   would add, the Headers tab's answer. Pass `"load"` for what a load run
+ *   would add instead (issue #1338): `negotiateCompression` governs the
+ *   former and `loadNegotiateCompression` the latter, and they can disagree.
  */
-export function useRequestDefaultsQuery() {
+export function useRequestDefaultsQuery(scope: RequestDefaultsScope = "design") {
 	return useQuery({
-		queryKey: queryKeys.requestDefaults.all,
-		queryFn: () => apiService.getRequestDefaults(),
+		queryKey: queryKeys.requestDefaults.scope(scope),
+		queryFn: () => apiService.getRequestDefaults(scope),
 		staleTime: QUERY_CACHE.CONFIG_STALE_TIME_MS,
 	});
 }

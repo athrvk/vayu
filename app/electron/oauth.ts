@@ -49,6 +49,12 @@ function openAuthWindow(params: OpenAuthWindowParams): Promise<OpenAuthWindowRes
 			contextIsolation: true,
 			sandbox: true,
 			partition: params.partition ?? "oauth:default",
+			// Off here for the same reason as the main window (#1355), and with
+			// more cause: this one loads the IdP's own login form, so a first
+			// keystroke in it would fetch Hunspell dictionaries from a Google CDN
+			// on Windows and Linux - during a sign-in, from a window the user did
+			// not know was a browser.
+			spellcheck: false,
 		},
 	});
 

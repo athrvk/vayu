@@ -741,7 +741,6 @@ export default function SettingsMain() {
 							value={currentValue}
 							onChange={(e) => handleValueChange(entry, e.target.value)}
 							rows={8}
-							spellCheck={false}
 							className="font-mono text-xs"
 							// Same as the Switch above: the name is in the
 							// CardTitle, which nothing links to this control.

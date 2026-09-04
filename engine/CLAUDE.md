@@ -249,7 +249,7 @@ The daemon listens on `http://127.0.0.1:9876`. Key endpoints:
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
-| GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding` and an opt-in correlation id, so a client renders them instead of re-deriving them |
+| GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding` and an opt-in correlation id, so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |
 | POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (#987); no restore endpoint, see `docs/engine/architecture.md` |
 | GET | `/trash` | What deleting a collection or request left recoverable (#988): roots only, each with what its cascade took; `POST /trash/:id/restore` puts one back, `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
 | POST | `/import/parse` | Read a raw import document (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4) into the tree `/import/apply` persists (#877); reads only |
