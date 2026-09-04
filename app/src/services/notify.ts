@@ -28,7 +28,11 @@
  */
 
 import { useClientSettingsStore } from "@/stores";
-import type { SystemNotificationAvailability, SystemNotificationTarget } from "@/types/electron";
+import type {
+	SystemNotificationAvailability,
+	SystemNotificationOutcome,
+	SystemNotificationTarget,
+} from "@/types/electron";
 
 /** The events relevant enough to interrupt another application. */
 export const NOTIFY_KINDS = {
@@ -93,6 +97,25 @@ export const systemNotify = {
 				// at the run that was ending.
 				console.warn(`[notify] "${request.kind}" could not be posted`, error);
 			});
+	},
+
+	/**
+	 * Show one on purpose, because the user asked to see what these look like.
+	 *
+	 * Deliberately not gated on the opt-in the way `post` is: the setting
+	 * governs the events that fire on their own, and this one fires because
+	 * someone pressed a button to find out whether it works at all. `null`
+	 * outside Electron.
+	 */
+	async sendTest(): Promise<SystemNotificationOutcome | null> {
+		const api = bridge();
+		if (!api?.sendTestNotification) return null;
+		try {
+			return await api.sendTestNotification();
+		} catch (error: unknown) {
+			console.warn("[notify] the test notification could not be posted", error);
+			return null;
+		}
 	},
 
 	/**

@@ -297,6 +297,19 @@ interface ElectronAPI {
 	notificationAvailability: () => Promise<SystemNotificationAvailability>;
 
 	/**
+	 * Post one because the user pressed the button in Settings, and answer with
+	 * what the OS did.
+	 *
+	 * The only path that ignores the focus check and the opt-in, both
+	 * deliberately: the user is looking at the panel when they press it, which
+	 * is the state every other notification is suppressed in, and a test is how
+	 * someone decides whether to turn the setting on. `unavailable` means the
+	 * system refused it - which on macOS is the answer that only arrives after
+	 * the attempt, and the reason this resolves late rather than immediately.
+	 */
+	sendTestNotification: () => Promise<SystemNotificationOutcome>;
+
+	/**
 	 * A notification was clicked. The window is already coming back to the
 	 * front; this says what it was about, so the renderer can open it.
 	 */

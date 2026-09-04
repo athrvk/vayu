@@ -57,6 +57,8 @@ export const NOTIFY_SHOW_CHANNEL = "notify:show";
 export const NOTIFY_AVAILABILITY_CHANNEL = "notify:availability";
 /** A notification was clicked; the renderer navigates to what it was about. */
 export const NOTIFY_ACTIVATED_CHANNEL = "notify:activated";
+/** Post one on purpose, from the settings row, and report what the OS did. */
+export const NOTIFY_TEST_CHANNEL = "notify:test";
 
 /**
  * Where a click should land. Composed by the renderer, echoed back untouched -
@@ -91,15 +93,40 @@ export interface NotifyAvailability {
 /** The text the settings row shows once a build has proved it cannot notify. */
 export const NOTIFY_UNAVAILABLE_REASON = "System notifications are unavailable on this build";
 
+/** The text a test notification carries. Named so the settings row can quote it. */
+export const NOTIFY_TEST_TITLE = "Vayu";
+export const NOTIFY_TEST_BODY = "System notifications are working. This is what one looks like.";
+
+/**
+ * How long to wait for the OS to answer a test before calling it inconclusive.
+ *
+ * Every platform Vayu ships on emits `show` or `failed` for a posted
+ * notification, and both arrive immediately - this exists only so a platform
+ * that emits neither leaves the button spinning forever instead of answering.
+ */
+export const NOTIFY_TEST_TIMEOUT_MS = 4000;
+
 /** The slice of Electron's `Notification` this needs, so a test can pass a fake. */
 export interface NotificationLike {
-	on(event: "click" | "failed", listener: () => void): unknown;
+	on(event: "click" | "failed" | "show", listener: () => void): unknown;
 	show(): void;
 }
 
 export interface NotifyDeps {
-	/** Build one. Mirrors `new Notification(options)`. */
-	create: (options: { title: string; body: string }) => NotificationLike;
+	/**
+	 * Build one. Mirrors `new Notification(options)`.
+	 *
+	 * `icon` is the app's own icon, and which platform needs it differs. macOS
+	 * ignores it and draws the bundle's icon itself. Windows falls back to the
+	 * Start Menu shortcut's icon for the matching AppUserModelID, so it is
+	 * already right and this only makes it explicit. Linux is the one that
+	 * needs it: libnotify draws whatever the notification carries, and a
+	 * notification carrying nothing gets a generic placeholder or no icon at
+	 * all.
+	 */
+	create: (options: { title: string; body: string; icon?: string }) => NotificationLike;
+	/** Absolute path to the app icon, or undefined where it cannot be resolved. */
+	iconPath?: string;
 	/** `Notification.isSupported()` - false on a Linux box with no notification daemon. */
 	isSupported: () => boolean;
 	/**
@@ -113,11 +140,29 @@ export interface NotifyDeps {
 	focus: () => void;
 	/** Push an event to the renderer. A destroyed window is the caller's problem. */
 	send: (channel: string, payload: unknown) => void;
+	/** Run `fn` after `ms`. Injected so a test can fire or withhold the timeout. */
+	after?: (ms: number, fn: () => void) => void;
 }
 
 export interface Notifier {
 	show(request: NotifyRequest): NotifyOutcome;
 	availability(): NotifyAvailability;
+	/**
+	 * Post one because the user asked to see one, and answer with what the OS
+	 * actually did rather than with what was attempted.
+	 *
+	 * This is the only path that ignores the focus check, and it has to: the
+	 * user is looking at the settings panel when they press the button, which is
+	 * precisely the state every other notification is suppressed in. It ignores
+	 * the opt-in for the same reason - a test is how someone decides whether to
+	 * turn the setting on.
+	 *
+	 * Async, unlike `show`, because the answer is the point. macOS refuses a
+	 * bundle it does not authorize through a `failed` event that arrives after
+	 * the call returns, so a synchronous "sent" would be the one thing a test
+	 * button must never say.
+	 */
+	test(): Promise<NotifyOutcome>;
 }
 
 /** A target the renderer sent, or `{ view: "app" }` for anything unrecognised. */
@@ -164,16 +209,30 @@ export function createNotifier(deps: NotifyDeps): Notifier {
 	 * the one answer the settings row needs.
 	 */
 	let unavailableReason: string | null = null;
+	const after = deps.after ?? ((ms, fn) => setTimeout(fn, ms));
 
-	function show(request: NotifyRequest): NotifyOutcome {
-		if (unavailableReason !== null) return "unavailable";
-		if (!deps.isSupported()) return "unsupported";
-		if (!deps.hasWindow()) return "no-window";
-		// The rule the issue states: a user watching the dashboard is told once,
-		// by the toast, not twice.
-		if (deps.isFocused()) return "focused";
+	/** Latch the refusal, once, whichever notification brought it. */
+	function markUnavailable(): void {
+		if (unavailableReason !== null) return;
+		unavailableReason = NOTIFY_UNAVAILABLE_REASON;
+		console.warn(`[notify] ${NOTIFY_UNAVAILABLE_REASON}; falling back to in-app toasts`);
+	}
 
-		const notification = deps.create({ title: request.title, body: request.body });
+	/**
+	 * Build one and wire what every notification needs, whatever posted it: a
+	 * click brings the window back and tells the renderer what it was about, and
+	 * a refusal latches. One definition, so the test path cannot drift into
+	 * handling a refusal differently from the real ones.
+	 */
+	function build(
+		request: NotifyRequest,
+		hooks?: { onFailed?: () => void; onShow?: () => void }
+	): NotificationLike {
+		const notification = deps.create({
+			title: request.title,
+			body: request.body,
+			icon: deps.iconPath,
+		});
 		notification.on("click", () => {
 			deps.focus();
 			deps.send(NOTIFY_ACTIVATED_CHANNEL, {
@@ -181,17 +240,72 @@ export function createNotifier(deps: NotifyDeps): Notifier {
 				target: request.target,
 			});
 		});
+		// One listener per event, composed here rather than registered twice by
+		// the caller: `Notification` is an emitter and would run both, but the
+		// latch is this module's business either way and only one place should
+		// decide the order.
 		notification.on("failed", () => {
-			if (unavailableReason !== null) return;
-			unavailableReason = NOTIFY_UNAVAILABLE_REASON;
-			console.warn(`[notify] ${NOTIFY_UNAVAILABLE_REASON}; falling back to in-app toasts`);
+			markUnavailable();
+			hooks?.onFailed?.();
 		});
-		notification.show();
+		if (hooks?.onShow) notification.on("show", hooks.onShow);
+		return notification;
+	}
+
+	/** The gates every path shares. `null` when there is nothing in the way. */
+	function blocked(): NotifyOutcome | null {
+		if (unavailableReason !== null) return "unavailable";
+		if (!deps.isSupported()) return "unsupported";
+		if (!deps.hasWindow()) return "no-window";
+		return null;
+	}
+
+	function show(request: NotifyRequest): NotifyOutcome {
+		const stopped = blocked();
+		if (stopped) return stopped;
+		// The rule the issue states: a user watching the dashboard is told once,
+		// by the toast, not twice.
+		if (deps.isFocused()) return "focused";
+
+		build(request).show();
 		return "shown";
+	}
+
+	function test(): Promise<NotifyOutcome> {
+		const stopped = blocked();
+		if (stopped) return Promise.resolve(stopped);
+
+		return new Promise<NotifyOutcome>((resolve) => {
+			let settled = false;
+			const settle = (outcome: NotifyOutcome) => {
+				if (settled) return;
+				settled = true;
+				resolve(outcome);
+			};
+
+			const notification = build(
+				{
+					kind: "test",
+					title: NOTIFY_TEST_TITLE,
+					body: NOTIFY_TEST_BODY,
+					target: { view: "settings" },
+				},
+				{
+					onFailed: () => settle("unavailable"),
+					onShow: () => settle("shown"),
+				}
+			);
+			// A platform that answers neither way must not leave the button
+			// spinning. `shown` here means "posted, and nothing refused it" - which
+			// is what the settings row's wording promises, no more.
+			after(NOTIFY_TEST_TIMEOUT_MS, () => settle("shown"));
+			notification.show();
+		});
 	}
 
 	return {
 		show,
+		test,
 		availability(): NotifyAvailability {
 			if (unavailableReason !== null) return { available: false, reason: unavailableReason };
 			if (!deps.isSupported()) {
@@ -212,4 +326,5 @@ export function registerNotifyIpc(ipc: IpcLike, notifier: Notifier): void {
 		notifier.show(readNotifyRequest(args[0]))
 	);
 	ipc.handle(NOTIFY_AVAILABILITY_CHANNEL, () => notifier.availability());
+	ipc.handle(NOTIFY_TEST_CHANNEL, () => notifier.test());
 }

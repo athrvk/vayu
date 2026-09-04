@@ -140,6 +140,21 @@ function liveWindow(): BrowserWindow | null {
 }
 
 /**
+ * The app's own icon on disk, for the surfaces that draw one themselves.
+ *
+ * Bundled as a loose resource (`extraResources`) so it resolves at runtime
+ * rather than from inside the asar; in dev it lives in the repo's shared
+ * assets. Two callers: the native About panel, and the system notifications,
+ * which Linux draws with whatever the notification carries and nothing
+ * otherwise (#1358).
+ */
+function appIconPath(): string {
+	return isDev
+		? path.join(app.getAppPath(), "..", "shared", "icon_png", "vayu_icon_256x256.png")
+		: path.join(process.resourcesPath, "icon.png");
+}
+
+/**
  * Bring the window back to the user, from wherever it is: minimized, hidden,
  * or behind another application.
  *
@@ -829,6 +844,9 @@ function setupIpcHandlers() {
 		ipcMain,
 		createNotifier({
 			create: (options) => new Notification(options),
+			// Linux draws only what the notification carries; macOS ignores this
+			// and uses the bundle's icon; Windows falls back to the shortcut's.
+			iconPath: appIconPath(),
 			isSupported: () => Notification.isSupported(),
 			isFocused: () => liveWindow()?.isFocused() ?? false,
 			hasWindow: () => liveWindow() !== null,
@@ -1174,11 +1192,7 @@ app.whenReady().then(async () => {
 
 	// Populate the native About panel (used by Help → About Vayu on
 	// Windows/Linux, and the macOS app menu's About item).
-	// iconPath is bundled as a loose resource (extraResources) so it resolves
-	// at runtime; in dev it lives in the repo's shared assets.
-	const aboutIconPath = isDev
-		? path.join(app.getAppPath(), "..", "shared", "icon_png", "vayu_icon_256x256.png")
-		: path.join(process.resourcesPath, "icon.png");
+	const aboutIconPath = appIconPath();
 	app.setAboutPanelOptions({
 		applicationName: "Vayu",
 		applicationVersion: app.getVersion(),

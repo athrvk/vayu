@@ -305,6 +305,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	}): Promise<string> => ipcRenderer.invoke("notify:show", request),
 	notificationAvailability: (): Promise<{ available: boolean; reason: string | null }> =>
 		ipcRenderer.invoke("notify:availability"),
+	// Post one on purpose, from the settings row. Unlike every other path this
+	// one ignores both the focus check and the opt-in - the user is looking at
+	// the panel when they press it, and a test is how they decide whether to
+	// turn the setting on. Resolves with what the OS did, not with what was
+	// attempted: a refusal arrives after the call and is what this waits for.
+	sendTestNotification: (): Promise<string> => ipcRenderer.invoke("notify:test"),
 	// A notification was clicked. Carries what it was about, so the renderer can
 	// open it - main has no opinion about the app's own surfaces.
 	onNotificationActivated: (
