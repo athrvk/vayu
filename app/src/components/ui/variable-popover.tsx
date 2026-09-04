@@ -48,7 +48,7 @@
  * a scope that cannot be written is a Create button that does nothing.
  */
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useId } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
 import { TooltipIconButton } from "./tooltip-icon-button";
@@ -301,6 +301,43 @@ export function VariablePopover({
 	// pointing at a no-op.
 	const activeCreateScope =
 		createScope && creatableScopes.includes(createScope) ? createScope : creatableScopes[0];
+	const createValueRef = useRef<HTMLInputElement>(null);
+	const createScopeGroupRef = useRef<HTMLDivElement>(null);
+	const createScopeLabelId = useId();
+
+	/**
+	 * Picking a scope is a modifier on the value, not a destination (issue #1380).
+	 *
+	 * A chip is a `<button>`, so clicking one takes focus the way any button does,
+	 * and the field's `autoFocus` only ever ran at mount - so choosing the scope
+	 * first and then typing put the keystrokes nowhere and left Enter re-pressing
+	 * the chip. The click hands focus back to the value the chip qualifies.
+	 */
+	const selectCreateScope = (scope: VariableScope) => {
+		setCreateScope(scope);
+		createValueRef.current?.focus();
+	};
+
+	/**
+	 * Arrow movement inside the group, where focus follows selection.
+	 *
+	 * The WAI-ARIA radio group pattern, as `ProfilePicker.tsx` spells it out: the
+	 * group is one Tab stop (roving `tabIndex`), and arrows move *and* select,
+	 * wrapping at the ends - the user is choosing as they arrow, not navigating
+	 * and then committing. Focus stays on the chips here rather than returning to
+	 * the field, because otherwise the second arrow press would have nothing to
+	 * move from.
+	 */
+	const moveCreateScope = (delta: number) => {
+		const index = creatableScopes.findIndex((s) => s === activeCreateScope);
+		const next =
+			creatableScopes[(index + delta + creatableScopes.length) % creatableScopes.length];
+		if (!next) return;
+		setCreateScope(next);
+		createScopeGroupRef.current
+			?.querySelector<HTMLElement>(`[data-create-scope="${next}"]`)
+			?.focus();
+	};
 
 	const handleOpenChange = (open: boolean) => {
 		if (open) {
@@ -331,8 +368,21 @@ export function VariablePopover({
 		closePopover();
 	};
 
+	/**
+	 * An empty field is not a variable worth writing (issue #1380).
+	 *
+	 * `mergeVariable` stores what it is handed, so an empty value defines the name
+	 * as `""` - a definition that resolves, so the token stops reading as
+	 * undefined and answers with nothing. That is worse than the state it
+	 * replaced, and it is one stray click away while the field is still empty, so
+	 * the write is refused here and the Create button is disabled for the same
+	 * reason. Refused rather than trimmed: a value of spaces is a value the user
+	 * typed, and this popover is not the place to have an opinion about it.
+	 */
+	const canSubmitCreate = editValue.length > 0;
+
 	const handleCreate = () => {
-		if (!onValueChange || !activeCreateScope) return;
+		if (!onValueChange || !activeCreateScope || !canSubmitCreate) return;
 		onValueChange(name, editValue, activeCreateScope);
 		closePopover();
 	};
@@ -646,10 +696,14 @@ export function VariablePopover({
 					) : canCreate ? (
 						<>
 							<Input
+								ref={createValueRef}
 								value={editValue}
 								onChange={(e) => setEditValue(e.target.value)}
 								onKeyDown={(e) => {
-									if (e.key === "Enter") {
+									// `isCommitEnter`, not a bare Enter (#939): an IME
+									// commits its composition with the same keydown, and
+									// the app's Send chord is Ctrl/Cmd+Enter.
+									if (isCommitEnter(e)) {
 										e.preventDefault();
 										handleCreate();
 									}
@@ -660,36 +714,88 @@ export function VariablePopover({
 								autoFocus
 							/>
 							<div className="flex items-center gap-1.5">
-								<span className="shrink-0 text-[10px] text-muted-foreground">
+								<span
+									id={createScopeLabelId}
+									className="shrink-0 text-[10px] text-muted-foreground"
+								>
 									create in
 								</span>
 								{/*
-								 * Only writable scopes appear. A picker offering
-								 * "Environment" with none selected would produce a
-								 * Create button that silently does nothing.
+								 * Three mutually exclusive choices, so a radio group -
+								 * `aria-pressed` chips said "three independent toggles,
+								 * two of them off" to a screen reader, and each was its
+								 * own Tab stop in the middle of a two-control form.
+								 *
+								 * The arrow handler sits on the chips rather than on the
+								 * group: keydown from the focused chip bubbles either
+								 * way, and a handler on the group would make it an
+								 * unfocusable interactive element that `jsx-a11y` can
+								 * only be silenced about at the line.
 								 */}
-								{creatableScopes.map((scope) => (
-									<button
-										key={scope}
-										type="button"
-										onClick={() => setCreateScope(scope)}
-										aria-pressed={scope === activeCreateScope}
-										className={cn(
-											"rounded-md border px-1.5 py-0.5 text-[10px] transition-colors",
-											scope === activeCreateScope
-												? cn(
-														VARIABLE_SCOPE_CONFIG[scope].tint,
-														VARIABLE_SCOPE_CONFIG[scope].border
-													)
-												: "border-transparent text-muted-foreground hover:bg-accent"
-										)}
-									>
-										{VARIABLE_SCOPE_CONFIG[scope].full}
-									</button>
-								))}
+								<div
+									ref={createScopeGroupRef}
+									role="radiogroup"
+									aria-labelledby={createScopeLabelId}
+									className="flex items-center gap-1.5"
+								>
+									{/*
+									 * Only writable scopes appear. A picker offering
+									 * "Environment" with none selected would produce a
+									 * Create button that silently does nothing.
+									 */}
+									{creatableScopes.map((scope) => {
+										const selected = scope === activeCreateScope;
+										return (
+											<button
+												key={scope}
+												type="button"
+												role="radio"
+												aria-checked={selected}
+												data-create-scope={scope}
+												// Roving tabindex: the group is one Tab stop.
+												tabIndex={selected ? 0 : -1}
+												onClick={() => selectCreateScope(scope)}
+												onKeyDown={(e) => {
+													// A chip that has focus and a value
+													// already typed leaves Enter nothing
+													// else to mean.
+													if (isCommitEnter(e)) {
+														e.preventDefault();
+														handleCreate();
+														return;
+													}
+													const delta =
+														e.key === "ArrowRight" ||
+														e.key === "ArrowDown"
+															? 1
+															: e.key === "ArrowLeft" ||
+																  e.key === "ArrowUp"
+																? -1
+																: 0;
+													if (delta === 0) return;
+													// Arrows would otherwise scroll the panel.
+													e.preventDefault();
+													moveCreateScope(delta);
+												}}
+												className={cn(
+													"rounded-md border px-1.5 py-0.5 text-[10px] transition-colors",
+													selected
+														? cn(
+																VARIABLE_SCOPE_CONFIG[scope].tint,
+																VARIABLE_SCOPE_CONFIG[scope].border
+															)
+														: "border-transparent text-muted-foreground hover:bg-accent"
+												)}
+											>
+												{VARIABLE_SCOPE_CONFIG[scope].full}
+											</button>
+										);
+									})}
+								</div>
 								<Button
 									size="sm"
 									className="ml-auto h-6 px-2 text-[11px]"
+									disabled={!canSubmitCreate}
 									onClick={handleCreate}
 								>
 									Create

@@ -257,7 +257,7 @@ describe("an undefined variable can define itself", () => {
 			writableScopes: ["global", "environment"],
 		});
 		const panel = open();
-		fireEvent.click(within(panel).getByRole("button", { name: "Global" }));
+		fireEvent.click(within(panel).getByRole("radio", { name: "Global" }));
 		fireEvent.change(within(panel).getByLabelText(/value for new variable/i), {
 			target: { value: "abc" },
 		});
@@ -271,11 +271,9 @@ describe("an undefined variable can define itself", () => {
 		// that appears to work and does not.
 		renderPopover({ varInfo: null, resolved: false, writableScopes: ["global"] });
 		const panel = open();
-		expect(within(panel).getByRole("button", { name: "Global" })).toBeInTheDocument();
-		expect(
-			within(panel).queryByRole("button", { name: "Environment" })
-		).not.toBeInTheDocument();
-		expect(within(panel).queryByRole("button", { name: "Collection" })).not.toBeInTheDocument();
+		expect(within(panel).getByRole("radio", { name: "Global" })).toBeInTheDocument();
+		expect(within(panel).queryByRole("radio", { name: "Environment" })).not.toBeInTheDocument();
+		expect(within(panel).queryByRole("radio", { name: "Collection" })).not.toBeInTheDocument();
 	});
 
 	it("falls back to explaining, when nothing at all is writable", () => {
@@ -283,6 +281,171 @@ describe("an undefined variable can define itself", () => {
 		const panel = open();
 		expect(within(panel).getByText(/Variable not defined/)).toBeInTheDocument();
 		expect(within(panel).queryByRole("button", { name: "Create" })).not.toBeInTheDocument();
+	});
+});
+
+/**
+ * Picking a scope used to end the interaction (issue #1380).
+ *
+ * The chips are `<button>`s, so clicking one took focus the way any button does,
+ * and the value field's `autoFocus` had run once at mount and had nothing left
+ * to give. Choosing "Collection" first and then typing put the keystrokes
+ * nowhere, and Enter re-pressed the chip instead of creating - the field sat
+ * empty beside a Create button that would have written an empty variable.
+ *
+ * jsdom does not move focus on a click the way a browser does, so each case here
+ * focuses the chip first: that is the browser behaviour under test, and asserting
+ * where focus lands afterwards is the only thing that distinguishes the fix.
+ */
+describe("the create row's keyboard model", () => {
+	/** The create branch, with all three scopes writable. */
+	function openCreate(
+		writableScopes: ("global" | "collection" | "environment")[] = [
+			"global",
+			"collection",
+			"environment",
+		]
+	) {
+		const { onValueChange } = renderPopover({ varInfo: null, resolved: false, writableScopes });
+		const panel = open();
+		const field = within(panel).getByLabelText(/value for new variable/i);
+		const chip = (label: string) => within(panel).getByRole("radio", { name: label });
+		return { onValueChange, panel, field, chip };
+	}
+
+	it("hands focus back to the value field when a chip is clicked", () => {
+		const { field, chip } = openCreate();
+		const collection = chip("Collection");
+		collection.focus();
+		fireEvent.click(collection);
+		// Drop the `.focus()` from the click handler and focus stays on the chip.
+		expect(document.activeElement).toBe(field);
+		expect(collection).toHaveAttribute("aria-checked", "true");
+	});
+
+	it("creates with the picked scope from a value typed after the pick", () => {
+		const { onValueChange, field, chip } = openCreate();
+		fireEvent.click(chip("Collection"));
+		fireEvent.change(field, { target: { value: "abc" } });
+		fireEvent.keyDown(field, { key: "Enter" });
+		expect(onValueChange).toHaveBeenCalledTimes(1);
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "collection");
+	});
+
+	it("is one Tab stop, with the selected chip carrying it", () => {
+		// Three chips, three tab stops in a two-control form, was the other half
+		// of the defect. Roving tabindex is what makes the group one stop.
+		const { chip } = openCreate();
+		expect(chip("Environment")).toHaveAttribute("tabindex", "0");
+		expect(chip("Collection")).toHaveAttribute("tabindex", "-1");
+		expect(chip("Global")).toHaveAttribute("tabindex", "-1");
+	});
+
+	it("moves selection and focus together on the arrow keys, wrapping at the ends", () => {
+		const { chip } = openCreate();
+		// Preference order is environment, collection, global.
+		const environment = chip("Environment");
+		environment.focus();
+
+		fireEvent.keyDown(environment, { key: "ArrowRight" });
+		expect(chip("Collection")).toHaveAttribute("aria-checked", "true");
+		expect(document.activeElement).toBe(chip("Collection"));
+
+		fireEvent.keyDown(chip("Collection"), { key: "ArrowLeft" });
+		expect(chip("Environment")).toHaveAttribute("aria-checked", "true");
+
+		// Wrapping: left from the first lands on the last.
+		fireEvent.keyDown(chip("Environment"), { key: "ArrowLeft" });
+		expect(chip("Global")).toHaveAttribute("aria-checked", "true");
+		expect(document.activeElement).toBe(chip("Global"));
+	});
+
+	it("reads as one choice out of three, not three independent toggles", () => {
+		const { panel, chip } = openCreate();
+		const group = within(panel).getByRole("radiogroup");
+		expect(group).toHaveAccessibleName("create in");
+		expect(chip("Environment")).toHaveAttribute("aria-checked", "true");
+		expect(chip("Global")).toHaveAttribute("aria-checked", "false");
+		expect(chip("Global")).not.toHaveAttribute("aria-pressed");
+	});
+
+	it("creates from a chip that has focus, since Enter has nothing else to mean", () => {
+		const { onValueChange, field, chip } = openCreate();
+		fireEvent.click(chip("Global"));
+		fireEvent.change(field, { target: { value: "abc" } });
+		// Tab from the field lands on the selected chip - the only one in the tab
+		// order - so that is the chip Enter can arrive on.
+		const global = chip("Global");
+		expect(global).toHaveAttribute("tabindex", "0");
+		global.focus();
+		fireEvent.keyDown(global, { key: "Enter" });
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "abc", "global");
+	});
+
+	it("ignores an Enter that only commits an IME buffer", () => {
+		// The same guard the edit field carries (#939): the composition commit
+		// arrives as an ordinary Enter keydown, so an unguarded field creates a
+		// variable out of a half-composed value.
+		const { onValueChange, field } = openCreate();
+		fireEvent.change(field, { target: { value: "ab" } });
+		fireEvent.keyDown(field, { key: "Enter", isComposing: true });
+		expect(onValueChange).not.toHaveBeenCalled();
+		fireEvent.keyDown(field, { key: "Enter" });
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "ab", "environment");
+	});
+});
+
+/**
+ * An empty field is not a variable worth writing (issue #1380).
+ *
+ * `mergeVariable` stores what it is handed, so Create on an empty field defined
+ * the name as `""` - which *resolves*, so the token stops reading as undefined
+ * and answers with nothing. The popover would then close over a silent write the
+ * user never typed.
+ */
+describe("creating with nothing typed", () => {
+	it("refuses the write and says so by disabling Create", () => {
+		const { onValueChange } = renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: ["global", "environment"],
+		});
+		const panel = open();
+		const create = within(panel).getByRole("button", { name: "Create" });
+		expect(create).toBeDisabled();
+		fireEvent.click(create);
+		expect(onValueChange).not.toHaveBeenCalled();
+	});
+
+	it("refuses it on Enter too, so the keyboard path is not the way in", () => {
+		const { onValueChange } = renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: ["global", "environment"],
+		});
+		const panel = open();
+		fireEvent.keyDown(within(panel).getByLabelText(/value for new variable/i), {
+			key: "Enter",
+		});
+		expect(onValueChange).not.toHaveBeenCalled();
+		// And the popover is still open to type into.
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+	});
+
+	it("enables Create as soon as something is typed", () => {
+		const { onValueChange } = renderPopover({
+			varInfo: null,
+			resolved: false,
+			writableScopes: ["global", "environment"],
+		});
+		const panel = open();
+		fireEvent.change(within(panel).getByLabelText(/value for new variable/i), {
+			target: { value: "x" },
+		});
+		const create = within(panel).getByRole("button", { name: "Create" });
+		expect(create).toBeEnabled();
+		fireEvent.click(create);
+		expect(onValueChange).toHaveBeenCalledWith("merchantId", "x", "environment");
 	});
 });
 
