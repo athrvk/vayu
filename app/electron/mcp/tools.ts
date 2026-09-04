@@ -1696,6 +1696,27 @@ function applyRecordingKnobs(
 	if (comment !== undefined) payload.comment = comment;
 }
 
+/**
+ * Copy the default-header opt-outs onto an execute or run payload (issue #1337).
+ *
+ * Beside the composed payload rather than through composition, for the reason
+ * `data` is: composition resolves `{{variables}}` and the auth chain, and an
+ * opt-out is neither - it is a send-time fact about the engine's own defaults,
+ * never stored on a request and never interpolated. `POST /execute` and
+ * `POST /runs` read it off the payload they are given.
+ *
+ * Absent stays absent: an empty list and no list say the same thing to the
+ * engine, and sending one where the agent named none would be this layer
+ * making a claim on its behalf.
+ */
+function applyDefaultHeaderOptOuts(
+	args: Record<string, unknown>,
+	payload: Record<string, unknown>
+): void {
+	const names = args.disabledDefaultHeaders;
+	if (Array.isArray(names)) payload.disabledDefaultHeaders = names;
+}
+
 // --- Shared input schema fragments ------------------------------------------
 
 /** Optional resolution scope shared by the ad-hoc execute/load tools. */
@@ -1746,7 +1767,25 @@ const environmentIdInput = z
  * paraphrases of the same rule are three things to keep in step with the engine.
  */
 export const ENGINE_DEFAULT_HEADERS_SENTENCE =
-	"Headers the engine adds itself: every request sent through Vayu that does not already name them gets a `User-Agent` (`Vayu/<version>`), an `Accept-Encoding` negotiating the compression this build can decode, and - only when the user has switched it on - a fresh per-request correlation id (`X-Vayu-Request-Id` by default). They are added at send time and never stored on a request, and a header you write under one of those names always wins, so setting `User-Agent` yourself is how you control what the target sees. Refusing one outright - sending no `User-Agent` at all - is the engine's `disabledDefaultHeaders` field, which names the headers a send declines; the app's Headers tab offers it as a tick per header, and it is not an argument these tools take.";
+	"Headers the engine adds itself: every request sent through Vayu that does not already name them gets a `User-Agent` (`Vayu/<version>`), an `Accept-Encoding` negotiating the compression this build can decode, and - only when the user has switched it on - a fresh per-request correlation id (`X-Vayu-Request-Id` by default). They are added at send time and never stored on a request, and a header you write under one of those names always wins, so setting `User-Agent` yourself is how you control what the target sees. Refusing one outright - sending no `User-Agent` at all - is the engine's `disabledDefaultHeaders` field, which names the headers a send declines; the app's Headers tab offers it as a tick per header, and run_request and start_load_run take it as an argument. run_collection_smoke does not: it replays each saved request exactly as stored, so a refusal there would be a per-send decision applied to requests the agent did not write.";
+
+/**
+ * The default headers one send refuses (issue #1337), as `disabledDefaultHeaders`.
+ *
+ * One fragment for the two tools that build a request payload: the field means
+ * the same thing on `POST /execute` and `POST /runs`, and the engine reads it
+ * off both through the same `read_default_header_opt_outs` (`utils/json.cpp`).
+ *
+ * Shape only. The engine owns what a usable header name is and refuses a bad
+ * one by name, so a second copy of that rule here could only drift from it -
+ * the same posture `thresholds` and the stream caps take.
+ */
+const defaultHeaderOptOutsInput = z
+	.array(z.string())
+	.optional()
+	.describe(
+		'Default headers this send refuses, by name (e.g. ["User-Agent", "Accept-Encoding"]). This is the only way to send a request with **no** User-Agent at all - writing one yourself replaces the value but still sends the header. Only the engine\'s own defaults are refusable; a name it adds nothing under is accepted and does nothing, and a name that cannot be a header name is refused by the engine. Nothing is stored: the refusal applies to this send alone.'
+	);
 
 export const INSECURE_TLS_REFUSAL =
 	"verifySSL: false is not accepted on a one-off send - a skipped certificate check has to leave a record, and an argument on a single call leaves none. Two ways forward: ask the user to add the internal authority under Vayu Settings > Network & connectivity, which keeps verification on for every request; or save the request with create_request/update_request `verifySSL: false` and run it (run_collection_smoke composes a saved request exactly as stored). The app then shows that request as accepting any certificate, and the user can untick it.";
@@ -2634,6 +2673,10 @@ const SINGLE_TARGET_LOAD_FIELDS: ReadonlyArray<[string, string]> = [
 	[
 		"data",
 		"a collection run states its rows as `scenario.data`, where one row is bound per iteration and shared by every step",
+	],
+	[
+		"disabledDefaultHeaders",
+		"the engine reads a send's default-header refusals off one request's payload, and a scenario's steps are each composed from their own saved request",
 	],
 	["postRequestScript", "each step runs the scripts stored on it and its collection chain"],
 	["tests", "each step runs the scripts stored on it and its collection chain"],
@@ -4082,6 +4125,7 @@ export const TOOLS: McpTool[] = [
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,
 			data: dataRowInput,
+			disabledDefaultHeaders: defaultHeaderOptOutsInput,
 			preRequestScript: z
 				.string()
 				.optional()
@@ -4148,6 +4192,11 @@ export const TOOLS: McpTool[] = [
 			// row (issue #601). Absent means today's send, unchanged.
 			const dataRow = args.data;
 			if (dataRow !== undefined && dataRow !== null) payload.data = dataRow;
+
+			// The same posture, and the same reason it is not composed: the names
+			// say which of the engine's own defaults this send declines, which
+			// composition neither reads nor rewrites (issue #1337).
+			applyDefaultHeaderOptOuts(args, payload);
 
 			// Stated on every call, never elided: the two answers have different
 			// *shapes* - `202 {runId, eventsUrl}` against the exchange - so a
@@ -6493,6 +6542,7 @@ export const TOOLS: McpTool[] = [
 			collectionId: collectionIdInput,
 			postRequestScript: validationScriptInput,
 			tests: validationScriptAliasInput,
+			disabledDefaultHeaders: defaultHeaderOptOutsInput,
 			// The single-target data set (issue #993). Bounded by the engine's
 			// own `maxScenarioDataRows` / `maxScenarioDataBytes`, whose 400 is
 			// surfaced verbatim rather than re-derived here - the same posture
@@ -6636,6 +6686,11 @@ export const TOOLS: McpTool[] = [
 				payload.monitor = monitor;
 			}
 			applyRecordingKnobs(args, payload);
+			// A single target's own send-time refusals (issue #1337). A scenario
+			// run never reaches here: it refuses the field by name, because its
+			// steps are composed one by one and nothing reads a run-level
+			// opt-out - see SINGLE_TARGET_LOAD_FIELDS.
+			applyDefaultHeaderOptOuts(args, payload);
 			// An omitted duration is 60s engine-side, not "unbounded" and not
 			// "capped" - so a cap under 60s has to be sent as an explicit field
 			// or it never reaches the run.

@@ -894,7 +894,16 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   where one is switched on - and
   the `Cookie` line the jar matched for the environment. A header the call
   wrote itself always wins over the default of that name, and
-  `disabledDefaultHeaders` on the payload refuses one outright. So the request an agent
+  `disabledDefaultHeaders` on the payload refuses one outright.
+  `run_request` and `start_load_run` take that list as an argument
+  (issue [#1337](https://github.com/athrvk/vayu/issues/1337)), which is how an
+  agent sends a request with no `User-Agent` at all rather than one carrying a
+  value it chose; it rides beside the composed payload, because the names say
+  which of the engine's own defaults this send declines and composition neither
+  reads nor rewrites them. `run_collection_smoke` does not take it - it replays
+  each saved request exactly as stored - and a scenario load run refuses it by
+  name, as it does every other single-target field, because its steps are each
+  composed from their own saved request. So the request an agent
   composed is not the request that was sent, and asserting on the composed one
   is how a correct request gets reported as wrong. `requestHeaders` in the
   result is the sent record - composed plus everything but the `Cookie` line,
