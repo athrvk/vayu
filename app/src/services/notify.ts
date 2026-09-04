@@ -23,8 +23,8 @@
  *
  * `post` is fire-and-forget by design: no call site may await the OS to get on
  * with ending a run. Every event that posts one also raises its toast, so a
- * build that cannot notify (see `notify.ts` on unsigned macOS) still tells the
- * user everything - just only where they can already see it.
+ * build that cannot notify (see `notify.ts` on what macOS authorizes) still
+ * tells the user everything - just only where they can already see it.
  */
 
 import { useClientSettingsStore } from "@/stores";

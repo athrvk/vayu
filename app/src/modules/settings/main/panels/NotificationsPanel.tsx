@@ -224,9 +224,11 @@ export default function NotificationsPanel() {
  * anything the user configures. `services/notify.ts` holds that list.
  *
  * The availability line is asked of the main process rather than guessed from
- * the platform. Vayu ships ad-hoc signed on macOS, and Electron 42+ refuses
- * notifications from an application without a code signature - which the app
- * only learns when the first one fails. A toggle that silently does nothing is
+ * the platform. macOS authorizes notifications per bundle and refuses one whose
+ * code signature does not bind its own `Info.plist` - which is the dev
+ * `Electron.app` and anything taken straight out of the DMG, though not an
+ * installed build, since `install.sh` re-signs it. The app only learns which it
+ * is when the first notification fails. A toggle that silently does nothing is
  * the outcome this line exists to prevent.
  */
 function SystemNotificationsCard() {

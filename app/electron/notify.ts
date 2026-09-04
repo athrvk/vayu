@@ -23,17 +23,28 @@
  * so is the platform's willingness to show anything at all.
  *
  * On macOS that willingness is not a given. Electron 42 moved notifications to
- * `UNNotification`, which refuses an application that is not code-signed, and
- * Vayu ships ad-hoc signed (see `install.sh`, and the `use-mock-keychain`
- * comment in `main.ts`, which is gated on the same missing Developer ID).
- * Whether an ad-hoc signature satisfies it is not documented either way, so
- * this does not assume the answer: a refusal arrives as a `failed` event rather
- * than a throw, and is caught here, latched, and reported to the settings panel
- * - the honest answer for a build that cannot do this, instead of a toggle that
- * silently does nothing.
- * The user still gets the in-app toast that every one of these events already
- * raises. If a Developer ID signature ever lands, the latch stops arming on
- * its own.
+ * `UNNotification`, which authorizes the *bundle*, and the OS reads the
+ * bundle's own code signature to decide which one it is authorizing. A
+ * Developer ID is not what it wants: ad-hoc is enough, as long as the signature
+ * binds `Info.plist` - so the identifier it grants is `io.github.athrvk.vayu`
+ * rather than whatever Electron's prebuilt binary was signed as - and the app
+ * sits in a normal install location. `install.sh` re-signs what it unpacks
+ * (`codesign --force --deep --sign -`), so an installed Vayu satisfies both.
+ *
+ * Three cases do not, and each arrives as a `failed` event rather than a throw.
+ * `pnpm electron:dev` runs `node_modules/electron/dist/Electron.app`, whose
+ * linker signature leaves `Info.plist` unbound under the identifier `Electron`,
+ * so system notifications cannot be exercised in dev on macOS at all - the
+ * settings row calls them unavailable, and it is right. A bundle dragged
+ * straight out of the DMG has the same shape, because electron-builder skips
+ * signing when it finds no Developer ID. And a user who denies the permission
+ * prompt is the third, which is the one the feature has to respect.
+ *
+ * So the refusal is caught here, latched, and reported to the settings panel -
+ * the honest answer for a build that cannot do this, instead of a toggle that
+ * silently does nothing. The user still gets the in-app toast that every one of
+ * these events already raises, and the latch stops arming on its own once the
+ * bundle is one macOS accepts.
  *
  * Kept out of main.ts so it can be tested: main.ts creates windows and starts
  * the engine at import time. The Electron surfaces arrive as arguments for the
@@ -148,7 +159,7 @@ export function readNotifyRequest(value: unknown): NotifyRequest {
 export function createNotifier(deps: NotifyDeps): Notifier {
 	/*
 	 * Latched on the first `failed`, never cleared. The refusal is a property of
-	 * the build (unsigned macOS, see the header), not of one notification, so
+	 * the bundle and its permission (see the header), not of one notification, so
 	 * retrying it every run would post a stream of failures nobody sees and hide
 	 * the one answer the settings row needs.
 	 */

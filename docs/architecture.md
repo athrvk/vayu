@@ -180,9 +180,13 @@ lives in a localStorage-backed store main cannot see - over `notify:show`
 window's focus and the platform's support, and answers `notify:availability`
 for the settings row. Nothing is posted while the window is focused - the toast
 already said it. Windows shows nothing at all unless `app.setAppUserModelId`
-matches the shortcut's id; macOS may refuse a build without a Developer ID
-signature, and Vayu is ad-hoc signed, so that refusal is caught, latched, and
-reported in Settings, with the toast standing in as the fallback.
+matches the shortcut's id; macOS authorizes per bundle and refuses one whose
+code signature does not bind its own `Info.plist`. Ad-hoc signing satisfies it,
+and `install.sh` re-signs what it installs, so an installed build notifies - but
+the dev `Electron.app` and a bundle dragged straight out of the DMG do not, so
+system notifications cannot be exercised by `pnpm electron:dev` on macOS. That
+refusal is caught, latched, and reported in Settings, with the toast standing in
+as the fallback.
 
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 

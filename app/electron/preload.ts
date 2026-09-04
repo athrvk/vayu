@@ -294,8 +294,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// (#1358). The renderer sends what happened; main decides whether to post
 	// it - the window's focus and the platform's support are its to answer -
 	// and resolves with what became of it. `notificationAvailability` is what
-	// the settings row asks before saying the toggle works on this build: an
-	// unsigned macOS build cannot show one, and says so after the first try.
+	// the settings row asks before saying the toggle works on this build: a
+	// macOS bundle the OS will not authorize cannot show one, and says so after
+	// the first try.
 	showNotification: (request: {
 		kind: string;
 		title: string;

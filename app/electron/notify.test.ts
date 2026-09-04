@@ -157,8 +157,8 @@ describe("createNotifier - a build that cannot show one", () => {
 		const { notifier, built } = harness();
 		notifier.show(request());
 
-		// What an unsigned macOS build does under Electron 42+: no throw, a
-		// `failed` event. Mutation check: drop the latch in the `failed` handler
+		// What a macOS bundle the OS will not authorize does under Electron 42+:
+		// no throw, a `failed` event. Mutation check: drop the latch in `failed`
 		// and the second call answers "shown" again.
 		built[0].fire("failed");
 
