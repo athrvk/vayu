@@ -28,6 +28,7 @@ import { API_ENDPOINTS } from "@/config/api-endpoints";
 // of that rule is how two writers come to disagree about one list.
 import { mergeCapture, queryKeys } from "@/queries";
 import type { Inbox, InboxCapture, InboxCapturesResponse } from "@/types";
+import { createCaptureNotifier } from "./capture-notifier";
 
 /** Narrow one SSE payload to a capture, or reject it. */
 export function parseCaptureEvent(raw: unknown): InboxCapture | null {
@@ -186,6 +187,9 @@ export function useInboxLive(inboxId: string | null, enabled: boolean): InboxLiv
 		let retryTimer: ReturnType<typeof setTimeout> | null = null;
 		let attempts = 0;
 		let cancelled = false;
+		// One per subscription, so a switch to another inbox neither carries the
+		// previous one's window nor announces its captures (#1388).
+		const notifier = createCaptureNotifier(inboxId);
 
 		const connect = () => {
 			// `Last-Event-ID` is a header the browser sets on its own reconnect
@@ -216,6 +220,9 @@ export function useInboxLive(inboxId: string | null, enabled: boolean): InboxLiv
 					queryKeys.inbox.captures(inboxId),
 					(cached) => mergeCapture(cached, capture)
 				);
+				// After the merge, not before: the list is what a click on the
+				// notification opens, and it is written first for that reason.
+				notifier.record(capture);
 			};
 			source.onerror = () => {
 				const exhausted = !cancelled && attempts >= INBOX_LIVE_MAX_RETRIES;
@@ -245,6 +252,7 @@ export function useInboxLive(inboxId: string | null, enabled: boolean): InboxLiv
 			cancelled = true;
 			if (retryTimer !== null) clearTimeout(retryTimer);
 			source?.close();
+			notifier.dispose();
 		};
 	}, [inboxId, enabled, queryClient, subscription]);
 

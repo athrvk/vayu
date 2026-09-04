@@ -65,7 +65,11 @@ export const NOTIFY_TEST_CHANNEL = "notify:test";
  * main has no opinion about the app's surfaces, and encoding one here would be
  * a second definition of the renderer's own navigation.
  */
-export type NotifyTarget = { view: "run"; runId: string } | { view: "settings" } | { view: "app" };
+export type NotifyTarget =
+	| { view: "run"; runId: string }
+	| { view: "inbox"; inboxId: string }
+	| { view: "settings" }
+	| { view: "app" };
 
 export interface NotifyRequest {
 	/** Which event this is, for the renderer's own routing. Echoed on a click. */
@@ -173,6 +177,10 @@ function readTarget(value: unknown): NotifyTarget {
 	if (view === "run") {
 		const runId = (value as { runId?: unknown }).runId;
 		if (typeof runId === "string" && runId.length > 0) return { view: "run", runId };
+	}
+	if (view === "inbox") {
+		const inboxId = (value as { inboxId?: unknown }).inboxId;
+		if (typeof inboxId === "string" && inboxId.length > 0) return { view: "inbox", inboxId };
 	}
 	return { view: "app" };
 }

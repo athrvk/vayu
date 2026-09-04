@@ -143,6 +143,26 @@ describe("createNotifier - whether to post at all", () => {
 		expect(built).toHaveLength(0);
 	});
 
+	it("says nothing about a capture either, while the window is focused", () => {
+		// The focus check is kind-agnostic, and the inbox's captures (#1388) are
+		// the one kind with a rate the app does not set - the kind a regression
+		// here would be loudest in. Named rather than left to the case above,
+		// because it is an acceptance criterion of its own.
+		const { notifier, built } = harness({ focused: true });
+		const capture = request({
+			kind: "inbox-captured",
+			title: "Inbox received a request",
+			body: "POST /webhook",
+			target: { view: "inbox", inboxId: "inbox_a" },
+		});
+
+		expect(notifier.show(capture)).toBe("focused");
+		expect(built).toHaveLength(0);
+
+		const away = harness({ focused: false });
+		expect(away.notifier.show(capture)).toBe("shown");
+	});
+
 	it("is a silent no-op where the platform supports no notifications", () => {
 		const { notifier, built } = harness({ supported: false });
 
@@ -321,6 +341,19 @@ describe("readNotifyRequest", () => {
 			view: "app",
 		});
 		expect(readNotifyRequest({ ...request(), target: "elsewhere" }).target).toEqual({
+			view: "app",
+		});
+	});
+
+	it("keeps an inbox target, on the same terms as a run's", () => {
+		// Mutation check: drop the `inbox` branch in `readTarget` and a capture
+		// notification's click opens nothing - the target arrives as `app`
+		// (#1388), which is a window coming back with no inbox on it.
+		expect(
+			readNotifyRequest({ ...request(), target: { view: "inbox", inboxId: "inbox_a" } })
+				.target
+		).toEqual({ view: "inbox", inboxId: "inbox_a" });
+		expect(readNotifyRequest({ ...request(), target: { view: "inbox" } }).target).toEqual({
 			view: "app",
 		});
 	});
