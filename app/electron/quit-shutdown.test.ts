@@ -190,7 +190,11 @@ describe("main.ts wiring", () => {
 	it("takes the single-instance lock and focuses the window a second launch wanted", () => {
 		expect(main).toContain("app.requestSingleInstanceLock()");
 		expect(main).toContain('app.on("second-instance"');
-		expect(main).toMatch(/second-instance[\s\S]{0,400}mainWindow\.focus\(\)/);
+		// Through `focusMainWindow`, which is also what a clicked system
+		// notification calls (#1358): "come back" is one behaviour, and
+		// `focus()` alone raises nothing on a minimized window.
+		expect(main).toMatch(/second-instance[\s\S]{0,400}focusMainWindow\(\)/);
+		expect(main).toMatch(/function focusMainWindow[\s\S]{0,400}win\.focus\(\)/);
 	});
 
 	it("shuts the engine down for good on quit rather than merely stopping it", () => {

@@ -172,6 +172,30 @@ The lock is a request to the OS, not a guarantee. When the host suspends anyway
 marks it on the charts and in the run's Events tab. The engine cannot carry that
 record: it was suspended too.
 
+**System notifications for a run's end are opt-in and off by default.** The
+renderer decides *what* is worth saying - it is the only side that knows a run
+reached a terminal state, and the only side that can read the opt-in, which
+lives in a localStorage-backed store main cannot see - over `notify:show`
+(`services/notify.ts`); `electron/notify.ts` decides *whether and how*, from the
+window's focus and the platform's support, and answers `notify:availability`
+for the settings row. Nothing is posted while the window is focused - the toast
+already said it. Windows shows nothing at all unless `app.setAppUserModelId`
+matches the shortcut's id; macOS authorizes per bundle and refuses one whose
+code signature does not bind its own `Info.plist`. Ad-hoc signing satisfies it,
+and `install.sh` re-signs what it installs, so an installed build notifies - but
+the dev `Electron.app` and a bundle dragged straight out of the DMG do not, so
+system notifications cannot be exercised by `pnpm electron:dev` on macOS. That
+refusal is caught, latched, and reported in Settings, with the toast standing in
+as the fallback.
+
+Because that answer only exists once something has been posted, Settings can ask
+for one: the Preview beside the toggle posts a real notification over
+`notify:test`, the single path that ignores both the focus check and the opt-in -
+the user is looking at the panel when they press it, and previewing is how they
+decide whether to turn the setting on. It waits for the OS rather than reporting
+what was attempted, so a refusal turns the row unavailable there and then instead
+of on the first run that ends.
+
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 
 ## Sidecar Pattern

@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 
 interface AvailableUpdate {
 	version: string;
@@ -48,11 +49,28 @@ export function useAppUpdate(): AppUpdateState {
 			// Windows, or a file electron-updater has already deleted on AppImage.
 			// `update-downloaded` sets it again for the version the banner names.
 			setReadyToInstall(false);
+			// Only the notify path (macOS), where this announcement is the whole
+			// story: on the silent paths the download that follows is what the
+			// user can act on, and notifying twice for one version is noise.
+			if (info.strategy === "notify") {
+				systemNotify.post({
+					kind: NOTIFY_KINDS.updateReady,
+					title: `Vayu ${info.version} is available`,
+					body: "Open Vayu to install it.",
+					target: { view: "settings" },
+				});
+			}
 		});
 
 		const offDownloaded = api.onUpdateDownloaded((info) => {
 			setUpdate((prev) => (prev ? { ...prev, version: info.version } : null));
 			setReadyToInstall(true);
+			systemNotify.post({
+				kind: NOTIFY_KINDS.updateReady,
+				title: `Vayu ${info.version} is ready`,
+				body: "Restart Vayu to update.",
+				target: { view: "settings" },
+			});
 		});
 
 		return () => {

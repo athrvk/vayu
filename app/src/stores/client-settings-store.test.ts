@@ -110,6 +110,7 @@ describe("client-settings rehydration", () => {
 		useClientSettingsStore.setState({
 			sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS,
 			notifications: { ...DEFAULT_NOTIFICATION_PREFS },
+			systemNotifications: false,
 		});
 	});
 
@@ -138,6 +139,28 @@ describe("client-settings rehydration", () => {
 		await useClientSettingsStore.persist.rehydrate();
 
 		expect(useClientSettingsStore.getState().sloThresholdMs).toBe(350);
+	});
+
+	it("carries the system-notification opt-in across a reload", async () => {
+		// Both halves, because they fail differently. A field left out of
+		// `partialize` reaches localStorage never - it writes, it reads, and it is
+		// gone on the next launch, "written but never read" one launch later - and
+		// a field the merge drops comes back as its default.
+		useClientSettingsStore.setState({ systemNotifications: true });
+		const written: unknown = JSON.parse(
+			localStorage.getItem(STORAGE_KEYS.CLIENT_SETTINGS) ?? "{}"
+		);
+		expect(
+			(written as { state: { systemNotifications?: boolean } }).state.systemNotifications
+		).toBe(true);
+
+		// A fresh launch, reading back exactly what the line above wrote. Seeded
+		// again because the reset below is itself a write, and persist stores it.
+		useClientSettingsStore.setState({ systemNotifications: false });
+		seed(written);
+		await useClientSettingsStore.persist.rehydrate();
+
+		expect(useClientSettingsStore.getState().systemNotifications).toBe(true);
 	});
 
 	it("completes a nested object stored before a key was added to it", async () => {

@@ -43,11 +43,20 @@ vi.mock("./wake-lock", () => ({
 	wakeLock: { hold: mockWakeLockHold, release: mockWakeLockRelease },
 	WAKE_LOCK_KEYS: { loadRun: "load-run", collectionRun: "collection-run" },
 }));
+// The system notification a terminal run posts (#1358). Mocked at the service
+// boundary: whether the OS shows it is `electron/notify.ts`'s question, and
+// whether the user asked for it is `services/notify.ts`'s.
+const { mockNotifyPost } = vi.hoisted(() => ({ mockNotifyPost: vi.fn() }));
+vi.mock("./notify", async (importOriginal) => ({
+	...(await importOriginal<typeof import("./notify")>()),
+	systemNotify: { post: mockNotifyPost, availability: vi.fn() },
+}));
 
 import { loadTestService } from "./load-test-service";
 import { sseClient } from "./sse-client";
 import { apiService } from "./api";
 import { WAKE_LOCK_KEYS } from "./wake-lock";
+import { NOTIFY_KINDS } from "./notify";
 
 /** `handleClose` is private; the SSE client is what calls it in production. */
 function closeStream(): Promise<void> {
@@ -188,6 +197,88 @@ describe("LoadTestService", () => {
 			);
 			// Pins the `wakeLock.release(...)` call in `handleError`.
 			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.loadRun);
+		});
+	});
+
+	describe("system notifications (issue #1358)", () => {
+		function failStream(message: string): void {
+			(loadTestService as unknown as { handleError: (e: Error) => void }).handleError(
+				new Error(message)
+			);
+		}
+
+		it("posts what the run did, not that it is over", async () => {
+			dashboard.currentRunId = "run_8";
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+				summary: { totalRequests: 12400, errorRate: 0.3 },
+				latency: { p95: 210.4 },
+			} as never);
+			loadTestService.startMonitoring("run_8");
+
+			await closeStream();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith({
+				kind: NOTIFY_KINDS.loadRunFinished,
+				title: "Load test finished",
+				body: "12,400 requests, p95 210 ms, 0.3% errors",
+				target: { view: "run", runId: "run_8" },
+			});
+		});
+
+		it("says so plainly when the report cannot supply the numbers", async () => {
+			// The shipped fixture for a report the engine answered with nothing
+			// usable. Reverting `runSummaryLine`'s checks turns this body into
+			// "0 requests, p95 0 ms, 0.0% errors" - numbers the user would read as
+			// their run's own.
+			dashboard.currentRunId = "run_9";
+			loadTestService.startMonitoring("run_9");
+
+			await closeStream();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({
+					kind: NOTIFY_KINDS.loadRunFinished,
+					body: "The run ended, but its report could not be read.",
+				})
+			);
+		});
+
+		it("posts the failure, with the reason", () => {
+			loadTestService.startMonitoring("run_10");
+
+			failStream("transport gone");
+
+			expect(mockNotifyPost).toHaveBeenCalledWith({
+				kind: NOTIFY_KINDS.loadRunFailed,
+				title: "Load test failed",
+				body: "transport gone",
+				target: { view: "run", runId: "run_10" },
+			});
+		});
+
+		it("posts once for a run that fails and then closes", async () => {
+			dashboard.currentRunId = "run_11";
+			loadTestService.startMonitoring("run_11");
+
+			failStream("transport gone");
+			await closeStream();
+
+			// Pins the per-run latch. Drop it and a failed run tells the user twice,
+			// the second time that it "finished".
+			expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFailed })
+			);
+		});
+
+		it("posts a stop as a stop", () => {
+			loadTestService.startMonitoring("run_12");
+
+			loadTestService.stopMonitoring();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunStopped })
+			);
 		});
 	});
 });

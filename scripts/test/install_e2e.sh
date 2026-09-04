@@ -99,7 +99,7 @@ make_macos_release() {
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key><string>Vayu</string>
-	<key>CFBundleIdentifier</key><string>com.vayu.client</string>
+	<key>CFBundleIdentifier</key><string>io.github.athrvk.vayu</string>
 	<key>CFBundleName</key><string>Vayu</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>$version</string>

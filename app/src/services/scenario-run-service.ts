@@ -33,10 +33,31 @@ import { useScenarioRunStore } from "@/stores/scenario-run-store";
 import { useClientSettingsStore } from "@/stores";
 import { createThrottledBatcher } from "./throttled-batcher";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
+import { systemNotify, NOTIFY_KINDS } from "./notify";
+import type { OutcomeCounts } from "@/modules/history/main/scenario-steps";
 import type { ScenarioStepEvent } from "@/types";
+
+/**
+ * "41 passed, 2 failed" - what the run did, not that it is over (#1358).
+ *
+ * Skipped and errored steps are named only when there are any: a clean run's
+ * line stays two numbers long, and a run that errored never reads as a pass.
+ */
+function stepOutcomeLine(counts: OutcomeCounts): string {
+	const parts = [`${counts.passed} passed`, `${counts.failed} failed`];
+	if (counts.errored > 0) parts.push(`${counts.errored} errored`);
+	if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`);
+	return parts.join(", ");
+}
 
 class ScenarioRunService {
 	private activeRunId: string | null = null;
+	/**
+	 * The run this service has already told the user about (#1358). A run that
+	 * failed reports its error and then closes its stream; that is one run
+	 * ending, so it is one notification.
+	 */
+	private notifiedRunId: string | null = null;
 	private stepBatcher = createThrottledBatcher<ScenarioStepEvent>((batch) =>
 		useScenarioRunStore.getState().addSteps(batch)
 	);
@@ -102,9 +123,29 @@ class ScenarioRunService {
 	 * A detach method with no caller is surface that cannot be verified.
 	 */
 
+	/** Tell the user their run ended, once, and only if they are elsewhere. */
+	private notifyTerminal(
+		runId: string | null,
+		kind: typeof NOTIFY_KINDS.collectionRunFinished | typeof NOTIFY_KINDS.collectionRunFailed,
+		body: string
+	): void {
+		if (!runId || this.notifiedRunId === runId) return;
+		this.notifiedRunId = runId;
+		systemNotify.post({
+			kind,
+			title:
+				kind === NOTIFY_KINDS.collectionRunFinished
+					? "Collection run finished"
+					: "Collection run failed",
+			body,
+			target: { view: "run", runId },
+		});
+	}
+
 	private handleError(error: Error): void {
 		console.error("[ScenarioRunService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
+		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.collectionRunFailed, error.message);
 		// Before the error, so the steps that did arrive are on screen under the
 		// notice explaining why no more will be. A buffered batch stranded here
 		// would be the run's last steps, silently missing from a list the reader
@@ -132,6 +173,15 @@ class ScenarioRunService {
 		// stream closed, and the machine must not stay pinned awake through them.
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
 		if (!runId) return;
+
+		// From the store's own fold rather than the report fetched below: the
+		// counts are complete the moment the last step arrived, and the user
+		// should not wait on a round trip to be told their run is over.
+		this.notifyTerminal(
+			runId,
+			NOTIFY_KINDS.collectionRunFinished,
+			stepOutcomeLine(useScenarioRunStore.getState().summary.counts)
+		);
 
 		// Through the cache, not a bare fetch: the run tab reads these exact
 		// keys, so a fetch that bypassed them would leave the pane on the stale

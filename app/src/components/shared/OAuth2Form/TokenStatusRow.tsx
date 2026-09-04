@@ -18,6 +18,7 @@ import {
 import { queryKeys } from "@/queries/keys";
 import { computeOAuth2CacheKey } from "@/services/oauth/cache-key";
 import { runInteractiveAuthorization } from "@/services/oauth/authorize";
+import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { OAUTH2_FIELD_LABELS, humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { useToastStore } from "@/stores";
 import type { OAuth2Config } from "@/types";
@@ -103,6 +104,14 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 					queryClient.invalidateQueries({ queryKey: queryKeys.oauth.token(cacheKey) });
 				}
 				showToast("Authorized", "success");
+				// The loopback flow puts the user in their browser by design, so
+				// this is the one success they are guaranteed not to be looking at
+				// (#1358). The click brings them back to the request they left.
+				systemNotify.post({
+					kind: NOTIFY_KINDS.signedIn,
+					title: "Signed in",
+					body: "Back to Vayu to continue.",
+				});
 			} catch (err) {
 				showToast(
 					err instanceof Error

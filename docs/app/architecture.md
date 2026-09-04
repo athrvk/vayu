@@ -81,6 +81,7 @@ The main process is responsible for:
 - **Engine Lifecycle**: Starts and stops the C++ engine via `EngineSidecar`
 - **App Lifecycle**: Handles app ready, window close, and quit events
 - **Context Menu**: Composes the right-click menu from Chromium's `context-menu` params and the target the renderer announces (`context-menu.ts`, issue #1359)
+- **Notifications**: Shows or refuses an OS notification for what finished while the user was elsewhere, and reports the platform's willingness to the settings row (`notify.ts`, issue #1358)
 
 **Key Responsibilities:**
 - Spawns the engine binary as a child process
@@ -303,7 +304,7 @@ cross-language conformance fixture. See `variable-resolution.md`.
 
 - **React 19**: UI framework
 - **TypeScript**: Type safety - 5.9 compiles and lints, 7 runs the `pnpm type-check` gate (see [building](building.md#two-compilers-one-on-purpose))
-- **Electron 28**: Desktop app framework
+- **Electron 44**: Desktop app framework
 - **Zustand**: Lightweight state management
 - **TanStack Query**: Server state and caching
 - **Radix UI**: Accessible component primitives
@@ -326,6 +327,7 @@ The preload script (`electron/preload.ts`) exposes a minimal, context-isolated A
 - **Platform & Paths**: `platform` constant and `getAppPaths()` for OS and directory detection
 - **Graceful Shutdown**: `onBeforeQuit()` to allow the renderer to flush state (saves, pending requests) before app termination
 - **Wake Lock**: `holdWakeLock(reason)` / `releaseWakeLock(token)` keep the machine from suspending under a streaming run (issue #1357). Ref-counted in `electron/power-save.ts`; the renderer side is `services/wake-lock.ts`, one keyed holder both run services call. `onHostSuspended()` / `onHostResumed()` report a sleep the lock could not prevent, which `useHostSleepRecorder` records against the run
+- **Notifications**: `showNotification()`, `notificationAvailability()`, `sendTestNotification()`, `onNotificationActivated()` over the `notify:*` channels, for the OS notifications a run finishing, an engine dropping out or an update landing raise while the user is elsewhere. The renderer side is `services/notify.ts`, which reads the opt-in and decides what is worth saying; a click is opened by the `useNotificationActivation` hook. `sendTestNotification()` is the Settings preview: the one path that ignores both the focus check and the opt-in, and the only way to learn whether this build can post at all without waiting for a run to end (issue #1358)
 
 ## Security Considerations
 

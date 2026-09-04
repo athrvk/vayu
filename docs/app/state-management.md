@@ -775,6 +775,7 @@ Central home for renderer-only preferences that aren't part of the pre-paint app
   autoSave: AutoSavePrefs        // { enabled, delayMs }
   reducedMotion: boolean         // mirrored onto <html data-reduced-motion>
   keepAwakeDuringRuns: boolean   // standing answer on the run wake lock; default off
+  systemNotifications: boolean   // opt-in for OS notifications while Vayu is in the background; default off
   notifications: NotificationPrefs  // position, durationScale, maxVisible, minSeverity
   loadTestCeilings: LoadTestCeilings
 }
@@ -796,6 +797,13 @@ governs a run is the one that was true when it began - flipping the row mid-run
 does not reach a stream already going. Off is the shipped default: with it off a
 load run of ten minutes or more asks once (`KeepAwakePrompt`), and that grant
 takes the same wake-lock key the service releases, so it ends with the run.
+
+`systemNotifications` is the opt-in for the OS notifications `services/notify.ts`
+posts (issue #1358). It is **read at the moment an event fires**, not watched,
+by the same reasoning as `keepAwakeDuringRuns`: every call site is a service or
+an event handler with no hook to hang a subscription on. Off is the shipped
+default, and it is persisted through `partialize` like the rest of this store's
+top-level preferences.
 
 `loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
 
