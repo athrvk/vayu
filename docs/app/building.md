@@ -261,23 +261,77 @@ guard-proved values are no-ops without it.
 ## Measuring what a build costs
 
 `.github/workflows/perf-measure.yml` records the built renderer's entry-chunk
-size, its total `dist/` size, and how long a window takes to become showable
-with that bundle in it - per platform, weekly and on demand. It is a
-measurement, not a gate: nothing there fails a build on a number.
+size, its total `dist/` size, and two startup figures - per platform, weekly
+and on demand. It is a measurement, not a gate: nothing there fails a build on
+a number.
 
 `scripts/perf/measure-app.mjs` is what produces those figures and runs locally
-the same way, against an existing `pnpm run build`:
+the same way, against an existing `pnpm run build` (and, for the packaged
+figure below, an unpacked `electron-builder` output):
 
 ```bash
-node scripts/perf/measure-app.mjs --out perf-app.json   # from the repo root
+node scripts/perf/measure-app.mjs --out perf-app.json --packaged-dir app/release   # from the repo root
 ```
 
-The startup figure comes from `scripts/perf/startup-harness.cjs`, a small
-Electron main script that loads `app/dist/index.html` into one window - not the
-Vayu app, which cannot start unpackaged (it resolves its engine under
-`process.resourcesPath`). So the number covers the renderer's module graph and
-its render-blocking fetches, and not the main process's own startup work. That
-file's header states the boundary in full; read it before quoting the number.
+`--packaged-dir` is optional - without it the packaged leg reports
+`"unavailable"` and the renderer-graph figures still come out.
+
+**On a headless Linux box the packaged figure is unreliable, and the CI runner
+is one.** Under `xvfb-run` the app produced a figure once across the runs that
+landed this leg and timed out every other time, each time having come up whole
+- engine listening, MCP up, the renderer fetching config, collections and
+globals from it, inside a second - and then produced no frame, so
+`ready-to-show` never fired and the leg reported `"unavailable"` with that
+output in `note`. The harness's plain window becomes
+showable in the same session every time, and the app's window is frameless.
+Running a window manager in the session changed nothing. #1347 tracks it; the
+Windows and macOS figures are unaffected, as is a Linux desktop, where this has
+not been seen.
+
+**The packaged figure is the real cold start.** The workflow builds the
+renderer, compiles the Electron main process, stages the engine binary into
+`app/build/resources/bin/` (where `sidecar.ts` looks inside a package), and
+packages an unpacked build - `electron-builder --linux dir`, and the
+`--win dir` / `--mac dir` equivalents; `--dir`, no installer, and no
+architecture named, so each runner packages for its own.
+`measure-app.mjs` launches that executable three times with
+`VAYU_MEASURE_STARTUP=1` set and reports the median milliseconds from process
+start to `ready-to-show`: the executable's own load, the main process's import
+graph, the window it creates and the renderer inside it, with the sidecar
+spawn running alongside. It does not include the engine handshake, and should
+not - #1144 deliberately put the window ahead of that, and this number is what
+a user waits for. Between launches it waits for the
+engine to stop listening on port 9876, because `sidecar.ts` adopts an engine
+that is already running rather than starting a fresh one, and an adopted
+engine is not a cold start; a launch that fails, or an engine that will not go
+away in time, is reported `"unavailable"` with the reason in `note` rather
+than retried.
+
+The first of the three launches is a first run - it creates the user-data
+directory the other two find waiting, and measured several times the others on
+a cloud container (5.6 s against 1.2 s). The median is what is reported, so
+that launch informs the number without setting it; read `launches` in the JSON
+before drawing anything from a single figure.
+
+`VAYU_MEASURE_STARTUP=1` is what makes the app print that line at all
+(`app/electron/startup-probe.ts`). Unset - which is every real launch - it
+measures and prints nothing.
+
+What the packaged leg still does not measure: the installer formats
+themselves (NSIS, the dmg, AppImage's FUSE mount), because the workflow
+packages `--dir`. An unpacked build is the same asar, the same staged engine
+and the same main process a user installs; only the installer wrapper is
+absent.
+
+**The renderer-graph figure stays beside it, unchanged.** It comes from
+`scripts/perf/startup-harness.cjs`, a small Electron main script that loads
+`app/dist/index.html` into a window of its own - not the Vayu app - and times
+it against a blank window. The delta isolates the cost of the renderer's
+module graph and its render-blocking fetches from everything the main
+process does, which the packaged figure cannot separate back out; it is the
+number #1146/#1147's bundle work moves and the one this program's history is
+recorded in. That file's header states the boundary in full; read it before
+quoting the number.
 
 ## Vite Configuration
 

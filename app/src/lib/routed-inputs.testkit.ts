@@ -250,6 +250,18 @@ export const ROOT_READING_GUARDS = {
 		reader: "app/electron/appimage-stamp.layout.test.ts",
 		paths: ["install.sh"],
 	},
+	/*
+	 * The third of the same kind (#1165): the packaged app prints its startup
+	 * line with a marker `scripts/perf/measure-app.mjs` waits for, and the two
+	 * cannot share a constant across the process boundary - one is compiled into
+	 * the main process, the other is a standalone script the workflow runs. The
+	 * script matches `scripts`, which runs shellcheck and the installer suite,
+	 * and never `pnpm test`.
+	 */
+	startupMarker: {
+		reader: "app/electron/startup-probe.test.ts",
+		paths: ["scripts/perf/measure-app.mjs"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 function union(guards: Record<string, ReadingGuard>): readonly string[] {

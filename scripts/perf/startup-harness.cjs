@@ -9,16 +9,18 @@
  * the renderer's module graph - the number #1146 is about (one 5.5 MB entry
  * chunk, zero React.lazy) and the one #1147's bundle work would move.
  *
- * Why a harness rather than launching the real app: `app/electron/main.ts`
- * decides both where the engine binary lives and where the renderer comes from
- * off the same `isDev` flag (`sidecar.ts` getEngineBinaryPath, `main.ts`
- * loadFile/loadURL). With NODE_ENV unset - the only setting that loads the
- * built `dist/` - the app resolves its engine under `process.resourcesPath`,
- * which exists only in a packaged build, so an unpackaged launch on a runner
- * never reaches `ready-to-show` at all. Measuring the packaged app end to end
- * needs electron-builder in this workflow and is #1165; this is the fallback
- * #1162 names for exactly that case ("the blank-window baseline vs
- * full-renderer delta - the sweep's method").
+ * Why a harness alongside the real app, rather than instead of it:
+ * `measure-app.mjs` also packages and launches the real app now (#1165,
+ * `--packaged-dir`), and that figure is the one to quote for a user's cold
+ * start. This harness stays because that packaged number cannot be pulled
+ * apart afterward: it is the executable's load, the main process's import
+ * graph, the window it creates and the renderer inside it, all in one
+ * measurement, with the sidecar spawn running alongside them. This
+ * script isolates the last piece alone - a window of its own, holding either
+ * nothing or the built renderer, with none of the main process's own work in
+ * the picture - which is the blank-window baseline vs full-renderer delta
+ * #1162 named as the sweep's method, and the number #1146/#1147's bundle work
+ * moves.
  *
  * What it therefore does NOT measure, so nobody reads more into the number:
  * the main process's own startup work - the eager MCP import (#1145), the
