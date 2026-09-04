@@ -102,6 +102,17 @@ const SCOPE_SECTIONS = 3;
  */
 const GROUP_CHILD_INSET = "pl-12.5";
 
+/**
+ * The same left edge for `ListSkeleton`, which cannot take it directly.
+ *
+ * The primitive pads each bar it draws with its own `px-2`, inside whatever the
+ * caller puts on the wrapper, so the two stack: the inset above put the bars 8px
+ * right of the rows they stand in for. 42 + 8 = the 50px above. The arithmetic
+ * is held by a test rather than by this comment - it reads both classes off the
+ * rendered skeleton and a rendered row, so changing either side fails.
+ */
+const GROUP_CHILD_SKELETON_INSET = "pl-10.5";
+
 export default function VariablesCategoryTree() {
 	// Fetches its own data, like the other three drawer views. It used to
 	// receive both lists as props from the Drawer, which read them with `= []`
@@ -459,7 +470,7 @@ export default function VariablesCategoryTree() {
 								{isLoadingEnvironments ? (
 									<ListSkeleton
 										rows={2}
-										className={cn("pr-3", GROUP_CHILD_INSET)}
+										className={cn("pr-3", GROUP_CHILD_SKELETON_INSET)}
 									/>
 								) : showEnvironmentsError ? (
 									<ErrorState
@@ -734,7 +745,7 @@ export default function VariablesCategoryTree() {
 								{isLoadingCollections ? (
 									<ListSkeleton
 										rows={2}
-										className={cn("pr-3", GROUP_CHILD_INSET)}
+										className={cn("pr-3", GROUP_CHILD_SKELETON_INSET)}
 									/>
 								) : showCollectionsError ? (
 									<ErrorState

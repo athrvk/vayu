@@ -73,6 +73,23 @@ function insetClass(element: HTMLElement): string | undefined {
 }
 
 /**
+ * The left padding an element contributes, in Tailwind spacing steps, from a
+ * `pl-*` or - when it has none - the `px-*` that sets both sides.
+ *
+ * Needed only for the skeleton, whose left edge is two elements' padding added
+ * together. Everywhere else a single class is the whole answer and the cases
+ * compare classes directly.
+ */
+function leftPaddingSteps(element: HTMLElement): number {
+	const classes = element.className.split(/\s+/);
+	const left = classes.find((name) => name.startsWith("pl-"));
+	const both = classes.find((name) => name.startsWith("px-"));
+	const value = Number((left ?? both ?? "").replace(/^p[lx]-/, ""));
+	if (!Number.isFinite(value)) throw new Error(`no left padding on: ${element.className}`);
+	return value;
+}
+
+/**
  * What an environment row indents to, read off a rendered row. Renders its own
  * tree and puts the query state back, so a case can take the reference and then
  * set up the state it is actually about.
@@ -118,12 +135,19 @@ describe("everything inside a section's group takes the row's left edge", () => 
 		expect(insetClass(field.parentElement as HTMLElement)).toBe(expected);
 	});
 
-	it("indents the loading skeleton", () => {
-		const expected = rowInsetClass();
+	it("indents the loading skeleton's bars, not just the box around them", () => {
+		// `ListSkeleton` pads every bar it draws with its own `px-2`, inside
+		// whatever the caller sets on the wrapper, so the wrapper carrying the
+		// row's inset put the bars 8px right of the rows they stand in for. The
+		// two paddings are what the eye adds up, so the test adds them too.
+		const expectedSteps = Number(rowInsetClass()?.replace("pl-", ""));
 		queryState.environments = { ...settled, data: [], isLoading: true };
 		renderTree();
 
-		expect(insetClass(screen.getByRole("status", { name: "Loading" }))).toBe(expected);
+		const wrapper = screen.getByRole("status", { name: "Loading" });
+		const bar = wrapper.querySelector(".flex") as HTMLElement;
+		expect(bar).toBeTruthy();
+		expect(leftPaddingSteps(wrapper) + leftPaddingSteps(bar)).toBe(expectedSteps);
 	});
 
 	it("indents the failure line", () => {
