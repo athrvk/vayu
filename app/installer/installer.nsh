@@ -28,6 +28,27 @@
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
+; Electron keeps userData in the *user's* roaming profile even when the app was
+; installed for all users, and this installer offers that choice (oneClick is
+; false and allowElevation is true in electron-builder.json). In that mode NSIS
+; has already run SetShellVarContext all by the time these macros are inserted -
+; customInit sits right after initMultiUser, customUnInstall near the top of the
+; uninstall section - so $APPDATA resolves to the machine profile and every path
+; below would miss the real directory again. electron-builder does the same flip
+; around its own userData removal; these two macros are that flip, so it is
+; written once instead of four times.
+!macro useUserShellContext
+  ${if} $installMode == "all"
+    SetShellVarContext current
+  ${endif}
+!macroend
+
+!macro restoreShellContext
+  ${if} $installMode == "all"
+    SetShellVarContext all
+  ${endif}
+!macroend
+
 ; ============================================================================
 ; INSTALL: Check for running instances and handle reinstall
 ; ============================================================================
@@ -67,6 +88,7 @@
   ${EndIf}
 
   cleanupLock:
+    !insertmacro useUserShellContext
     ; Clean up any stale lock files from previous installations or crashes
     ; Check if lock file exists and if the process is still running
     IfFileExists "$APPDATA\${APP_DATA_DIR}\vayu.lock" 0 initDone
@@ -76,6 +98,7 @@
       Delete "$APPDATA\${APP_DATA_DIR}\vayu.lock"
 
   initDone:
+    !insertmacro restoreShellContext
 !macroend
 
 ; ============================================================================
@@ -92,6 +115,8 @@
 ; POST-UNINSTALL: Clean up app data (with user confirmation)
 ; ============================================================================
 !macro customUnInstall
+  !insertmacro useUserShellContext
+
   ; Ask user if they want to KEEP app data (Yes = safe/keep, No = delete)
   MessageBox MB_YESNO|MB_ICONQUESTION \
     "Would you like to keep your Vayu data for future reinstalls?$\n$\n\
@@ -127,4 +152,5 @@
     DetailPrint "No Vayu data directory at $APPDATA\${APP_DATA_DIR} - nothing to delete."
 
   cleanupDone:
+    !insertmacro restoreShellContext
 !macroend

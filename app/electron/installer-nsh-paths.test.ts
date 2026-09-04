@@ -46,6 +46,14 @@ function appDataSegments(): string[] {
 	return [...script.matchAll(/[$%](?:LOCAL)?APPDATA%?\\([^\s"\\]*)/g)].map((match) => match[1]);
 }
 
+/** Every `!macro NAME ... !macroend` block in the script, by name. */
+function macros(): [string, string][] {
+	return [...script.matchAll(/^!macro (\w+)\b([\s\S]*?)^!macroend$/gm)].map((match) => [
+		match[1],
+		match[2],
+	]);
+}
+
 describe("the Windows installer's data directory", () => {
 	it("is the name Electron derives userData from", () => {
 		expect(pkg.name).toBeTruthy();
@@ -59,6 +67,25 @@ describe("the Windows installer's data directory", () => {
 		expect(segments.length).toBeGreaterThan(0);
 		for (const segment of segments) {
 			expect(segment).toBe("${APP_DATA_DIR}");
+		}
+	});
+
+	/**
+	 * The same defect in its second shape. An all-users install leaves NSIS in
+	 * the machine shell context, where `$APPDATA` is not the profile Electron
+	 * writes userData to - so a correctly named path still misses the real
+	 * directory unless the context is flipped back for the duration.
+	 */
+	it("is read in the user's shell context by every macro that touches it", () => {
+		const reading = macros().filter(([, body]) => body.includes("$APPDATA"));
+		expect(reading.length).toBeGreaterThan(0);
+		for (const [name, body] of reading) {
+			expect(body, `${name} reads $APPDATA outside the user's shell context`).toContain(
+				"!insertmacro useUserShellContext"
+			);
+			expect(body, `${name} leaves the shell context flipped`).toContain(
+				"!insertmacro restoreShellContext"
+			);
 		}
 	});
 

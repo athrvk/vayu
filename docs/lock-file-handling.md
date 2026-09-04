@@ -34,6 +34,11 @@ from `app.getName()`, which reads `name` in `app/package.json`, so the script
 defines `APP_DATA_DIR` from that file rather than spelling a path
 (`app/electron/installer-nsh-paths.test.ts` fails if the two drift apart).
 
+Both macros also flip NSIS back to the user's shell context around those paths.
+An all-users install leaves NSIS in the machine context, where `$APPDATA` is not
+the roaming profile Electron writes userData to - so a correctly named path
+would still miss the real directory in that install mode.
+
 ### macOS (DMG)
 
 **Installation:**
