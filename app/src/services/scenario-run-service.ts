@@ -110,10 +110,14 @@ class ScenarioRunService {
 		// #1398). This client still computes no denominator of its own -
 		// `RunCollectionDialog` sends no step count precisely because the engine
 		// resolves it, and a second copy of that rule here would be a number
-		// only one side can be right about - so what it shows before the `plan`
-		// frame arrives, and for a run whose frame never does, is that a run is
-		// going.
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
+		// only one side can be right about - so what the claim shows until the
+		// `plan` frame arrives, and for a run whose frame never does, is that a
+		// run is going.
+		//
+		// Claimed for this run rather than for collection runs in general
+		// (#1405), so that a run this one supersedes - and one that supersedes
+		// this one - cannot paint over the bar of the run being watched.
+		runProgress.claim(RUN_PROGRESS_KEYS.collectionRun, runId);
 
 		// Connect immediately: the engine retains a replayable topic per run, so
 		// even a sequence that finishes before we attach replays from offset 0.
@@ -160,15 +164,17 @@ class ScenarioRunService {
 		return Math.min(1, this.stepsCompleted / this.stepsExpected);
 	}
 
-	/** Paint the fraction, unless this run's indicator is no longer ours. */
+	/**
+	 * Paint where this run is.
+	 *
+	 * The run it is for is named rather than assumed, and no guard is repeated
+	 * here: `runProgress` holds the claim (#1405), so a report from a run that
+	 * has been superseded, has already failed, or is over - `activeRunId` is
+	 * null by then - paints nothing on its own terms. A second copy of that
+	 * rule in this file could only disagree with it.
+	 */
 	private reportProgress(): void {
-		// The run is over and `handleClose` is clearing the indicator; the last
-		// flush must not repaint it as running on the way out.
-		if (this.activeRunId === null) return;
-		// A run that reported its failure keeps that flash - the error arrives
-		// before the final flush, for the reason `progressFailedRunId` exists.
-		if (this.progressFailedRunId === this.activeRunId) return;
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, this.runFraction());
+		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, this.activeRunId, this.runFraction());
 	}
 
 	/**
@@ -219,7 +225,7 @@ class ScenarioRunService {
 	private handleError(error: Error): void {
 		console.error("[ScenarioRunService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
-		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun);
+		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun, this.activeRunId);
 		this.progressFailedRunId = this.activeRunId;
 		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.collectionRunFailed, error.message);
 		// Before the error, so the steps that did arrive are on screen under the
@@ -249,9 +255,11 @@ class ScenarioRunService {
 		// stream closed, and the machine must not stay pinned awake through them.
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
 		// And the OS stops saying a run is going. A run that already reported its
-		// failure keeps that flash - see `progressFailedRunId`.
-		if (runId === null || this.progressFailedRunId !== runId) {
-			runProgress.clear(RUN_PROGRESS_KEYS.collectionRun);
+		// failure keeps that flash - see `progressFailedRunId`. A close with no
+		// run to name clears nothing: it holds no claim, and the bar it would
+		// wipe belongs to whatever run is being watched now (#1405).
+		if (this.progressFailedRunId !== runId) {
+			runProgress.clear(RUN_PROGRESS_KEYS.collectionRun, runId);
 		}
 		if (!runId) return;
 

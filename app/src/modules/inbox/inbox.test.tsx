@@ -20,7 +20,7 @@ import { mergeCapture } from "@/queries";
 import type { InboxCapture, InboxCapturesResponse } from "@/types";
 import { CaptureDetail } from "./CaptureDetail";
 import { captureUrl } from "./utils";
-import { parseCaptureEvent } from "./useInboxLive";
+import { parseCaptureEvent } from "@/services/inbox-watch-service";
 
 function capture(overrides: Partial<InboxCapture> = {}): InboxCapture {
 	return {
