@@ -45,6 +45,13 @@ export const NOTIFY_KINDS = {
 	engineRestartFailed: "engine-restart-failed",
 	updateReady: "update-ready",
 	signedIn: "signed-in",
+	/**
+	 * The one event here that is neither terminal nor rare (#1388), which is why
+	 * it is the one with a second, per-inbox opt-in of its own and a coalescing
+	 * window: a webhook source sets the rate, and a notification per capture
+	 * would teach the user to turn the whole feature off.
+	 */
+	inboxCaptured: "inbox-captured",
 } as const;
 
 export type NotifyKind = (typeof NOTIFY_KINDS)[keyof typeof NOTIFY_KINDS];

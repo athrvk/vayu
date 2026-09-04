@@ -25,6 +25,7 @@ import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { queryKeys, useInboxesQuery } from "@/queries";
+import { useClientSettingsStore, useInboxNotifyStore } from "@/stores";
 import type { Inbox, InboxCapturesResponse } from "@/types";
 import {
 	INBOX_LIVE_MAX_RETRIES,
@@ -33,6 +34,7 @@ import {
 	inboxLiveRetryDelayMs,
 	useInboxLive,
 } from "./useInboxLive";
+import { INBOX_CAPTURE_NOTIFY_WINDOW_MS } from "./capture-notifier";
 
 const listInboxes = vi.fn();
 
@@ -112,6 +114,10 @@ beforeEach(() => {
 	listInboxes.mockReset().mockResolvedValue([record()]);
 	vi.stubGlobal("EventSource", MockEventSource);
 	vi.useFakeTimers();
+	// Both notification gates start off, so only the cases that ask for one
+	// (#1388) can post: every other case here drives the same stream.
+	useClientSettingsStore.setState({ systemNotifications: false });
+	useInboxNotifyStore.setState({ enabled: {} });
 });
 
 afterEach(() => {
@@ -177,6 +183,68 @@ describe("useInboxLive", () => {
 			queryKeys.inbox.captures("inbox_a")
 		);
 		expect(cached?.data.map((c) => c.id)).toEqual([7]);
+	});
+
+	it("hands a streamed capture to this inbox's notifier", () => {
+		// The wiring #1388 turns on: the stream is the only place the app hears
+		// about a capture, so a notifier that is not fed here never fires.
+		// Mutation check: drop the `notifier.record` call and nothing is posted.
+		const showNotification = vi.fn().mockResolvedValue("shown");
+		vi.stubGlobal("electronAPI", { showNotification });
+		useClientSettingsStore.setState({ systemNotifications: true });
+		useInboxNotifyStore.getState().setEnabled("inbox_a", true);
+
+		renderHook(() => useInboxLive("inbox_a", true), { wrapper: wrapper(makeClient()) });
+		act(() =>
+			latest().onmessage?.(
+				new MessageEvent("message", {
+					lastEventId: "3",
+					data: JSON.stringify({
+						id: 3,
+						inboxId: "inbox_a",
+						method: "POST",
+						path: "/hook",
+					}),
+				})
+			)
+		);
+		act(() => void vi.advanceTimersByTime(INBOX_CAPTURE_NOTIFY_WINDOW_MS));
+
+		expect(showNotification).toHaveBeenCalledTimes(1);
+		expect(showNotification.mock.calls[0][0]).toMatchObject({
+			kind: "inbox-captured",
+			body: "POST /hook",
+			target: { view: "inbox", inboxId: "inbox_a" },
+		});
+	});
+
+	it("drops the pending notification when the stream is torn down", () => {
+		// A window still armed after the user switched inbox would speak for a
+		// stream that no longer exists.
+		const showNotification = vi.fn().mockResolvedValue("shown");
+		vi.stubGlobal("electronAPI", { showNotification });
+		useClientSettingsStore.setState({ systemNotifications: true });
+		useInboxNotifyStore.getState().setEnabled("inbox_a", true);
+
+		const { unmount } = renderHook(() => useInboxLive("inbox_a", true), {
+			wrapper: wrapper(makeClient()),
+		});
+		act(() =>
+			latest().onmessage?.(
+				new MessageEvent("message", {
+					data: JSON.stringify({
+						id: 4,
+						inboxId: "inbox_a",
+						method: "GET",
+						path: "/hook",
+					}),
+				})
+			)
+		);
+		unmount();
+		act(() => void vi.advanceTimersByTime(INBOX_CAPTURE_NOTIFY_WINDOW_MS * 2));
+
+		expect(showNotification).not.toHaveBeenCalled();
 	});
 
 	it("reconnects after a drop and comes back to Live", async () => {
