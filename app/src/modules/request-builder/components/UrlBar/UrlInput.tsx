@@ -12,7 +12,7 @@
  * Pasting a curl/wget command auto-populates the whole request.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { detectCommand, importCommand } from "@/services/curl/parseCurl";
 import { useToastStore } from "@/stores";
 import { droppedFlagsNotice } from "../../utils/paste-disclosure";
@@ -47,6 +47,21 @@ export default function UrlInput({ className }: UrlInputProps) {
 		[updateField]
 	);
 
+	/** Replace the request with what a curl/wget command describes. */
+	const importIntoRequest = useCallback(
+		(text: string) => {
+			const imported = importCommand(text);
+			if (!imported) return;
+			// Request-shape replacement; identity & scripts are preserved.
+			setRequest(imported.request);
+			// And what it could not carry, said out loud rather than eaten
+			// (issue #708). After the import, never instead of it.
+			const notice = droppedFlagsNotice(imported.dropped);
+			if (notice) showToast(notice);
+		},
+		[setRequest, showToast]
+	);
+
 	// Auto-import a pasted curl/wget command into the whole request.
 	const handlePaste = useCallback(
 		(e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -56,18 +71,24 @@ export default function UrlInput({ className }: UrlInputProps) {
 			// A multi-line command must never land in the single-line input.
 			e.preventDefault();
 
-			const imported = importCommand(text);
-			if (imported) {
-				// Request-shape replacement; identity & scripts are preserved.
-				setRequest(imported.request);
-				// And what it could not carry, said out loud rather than eaten
-				// (issue #708). After the import, never instead of it.
-				const notice = droppedFlagsNotice(imported.dropped);
-				if (notice) showToast(notice);
-			}
+			importIntoRequest(text);
 		},
-		[setRequest, showToast]
+		[importIntoRequest]
 	);
+
+	/*
+	 * The same import, asked for by the right-click menu's "Paste as curl"
+	 * (#1359). The menu is composed in the main process, which reads the
+	 * clipboard and offers the item only for text this would accept, then hands
+	 * that text back here: the offer exists to make the paste behaviour above
+	 * discoverable, so it must be the same import and not a second one.
+	 */
+	useEffect(() => {
+		return window.electronAPI?.onContextMenuCommand?.((command) => {
+			if (command.type !== "import-command") return; // the token popover is not ours
+			importIntoRequest(command.text);
+		});
+	}, [importIntoRequest]);
 
 	return (
 		<VariableInput
@@ -81,6 +102,9 @@ export default function UrlInput({ className }: UrlInputProps) {
 			aria-label="Request URL"
 			// So ⌘L can find it from the Shell, which is outside this subtree.
 			id={REQUEST_URL_INPUT_ID}
+			// The one field whose right-click menu offers to import a command from
+			// the clipboard, because it is the one that imports a pasted one.
+			contextKind="url-bar"
 			variables={variables}
 			className={className ?? "w-full"}
 		/>

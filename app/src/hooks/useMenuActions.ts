@@ -10,6 +10,7 @@ import { useAppearanceStore } from "@/stores";
 import { baseCommandContext, commandById } from "@/lib/commands";
 import { isModalOpen } from "@/lib/modal";
 import { navigateHistory } from "@/lib/navigate-history";
+import { installContextMenuBridge } from "@/lib/context-menu";
 
 /**
  * Bridges native menu items (Preferences… / Settings, View → zoom) to in-app
@@ -46,6 +47,18 @@ export function useMenuActions(): void {
 			if (isModalOpen()) return;
 			navigateHistory(direction, "os");
 		});
+	}, []);
+
+	useEffect(() => {
+		/*
+		 * The right-click menu's renderer half (#1359): what is under the pointer
+		 * on the way out, the token popover on the way back.
+		 *
+		 * Here rather than in a component of its own for the same reason zoom is:
+		 * the listener is on `window`, and a second mount would announce the same
+		 * click twice. Mounted once, in `App`.
+		 */
+		return installContextMenuBridge(window.electronAPI, window);
 	}, []);
 
 	useEffect(() => {

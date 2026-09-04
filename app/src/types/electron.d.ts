@@ -63,8 +63,7 @@ export interface ContextMenuTarget {
  * actions never leave the main process, so they are not in this union.
  */
 export type ContextMenuCommand =
-	| { type: "import-command"; text: string }
-	| { type: "edit-variable"; name: string };
+	{ type: "import-command"; text: string } | { type: "edit-variable"; name: string };
 
 interface ElectronAPI {
 	// Engine management

@@ -103,7 +103,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// forwarded half of `ContextCommand` in electron/context-menu.ts.
 	onContextMenuCommand: (
 		callback: (
-			command: { type: "import-command"; text: string } | { type: "edit-variable"; name: string }
+			command:
+				{ type: "import-command"; text: string } | { type: "edit-variable"; name: string }
 		) => void
 	) => {
 		const handler = (_event: unknown, command: unknown) =>

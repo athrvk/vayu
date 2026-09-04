@@ -6,6 +6,9 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 // The renderer's own detector, which parses whatever this menu offers to import.
 // A leaf module by design, so reaching across the process boundary here costs
 // nothing: see src/services/curl/detect-command.ts.
@@ -74,7 +77,10 @@ describe("menuTemplateFor - editable fields", () => {
 
 	it("disables the items the edit flags say cannot act", () => {
 		const items = menuTemplateFor(
-			params({ isEditable: true, editFlags: { ...ALL_FLAGS, canPaste: false, canCut: false } }),
+			params({
+				isEditable: true,
+				editFlags: { ...ALL_FLAGS, canPaste: false, canCut: false },
+			}),
 			target(),
 			noClipboard
 		);
@@ -200,7 +206,11 @@ describe("menuTemplateFor - links", () => {
 	});
 
 	it("offers a link on a read-only surface with no selection", () => {
-		const items = menuTemplateFor(params({ linkURL: "http://localhost:9876" }), target(), noClipboard);
+		const items = menuTemplateFor(
+			params({ linkURL: "http://localhost:9876" }),
+			target(),
+			noClipboard
+		);
 
 		expect(labels(items)).toEqual(["Copy Link", "Open in Browser"]);
 		expect(items[0]).not.toEqual({ kind: "separator" });
@@ -395,7 +405,10 @@ describe("installContextMenu", () => {
 	function fakeContents() {
 		const listeners: Array<(event: unknown, params: ContextMenuParams) => void> = [];
 		return {
-			on(_event: "context-menu", listener: (event: unknown, params: ContextMenuParams) => void) {
+			on(
+				_event: "context-menu",
+				listener: (event: unknown, params: ContextMenuParams) => void
+			) {
 				listeners.push(listener);
 				return this;
 			},
@@ -432,5 +445,31 @@ describe("installContextMenu", () => {
 		contents.rightClick(params({ isEditable: true }));
 
 		expect(showMenu).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * main.ts creates windows and starts the engine at import time, so the wiring
+ * can only be read - the characterization approach `startup-order.test.ts` and
+ * `renderer-recovery.test.ts` take to the same file. What is driven for real is
+ * everything above; what is asserted here is that it is reached at all.
+ */
+describe("the wiring in main.ts", () => {
+	const main = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "main.ts"), "utf8");
+
+	it("installs the handler on the window's own web contents", () => {
+		expect(main).toContain("installContextMenu(menuWindow.webContents");
+	});
+
+	it("takes the announcement over an IPC channel that always answers", () => {
+		const handlerAt = main.indexOf('ipcMain.on("context-menu:target"');
+		expect(handlerAt).toBeGreaterThan(-1);
+
+		// A `sendSync` whose handler returns without a `returnValue` blocks the
+		// renderer for good, so it is set before anything that could throw.
+		const body = main.slice(handlerAt, handlerAt + 400);
+		expect(body.indexOf("event.returnValue = true;")).toBeLessThan(
+			body.indexOf("contextTargets.announce(")
+		);
 	});
 });

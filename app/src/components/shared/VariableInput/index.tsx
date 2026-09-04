@@ -54,6 +54,7 @@ import RuntimeToken from "./RuntimeToken";
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { variableCompletionContext } from "@/lib/variable-completion";
 import { classifyVariableToken, type VariableTokenKind } from "@/lib/variable-token-kind";
+import { contextProps, type ContextKind } from "@/lib/context-menu";
 
 interface VariableInputProps {
 	value: string;
@@ -76,6 +77,13 @@ interface VariableInputProps {
 	 * ref into the request builder. From `constants/dom-ids.ts`, both ends.
 	 */
 	id?: string;
+	/**
+	 * What this field is, for the right-click menu (#1359). Only the URL bar has
+	 * an answer: it is the field that imports a pasted curl command, so it is the
+	 * one whose menu offers to. Every other field's menu is composed from what
+	 * Chromium already reports, and needs no marker.
+	 */
+	contextKind?: ContextKind;
 	/**
 	 * The variable scope this field edits inside. Omitted where there is none,
 	 * which makes this a plain text field: no tokens, no `{{` autocomplete, no
@@ -161,6 +169,7 @@ export default function VariableInput({
 	onPaste,
 	"aria-label": ariaLabel,
 	id,
+	contextKind,
 	variables,
 }: VariableInputProps) {
 	const [showSuggestions, setShowSuggestions] = useState(false);
@@ -713,6 +722,10 @@ export default function VariableInput({
 		// eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- wraps a native input; the click only widens the hit area to the padded box, and the input is keyboard-operable on its own
 		<div
 			ref={containerRef}
+			// The wrapper, not the input: the token overlay is painted beside the
+			// input rather than inside it, so this is the ancestor a right-click on
+			// a `{{token}}` and one on the text share.
+			{...(contextKind ? contextProps(contextKind) : {})}
 			className={cn(
 				// Default chrome - overridable via className. Wrapper owns border/bg/size
 				// so the inner input can be borderless and fill it.

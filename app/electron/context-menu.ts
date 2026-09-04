@@ -138,14 +138,12 @@ export function readContextTarget(value: unknown): ContextTarget {
 	if (typeof value !== "object" || value === null) return NO_CONTEXT_TARGET;
 	const source = value as { kind?: unknown; variable?: unknown };
 	const kind = source.kind === "url-bar" || source.kind === "monaco" ? source.kind : null;
-	const variable = typeof source.variable === "string" && source.variable ? source.variable : null;
+	const variable =
+		typeof source.variable === "string" && source.variable ? source.variable : null;
 	return { kind, variable };
 }
 
-function roleItem(
-	role: "cut" | "copy" | "paste" | "selectAll",
-	enabled: boolean
-): ContextMenuItem {
+function roleItem(role: "cut" | "copy" | "paste" | "selectAll", enabled: boolean): ContextMenuItem {
 	return { kind: "role", role, enabled };
 }
 
