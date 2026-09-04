@@ -122,7 +122,18 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			// rejecting (`useSaveManager`, `SettingsMain`, `VariableTableEditor`
 			// all do), so overwriting unconditionally turned a failed Cmd+S into
 			// "Saved" - with the failure toast still on screen next to it.
-			if (get().status === "error") return;
+			//
+			// Nor is it proof of completeness (#1381). A context that saw an edit
+			// land while its write was in flight publishes `pending`, because the
+			// payload that went out does not hold that edit; overwriting *that*
+			// put "Saved" on the Dock over an edit nobody had persisted, on the
+			// two paths that come through here - Cmd+S and the quit flush.
+			//
+			// Both cases are the same rule: a status the context published for
+			// itself is the truthful one, and this wrapper only fills in the
+			// silence.
+			const published = get().status;
+			if (published === "error" || published === "pending") return;
 			get().completeSaveThenIdle();
 		} catch (error) {
 			get().failSave(error instanceof Error ? error.message : "Save failed");

@@ -603,6 +603,13 @@ do - so `runSave` checks for `status === "error"` after awaiting instead of
 setting `"saved"` unconditionally. Without that check a failed Cmd/Ctrl+S showed
 "Saved" beside its own failure toast.
 
+It refuses `"pending"` on the same grounds (#1381). A context that saw an edit
+land while its write was in flight publishes `pending`, because the payload that
+went out does not hold that edit - and `runSave` is the path Cmd/Ctrl+S and the
+quit flush take, so overwriting it put "Saved" on the Dock over an edit nobody
+had persisted. One rule covers both: a status the context published for itself
+is the truthful one, and `runSave` only fills in the silence.
+
 **SaveContext:**
 ```typescript
 {

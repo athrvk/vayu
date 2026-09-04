@@ -170,4 +170,65 @@ describe("what a returning save is allowed to call itself", () => {
 		expect(useSaveStore.getState().status).toBe("pending");
 		expect(useSaveStore.getState().status).not.toBe("saved");
 	});
+
+	/*
+	 * Cmd+S and the quit flush do not call `performSave` directly - they go
+	 * through the store's `runSave`, which publishes its own status around the
+	 * context's save. It knew to keep its hands off an `error` the context had
+	 * reported and nothing else, so it painted "Saved" straight over the
+	 * `pending` this fix publishes. Two paths, two cases: the guard is one line
+	 * and covers both, and only a test that drives the store catches it.
+	 */
+	it("stays unsaved when the edit landed during a Cmd+S", async () => {
+		const held = deferred();
+		const onSave = vi.fn().mockReturnValue(held.promise);
+		const { rerender } = mountManager(onSave);
+
+		let triggered!: Promise<void>;
+		act(() => {
+			triggered = useSaveStore.getState().triggerSave();
+		});
+		await settle();
+
+		rerender({ token: 2 });
+
+		held.resolve();
+		await act(async () => {
+			await triggered;
+		});
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
+	it("stays unsaved when the edit landed during the quit flush", async () => {
+		const held = deferred();
+		const onSave = vi.fn().mockReturnValue(held.promise);
+		const { rerender } = mountManager(onSave);
+
+		let flushed!: Promise<void>;
+		act(() => {
+			flushed = useSaveStore.getState().flushAll();
+		});
+		await settle();
+
+		rerender({ token: 2 });
+
+		held.resolve();
+		await act(async () => {
+			await flushed;
+		});
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
+	it("still reports Saved through Cmd+S when nothing raced it", async () => {
+		// The control. A guard that refused to ever complete would pass the two
+		// cases above and break every ordinary save.
+		const onSave = vi.fn().mockResolvedValue(undefined);
+		mountManager(onSave);
+
+		await act(async () => {
+			await useSaveStore.getState().triggerSave();
+		});
+
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
 });
