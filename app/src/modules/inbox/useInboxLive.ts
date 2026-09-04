@@ -20,7 +20,7 @@
  * does not close the socket unless nothing else wants it.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { inboxWatchService, type InboxWatchState } from "@/services/inbox-watch-service";
 
 /** What the surface renders from {@link useInboxLive}. */
@@ -41,29 +41,32 @@ const IDLE: InboxWatchState = { watching: false, stopped: false };
  */
 export function useInboxLive(inboxId: string | null, enabled: boolean): InboxLiveState {
 	const watched = enabled ? inboxId : null;
-	// Stamped with the inbox it describes. A state left by the previously
-	// addressed inbox says nothing about this one, so it is discarded while
-	// rendering rather than reset by an effect - the reset would otherwise land
-	// a render late, showing the previous inbox's badge on the new one.
-	const [reported, setReported] = useState<{ inboxId: string; state: InboxWatchState } | null>(
-		null
-	);
-	const state = watched !== null && reported?.inboxId === watched ? reported.state : IDLE;
 
+	// The reference, which is a want rather than a read: the service keeps this
+	// inbox's socket open while the view is mounted, whether or not anything is
+	// rendering its state.
 	useEffect(() => {
 		if (!watched) return;
-		// Retained before subscribing, so the first state this renders is the one
-		// belonging to the stream this view asked for rather than to whatever the
-		// service happened to hold a tick earlier.
 		inboxWatchService.retain(watched);
-		const unsubscribe = inboxWatchService.subscribe(watched, (next) =>
-			setReported({ inboxId: watched, state: next })
-		);
-		return () => {
-			unsubscribe();
-			inboxWatchService.release(watched);
-		};
+		return () => inboxWatchService.release(watched);
 	}, [watched]);
+
+	// `useSyncExternalStore` rather than state-plus-effect, for the reason
+	// `usePrefersReducedMotion` gives: the service is the source of truth, and
+	// the effect version renders one frame of `IDLE` before it catches up. On a
+	// tab reopened over a stream the service is already holding - the case this
+	// issue is about - that frame is the badge reading `Running` and then
+	// flicking to `Live`.
+	const subscribe = useCallback(
+		(onChange: () => void) =>
+			watched ? inboxWatchService.subscribe(watched, onChange) : () => {},
+		[watched]
+	);
+	const getSnapshot = useCallback(
+		() => (watched ? inboxWatchService.getState(watched) : IDLE),
+		[watched]
+	);
+	const state = useSyncExternalStore(subscribe, getSnapshot);
 
 	const resume = useCallback(() => {
 		if (watched) inboxWatchService.resume(watched);

@@ -25,7 +25,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import { queryClient } from "@/lib/query-client";
 import { inboxWatchService } from "@/services/inbox-watch-service";
 import { useInboxLive } from "./useInboxLive";
@@ -89,17 +89,24 @@ describe("useInboxLive", () => {
 		expect(result.current.stopped).toBe(false);
 	});
 
-	it("adopts a stream the service already holds", () => {
+	it("adopts a stream the service already holds, on the first render", () => {
 		// The tab is reopened on an inbox that has been notifying in the
-		// background: one socket, and the badge reads Live at once rather than
-		// after a reconnect.
+		// background: one socket, and the badge reads Live from the first frame.
+		// Mutation check: read the service through state-plus-effect instead of
+		// `useSyncExternalStore` and the first frame is `Running`, which is the
+		// badge flicking on every reopen.
 		inboxWatchService.reconcile(["inbox_a"]);
 		act(() => latest().onopen?.());
 
-		const { result } = renderHook(() => useInboxLive("inbox_a", true));
+		const rendered: boolean[] = [];
+		function Probe() {
+			rendered.push(useInboxLive("inbox_a", true).watching);
+			return null;
+		}
+		render(<Probe />);
 
 		expect(sources()).toHaveLength(1);
-		expect(result.current.watching).toBe(true);
+		expect(rendered[0]).toBe(true);
 	});
 
 	it("leaves the socket open on unmount when something else still wants it", () => {

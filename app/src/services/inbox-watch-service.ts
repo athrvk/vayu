@@ -215,7 +215,16 @@ class InboxWatchService {
 		return this.streams.get(inboxId)?.state ?? IDLE;
 	}
 
-	/** Re-subscribe now, from the same resume point, with a fresh budget. */
+	/**
+	 * Re-subscribe now, from the same resume point, with a fresh budget.
+	 *
+	 * Immediately, without the backoff a reconnect uses: this is a user asking,
+	 * and a Resume that waited would look like a control that did nothing. A
+	 * reconnect landing inside the engine's dead-socket window still meets the
+	 * previous claim's 409, which is what the ladder below is for - the same is
+	 * true of a `Notify` toggle flipped off and straight back on, which closes
+	 * and reopens through {@link apply}.
+	 */
 	resume(inboxId: string): void {
 		const stream = this.streams.get(inboxId);
 		if (!stream) {
