@@ -21,7 +21,10 @@
  * - A field is inserted into the selection set the cursor is in *only* when
  *   that set's type is the one that owns the field. No inline-fragment
  *   guessing on an interface or union, because "probably compatible" is how an
- *   invalid document gets written on the user's behalf.
+ *   invalid document gets written on the user's behalf. A cursor *inside* an
+ *   inline fragment is a different matter: the fragment states its type, so the
+ *   set is read at that type rather than at the interface or union above it -
+ *   reading what the document says is not guessing.
  * - A field whose arguments become `$variables` forces those variables to be
  *   *declared*, so inserting into an existing operation edits that operation's
  *   variable definitions too. A `$id` nobody declared is a document the server
@@ -63,6 +66,7 @@ import {
 	type GraphQLField,
 	type GraphQLNamedType,
 	type GraphQLSchema,
+	type InlineFragmentNode,
 	type OperationDefinitionNode,
 	type SelectionSetNode,
 } from "graphql";
@@ -177,6 +181,12 @@ interface EnclosingSet {
  * Empty when the document does not parse, when the cursor is outside every
  * operation, or when a field along the way is not in the schema - all of which
  * mean the same thing to the caller: there is no context to insert into.
+ *
+ * An inline fragment is one of the sets, at the type it narrows to. Skipping it
+ * reported the interface or union the field above declares, so a cursor inside
+ * `... on Post { }` looked like a cursor in a `Node` set that owns nothing the
+ * user clicked - and the insertion fell all the way out to a second copy of the
+ * route (#1346).
  */
 function enclosingSets(
 	schema: GraphQLSchema,
@@ -202,23 +212,59 @@ function enclosingSets(
 		let set: SelectionSetNode | null = operation.selectionSet;
 		while (set) {
 			chain.push({ typeName, selectionSet: set, operation });
-			const next: FieldNode | undefined = set.selections.find(
-				(s): s is FieldNode =>
-					s.kind === Kind.FIELD && !!s.selectionSet && contains(s.selectionSet, cursor)
-			);
+			const next = descend(schema, set, typeName, cursor);
 			if (!next) break;
-			const owner = schema.getType(typeName);
-			const field =
-				isObjectType(owner) || isInterfaceType(owner)
-					? owner.getFields()[next.name.value]
-					: undefined;
-			if (!field) break;
-			typeName = getNamedType(field.type).name;
-			set = next.selectionSet ?? null;
+			typeName = next.typeName;
+			set = next.selectionSet;
 		}
 		return { chain, operations };
 	}
 	return { chain: [], operations };
+}
+
+/**
+ * One step inwards from `set` towards the cursor, or null when the cursor is in
+ * `set` itself - or behind something this cannot read the type of.
+ *
+ * The two selections that hold a nested set are a field and an inline fragment,
+ * and they answer the same question differently: a field's set is read at the
+ * field's type, a fragment's at the type it names. A fragment with no type
+ * condition (`... @include(if: $x) { }`) is legal and narrows nothing, so the
+ * type carries over unchanged.
+ *
+ * Stopping (rather than descending blind) where the schema does not have the
+ * field or the type condition is the same rule the chain has always followed:
+ * the sets above are still honest context, and the sets below are read against
+ * a type nothing can be checked against.
+ */
+function descend(
+	schema: GraphQLSchema,
+	set: SelectionSetNode,
+	typeName: string,
+	cursor: number
+): { typeName: string; selectionSet: SelectionSetNode } | null {
+	const next = set.selections.find(
+		(s): s is FieldNode | InlineFragmentNode =>
+			(s.kind === Kind.FIELD || s.kind === Kind.INLINE_FRAGMENT) &&
+			!!s.selectionSet &&
+			contains(s.selectionSet, cursor)
+	);
+	if (!next) return null;
+
+	if (next.kind === Kind.INLINE_FRAGMENT) {
+		const condition = next.typeCondition?.name.value;
+		if (!condition) return { typeName, selectionSet: next.selectionSet };
+		if (!isCompositeType(schema.getType(condition))) return null;
+		return { typeName: condition, selectionSet: next.selectionSet };
+	}
+
+	const owner = schema.getType(typeName);
+	const field =
+		isObjectType(owner) || isInterfaceType(owner)
+			? owner.getFields()[next.name.value]
+			: undefined;
+	if (!field || !next.selectionSet) return null;
+	return { typeName: getNamedType(field.type).name, selectionSet: next.selectionSet };
 }
 
 function rootTypeFor(schema: GraphQLSchema, operation: OperationDefinitionNode) {
