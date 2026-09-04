@@ -31,6 +31,12 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { createRendererWatch, type IpcEventLike, type RendererLike } from "./renderer-watch.js";
+
+// Re-exported because this module's IPC surface is written in terms of them,
+// and a caller typing a fake renderer should not have to know which file the
+// two lifecycle events moved to.
+export type { IpcEventLike, RendererLike };
 
 /** What a run asks the OS for. See the header: never `prevent-display-sleep`. */
 export const WAKE_LOCK_BLOCKER_TYPE = "prevent-app-suspension";
@@ -180,42 +186,17 @@ export interface IpcLike {
 }
 
 /**
- * The renderer behind a call, and the two lifecycle events that mean its holds
- * are gone: `destroyed` (window closed, process gone) and `did-start-loading`
- * (a reload - the new page cannot release the old page's tokens).
- */
-export interface RendererLike {
-	id: number;
-	once(event: "destroyed", listener: () => void): unknown;
-	on(event: "did-start-loading", listener: () => void): unknown;
-}
-
-export interface IpcEventLike {
-	sender: RendererLike;
-}
-
-/**
  * Wire the two channels, and make a renderer's holds die with it.
  *
  * The owner cleanup is not a nicety: a renderer that crashes or reloads mid-run
  * never gets to release, and without this the machine stays pinned awake until
- * the app quits.
+ * the app quits. `renderer-watch.ts` holds the two lifecycle events, which the
+ * taskbar's progress bar (#1362) needs in exactly the same way.
  */
 export function registerPowerIpc(ipc: IpcLike, lock: WakeLock): void {
-	const watched = new Set<number>();
-
-	function watchOwner(sender: RendererLike): void {
-		if (watched.has(sender.id)) return;
-		watched.add(sender.id);
-		const drop = () => {
-			lock.releaseAllFrom(sender.id);
-		};
-		sender.once("destroyed", () => {
-			watched.delete(sender.id);
-			drop();
-		});
-		sender.on("did-start-loading", drop);
-	}
+	const watchOwner = createRendererWatch((rendererId) => {
+		lock.releaseAllFrom(rendererId);
+	});
 
 	ipc.handle(POWER_HOLD_CHANNEL, (event: IpcEventLike, ...args: unknown[]) => {
 		// A reason the renderer did not send is not a reason to refuse the hold:

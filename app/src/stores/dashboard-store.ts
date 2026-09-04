@@ -43,16 +43,17 @@ export interface LoadTestRunConfig {
 }
 
 /**
- * Seconds in a duration the engine accepts: a number with an optional
- * `ms`/`s`/`m`/`h` unit, where a bare number is seconds (see
- * `parse_duration_ms` in `engine/src/core/load_strategy.cpp`). `null` for
+ * Seconds in a duration the engine accepts: digits with at most one decimal
+ * point and an optional `ms`/`s`/`m`/`h` unit, where a bare number is seconds
+ * (see `parse_duration_ms` in `engine/include/vayu/core/load_pacing.hpp`, which
+ * rejects `1e3` and a signed value for the same reason this does). `null` for
  * anything else, including the absent duration of an open-ended run.
  */
 const DURATION_UNIT_SECONDS: Record<string, number> = { ms: 0.001, s: 1, m: 60, h: 3600 };
 
 function durationSeconds(duration: string | undefined): number | null {
 	if (!duration) return null;
-	const match = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h)?\s*$/.exec(duration);
+	const match = /^\s*(\d+\.?\d*|\.\d+)\s*(ms|s|m|h)?\s*$/.exec(duration);
 	if (!match) return null;
 	const seconds = Number(match[1]) * (match[2] ? DURATION_UNIT_SECONDS[match[2]] : 1);
 	return seconds > 0 ? seconds : null;

@@ -29,6 +29,8 @@
  * needs arrive as arguments for the same reason.
  */
 
+import { createRendererWatch, type IpcEventLike } from "./renderer-watch.js";
+
 export const RUN_PROGRESS_CHANNEL = "runs:progress";
 
 /**
@@ -167,20 +169,6 @@ export interface IpcLike {
 }
 
 /**
- * The renderer behind a message, and the two lifecycle events that mean it can
- * no longer clear what it painted: `destroyed` and `did-start-loading`.
- */
-export interface RendererLike {
-	id: number;
-	once(event: "destroyed", listener: () => void): unknown;
-	on(event: "did-start-loading", listener: () => void): unknown;
-}
-
-export interface IpcEventLike {
-	sender: RendererLike;
-}
-
-/**
  * Read one message off the channel, or `null` for anything that is not one.
  *
  * A malformed payload is dropped rather than painted: the values reach an OS
@@ -206,18 +194,7 @@ export function parseRunProgressUpdate(raw: unknown): RunProgressUpdate | null {
  * for a run that is gone until the app quits.
  */
 export function registerRunProgressIpc(ipc: IpcLike, painter: RunProgressPainter): void {
-	const watched = new Set<number>();
-
-	function watchOwner(sender: RendererLike): void {
-		if (watched.has(sender.id)) return;
-		watched.add(sender.id);
-		const drop = () => painter.clear();
-		sender.once("destroyed", () => {
-			watched.delete(sender.id);
-			drop();
-		});
-		sender.on("did-start-loading", drop);
-	}
+	const watchOwner = createRendererWatch(() => painter.clear());
 
 	ipc.on(RUN_PROGRESS_CHANNEL, (event: IpcEventLike, ...args: unknown[]) => {
 		const update = parseRunProgressUpdate(args[0]);

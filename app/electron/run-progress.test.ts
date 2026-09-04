@@ -21,9 +21,9 @@ import {
 	registerRunProgressIpc,
 	RUN_PROGRESS_CHANNEL,
 	RUN_PROGRESS_ERROR_FLASH_MS,
-	type IpcEventLike,
 	type RunProgressPainter,
 } from "./run-progress";
+import type { IpcEventLike } from "./renderer-watch";
 
 type Call = [number, { mode: string }?];
 

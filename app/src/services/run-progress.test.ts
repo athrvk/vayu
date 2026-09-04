@@ -23,8 +23,8 @@ function stubBridge() {
 
 /**
  * The reporter's state is a module singleton, as the one indicator it speaks
- * for is. Each case starts from nothing live and nothing remembered as painted,
- * driven through the same calls a run makes rather than through a back door.
+ * for is. Each case starts from nothing shown and nothing remembered as
+ * painted, driven through the same calls a run makes rather than a back door.
  */
 beforeEach(() => {
 	stubBridge();
@@ -75,14 +75,14 @@ describe("runProgress - one run", () => {
 		expect(send).toHaveBeenLastCalledWith({ state: "idle" });
 	});
 
-	it("says failed when the only run fails", () => {
+	it("says failed when the run fails", () => {
 		const send = stubBridge();
 		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.5);
 		runProgress.fail(RUN_PROGRESS_KEYS.loadRun);
 		expect(send).toHaveBeenLastCalledWith({ state: "failed" });
 	});
 
-	it("sends nothing for a run that was never live", () => {
+	it("sends nothing for a run the indicator is not showing", () => {
 		const send = stubBridge();
 		runProgress.clear(RUN_PROGRESS_KEYS.loadRun);
 		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun);
@@ -90,53 +90,55 @@ describe("runProgress - one run", () => {
 	});
 });
 
-describe("runProgress - two runs and one indicator", () => {
-	it("gives the indicator to the run that started most recently", () => {
+/*
+ * `sse-client.ts` is one `EventSource` for both run types, so a second
+ * `startMonitoring` closes the first run's stream where it stands: that run
+ * keeps going on the engine and the renderer never sees another tick of it, nor
+ * runs its terminal handlers. The indicator follows the run being watched.
+ */
+describe("runProgress - a run that supersedes another", () => {
+	it("hands the indicator to the run the renderer is now watching", () => {
 		const send = stubBridge();
 		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
 		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
 		expect(send).toHaveBeenLastCalledWith({ state: "running", value: null });
 	});
 
-	it("records the run behind without painting it", () => {
-		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
-		send.mockClear();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.4);
-		expect(send).not.toHaveBeenCalled();
-	});
-
 	/*
-	 * Mutation check: paint from a single "current" value instead of the keyed
-	 * map and the load run's bar never comes back - the taskbar sits idle while
-	 * a run is still going.
+	 * Mutation check: drop the `shownFor` guard in `clear` and the superseded
+	 * load run's stop - the dashboard calls `stopMonitoring` for a run it finds
+	 * already finished - wipes the bar of the collection run that is streaming.
 	 */
-	it("hands it back to the run still going, at that run's own progress", () => {
-		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.4);
-		runProgress.clear(RUN_PROGRESS_KEYS.collectionRun);
-		expect(send).toHaveBeenLastCalledWith({ state: "running", value: 0.4 });
-	});
-
-	it("shows the run still going rather than the other's failure", () => {
-		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.4);
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
-		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun);
-		expect(send).toHaveBeenLastCalledWith({ state: "running", value: 0.4 });
-		expect(send.mock.calls.some(([update]) => update.state === "failed")).toBe(false);
-	});
-
-	it("keeps the indicator when the run behind ends", () => {
+	it("ignores a superseded run's stop", () => {
 		const send = stubBridge();
 		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
 		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
 		send.mockClear();
 		runProgress.clear(RUN_PROGRESS_KEYS.loadRun);
 		expect(send).not.toHaveBeenCalled();
+	});
+
+	/* Same guard, the other terminal path. */
+	it("ignores a superseded run's failure", () => {
+		const send = stubBridge();
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
+		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
+		send.mockClear();
+		runProgress.fail(RUN_PROGRESS_KEYS.loadRun);
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * And the superseded run leaves nothing behind: when the run that took over
+	 * ends, the indicator goes away rather than falling back to a fraction from
+	 * a run nothing is watching any more.
+	 */
+	it("leaves no bar behind when the run that took over ends", () => {
+		const send = stubBridge();
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
+		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
+		runProgress.clear(RUN_PROGRESS_KEYS.collectionRun);
+		expect(send).toHaveBeenLastCalledWith({ state: "idle" });
 	});
 });
 

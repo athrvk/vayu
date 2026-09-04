@@ -10,12 +10,19 @@
  *
  * `electron/run-progress.ts` decides how a platform paints an update - and that
  * two of the three paint anything at all. This side decides what the update is,
- * and holds the one rule main cannot answer: **an application has one progress
- * indicator, and two runs can be live at once.** A load run and a collection run
- * each report under their own key; the most recently started of them owns the
- * indicator, and when it ends the other takes it back rather than the OS being
- * left with a bar for a run that finished. That is the same reason
- * `wake-lock.ts` is keyed rather than copied into both run services.
+ * and holds the one rule main cannot answer: **which run the indicator is for.**
+ *
+ * There is only ever one, and it is whichever run the renderer is currently
+ * watching. `sse-client.ts` is a singleton with one `EventSource` - "one client
+ * for both run types, because there is one stream" - so a second
+ * `startMonitoring`, from either run service, closes the first stream where it
+ * stands. The superseded run keeps running on the engine, but nothing here sees
+ * another tick of it, and its terminal handlers never fire.
+ *
+ * So `report` takes the indicator over, and `fail`/`clear` from a run that has
+ * already been superseded are ignored. Without that guard the older run's stop -
+ * the dashboard calls `stopMonitoring` for a run it finds already finished -
+ * would wipe the bar of the run that is actually being watched.
  *
  * Nothing here throttles: a caller reports off the metrics flush, which is
  * already the live-refresh cadence (`throttled-batcher.ts`), so a second timer
@@ -27,7 +34,7 @@
 
 import type { RunProgressUpdate } from "@/types/electron";
 
-/** The two runs that can own the indicator, matching `WAKE_LOCK_KEYS`. */
+/** The two kinds of run that report progress, matching `WAKE_LOCK_KEYS`. */
 export const RUN_PROGRESS_KEYS = {
 	loadRun: "load-run",
 	collectionRun: "collection-run",
@@ -35,12 +42,8 @@ export const RUN_PROGRESS_KEYS = {
 
 export type RunProgressKey = (typeof RUN_PROGRESS_KEYS)[keyof typeof RUN_PROGRESS_KEYS];
 
-/**
- * Live runs and their last reported fraction, in the order they started. A
- * `Map` keeps that order across an update to a key already in it, so the owner
- * is simply the last one added.
- */
-const live = new Map<RunProgressKey, number | null>();
+/** The run the indicator is showing, or null when it is showing nothing. */
+let shownFor: RunProgressKey | null = null;
 
 /**
  * The last running update sent, so an unmoved fraction is not re-sent on every
@@ -82,58 +85,33 @@ function send(update: RunProgressUpdate): void {
 	}
 }
 
-/** The most recently started run still live, or null when none is. */
-function owner(): RunProgressKey | null {
-	let last: RunProgressKey | null = null;
-	for (const key of live.keys()) last = key;
-	return last;
-}
-
-/** Paint whoever owns the indicator now, or take it away when nobody does. */
-function paintOwner(): void {
-	const key = owner();
-	if (!key) {
-		send({ state: "idle" });
-		return;
-	}
-	send({ state: "running", value: live.get(key) ?? null });
-}
-
 export const runProgress = {
 	/**
 	 * Say where `key`'s run is: a 0..1 fraction, or null for a run with no
 	 * denominator, which shows as indeterminate where the platform has one.
 	 *
-	 * The first report for a key is what makes that run the owner, so a run
-	 * reports once when it starts rather than waiting for its first tick.
+	 * Reporting takes the indicator over, because watching this run is what
+	 * stopped the renderer watching any other.
 	 */
 	report(key: RunProgressKey, value: number | null): void {
-		// A key not seen before lands at the end of the map and is the owner from
-		// this call on; one already there keeps its place. Either way a key that
-		// is live but not in front has its value recorded and nothing else - it
-		// is what gets painted when the run in front ends.
-		live.set(key, value);
-		if (owner() === key) paintOwner();
+		shownFor = key;
+		send({ state: "running", value });
 	},
 
 	/**
 	 * `key`'s run ended badly. The indicator says so - briefly, and only where a
-	 * platform has a failed state - unless another run is still going, whose
-	 * progress is the more useful thing to be showing.
+	 * platform has a failed state.
 	 */
 	fail(key: RunProgressKey): void {
-		const wasOwner = owner() === key;
-		if (!live.delete(key) || !wasOwner) return;
-		if (live.size > 0) {
-			paintOwner();
-			return;
-		}
+		if (shownFor !== key) return;
+		shownFor = null;
 		send({ state: "failed" });
 	},
 
-	/** `key`'s run is over. A key that is not live is a no-op. */
+	/** `key`'s run is over. A run the indicator is not showing is a no-op. */
 	clear(key: RunProgressKey): void {
-		if (!live.delete(key)) return;
-		paintOwner();
+		if (shownFor !== key) return;
+		shownFor = null;
+		send({ state: "idle" });
 	},
 };
