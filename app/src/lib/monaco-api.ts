@@ -26,11 +26,14 @@
  * Written as an `Omit` of the package's own type rather than as a hand-written
  * shape so that the composed object in `monaco-setup.ts` is checked against
  * monaco's real API: a version that moves `typescript` or `json` fails to
- * compile there rather than going missing at runtime.
+ * compile there rather than going missing at runtime. That is not a hypothetical
+ * - 0.56 reorganised the entry points under an `exports` map and this type is
+ * what pinned the composed object to the barrel through it (#1342).
  *
- * `createWebWorker` goes with them because it is exported by the barrel and
- * not by `editor.api`, and nothing here calls it.
+ * `createWebWorker` used to be omitted here too, as a barrel-only export
+ * nothing calls. 0.56's barrel no longer exports it at all, so naming it would
+ * be omitting a key that is not there.
  */
 import type * as Monaco from "monaco-editor";
 
-export type MonacoApi = Omit<typeof Monaco, "css" | "html" | "lsp" | "createWebWorker">;
+export type MonacoApi = Omit<typeof Monaco, "css" | "html" | "lsp">;

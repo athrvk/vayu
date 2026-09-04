@@ -26,24 +26,23 @@
 import { describe, it, expect } from "vitest";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 
 /**
- * Resolved from the package's own manifest rather than from its entry point:
+ * Resolved as the module it is, rather than joined onto the package root:
  * `monaco-editor`'s `main` is the bundled `min/` build, while the app imports
- * the `esm/` tree that Vite splits - so the entry is the wrong anchor and
- * pnpm's store layout is not a path anyone should hardcode.
+ * the `esm/` tree that Vite splits, and pnpm's store layout is not a path
+ * anyone should hardcode.
+ *
+ * It used to anchor on `monaco-editor/package.json` and walk down from there.
+ * 0.56's `exports` map ends that: `./*` maps into `esm/vs/`, so the manifest
+ * itself is no longer a resolvable subpath and the walk threw before any
+ * assertion ran (#1342). Resolving the controller directly is both shorter and
+ * the thing actually being asserted - and a version that moves it fails here,
+ * loudly, which is this file's whole job.
  */
 const require_ = createRequire(import.meta.url);
-const CONTROLLER_PATH = join(
-	dirname(require_.resolve("monaco-editor/package.json")),
-	"esm",
-	"vs",
-	"editor",
-	"contrib",
-	"snippet",
-	"browser",
-	"snippetController2.js"
+const CONTROLLER_PATH = require_.resolve(
+	"monaco-editor/editor/contrib/snippet/browser/snippetController2.js"
 );
 
 describe("the snippet controller this app drives", () => {

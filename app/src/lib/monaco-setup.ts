@@ -21,7 +21,7 @@
  * configured instance to the rest of the app.
  *
  * **The entry is composed here rather than taken from the package root**
- * (#1147). `import * as monaco from "monaco-editor"` is `editor.main`: every
+ * (#1147). `import * as monaco from "monaco-editor"` is the full barrel: every
  * Monarch grammar monaco ships, all four language services, and an LSP client.
  * Two of those services - CSS and HTML - reach their workers through
  * `new Worker(new URL("css.worker.js", import.meta.url))` in monaco's own
@@ -31,26 +31,42 @@
  * The imports are therefore spelled out: the editor core, the two language
  * services the app drives, and one grammar per language id it can actually
  * open. `lib/monaco-api.ts` records what that leaves out and why.
+ *
+ * **The entry points are 0.56's, not the `esm/vs/...` paths** (#1342). 0.56
+ * publishes an `exports` map (`"./*": "./esm/vs/*.js"`), so a specifier that
+ * spells `esm/vs` itself now resolves to `esm/vs/esm/vs/...` and fails. What
+ * replaces those paths is the package's own supported surface - `editor`,
+ * `features/<feature>/register`, `languages/definitions/<language>/register`
+ * and `languages/features/<service>/register` - which is what every import
+ * below uses. The composition is otherwise the same one #1147 arrived at.
  */
 
 import { loader } from "@monaco-editor/react";
 
 // The API surface, and separately the standalone editor's contributions. This
-// pair is what the package root's `editor.main` is built from, minus the
-// languages: `editor.api` is types and namespaces *only*, so on its own the
-// editor mounts with no find widget, no folding, no bracket matching, and no
-// suggest, hover or context-menu widgets - all of which the editors here use.
-// `edcore.main` registers them and re-exports the same `editor.api` instances,
+// pair is what the package root is built from, minus the languages: `editor`
+// is types and namespaces *only*, so on its own the editor mounts with no find
+// widget, no folding, no bracket matching, and no suggest, hover or
+// context-menu widgets - all of which the editors here use.
+// `features/register.all` registers them against the same `editor` instances,
 // so importing it for its side effects leaves `editorApi` below unchanged.
-import * as editorApi from "monaco-editor/esm/vs/editor/editor.api.js";
-import "monaco-editor/esm/vs/editor/edcore.main.js";
+//
+// It is the successor to 0.55's `edcore.main`, and three contributions
+// `edcore.main` carried are not on it: `caretOperations` (the two keybindingless
+// Move Caret actions), `copyPasteContribution` and `documentSemanticTokens`.
+// Each needs a provider registered to do anything - a paste provider, a
+// document semantic-tokens provider - and this app registers none of the three,
+// nor names those actions in `constants/shortcuts.ts`. `viewportSemanticTokens`,
+// which is what a live editor actually tokenizes through, is on `register.all`.
+import * as editorApi from "monaco-editor/editor";
+import "monaco-editor/features/register.all";
 
 // The two language services the app drives from the main thread, and the only
 // two whose workers `getWorker` constructs: `useScriptTypeDefinitions` feeds
 // `typescript.javascriptDefaults`, and `graphql/variables-schema` feeds
 // `json.jsonDefaults`.
-import * as jsonLanguage from "monaco-editor/esm/vs/language/json/monaco.contribution.js";
-import * as typescriptLanguage from "monaco-editor/esm/vs/language/typescript/monaco.contribution.js";
+import * as jsonLanguage from "monaco-editor/languages/features/json/register";
+import * as typescriptLanguage from "monaco-editor/languages/features/typescript/register";
 
 // One Monarch grammar per language id the app can put in a model. The response
 // viewer maps body types to css/html/markdown/xml/json/javascript/plaintext
@@ -59,16 +75,16 @@ import * as typescriptLanguage from "monaco-editor/esm/vs/language/typescript/mo
 // own basic language - the providers in `graphql/language-providers.ts` attach
 // to that registered id, so dropping the grammar would leave a graphql model
 // tokenized, and matched, as plain text. `http` is ours, registered below.
-import "monaco-editor/esm/vs/basic-languages/css/css.contribution.js";
-import "monaco-editor/esm/vs/basic-languages/graphql/graphql.contribution.js";
-import "monaco-editor/esm/vs/basic-languages/html/html.contribution.js";
-import "monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js";
-import "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js";
-import "monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js";
+import "monaco-editor/languages/definitions/css/register";
+import "monaco-editor/languages/definitions/graphql/register";
+import "monaco-editor/languages/definitions/html/register";
+import "monaco-editor/languages/definitions/javascript/register";
+import "monaco-editor/languages/definitions/markdown/register";
+import "monaco-editor/languages/definitions/xml/register";
 
-import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import JsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
-import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+import EditorWorker from "monaco-editor/editor/editor.worker?worker";
+import JsonWorker from "monaco-editor/languages/features/json/json.worker?worker";
+import TsWorker from "monaco-editor/languages/features/typescript/ts.worker?worker";
 
 import type { MonacoApi } from "./monaco-api";
 import { registerGraphqlProviders } from "./graphql/language-providers";
@@ -83,15 +99,15 @@ import { registerMonacoTheme } from "./monaco-theme";
  */
 const monaco: MonacoApi = {
 	...editorApi,
-	// Monaco ships these two subpaths with an empty declaration stub
-	// (`monaco.contribution.d.ts` is literally `export {}`); the real types for
-	// both namespaces live inlined in `editor.main.d.ts`, which is what
-	// `MonacoApi` reads. That mismatch is all the cast covers - the members the
-	// app then reads are still monaco's own types, and
-	// `monaco-setup.contributions.test.ts` asserts at runtime that each module
-	// really does export what the cast promises.
-	json: jsonLanguage as unknown as MonacoApi["json"],
-	typescript: typescriptLanguage as unknown as MonacoApi["typescript"],
+	// No cast: 0.55 shipped these two subpaths with an empty declaration stub
+	// (`monaco.contribution.d.ts` was literally `export {}`) and the real types
+	// only inlined in the barrel, so both had to be forced into place. 0.56's
+	// `register.d.ts` is the barrel's own source for `json` and `typescript`,
+	// so the two sides are the same type and assign directly (#1342).
+	// `monaco-setup.contributions.test.ts` still asserts at runtime that each
+	// module exports what the call sites read.
+	json: jsonLanguage,
+	typescript: typescriptLanguage,
 };
 
 self.MonacoEnvironment = {

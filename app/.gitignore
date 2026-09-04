@@ -63,6 +63,11 @@ full-suite-*.txt
 tmp/
 temp/
 
+# Build fixture written inside app/ by monaco-setup.contributions.test.ts, so
+# `monaco-editor`'s exports map resolves the way the real build resolves it.
+# The test removes it; this is for the run that dies before its finally.
+.monaco-worker-fixture-*/
+
 # Engine binaries (bundled at build time)
 resources/bin/vayu-engine
 resources/bin/vayu-cli

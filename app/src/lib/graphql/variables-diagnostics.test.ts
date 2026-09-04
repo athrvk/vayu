@@ -18,7 +18,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import type * as Monaco from "monaco-editor";
-import { JSONWorker } from "monaco-editor/esm/vs/language/json/jsonWorker.js";
+import { JSONWorker } from "monaco-editor/languages/features/json/jsonWorker.js";
 import {
 	attachVariablesDiagnostics,
 	markersOutsideTemplates,
