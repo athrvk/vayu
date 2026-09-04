@@ -34,10 +34,9 @@ import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import { tokenize } from "./tokenize";
 // Re-exported rather than defined here: the main process asks the same question
 // of the clipboard, and a leaf module is what its test can import (#1359).
-import { detectCommand, type CommandKind } from "./detect-command";
+import { detectCommand } from "./detect-command";
 
 export { detectCommand };
-export type { CommandKind };
 
 /** The subset of RequestState a curl/wget command can populate. */
 export type ParsedRequest = Pick<

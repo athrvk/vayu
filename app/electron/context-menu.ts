@@ -33,6 +33,8 @@
  * screenshot.
  */
 
+import { isBrowsableUrl } from "./external-url.js";
+
 /** Where the pointer is, in Vayu's terms rather than Chromium's. */
 export type ContextKind = "url-bar" | "monaco";
 
@@ -94,8 +96,8 @@ export type ClipboardCommand = "curl" | "wget";
 /**
  * Whether the clipboard holds a command the request builder can import.
  *
- * Duplicated from `detectCommand` in `src/services/curl/parseCurl.ts`, which is
- * the parser this offer hands the text to: `tsconfig.node.json` has no `@/*`
+ * Duplicated from `detectCommand` in `src/services/curl/detect-command.ts`,
+ * whose parser this offer hands the text to: `tsconfig.node.json` has no `@/*`
  * mapping, so the main process cannot import a renderer module (see
  * `tsconfig.electron-test.json` for why that boundary is deliberate). The two
  * copies are held together by a test that drives both with the same table.
@@ -106,24 +108,6 @@ export function commandOnClipboard(text: string): ClipboardCommand | null {
 	if (first === "curl") return "curl";
 	if (first === "wget") return "wget";
 	return null;
-}
-
-/**
- * Whether a link is one the OS should be asked to open.
- *
- * A `context-menu` link URL is whatever the document says it is, so the offer is
- * limited to the two schemes a browser answers for. Anything else - a `file:`
- * target, a protocol handler - is not opened and not offered, rather than
- * offered and then refused.
- */
-export function isBrowsableUrl(value: string): boolean {
-	let protocol: string;
-	try {
-		protocol = new URL(value).protocol;
-	} catch {
-		return false;
-	}
-	return protocol === "http:" || protocol === "https:";
 }
 
 /**

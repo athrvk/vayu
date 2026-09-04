@@ -17,7 +17,6 @@ import {
 	commandOnClipboard,
 	createContextTargetStore,
 	installContextMenu,
-	isBrowsableUrl,
 	menuTemplateFor,
 	readContextTarget,
 	runContextCommand,
@@ -224,14 +223,6 @@ describe("menuTemplateFor - links", () => {
 		);
 
 		expect(labels(items)).toEqual([]);
-	});
-
-	it("judges browsable schemes and nothing else", () => {
-		expect(isBrowsableUrl("https://example.com")).toBe(true);
-		expect(isBrowsableUrl("http://example.com")).toBe(true);
-		expect(isBrowsableUrl("vayu://open")).toBe(false);
-		expect(isBrowsableUrl("javascript:alert(1)")).toBe(false);
-		expect(isBrowsableUrl("not a url")).toBe(false);
 	});
 });
 
