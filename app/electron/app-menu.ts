@@ -18,16 +18,34 @@
  *
  * The decision is here rather than in main.ts for the reason context-menu.ts
  * gives: main.ts creates windows and starts the engine at import time, which no
- * unit test can do. `planAppMenuPopup` takes no Electron type and returns plain
- * data, so "macOS is left alone", "a point from a scaled display is rounded"
- * and "a malformed point falls back to the pointer" are unit tests rather than
- * three platforms of manual clicking.
+ * unit test can do. `showApplicationMenu` is what main.ts calls, and neither it
+ * nor `planAppMenuPopup` names an Electron type - the menu and the window
+ * arrive as the slices of them this reads, which a real `Menu` satisfies and a
+ * test's fake satisfies too. So "macOS is left alone", "a point from a scaled
+ * display is rounded" and "a malformed point falls back to the pointer" are
+ * unit tests rather than three platforms of manual clicking.
  */
 
 /** A point in the window's viewport, as the renderer measured it. */
 export interface MenuPoint {
 	x: number;
 	y: number;
+}
+
+/** The slice of `BrowserWindow` this reads, so a test can pass a fake. */
+export interface PopupWindow {
+	isDestroyed(): boolean;
+}
+
+/**
+ * The slice of Electron's `Menu` this pops.
+ *
+ * `window` is optional here only so Electron's own `PopupOptions` stays
+ * assignable to it: a real `Menu` satisfies this interface, and a fake with a
+ * recorded call satisfies it too, which is the whole point.
+ */
+export interface PoppableMenu {
+	popup(options?: { window?: PopupWindow; x?: number; y?: number }): void;
 }
 
 /** What main.ts knows when the renderer asks for the menu. */
@@ -38,6 +56,18 @@ export interface AppMenuRequest {
 	hasWindow: boolean;
 	/** Did `Menu.getApplicationMenu()` return a menu? */
 	hasMenu: boolean;
+	/** Whatever arrived over IPC - untrusted, hence `unknown`. */
+	position?: unknown;
+}
+
+/** The handles main.ts holds when the renderer asks for the menu. */
+export interface AppMenuTargets {
+	/** `process.platform`. */
+	platform: string;
+	/** `Menu.getApplicationMenu()` - the menu `createMenu` installed. */
+	menu: PoppableMenu | null;
+	/** The window to pop over, `null` once it is gone. */
+	window: PopupWindow | null;
 	/** Whatever arrived over IPC - untrusted, hence `unknown`. */
 	position?: unknown;
 }
@@ -81,4 +111,26 @@ export function planAppMenuPopup(request: AppMenuRequest): AppMenuPlan {
 	if (!request.hasWindow) return { pop: false, reason: "no-window" };
 	if (!request.hasMenu) return { pop: false, reason: "no-menu" };
 	return { pop: true, point: menuPoint(request.position) };
+}
+
+/**
+ * Pop the installed application menu over the window, if this request should.
+ *
+ * The one function main.ts calls, and the only place the menu is popped - no
+ * template is built here, because the menu handed in is the one the menu bar
+ * draws on macOS. Returns the plan it acted on, so a caller or a test can name
+ * the case rather than infer it from a call that did not happen.
+ */
+export function showApplicationMenu(targets: AppMenuTargets): AppMenuPlan {
+	const plan = planAppMenuPopup({
+		platform: targets.platform,
+		hasWindow: !!targets.window && !targets.window.isDestroyed(),
+		hasMenu: !!targets.menu,
+		position: targets.position,
+	});
+	if (!plan.pop) return plan;
+	// Both handles are non-null: `plan.pop` is exactly what the two checks
+	// above established, and the compiler cannot carry that across the call.
+	targets.menu?.popup({ window: targets.window ?? undefined, ...(plan.point ?? {}) });
+	return plan;
 }

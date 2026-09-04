@@ -43,7 +43,7 @@ import {
 	toElectronTemplate,
 	type ContextCommand,
 } from "./context-menu.js";
-import { planAppMenuPopup } from "./app-menu.js";
+import { showApplicationMenu } from "./app-menu.js";
 import { createSaveFlusher } from "./save-flush.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
@@ -994,17 +994,12 @@ function setupIpcHandlers() {
 	 * still draws from the same object. See app-menu.ts for the decision.
 	 */
 	ipcMain.on("window:appMenu", (_event, position?: unknown) => {
-		const menu = Menu.getApplicationMenu();
-		const plan = planAppMenuPopup({
+		showApplicationMenu({
 			platform: process.platform,
-			hasWindow: !!mainWindow && !mainWindow.isDestroyed(),
-			hasMenu: !!menu,
+			menu: Menu.getApplicationMenu(),
+			window: mainWindow,
 			position,
 		});
-		// The plan answers all three; the re-checks are what narrow the two
-		// nullable handles for the compiler.
-		if (!plan.pop || !menu || !mainWindow) return;
-		menu.popup({ window: mainWindow, ...(plan.point ?? {}) });
 	});
 
 	/**
@@ -1147,9 +1142,13 @@ app.whenReady().then(async () => {
 		copyright: "© 2026 Atharva Kusumbia",
 		website: "https://github.com/athrvk/vayu",
 		iconPath: aboutIconPath,
-		// Linux draws this one and macOS does not; it was absent while Help >
-		// About was reachable on neither Windows nor Linux (#1361).
+		// The panel's fields are platform-scoped, and the two halves cover
+		// different platforms: `website` and `authors` are Linux-only, `credits`
+		// is macOS and Windows. Both are set so the panel names where to go on
+		// every platform - it was version and copyright alone on the two that
+		// could not open it at all until #1361.
 		authors: ["Atharva Kusumbia"],
+		credits: `${DOCS_URL}\nhttps://github.com/athrvk/vayu`,
 	});
 
 	// Create application menu

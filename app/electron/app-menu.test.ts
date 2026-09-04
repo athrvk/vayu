@@ -19,7 +19,13 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { planAppMenuPopup, menuPoint, type AppMenuRequest } from "./app-menu.js";
+import {
+	planAppMenuPopup,
+	menuPoint,
+	showApplicationMenu,
+	type AppMenuRequest,
+	type PopupWindow,
+} from "./app-menu.js";
 
 const request = (overrides: Partial<AppMenuRequest> = {}): AppMenuRequest => ({
 	platform: "win32",
@@ -102,24 +108,101 @@ describe("menuPoint", () => {
 	});
 });
 
+describe("showApplicationMenu", () => {
+	/** A menu that records what it was asked to pop, and nothing else. */
+	function fakeMenu() {
+		const popped: ({ window?: unknown; x?: number; y?: number } | undefined)[] = [];
+		return {
+			popup(options?: { window?: PopupWindow; x?: number; y?: number }) {
+				popped.push(options);
+			},
+			popped,
+		};
+	}
+	const liveWindow = (): PopupWindow => ({ isDestroyed: () => false });
+
+	it("pops the menu it was handed, over the window, at the point", () => {
+		const menu = fakeMenu();
+		const window = liveWindow();
+
+		const plan = showApplicationMenu({
+			platform: "win32",
+			menu,
+			window,
+			position: { x: 15.6, y: 37.4 },
+		});
+
+		expect(plan).toEqual({ pop: true, point: { x: 16, y: 37 } });
+		expect(menu.popped).toEqual([{ window, x: 16, y: 37 }]);
+	});
+
+	it("pops at the pointer when the point is unusable", () => {
+		const menu = fakeMenu();
+
+		showApplicationMenu({ platform: "linux", menu, window: liveWindow(), position: "16,38" });
+
+		expect(menu.popped).toHaveLength(1);
+		expect(menu.popped[0]).not.toHaveProperty("x");
+		expect(menu.popped[0]).not.toHaveProperty("y");
+	});
+
+	it("pops nothing on macOS, over a destroyed window, or with no menu", () => {
+		const menu = fakeMenu();
+		const gone: PopupWindow = { isDestroyed: () => true };
+
+		expect(showApplicationMenu({ platform: "darwin", menu, window: liveWindow() })).toEqual({
+			pop: false,
+			reason: "has-menu-bar",
+		});
+		expect(showApplicationMenu({ platform: "win32", menu, window: gone })).toEqual({
+			pop: false,
+			reason: "no-window",
+		});
+		expect(showApplicationMenu({ platform: "win32", menu, window: null })).toEqual({
+			pop: false,
+			reason: "no-window",
+		});
+		expect(
+			showApplicationMenu({ platform: "linux", menu: null, window: liveWindow() })
+		).toEqual({ pop: false, reason: "no-menu" });
+		expect(menu.popped).toEqual([]);
+	});
+});
+
 describe("the wiring in main.ts", () => {
 	const here = path.dirname(fileURLToPath(import.meta.url));
 	const main = readFileSync(path.join(here, "main.ts"), "utf8");
 
-	it("pops the menu that is already installed, and builds no second one", () => {
-		expect(main).toContain('ipcMain.on("window:appMenu"');
-		expect(main).toContain("planAppMenuPopup({");
-		// The point of the issue: one template, two surfaces. A
-		// `buildFromTemplate` in this handler would be a second definition of
-		// the menu that could drift from the menu bar macOS draws.
+	/** The handler's body, so a claim about it is not a claim about the file. */
+	const handlerBody = (() => {
 		const handler = main.slice(main.indexOf('ipcMain.on("window:appMenu"'));
-		const body = handler.slice(0, handler.indexOf("\n\t});"));
-		expect(body).toContain("Menu.getApplicationMenu()");
-		expect(body).not.toContain("buildFromTemplate");
+		return handler.slice(0, handler.indexOf("\n\t});"));
+	})();
+
+	it("reads a handler to scan at all", () => {
+		// A slice that came back empty would pass every `not.toContain` below.
+		expect(main).toContain('ipcMain.on("window:appMenu"');
+		expect(handlerBody.length).toBeGreaterThan(0);
 	});
 
-	it("names the authors the Linux About panel prints", () => {
+	it("pops the menu that is already installed, and builds no second one", () => {
+		// The point of the issue: one template, two surfaces. A
+		// `buildFromTemplate` here would be a second definition of the menu, free
+		// to drift from the menu bar macOS draws from the same object.
+		expect(handlerBody).toContain("showApplicationMenu({");
+		expect(handlerBody).toContain("Menu.getApplicationMenu()");
+		expect(handlerBody).not.toContain("buildFromTemplate");
+	});
+
+	it("gives the About panel a link on every platform", () => {
+		// The fields are platform-scoped: `website` and `authors` are read on
+		// Linux, `credits` on macOS and Windows. Setting one half leaves the
+		// other platform's panel with a version and nothing to follow.
 		const options = main.slice(main.indexOf("app.setAboutPanelOptions({"));
-		expect(options.slice(0, options.indexOf("});"))).toContain("authors:");
+		const body = options.slice(0, options.indexOf("});"));
+		expect(body.length).toBeGreaterThan(0);
+		for (const field of ["applicationVersion:", "website:", "authors:", "credits:"]) {
+			expect(body, field).toContain(field);
+		}
 	});
 });
