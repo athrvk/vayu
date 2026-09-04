@@ -22,7 +22,16 @@ export interface LabeledOption<T> {
 /* ── Editor ──────────────────────────────────────────────────────────────── */
 
 export const EDITOR_FONT_SIZES = [11, 12, 13, 14, 16] as const;
-export const DEFAULT_EDITOR_FONT_SIZE = 13;
+/**
+ * 12px, decided on the face rather than on the number (#1202). JetBrains Mono,
+ * the default code face, has an x-height ratio of 0.550 - the largest of the
+ * six bundled faces - so 13px rendered a 7.15px x-height where a code editor
+ * shipping Menlo or Consolas at its own default sits between 6.3 and 6.6px. At
+ * 12px the same face measures 6.60px and lands inside that band.
+ * `appearance.font-metrics.test.ts` holds this to the measurement; Settings ->
+ * Editor still offers 11 through 16 for a user who wants another register.
+ */
+export const DEFAULT_EDITOR_FONT_SIZE = 12;
 
 export const EDITOR_TAB_SIZES = [2, 4] as const;
 export const DEFAULT_EDITOR_TAB_SIZE = 2;

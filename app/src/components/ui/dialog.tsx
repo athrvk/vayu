@@ -186,7 +186,10 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
 	return (
 		<DialogPrimitive.Title
 			data-slot="dialog-title"
-			className={cn("text-lg font-semibold leading-none tracking-tight", className)}
+			// 15px, the scale's title step, not stock shadcn's 18px: a dialog
+			// title is the app's own chrome and read three steps above body in a
+			// dense tool (#1202).
+			className={cn("text-md font-semibold leading-none tracking-tight", className)}
 			{...props}
 		/>
 	);

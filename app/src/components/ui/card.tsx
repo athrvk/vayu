@@ -33,7 +33,11 @@ function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
 	return (
 		<div
 			data-slot="card-title"
-			className={cn("font-semibold leading-none tracking-tight", className)}
+			// The size belongs to the primitive, not to the caller. Naming no size
+			// here left every card heading in the app to pick one, and 51 of them
+			// picked 16px or 18px - a heading register a step above the 15px
+			// "Title / small heading" step the scale already documents (#1202).
+			className={cn("text-md font-semibold leading-none tracking-tight", className)}
 			{...props}
 		/>
 	);
