@@ -53,6 +53,12 @@ const NO_COMMAND = new Map<Chord, string>([
 		"moves focus, and the palette restores focus to wherever it was when it " +
 			"opened - the command would be undone as it closed",
 	],
+	[
+		shortcuts.APP_MENU_CHORD,
+		"pops a native menu anchored to the title-bar icon, which macOS does not " +
+			"render and the palette cannot point at - and every item it holds is " +
+			"already a row here or a chord of its own",
+	],
 	[shortcuts.NEXT_REGION_CHORD, "moves focus - same reason as ⌘L"],
 	[shortcuts.PREVIOUS_REGION_CHORD, "moves focus - same reason as ⌘L"],
 	[

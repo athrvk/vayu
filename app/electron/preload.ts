@@ -77,6 +77,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// why this is reimplemented rather than left to the platform.
 	windowSystemMenu: (position?: { x: number; y: number }): void =>
 		ipcRenderer.send("window:systemMenu", position),
+	// Windows and Linux: pops the application menu the main process already
+	// installed, which a frameless window draws no bar for (#1361).
+	windowAppMenu: (position?: { x: number; y: number }): void =>
+		ipcRenderer.send("window:appMenu", position),
 	onWindowMaximized: (callback: (isMaximized: boolean) => void) => {
 		const handler = (_event: unknown, isMaximized: boolean) => callback(isMaximized);
 		ipcRenderer.on("window:maximized", handler);

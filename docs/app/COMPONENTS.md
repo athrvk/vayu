@@ -19,7 +19,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 ```
 <App />                                  // App.tsx - mounts providers, kicks off health/prefetch queries, OS theme sync
 ├── <TitleBar />                         // components/layout/TitleBar.tsx - --titlebar-height drag region: icon + centered search bar + env pill
-│   ├── AppIcon (Windows only - the system-menu control)
+│   ├── AppIcon (Windows and Linux - the application-menu button; the system-menu control on Windows)
 │   ├── <CommandSearchBar />             // Input-shaped trigger for the ⌘K palette; never its own search
 │   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
 ├── <RecoveryBanner />                   // components/shared/RecoveryBanner.tsx - only when the engine restored or deleted the database
@@ -80,8 +80,10 @@ Custom window title bar (Electron frameless window, `--titlebar-height`). Render
 
 - **All platforms:** `NavigationControls` (Back / Forward, leading edge, issue #1245), `<CommandSearchBar />` (centre), `EnvPill` (right).
 - **macOS:** Native traffic light inset (`--traffic-light-inset`, 104px left); no HTML window controls.
-- **Windows:** App icon as the system-menu control (left); native window overlay, no HTML controls in the bar.
-- **Linux:** Custom HTML min/max/close buttons (right).
+- **Windows:** App icon as the application-menu button on left click and the system-menu control on right click (left); native window overlay, no HTML controls in the bar.
+- **Linux:** App icon as the application-menu button (left); custom HTML min/max/close buttons (right).
+
+`AppIcon` is where the application menu is reachable at all on Windows and Linux (issue #1361): the window is frameless, so neither platform draws a menu bar, and the template `createMenu` installs contributed accelerators and nothing else there - Help > Documentation, About Vayu and Check for Updates had no mouse route. Left click, Enter, Space, `APP_MENU_CHORD` (F10) and a tap of Alt all send `window:appMenu`, and main pops `Menu.getApplicationMenu()` at the icon: one template, two surfaces, no second menu in the renderer. Both keyboard routes ask `isModalOpen()` first, and the Alt tap is a state machine (`lib/alt-tap.ts`) rather than a `Chord`, because Alt held as a modifier - Alt+Tab, Alt+← - is not a menu request. macOS renders no button and registers no listener; its menu bar draws the same template already. → `app-icon-menus.test.tsx`, `electron/app-menu.test.ts`.
 
 The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag` - a drag area ignores every pointer event, so a control that forgets is dead rather than merely awkward. Opting out per control or per cluster is fine; opting out a wrapper that spans the row's slack is not, because that slack is what the window is dragged by. → `TitleBar.search-bar.test.tsx`.
 

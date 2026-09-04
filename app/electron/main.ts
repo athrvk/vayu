@@ -43,6 +43,7 @@ import {
 	toElectronTemplate,
 	type ContextCommand,
 } from "./context-menu.js";
+import { planAppMenuPopup } from "./app-menu.js";
 import { createSaveFlusher } from "./save-flush.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
@@ -982,6 +983,31 @@ function setupIpcHandlers() {
 	});
 
 	/**
+	 * The application menu, for the two platforms that never draw it (#1361).
+	 *
+	 * `createMenu` installs the same template everywhere, but a frameless window
+	 * has no menu bar on Windows or Linux, so there the template contributes
+	 * accelerators and nothing else - Help > Documentation, About Vayu and Check
+	 * for Updates were reachable by no mouse at all. This pops the menu that is
+	 * already installed rather than building a second template: one definition,
+	 * two surfaces, and no way for the popup to fall behind the menu bar macOS
+	 * still draws from the same object. See app-menu.ts for the decision.
+	 */
+	ipcMain.on("window:appMenu", (_event, position?: unknown) => {
+		const menu = Menu.getApplicationMenu();
+		const plan = planAppMenuPopup({
+			platform: process.platform,
+			hasWindow: !!mainWindow && !mainWindow.isDestroyed(),
+			hasMenu: !!menu,
+			position,
+		});
+		// The plan answers all three; the re-checks are what narrow the two
+		// nullable handles for the compiler.
+		if (!plan.pop || !menu || !mainWindow) return;
+		menu.popup({ window: mainWindow, ...(plan.point ?? {}) });
+	});
+
+	/**
 	 * What the renderer sees under the pointer, announced as it right-clicks.
 	 *
 	 * Synchronous on purpose, and it is the only `sendSync` in the app. The
@@ -1121,6 +1147,9 @@ app.whenReady().then(async () => {
 		copyright: "© 2026 Atharva Kusumbia",
 		website: "https://github.com/athrvk/vayu",
 		iconPath: aboutIconPath,
+		// Linux draws this one and macOS does not; it was absent while Help >
+		// About was reachable on neither Windows nor Linux (#1361).
+		authors: ["Atharva Kusumbia"],
 	});
 
 	// Create application menu
