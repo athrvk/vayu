@@ -6,3 +6,25 @@ onlyBuiltDependencies:
     - electron
     - electron-winstaller
     - esbuild
+# Do not resolve a version published in the last seven days: a compromised
+# release is usually pulled within that window, and nothing here needs a
+# package the day it ships. The unit is minutes.
+#
+# The setting has to live in this file. pnpm reads its own settings from
+# pnpm-workspace.yaml, and pnpm 11 ignores them in .npmrc, so the
+# `minimum-release-age=10080` that app/.npmrc carried held on pnpm 10 - what
+# CI pins - and silently fell back to pnpm 11's built-in 24-hour default for
+# anyone installing locally. From here both versions honour it; that was
+# checked by resolving under each.
+minimumReleaseAge: 10080
+# These three are exempt because their versions are not ours to pick: Vite
+# depends on an exact `rolldown`, which in turn depends on an exact
+# `@rolldown/binding-*` per platform and an exact `@oxc-project/types`. A
+# package with one matching version cannot wait - pnpm fails the whole
+# resolution with ERR_PNPM_NO_MATURE_MATCHING_VERSION rather than choosing an
+# older one. The delay still applies to Vite itself, which is the dependency
+# this repo actually chooses.
+minimumReleaseAgeExclude:
+    - rolldown
+    - "@rolldown/binding-*"
+    - "@oxc-project/types"
