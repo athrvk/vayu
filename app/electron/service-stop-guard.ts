@@ -229,12 +229,55 @@ export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopG
 					if (proceed) confirmed = true;
 					return proceed;
 				})
+				.catch((error: unknown) => {
+					// A question that could not be asked is not a yes. In the case that
+					// actually raises this - a window destroyed while its own dialog was
+					// up - the close already happened and the answer is moot; in any
+					// other, refusing to stop the user's services on an error is the
+					// safe half, and a signal still quits without asking at all.
+					console.warn(
+						"[service-stop-guard] could not ask about running services",
+						error
+					);
+					return false;
+				})
 				.finally(() => {
 					asking = null;
 				});
 			return asking;
 		},
 	};
+}
+
+/** The slice of an Electron event this needs: the power to hold the gesture. */
+export interface HoldableEvent {
+	preventDefault: () => void;
+}
+
+/**
+ * Put a gesture through the guard, and answer whether it may go ahead now.
+ *
+ * `false` means the gesture has been held for a dialog: `retry` runs when the
+ * user says yes, and nothing at all when they say no - which is what leaves the
+ * window, the renderer and every service exactly as they were. A `true` caller
+ * carries on into whatever else its handler does, the save flush included.
+ *
+ * A decision, not a wiring detail, so it is tested rather than read: main.ts's
+ * handlers hold two facts each, and the one that matters here (a no does
+ * nothing) is invisible to a source scan.
+ */
+export function holdForConfirmation(
+	guard: ServiceStopGuard,
+	gesture: StopGesture,
+	event: HoldableEvent,
+	retry: () => void
+): boolean {
+	if (guard.isCleared(gesture)) return true;
+	event.preventDefault();
+	void guard.confirm(gesture).then((proceed) => {
+		if (proceed) retry();
+	});
+	return false;
 }
 
 /** The slice of `ipcMain` this channel needs. */

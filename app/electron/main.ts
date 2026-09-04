@@ -37,7 +37,11 @@ import { installQuitOnSignal } from "./quit-signals.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
 import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
-import { createServiceStopGuard, registerRunningServicesIpc } from "./service-stop-guard.js";
+import {
+	createServiceStopGuard,
+	holdForConfirmation,
+	registerRunningServicesIpc,
+} from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { watchNavigationGestures, type NavDirection } from "./nav-history.js";
 import {
@@ -457,14 +461,13 @@ function createWindow() {
 	closingWindow.on("close", (event) => {
 		// Asked before the flush, because Cancel has to leave the window, the
 		// renderer and every running service exactly as they were - a flush that
-		// already happened would have told the renderer its work was ending.
-		if (!serviceStopGuard.isCleared("window-close")) {
-			event.preventDefault();
-			void serviceStopGuard.confirm("window-close").then((proceed) => {
-				if (proceed && !closingWindow.isDestroyed()) closingWindow.close();
-			});
-			return;
-		}
+		// already happened would have told the renderer its work was ending. A
+		// confirmed close comes back through here with the guard cleared and falls
+		// into the flush below.
+		const mayClose = holdForConfirmation(serviceStopGuard, "window-close", event, () => {
+			if (!closingWindow.isDestroyed()) closingWindow.close();
+		});
+		if (!mayClose) return;
 
 		if (saveFlusher.hasSettled()) return;
 		event.preventDefault();
@@ -1355,14 +1358,9 @@ const quitShutdown = createQuitShutdown({
 app.on("before-quit", (event) => {
 	// Before any of it: a quit stops the running services on every platform,
 	// macOS included, so it asks the same question the X does. Cancelling here
-	// leaves the app up with everything still serving.
-	if (!serviceStopGuard.isCleared("quit")) {
-		event.preventDefault();
-		void serviceStopGuard.confirm("quit").then((proceed) => {
-			if (proceed) app.quit();
-		});
-		return;
-	}
+	// leaves the app up with everything still serving; confirming quits again,
+	// through the flush and the shutdown below.
+	if (!holdForConfirmation(serviceStopGuard, "quit", event, resumeQuit)) return;
 
 	// First pass: ask the renderer to flush pending saves. Quit resumes as
 	// soon as the renderer ACKs, with a 2s ceiling in case it is stuck. Only a

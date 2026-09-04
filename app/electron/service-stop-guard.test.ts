@@ -29,6 +29,7 @@ import {
 	buildStopPrompt,
 	createServiceStopGuard,
 	describeRunningService,
+	holdForConfirmation,
 	parseRunningServices,
 	registerRunningServicesIpc,
 	RUNNING_SERVICES_CHANNEL,
@@ -279,6 +280,22 @@ describe("createServiceStopGuard", () => {
 		expect(ask).not.toHaveBeenCalled();
 	});
 
+	it("treats a dialog it could not show as a no, not as consent", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const guard = createServiceStopGuard({
+			ask: () => Promise.reject(new Error("no window to parent to")),
+			platform: "linux",
+		});
+		guard.publish([inbox]);
+
+		await expect(guard.confirm("window-close")).resolves.toBe(false);
+		// Not latched either: the next gesture asks again rather than inheriting a
+		// consent nobody gave.
+		expect(guard.isCleared("quit")).toBe(false);
+		expect(warn).toHaveBeenCalled();
+		warn.mockRestore();
+	});
+
 	it("forgets the snapshot when told the renderer went away", () => {
 		const { guard } = fakeGuard();
 		guard.publish([inbox]);
@@ -407,6 +424,88 @@ describe("registerRunningServicesIpc", () => {
 	});
 });
 
+/*
+ * What each of main.ts's two handlers does with the answer. The handlers
+ * themselves cannot be imported, so the decision they turn on lives here: a
+ * "no" has to do nothing at all, which no source scan can see.
+ */
+describe("holdForConfirmation", () => {
+	/** The close event as far as a handler is concerned. */
+	function fakeEvent() {
+		return { preventDefault: vi.fn() };
+	}
+
+	/** Let the answered dialog's promise chain run out before asserting on it. */
+	const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+	it("lets a gesture through untouched when there is nothing to ask about", () => {
+		const { guard, ask } = fakeGuard();
+		const event = fakeEvent();
+		const retry = vi.fn();
+
+		expect(holdForConfirmation(guard, "window-close", event, retry)).toBe(true);
+		expect(event.preventDefault).not.toHaveBeenCalled();
+		expect(retry).not.toHaveBeenCalled();
+		expect(ask).not.toHaveBeenCalled();
+	});
+
+	it("holds the gesture while the dialog is up", () => {
+		const { guard, answerDialog } = fakeGuard();
+		guard.publish([inbox]);
+		const event = fakeEvent();
+		const retry = vi.fn();
+
+		expect(holdForConfirmation(guard, "window-close", event, retry)).toBe(false);
+		expect(event.preventDefault).toHaveBeenCalledTimes(1);
+		expect(retry).not.toHaveBeenCalled();
+
+		answerDialog(true);
+		expect(retry).not.toHaveBeenCalled(); // still on the promise's tick
+	});
+
+	it("does nothing at all on Cancel - the window stays, the services stay", async () => {
+		const { guard, answerDialog } = fakeGuard();
+		guard.publish([inbox]);
+		const event = fakeEvent();
+		const retry = vi.fn();
+
+		holdForConfirmation(guard, "window-close", event, retry);
+		answerDialog(false);
+		await settled();
+
+		expect(retry).not.toHaveBeenCalled();
+		expect(guard.running()).toEqual([inbox]);
+	});
+
+	it("retries the gesture on Close anyway, and the retry finds the guard cleared", async () => {
+		const { guard, answerDialog } = fakeGuard();
+		guard.publish([inbox]);
+		const retry = vi.fn();
+
+		holdForConfirmation(guard, "window-close", fakeEvent(), retry);
+		answerDialog(true);
+		await settled();
+
+		expect(retry).toHaveBeenCalledTimes(1);
+		// The second pass through the handler asks nothing and returns true, which
+		// is what carries main.ts's close into the save flush.
+		const second = fakeEvent();
+		expect(holdForConfirmation(guard, "window-close", second, vi.fn())).toBe(true);
+		expect(second.preventDefault).not.toHaveBeenCalled();
+	});
+
+	it("holds nothing on a quit nobody is behind", () => {
+		const { guard, ask } = fakeGuard();
+		guard.publish([inbox]);
+		guard.markQuitUnattended();
+		const event = fakeEvent();
+
+		expect(holdForConfirmation(guard, "quit", event, vi.fn())).toBe(true);
+		expect(event.preventDefault).not.toHaveBeenCalled();
+		expect(ask).not.toHaveBeenCalled();
+	});
+});
+
 describe("main.ts wiring", () => {
 	it("read the real main.ts", () => {
 		// A guard that scanned an empty string would pass every assertion below.
@@ -418,20 +517,26 @@ describe("main.ts wiring", () => {
 		// Ordered: a flush that ran first would have told the renderer its work
 		// was ending, and Cancel has to leave everything as it was.
 		const closeHandler = main.slice(main.indexOf('.on("close"'));
-		const guardCheck = closeHandler.indexOf('serviceStopGuard.isCleared("window-close")');
+		const guardCheck = closeHandler.indexOf(
+			'holdForConfirmation(serviceStopGuard, "window-close"'
+		);
 		const flushCheck = closeHandler.indexOf("saveFlusher.hasSettled()");
 		expect(guardCheck).toBeGreaterThan(-1);
 		expect(flushCheck).toBeGreaterThan(guardCheck);
-		expect(closeHandler).toContain('serviceStopGuard.confirm("window-close")');
+		// The held close is resumed by closing the window again, which is what
+		// takes the confirmed path through the flush.
+		expect(closeHandler).toContain("closingWindow.close()");
 	});
 
 	it("asks the same question of a quit, before the flush", () => {
 		const quitHandler = main.slice(main.indexOf('app.on("before-quit"'));
-		const guardCheck = quitHandler.indexOf('serviceStopGuard.isCleared("quit")');
+		const guardCheck = quitHandler.indexOf('holdForConfirmation(serviceStopGuard, "quit"');
 		const flushCheck = quitHandler.indexOf("saveFlusher.hasSettled()");
 		expect(guardCheck).toBeGreaterThan(-1);
 		expect(flushCheck).toBeGreaterThan(guardCheck);
-		expect(quitHandler).toContain('serviceStopGuard.confirm("quit")');
+		// Resumed through the same one stable callback every other quit gesture
+		// takes, so a confirmed quit is not a second engine shutdown.
+		expect(quitHandler).toContain("resumeQuit)");
 	});
 
 	it("takes the renderer's snapshot off the channel", () => {
