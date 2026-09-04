@@ -74,6 +74,34 @@ export const INBOX_LIVE_RETRY_BASE_MS = 400;
 export const INBOX_LIVE_RETRY_MAX_MS = 5000;
 
 /**
+ * How long a stream nothing is watching waits, once its retries are spent,
+ * before it is given one fresh budget (issue #1403).
+ *
+ * The bound above exists so a refused stream stops hammering the engine inside
+ * a reconnect burst, and for a stream a surface is watching it is the whole
+ * answer: the inbox view renders "Live updates stopped" with a Resume, so the
+ * user is told and can act. Nothing renders a stream held only by the standing
+ * want, so there the same give-up ends an opt-in feature for the rest of the
+ * session without saying so anywhere.
+ *
+ * A minute, for two reasons that agree. It has to be a different rate rather
+ * than a second copy of the ladder: the ladder spends its six attempts inside
+ * about fifteen seconds, so one fresh budget a minute costs at most six attempts
+ * a minute against an engine that keeps refusing - a quarter of the rate the
+ * bound was added to stop, and far enough from a burst that the two cannot be
+ * confused. And a minute is what the platform would give anyway: `backgroundThrottling`
+ * is left on, so Chromium aligns a hidden window's timers to one-minute buckets
+ * once it has been hidden a while, which is exactly the case this exists for. A
+ * shorter cadence would not fire sooner there; it would only cost more while the
+ * window is visible.
+ *
+ * The timer is the service's own, and not the watcher's list read, because that
+ * read stops happening in the case this is for: `refetchIntervalInBackground` is
+ * unset, so the inbox poll pauses in a hidden window.
+ */
+export const INBOX_LIVE_BACKGROUND_RESUME_MS = 60_000;
+
+/**
  * How many inboxes may be streamed at once.
  *
  * Each stream parks one thread of the engine's API pool, whose base is
@@ -150,6 +178,41 @@ export interface InboxWatchState {
 /** No stream, and none given up on - what an unwatched inbox reports. */
 const IDLE: InboxWatchState = { watching: false, stopped: false };
 
+/**
+ * Which inboxes are not hearing their captures, for a surface that lists them
+ * (issue #1412).
+ *
+ * {@link InboxWatchState} answers for one inbox and is what the inbox tab reads.
+ * This answers for all of them at once, because the Services drawer draws a row
+ * per inbox and is on screen from any tab - which is the property that makes it
+ * the place to say a `Notify` toggle is not currently in effect. The two lists
+ * are separate because their causes are: one is a stream that failed, the other
+ * is an inbox that never got a stream.
+ */
+export interface InboxWatchSummary {
+	/**
+	 * Inboxes whose stream gave up and has not opened since.
+	 *
+	 * Held until a connection actually succeeds rather than cleared when the
+	 * background resume fires, so a stream that keeps failing reads as one
+	 * standing state instead of blinking once a minute.
+	 */
+	stalled: readonly string[];
+	/**
+	 * Running, notify-enabled inboxes with no stream at all: the cap had no slot.
+	 *
+	 * Nothing here is retrying, and nothing will change until a slot frees up -
+	 * which is why this is the case a marker exists for rather than a wait.
+	 */
+	unwatched: readonly string[];
+}
+
+const NOTHING_TO_REPORT: InboxWatchSummary = { stalled: [], unwatched: [] };
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+	return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
 /** One inbox's socket and everything that outlives its reconnects. */
 interface Stream {
 	inboxId: string;
@@ -158,6 +221,10 @@ interface Stream {
 	/** Reconnects spent since the last open. */
 	attempts: number;
 	retryTimer: ReturnType<typeof setTimeout> | null;
+	/** The next background resume, armed only while the retries are spent. */
+	resumeTimer: ReturnType<typeof setTimeout> | null;
+	/** Gave up at least once and has not opened since - see {@link InboxWatchSummary}. */
+	stalled: boolean;
 	/** Where a reconnect resumes from; a capture id belongs to one inbox. */
 	lastEventId: string;
 	state: InboxWatchState;
@@ -167,6 +234,8 @@ type StateListener = (state: InboxWatchState) => void;
 
 class InboxWatchService {
 	private streams = new Map<string, Stream>();
+	private summary: InboxWatchSummary = NOTHING_TO_REPORT;
+	private summaryListeners = new Set<() => void>();
 	/** Inboxes a mounted view is showing, by reference count. */
 	private held = new Map<string, number>();
 	/** Inboxes whose captures may notify, in the order they should get slots. */
@@ -216,6 +285,25 @@ class InboxWatchService {
 	}
 
 	/**
+	 * Which inboxes are not hearing their captures, for the drawer (issue #1412).
+	 *
+	 * The same object until the answer changes, because this is read through
+	 * `useSyncExternalStore`, which compares snapshots by identity and would
+	 * re-render forever on a fresh one per call.
+	 */
+	getSummary(): InboxWatchSummary {
+		return this.summary;
+	}
+
+	/** Told that {@link getSummary} now answers differently. */
+	subscribeSummary(listener: () => void): () => void {
+		this.summaryListeners.add(listener);
+		return () => {
+			this.summaryListeners.delete(listener);
+		};
+	}
+
+	/**
 	 * Re-subscribe now, from the same resume point, with a fresh budget.
 	 *
 	 * Immediately, without the backoff a reconnect uses: this is a user asking,
@@ -231,10 +319,7 @@ class InboxWatchService {
 			this.apply();
 			return;
 		}
-		this.disconnect(stream);
-		stream.attempts = 0;
-		this.setState(stream, IDLE);
-		this.connect(stream);
+		this.restart(stream);
 	}
 
 	/** Drop every stream. For teardown and for a test's clean slate. */
@@ -242,6 +327,57 @@ class InboxWatchService {
 		for (const stream of [...this.streams.values()]) this.close(stream);
 		this.held.clear();
 		this.wanted = [];
+		this.refreshSummary();
+	}
+
+	/** Drop what is open and reconnect from the same resume point, budget refilled. */
+	private restart(stream: Stream): void {
+		this.disconnect(stream);
+		this.cancelBackgroundResume(stream);
+		stream.attempts = 0;
+		this.setState(stream, IDLE);
+		this.connect(stream);
+	}
+
+	/**
+	 * A stream has given up: come back for it in
+	 * `INBOX_LIVE_BACKGROUND_RESUME_MS` (issue #1403).
+	 *
+	 * Armed for every stream that spends its budget, and answered only for one no
+	 * view is holding - a view renders the give-up and offers its own Resume, so
+	 * resuming underneath it would be a callout that cleared itself. A held
+	 * stream re-arms instead of being dropped, because the view is a tab the user
+	 * leaves: the stream that was watched a moment ago is the background stream
+	 * this exists for, and it must not need a give-up of its own to qualify.
+	 *
+	 * The wanted set this checks against is the last one the engine gave, which
+	 * in a hidden window may be a minute or more old - the inbox poll pauses
+	 * there. Resuming an inbox that has since been stopped elsewhere costs one
+	 * refused connection: the reconnect behind it asks the engine directly
+	 * ({@link listenerIsGone}, a refetch rather than the paused poll), reads the
+	 * stop and ends the stream without spending the budget or arming this again.
+	 */
+	private scheduleBackgroundResume(stream: Stream): void {
+		// One timer per stream, whatever asks: a second error reaching a source
+		// this stream has already closed would otherwise arm a second.
+		this.cancelBackgroundResume(stream);
+		stream.resumeTimer = setTimeout(() => {
+			stream.resumeTimer = null;
+			// The stream this timer was armed for, not whatever now answers to its
+			// inbox id: a close and a fresh open in between is a different stream
+			// with a budget of its own.
+			if (this.streams.get(stream.inboxId) !== stream) return;
+			if (this.held.has(stream.inboxId)) {
+				this.scheduleBackgroundResume(stream);
+				return;
+			}
+			this.restart(stream);
+		}, INBOX_LIVE_BACKGROUND_RESUME_MS);
+	}
+
+	private cancelBackgroundResume(stream: Stream): void {
+		if (stream.resumeTimer !== null) clearTimeout(stream.resumeTimer);
+		stream.resumeTimer = null;
 	}
 
 	/** Which inboxes should hold a socket, best claim first. */
@@ -265,6 +401,20 @@ class InboxWatchService {
 		for (const inboxId of wanted) {
 			if (!this.streams.has(inboxId)) this.open(inboxId);
 		}
+		this.refreshSummary();
+	}
+
+	/** Recompute what the drawer reads, and tell it only when it changed. */
+	private refreshSummary(): void {
+		const stalled = [...this.streams.values()].filter((s) => s.stalled).map((s) => s.inboxId);
+		// A wanted inbox with no stream is one the cap had no slot for: the loop
+		// above opens a stream for every id it keeps.
+		const unwatched = this.wanted.filter((inboxId) => !this.streams.has(inboxId));
+		if (sameIds(stalled, this.summary.stalled) && sameIds(unwatched, this.summary.unwatched)) {
+			return;
+		}
+		this.summary = { stalled, unwatched };
+		for (const listener of this.summaryListeners) listener();
 	}
 
 	private open(inboxId: string): void {
@@ -276,6 +426,8 @@ class InboxWatchService {
 			notifier: createCaptureNotifier(inboxId),
 			attempts: 0,
 			retryTimer: null,
+			resumeTimer: null,
+			stalled: false,
 			lastEventId: "",
 			state: IDLE,
 		};
@@ -285,6 +437,7 @@ class InboxWatchService {
 
 	private close(stream: Stream): void {
 		this.disconnect(stream);
+		this.cancelBackgroundResume(stream);
 		stream.notifier.dispose();
 		this.streams.delete(stream.inboxId);
 		this.emit(stream.inboxId, IDLE);
@@ -311,7 +464,12 @@ class InboxWatchService {
 		stream.source = source;
 		source.onopen = () => {
 			stream.attempts = 0;
+			// Cleared here rather than where the resume is armed: what the drawer
+			// says is whether this inbox's captures are being heard, and a
+			// reconnect that has not opened yet is not hearing them (#1412).
+			stream.stalled = false;
 			this.setState(stream, { watching: true, stopped: false });
+			this.refreshSummary();
 		};
 		source.onmessage = (event) => this.receive(stream, event);
 		source.onerror = () => this.recover(stream);
@@ -354,7 +512,15 @@ class InboxWatchService {
 		// source it has already given up on holds no retry of its own.
 		// Everything after this point is our reconnect.
 		this.disconnect(stream);
-		if (exhausted) return;
+		if (exhausted) {
+			// The bound holds - this stream retries no more. What follows a minute
+			// from now is one fresh budget for a stream nothing is watching, not a
+			// sixth attempt at this one (#1403).
+			stream.stalled = true;
+			this.refreshSummary();
+			this.scheduleBackgroundResume(stream);
+			return;
+		}
 		stream.attempts += 1;
 		const attempt = stream.attempts;
 		void (async () => {
