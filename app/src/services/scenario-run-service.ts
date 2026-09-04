@@ -25,7 +25,7 @@
  * mechanism itself lives in `throttled-batcher.ts`, which both services use.
  */
 
-import { sseClient } from "./sse-client";
+import { sseClient, type SSETerminalStatus } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
@@ -250,7 +250,11 @@ class ScenarioRunService {
 	 * step rows are now the complete record - invalidating the report and the
 	 * run itself is what flips the view from the live list to that record.
 	 */
-	private async handleClose(): Promise<void> {
+	/**
+	 * The stream ended. `status` is what the engine's completion frame said, or
+	 * null for a stream that ended without one (issue #1415).
+	 */
+	private async handleClose(status: SSETerminalStatus = null): Promise<void> {
 		const runId = this.activeRunId;
 		this.activeRunId = null;
 		// The last window's steps, before anything reads the list as final. The
@@ -275,9 +279,17 @@ class ScenarioRunService {
 		// From the store's own fold rather than the report fetched below: the
 		// counts are complete the moment the last step arrived, and the user
 		// should not wait on a round trip to be told their run is over.
+		//
+		// Which is also why the frame's status is the only source here, where
+		// the load service can fall back to the stored row: that fetch happens
+		// after this line, and waiting for it to name a failure would trade the
+		// promptness this comment is about for a verdict the frame already
+		// carries (#1415).
 		this.notifyTerminal(
 			runId,
-			NOTIFY_KINDS.collectionRunFinished,
+			status === "Failed"
+				? NOTIFY_KINDS.collectionRunFailed
+				: NOTIFY_KINDS.collectionRunFinished,
 			stepOutcomeLine(useScenarioRunStore.getState().summary.counts)
 		);
 

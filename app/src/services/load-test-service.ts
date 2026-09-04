@@ -13,7 +13,7 @@
  * where any component can read them.
  */
 
-import { sseClient } from "./sse-client";
+import { sseClient, type SSETerminalStatus } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
@@ -277,7 +277,12 @@ class LoadTestService {
 		store.setError(error.message);
 	}
 
-	private async handleClose(): Promise<void> {
+	/**
+	 * The stream ended. `status` is what the engine's completion frame said, or
+	 * null for a stream that ended without one - a dropped connection, or an
+	 * older engine (issue #1415).
+	 */
+	private async handleClose(status: SSETerminalStatus = null): Promise<void> {
 		const runId = this.activeRunId;
 		this.flushPending();
 		this.isConnected = false;
@@ -307,6 +312,8 @@ class LoadTestService {
 			// Stands unless the report arrives with all three numbers in it: a run
 			// that ended is worth saying even when what it did cannot be read.
 			let summary: string | null = null;
+			/** The stored row's own verdict, read only when the frame had none. */
+			let reportStatus: string | null = null;
 			try {
 				const report = await queryClient.fetchQuery({
 					queryKey: queryKeys.runs.report(runId),
@@ -324,14 +331,23 @@ class LoadTestService {
 				// Last inside the try: the dashboard is the terminal surface that
 				// matters, and nothing done for a notification may come before it.
 				summary = runSummaryLine(report);
+				reportStatus = report.metadata?.status ?? null;
 			} catch (e) {
 				console.warn("[LoadTestService] report fetch failed", e);
 			}
 			// After the fetch, so the body carries the run's own numbers. A run
 			// that already reported a failure has had its one notification.
+			//
+			// A failed run is not a finished one, and until #1415 this said
+			// finished for both: the frame's status is preferred, and the
+			// report's own is the fallback for a stream that ended without one.
+			// The frame first, deliberately - the fetch above can fail, and a
+			// failure that could not be read must still report a failure rather
+			// than quietly report success.
+			const failed = status === "Failed" || (status === null && reportStatus === "Failed");
 			this.notifyTerminal(
 				runId,
-				NOTIFY_KINDS.loadRunFinished,
+				failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,
 				summary ?? "The run ended, but its report could not be read."
 			);
 			// The run has reached a terminal state, so the lists that carry its

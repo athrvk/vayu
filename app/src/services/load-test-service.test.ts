@@ -78,9 +78,17 @@ import { apiService } from "./api";
 import { WAKE_LOCK_KEYS } from "./wake-lock";
 import { NOTIFY_KINDS } from "./notify";
 
-/** `handleClose` is private; the SSE client is what calls it in production. */
-function closeStream(): Promise<void> {
-	return (loadTestService as unknown as { handleClose: () => Promise<void> }).handleClose();
+/**
+ * `handleClose` is private; the SSE client is what calls it in production, with
+ * the status off the engine's completion frame (#1415). `null` is a stream that
+ * ended without one - a dropped connection, or an older engine.
+ */
+function closeStream(status: "Completed" | "Stopped" | "Failed" | null = null): Promise<void> {
+	return (
+		loadTestService as unknown as {
+			handleClose: (status: "Completed" | "Stopped" | "Failed" | null) => Promise<void>;
+		}
+	).handleClose(status);
 }
 
 describe("LoadTestService", () => {
@@ -367,6 +375,58 @@ describe("LoadTestService", () => {
 		 * is one the user pressed Stop on, so they were at the window and need
 		 * no cue that it ended.
 		 */
+		/*
+		 * #1415: until the completion frame's status was read, every terminal
+		 * close reported `loadRunFinished` - so a failed run notified "finished",
+		 * left the taskbar bar unmarked and never reached this icon mark at all.
+		 *
+		 * Mutation check: go back to the unconditional `loadRunFinished` and
+		 * this reddens, which is the whole of what #1415 was.
+		 */
+		it("marks the icon when the engine's frame says the run failed", async () => {
+			dashboard.currentRunId = "run_15d";
+			loadTestService.startMonitoring("run_15d");
+
+			await closeStream("Failed");
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFailed })
+			);
+		});
+
+		/*
+		 * The fallback, for a stream that ended without a frame - a dropped
+		 * connection, or an engine older than #1415's change. Mutation check:
+		 * drop the `reportStatus` half and this reddens while the case above
+		 * still passes, which is why both are here.
+		 */
+		it("falls back to the stored report when the frame carried no status", async () => {
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+				summary: {},
+				latency: {},
+				metadata: { status: "Failed" },
+			} as Awaited<ReturnType<typeof apiService.getRunReport>>);
+			dashboard.currentRunId = "run_15e";
+			loadTestService.startMonitoring("run_15e");
+
+			await closeStream(null);
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		it("still says finished when neither the frame nor the report says otherwise", async () => {
+			dashboard.currentRunId = "run_15f";
+			loadTestService.startMonitoring("run_15f");
+
+			await closeStream("Completed");
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFinished })
+			);
+		});
+
 		it("raises no cue for a run the user stopped themselves", () => {
 			loadTestService.startMonitoring("run_15c");
 

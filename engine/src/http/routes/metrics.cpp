@@ -410,7 +410,8 @@ void handle_run_stats (RouteContext& ctx, const httplib::Request& req, httplib::
  * Always answers `false` - the provider is done when this returns, whether the
  * run ended or the client went away.
  */
-bool stream_live_metrics (const std::string& run_id,
+bool stream_live_metrics (vayu::db::Database& db,
+const std::string& run_id,
 const std::shared_ptr<vayu::core::RunContext>& context,
 size_t start_offset,
 httplib::DataSink& sink) {
@@ -434,6 +435,24 @@ httplib::DataSink& sink) {
             nlohmann::json completion_event;
             completion_event["event"] = "complete";
             completion_event["runId"] = run_id;
+            // The status, so the client can tell a failed run from a finished
+            // one without going back for the report (issue #1415). The stored
+            // stream's completion frame at write_stats_frame has always
+            // carried it; this one did not, and this is the frame an ordinary
+            // live run ends on, so nothing downstream could see a failure.
+            //
+            // Omitted rather than guessed when the row is not terminal yet:
+            // `closed` says the producer appended its last tick, which can
+            // land just before the run's own status is written. A frame with
+            // no status reads exactly as it always did, and the client falls
+            // back to the report it fetches next.
+            auto finished = db.get_run (run_id);
+            if (finished &&
+            (finished->status == vayu::RunStatus::Completed ||
+            finished->status == vayu::RunStatus::Stopped ||
+            finished->status == vayu::RunStatus::Failed)) {
+                completion_event["status"] = to_string (finished->status);
+            }
             std::string payload =
             "event: complete\ndata: " + completion_event.dump () + "\n\n";
             sink.write (payload.data (), payload.size ());
@@ -479,8 +498,8 @@ void handle_live_metrics (RouteContext& ctx, const httplib::Request& req, httpli
     }
 
     res.set_content_provider ("text/event-stream",
-    [run_id, context, start_offset] (size_t, httplib::DataSink& sink) {
-        return stream_live_metrics (run_id, context, start_offset, sink);
+    [&db = ctx.db, run_id, context, start_offset] (size_t, httplib::DataSink& sink) {
+        return stream_live_metrics (db, run_id, context, start_offset, sink);
     });
 }
 

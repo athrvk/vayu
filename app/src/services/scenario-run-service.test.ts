@@ -119,9 +119,17 @@ import type { ScenarioStepEvent } from "@/types";
 /** The live-refresh cadence these cases run at. */
 const FLUSH_MS = 500;
 
-/** `handleClose` is private; the SSE client is what calls it in production. */
-function closeStream(): Promise<void> {
-	return (scenarioRunService as unknown as { handleClose: () => Promise<void> }).handleClose();
+/**
+ * `handleClose` is private; the SSE client is what calls it in production, with
+ * the status off the engine's completion frame (#1415). `null` is a stream that
+ * ended without one.
+ */
+function closeStream(status: "Completed" | "Stopped" | "Failed" | null = null): Promise<void> {
+	return (
+		scenarioRunService as unknown as {
+			handleClose: (status: "Completed" | "Stopped" | "Failed" | null) => Promise<void>;
+		}
+	).handleClose(status);
 }
 
 /** Likewise `handleError` - a transport failure is what calls it. */
@@ -640,6 +648,32 @@ describe("ScenarioRunService", () => {
 		 * call and a user with notifications off learns nothing when a
 		 * collection run ends.
 		 */
+		/*
+		 * #1415: until the completion frame's status was read, every terminal
+		 * close reported `collectionRunFinished`, so a failed collection run
+		 * said finished and marked nothing.
+		 *
+		 * The frame is the only source here, unlike the load service's: this
+		 * service notifies before it fetches the report, deliberately, so there
+		 * is no stored verdict to fall back to at this point. Mutation check:
+		 * restore the unconditional finished kind and this reddens.
+		 */
+		it("marks the icon when the engine's frame says the run failed", async () => {
+			scenarioRunService.startMonitoring("run_32");
+
+			await closeStream("Failed");
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		it("marks nothing when the frame says the run completed", async () => {
+			scenarioRunService.startMonitoring("run_33");
+
+			await closeStream("Completed");
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+		});
+
 		it("raises the quieter end-of-run cue when a collection run ends", async () => {
 			scenarioRunService.startMonitoring("run_31");
 
