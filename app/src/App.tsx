@@ -11,6 +11,7 @@ import TitleBar from "./components/layout/TitleBar";
 import UpdateBanner from "./components/shared/UpdateBanner";
 import RecoveryBanner from "./components/shared/RecoveryBanner";
 import Toaster from "./components/shared/Toaster";
+import KeepAwakePrompt from "./components/shared/KeepAwakePrompt";
 import {
 	useConfigQuery,
 	useHealthQuery,
@@ -112,6 +113,9 @@ function App() {
 				<Shell />
 			</div>
 			<Toaster />
+			{/* Asks, once, about a run long enough for the machine to sleep under
+			    it - and only while the standing preference is off (#1357). */}
+			<KeepAwakePrompt />
 		</div>
 	);
 }

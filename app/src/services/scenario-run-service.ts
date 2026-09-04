@@ -30,6 +30,7 @@ import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
 import { useScenarioRunStore } from "@/stores/scenario-run-store";
+import { useClientSettingsStore } from "@/stores";
 import { createThrottledBatcher } from "./throttled-batcher";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import type { ScenarioStepEvent } from "@/types";
@@ -44,9 +45,15 @@ class ScenarioRunService {
 	startMonitoring(runId: string): void {
 		if (this.activeRunId === runId) return;
 
+		// Only on the user's standing say-so (#1357), the same read
+		// `LoadTestService` makes. A collection run is never asked about: it
+		// declares no duration, so nothing here can tell a two-second sequence
+		// from a two-hour one, and a prompt on every run would be noise.
 		// Fire-and-forget: the stream below connects the same tick regardless of
 		// whether the main process has answered yet.
-		wakeLock.hold(WAKE_LOCK_KEYS.collectionRun, "Collection run streaming");
+		if (useClientSettingsStore.getState().keepAwakeDuringRuns) {
+			wakeLock.hold(WAKE_LOCK_KEYS.collectionRun, "Collection run streaming");
+		}
 
 		// Whatever the previous run left buffered belongs to a list the store is
 		// about to clear, so it is dropped rather than flushed into this run's.

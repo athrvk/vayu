@@ -70,6 +70,16 @@ interface ClientSettingsState {
 	liveRefreshMs: number;
 	autoSave: AutoSavePrefs;
 	reducedMotion: boolean;
+	/**
+	 * Standing answer to "should a run keep this machine awake" (issue #1357).
+	 *
+	 * Off by default: overriding the user's power settings is theirs to opt into,
+	 * and a run shorter than any sleep timer never needed it. With it off, a run
+	 * long enough to be walked away from asks once - see `KeepAwakePrompt`, which
+	 * is also what turns this on when the user answers "always". Read when a run
+	 * starts, so flipping it does not reach a run already streaming.
+	 */
+	keepAwakeDuringRuns: boolean;
 	/** Toast position, duration scale, stack cap and severity floor. */
 	notifications: NotificationPrefs;
 	/** Upper bounds the load-test dialog offers. Read via `resolveLoadTestLimits`. */
@@ -84,6 +94,7 @@ interface ClientSettingsState {
 	setAutoSave: (patch: Partial<AutoSavePrefs>) => void;
 	setNotifications: (patch: Partial<NotificationPrefs>) => void;
 	setReducedMotion: (on: boolean) => void;
+	setKeepAwakeDuringRuns: (on: boolean) => void;
 	/** Patch one or more ceilings; each is clamped to what the engine accepts. */
 	setLoadTestCeilings: (patch: Partial<LoadTestCeilings>) => void;
 	/** Clear every renderer preference and reload so defaults re-apply cleanly. */
@@ -179,6 +190,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			liveRefreshMs: DEFAULT_LIVE_REFRESH_MS,
 			autoSave: { ...DEFAULT_AUTO_SAVE_PREFS },
 			reducedMotion: false,
+			keepAwakeDuringRuns: false,
 			notifications: { ...DEFAULT_NOTIFICATION_PREFS },
 			loadTestCeilings: { ...DEFAULT_LOAD_TEST_CEILINGS },
 
@@ -201,6 +213,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				applyReducedMotion(on);
 				set({ reducedMotion: on });
 			},
+			setKeepAwakeDuringRuns: (on) => set({ keepAwakeDuringRuns: on }),
 			// Clamped on the way in, not only on the way out: the dialog reads
 			// this to build its own ranges, so an out-of-range ceiling stored
 			// here would present the user a value the engine rejects.
@@ -230,6 +243,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				liveRefreshMs: s.liveRefreshMs,
 				autoSave: s.autoSave,
 				reducedMotion: s.reducedMotion,
+				keepAwakeDuringRuns: s.keepAwakeDuringRuns,
 				notifications: s.notifications,
 				loadTestCeilings: s.loadTestCeilings,
 			}),

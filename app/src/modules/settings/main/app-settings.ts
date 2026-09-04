@@ -242,6 +242,14 @@ export const APP_SETTINGS = [
 
 	// Load testing
 	{
+		anchor: "load-keep-awake",
+		panel: "load-testing",
+		label: "Keep the machine awake during runs",
+		searchText:
+			"Ask the operating system not to suspend the machine while a load or collection run is streaming.",
+		keywords: ["sleep", "suspend", "power", "wake lock", "idle", "battery"],
+	},
+	{
 		anchor: "load-max-connections",
 		panel: "load-testing",
 		label: "Max connections",

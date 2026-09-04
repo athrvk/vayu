@@ -24,6 +24,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 │   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
 ├── <RecoveryBanner />                   // components/shared/RecoveryBanner.tsx - only when the engine restored or deleted the database
 ├── <UpdateBanner />
+├── <KeepAwakePrompt />                  // components/shared/KeepAwakePrompt.tsx - asks once about a run long enough for the machine to sleep under it (#1357)
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
     ├── <CommandPalette />               // modules/palette/ - ⌘K overlay; open-state in layout-store
@@ -390,8 +391,13 @@ Connects to the engine SSE metrics stream (`/runs/:runId/live`, via the load-tes
 
 The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run config to one of `constant_rps` / `constant_concurrency` / `iterations` / `ramp_up`, and the hero row + stat row + charts render the surfaces appropriate to that mode. `MetricsView` is a thin orchestrator over a modular tree:
 
-While a run streams the app holds a system wake lock, so the OS does not
-suspend the machine under a test the user walked away from (issue #1357). The
+While a run streams the app can hold a system wake lock, so the OS does not
+suspend the machine under a test the user walked away from (issue #1357). It is
+off by default and turned on either standing (Settings > Load testing) or per
+run: a load run of five minutes or more asks once as it starts, through
+`components/shared/KeepAwakePrompt.tsx`, which is mounted at the app root
+because the question is about whichever run is streaming rather than about the
+surface that started it. The
 lock is a request, not a guarantee - a closed lid overrides it - so a suspend
 that happens anyway is marked on the time-series charts at the point the run
 reached, labelled with how long the machine was gone. The record is the app's

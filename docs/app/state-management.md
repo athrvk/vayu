@@ -732,6 +732,7 @@ Central home for renderer-only preferences that aren't part of the pre-paint app
   liveRefreshMs: number          // how often live metrics commit into the store
   autoSave: AutoSavePrefs        // { enabled, delayMs }
   reducedMotion: boolean         // mirrored onto <html data-reduced-motion>
+  keepAwakeDuringRuns: boolean   // standing answer on the run wake lock; default off
   notifications: NotificationPrefs  // position, durationScale, maxVisible, minSeverity
   loadTestCeilings: LoadTestCeilings
 }
@@ -745,6 +746,14 @@ import { SETTINGS_STORAGE_KEYS } from "@/stores";  // localStorage keys reset by
 `data-reduced-motion`), so their setters and `onRehydrateStorage` both apply
 them - a preference that only lands on the next reload reads as a broken
 setting.
+
+`keepAwakeDuringRuns` is the user's standing answer to whether a run may ask the
+OS to stay awake (issue #1357). It is **read when a run starts** rather than
+watched, by `LoadTestService` and `ScenarioRunService`, so the answer that
+governs a run is the one that was true when it began - flipping the row mid-run
+does not reach a stream already going. Off is the shipped default: with it off a
+load run of five minutes or more asks once (`KeepAwakePrompt`), and that grant
+takes the same wake-lock key the service releases, so it ends with the run.
 
 `loadTestCeilings` is the one slice with a bound outside the app: each value is clamped to `LOAD_TEST_CEILING_BOUNDS` (`constants/load-test.ts`) on write **and** on rehydrate, because the bounds are the engine's crash guards and a build that tightens one must not keep offering a stored ceiling above it. The load dialog turns them into its field ranges via `resolveLoadTestLimits`; nothing else reads them.
 

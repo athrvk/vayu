@@ -48,6 +48,16 @@ export interface DeleteConfirmDialogProps {
 	 */
 	confirmLabel?: string;
 	/**
+	 * Word on the declining button. Defaults to "Cancel".
+	 *
+	 * "Cancel" is right when the dialog interrupts something the user started,
+	 * and ambiguous when it asks a question the user did not - declining an
+	 * offer to keep the machine awake is not cancelling anything, so that caller
+	 * names the outcome ("Allow sleep") instead. The button keeps its role
+	 * either way: it is the one focus opens on.
+	 */
+	cancelLabel?: string;
+	/**
 	 * `destructive` (default) for anything that removes data. `primary` for an
 	 * irreversible-but-not-destructive action, where a red button overstates it.
 	 */
@@ -72,6 +82,7 @@ export function DeleteConfirmDialog({
 	onConfirm,
 	isDeleting = false,
 	confirmLabel = "Delete",
+	cancelLabel = "Cancel",
 	confirmVariant = "destructive",
 	onCloseAutoFocus,
 }: DeleteConfirmDialogProps) {
@@ -120,7 +131,7 @@ export function DeleteConfirmDialog({
 						onClick={() => onOpenChange(false)}
 						disabled={isDeleting}
 					>
-						Cancel
+						{cancelLabel}
 					</Button>
 					<Button variant={confirmVariant} onClick={onConfirm} disabled={isDeleting}>
 						{isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : confirmLabel}

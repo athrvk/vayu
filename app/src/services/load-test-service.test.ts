@@ -14,6 +14,9 @@ const mockAddMetricsBatch = vi.fn();
 // Which run the dashboard is showing *right now* - re-read after every await,
 // which is the whole point of the guard under test.
 const dashboard = { currentRunId: null as string | null };
+// The user's standing answer to "keep this machine awake" (#1357), which the
+// service reads at start. Off is the shipped default, so it is the default here.
+const settings = { keepAwakeDuringRuns: false };
 vi.mock("@/stores", () => ({
 	useDashboardStore: {
 		getState: () => ({
@@ -24,7 +27,9 @@ vi.mock("@/stores", () => ({
 			addMetricsBatch: mockAddMetricsBatch,
 		}),
 	},
-	useClientSettingsStore: { getState: () => ({ liveRefreshMs: 0 }) },
+	useClientSettingsStore: {
+		getState: () => ({ liveRefreshMs: 0, keepAwakeDuringRuns: settings.keepAwakeDuringRuns }),
+	},
 }));
 vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn(), disconnect: vi.fn() } }));
 vi.mock("./api", () => ({
@@ -123,9 +128,24 @@ describe("LoadTestService", () => {
 	});
 
 	describe("wake lock (issue #1357)", () => {
-		it("holds the load-run key on start", () => {
+		afterEach(() => {
+			settings.keepAwakeDuringRuns = false;
+		});
+
+		it("holds nothing on start while the preference is off", () => {
+			// The shipped default. Overriding the machine's power settings is the
+			// user's decision, so a run takes no lock until they have made it -
+			// `KeepAwakePrompt` is what asks, for a run long enough to matter.
+			loadTestService.startMonitoring("run_4a");
+			expect(mockWakeLockHold).not.toHaveBeenCalled();
+		});
+
+		it("holds the load-run key on start once the preference is on", () => {
+			settings.keepAwakeDuringRuns = true;
 			loadTestService.startMonitoring("run_4");
-			// Pins the `wakeLock.hold(...)` call in `startMonitoring`.
+			// Pins the `wakeLock.hold(...)` call in `startMonitoring`, and the
+			// condition around it: drop the condition and the case above fails,
+			// drop the call and this one does.
 			expect(mockWakeLockHold).toHaveBeenCalledWith(
 				WAKE_LOCK_KEYS.loadRun,
 				expect.any(String)
