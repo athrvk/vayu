@@ -288,6 +288,9 @@ guard-proved values are no-ops without it.
 ### Electron tests (`tsconfig.electron-test.json`)
 
 - `noEmit` - it exists to type-check what `tsconfig.node.json` excludes
+- Lib: the same four entries as the other two configs, stated here rather than
+  inherited - a test that reaches into `app/src/` is DOM code, and this config
+  said so back when the main-process one left its list implicit
 - Adds the `@/*` → `./src/*` alias, which the main-process config deliberately
   lacks: only a test may cross into `app/src/` (`resolve.test.ts` compares the
   renderer's dynamic-variable table against the main-process copy)
