@@ -53,6 +53,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
+import { ToggleGroup, ToggleGroupItem } from "./toggle-group";
 import { VariableScopeBadge, type VariableScope } from "./variable-scope-badge";
 import { VARIABLE_SCOPE_CONFIG, VARIABLE_SCOPE_DOT } from "@/constants/variables";
 import { cn } from "@/lib/utils";
@@ -302,41 +303,25 @@ export function VariablePopover({
 	const activeCreateScope =
 		createScope && creatableScopes.includes(createScope) ? createScope : creatableScopes[0];
 	const createValueRef = useRef<HTMLInputElement>(null);
-	const createScopeGroupRef = useRef<HTMLDivElement>(null);
 	const createScopeLabelId = useId();
 
 	/**
 	 * Picking a scope is a modifier on the value, not a destination (issue #1380).
 	 *
-	 * A chip is a `<button>`, so clicking one takes focus the way any button does,
-	 * and the field's `autoFocus` only ever ran at mount - so choosing the scope
-	 * first and then typing put the keystrokes nowhere and left Enter re-pressing
-	 * the chip. The click hands focus back to the value the chip qualifies.
-	 */
-	const selectCreateScope = (scope: VariableScope) => {
-		setCreateScope(scope);
-		createValueRef.current?.focus();
-	};
-
-	/**
-	 * Arrow movement inside the group, where focus follows selection.
+	 * A segment is a `<button>`, so clicking one takes focus the way any button
+	 * does, and the field's `autoFocus` only ever ran at mount - so choosing the
+	 * scope first and then typing put the keystrokes nowhere and left Enter
+	 * re-pressing the segment. The click hands focus back to the value it
+	 * qualifies.
 	 *
-	 * The WAI-ARIA radio group pattern, as `ProfilePicker.tsx` spells it out: the
-	 * group is one Tab stop (roving `tabIndex`), and arrows move *and* select,
-	 * wrapping at the ends - the user is choosing as they arrow, not navigating
-	 * and then committing. Focus stays on the chips here rather than returning to
-	 * the field, because otherwise the second arrow press would have nothing to
-	 * move from.
+	 * Radix clears the value when the active segment is pressed again; a scope has
+	 * no "off", so the empty string means "keep what is chosen" and only the
+	 * refocus is left to do.
 	 */
-	const moveCreateScope = (delta: number) => {
-		const index = creatableScopes.findIndex((s) => s === activeCreateScope);
-		const next =
-			creatableScopes[(index + delta + creatableScopes.length) % creatableScopes.length];
-		if (!next) return;
-		setCreateScope(next);
-		createScopeGroupRef.current
-			?.querySelector<HTMLElement>(`[data-create-scope="${next}"]`)
-			?.focus();
+	const selectCreateScope = (value: string) => {
+		const next = creatableScopes.find((s) => s === value);
+		if (next) setCreateScope(next);
+		createValueRef.current?.focus();
 	};
 
 	const handleOpenChange = (open: boolean) => {
@@ -721,80 +706,69 @@ export function VariablePopover({
 									create in
 								</span>
 								{/*
-								 * Three mutually exclusive choices, so a radio group -
-								 * `aria-pressed` chips said "three independent toggles,
-								 * two of them off" to a screen reader, and each was its
-								 * own Tab stop in the middle of a two-control form.
+								 * One choice out of a few, all of them visible, so the
+								 * app's segmented control - not a third hand-rolled copy
+								 * of one (issue #1391). `ToggleGroup` is single-select,
+								 * so Radix supplies the `radiogroup`/`radio` roles, the
+								 * roving tab stop and the arrow keys; the chips it
+								 * replaces spelled all four out by hand, one file over
+								 * from the primitive whose header names that shape as
+								 * the defect it exists to end.
 								 *
-								 * The arrow handler sits on the chips rather than on the
-								 * group: keydown from the focused chip bubbles either
-								 * way, and a handler on the group would make it an
-								 * unfocusable interactive element that `jsx-a11y` can
-								 * only be silenced about at the line.
+								 * The Enter handler sits on the group rather than on each
+								 * segment: the keydown bubbles either way, and the group
+								 * is a component here, not the bare unfocusable div that
+								 * `jsx-a11y` would ask to be silenced about at the line.
 								 */}
-								<div
-									ref={createScopeGroupRef}
-									role="radiogroup"
+								<ToggleGroup
+									value={activeCreateScope ?? ""}
 									aria-labelledby={createScopeLabelId}
-									className="flex items-center gap-1.5"
+									onValueChange={selectCreateScope}
+									onKeyDown={(e) => {
+										// A segment that has focus and a value already
+										// typed leaves Enter nothing else to mean.
+										if (isCommitEnter(e)) {
+											e.preventDefault();
+											handleCreate();
+										}
+									}}
 								>
 									{/*
 									 * Only writable scopes appear. A picker offering
 									 * "Environment" with none selected would produce a
 									 * Create button that silently does nothing.
 									 */}
-									{creatableScopes.map((scope) => {
-										const selected = scope === activeCreateScope;
-										return (
-											<button
-												key={scope}
-												type="button"
-												role="radio"
-												aria-checked={selected}
-												data-create-scope={scope}
-												// Roving tabindex: the group is one Tab stop.
-												tabIndex={selected ? 0 : -1}
-												onClick={() => selectCreateScope(scope)}
-												onKeyDown={(e) => {
-													// A chip that has focus and a value
-													// already typed leaves Enter nothing
-													// else to mean.
-													if (isCommitEnter(e)) {
-														e.preventDefault();
-														handleCreate();
-														return;
-													}
-													const delta =
-														e.key === "ArrowRight" ||
-														e.key === "ArrowDown"
-															? 1
-															: e.key === "ArrowLeft" ||
-																  e.key === "ArrowUp"
-																? -1
-																: 0;
-													if (delta === 0) return;
-													// Arrows would otherwise scroll the panel.
-													e.preventDefault();
-													moveCreateScope(delta);
-												}}
-												className={cn(
-													"rounded-md border px-1.5 py-0.5 text-[10px] transition-colors",
-													selected
-														? cn(
-																VARIABLE_SCOPE_CONFIG[scope].tint,
-																VARIABLE_SCOPE_CONFIG[scope].border
-															)
-														: "border-transparent text-muted-foreground hover:bg-accent"
-												)}
-											>
-												{VARIABLE_SCOPE_CONFIG[scope].full}
-											</button>
-										);
-									})}
-								</div>
+									{creatableScopes.map((scope) => (
+										<ToggleGroupItem
+											key={scope}
+											value={scope}
+											/*
+											 * Selection follows focus, which is the radio
+											 * group's own pattern and what the arrows did
+											 * before: Radix moves the roving tab stop and
+											 * leaves selection to a press, so an arrow
+											 * would otherwise light one segment while
+											 * Enter created in another. Focus stays on the
+											 * segments rather than returning to the field,
+											 * or the second arrow press would have nothing
+											 * to move from.
+											 */
+											onFocus={() => setCreateScope(scope)}
+										>
+											{VARIABLE_SCOPE_CONFIG[scope].full}
+										</ToggleGroupItem>
+									))}
+								</ToggleGroup>
+							</div>
+							{/*
+							 * The primary action sits where the edit branch above puts
+							 * Cancel and Save, so the two branches read as one component
+							 * - and so the button is not the thing that pushes a row past
+							 * the card's edge.
+							 */}
+							<div className="flex justify-end gap-2">
 								<Button
 									size="sm"
-									className="ml-auto h-6 px-2 text-[11px]"
 									disabled={!canSubmitCreate}
 									onClick={handleCreate}
 								>

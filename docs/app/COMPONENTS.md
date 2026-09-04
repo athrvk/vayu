@@ -1859,14 +1859,24 @@ instead of telling the reader to go and define it. The red itself stays - the
 token genuinely does not resolve. `data.*` is the one state with no list, for
 the same disjointness reason it has no create offer.
 
-**The create offer's scope chips are a radio group, and picking one keeps you in
-the value field** (issue #1380). They are one Tab stop on a roving `tabIndex`,
-arrows move the selection and the focus together wrapping at the ends, and Enter
-on the focused chip creates - a chip that has focus beside a value already typed
-leaves Enter nothing else to mean. A mouse click hands focus back to the field,
-because picking a scope qualifies the value rather than replacing it as the
-destination; as plain buttons the chips kept the focus a click gave them, and
-the next keystroke went nowhere. Create is refused while the field is empty:
+**The create offer's scope choice is a `ToggleGroup`, and picking one keeps you
+in the value field** (issues #1380, #1391). It was three hand-rolled
+`role="radio"` buttons with a roving `tabIndex` and an arrow handler of their
+own, sharing one flex line with the "create in" label and an `ml-auto` Create
+button - 298px of content in a 266px row, so with all three scopes writable the
+button painted 21px outside the card, which `PopoverContent` does not clip. Both
+halves are primitives now: the choice is the app's segmented control, so Radix
+owns the `radiogroup` and `radio` roles, the single tab stop and the arrow keys,
+and Create sits in the same `flex justify-end gap-2` footer the edit branch uses
+one state over, which is what takes the widest line back inside the card.
+Selection follows focus, as a radio group's does - Radix moves the tab stop and
+leaves selecting to a press, so each segment picks itself `onFocus` and an arrow
+cannot light one segment while Enter creates in another. Enter on the focused
+segment creates: a segment that has focus beside a value already typed leaves
+Enter nothing else to mean. A mouse click hands focus back to the field, because
+picking a scope qualifies the value rather than replacing it as the destination;
+as plain buttons the chips kept the focus a click gave them, and the next
+keystroke went nowhere. Create is refused while the field is empty:
 `mergeVariable` stores what it is handed, so an empty value defines the name as
 `""`, which resolves - the token stops reading as undefined and answers with
 nothing.
