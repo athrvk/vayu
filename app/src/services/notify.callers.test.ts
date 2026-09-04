@@ -41,6 +41,9 @@ const ALLOWED = [
 	"components/shared/OAuth2Form/TokenStatusRow.tsx",
 	"hooks/useAppUpdate.ts",
 	"hooks/useEngineRestart.ts",
+	// The one caller whose event is neither terminal nor rare, which is why it
+	// carries a second opt-in of its own and a coalescing window (#1388).
+	"modules/inbox/capture-notifier.ts",
 	"modules/settings/main/panels/NotificationsPanel.tsx",
 	"queries/health.ts",
 	"services/load-test-service.ts",

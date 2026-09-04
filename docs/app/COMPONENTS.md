@@ -633,7 +633,8 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
 `docs/engine/api-reference.md` (Webhook Inbox).
 
 - `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop/clear/delete, the URL with a copy
-  control, the running/live badge, the inbox switcher, the capture list and the detail pane. Clear
+  control, the running/live badge, the `Notify` toggle (see `capture-notifier.ts` below), the inbox
+  switcher, the capture list and the detail pane. Clear
   (Eraser) empties the capture list; Delete (bin) ends the inbox itself, so the two adjacent
   destructive controls do not share an icon. The switcher is a
   `Select` in the header, shown only when more than one inbox exists (with one, it could pick only
@@ -662,6 +663,19 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   passed - a canned reply is echoed verbatim, so there is nothing to resolve. They were local
   `Input` pairs until #564 made the primitive mountable outside `RequestBuilderProvider`; the
   table's trailing blank row replaced the panel's own "Add header" button.
+- `capture-notifier.ts` - the OS notification a capture raises while Vayu is in the background
+  (issue #1388), and the two gates it passes first: the global opt-in, read by `services/notify.ts`
+  for every kind, and this inbox's own `Notify` toggle in the header, read here and off by default.
+  Both, because a webhook source sets the rate and a busy inbox must not be made loud by the setting
+  the user turned on for run results. One window of captures is one notification naming how many
+  arrived, through `createThrottledBatcher` with its leading edge off - a leading edge would post
+  once for the first capture and once for the rest, which is two notifications for one burst. The
+  window is trailing for that reason and not a setting: it is a property of what a notification is
+  for, not of how fast this user's source is. A click opens the inbox tab the capture landed on
+  (`target: { view: "inbox", inboxId }`), which is why the tab retargets rather than opening a
+  second one. The toggle is stored per inbox in `inbox-notify-store`, not on the engine's record:
+  the engine's inbox is in-memory state that does not outlive its process and does not act on the
+  flag.
 - `CaptureDetail.tsx` - one capture, rendered through `UnifiedResponseViewer` and `buildRawRequest`.
   A capture is an exchange with no response, which that viewer already handles; a request you
   received should read like one you sent.

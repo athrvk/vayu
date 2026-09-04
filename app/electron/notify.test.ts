@@ -324,6 +324,19 @@ describe("readNotifyRequest", () => {
 			view: "app",
 		});
 	});
+
+	it("keeps an inbox target, on the same terms as a run's", () => {
+		// Mutation check: drop the `inbox` branch in `readTarget` and a capture
+		// notification's click opens nothing - the target arrives as `app`
+		// (#1388), which is a window coming back with no inbox on it.
+		expect(
+			readNotifyRequest({ ...request(), target: { view: "inbox", inboxId: "inbox_a" } })
+				.target
+		).toEqual({ view: "inbox", inboxId: "inbox_a" });
+		expect(readNotifyRequest({ ...request(), target: { view: "inbox" } }).target).toEqual({
+			view: "app",
+		});
+	});
 });
 
 describe("registerNotifyIpc", () => {

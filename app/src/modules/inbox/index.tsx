@@ -25,16 +25,18 @@
  * showing a different inbox than the row it was clicked on.
  */
 
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Copy, Eraser, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from "lucide-react";
 import {
 	Badge,
 	Button,
+	Label,
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	Switch,
 } from "@/components/ui";
 import { Callout, EmptyState, ErrorState, NonLoopbackBadge } from "@/components/shared";
 import {
@@ -46,7 +48,7 @@ import {
 	useStopInboxMutation,
 	useUpdateInboxResponseMutation,
 } from "@/queries";
-import { useTabsStore, useToastStore } from "@/stores";
+import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { cn } from "@/lib/utils";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
@@ -59,6 +61,39 @@ import { cannedResponseKey } from "./utils";
 
 function formatTime(ms: number): string {
 	return new Date(ms).toLocaleTimeString();
+}
+
+/**
+ * The per-inbox half of capture notifications (issue #1388).
+ *
+ * Here rather than in the Notifications settings panel because it is a property
+ * of one inbox, the way its canned response is: the panel's opt-in governs the
+ * events that happen once, and this governs whether *this* listener may speak
+ * for them. Both have to be on, which is why the hint names the other one - a
+ * toggle that does nothing because of a setting on another screen is worse than
+ * no toggle at all.
+ */
+function NotifyOnCaptureToggle({ inboxId }: { inboxId: string }) {
+	const switchId = useId();
+	const enabled = useInboxNotifyStore((s) => s.enabled[inboxId] === true);
+	const setEnabled = useInboxNotifyStore((s) => s.setEnabled);
+	return (
+		<div className="flex items-center gap-2">
+			<Label htmlFor={switchId} className="text-xs text-muted-foreground">
+				Notify
+			</Label>
+			{/* Radix renders a button, which the visible label associates with but
+			    does not name - the same reason `ToggleRow` carries both. */}
+			<Switch
+				id={switchId}
+				checked={enabled}
+				onCheckedChange={(on) => setEnabled(inboxId, on)}
+				aria-label="Notify on capture"
+				title="Notify through the system when this inbox captures a request while Vayu is in the background. Needs system notifications on in Settings."
+				className="shrink-0"
+			/>
+		</div>
+	);
 }
 
 interface CaptureRowProps {
@@ -127,10 +162,21 @@ export default function InboxView() {
 	const showToast = useToastStore((s) => s.showToast);
 	const copy = useCopy();
 	const { openTabs, activeTabId, openTab } = useTabsStore();
-	const { data: inboxes = [], isError, error, refetch } = useInboxesQuery();
+	const { data: inboxes = [], isError, isSuccess, error, refetch } = useInboxesQuery();
 	// Which capture, and of which inbox: ids are per-inbox, so a bare number
 	// carried across a switch can select a row in the inbox switched *to*.
 	const [selection, setSelection] = useState<{ inboxId: string; captureId: number } | null>(null);
+
+	// An inbox id belongs to the engine process that minted it - none survives a
+	// restart - so a notify preference keyed by one is dead the moment the
+	// engine's own list stops naming it. Pruned here, against an answer the
+	// engine actually gave: a failed or unsettled read leaves the map alone,
+	// because "no inboxes" and "could not ask" are not the same list (#1388).
+	const retainInboxes = useInboxNotifyStore((s) => s.retainInboxes);
+	useEffect(() => {
+		if (!isSuccess) return;
+		retainInboxes(inboxes.map((i) => i.inboxId));
+	}, [isSuccess, inboxes, retainInboxes]);
 
 	const startInbox = useStartInboxMutation();
 	const stopInbox = useStopInboxMutation();
@@ -253,6 +299,7 @@ export default function InboxView() {
 				<Badge variant="outline">
 					{inbox.running ? (live.watching ? "Live" : "Running") : "Stopped"}
 				</Badge>
+				<NotifyOnCaptureToggle inboxId={inbox.inboxId} />
 
 				{/* The tab's multi-inbox story, which it never had: with several
 				    listeners running, this is the only way to reach one of them

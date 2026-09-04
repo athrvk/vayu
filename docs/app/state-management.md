@@ -920,6 +920,39 @@ produced it, and a user who finds the hole tomorrow needs the same answer, but
 localStorage is a fixed budget shared with the workspace. `migrate` and `merge`
 both normalize, as `recovery-notice-store` does and for the same reason.
 
+#### `inbox-notify-store.ts` - Which Inboxes May Notify On A Capture
+
+Whether a capture landing on one inbox may raise an OS notification while Vayu
+is in the background (issue #1388), keyed by inbox id. Off for an inbox nobody
+has decided about, and off even when `systemNotifications` is on: a capture is
+the one relevant event with no natural rate, and a webhook source that retries
+would otherwise teach the user to turn the whole feature off, taking the
+run-finished notification with it.
+
+It lives here rather than on the engine's inbox record, the way
+`host-sleep-store` keeps a run's annotation beside a report with no field for
+it: the engine's inbox is in-memory state that never outlives the process that
+opened it, and it does not act on this flag - only the desktop app does.
+
+**State:**
+
+```typescript
+{
+  enabled: Record<string, true>  // only the inboxes that are on; off is absence
+}
+```
+
+Two readers, both at the moment a capture arrives:
+`modules/inbox/capture-notifier.ts` gates on it (the second gate;
+`services/notify.ts` reads the global opt-in), and the header toggle in
+`modules/inbox/index.tsx` writes it.
+
+**Persisted**, and pruned: an inbox id belongs to the engine process that minted
+it, so `retainInboxes` drops every id a successful `GET /inbox` no longer names,
+called from `InboxView` on a list read the engine actually answered - a failed
+read leaves the map alone, because "no inboxes" and "could not ask" are not the
+same list. `migrate` and `merge` both normalize, as `host-sleep-store` does.
+
 #### `scenario-run-store.ts` - Live Collection-Run Steps
 
 The live half of a scenario (collection) run's tab. `ScenarioRunService` pushes the `step` SSE events in here and `ScenarioRunView` reads them, so the stream survives navigating away from the tab and back - the same split, for the same reason, as `LoadTestService` and `dashboard-store`.
