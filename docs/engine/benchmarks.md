@@ -331,6 +331,99 @@ disabled, at the chunk sizes libcurl actually delivers.
 What is already known without a run: the counter cannot change a *non*-streaming
 run's cost, because the branch that reaches it is not taken.
 
+### The run-scoped 1 ms timer request: pacing unchanged, idle holds nothing (2026-09-04, Windows)
+
+Issue #1161 moved Windows' `timeBeginPeriod(1)` from process start to the
+event loop's lifetime (`platform::HighResolutionTimerScope`, one refcounted
+request per run), and #1296 is the measurement its second acceptance criterion
+asked for and a Linux host could not take: on Linux the scope compiles to a
+counter, so the platform where the numbers could differ is the only one worth
+measuring on. Two questions, each with its own instrument.
+
+**Different hardware again.** A 4-core / 8-thread **Intel i5-8300H** laptop,
+Windows 11 Home 24H2 (build 26200), 16 GB, the target sharing those cores.
+Release builds of engine **0.24.0** (`1d20f4f4`, the commit before #1295
+merged: "before") and **0.25.0** (`711f359f`: "after"), each started fresh per
+run with `--verbose 1` and a scratch data dir, so nothing carries over between
+arms.
+
+**Pacing.** `constant_rps` runs of 20 s at 200 and 400 RPS (the `sleep_for`
+leg, below the ~500 RPS point where a tick's remainder is spun instead) and at
+1500 RPS (the spin leg, 1 ms ticks), 3 rounds, the two arms alternated within
+each round. The achieved rate is the report's `sendRate`. The spread is read
+off the *receiving* side rather than the engine's counters: the target is the
+same 11-byte `/fast` as `scripts/test/mock-server.go` with one addition, a
+monotonic arrival timestamp per request, and the gaps between consecutive
+arrivals are what the table reports. "Nominal" is `1e6 / RPS` microseconds;
+"within 25%" is the share of gaps inside a quarter of nominal on either side,
+"under 10%" the share that are catch-up bursts.
+
+| target RPS | arm | sent rate (median of 3) | dropped | gap p50 / p90 / p99 / max (us) | within 25% | under 10% | per-second stdev | p99 latency |
+|---:|---|---:|---:|---|---:|---:|---:|---:|
+| 200 | before | 199.92 | 0 | 5733 / 5882 / 8782 / 10478 | 77.5% | 9.8% | 0.46 | 4.66 ms |
+| 200 | **after** | 199.92 | 0 | 5743 / 5871 / 8758 / 10127 | 78.5% | 7.4% | 0.56 | 4.52 ms |
+| 400 | before | 399.89 | 0 | 3515 / 3858 / 6746 / 8205 | 7.7% | 27.2% | 0.89 | 4.77 ms |
+| 400 | **after** | 399.88 | 0 | 3694 / 3830 / 4821 / 6437 | 6.8% | 27.6% | 0.69 | 2.88 ms |
+| 1500 | before | 1499.78 | 0 | 540 / 1447 / 1712 / 3458 | 23.8% | 25.9% | 0.92 | 1.10 ms |
+| 1500 | **after** | 1499.77 | 0 | 541 / 1461 / 1666 / 3518 | 21.9% | 27.4% | 0.89 | 1.07 ms |
+
+The furthest any of the 18 runs strayed from its target was 399.14 at 400 RPS,
+and no run dropped a request. **The achieved rate is identical to the second
+decimal in every pair, and at 200 and 1500 RPS every spread statistic agrees
+between arms to within its own round-to-round scatter.** The 400 RPS before
+arm is the one exception, and it is the session's very first run: gap p50 of 0,
+max 37 ms, p99 latency 40 ms, a cold daemon on a laptop that had just finished
+two builds. Rounds 2 and 3 of that arm read 3688 / 3515 us at p50 and 4810 /
+6746 us at p99 against the after arm's 3693-3699 / 4811-5037, so the medians in
+the table carry that one run and the arms do not otherwise separate. The
+`sleep_for` leg is the one that would have shown a request not in force - at
+the 15.6 ms default a 5 ms sleep returns three ticks late, and the 200 RPS gap
+distribution would sit at ~15 ms with two-thirds of the requests arriving in
+bursts - and it reads the same on both arms. So the ordering read off the code
+in #1295 holds on a trace: `configure_event_loop` builds the loop, the loop's
+first member takes the request, and the strategy's first tick runs under it.
+
+What the table does show, on both arms equally, is the shape of `sleep_for` at
+1 ms resolution: the 200 RPS median gap is 5.7 ms against a 5 ms nominal, and
+at 400 RPS (2.5 ms nominal, 2.5 ms sleep - just over the 2000 us threshold
+above which the tick sleeps rather than spins) the median is 3.5-3.7 ms with a
+quarter of the gaps being the double-dispatch that pays the overshoot back.
+The rate is exact because `take_due_requests` accrues the debt; the
+*regularity* is bounded by the OS sleep granularity. That is a property of the
+spin threshold in `wait_for_next_tick`, not of the scope, and it predates it.
+
+**Idle.** The fix's actual claim is that a daemon with no run active holds no
+request. `powercfg /energy` reports outstanding timer requests by process but
+needs an elevated shell, which this session did not have, so the readout is
+`NtQueryTimerResolution` taken from inside a probe process that has itself
+requested a deliberately coarse **10 ms**. Since Windows 10 2004 the
+resolution a process observes is the finest period requested by *any* process,
+once it has made a request of its own - so the probe reads **10.0 ms** when
+nothing else holds a request and **1.0 ms** when anything does, while a
+process that never asked keeps sleeping at 15.6 ms regardless. Calibrated
+against a helper holding `timeBeginPeriod(1)`: 10.0 without it, 1.0 with it.
+`timeGetDevCaps` is not used; it reports the 0.5-15.625 ms capability range and
+never moved.
+
+| daemon state | before (0.24.0) | **after (0.25.0)** |
+|---|---:|---:|
+| no daemon running | 10.0 ms | 10.0 ms |
+| daemon up, idle 5 s | **1.0 ms** | **10.0 ms** |
+| 3 s into a 200 RPS run | 1.0 ms | 1.0 ms |
+| 3 s after the run completed | **1.0 ms** | **10.0 ms** |
+| daemon stopped | 10.0 ms | 10.0 ms |
+
+Each cell is corroborated by the probe's own mean `Sleep(1)`: ~10 ms in the
+10.0 rows, ~1.9 ms in the 1.0 rows. The old daemon took the request at boot and
+kept it for its life; the new one holds it for exactly the span of the run,
+and `release_execution_resources` hands it back as the run is retained.
+
+**Verdict: nothing moved, so neither constant needs looking at.** The 2000 us
+spin threshold and the 1000 us `tick_us` floor are the two named mechanisms
+the issue said to check if a regression appeared; none did. The
+[Timer resolution paragraph](architecture.md#event-loop-curl_multi) in the architecture
+doc stands as written.
+
 ### The in-app proof run
 
 Started from the app's own Load Test panel (not the CLI, not MCP), 60 s,
