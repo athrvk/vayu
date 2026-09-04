@@ -54,11 +54,21 @@ const REFERENCE_BODY_XHEIGHT = SYSTEM_FACE_RATIO * 13;
 
 /**
  * The band a code editor's default lands in: Menlo and Consolas at the sizes
- * VS Code ships them render an x-height of roughly 6.3 to 6.6px. The default
+ * VS Code ships them render an x-height of roughly 6.3 to 6.6px. The *default*
  * code face at the default editor size has to sit inside it, which is the whole
  * content of the 13px -> 12px move.
  */
-const EDITOR_XHEIGHT_BAND = { min: 5.5, max: 6.6 } as const;
+const EDITOR_REFERENCE_BAND = { min: 6.3, max: 6.6 } as const;
+
+/**
+ * What the four selectable code faces are held to instead, and why it is not
+ * the band above. Two of them render below its floor at the same size by their
+ * own design - IBM Plex Mono 6.19px, Space Mono 5.95px - and that is the
+ * user's choice of face rather than the register this issue set. What none of
+ * them may do is read *larger* than the default (the band's ceiling), or drop
+ * under a floor where a code face stops being comfortable at all.
+ */
+const SELECTABLE_XHEIGHT_FLOOR = 5.5;
 
 /** The head of a stack, when that head is a bundled family. */
 const promisedFace = (stack: string): string | undefined => /^\s*"([^"]+)"/.exec(stack)?.[1];
@@ -170,18 +180,21 @@ describe("the bundled faces' x-heights", () => {
 		const xHeight =
 			(ratios.get(monoFaces.get(DEFAULT_MONO_FONT) as string) as number) *
 			DEFAULT_EDITOR_FONT_SIZE;
-		expect(round(xHeight, 2)).toBeGreaterThanOrEqual(EDITOR_XHEIGHT_BAND.min);
-		expect(round(xHeight, 2)).toBeLessThanOrEqual(EDITOR_XHEIGHT_BAND.max);
+		expect(round(xHeight, 2)).toBeGreaterThanOrEqual(EDITOR_REFERENCE_BAND.min);
+		expect(round(xHeight, 2)).toBeLessThanOrEqual(EDITOR_REFERENCE_BAND.max);
 	});
 
-	it("keep every selectable code face inside that band too", () => {
+	it("keep every selectable code face at or under the default, and above the floor", () => {
+		// Not the reference band: two of these read below its floor by their own
+		// design, and picking one of them is the user's call. Reading *larger*
+		// than the default face is what would put the editor back where it was.
 		for (const [value, pkg] of monoFaces) {
 			const xHeight = round((ratios.get(pkg) as number) * DEFAULT_EDITOR_FONT_SIZE, 2);
 			expect(xHeight, `${value} at the default editor size`).toBeGreaterThanOrEqual(
-				EDITOR_XHEIGHT_BAND.min
+				SELECTABLE_XHEIGHT_FLOOR
 			);
 			expect(xHeight, `${value} at the default editor size`).toBeLessThanOrEqual(
-				EDITOR_XHEIGHT_BAND.max
+				EDITOR_REFERENCE_BAND.max
 			);
 		}
 	});
