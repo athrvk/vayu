@@ -6,259 +6,68 @@
  */
 
 /**
- * The inbox's live capture stream (issue #480).
+ * The inbox view's half of the live capture stream (issues #480, #1400).
  *
  * `GET /inbox/:id/live` emits one SSE event per capture, so the list does not
- * poll: a webhook arrives and the row appears. The engine allows exactly one
- * stream per inbox - each holds a pool thread for its whole life - which is why
- * this hook opens and closes with the *selected* inbox rather than one stream
- * per inbox on screen.
+ * poll: a webhook arrives and the row appears. The socket, its reconnect and the
+ * merge into the query cache all belong to `services/inbox-watch-service.ts` -
+ * this hook holds a reference to that inbox's stream for as long as the view is
+ * mounted, and renders what the service reports.
  *
- * New captures are merged into the same query cache `useInboxCapturesQuery`
- * fills, rather than kept in a second list beside it. Two lists would have to
- * be reconciled on every clear and refetch, and the one the detail pane read
- * would decide which of them was the truth.
+ * The stream outliving this hook is the whole point: the view is mounted only
+ * while the inbox tab is the active one, and a capture that arrives while the
+ * user is in another tab still has to be able to notify. Releasing the reference
+ * does not close the socket unless nothing else wants it.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { API_ENDPOINTS } from "@/config/api-endpoints";
-// `mergeCapture` lives with the query that owns this cache entry, not here: the
-// fetch and the load-more pages write through the same union, and a second copy
-// of that rule is how two writers come to disagree about one list.
-import { mergeCapture, queryKeys } from "@/queries";
-import type { Inbox, InboxCapture, InboxCapturesResponse } from "@/types";
-import { createCaptureNotifier } from "./capture-notifier";
-
-/** Narrow one SSE payload to a capture, or reject it. */
-export function parseCaptureEvent(raw: unknown): InboxCapture | null {
-	if (typeof raw !== "object" || raw === null) return null;
-	const e = raw as Record<string, unknown>;
-	// `id` and `method` are what the list keys and renders on; a payload
-	// missing either is dropped rather than defaulted into a row claiming to be
-	// a request nothing sent.
-	if (typeof e.id !== "number" || typeof e.method !== "string") return null;
-	if (typeof e.inboxId !== "string" || typeof e.path !== "string") return null;
-	return {
-		id: e.id,
-		inboxId: e.inboxId,
-		receivedAt: typeof e.receivedAt === "number" ? e.receivedAt : Date.now(),
-		method: e.method,
-		path: e.path,
-		query: typeof e.query === "string" ? e.query : "",
-		headers:
-			typeof e.headers === "object" && e.headers !== null
-				? (e.headers as Record<string, string>)
-				: {},
-		body: typeof e.body === "string" ? e.body : "",
-		bodyBytes: typeof e.bodyBytes === "number" ? e.bodyBytes : 0,
-		bodyTruncated: e.bodyTruncated === true,
-		remoteAddr: typeof e.remoteAddr === "string" ? e.remoteAddr : "",
-	};
-}
-
-/** Reconnect attempts before the surface says so and waits to be told. */
-export const INBOX_LIVE_MAX_RETRIES = 5;
-/** First backoff step; each attempt doubles it, up to the cap. */
-export const INBOX_LIVE_RETRY_BASE_MS = 400;
-export const INBOX_LIVE_RETRY_MAX_MS = 5000;
-
-/**
- * How long to wait before reconnect attempt @p attempt (1-based).
- *
- * The first step has to outlast the engine's dead-socket detection - the
- * previous stream's claim is held until its poll loop notices, one
- * `inboxLivePollIntervalMs` later - because a reconnect inside that window is
- * refused with a 409. The app cannot read that setting, so the backoff doubles
- * rather than guessing it: 400ms clears the 250ms default on the first attempt
- * and a raised cadence is covered within two or three. Jitter keeps several
- * watchers from retrying in lockstep.
- */
-export function inboxLiveRetryDelayMs(attempt: number, random: () => number = Math.random): number {
-	const step = Math.min(
-		INBOX_LIVE_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1),
-		INBOX_LIVE_RETRY_MAX_MS
-	);
-	return Math.round(step + random() * step * 0.5);
-}
-
-/**
- * Ask the engine, now, whether @p inboxId still has a listener (issue #554).
- *
- * A stream ends the same way whether the connection dropped or somebody stopped
- * the inbox - from the drawer, an MCP tool or a bare curl - and only the engine
- * knows which. The list is polled at `SERVICES_POLL_INTERVAL_MS`, so left to the
- * poll a deliberate stop spends up to ten seconds looking like a live inbox
- * whose stream is flapping. Reading it here answers both halves: the surface
- * reflects the stop within the close, and the reconnect budget is kept for the
- * drops it was added for.
- *
- * Only a definite answer counts. A refetch that failed leaves the last good
- * list in the cache, which still says `running` - so a stream lost to a blip
- * retries, as it must.
- */
-async function listenerIsGone(client: QueryClient, inboxId: string): Promise<boolean> {
-	// `refetchType: "all"`, not the default "active": whether some other surface
-	// happens to be observing the list is not what should decide whether this
-	// answer is fresh.
-	await client.invalidateQueries({ queryKey: queryKeys.inbox.list(), refetchType: "all" });
-	const inboxes = client.getQueryData<Inbox[]>(queryKeys.inbox.list());
-	if (inboxes === undefined) return false;
-	return inboxes.find((i) => i.inboxId === inboxId)?.running !== true;
-}
-
-/** One subscription's stream state, stamped with the subscription it belongs to. */
-interface LiveStatus {
-	subscription: string;
-	open: boolean;
-	stopped: boolean;
-}
-
-/** Not yet open and not yet given up on - what every subscription starts as. */
-const FRESH: LiveStatus = { subscription: "", open: false, stopped: false };
+import { useCallback, useEffect, useState } from "react";
+import { inboxWatchService, type InboxWatchState } from "@/services/inbox-watch-service";
 
 /** What the surface renders from {@link useInboxLive}. */
-export interface InboxLiveState {
-	/**
-	 * Whether the stream is open. A listener that is running while nothing is
-	 * watching it is still capturing, and the two states are not the same - the
-	 * badge tells them apart.
-	 */
-	watching: boolean;
-	/**
-	 * Set once the reconnects are spent. Captures are still being recorded; the
-	 * list has simply stopped hearing about them, which is worth saying out loud
-	 * rather than leaving the badge to read `Running` forever.
-	 */
-	stopped: boolean;
+export interface InboxLiveState extends InboxWatchState {
 	/** Re-subscribe now, resetting the retry budget. */
 	resume: () => void;
 }
 
+/** Not watching, and nothing given up on. */
+const IDLE: InboxWatchState = { watching: false, stopped: false };
+
 /**
- * Watch one inbox.
+ * Watch one inbox for as long as this surface is showing it.
  *
- * The retry is ours rather than the browser's (issue #506). `EventSource` treats
- * any non-200 as fatal and never retries it, and a reconnect that lands inside
- * the engine's dead-socket detection window meets a `409 inbox_live_in_use` from
- * the claim the previous stream is still holding - so a single unlucky
- * disconnect used to end the stream for the life of the tab, with nothing said.
- *
- * `SSEClient` deliberately does *not* reconnect, but its reason does not apply
- * here: a run's stream would replay its whole retained ring and clobber the live
- * visuals, whereas an inbox resume is addressed by capture id and
- * {@link mergeCapture} is idempotent on it, so at worst a resume re-delivers
- * rows the list already has.
+ * @param inboxId The inbox on screen, or null when there is none.
+ * @param enabled Whether the engine says that inbox is running - a stopped
+ *   listener has no stream to attach to.
  */
 export function useInboxLive(inboxId: string | null, enabled: boolean): InboxLiveState {
-	const queryClient = useQueryClient();
-	// Bumping this re-runs the effect, which is what a manual resume is: the
-	// same subscription, from the same resume point, with a fresh budget.
-	const [resumeNonce, setResumeNonce] = useState(0);
-	// Which subscription the state below describes. A status left by an earlier
-	// one says nothing about this one, so it is discarded while rendering rather
-	// than reset by an effect - the reset would otherwise land a render late,
-	// showing the previous inbox's badge on the new one.
-	const subscription = `${inboxId ?? ""}:${resumeNonce}`;
-	// Only the EventSource's own callbacks write this.
-	const [status, setStatus] = useState<LiveStatus>(FRESH);
-	const current = status.subscription === subscription ? status : FRESH;
-
-	// Survives the effect re-running (a resume), and is discarded when the
-	// inbox changes - a capture id belongs to the inbox that recorded it.
-	const resumeFrom = useRef<{ inboxId: string | null; lastEventId: string }>({
-		inboxId: null,
-		lastEventId: "",
-	});
-
-	// The nonce alone clears the given-up state: it names a new subscription,
-	// and the old one's status stops being the one rendered.
-	const resume = useCallback(() => setResumeNonce((n) => n + 1), []);
+	const watched = enabled ? inboxId : null;
+	// Stamped with the inbox it describes. A state left by the previously
+	// addressed inbox says nothing about this one, so it is discarded while
+	// rendering rather than reset by an effect - the reset would otherwise land
+	// a render late, showing the previous inbox's badge on the new one.
+	const [reported, setReported] = useState<{ inboxId: string; state: InboxWatchState } | null>(
+		null
+	);
+	const state = watched !== null && reported?.inboxId === watched ? reported.state : IDLE;
 
 	useEffect(() => {
-		if (!inboxId || !enabled) {
-			return;
-		}
-		if (resumeFrom.current.inboxId !== inboxId) {
-			resumeFrom.current = { inboxId, lastEventId: "" };
-		}
-
-		let source: EventSource | null = null;
-		let retryTimer: ReturnType<typeof setTimeout> | null = null;
-		let attempts = 0;
-		let cancelled = false;
-		// One per subscription, so a switch to another inbox neither carries the
-		// previous one's window nor announces its captures (#1388).
-		const notifier = createCaptureNotifier(inboxId);
-
-		const connect = () => {
-			// `Last-Event-ID` is a header the browser sets on its own reconnect
-			// and that no API lets us set on a fresh connection, so ours travels
-			// as a query parameter the engine reads on the same terms.
-			const { lastEventId } = resumeFrom.current;
-			const query = lastEventId ? `?lastEventId=${encodeURIComponent(lastEventId)}` : "";
-			source = new EventSource(
-				`${API_ENDPOINTS.BASE_URL}${API_ENDPOINTS.INBOX_LIVE(inboxId)}${query}`
-			);
-			source.onopen = () => {
-				attempts = 0;
-				setStatus({ subscription, open: true, stopped: false });
-			};
-			source.onmessage = (event) => {
-				if (event.lastEventId) {
-					resumeFrom.current = { inboxId, lastEventId: event.lastEventId };
-				}
-				let parsed: unknown;
-				try {
-					parsed = JSON.parse(event.data);
-				} catch {
-					return; // A frame this engine wrote always parses.
-				}
-				const capture = parseCaptureEvent(parsed);
-				if (!capture) return;
-				queryClient.setQueryData<InboxCapturesResponse>(
-					queryKeys.inbox.captures(inboxId),
-					(cached) => mergeCapture(cached, capture)
-				);
-				// After the merge, not before: the list is what a click on the
-				// notification opens, and it is written first for that reason.
-				notifier.record(capture);
-			};
-			source.onerror = () => {
-				const exhausted = !cancelled && attempts >= INBOX_LIVE_MAX_RETRIES;
-				setStatus({ subscription, open: false, stopped: exhausted });
-				// Closed rather than left to the browser: a 409 is fatal to it,
-				// and a source it has already given up on holds no retry of its
-				// own. Everything after this point is our reconnect.
-				source?.close();
-				source = null;
-				if (cancelled || exhausted) return;
-				attempts += 1;
-				const attempt = attempts;
-				void (async () => {
-					// The reconnect waits on this answer rather than racing it: a
-					// retry fired first is a request to re-attach to a listener the
-					// user has just stopped.
-					if (await listenerIsGone(queryClient, inboxId)) return;
-					if (cancelled) return;
-					retryTimer = setTimeout(connect, inboxLiveRetryDelayMs(attempt));
-				})();
-			};
-		};
-
-		connect();
-
+		if (!watched) return;
+		// Retained before subscribing, so the first state this renders is the one
+		// belonging to the stream this view asked for rather than to whatever the
+		// service happened to hold a tick earlier.
+		inboxWatchService.retain(watched);
+		const unsubscribe = inboxWatchService.subscribe(watched, (next) =>
+			setReported({ inboxId: watched, state: next })
+		);
 		return () => {
-			cancelled = true;
-			if (retryTimer !== null) clearTimeout(retryTimer);
-			source?.close();
-			notifier.dispose();
+			unsubscribe();
+			inboxWatchService.release(watched);
 		};
-	}, [inboxId, enabled, queryClient, subscription]);
+	}, [watched]);
 
-	return {
-		watching: current.open && enabled && inboxId !== null,
-		stopped: current.stopped && enabled && inboxId !== null,
-		resume,
-	};
+	const resume = useCallback(() => {
+		if (watched) inboxWatchService.resume(watched);
+	}, [watched]);
+
+	return { watching: state.watching, stopped: state.stopped, resume };
 }

@@ -11,8 +11,8 @@
  * An inbox is a listener the engine holds for as long as its process lives, so
  * none of this is stored state the app could rebuild - every hook here reads
  * the engine back. The capture list is fetched a page at a time and appended to
- * by the SSE stream (`useInboxLive`); it is deliberately not polled, since the
- * stream is the thing that knows a capture arrived.
+ * by the SSE stream (`services/inbox-watch-service.ts`); it is deliberately not
+ * polled, since the stream is the thing that knows a capture arrived.
  *
  * Those two writers, plus the load-more below, share one cache entry per inbox
  * and every write to it is the union in {@link mergeCaptures}. That is the rule
@@ -127,12 +127,18 @@ function clearedCapturePage(): InboxCapturesResponse {
  * drawer and the Dock's running-services indicator both promise to show a
  * running listener wherever it came from, which a list only this app's own
  * mutations refreshed could not do.
+ *
+ * `enabled` is for the app-level watcher (#1400), which needs the list only
+ * while some inbox may notify on a capture: a root observer polling for the
+ * app's whole life with nobody reading the answer is what #1150 removed. Every
+ * surface that shows the list omits it and observes unconditionally.
  */
-export function useInboxesQuery() {
+export function useInboxesQuery(options: { enabled?: boolean } = {}) {
 	return useQuery({
 		queryKey: queryKeys.inbox.list(),
 		queryFn: () => apiService.listInboxes(),
 		refetchInterval: TIMING.SERVICES_POLL_INTERVAL_MS,
+		enabled: options.enabled ?? true,
 	});
 }
 
