@@ -39,8 +39,8 @@
  * already the live-refresh cadence (`throttled-batcher.ts`), so a second timer
  * would only add a second answer to "how often does this paint".
  *
- * `report`/`fail`/`clear` are fire-and-forget by design - no run may wait on the
- * OS to draw a rectangle.
+ * Every call here is fire-and-forget by design - no run may wait on the OS to
+ * draw a rectangle.
  */
 
 import type { RunProgressUpdate } from "@/types/electron";
