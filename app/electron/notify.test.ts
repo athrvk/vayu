@@ -143,6 +143,26 @@ describe("createNotifier - whether to post at all", () => {
 		expect(built).toHaveLength(0);
 	});
 
+	it("says nothing about a capture either, while the window is focused", () => {
+		// The focus check is kind-agnostic, and the inbox's captures (#1388) are
+		// the one kind with a rate the app does not set - the kind a regression
+		// here would be loudest in. Named rather than left to the case above,
+		// because it is an acceptance criterion of its own.
+		const { notifier, built } = harness({ focused: true });
+		const capture = request({
+			kind: "inbox-captured",
+			title: "Inbox received a request",
+			body: "POST /webhook",
+			target: { view: "inbox", inboxId: "inbox_a" },
+		});
+
+		expect(notifier.show(capture)).toBe("focused");
+		expect(built).toHaveLength(0);
+
+		const away = harness({ focused: false });
+		expect(away.notifier.show(capture)).toBe("shown");
+	});
+
 	it("is a silent no-op where the platform supports no notifications", () => {
 		const { notifier, built } = harness({ supported: false });
 

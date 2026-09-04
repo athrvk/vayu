@@ -633,8 +633,8 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
 `docs/engine/api-reference.md` (Webhook Inbox).
 
 - `index.tsx` (`InboxView`, screen `"inbox"`) - start/stop/clear/delete, the URL with a copy
-  control, the running/live badge, the `Notify` toggle (see `capture-notifier.ts` below), the inbox
-  switcher, the capture list and the detail pane. Clear
+  control, the running/live badge, the `Notify` toggle (`NotifyOnCaptureToggle`, whose two gates
+  are `capture-notifier.ts` below), the inbox switcher, the capture list and the detail pane. Clear
   (Eraser) empties the capture list; Delete (bin) ends the inbox itself, so the two adjacent
   destructive controls do not share an icon. The switcher is a
   `Select` in the header, shown only when more than one inbox exists (with one, it could pick only

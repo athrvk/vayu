@@ -82,8 +82,16 @@ function NotifyOnCaptureToggle({ inboxId }: { inboxId: string }) {
 			<Label htmlFor={switchId} className="text-xs text-muted-foreground">
 				Notify
 			</Label>
-			{/* Radix renders a button, which the visible label associates with but
-			    does not name - the same reason `ToggleRow` carries both. */}
+			{/* `Switch` and `Label` composed directly, as `OAuth2Form` and
+			    `RunCollectionDialog` do for a control that sits in a line of
+			    other controls. `ToggleRow` is the settings *row* - a full-width
+			    `justify-between` box with a description slot and the settings
+			    search's `data-setting-row` marker - and none of that belongs in
+			    a header strip.
+
+			    Radix renders a button, which the visible label associates with
+			    but does not name, so the switch carries its own name - the same
+			    reason `ToggleRow` carries both. */}
 			<Switch
 				id={switchId}
 				checked={enabled}
