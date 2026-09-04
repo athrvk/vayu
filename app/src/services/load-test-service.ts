@@ -131,12 +131,13 @@ class LoadTestService {
 		store.setStreaming(true);
 		store.setError(null);
 
-		// The OS indicator starts the moment the run does (#1362), without a
-		// fraction: nothing has ticked yet, so how far along this run is has no
-		// answer, and "running, length unknown" is the honest one. The first
-		// committed batch below replaces it with a real fraction where the run
-		// has a denominator at all.
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, null);
+		// The OS indicator starts the moment the run does (#1362), claimed for
+		// this run rather than for load runs in general (#1405): every later call
+		// names the run it speaks for, so a run this one supersedes cannot paint
+		// over it. It starts without a fraction - nothing has ticked yet - and
+		// the first committed batch below replaces that with a real one where the
+		// run has a denominator at all.
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, runId);
 
 		// Connect immediately. The engine retains a replayable tick topic per run
 		// (N1), so even a sub-second run that finishes before we attach is fully
@@ -156,14 +157,15 @@ class LoadTestService {
 	 * Call this when the test is stopped by user or completes
 	 */
 	stopMonitoring(): void {
-		if (!this.activeRunId) {
+		const runId = this.activeRunId;
+		if (!runId) {
 			return;
 		}
 
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
-		runProgress.clear(RUN_PROGRESS_KEYS.loadRun);
+		runProgress.clear(RUN_PROGRESS_KEYS.loadRun, runId);
 		this.notifyTerminal(
-			this.activeRunId,
+			runId,
 			NOTIFY_KINDS.loadRunStopped,
 			"The run was stopped before it finished."
 		);
@@ -236,6 +238,7 @@ class LoadTestService {
 		if (latest) {
 			runProgress.report(
 				RUN_PROGRESS_KEYS.loadRun,
+				this.activeRunId,
 				deriveRunProgress(store.loadTestConfig, latest)
 			);
 		}
@@ -257,7 +260,7 @@ class LoadTestService {
 	private handleError(error: Error): void {
 		console.error("[LoadTestService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
-		runProgress.fail(RUN_PROGRESS_KEYS.loadRun);
+		runProgress.fail(RUN_PROGRESS_KEYS.loadRun, this.activeRunId);
 		this.progressFailedRunId = this.activeRunId;
 		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.loadRunFailed, error.message);
 		const store = useDashboardStore.getState();
@@ -274,9 +277,11 @@ class LoadTestService {
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		// Same reason, and the same moment: the run is over, so the taskbar stops
 		// claiming one is going. A run that already reported its failure keeps
-		// that flash instead - see `progressFailedRunId`.
-		if (runId === null || this.progressFailedRunId !== runId) {
-			runProgress.clear(RUN_PROGRESS_KEYS.loadRun);
+		// that flash instead - see `progressFailedRunId`. A close with no run to
+		// name clears nothing: it holds no claim, and the bar it would wipe
+		// belongs to whatever run is being watched now (#1405).
+		if (this.progressFailedRunId !== runId) {
+			runProgress.clear(RUN_PROGRESS_KEYS.loadRun, runId);
 		}
 		const store = useDashboardStore.getState();
 		store.setStreaming(false);

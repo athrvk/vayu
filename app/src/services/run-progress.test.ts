@@ -29,8 +29,8 @@ function stubBridge() {
 beforeEach(() => {
 	stubBridge();
 	for (const key of Object.values(RUN_PROGRESS_KEYS)) {
-		runProgress.report(key, null);
-		runProgress.clear(key);
+		runProgress.claim(key, "run_reset");
+		runProgress.clear(key, "run_reset");
 	}
 	vi.unstubAllGlobals();
 });
@@ -43,13 +43,14 @@ afterEach(() => {
 describe("runProgress - one run", () => {
 	it("sends the fraction a run reports", () => {
 		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.25);
-		expect(send).toHaveBeenCalledWith({ state: "running", value: 0.25 });
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, "run_1", 0.25);
+		expect(send).toHaveBeenLastCalledWith({ state: "running", value: 0.25 });
 	});
 
-	it("sends null for a run with no denominator", () => {
+	it("starts a claimed run with no fraction", () => {
 		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
+		runProgress.claim(RUN_PROGRESS_KEYS.collectionRun, "run_1");
 		expect(send).toHaveBeenCalledWith({ state: "running", value: null });
 	});
 
@@ -59,9 +60,11 @@ describe("runProgress - one run", () => {
 	 */
 	it("does not re-send a fraction that has not moved", () => {
 		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.5);
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.5);
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.75);
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		send.mockClear();
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, "run_1", 0.5);
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, "run_1", 0.5);
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, "run_1", 0.75);
 		expect(send.mock.calls.map(([update]) => update)).toEqual([
 			{ state: "running", value: 0.5 },
 			{ state: "running", value: 0.75 },
@@ -70,22 +73,50 @@ describe("runProgress - one run", () => {
 
 	it("goes idle when the run ends", () => {
 		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.5);
-		runProgress.clear(RUN_PROGRESS_KEYS.loadRun);
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.clear(RUN_PROGRESS_KEYS.loadRun, "run_1");
 		expect(send).toHaveBeenLastCalledWith({ state: "idle" });
 	});
 
 	it("says failed when the run fails", () => {
 		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.5);
-		runProgress.fail(RUN_PROGRESS_KEYS.loadRun);
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.fail(RUN_PROGRESS_KEYS.loadRun, "run_1");
 		expect(send).toHaveBeenLastCalledWith({ state: "failed" });
+	});
+
+	/*
+	 * The flash outlives the run that raised it: `fail` gives the claim up, so
+	 * the failed run's own last flush - a batcher's trailing commit lands after
+	 * the error - cannot repaint the bar as running.
+	 */
+	it("does not repaint a failed run as running", () => {
+		const send = stubBridge();
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.fail(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		send.mockClear();
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, "run_1", 0.9);
+		expect(send).not.toHaveBeenCalled();
 	});
 
 	it("sends nothing for a run the indicator is not showing", () => {
 		const send = stubBridge();
-		runProgress.clear(RUN_PROGRESS_KEYS.loadRun);
-		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun);
+		runProgress.clear(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun, "run_1");
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * A service whose run has already been forgotten - `handleClose` nulls its
+	 * `activeRunId` before the terminal path finishes - names no run, and a call
+	 * that names no run holds no claim.
+	 */
+	it("sends nothing for a call that cannot name its run", () => {
+		const send = stubBridge();
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		send.mockClear();
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, null, 0.5);
+		runProgress.clear(RUN_PROGRESS_KEYS.loadRun, null);
 		expect(send).not.toHaveBeenCalled();
 	});
 });
@@ -99,32 +130,68 @@ describe("runProgress - one run", () => {
 describe("runProgress - a run that supersedes another", () => {
 	it("hands the indicator to the run the renderer is now watching", () => {
 		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, "run_1", 0.2);
+		runProgress.claim(RUN_PROGRESS_KEYS.collectionRun, "run_2");
 		expect(send).toHaveBeenLastCalledWith({ state: "running", value: null });
 	});
 
 	/*
-	 * Mutation check: drop the `shownFor` guard in `clear` and the superseded
+	 * Mutation check: drop the `isShown` guard in `clear` and the superseded
 	 * load run's stop - the dashboard calls `stopMonitoring` for a run it finds
 	 * already finished - wipes the bar of the collection run that is streaming.
 	 */
 	it("ignores a superseded run's stop", () => {
 		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.claim(RUN_PROGRESS_KEYS.collectionRun, "run_2");
 		send.mockClear();
-		runProgress.clear(RUN_PROGRESS_KEYS.loadRun);
+		runProgress.clear(RUN_PROGRESS_KEYS.loadRun, "run_1");
 		expect(send).not.toHaveBeenCalled();
 	});
 
 	/* Same guard, the other terminal path. */
 	it("ignores a superseded run's failure", () => {
 		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.claim(RUN_PROGRESS_KEYS.collectionRun, "run_2");
 		send.mockClear();
-		runProgress.fail(RUN_PROGRESS_KEYS.loadRun);
+		runProgress.fail(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * And the third path, which is what #1405 is about: a superseded run can
+	 * still *report*. Its steps or ticks are batched on a trailing timer, so one
+	 * commit fires after the run that took over has painted its own bar.
+	 *
+	 * Mutation check: drop the guard in `report` and the last line repaints the
+	 * collection run's fresh bar with a fraction from a run nobody is watching,
+	 * where it stays until the live run's next flush takes it back.
+	 */
+	it("ignores a superseded run's last buffered report", () => {
+		const send = stubBridge();
+		runProgress.claim(RUN_PROGRESS_KEYS.collectionRun, "run_1");
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_2");
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, "run_2", 0.1);
+		send.mockClear();
+		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, "run_1", 0.8);
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * And the case a key-shaped claim could not see at all: two runs of the same
+	 * kind. Nothing in the UI prevents starting a second load test, and to a
+	 * guard that compares `load-run` with `load-run` the superseded run is still
+	 * the one being shown.
+	 */
+	it("ignores a run superseded by another of its own kind", () => {
+		const send = stubBridge();
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_2");
+		send.mockClear();
+		runProgress.report(RUN_PROGRESS_KEYS.loadRun, "run_1", 0.4);
+		runProgress.clear(RUN_PROGRESS_KEYS.loadRun, "run_1");
 		expect(send).not.toHaveBeenCalled();
 	});
 
@@ -135,9 +202,9 @@ describe("runProgress - a run that supersedes another", () => {
 	 */
 	it("leaves no bar behind when the run that took over ends", () => {
 		const send = stubBridge();
-		runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.2);
-		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, null);
-		runProgress.clear(RUN_PROGRESS_KEYS.collectionRun);
+		runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1");
+		runProgress.claim(RUN_PROGRESS_KEYS.collectionRun, "run_2");
+		runProgress.clear(RUN_PROGRESS_KEYS.collectionRun, "run_2");
 		expect(send).toHaveBeenLastCalledWith({ state: "idle" });
 	});
 });
@@ -145,7 +212,8 @@ describe("runProgress - a run that supersedes another", () => {
 describe("runProgress - outside Electron", () => {
 	it("does nothing without the bridge", () => {
 		vi.stubGlobal("window", {});
-		expect(() => runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.5)).not.toThrow();
+		expect(() => runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1")).not.toThrow();
+		expect(() => runProgress.report(RUN_PROGRESS_KEYS.loadRun, "run_1", 0.5)).not.toThrow();
 	});
 
 	it("logs a send that throws rather than raising it at the run", () => {
@@ -157,7 +225,7 @@ describe("runProgress - outside Electron", () => {
 				},
 			},
 		});
-		expect(() => runProgress.report(RUN_PROGRESS_KEYS.loadRun, 0.5)).not.toThrow();
+		expect(() => runProgress.claim(RUN_PROGRESS_KEYS.loadRun, "run_1")).not.toThrow();
 		expect(warn).toHaveBeenCalled();
 	});
 });
