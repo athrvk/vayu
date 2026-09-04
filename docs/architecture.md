@@ -216,7 +216,8 @@ says what the fraction is - it is the only side that holds a run's denominator -
 and main says what each platform makes of it: a fill on the Windows taskbar
 button, a bar on the macOS Dock icon, and nothing on Linux, where Electron 44
 removed Unity launcher support. A run with no denominator (an open-ended load
-test, or a collection run, whose plan length only the engine resolves) shows
+test, or a collection run whose plan frame - the size the engine publishes on
+its stream as the run opens, issue #1398 - never reached the client) shows
 indeterminate on Windows and nothing on macOS; a failed run flashes the Windows
 error state; the bar clears on every terminal path, and main clears it itself
 when the renderer that asked for it is destroyed or reloads. One indicator is

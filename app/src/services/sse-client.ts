@@ -13,6 +13,7 @@ import type {
 	LoadTestMetrics,
 	MonitorSample,
 	ResponseValidation,
+	ScenarioRunPlanEvent,
 	ScenarioStepEvent,
 	StepOutcome,
 	StepTestTally,
@@ -131,6 +132,23 @@ function parseTestTally(raw: unknown): { tests: StepTestTally } | null {
 }
 
 /**
+ * Narrow a raw `plan` frame to the run's size, or reject it (issue #1398).
+ *
+ * Same rule as {@link parseStepEvent}, and it matters more here: this frame is
+ * a denominator. A field defaulted to `0` would make every fraction computed
+ * from it either a division by zero or a bar that is full from the first step,
+ * where rejecting the frame leaves the run indeterminate - which is what a
+ * client that was told nothing should show.
+ */
+export function parsePlanEvent(raw: unknown): ScenarioRunPlanEvent | null {
+	if (typeof raw !== "object" || raw === null) return null;
+	const { stepsPerIteration, iterations, stepsExpected } = raw as Record<string, unknown>;
+	if (typeof stepsPerIteration !== "number" || typeof iterations !== "number") return null;
+	if (typeof stepsExpected !== "number") return null;
+	return { stepsPerIteration, iterations, stepsExpected };
+}
+
+/**
  * Narrow a raw `monitor` frame to one scrape, or reject it.
  *
  * Same rule as {@link parseStepEvent}: a frame this client cannot read is
@@ -157,6 +175,8 @@ export type SSEErrorHandler = (error: Error) => void;
 export type SSECloseHandler = () => void;
 /** One step execution of a scenario run, from the `step` event. */
 export type SSEStepHandler = (step: ScenarioStepEvent) => void;
+/** The size a collection run resolved to, from its opening `plan` event. */
+export type SSEPlanHandler = (plan: ScenarioRunPlanEvent) => void;
 /** One scrape of the run's monitored endpoint, from the `monitor` event. */
 export type SSEMonitorHandler = (sample: MonitorSample) => void;
 
@@ -197,10 +217,10 @@ export class SSEClient {
 	 * One client for both run types, because there is one stream: a load run
 	 * publishes `metrics` ticks and a scenario run publishes `step` events, on
 	 * the same ring with the same monotonic ids, and both end with `complete`.
-	 * `onStep` and `onMonitor` are optional so a caller says nothing about the
-	 * events it has no use for rather than passing handlers it will not read: a
-	 * load run emits no steps, and only a run configured with a `monitor` block
-	 * emits scrapes.
+	 * `onStep`, `onMonitor` and `onPlan` are optional so a caller says nothing
+	 * about the events it has no use for rather than passing handlers it will
+	 * not read: a load run emits no steps and no plan, and only a run
+	 * configured with a `monitor` block emits scrapes.
 	 */
 	connect(
 		runId: string,
@@ -208,7 +228,8 @@ export class SSEClient {
 		onError: SSEErrorHandler,
 		onClose: SSECloseHandler,
 		onStep?: SSEStepHandler,
-		onMonitor?: SSEMonitorHandler
+		onMonitor?: SSEMonitorHandler,
+		onPlan?: SSEPlanHandler
 	): void {
 		// Close existing connection
 		this.disconnect();
@@ -255,6 +276,20 @@ export class SSEClient {
 						if (step) onStep(step);
 					} catch (error) {
 						console.error("Failed to parse step:", error);
+					}
+				});
+			}
+
+			// The size a collection run resolved to, once, before its first
+			// step (issue #1398). Registered on the same terms as the steps
+			// it is the denominator for: a load run publishes no such frame.
+			if (onPlan) {
+				this.eventSource.addEventListener("plan", (event) => {
+					try {
+						const plan = parsePlanEvent(JSON.parse(event.data));
+						if (plan) onPlan(plan);
+					} catch (error) {
+						console.error("Failed to parse plan:", error);
 					}
 				});
 			}
