@@ -67,8 +67,10 @@ import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
 import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
 import { describeDataSchemaDiff } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
+import { useRequestDefaultsQuery } from "@/queries";
 import { ProfilePicker } from "./ProfilePicker";
 import { summarise } from "./summary";
+import { describeDefaultHeaderDifference } from "./defaultHeaders";
 import {
 	BUDGET_FIELDS,
 	type BudgetDraft,
@@ -412,6 +414,18 @@ export default function LoadTestConfigDialog({
 		? describeDataSchemaDiff(contract?.columns ?? [], dataFile.parsed.columns)
 		: [];
 
+	/*
+	 * The Headers tab renders the design answer, and it is the tab a user reads
+	 * right before opening this dialog (issue #1338). `negotiateCompression`
+	 * and `loadNegotiateCompression` are two config keys, so the two scopes can
+	 * disagree on `Accept-Encoding` - reading both here is what lets the notice
+	 * below say so, rather than the dialog silently starting a run that sends
+	 * something different from what the tab just showed.
+	 */
+	const { data: designDefaults } = useRequestDefaultsQuery("design");
+	const { data: loadDefaults } = useRequestDefaultsQuery("load");
+	const defaultHeaderDifference = describeDefaultHeaderDifference(designDefaults, loadDefaults);
+
 	const rampDurationError = validateRampDuration(mode, duration, rampDuration);
 	// Checked before the two range rules, which both compare the start against
 	// the target: a start below the floor is wrong on its own terms, and saying
@@ -522,6 +536,18 @@ export default function LoadTestConfigDialog({
 			});
 		}
 
+		if (defaultHeaderDifference) {
+			list.push({
+				key: "default-headers",
+				severity: "info",
+				node: (
+					<Callout severity="info" title="This load run's default headers differ">
+						{defaultHeaderDifference}
+					</Callout>
+				),
+			});
+		}
+
 		return list.sort(
 			(a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
 		);
@@ -533,6 +559,7 @@ export default function LoadTestConfigDialog({
 		budgetsError,
 		monitoringError,
 		hasPreRequestScript,
+		defaultHeaderDifference,
 	]);
 
 	const handleStart = () => {

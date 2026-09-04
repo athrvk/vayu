@@ -132,7 +132,7 @@ for the full contract.
 apiService.getHealth(): Promise<EngineHealth>
 apiService.getConfig(): Promise<EngineConfig>
 apiService.updateConfig(config): Promise<EngineConfig>
-apiService.getRequestDefaults(): Promise<RequestDefaults>
+apiService.getRequestDefaults(scope?: RequestDefaultsScope): Promise<RequestDefaults>
 ```
 
 `getRequestDefaults` reads what the engine will add to a request that names none
@@ -145,6 +145,13 @@ config entries would be a second definition of the same rule. The Headers tab
 renders it as the read-only "Added by Vayu" group, and a row ticked off there
 rides the send as `disabledDefaultHeaders`, which `POST /execute` and
 `POST /runs` both take. None of it is persisted on the request.
+
+`scope` (issue #1338) selects which send is being asked about: `"design"`
+(the default, and the Headers tab's own answer) or `"load"`. The two can
+disagree - `negotiateCompression` governs a design send's `Accept-Encoding`
+and `loadNegotiateCompression` governs a load run's - so the load-test dialog
+reads both and names the difference rather than starting a run whose headers
+silently do not match what the tab just showed.
 
 #### Cookie jar
 
@@ -903,7 +910,8 @@ export const API_ENDPOINTS = {
   // Health & Config
   HEALTH: "/health",
   CONFIG: "/config",
-  // What a send adds on its own, resolved from config by the engine
+  // What a send adds on its own, resolved from config by the engine.
+  // `?scope=design|load` selects which send - see getRequestDefaults above.
   REQUEST_DEFAULTS: "/request-defaults",
   
   // Collections

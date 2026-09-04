@@ -27,6 +27,8 @@ export const API_ENDPOINTS = {
 	// User-Agent, a negotiated Accept-Encoding, an optional correlation id.
 	// Config-derived but not config: the engine resolves the set, so a client
 	// displays it rather than working it out from the entries.
+	// `?scope=design|load` selects which send is being described (issue #1338):
+	// a load run resolves Accept-Encoding from its own compression setting.
 	REQUEST_DEFAULTS: `/request-defaults`,
 
 	// Collections. POST the collection path to create; PUT the by-id path to

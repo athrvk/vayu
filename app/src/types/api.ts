@@ -1253,6 +1253,17 @@ export interface UpdateConfigRequest {
 }
 
 /**
+ * Which send `GET /request-defaults` is answering for (issue #1338).
+ *
+ * The two can disagree: `negotiateCompression` governs a design send's
+ * `Accept-Encoding` and `loadNegotiateCompression` governs a load run's, so the
+ * same config can produce two different declared sets. `"design"` is the
+ * Headers tab's answer (what sending this request right now would add);
+ * `"load"` is what a load run of it would add instead.
+ */
+export type RequestDefaultsScope = "design" | "load";
+
+/**
  * One header the engine adds to a request that does not name it (issue #1229).
  *
  * Declared by the engine over `GET /request-defaults` rather than re-derived
