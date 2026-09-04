@@ -5638,6 +5638,34 @@ describe("default-header opt-outs reach the engine", () => {
 		expect(payload).not.toHaveProperty("disabledDefaultHeaders");
 	});
 
+	test("a streaming run_request carries them too", async () => {
+		// The streaming branch answers `202 {runId, eventsUrl}` and consumes the
+		// events itself, so it is the one send whose payload a reader has to
+		// follow into a second function - and a refusal dropped there would be a
+		// stream opened with a User-Agent the agent declined.
+		const client = fakeClient({
+			executeRequest: vi
+				.fn()
+				.mockResolvedValue({ runId: "run_s", eventsUrl: "/runs/run_s/events" }),
+			consumeStreamEvents: vi
+				.fn()
+				.mockResolvedValue({ events: [], completed: true, capReached: false }),
+		});
+		const res = await dispatchTool(
+			"run_request",
+			parseArgs("run_request", {
+				url: "https://api.example.com/events",
+				stream: true,
+				disabledDefaultHeaders: ["User-Agent"],
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).toMatchObject({ stream: true, disabledDefaultHeaders: ["User-Agent"] });
+	});
+
 	test("start_load_run forwards the refused names to /runs", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
