@@ -345,7 +345,10 @@ Windows 11 Home 24H2 (build 26200), 16 GB, the target sharing those cores.
 Release builds of engine **0.24.0** (`1d20f4f4`, the commit before #1295
 merged: "before") and **0.25.0** (`711f359f`: "after"), each started fresh per
 run with `--verbose 1` and a scratch data dir, so nothing carries over between
-arms.
+arms. `workers` was left at its default, which auto-detects to
+`hardware_concurrency()` - 8 here - on both arms; pacing is a single producer
+thread and at these rates the workers are mostly idle, so the count is a
+constant across the comparison rather than a lever in it.
 
 **Pacing.** `constant_rps` runs of 20 s at 200 and 400 RPS (the `sleep_for`
 leg, below the ~500 RPS point where a tick's remainder is spun instead) and at
