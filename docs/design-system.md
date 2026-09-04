@@ -1401,17 +1401,20 @@ unfocusable, so those sites carry a one-line disable naming the hook - the same
 for a row whose Enter and Space arrive through the tree rather than through its
 own handler.
 
-**A radio group whose options are already buttons needs no disable.** The
-variable popover's "create in" row (issue #1380) is the same pattern with
-focusable children: the arrow handler sits on each `role="radio"` button, where
-the keydown starts, rather than on the container it would bubble to, so the
-group is a plain `role="radiogroup"` with no handler and nothing for
-`interactive-supports-focus` to report. Reach for the container handler only
-where the options are not focusable in their own right, and take the disable
-with it. Selection there is a modifier, not a destination: the arrows move
-selection and focus together between the chips, and a mouse click on one returns
-focus to the value field it qualifies, because a chip that keeps focus after a
-click leaves the next keystroke going nowhere.
+**A radio group built from `ToggleGroup` needs no disable at all.** The variable
+popover's "create in" row was the hand-rolled kind - a `role="radiogroup"` div
+whose arrow handler sat on each `role="radio"` button, where the keydown starts,
+rather than on the container it would bubble to, which is what kept
+`interactive-supports-focus` quiet (issue #1380). It is the primitive now (issue
+#1391), so Radix owns the roles, the tab stop and the arrows, and the rule has
+nothing to inspect: `jsx-a11y` reads JSX elements, and a component is not the
+bare `<div role="radiogroup">` it reports on. Reach for a hand-rolled group only
+where `ToggleGroup` does not fit, put the handler on the options while they are
+focusable in their own right, and take the disable with the container handler
+when they are not. Selection is a modifier there, not a destination: it follows
+focus, so the arrows move both together between the segments, and a mouse click
+on one returns focus to the value field it qualifies, because a segment that
+keeps focus after a click leaves the next keystroke going nowhere.
 
 **The lint's allowlist.** Three rules are configured rather than obeyed as
 written, in `app/eslint.config.mjs`, each because the pattern it flags is the
