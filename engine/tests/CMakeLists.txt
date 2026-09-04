@@ -48,6 +48,8 @@ add_executable(vayu_tests
     diagnostics_route_test.cpp
     import_apply_route_test.cpp
     config_route_test.cpp
+    compression_wire_test.cpp
+    default_headers_test.cpp
     sse_parser_test.cpp
     sse_frame_counter_test.cpp
     sse_load_stream_test.cpp
@@ -311,6 +313,7 @@ set(vayu_scratch_database_suites
     ConfigRouteTest
     CustomCaVerificationTest
     DatabaseConcurrencyTest
+    DefaultHeaderConfigTest
     DatabaseTest
     DbRecoveryTest
     DeleteRunTest

@@ -35,6 +35,15 @@ own **`concurrency`**, and the optimum on this target is **64**.
   the sweeps, 60 s for headline figures, with cooldowns between runs.
 - All runs are **error-free** (0 non-2xx, 0 failures, 0 dropped) - across roughly
   23 M requests through Vayu in the 2026-07-29 session alone.
+- **Compression is part of the measurement, and a setting** (issue #1229). Since
+  that change a load run negotiates a compressed response by default
+  (`loadNegotiateCompression`), so a server that compresses is measured as its
+  clients experience it: fewer bytes on the wire, a decode per response, and the
+  server's own compression cost included. The figures above predate it and were
+  taken against an 11-byte endpoint no server would compress, so they are
+  unaffected; a comparison against a compressing endpoint has to state which way
+  the setting was. Turn it off to measure an uncompressed ceiling. Every size the
+  run reports is the bytes Vayu holds, which is the decoded response either way.
 
 ### Hardware
 

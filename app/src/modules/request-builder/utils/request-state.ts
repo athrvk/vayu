@@ -21,7 +21,6 @@ import {
 	type HttpVersion,
 } from "@/constants/request";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
-import { createDefaultSystemHeaders } from "./system-headers";
 
 /**
  * Create a default RequestState with empty values.
@@ -38,7 +37,6 @@ import { createDefaultSystemHeaders } from "./system-headers";
 export const createDefaultRequestState = (
 	httpVersion: HttpVersion = DEFAULT_HTTP_VERSION
 ): RequestState => {
-	const systemHeaders = createDefaultSystemHeaders();
 	return {
 		id: null,
 		collectionId: null,
@@ -46,7 +44,11 @@ export const createDefaultRequestState = (
 		method: "GET",
 		url: "",
 		params: [createEmptyKeyValue()],
-		headers: [...systemHeaders, createEmptyKeyValue()],
+		// No Vayu row is seeded here any more (issue #1229): the engine adds its
+		// own headers at send time, so a new request starts with nothing but the
+		// blank row to type into.
+		headers: [createEmptyKeyValue()],
+		disabledDefaultHeaders: [],
 		bodyMode: "none",
 		body: "",
 		formData: [createEmptyKeyValue()],

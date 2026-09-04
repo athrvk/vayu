@@ -17,6 +17,7 @@
 #include <string_view>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/form_body.hpp"
 
 namespace vayu::json {
@@ -859,6 +860,40 @@ std::optional<Error> read_request_body (const Json& json, Request& request) {
     return std::nullopt;
 }
 
+/**
+ * The default headers this send refuses (issue #1229), as `disabledDefaultHeaders`.
+ *
+ * Refused rather than dropped when the shape is wrong: a client sending
+ * `"User-Agent"` instead of `["User-Agent"]`, or a name that cannot be a header
+ * name, is asking for a request it will not get, and the load path has no
+ * later gate that would notice. A name the engine adds nothing under is
+ * accepted and does nothing, because it says the same thing either way -
+ * "do not add this" - and config can switch a default off between the moment a
+ * client read the declared set and the moment it sends.
+ */
+std::optional<Error> read_default_header_opt_outs (const Json& json, Request& request) {
+    if (!json.contains ("disabledDefaultHeaders")) {
+        return std::nullopt;
+    }
+    const auto& names = json["disabledDefaultHeaders"];
+    if (!names.is_array ()) {
+        return Error{ ErrorCode::InternalError,
+            "'disabledDefaultHeaders' must be an array of header names" };
+    }
+    for (const auto& name : names) {
+        if (!name.is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                "'disabledDefaultHeaders' must hold header names as strings" };
+        }
+        const auto text = name.get<std::string> ();
+        if (auto rejection = vayu::http::unusable_header_name (text)) {
+            return Error{ ErrorCode::InternalError, "'disabledDefaultHeaders': " + *rejection };
+        }
+        request.suppressed_default_headers.insert (text);
+    }
+    return std::nullopt;
+}
+
 /** The per-request options, each optional and each with a documented default. */
 void read_request_options (const Json& json, Request& request) {
     // Options
@@ -934,6 +969,9 @@ Result<Request> deserialize_request (const Json& json) {
         }
 
         if (auto refusal = read_request_body (json, request)) {
+            return *refusal;
+        }
+        if (auto refusal = read_default_header_opt_outs (json, request)) {
             return *refusal;
         }
         read_request_options (json, request);

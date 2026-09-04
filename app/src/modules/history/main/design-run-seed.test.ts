@@ -198,6 +198,65 @@ describe("seedFromRun", () => {
 
 			expect(request.auth).toEqual({ mode: "none" });
 		});
+
+		it("drops the rows a pre-#1229 client put on that wire, and keeps the user's", () => {
+			// A run row is the one place those survive: the engine's startup
+			// repair rewrites stored requests and never traces. Seeding them
+			// here would replay a years-old correlation id as a user header.
+			const legacyTrace = run({
+				result: {
+					timestamp: 1_750_000_000_000,
+					statusCode: 200,
+					statusText: "OK",
+					latencyMs: 12,
+					trace: {
+						request: {
+							method: "POST",
+							url: "https://api.example.test/users?page=2",
+							headers: {
+								"X-Plain": "visible",
+								"X-Vayu-Version": "0.1.1",
+								"X-Request-ID": "6b2b9b3e-6d3a-4d4a-9d6e-2a9f0a1b2c3d",
+								"User-Agent": "Vayu/0.1.1",
+							},
+						},
+						response: { headers: {}, body: "{}" },
+					},
+				},
+			} as unknown as Partial<Run>);
+
+			const keys = seedFromRun(legacyTrace, null).request.headers?.map((h) => h.key) ?? [];
+
+			expect(keys).toContain("X-Plain");
+			expect(keys).not.toContain("X-Vayu-Version");
+			expect(keys).not.toContain("X-Request-ID");
+			expect(keys).not.toContain("User-Agent");
+		});
+
+		it("keeps a User-Agent the run really sent", () => {
+			const browser = run({
+				result: {
+					timestamp: 1_750_000_000_000,
+					statusCode: 200,
+					statusText: "OK",
+					latencyMs: 12,
+					trace: {
+						request: {
+							method: "POST",
+							url: "https://api.example.test/users?page=2",
+							headers: { "User-Agent": "Mozilla/5.0 Firefox" },
+						},
+						response: { headers: {}, body: "{}" },
+					},
+				},
+			} as unknown as Partial<Run>);
+
+			const agent = seedFromRun(browser, null).request.headers?.find(
+				(h) => h.key === "User-Agent"
+			);
+
+			expect(agent?.value).toBe("Mozilla/5.0 Firefox");
+		});
 	});
 
 	describe("scripts", () => {

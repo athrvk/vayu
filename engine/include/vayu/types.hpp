@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <variant>
 #include <vector>
@@ -311,6 +312,24 @@ struct Request {
      * does not receive its fixes. Read only when `track_cookies` is set.
      */
     std::vector<std::string> cookie_lines;
+
+    /**
+     * @brief Default headers this send refuses, by name (issue #1229).
+     *
+     * The engine adds a small, declared set to every request nobody wrote them
+     * into - `User-Agent`, `Accept-Encoding`, an optional correlation id; see
+     * `http/default_headers.hpp`. A testing tool has to be able to send exactly
+     * the request that was written, so each of them can be refused per send,
+     * which is what a client's auto-header toggle carries here.
+     *
+     * Case-insensitive, like every header name. A name that is not a header
+     * name at all is refused where the payload is read, because a malformed
+     * opt-out is a request the caller will not get; a well-formed name the
+     * engine adds nothing under is accepted and does nothing, because config
+     * can switch a default off between the moment a client read the declared
+     * set and the moment it sends.
+     */
+    std::set<std::string, CaseInsensitiveLess> suppressed_default_headers;
 
     /**
      * @brief Consume this transfer as a bounded `text/event-stream` (#576).

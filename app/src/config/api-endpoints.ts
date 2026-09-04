@@ -23,6 +23,11 @@ export const API_ENDPOINTS = {
 	// Health & Config
 	HEALTH: `/health`,
 	CONFIG: `/config`,
+	// What the engine adds to a request that names none of it (issue #1229):
+	// User-Agent, a negotiated Accept-Encoding, an optional correlation id.
+	// Config-derived but not config: the engine resolves the set, so a client
+	// displays it rather than working it out from the entries.
+	REQUEST_DEFAULTS: `/request-defaults`,
 
 	// Collections. POST the collection path to create; PUT the by-id path to
 	// update. The engine split the verbs in #95 - POST no longer upserts, so an

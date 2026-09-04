@@ -480,6 +480,10 @@ struct StepContext {
     const std::shared_ptr<const ScenarioExecution>& execution;
     const std::optional<ResponseSchemaIndex>& schema_index;
     const vayu::http::TransportPolicy& transport;
+    /// What the engine adds to every step's send (issue #1229). Run-scoped for
+    /// the reason `transport` is: one collection run must not send two
+    /// different header sets because Settings changed mid-sequence.
+    const vayu::http::DefaultHeaderPolicy& default_headers;
     const std::string& cookie_scope;
     const std::vector<nlohmann::json>& data_rows;
     std::optional<size_t> data_row_index;
@@ -526,6 +530,7 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.vu                 = SOLE_VIRTUAL_USER;
     inputs.iteration_count    = ctx.iteration_count;
     inputs.transport          = ctx.transport;
+    inputs.default_headers    = ctx.default_headers;
     inputs.max_response_bytes = ctx.max_response_bytes;
     // The one caller that sets it: `pm.execution` throws
     // everywhere else, because nowhere else has a sequence to
@@ -888,6 +893,11 @@ RunManager& manager) {
     // Settings changed mid-sequence would make its results unreproducible
     // (issue #705, epic decision 3 of #704).
     const auto transport = vayu::http::resolve_transport_policy (db);
+    // The defaults every step's send adds, read once for the same reason
+    // (issue #1229). A collection run is a design-mode send per step, so it
+    // reads the design scope's compression setting rather than the load one's.
+    const auto default_headers = vayu::http::resolve_default_header_policy (
+    db, vayu::http::DefaultHeaderScope::Design);
 
     // The one parse of the document's schema index this run pays for, before
     // the first send rather than per step. `std::nullopt` - an unbound
@@ -976,8 +986,9 @@ RunManager& manager) {
             // it: a script may send it backwards, forwards or out early, so the
             // position is a variable and the loop is bounded by the budget
             // above rather than by the plan's length.
-            const StepContext step_ctx{ context, execution, schema_index, transport,
-                cookie_scope, data_rows, data_row_index, iteration, asked.iterations,
+            const StepContext step_ctx{ context, execution, schema_index,
+                transport, default_headers, cookie_scope, data_rows,
+                data_row_index, iteration, asked.iterations,
                 fail_on_schema_error, max_trace_body_bytes, max_response_bytes };
             run_iteration (script_engine, cookie_jar, cookie_scope, verbose, scopes, step_ctx,
             plan, step_index, max_steps_per_iteration, coverage, summary, store);

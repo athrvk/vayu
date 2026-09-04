@@ -744,6 +744,47 @@ numeric values stored in existing traces are unchanged.
 Cookies are unaffected by any of this: libcurl owns the wire cookies and
 matches them on the **origin** host, never the proxy hop.
 
+#### Default request headers
+
+Four `network_performance` entries decide what Vayu adds to a request nobody
+wrote it into (issue #1229). They are read at the top of a request or a run, so
+a change applies to the next send; a load run reads them once at run start, as
+it does the proxy policy.
+
+| Key | Default | Values | Effect |
+|-----|---------|--------|--------|
+| `negotiateCompression` | `true` | boolean | Ask for a compressed response on a Send, a collection or scenario run, and a script's own `pm.sendRequest`. The value advertised is what *this* libcurl can decode, read off `curl_version_info` - `gzip, deflate` plus `br` and `zstd` where the build has them - and libcurl decodes the response before the engine sees it. Off sends no `Accept-Encoding` at all. |
+| `loadNegotiateCompression` | `true` | boolean | The same decision for a load run, separate because compression is part of what a load test measures: off measures a server's uncompressed ceiling, on measures what its clients actually get. |
+| `correlationIdEnabled` | `false` | boolean | Send a header carrying a fresh identifier with every request, so one send - or one iteration of a load run - can be found in a server's log. Off by default: it is a header the target did not ask for. |
+| `correlationIdHeader` | `X-Vayu-Request-Id` | header name | Which name that identifier goes out under. Vendor-namespaced by default so it collides with nothing a gateway defines; set it to `X-Request-ID` or `X-Correlation-ID` for infrastructure that reads one of those. `POST /config` refuses a value that is not a header name (RFC 9110 token), because a broken name would otherwise put a broken line on every request afterwards. |
+
+Three rules hold for all of them, and for the `User-Agent` the engine has always
+added:
+
+- **A header the request carries wins.** Nothing here overwrites a name the
+  request already names, so a browser's `User-Agent`, a hand-typed correlation
+  id, or an `Accept-Encoding: identity` is sent exactly as written. A request
+  that names `Accept-Encoding` itself also gets no decoding: libcurl hands back
+  what arrives, which is what typing that header asks for.
+- **Any of them can be refused per send**, with `disabledDefaultHeaders` on
+  [POST /execute](#post-execute) or [POST /runs](#post-runs).
+- **None of them is stored.** They are applied at send time, so a saved request
+  cannot carry a stale one. A request saved before this change is stripped of
+  the rows an older app wrote into it, once, at startup: `X-Vayu-Version`
+  always, an `X-Request-ID` whose value is a bare UUID, and a `User-Agent`
+  whose value is a `Vayu/...`. A correlation id or a `User-Agent` someone typed
+  is left alone.
+
+The correlation id is generated **per transfer**, not per composition, so every
+iteration of a load run carries its own.
+
+**Every size the API reports is the bytes Vayu holds** - `bodySize`, a stored
+trace's `bodyBytes`, a load sample's `body_bytes`. With negotiation on those are
+the *decoded* bytes, because libcurl decodes before the engine counts; with it
+off they are the identity response, which is the same number. What crossed the
+network compressed is not measured, and `rawRequest` is where the negotiated
+`Accept-Encoding` line itself can be read back.
+
 #### TLS trust settings
 
 One more `network_performance` entry decides *who* the engine trusts, and it
@@ -834,6 +875,30 @@ In-progress (`running`/`pending`) runs are never pruned, and neither are runs
 pinned as baselines (see
 [PUT /runs/:runId/baseline](#put-runsrunidbaseline)); neither kind counts
 toward `maxRunsRetained`.
+
+### GET /request-defaults
+
+What the engine will add to a request that names none of it - the set a client
+renders beside the request's own headers instead of re-deriving it from the
+config entries above.
+
+```json
+{
+  "headers": [
+    { "name": "User-Agent", "value": "Vayu/0.25.0", "generated": false },
+    { "name": "Accept-Encoding", "value": "gzip, deflate", "configKey": "negotiateCompression", "generated": false },
+    { "name": "X-Vayu-Request-Id", "generated": true, "configKey": "correlationIdEnabled" }
+  ]
+}
+```
+
+A default that is switched off is **absent** rather than listed as disabled.
+`generated: true` means the value is made per send, so the row carries no
+`value` at all - an empty string would be a value a client would print.
+`configKey` names the setting that governs the row, and is absent for the
+`User-Agent`, which is always added. The answer describes a design-mode send;
+a load run reads `loadNegotiateCompression` instead, which is the one way the
+two can differ.
 
 ### POST /config
 
@@ -4012,9 +4077,21 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "stream": false,                     // Optional, default false - see below
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
   "maxStreamEvents": 100000,           // Optional, streaming only - see below
-  "data": { "id": "7" }                // Optional, one data row - see below
+  "data": { "id": "7" },               // Optional, one data row - see below
+  "disabledDefaultHeaders": []         // Optional, headers Vayu adds that this send refuses
 }
 ```
+
+**`disabledDefaultHeaders` refuses what the engine would add** (issue #1229).
+The engine adds a small declared set to every request that does not name it -
+see [Default request headers](#default-request-headers) - and a testing tool
+has to be able to send exactly the request that was written, including one with
+no `User-Agent` at all. Names are matched case-insensitively; the field is
+accepted on `POST /execute` and `POST /runs` alike. A value that is not an
+array of header names is a `400` naming the field, because a malformed opt-out
+would otherwise read as one that did nothing. A name matching no current
+default is accepted and does nothing: config can switch a default off between
+the moment a client read the declared set and the moment it sends.
 
 **`stream` consumes a `text/event-stream` response live** (issue #573) instead
 of buffering it. It changes the *execution model*, so it is declared rather than
@@ -4416,9 +4493,11 @@ and an h2 request rendered in HTTP/1 form - none of which appear in
 `requestHeaders`.
 
 **`requestHeaders` is the sent record**: the composed headers as the transfer
-issued them. It carries the two the engine derives at send time - the
-body-implied `Content-Type` and the default `User-Agent` - and drops a
-`form-data` `Content-Type`, which libcurl writes itself with the boundary. It
+issued them. It carries what the engine derives at send time - the body-implied
+`Content-Type`, and every [default header](#default-request-headers) this send
+adds (the `User-Agent`, the negotiated `Accept-Encoding`, an enabled
+correlation id) - and drops a `form-data` `Content-Type`, which libcurl writes
+itself with the boundary. It
 also drops **an enabled header whose value is empty or only whitespace**: a
 header line with nothing after the colon is libcurl's spelling for *remove this
 header*, so such a row never reaches the wire on any transport and is not

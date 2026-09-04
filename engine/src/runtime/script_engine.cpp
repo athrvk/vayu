@@ -161,6 +161,10 @@ struct ContextData {
     /// `ScriptContext::transport`, which owns the rationale.
     vayu::http::TransportPolicy transport;
 
+    /// What the engine adds to a `pm.sendRequest` - see
+    /// `ScriptContext::default_headers`, which owns the rationale.
+    vayu::http::DefaultHeaderPolicy default_headers;
+
     /// How much of a `pm.sendRequest` response body is read before the
     /// transfer is refused - see `ScriptContext::max_response_bytes`, which
     /// owns the rationale and the per-path choice.
@@ -7361,7 +7365,8 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     // takes (issue #705). A script that authenticates through sendRequest and
     // then lets the real request carry the session needs both to reach the
     // network the same way.
-    client_config.transport = data->transport;
+    client_config.transport       = data->transport;
+    client_config.default_headers = data->default_headers;
     // The bound the enclosing execution resolved for its own read (issue
     // #1188), so a script's fetch is not the one read with no byte bound left.
     // `truncate_over_limit` stays false: a script parses what it is handed, and
@@ -8679,6 +8684,7 @@ class ScriptEngine::Impl {
         ctx_data.cookie_scope       = ctx.cookie_scope;
         ctx_data.cookie_writes      = ctx.cookie_writes;
         ctx_data.transport          = ctx.transport;
+        ctx_data.default_headers    = ctx.default_headers;
         ctx_data.max_response_bytes = ctx.max_response_bytes;
         ctx_data.in_scenario        = ctx.in_scenario;
         JS_SetContextOpaque (js_ctx, &ctx_data);

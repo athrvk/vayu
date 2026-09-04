@@ -298,8 +298,9 @@ TEST_F (ResponseCaptureTest, BinaryBodyIsStoredAsADescriptor) {
     seed_run ("run_binary");
     MetricsCollector collector ("run_binary", capture_config ());
 
-    // Raw deflate bytes under an origin's own text/html - the realistic case,
-    // since the engine never sets CURLOPT_ACCEPT_ENCODING.
+    // Raw deflate bytes under an origin's own text/html: what still arrives
+    // when the request carried its own Accept-Encoding, which switches the
+    // engine's negotiation - and libcurl's decoding with it - off (#1229).
     auto response = make_response (
     200, std::string ("\x1f\x8b\x08\x00\xff\xfe\x00\x01", 8), "text/html");
     collector.record_error (vayu::ErrorCode::ConnectionFailed, "boom", "{}", &response);

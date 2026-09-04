@@ -45,10 +45,10 @@ import { resolveAuthSource } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
 import { toFlatHeaders } from "./utils/key-value";
-import { generateUUID } from "@/lib/id";
 import { scriptParts } from "./utils/script-parts";
 import {
 	buildExecBody,
+	disabledDefaults,
 	execIdentity,
 	responseFromExecuteResult,
 	scriptsMayWriteVariables,
@@ -188,7 +188,7 @@ export default function RequestBuilder() {
 	 *
 	 * Shared by the buffered and the streaming send (issue #574): the two differ
 	 * only in which endpoint answer they take, and everything up to that point -
-	 * the system headers, the body builder, the collection chain's scripts, the
+	 * the headers, the body builder, the collection chain's scripts, the
 	 * engine-side composition - has to be identical, or a stream would measure a
 	 * different request from the one Send sends.
 	 *
@@ -206,11 +206,10 @@ export default function RequestBuilder() {
 			ownerCollectionId: string,
 			dataRow?: Record<string, unknown>
 		) => {
-			// Flatten enabled headers for execution; inject per-request system headers
+			// The user's enabled headers, flattened for execution - and nothing
+			// else. What Vayu adds is the engine's since issue #1229, applied on
+			// every send path rather than by whichever client happened to send.
 			const headersRecord = toFlatHeaders(request.headers);
-			headersRecord["X-Request-ID"] = generateUUID();
-			const version = typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
-			headersRecord["X-Vayu-Version"] = version;
 
 			// Shared with the History run view's send path - see execute-mapping.ts.
 			// Raw: since #226 the engine resolves {{variables}} and inherit auth
@@ -307,6 +306,12 @@ export default function RequestBuilder() {
 						...composed,
 						requestId: fetchedRequest.id,
 						stream: false,
+						// The defaults this send refuses (issue #1229). Beside the
+						// composed payload rather than through composition: what
+						// the engine adds is decided at send time from config, so
+						// the opt-out belongs to the send, not to the composed
+						// request. Omitted entirely when nothing is switched off.
+						...disabledDefaults(request),
 						// A Send-with-row's row, or nothing at all (issue #601).
 						// It rides *beside* the composed payload rather than
 						// through composition: `{{data.*}}` survives compose by
@@ -418,6 +423,9 @@ export default function RequestBuilder() {
 					...composed,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
+					// Same opt-out the buffered send carries - a stream must not
+					// go out with a header set the buffered send would not.
+					...disabledDefaults(request),
 					// A stream binds a row exactly as a buffered send does - the
 					// engine reads it before the transfer starts, so the URL and
 					// headers it opens with are the bound ones (issue #601).
@@ -507,6 +515,11 @@ export default function RequestBuilder() {
 				method: request.method as HttpMethod,
 				url: request.url,
 				params: toKeyValueEntries(request.params),
+				// Only the user's rows: nothing in editor state is Vayu's own any
+				// more (issue #1229), so this needs no filter to stay clean.
+				// `disabledDefaultHeaders` is deliberately absent - none of the
+				// opt-outs is persisted; they belong to a send, and the defaults
+				// they refuse are re-resolved from engine config on every one.
 				headers: toKeyValueEntries(request.headers),
 				body: bodyPayload,
 				bodyType: bodyPayload.mode,
@@ -679,6 +692,10 @@ export default function RequestBuilder() {
 					// was picked: a present-but-empty array is refused engine-side,
 					// so "no data set" has to be the absent key rather than `[]`.
 					data: config.data,
+					// The engine defaults this run refuses (issue #1229). A load
+					// run has to send the header set Send sends, or it measures a
+					// different request from the one the user tried.
+					...disabledDefaults(pendingLoadTestRequest),
 				};
 
 				const result = await apiService.startLoadTest(apiRequest);

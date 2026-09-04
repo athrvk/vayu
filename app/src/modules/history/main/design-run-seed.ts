@@ -24,6 +24,7 @@ import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
+import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import {
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_HTTP_VERSION,
@@ -85,13 +86,25 @@ export interface DesignRunSeed {
 	requestBodyTruncated?: boolean;
 }
 
+/**
+ * A run's recorded headers as editor rows, minus the ones a pre-#1229 client
+ * put on the wire itself.
+ *
+ * A run row is the one place those survive the engine's startup repair, which
+ * rewrites stored *requests* and never traces - so without this a replay of an
+ * old run would seed the copy with that run's frozen `X-Request-ID` and the
+ * version string of the day it ran, and send both again as ordinary user
+ * headers. Same rule as the request loader's, from the same definition.
+ */
 function toHeaderItems(headers: Record<string, string> | undefined) {
 	return toKeyValueItems(
-		Object.entries(headers ?? {}).map(([key, value]) => ({
-			key,
-			value,
-			enabled: true,
-		}))
+		Object.entries(headers ?? {})
+			.filter(([key, value]) => !isLegacyManagedHeader(key, value))
+			.map(([key, value]) => ({
+				key,
+				value,
+				enabled: true,
+			}))
 	);
 }
 

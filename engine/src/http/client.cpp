@@ -489,11 +489,14 @@ Result<Response> Client::send (const Request& request) {
 
     // Set headers, and record the same set as what was sent.
     struct curl_slist* headers_list = detail::build_request_header_list (
-    request, impl_->config.user_agent, &response.request_headers);
+    request, impl_->config.default_headers, &response.request_headers);
 
     if (headers_list) {
         set_opt<CURLOPT_HTTPHEADER> (curl, headers_list);
     }
+
+    // The one default that rides an option rather than a header line.
+    detail::apply_default_header_options (curl, request, impl_->config.default_headers);
 
     // rawRequest is read off the wire, so it can only be built after the
     // transfer completes - see below, just before the error-path early return.

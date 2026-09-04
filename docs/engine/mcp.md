@@ -888,14 +888,19 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   body-implied `Content-Type` (a `graphql` body on `POST`, or a `jsonrpc` body,
   sends `application/json`; a `graphql` body on `GET` has no body, so the engine
   adds no Content-Type for it at all - an `xml` one `application/xml`, an
-  `x-www-form-urlencoded` one its own type), a
-  default `User-Agent`, and
-  the `Cookie` line the jar matched for the environment. So the request an agent
+  `x-www-form-urlencoded` one its own type), the
+  [default headers](api-reference.md#default-request-headers) a send adds - a
+  default `User-Agent`, a negotiated `Accept-Encoding`, and a correlation id
+  where one is switched on - and
+  the `Cookie` line the jar matched for the environment. A header the call
+  wrote itself always wins over the default of that name, and
+  `disabledDefaultHeaders` on the payload refuses one outright. So the request an agent
   composed is not the request that was sent, and asserting on the composed one
   is how a correct request gets reported as wrong. `requestHeaders` in the
-  result is the sent record - composed plus those first two, minus a
-  `form-data` `Content-Type` libcurl writes itself and minus any header whose
-  value is empty, which libcurl reads as a removal rather than sending - and
+  result is the sent record - composed plus everything but the `Cookie` line,
+  minus a `form-data` `Content-Type` libcurl writes itself and minus any header
+  whose value is empty, which libcurl reads as a removal rather than sending -
+  and
   `rawRequest` is the
   full wire frame including the `Cookie` line and libcurl's own `Accept` /
   `Content-Length`. Both are passed through verbatim; read them rather than the

@@ -685,6 +685,14 @@ export default function RequestBuilderProvider({
 		await forceSave();
 	}, [forceSave]);
 
+	// The one field that is state without being data (issue #1229): which engine
+	// defaults this send refuses. It is never written to the request, so it must
+	// not mark the tab dirty - `setRequest` would, and autosave would then PUT a
+	// request whose saved fields nobody touched.
+	const setDisabledDefaultHeaders = useCallback((names: string[]) => {
+		setRequestState((prev) => ({ ...prev, disabledDefaultHeaders: names }));
+	}, []);
+
 	// Update single field
 	const updateField = useCallback(
 		<K extends keyof RequestState>(field: K, value: RequestState[K]) => {
@@ -1017,6 +1025,7 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			setDisabledDefaultHeaders,
 			restoreStoredName,
 			getBodyDrafts,
 			setBodyDrafts,
@@ -1063,6 +1072,7 @@ export default function RequestBuilderProvider({
 			request,
 			setRequest,
 			updateField,
+			setDisabledDefaultHeaders,
 			restoreStoredName,
 			getBodyDrafts,
 			setBodyDrafts,

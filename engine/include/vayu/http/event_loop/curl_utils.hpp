@@ -15,6 +15,7 @@
 
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
@@ -194,15 +195,22 @@ Response error_response (const Error& error);
  *        puts on the wire.
  *
  * The one place a driver's outbound header set is decided: the request's own
- * headers minus the suppressed and the value-less, plus the two the engine
- * derives (the body-implied Content-Type and a default User-Agent when the
- * request names none). All three drivers - the single-request client, the load
- * event loop and the SSE stream consumer - call this, so none of them can
- * disagree about what goes out.
+ * headers minus the suppressed and the value-less, plus what the engine derives
+ * - the body-implied Content-Type, and the declared defaults @p policy carries
+ * for a name the request does not (see `http/default_headers.hpp`). All three
+ * drivers - the single-request client, the load event loop and the SSE stream
+ * consumer - call this, so none of them can disagree about what goes out.
  *
  * It has no error channel, deliberately: a header it cannot append it drops.
  * Text that must be *refused* rather than dropped is caught one step earlier,
  * by `validate_transferable`, which every one of those drivers already calls.
+ *
+ * `Accept-Encoding` is the one default recorded without being appended: it
+ * reaches the wire through `CURLOPT_ACCEPT_ENCODING`, which is what makes
+ * libcurl decode the response it asks for, and appending the line here as well
+ * would send it twice. `negotiates_compression` is the single predicate both
+ * this function and the driver read, so the record cannot claim an encoding the
+ * transfer did not ask for.
  *
  * @param sent When non-null, cleared and filled with exactly the headers
  *        appended to the returned list. That is `Response::request_headers`,
@@ -218,8 +226,20 @@ Response error_response (const Error& error);
  *         when the request sends no headers at all.
  */
 [[nodiscard]] curl_slist* build_request_header_list (const Request& request,
-const std::string& user_agent,
+const DefaultHeaderPolicy& policy,
 Headers* sent);
+
+/**
+ * @brief Apply the transfer options a default header rides on rather than a
+ *        header line - today, compression negotiation.
+ *
+ * Always sets `CURLOPT_ACCEPT_ENCODING`, clearing it when this transfer does
+ * not negotiate: the load driver's handles come from a pool, so an option left
+ * on from the transfer before would ask for an encoding this one refused.
+ */
+void apply_default_header_options (CURL* curl,
+const Request& request,
+const DefaultHeaderPolicy& policy);
 
 /**
  * @brief Record one "Key: Value" response header line into `headers`.

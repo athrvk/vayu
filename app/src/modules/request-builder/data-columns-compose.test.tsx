@@ -113,6 +113,7 @@ const REQUEST: RequestState = {
 	url: "https://api.test/u/{{username}}",
 	params: [],
 	headers: [],
+	disabledDefaultHeaders: [],
 	bodyMode: "none",
 	body: "",
 	formData: [],

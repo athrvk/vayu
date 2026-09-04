@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/utils/logger.hpp"
@@ -249,6 +250,14 @@ const std::string& value) {
  * clearing it is how `system` goes direct.
  */
 std::string key_rejection (const std::string& key, const std::string& value) {
+    // `correlationIdHeader` is a header *name*, and a name that is not one
+    // would put a broken line on every request afterwards - the same shape of
+    // invisible failure the proxy URL is refused for (issue #1229).
+    if (key == std::string (vayu::http::CORRELATION_ID_HEADER_KEY)) {
+        if (const auto rejection = vayu::http::unusable_header_name (value)) {
+            return "'correlationIdHeader' is not usable: " + *rejection;
+        }
+    }
     if (key == "customCaCertificates" && !value.empty ()) {
         if (const auto rejection = vayu::http::ca_pem_rejection (value)) {
             return "'customCaCertificates' is not a usable PEM bundle: " + *rejection;
@@ -390,7 +399,60 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
     return { 200, response };
 }
 
+/**
+ * @brief What the engine will add to a request that names none of it.
+ *
+ * The body of `GET /request-defaults`, split out for the reason
+ * `apply_config_update` is: it is the whole of the route, and a test that has a
+ * `Database` should not need a live server to read it.
+ *
+ * A client renders these as the auto rows beside a request's own headers, and
+ * sends the names it wants back off as `disabledDefaultHeaders`. It is
+ * deliberately the engine that declares them: a renderer re-deriving the set
+ * from the config entries would be a second definition of the same rule, which
+ * is how the two came to disagree before issue #1229.
+ */
+nlohmann::json request_defaults_json (vayu::db::Database& db) {
+    const auto policy = vayu::http::resolve_default_header_policy (
+    db, vayu::http::DefaultHeaderScope::Design);
+
+    nlohmann::json headers = nlohmann::json::array ();
+    for (const auto& header : vayu::http::declared_default_headers (policy)) {
+        nlohmann::json row;
+        row["name"] = header.name;
+        // A generated value has none to show until the send makes one, so the
+        // field is absent rather than an empty string a client would print.
+        if (!header.generated) {
+            row["value"] = header.value;
+        }
+        row["generated"] = header.generated;
+        if (!header.config_key.empty ()) {
+            row["configKey"] = header.config_key;
+        }
+        headers.push_back (std::move (row));
+    }
+
+    nlohmann::json response;
+    response["headers"] = std::move (headers);
+    return response;
+}
+
 void register_config_routes (RouteContext& ctx) {
+    /**
+     * GET /request-defaults
+     * What the engine adds to a request that does not name it (issue #1229).
+     */
+    ctx.server.Get ("/request-defaults",
+    [&ctx] (const httplib::Request&, httplib::Response& res) {
+        try {
+            res.set_content (request_defaults_json (ctx.db).dump (2), "application/json");
+        } catch (const std::exception& e) {
+            vayu::utils::log_error (
+            "GET /request-defaults - Error: " + std::string (e.what ()));
+            send_error (res, 500, e.what ());
+        }
+    });
+
     /**
      * GET /config
      * Retrieves all configuration entries with metadata for UI display.

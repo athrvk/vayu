@@ -21,12 +21,11 @@
 
 import { describe, it, expect } from "vitest";
 import { formatHeadersToText, parseHeadersFromText } from "./headers-format";
-import { VERSION_HEADER_KEY } from "./system-headers";
 import type { KeyValueItem } from "@/types";
 
 /** The parsed shape, minus the generated id that varies per call. */
-const pairs = (text: string, skipVersion = true) =>
-	parseHeadersFromText(text, skipVersion).map(({ key, value }) => ({ key, value }));
+const pairs = (text: string) =>
+	parseHeadersFromText(text).map(({ key, value }) => ({ key, value }));
 
 /** Build the array shape `formatHeadersToText` consumes. */
 const items = (...kv: Array<[string, string]>): KeyValueItem[] =>
@@ -116,16 +115,22 @@ describe("lines that name no header", () => {
 	});
 });
 
-describe("the protected version header", () => {
-	it("is skipped on the way in, so bulk edit cannot forge it", () => {
-		expect(pairs(`${VERSION_HEADER_KEY}: 9.9.9\nAccept: */*`)).toEqual([
+describe("no header is protected from bulk edit any more (issue #1229)", () => {
+	// The app used to seed and defend `X-Vayu-Version`, so bulk edit hid it on
+	// the way out and refused it on the way in. Nothing here is Vayu's now: the
+	// engine adds what it adds at send time, and the table is the user's alone -
+	// so a name that happens to look like one of the old ones round-trips like
+	// any other. Restore either filter and both cases below fail.
+	it("parses a header the old parser silently dropped", () => {
+		expect(pairs("X-Vayu-Version: 9.9.9\nAccept: */*")).toEqual([
+			{ key: "X-Vayu-Version", value: "9.9.9" },
 			{ key: "Accept", value: "*/*" },
 		]);
 	});
 
-	it("is never offered for editing on the way out", () => {
-		const text = formatHeadersToText(items([VERSION_HEADER_KEY, "1.0.0"], ["Accept", "*/*"]));
-		expect(text).toBe("Accept: */*");
+	it("offers every row for editing on the way out", () => {
+		const text = formatHeadersToText(items(["X-Vayu-Version", "1.0.0"], ["Accept", "*/*"]));
+		expect(text).toBe("X-Vayu-Version: 1.0.0\nAccept: */*");
 	});
 });
 

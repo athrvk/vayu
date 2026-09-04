@@ -27,9 +27,10 @@
  * `vayu/version.hpp` directly (daemon, cli, client, server, the health route).
  *
  * It is deliberately not `constexpr` any more - a `constexpr` cannot hide its
- * initialiser from the header. The three defaulted members that read it
- * (`ClientConfig`, `EventLoopConfig`, `SseStreamRequest`) copy it into a
- * `std::string` at construction, so nothing needed a compile-time value.
+ * initialiser from the header. The member that reads it
+ * (`DefaultHeaderPolicy::user_agent`, which the three driver configs each hold
+ * one of) copies it into a `std::string` at construction, so nothing needed a
+ * compile-time value.
  * `const char* const` with a constant initialiser is constant-initialised, so
  * there is no static-initialisation-order question either.
  *

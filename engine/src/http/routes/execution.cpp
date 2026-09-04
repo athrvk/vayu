@@ -1321,6 +1321,13 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // stream, and a settings change between them would otherwise send
     // the two halves out by different routes.
     const auto transport = vayu::http::resolve_transport_policy (ctx.db);
+    // Resolved here, beside `transport`, for the same reason and with the same
+    // reach (issue #1229): the transfer below and both scripts' own
+    // `pm.sendRequest` are one send, and a script whose auxiliary request
+    // carried a different default header set from the stream it belongs to
+    // would be the per-path divergence this issue removed.
+    const auto default_headers = vayu::http::resolve_default_header_policy (
+    ctx.db, vayu::http::DefaultHeaderScope::Design);
     // What either script's `pm.sendRequest` may read (issue #1188). The stream
     // itself is bounded by its event and duration caps rather than by a byte
     // total, but a script's auxiliary fetch is an ordinary buffered read and
@@ -1340,6 +1347,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         pre_ctx.request_id         = send.run.request_id;
         pre_ctx.request_name       = send.script_request_name;
         pre_ctx.transport          = transport;
+        pre_ctx.default_headers    = default_headers;
         pre_ctx.max_response_bytes = script_response_bound;
         // The same row the transfer below carries, on the same terms
         // as the buffered path: a stream is still one send, and one
@@ -1381,6 +1389,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     spec.request         = std::move (send.request);
     spec.limits          = vayu::http::read_sse_limits (ctx.db);
     spec.transport       = transport;
+    spec.default_headers = default_headers;
     spec.max_duration_ms = send.stream.max_duration_ms;
     spec.max_events      = send.stream.max_events;
     spec.cookie_jar      = &ctx.cookie_jar;
@@ -1400,9 +1409,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     [&db = ctx.db, &jar = ctx.cookie_jar, id = run_id, cookie_scope = send.cookie_scope,
     run = send.run, script_config = send.script_config,
     post_request_script = send.post_script, request_name = send.script_request_name,
-    scopes, iteration_data = send.data_row, transport, script_response_bound,
-    pre_script_result] (const vayu::Request& sent, const vayu::Response& response,
-    const vayu::http::SseStreamContext& context) mutable {
+    scopes, iteration_data = send.data_row, transport, default_headers,
+    script_response_bound, pre_script_result] (const vayu::Request& sent,
+    const vayu::Response& response, const vayu::http::SseStreamContext& context) mutable {
         StreamRecord record;
         nlohmann::json scripts = nlohmann::json::object ();
         record.events          = vayu::http::stream_trace_node (context);
@@ -1432,6 +1441,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                     post_ctx.request_id         = run.request_id;
                     post_ctx.request_name       = request_name;
                     post_ctx.transport          = transport;
+                    post_ctx.default_headers    = default_headers;
                     post_ctx.max_response_bytes = script_response_bound;
                     if (iteration_data) {
                         post_ctx.iteration_data = &*iteration_data;
@@ -1509,7 +1519,9 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     // Read at the point of use, so a settings change applies to the next
     // send without a restart (issue #705). The body bound is read the same way
     // and for the same reason (issue #1157).
-    inputs.transport          = vayu::http::resolve_transport_policy (ctx.db);
+    inputs.transport       = vayu::http::resolve_transport_policy (ctx.db);
+    inputs.default_headers = vayu::http::resolve_default_header_policy (
+    ctx.db, vayu::http::DefaultHeaderScope::Design);
     inputs.max_response_bytes = design_response_body_bound (ctx.db);
     if (send.data_row) {
         inputs.iteration_data = &*send.data_row;

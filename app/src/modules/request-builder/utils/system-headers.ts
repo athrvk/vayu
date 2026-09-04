@@ -6,173 +6,78 @@
  */
 
 /**
- * System Headers Utilities
+ * What a pre-#1229 client wrote into a stored request, and how to recognise it.
  *
- * Centralized logic for managing system headers (User-Agent, X-Vayu-Version, X-Request-ID)
- * Keeps system header logic separate from UI components
+ * Until issue #1229 this module *created* three headers - `User-Agent`,
+ * `X-Vayu-Version` and a fresh `X-Request-ID` - seeded them into every new
+ * request, re-imposed them on load, protected them from editing, and saved them
+ * with the request. So a stored request carried a frozen correlation id that a
+ * load run replayed on every iteration, and the same request went out with a
+ * different header set depending on which client sent it.
+ *
+ * The engine adds those headers now, at send time, on every path, and declares
+ * them over `GET /request-defaults` for a client to display. Nothing here
+ * creates a header any more; what is left is the one definition of which stored
+ * rows the old client wrote, so they can be dropped on the way into the editor.
+ *
+ * **The engine's startup pass owns the stored copy** - it rewrites the rows out
+ * of the database once (`strip_legacy_managed_headers` in
+ * `engine/src/http/default_headers.cpp`). This is that same rule applied to what
+ * a client loads, so a request read before or without that pass still opens
+ * clean, and the two must stay identical.
  */
 
 import type { FormFieldEntry, KeyValueItem } from "@/types";
-import { createEmptyKeyValue, toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
-import { generateId, generateUUID } from "@/lib/id";
+import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 
-// System header keys (case-insensitive)
-export const SYSTEM_HEADER_KEYS = new Set(["user-agent", "x-vayu-version", "x-request-id"]);
-export const VERSION_HEADER_KEY = "x-vayu-version";
+/** A bare RFC 4122 UUID - the exact shape `generateUUID()` produced. */
+const BARE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Get Vayu version from package.json (injected at build time via Vite)
- */
-const getVayuVersion = (): string => {
-	return typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
-};
-
-/**
- * Create default system headers that can't be disabled or removed
- */
-export const createDefaultSystemHeaders = (requestId?: string): KeyValueItem[] => {
-	const version = getVayuVersion();
-	const uuid = requestId || generateUUID();
-
-	return [
-		{
-			id: generateId(),
-			key: "User-Agent",
-			value: `Vayu/${version}`,
-			enabled: true,
-			system: true,
-		},
-		{
-			id: generateId(),
-			key: "X-Vayu-Version",
-			value: version,
-			enabled: true,
-			system: true,
-		},
-		{
-			id: generateId(),
-			key: "X-Request-ID",
-			value: uuid,
-			enabled: true,
-			system: true,
-		},
-	];
-};
-
-/**
- * The stored header entries as editor rows, with the managed system headers in
- * front of them.
+ * The ASCII whitespace this rule strips, spelled out rather than left to
+ * `String.prototype.trim`.
  *
- * This used to be `toKeyValueItems(entries, true)`. The conversion moved to the
- * shared table with the table itself (#567) and the system headers did not go
- * with it: which headers Vayu manages is the request builder's knowledge, and
- * the inbox - the other mount site of that table - has none of them. A stored
- * entry whose key collides with a managed one is dropped, since the managed row
- * carries the current value.
+ * `trim()` also strips Unicode spaces (NBSP, U+2028) that the engine's copy of
+ * this rule does not, and the two answering differently is the whole defect:
+ * a row this side hid and the engine kept is a header on the wire that nothing
+ * shows. Same set as `TRIMMED_WHITESPACE` in
+ * `engine/src/http/default_headers.cpp`.
  */
-export const toHeaderItems = (entries: FormFieldEntry[] | undefined): KeyValueItem[] => {
-	const systemHeaders = createDefaultSystemHeaders();
-	const systemKeys = new Set(systemHeaders.map((h) => h.key.toLowerCase()));
-	return [
-		...systemHeaders,
-		...toKeyValueItems((entries ?? []).filter((e) => !systemKeys.has(e.key.toLowerCase()))),
-	];
-};
+const ASCII_TRIM = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
+
+const trimmed = (text: string): string => text.replace(ASCII_TRIM, "");
 
 /**
- * Ensure system headers are always present in headers array
- * Allows user overrides by adding new headers with same key (last one wins when converted to record)
+ * Was this stored header row written by a pre-#1229 Vayu client?
+ *
+ * Three rules, each as narrow as it can be, because acting on this deletes what
+ * the user sees as their own data:
+ *
+ * - `X-Vayu-Version` goes unconditionally. The old editor never let it be
+ *   edited, so no value of it was ever anyone's.
+ * - `X-Request-ID` goes only when its value is a bare UUID, the shape the old
+ *   client generated. A correlation id someone typed stays.
+ * - `User-Agent` goes only when its value is a `Vayu/...`. A browser's or a
+ *   crawler's `User-Agent` is exactly the header a testing tool exists to send.
  */
-export const ensureSystemHeaders = (headers: KeyValueItem[]): KeyValueItem[] => {
-	const systemHeaders = createDefaultSystemHeaders();
-	const systemHeaderKeys = new Set(systemHeaders.map((h) => h.key.toLowerCase()));
-
-	// Find existing system headers by key (preserve their IDs and allow value editing except version)
-	const existingSystemHeaders: KeyValueItem[] = [];
-	const userHeaders: KeyValueItem[] = [];
-
-	headers.forEach((header) => {
-		const headerKeyLower = header.key.toLowerCase();
-		if (header.system || systemHeaderKeys.has(headerKeyLower)) {
-			// Update system header with latest values but preserve ID
-			const systemHeader = systemHeaders.find(
-				(sh) => sh.key.toLowerCase() === headerKeyLower
-			);
-			if (systemHeader) {
-				// Allow editing values except for version header
-				const preservedValue =
-					headerKeyLower === VERSION_HEADER_KEY
-						? systemHeader.value // Never allow version override
-						: header.value || systemHeader.value; // Allow user edits for other system headers
-
-				existingSystemHeaders.push({
-					...systemHeader,
-					id: header.id, // Preserve existing ID
-					value: preservedValue,
-				});
-			}
-		} else {
-			userHeaders.push(header);
-		}
-	});
-
-	// Add any missing system headers
-	systemHeaders.forEach((systemHeader) => {
-		if (
-			!existingSystemHeaders.some(
-				(h) => h.key.toLowerCase() === systemHeader.key.toLowerCase()
-			)
-		) {
-			existingSystemHeaders.push(systemHeader);
-		}
-	});
-
-	// Return system headers first, then user headers, then empty row if needed
-	const result = [...existingSystemHeaders, ...userHeaders];
-	const lastItem = result[result.length - 1];
-	if (!lastItem || lastItem.key.trim() || lastItem.value.trim()) {
-		result.push(createEmptyKeyValue());
+export const isLegacyManagedHeader = (key: string, value: string): boolean => {
+	switch (trimmed(key).toLowerCase()) {
+		case "x-vayu-version":
+			return true;
+		case "x-request-id":
+			return BARE_UUID.test(trimmed(value));
+		case "user-agent":
+			return trimmed(value).toLowerCase().startsWith("vayu/");
+		default:
+			return false;
 	}
-
-	return result;
 };
 
 /**
- * Check if a header is a system header
+ * The stored header entries as editor rows, minus the rows the old client
+ * wrote. Every row that survives is the user's, editable and removable like any
+ * other; what Vayu itself sends is shown separately, from
+ * `GET /request-defaults`.
  */
-export const isSystemHeader = (item: KeyValueItem): boolean => {
-	return item.system === true || SYSTEM_HEADER_KEYS.has(item.key.toLowerCase());
-};
-
-/**
- * Check if a header is the version header (protected)
- */
-export const isVersionHeader = (item: KeyValueItem): boolean => {
-	return item.key.toLowerCase() === VERSION_HEADER_KEY;
-};
-
-/**
- * Check if a field can be edited for a given header
- */
-export const canEditHeaderField = (item: KeyValueItem, field: keyof KeyValueItem): boolean => {
-	// Version header key/value cannot be edited
-	if (isVersionHeader(item) && (field === "key" || field === "value")) {
-		return false;
-	}
-	// All other fields can be edited
-	return true;
-};
-
-/**
- * Check if a header can be removed
- */
-export const canRemoveHeader = (item: KeyValueItem): boolean => {
-	return !isSystemHeader(item);
-};
-
-/**
- * Check if a header can be disabled
- */
-export const canDisableHeader = (item: KeyValueItem): boolean => {
-	return !isSystemHeader(item);
-};
+export const toHeaderItems = (entries: FormFieldEntry[] | undefined): KeyValueItem[] =>
+	toKeyValueItems((entries ?? []).filter((e) => !isLegacyManagedHeader(e.key, e.value)));
