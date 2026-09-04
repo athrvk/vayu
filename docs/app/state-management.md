@@ -623,6 +623,28 @@ quit flush take, so overwriting it put "Saved" on the Dock over an edit nobody
 had persisted. One rule covers both: a status the context published for itself
 is the truthful one, and `runSave` only fills in the silence.
 
+**A writer that registers no context inherits that rule from
+`completeSaveThenIdle`.** The collection tree's two renames call `startSaving`
+and `completeSaveThenIdle` by hand, so `runSave` never saw them: a rename
+published "Saved" onto the one status the Dock renders while the open request
+held an unsaved script - true of the rename, false of everything else on screen
+(#1385). The success reporter now asks the registry, and publishes `pending`
+instead while any *other* registered context still has `hasPendingChanges`; the
+context holding that edit clears it when it writes. A registered context names
+itself as it reports - `completeSaveThenIdle(contextId)` - because its own entry
+is refreshed by an effect and so still reads dirty at the moment its write
+lands. A direct writer names nobody and is measured against all of them, which
+is the point of guarding in the store rather than at the call sites: the writer
+added next inherits it without knowing the rule exists.
+
+That same effect lag is why the `pending` this guard publishes is re-derived
+once, after `TIMING.SAVED_STATUS_DURATION_MS`. Two surfaces finishing within a
+render of each other each read the other's not-yet-refreshed entry as dirty, so
+both report `pending` over an editor holding nothing - and nothing would revisit
+it until the next save. The re-check clears it only while no context is dirty
+and no later save has re-armed the reset, so a `pending` a context published for
+its own unsaved edit is untouched.
+
 **SaveContext:**
 ```typescript
 {

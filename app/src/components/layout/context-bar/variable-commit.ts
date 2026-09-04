@@ -129,7 +129,7 @@ function usePendingCommits(): () => () => void {
 			// it lands. This path armed no reset at all before #369, which left
 			// "Saved" in the Dock until something else changed it.
 			if (useSaveStore.getState().status !== "error") {
-				useSaveStore.getState().completeSaveThenIdle();
+				useSaveStore.getState().completeSaveThenIdle(SAVE_CONTEXT_ID);
 			}
 		};
 	}, [updateContext]);
