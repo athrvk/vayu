@@ -426,8 +426,8 @@ describe("a cursor inside an inline fragment", () => {
 
 	it("spreads a fragment into the narrowed set, not the interface set above it", () => {
 		/*
-		 * `spreadHost` prefers an exact type match over a merely overlapping one,
-		 * and the exact one is the `... on Post` the cursor is in. Mutation check:
+		 * The `... on Post` the cursor is in is both the innermost host and an
+		 * exact match, so every version of `spreadHost` picks it. Mutation check:
 		 * stop the descent and the spread lands in the `Node` set instead, which
 		 * is legal and is not where the user was looking.
 		 */
@@ -435,27 +435,24 @@ describe("a cursor inside an inline fragment", () => {
 
 		expect(result.text).toContain("fragment PostFields on Post");
 		// Inside the narrowed braces, beside `id` - not after them, in the `Node`
-		// set, which is where an overlap-only host puts it.
+		// set, which is where a host chosen further out puts it.
 		expect(result.text).toContain("... on Post {\n      id\n      ...PostFields\n    }");
 		expectValid(result.text);
 	});
 
-	it("finds a host for a fragment the narrowed set only overlaps, rather than refusing", () => {
+	it("spreads a fragment the narrowed set only overlaps into that set, not the exact one outside it", () => {
 		/*
-		 * A fragment on `Node` is legal inside `... on Post` - `doTypesOverlap`
-		 * says so - so there is a host and the click is answered.
-		 *
-		 * Where it lands is `spreadHost`'s existing tie-break, untouched here: an
-		 * exact type match wins over an overlapping one, and the exact `Node` set
-		 * is the one *outside* the fragment, so that is where the spread goes.
-		 * Preferring the nearer set would be a change to that rule rather than to
-		 * the chain this fix repairs (#1350).
+		 * The pair only `spreadHost`'s depth rule can order: the `... on Post` set
+		 * the cursor is in merely overlaps `Node`, while the `node` selection one
+		 * step out is `Node` exactly. Depth wins, so the spread lands where the
+		 * user is looking. Mutation check: prefer the exact match over the deeper
+		 * host and `...NodeFields` moves out of the fragment's braces (#1350).
 		 */
 		const result = inserted(insertFragment(schema, inFragment, insideFragment, "Node"));
 
 		expect(result.text).toContain("fragment NodeFields on Node");
 		expect(result.text.match(/node\(/g)).toHaveLength(1);
-		expect(result.text).toContain("...NodeFields");
+		expect(result.text).toContain("... on Post {\n      id\n      ...NodeFields\n    }");
 		expectValid(result.text);
 	});
 });
@@ -566,8 +563,10 @@ describe("insertFragment", () => {
 	});
 
 	it("prefers the set that is exactly the type over one it merely overlaps", () => {
-		// Both are on the chain: the User set inside the Node set. The one the
-		// user is in wins over the one the spread is only legal in.
+		// The `node` selection beside the cursor's `user` one is a legal host too,
+		// and is not on the chain at all - only `user` is, so the depth rule and
+		// the exactness the old rule went by point the same way. This is the case
+		// #1350's depth-first `spreadHost` had to keep, not the one it changed.
 		const doc = `query Existing {\n  user(id: "1") {\n    id\n  }\n  node(id: "2") {\n    id\n  }\n}\n`;
 		const result = inserted(insertFragment(schema, doc, doc.indexOf("id\n  }"), "User"));
 
@@ -575,6 +574,25 @@ describe("insertFragment", () => {
 		const spreadAt = result.text.indexOf("...UserFields");
 		expect(spreadAt).toBeGreaterThan(-1);
 		expect(spreadAt).toBeLessThan(result.text.indexOf("node(id:"));
+		expectValid(result.text);
+	});
+
+	it("spreads a union fragment into the member set the cursor is in, not the union set above it", () => {
+		/*
+		 * The union half of the same pair: `... on User` overlaps `SearchResult`,
+		 * the `search` selection outside it *is* `SearchResult`. Mutation check:
+		 * prefer the exact match and `...SearchResultFields` moves out of the
+		 * `... on User` braces into the `search` set (#1350).
+		 */
+		const doc = `query S($term: String!) {\n  search(term: $term) {\n    ... on User {\n      id\n    }\n  }\n}\n`;
+		const result = inserted(
+			insertFragment(schema, doc, doc.indexOf("id\n    }"), "SearchResult")
+		);
+
+		expect(result.text).toContain("fragment SearchResultFields on SearchResult");
+		expect(result.text).toContain(
+			"... on User {\n      id\n      ...SearchResultFields\n    }"
+		);
 		expectValid(result.text);
 	});
 
