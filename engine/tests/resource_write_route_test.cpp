@@ -566,6 +566,34 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateAbsentKeepsNullResets) {
     EXPECT_EQ (reset["maxRedirects"], 10);
 }
 
+// The server-side witness for the client contract in issue #1381: an empty
+// script is a value a client sends to clear one, and it is a different thing
+// from omitting the key. The app used to collapse the two - it wrote
+// `script || undefined`, which serialises the key out of the body - so
+// deleting a whole script saved nothing and reported success. Both fields,
+// because only `postRequestScript` had a case here at all.
+TEST_F (ResourceWriteRouteTest, RequestUpdateEmptyScriptStringClears) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (update_request_response (*db_, id,
+               json{ { "preRequestScript", "pm.environment.set('t', 1);" },
+               { "postRequestScript", "pm.test('x', () => {});" } })
+               .first,
+    200);
+
+    auto [status, cleared] = update_request_response (
+    *db_, id, json{ { "preRequestScript", "" }, { "postRequestScript", "" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (cleared["preRequestScript"], "");
+    EXPECT_EQ (cleared["postRequestScript"], "");
+
+    // Stored, not merely echoed back.
+    const auto stored = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->pre_request_script, "");
+    EXPECT_EQ (stored->post_request_script, "");
+}
+
 // `requests.stream` (issue #574). It follows the redirect policy's contract
 // exactly - absent keeps, null resets, a non-boolean is ignored rather than
 // rejected - and it is the app's Event stream toggle that persists here, so a

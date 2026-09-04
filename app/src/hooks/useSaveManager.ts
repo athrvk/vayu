@@ -28,6 +28,17 @@ interface UseSaveManagerOptions {
 	onSave: () => Promise<void>;
 	/** Whether there are unsaved changes */
 	hasChanges: boolean;
+	/**
+	 * A counter the caller increments on every edit.
+	 *
+	 * `hasChanges` cannot carry this on its own: it is already `true` for the
+	 * second keystroke of a burst, so an effect watching it does not re-run and
+	 * the delay measures from the *first* edit rather than the last. The token
+	 * changes on every edit, which is what makes the delay a debounce and what
+	 * tells a returning save whether the payload it sent is still the whole
+	 * story.
+	 */
+	changeToken: number;
 	/** Whether auto-save is enabled (default: true) */
 	enabled?: boolean;
 }
@@ -46,6 +57,7 @@ export function useSaveManager({
 	contextName,
 	onSave,
 	hasChanges,
+	changeToken,
 	enabled = true,
 }: UseSaveManagerOptions): UseSaveManagerReturn {
 	const {
@@ -69,6 +81,7 @@ export function useSaveManager({
 	const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 	const onSaveRef = useRef(onSave);
 	const hasChangesRef = useRef(hasChanges);
+	const changeTokenRef = useRef(changeToken);
 	const enabledRef = useRef(enabled);
 
 	// Keep onSave ref updated to avoid stale closures
@@ -80,6 +93,11 @@ export function useSaveManager({
 	useEffect(() => {
 		hasChangesRef.current = hasChanges;
 	}, [hasChanges]);
+
+	// Keep the change token ref updated
+	useEffect(() => {
+		changeTokenRef.current = changeToken;
+	}, [changeToken]);
 
 	// Keep enabled ref updated
 	useEffect(() => {
@@ -121,12 +139,26 @@ export function useSaveManager({
 		// repoints `onSaveRef` - a queued save that read the ref late would write
 		// the entity the user just switched *to*.
 		const save = onSaveRef.current;
+		// The generation that saver carries. Bound here, beside it, for the same
+		// reason: both describe the state of the entity at this moment, and a
+		// read taken later would describe an edit this save is not carrying.
+		const savedGeneration = changeTokenRef.current;
 
 		const run = saveQueueRef.current.then(async () => {
 			startSaving();
 			try {
 				await save();
-				completeSaveThenIdle();
+				// "Saved" is a claim about the editor, not about the round trip.
+				// An edit that landed while this save was in flight is not in
+				// what went out, so the honest status is still "unsaved" - the
+				// Dock reads this store, and it used to flash "Saved" over an
+				// edit nobody had persisted. The caller re-arms the save; this
+				// only refuses to mislabel it.
+				if (changeTokenRef.current === savedGeneration) {
+					completeSaveThenIdle();
+				} else {
+					markPendingSave();
+				}
 			} catch (error) {
 				console.error("Save failed:", error);
 				failSave(error instanceof Error ? error.message : "Save failed");
@@ -134,7 +166,7 @@ export function useSaveManager({
 		});
 		saveQueueRef.current = run;
 		return run;
-	}, [entityId, startSaving, completeSaveThenIdle, failSave]);
+	}, [entityId, startSaving, completeSaveThenIdle, markPendingSave, failSave]);
 
 	// Register/unregister with centralized save context
 	useEffect(() => {
@@ -202,7 +234,15 @@ export function useSaveManager({
 		await performSave();
 	}, [performSave]);
 
-	// Auto-save on changes (debounced)
+	// Auto-save on changes, debounced from the *last* edit.
+	//
+	// `changeToken` is in the dependency list and `hasChanges` alone is not
+	// enough: the boolean is already `true` by the second keystroke, so this
+	// effect did not re-run and the timer armed by the first keystroke ran to
+	// term - a save fired five seconds into a burst carrying a half-typed
+	// script, every burst, which is what made the in-flight-edit race fire so
+	// often. With the token here, each edit clears the pending timer in the
+	// cleanup below and arms a fresh one, so one save follows the pause.
 	useEffect(() => {
 		if (!enabled || !hasChanges || !entityId) {
 			return;
@@ -236,6 +276,7 @@ export function useSaveManager({
 	}, [
 		enabled,
 		hasChanges,
+		changeToken,
 		entityId,
 		markPendingSave,
 		performSave,

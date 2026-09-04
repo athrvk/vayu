@@ -603,6 +603,13 @@ do - so `runSave` checks for `status === "error"` after awaiting instead of
 setting `"saved"` unconditionally. Without that check a failed Cmd/Ctrl+S showed
 "Saved" beside its own failure toast.
 
+It refuses `"pending"` on the same grounds (#1381). A context that saw an edit
+land while its write was in flight publishes `pending`, because the payload that
+went out does not hold that edit - and `runSave` is the path Cmd/Ctrl+S and the
+quit flush take, so overwriting it put "Saved" on the Dock over an edit nobody
+had persisted. One rule covers both: a status the context published for itself
+is the truthful one, and `runSave` only fills in the silence.
+
 **SaveContext:**
 ```typescript
 {
@@ -2070,6 +2077,7 @@ const {
   contextName?: string              // Display name (e.g., "Request: GET /api")
   onSave: () => Promise<void>       // Function to persist changes
   hasChanges: boolean               // Whether unsaved changes exist
+  changeToken: number               // Bumped by the caller on every edit
   enabled?: boolean                 // Disable auto-save (default: true)
 });
 ```
@@ -2091,6 +2099,18 @@ const {
   one, so the hook reads it from the store rather than taking it as an option.
   Turning auto-save off in Settings leaves the entity marked dirty - Ctrl/Cmd+S
   still saves it - but schedules nothing.
+- **The delay runs from the last edit, and `changeToken` is what makes it a
+  debounce** (#1381). `hasChanges` cannot carry that on its own: it is already
+  `true` by the second keystroke, so an effect keyed on it does not re-run and
+  the timer armed by the *first* keystroke runs to term. A save then went out
+  five seconds into every burst carrying a half-typed script. The token changes
+  on every edit, so each one tears the pending timer down and arms a fresh one
+- **A returning save reports "Saved" only for the edits it carried** (#1381).
+  The saver and the token are bound together when `performSave` is called;
+  if the token has moved by the time the write lands, an edit arrived that the
+  payload does not hold, and the status goes back to `pending` rather than
+  flashing "Saved" over it. The caller is what re-arms the save - this only
+  refuses to mislabel it
 
 `app/src/config/timing.ts` used to carry an `AUTO_SAVE_DELAY_MS: 3000` that
 nothing read and that this section documented as the source of truth. It is
@@ -2252,12 +2272,13 @@ restore) and `save-request-name.test.ts` (the payload).
 2. Component mounts `useSaveManager()` with the request ID and save callback
 3. Hook registers the context with `useSaveStore()` for Ctrl/Cmd+S integration
 4. User edits the request (URL, headers, body, etc.)
-5. `hasChanges` is marked true, triggering the debounce timer - `autoSave.delayMs` from `client-settings-store`, 5s by default (Settings → General offers 5s / 30s / 1m)
-6. A further change within that window resets the timer
+5. `hasChanges` is marked true and `changeToken` is bumped, arming the debounce timer - `autoSave.delayMs` from `client-settings-store`, 5s by default (Settings → General offers 5s / 30s / 1m)
+6. A further change within that window bumps the token again, which tears the pending timer down and arms a new one, so the delay measures from the last edit
 7. After the delay elapses with no edit, `performSave()` is called, which calls the `onSave` callback
 8. Save status updates in `useSaveStore()`, and the Dock shows "Saving..." then "Saved" for `TIMING.SAVED_STATUS_DURATION_MS`
-9. On **tab switch or unmount**, any pending save is flushed before the context is unregistered
-10. On **app quit** (Electron `before-quit`) *and* on **window close** (the X
+9. **A save is only allowed to call the entity clean for the generation it sent** (#1381). `onSave(request)` serialises the state as it was when the save started, so a keystroke landing during the round trip is not in that payload. The provider records the generation beside the snapshot and clears `hasUnsavedChanges` only if the token has not moved when the write lands; the hook applies the same check to the "Saved" indicator. Clearing unconditionally marked that keystroke saved, left nothing dirty for the next timer to fire on, and lost the edit
+10. On **tab switch or unmount**, any pending save is flushed before the context is unregistered
+11. On **app quit** (Electron `before-quit`) *and* on **window close** (the X
     button), `useSaveStore().flushAll()` saves all dirty contexts
 
 **Both window-destroying paths flush, through one coordinator.** `before-quit`

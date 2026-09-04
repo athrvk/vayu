@@ -42,7 +42,15 @@ function deferred() {
 
 function mountManager(onSave: () => Promise<void>) {
 	return renderHook(() =>
-		useSaveManager({ entityId: "req_1", contextName: "Request", onSave, hasChanges: true })
+		useSaveManager({
+			entityId: "req_1",
+			contextName: "Request",
+			onSave,
+			hasChanges: true,
+			// One edit, never revised: these cases are about the save, not the
+			// debounce. `useSaveManager.debounce.test.tsx` varies the token.
+			changeToken: 1,
+		})
 	);
 }
 

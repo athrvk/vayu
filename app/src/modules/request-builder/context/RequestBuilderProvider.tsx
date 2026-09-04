@@ -272,6 +272,31 @@ export default function RequestBuilderProvider({
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
 	/*
+	 * How many edits this request has seen - the generation `handleSave` checks
+	 * before it reports the request clean.
+	 *
+	 * `onSave(request)` serialises the state as it was when the save started, so
+	 * a keystroke that lands during the round trip is not in the payload that
+	 * went out. Clearing `hasUnsavedChanges` unconditionally on the way back
+	 * therefore marked that keystroke saved and dropped it: nothing was left
+	 * dirty, so `useSaveManager` never re-armed and the Dock said "Saved".
+	 * Comparing generations across the await keeps a save from claiming an edit
+	 * it never carried - the same shape `save-store.ts` uses to keep an early
+	 * timer off a later save's indicator.
+	 *
+	 * Kept as a ref *and* as state on purpose: the ref is what survives the
+	 * await, and the state is what `useSaveManager` can watch to restart its
+	 * debounce on each edit.
+	 */
+	const changeTokenRef = useRef(0);
+	const [changeToken, setChangeToken] = useState(0);
+	const markDirty = useCallback(() => {
+		changeTokenRef.current += 1;
+		setChangeToken(changeTokenRef.current);
+		setHasUnsavedChanges(true);
+	}, []);
+
+	/*
 	 * What the body modes you are not looking at were holding. It lives here
 	 * rather than in `BodyPanel` because Radix unmounts an inactive
 	 * `TabsContent`: a panel-local ref is discarded the moment you glance at the
@@ -659,9 +684,18 @@ export default function RequestBuilderProvider({
 	// Centralized save manager - handles auto-save, keyboard shortcut, and status
 	const handleSave = useCallback(async () => {
 		if (!onSave) return;
+		// Read from state, not the ref: this closure's `request` is the snapshot
+		// `onSave` serialises, and `changeToken` is the generation that produced
+		// it. The ref holds whatever the newest edit made it, which is the thing
+		// we are comparing against.
+		const savedGeneration = changeToken;
 		await onSave(request);
+		// An edit landed while this save was in flight: it is not in the payload
+		// that went out, so the request is still dirty and `useSaveManager` has
+		// to keep its debounce running for it.
+		if (changeTokenRef.current !== savedGeneration) return;
 		setHasUnsavedChanges(false);
-	}, [request, onSave]);
+	}, [request, changeToken, onSave]);
 
 	const {
 		forceSave,
@@ -671,14 +705,18 @@ export default function RequestBuilderProvider({
 		entityId: request.id || null,
 		onSave: handleSave,
 		hasChanges: hasUnsavedChanges,
+		changeToken,
 		enabled: !!onSave,
 	});
 
 	// Set request with change tracking
-	const setRequest = useCallback((updates: Partial<RequestState>) => {
-		setRequestState((prev) => ({ ...prev, ...updates }));
-		setHasUnsavedChanges(true);
-	}, []);
+	const setRequest = useCallback(
+		(updates: Partial<RequestState>) => {
+			setRequestState((prev) => ({ ...prev, ...updates }));
+			markDirty();
+		},
+		[markDirty]
+	);
 
 	// saveRequest now uses the centralized forceSave
 	const saveRequest = useCallback(async () => {
