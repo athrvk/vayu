@@ -14,6 +14,21 @@
  * them in sync.
  */
 
+/**
+ * The identity Windows files the app's toasts under (issue #1358).
+ *
+ * Must equal `appId` in `electron-builder.json`, which is what the NSIS target
+ * stamps on the Start Menu shortcut: Windows matches a toast's AppUserModelID
+ * against that shortcut, and a mismatch shows nothing at all rather than
+ * showing it under the wrong name. `app-user-model-id.test.ts` compares the
+ * two so they cannot drift.
+ *
+ * Reverse-DNS of a domain the project actually holds. The previous value,
+ * `com.vayu.client`, claimed `vayu.com`, which it does not - and named the app
+ * "the client", which is the npm package's name, not the product's.
+ */
+export const APP_USER_MODEL_ID = "io.github.athrvk.vayu";
+
 // Engine sidecar (must match src/config/network.ts)
 export const ENGINE_HOST = "127.0.0.1";
 export const ENGINE_PORT = 9876;

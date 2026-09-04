@@ -80,6 +80,17 @@ interface ClientSettingsState {
 	 * starts, so flipping it does not reach a run already streaming.
 	 */
 	keepAwakeDuringRuns: boolean;
+	/**
+	 * Standing answer to "should Vayu interrupt me in another application"
+	 * (issue #1358).
+	 *
+	 * Off by default: an app that posts to the OS without being asked is one the
+	 * user turns off entirely. With it on, only the events that are terminal and
+	 * asynchronous notify, and only while the window is not the one in front -
+	 * `services/notify.ts` holds that list, `electron/notify.ts` the focus check.
+	 * Read when an event happens, not watched: it only has to be right then.
+	 */
+	systemNotifications: boolean;
 	/** Toast position, duration scale, stack cap and severity floor. */
 	notifications: NotificationPrefs;
 	/** Upper bounds the load-test dialog offers. Read via `resolveLoadTestLimits`. */
@@ -95,6 +106,7 @@ interface ClientSettingsState {
 	setNotifications: (patch: Partial<NotificationPrefs>) => void;
 	setReducedMotion: (on: boolean) => void;
 	setKeepAwakeDuringRuns: (on: boolean) => void;
+	setSystemNotifications: (on: boolean) => void;
 	/** Patch one or more ceilings; each is clamped to what the engine accepts. */
 	setLoadTestCeilings: (patch: Partial<LoadTestCeilings>) => void;
 	/** Clear every renderer preference and reload so defaults re-apply cleanly. */
@@ -191,6 +203,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			autoSave: { ...DEFAULT_AUTO_SAVE_PREFS },
 			reducedMotion: false,
 			keepAwakeDuringRuns: false,
+			systemNotifications: false,
 			notifications: { ...DEFAULT_NOTIFICATION_PREFS },
 			loadTestCeilings: { ...DEFAULT_LOAD_TEST_CEILINGS },
 
@@ -214,6 +227,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				set({ reducedMotion: on });
 			},
 			setKeepAwakeDuringRuns: (on) => set({ keepAwakeDuringRuns: on }),
+			setSystemNotifications: (on) => set({ systemNotifications: on }),
 			// Clamped on the way in, not only on the way out: the dialog reads
 			// this to build its own ranges, so an out-of-range ceiling stored
 			// here would present the user a value the engine rejects.
@@ -244,6 +258,7 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				autoSave: s.autoSave,
 				reducedMotion: s.reducedMotion,
 				keepAwakeDuringRuns: s.keepAwakeDuringRuns,
+				systemNotifications: s.systemNotifications,
 				notifications: s.notifications,
 				loadTestCeilings: s.loadTestCeilings,
 			}),

@@ -40,6 +40,37 @@ interface HostResumedEvent {
 	durationMs: number;
 }
 
+/**
+ * Where a notification's click should land. Mirrors `NotifyTarget` in
+ * `electron/notify.ts`, which echoes it back untouched: main carries the
+ * target, the renderer is the only side that knows what it means.
+ */
+export type SystemNotificationTarget =
+	{ view: "run"; runId: string } | { view: "settings" } | { view: "app" };
+
+export interface SystemNotificationRequest {
+	/** Which event this is. Echoed on a click, for the renderer's own routing. */
+	kind: string;
+	title: string;
+	body: string;
+	target: SystemNotificationTarget;
+}
+
+/** Mirrors `NotifyOutcome` in `electron/notify.ts`. */
+export type SystemNotificationOutcome =
+	"shown" | "focused" | "no-window" | "unsupported" | "unavailable";
+
+export interface SystemNotificationAvailability {
+	available: boolean;
+	/** Why not, in the words the settings row prints. Null while available. */
+	reason: string | null;
+}
+
+export interface SystemNotificationActivation {
+	kind: string;
+	target: SystemNotificationTarget;
+}
+
 type UpdateStrategy = "silent" | "notify" | "disabled";
 
 interface UpdateAvailableInfo {
@@ -245,6 +276,46 @@ interface ElectronAPI {
 	 */
 	onHostSuspended: (callback: (event: HostSuspendedEvent) => void) => () => void;
 	onHostResumed: (callback: (event: HostResumedEvent) => void) => () => void;
+
+	/**
+	 * System notifications for the events that finish while the user is in
+	 * another application (issue #1358). Mirrors `electron/notify.ts`; the two
+	 * are separated only by the process boundary.
+	 *
+	 * `showNotification` resolves with what became of the request - `shown`,
+	 * `focused` (the window was in front, so the toast already said it),
+	 * `no-window`, `unsupported`, or `unavailable` (this build cannot show one,
+	 * see below). Renderer callers go through `@/services/notify`, which holds
+	 * the opt-in check and the one place that knows which events are relevant.
+	 *
+	 * `notificationAvailability` is what the settings row asks. Vayu ships
+	 * ad-hoc signed on macOS, and Electron 42+ refuses notifications from an
+	 * application without a code signature - as a `failed` event rather than a
+	 * throw, which is why the answer is only certain after the first attempt.
+	 */
+	showNotification: (request: SystemNotificationRequest) => Promise<SystemNotificationOutcome>;
+	notificationAvailability: () => Promise<SystemNotificationAvailability>;
+
+	/**
+	 * Post one because the user pressed the button in Settings, and answer with
+	 * what the OS did.
+	 *
+	 * The only path that ignores the focus check and the opt-in, both
+	 * deliberately: the user is looking at the panel when they press it, which
+	 * is the state every other notification is suppressed in, and a test is how
+	 * someone decides whether to turn the setting on. `unavailable` means the
+	 * system refused it - which on macOS is the answer that only arrives after
+	 * the attempt, and the reason this resolves late rather than immediately.
+	 */
+	sendTestNotification: () => Promise<SystemNotificationOutcome>;
+
+	/**
+	 * A notification was clicked. The window is already coming back to the
+	 * front; this says what it was about, so the renderer can open it.
+	 */
+	onNotificationActivated: (
+		callback: (event: SystemNotificationActivation) => void
+	) => () => void;
 
 	// Before quit flush handler
 	onBeforeQuit: (callback: () => void | Promise<void>) => () => void;

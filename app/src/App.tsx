@@ -27,6 +27,7 @@ import { useVariableCompletionProvider } from "./hooks/useVariableCompletionProv
 import { useScriptVariableCompletionProvider } from "./hooks/useScriptVariableCompletionProvider";
 import { useScriptTypeDefinitions } from "./hooks/useScriptTypeDefinitions";
 import { useMenuActions } from "./hooks/useMenuActions";
+import { useNotificationActivation } from "./hooks/useNotificationActivation";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
 import { useSaveStore } from "./stores/save-store";
@@ -83,6 +84,11 @@ function App() {
 
 	// Bridge native menu items (Preferences…/Settings) to in-app navigation
 	useMenuActions();
+
+	// A click on a system notification, which the main process has already
+	// answered by bringing the window back. Mounted here for the same reason
+	// the line above is: one listener, one tab per click (#1358).
+	useNotificationActivation();
 
 	// An agent writing over MCP mutates the engine from the main process, which
 	// no query can see. This is the channel that tells the cache to refetch.

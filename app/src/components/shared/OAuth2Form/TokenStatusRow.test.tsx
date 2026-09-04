@@ -21,12 +21,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { ApiError } from "@/services/http-client";
 import type { OAuth2Config } from "@/types";
 import TokenStatusRow from "./TokenStatusRow";
+import { NOTIFY_KINDS } from "@/services/notify";
 
 const fetchMutation = { mutate: vi.fn(), isPending: false };
 const clearMutation = { mutate: vi.fn(), isPending: false };
@@ -42,6 +43,20 @@ vi.mock("@/queries/oauth", () => ({
 vi.mock("@/stores", () => ({
 	useToastStore: (select: (state: { showToast: typeof showToast }) => unknown) =>
 		select({ showToast }),
+	// Read by `services/notify`, which this row calls on a completed sign-in.
+	useClientSettingsStore: { getState: () => ({ systemNotifications: false }) },
+}));
+
+// The loopback flow puts the user in their browser by design, so its success is
+// one they may not be looking at (#1358).
+const authorize = vi.fn();
+vi.mock("@/services/oauth/authorize", () => ({
+	runInteractiveAuthorization: (...args: unknown[]) => authorize(...args) as unknown,
+}));
+const { mockNotifyPost } = vi.hoisted(() => ({ mockNotifyPost: vi.fn() }));
+vi.mock("@/services/notify", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/services/notify")>()),
+	systemNotify: { post: mockNotifyPost, availability: vi.fn() },
 }));
 
 function config(overrides: Partial<OAuth2Config> = {}): OAuth2Config {
@@ -70,6 +85,8 @@ beforeEach(() => {
 	fetchMutation.mutate.mockReset();
 	clearMutation.mutate.mockReset();
 	showToast.mockReset();
+	authorize.mockReset();
+	mockNotifyPost.mockReset();
 	statusQuery.data = undefined;
 });
 
@@ -191,5 +208,45 @@ describe("TokenStatusRow with a complete config", () => {
 		fireEvent.click(getTokenButton());
 
 		expect(showToast).toHaveBeenCalledWith("Access Token URL must be an http(s) URL", "error");
+	});
+
+	it("tells the user their sign-in landed, since the browser had them", async () => {
+		authorize.mockResolvedValue(undefined);
+
+		renderRow(
+			config({
+				grantType: "authorization_code",
+				authorizationUrl: "https://idp.example.com/authorize",
+				accessTokenUrl: "https://idp.example.com/token",
+				clientId: "abc",
+			})
+		);
+		fireEvent.click(getTokenButton());
+
+		// Beside the toast, never instead of it: a user who stayed in Vayu sees
+		// the toast, and the notification is suppressed for them in main.
+		await waitFor(() => expect(showToast).toHaveBeenCalledWith("Authorized", "success"));
+		expect(mockNotifyPost).toHaveBeenCalledWith({
+			kind: NOTIFY_KINDS.signedIn,
+			title: "Signed in",
+			body: "Back to Vayu to continue.",
+		});
+	});
+
+	it("says nothing to the OS when the sign-in failed", async () => {
+		authorize.mockRejectedValue(new Error("state mismatch"));
+
+		renderRow(
+			config({
+				grantType: "authorization_code",
+				authorizationUrl: "https://idp.example.com/authorize",
+				accessTokenUrl: "https://idp.example.com/token",
+				clientId: "abc",
+			})
+		);
+		fireEvent.click(getTokenButton());
+
+		await waitFor(() => expect(showToast).toHaveBeenCalled());
+		expect(mockNotifyPost).not.toHaveBeenCalled();
 	});
 });

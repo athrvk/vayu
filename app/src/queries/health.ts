@@ -15,6 +15,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 import { useEngineStore } from "@/stores";
+import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { useEffect, useRef } from "react";
 import { TIMING } from "@/config/timing";
 
@@ -147,6 +148,10 @@ export function useHealthQuery() {
 			}
 		} else if (query.isError) {
 			sawDisconnect.current = true;
+			// Read before the status is written: the notification below is about
+			// the transition, and only the previous value says whether this poll
+			// is one.
+			const previousStatus = useEngineStore.getState().engineStatus;
 			// Read, not subscribed. A window opened while the query's last state is
 			// still a success - which is exactly what a restart does - would re-run
 			// this effect into the branch above and close the window it had just
@@ -167,6 +172,17 @@ export function useHealthQuery() {
 			const errorMessage =
 				query.error instanceof Error ? query.error.message : "Cannot connect to engine";
 			setEngineError(errorMessage);
+			// The transition, never each failed poll (#1358): a poll that fails is
+			// already on the fast cadence, so re-posting would put one notification
+			// on the user's screen every few hundred milliseconds. The Dock's dot
+			// says the same thing for a user who is looking.
+			if (previousStatus !== "unreachable") {
+				systemNotify.post({
+					kind: NOTIFY_KINDS.engineLost,
+					title: "Vayu's engine stopped responding",
+					body: errorMessage,
+				});
+			}
 		}
 	}, [
 		query.isSuccess,

@@ -29,6 +29,8 @@ const mockSetStreaming = vi.fn();
 const mockSetError = vi.fn();
 const mockStartRun = vi.fn();
 const mockAddSteps = vi.fn();
+/** The fold the store keeps beside the rows; the notification body reads it. */
+const stepCounts = { passed: 0, failed: 0, skipped: 0, errored: 0 };
 vi.mock("@/stores/scenario-run-store", () => ({
 	useScenarioRunStore: {
 		getState: () => ({
@@ -36,6 +38,7 @@ vi.mock("@/stores/scenario-run-store", () => ({
 			addSteps: mockAddSteps,
 			setStreaming: mockSetStreaming,
 			setError: mockSetError,
+			summary: { counts: stepCounts, iterationSteps: 0, dataBoundSteps: 0 },
 		}),
 	},
 }));
@@ -60,7 +63,15 @@ vi.mock("./wake-lock", () => ({
 	wakeLock: { hold: mockWakeLockHold, release: mockWakeLockRelease },
 	WAKE_LOCK_KEYS: { loadRun: "load-run", collectionRun: "collection-run" },
 }));
+// The system notification a terminal run posts (#1358), mocked at the service
+// boundary the way the wake lock is.
+const { mockNotifyPost } = vi.hoisted(() => ({ mockNotifyPost: vi.fn() }));
+vi.mock("./notify", async (importOriginal) => ({
+	...(await importOriginal<typeof import("./notify")>()),
+	systemNotify: { post: mockNotifyPost, availability: vi.fn() },
+}));
 
+import { NOTIFY_KINDS } from "./notify";
 import { scenarioRunService } from "./scenario-run-service";
 import { sseClient } from "./sse-client";
 import { apiService } from "./api";
@@ -325,6 +336,54 @@ describe("ScenarioRunService", () => {
 			failStream("engine gone");
 			// Pins the `wakeLock.release(...)` call in `handleError`.
 			expect(mockWakeLockRelease).toHaveBeenCalledWith(WAKE_LOCK_KEYS.collectionRun);
+		});
+	});
+
+	describe("system notifications (issue #1358)", () => {
+		afterEach(() => {
+			Object.assign(stepCounts, { passed: 0, failed: 0, skipped: 0, errored: 0 });
+		});
+
+		it("posts the run's outcome counts when the stream closes", async () => {
+			Object.assign(stepCounts, { passed: 41, failed: 2 });
+			scenarioRunService.startMonitoring("run_13");
+
+			await closeStream();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith({
+				kind: NOTIFY_KINDS.collectionRunFinished,
+				title: "Collection run finished",
+				body: "41 passed, 2 failed",
+				target: { view: "run", runId: "run_13" },
+			});
+		});
+
+		it("names errored and skipped steps only when there are some", async () => {
+			Object.assign(stepCounts, { passed: 3, failed: 0, errored: 1, skipped: 2 });
+			scenarioRunService.startMonitoring("run_14");
+
+			await closeStream();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ body: "3 passed, 0 failed, 1 errored, 2 skipped" })
+			);
+		});
+
+		it("posts once for a run that fails and then closes", async () => {
+			scenarioRunService.startMonitoring("run_15");
+
+			failStream("engine gone");
+			await closeStream();
+
+			// Pins the per-run latch: one run ending is one notification, and the
+			// one the user gets is the one that says what went wrong.
+			expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({
+					kind: NOTIFY_KINDS.collectionRunFailed,
+					body: "engine gone",
+				})
+			);
 		});
 	});
 });

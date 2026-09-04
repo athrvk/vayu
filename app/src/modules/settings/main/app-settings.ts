@@ -281,6 +281,14 @@ export const APP_SETTINGS = [
 
 	// Notifications
 	{
+		anchor: "system-notifications",
+		panel: "notifications",
+		label: "Notify through the system when Vayu is in the background",
+		searchText:
+			"Post an operating-system notification when a run finishes, the engine stops responding, an update is ready or a sign-in completes while Vayu is not the window in front.",
+		keywords: ["os", "desktop", "system", "background", "banner", "alert"],
+	},
+	{
 		anchor: "toast-position",
 		panel: "notifications",
 		label: "Position",
