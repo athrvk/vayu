@@ -256,6 +256,17 @@ one app instance may drive it:
   refuses to start an engine, and a restart already in flight is waited out
   rather than raced - otherwise a freshly spawned engine outlives the process
   that was supposed to kill it.
+- **Local services are window-scoped, and the close says so.** Everything the
+  Services drawer starts - webhook inboxes, mock servers, mock issuers - runs
+  inside the engine, so quitting stops all of it. On Windows and Linux closing
+  the last window quits; on macOS it hides the window and the app keeps serving
+  until Quit. Neither one takes a listening service silently: a close or quit
+  that would stop something names it - "Close Vayu and stop the 2 services it is
+  running?", with the inbox's port and the mock server's collection - and Cancel
+  leaves everything up. macOS's window-close asks nothing, having stopped
+  nothing. The one quit that never asks is a signal: `install.sh` replaces a
+  running AppImage that way, and a dialog would hold the upgrade open waiting for
+  an answer nobody is there to give (issue #1363).
 - **A taken port is a loud failure, not a silent one.** The engine binds 9876
   before it serves, so anything already holding the port makes it print
   `Could not bind 127.0.0.1:9876 - ...` to stderr and exit **1** rather than

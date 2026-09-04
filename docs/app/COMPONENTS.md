@@ -818,12 +818,22 @@ both activate it.
   a token comes back without the claim. Every refusal **names its bound in words**: a reddened field
   beside a greyed-out Start says something is wrong and never which field or why, and `aria-invalid`
   alone announces "invalid" with no correction. Mounted only while open, so the mount is the reset.
-- `useRunningServices.ts` - `useRunningServiceCount()`, shared by the drawer and the Dock. One place
-  because the three lists disagree on their own terms: a stopped inbox stays listed with
-  `running: false`, while a stopped issuer or mock server is gone from the engine's list entirely -
-  and because a **disconnected engine is running none of them**, which is the gate this hook holds
-  so that no caller renders a green count off a stale cache (issue #555). The mock-server list was
-  missing from the sum until issue #792, so a mock holding a port counted as nothing.
+- `useRunningServices.ts` - `useRunningServices()` and the count derived from it, shared by the
+  drawer, the Dock and the main process. One place because the three lists disagree on their own
+  terms: a stopped inbox stays listed with `running: false`, while a stopped issuer or mock server
+  is gone from the engine's list entirely - and because a **disconnected engine is running none of
+  them**, which is the gate this hook holds so that no caller renders a green count off a stale
+  cache (issue #555). The mock-server list was missing from the sum until issue #792, so a mock
+  holding a port counted as nothing. The count is now the list's length rather than a second sum
+  (issue #1363): the Dock saying 2 while the close dialog names 3 is a disagreement no test that
+  reads one of them can see. `useRunningServicesPublisher()`, mounted once in `App.tsx`, pushes that
+  list to the main process on every change.
+
+**Closing Vayu stops everything in this drawer, and says so first** (issue #1363). These services
+live in the engine and the engine goes down with the app, so a close - the X on Windows and Linux,
+Quit anywhere - that would stop one asks first, naming each: the inbox by its port, the mock server
+by the collection it serves. Cancel leaves them running. Closing the window on macOS asks nothing
+because it stops nothing: the app keeps serving with no window until Quit.
 - `failure-modes.ts` - the four `failureMode` labels, the engine's bounds, and the row's
   one-line summary. Shared so the badge, the live switch and the dialog cannot name a mode
   differently.

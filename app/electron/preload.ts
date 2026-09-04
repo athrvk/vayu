@@ -300,6 +300,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		value?: number | null;
 	}): void => ipcRenderer.send("runs:progress", update),
 
+	// What the engine is holding for this window - inboxes, mock servers, mock
+	// issuers (#1363). Sent on every change so the close that would stop them can
+	// name them without asking anything while the user waits; the shape mirrors
+	// `RunningService` in `electron/service-stop-guard.ts`, inlined because this
+	// file is a CommonJS script and must not grow imports.
+	setRunningServices: (
+		services: Array<{
+			kind: "inbox" | "mock-server" | "issuer";
+			name: string | null;
+			port: number;
+		}>
+	): void => ipcRenderer.send("services:running", services),
+
 	// System notifications for what finishes while the user is elsewhere
 	// (#1358). The renderer sends what happened; main decides whether to post
 	// it - the window's focus and the platform's support are its to answer -
