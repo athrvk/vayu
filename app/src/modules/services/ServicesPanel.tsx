@@ -59,13 +59,15 @@ import {
 	useStopMockServerMutation,
 	useUpdateMockIssuerMutation,
 } from "@/queries";
-import { useTabsStore, useToastStore } from "@/stores";
+import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TIMING } from "@/config/timing";
 import { cn } from "@/lib/utils";
 import type { Inbox, MockIssuer, MockIssuerFailureMode, MockServer } from "@/types";
 import { DeleteInboxDialog } from "@/modules/inbox/DeleteInboxDialog";
 import { useInboxDeletion } from "@/modules/inbox/useInboxDeletion";
+import type { InboxWatchSummary } from "@/services/inbox-watch-service";
+import { useInboxWatchSummary } from "./useInboxWatchSummary";
 import { FAILURE_MODE_LABELS, MAX_SLOW_MS, failureModeSummary } from "./failure-modes";
 import { NewIssuerDialog } from "./NewIssuerDialog";
 
@@ -180,6 +182,47 @@ function ServiceGroup({ title, action, children }: ServiceGroupProps) {
 /** `px-3 py-2 text-left`: a drawer group's line, not a centred pane. */
 const GROUP_NOTE_CLASS = "px-3 py-2 text-left text-xs";
 
+/**
+ * Whether this inbox's `Notify` toggle is on and not currently in effect.
+ *
+ * Only for an inbox that promised something: the toggle off is not a broken
+ * promise, and a stopped inbox captures nothing to notify about (issue #1412).
+ *
+ * The two causes the service reports - a stream that gave up, and one the cap
+ * left out - read as one state here. They differ in what will fix them, which
+ * is a paragraph (`docs/app/COMPONENTS.md`) rather than a chip: a row is 32px
+ * and the cause spelled out took the whole of it, leaving the URL beside it
+ * truncated to two characters.
+ */
+function isNotNotifying(inbox: Inbox, notifies: boolean, summary: InboxWatchSummary): boolean {
+	if (!notifies || !inbox.running) return false;
+	return summary.unwatched.includes(inbox.inboxId) || summary.stalled.includes(inbox.inboxId);
+}
+
+/**
+ * The standing note that an inbox's captures are not being heard (issue #1412).
+ *
+ * Here rather than on the inbox tab because this drawer is on screen from any
+ * tab, which is the whole difficulty: the toggle exists to speak while the user
+ * is elsewhere, so the surface that says it is not speaking cannot be the one
+ * they have to open to see it.
+ */
+function NotNotifyingBadge() {
+	return (
+		// `variant="chip"`, per the Badge note in `app/CLAUDE.md`: the other
+		// variants pair `bg-x` with a `hover:bg-x/80` that tailwind-merge does not
+		// replace, so this fill would win at rest and the variant's under the
+		// pointer. `shrink-0 whitespace-nowrap` because the row is a fixed 32px
+		// and a badge allowed to wrap takes a second line and spills out of it.
+		<Badge
+			variant="chip"
+			className="shrink-0 whitespace-nowrap bg-status-warning-fill text-primary-foreground"
+		>
+			Not notifying
+		</Badge>
+	);
+}
+
 function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const openTab = useTabsStore((s) => s.openTab);
 	const showToast = useToastStore((s) => s.showToast);
@@ -187,6 +230,9 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const stopInbox = useStopInboxMutation();
 	// No capture list on this surface, so the record's own count is all it knows.
 	const deletion = useInboxDeletion(inbox);
+	const notifies = useInboxNotifyStore((s) => s.enabled[inbox.inboxId] === true);
+	const watchSummary = useInboxWatchSummary();
+	const notNotifying = isNotNotifying(inbox, notifies, watchSummary);
 
 	return (
 		<>
@@ -254,6 +300,7 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 					{inbox.url}
 				</TruncatedText>
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
+				{notNotifying && <NotNotifyingBadge />}
 				{!inbox.running && <span className="text-xs text-muted-foreground">Stopped</span>}
 			</ServiceRow>
 			<DeleteInboxDialog deletion={deletion} />

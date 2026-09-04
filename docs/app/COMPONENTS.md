@@ -710,7 +710,27 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   close is indistinguishable from a drop, so before spending a retry it refetches the inbox list and
   reads the record: gone or `running: false` means no reconnect, and the surface reflects the stop
   inside the close instead of on the next `SERVICES_POLL_INTERVAL_MS` poll. A refetch that failed
-  leaves the last good list, which still says running - a blip must still retry.
+  leaves the last good list, which still says running - a blip must still retry. **What running out
+  of retries costs depends on who is holding the stream** (issue #1403): a stream a view has retained
+  waits for the Resume that view offers, and one held only by the standing want - which no surface
+  renders, so no surface can offer anything - is handed one fresh budget
+  `INBOX_LIVE_BACKGROUND_RESUME_MS` (60s) later, from a timer the service arms as it gives up, and
+  again a minute after that if the new ladder is spent too. The bound is untouched: each resume buys
+  one ladder, so a background stream costs at most six attempts a minute against an engine that keeps
+  refusing, where a burst spends six in about fifteen seconds. The timer is the service's own rather
+  than the watcher's list read, because that read stops happening in exactly the case this is for -
+  `refetchIntervalInBackground` is unset (`lib/query-client.ts`), so the inbox poll pauses in a hidden
+  window - and a minute is also the bucket Chromium aligns a long-hidden window's timers to, so a
+  shorter cadence would not fire sooner there. The wanted set the resume runs against is therefore
+  the last one the engine gave: an inbox stopped elsewhere meanwhile costs one refused connection,
+  after which the listener-is-gone check above ends the stream without spending the budget. **Above
+  the cap there is no such recovery**: the ninth notify-enabled inbox is left with no stream at all
+  until a slot frees up, so it is not waiting for anything. Both cases - a stream that gave up, and
+  an inbox the cap left out - are what `getSummary()` / `subscribeSummary()` report (issue #1412),
+  the one accessor that answers for every inbox at once rather than for the one a view is showing.
+  `stalled` there is held until a connection actually opens rather than cleared when the resume
+  fires, so a stream that keeps failing reads as one standing state instead of blinking once a
+  minute.
 - `hooks/useInboxWatchers.ts` (mounted once in `App.tsx`, beside `useHostSleepRecorder`) - the
   standing answer to which inboxes the service should hold, recomputed as the engine's list and the
   toggles change, plus the pruning of notify preferences whose inbox the engine no longer lists. It
@@ -786,6 +806,17 @@ both activate it.
   The inbox group's affordance is **New inbox** (Plus), matching **New issuer**: it always mints a
   new listener, and as a Play labelled "Start inbox" beside a stopped row it read as "restart that
   one", which nothing here does (issue #553).
+
+  **An inbox row also says when its `Notify` toggle is not in effect** - a *Not notifying* chip
+  (issue #1412), from `useInboxWatchSummary` over the watch service's `getSummary`. Two causes, one
+  chip: a stream that gave up and has not opened since, and an inbox `MAX_INBOX_WATCH_STREAMS` left
+  without a stream at all. They differ in what will fix them - the first is retrying on its own and
+  needs nothing, the second will not change until an inbox stops or a toggle goes off - and that
+  difference is this paragraph rather than a longer chip: the row is 32px, and the cause spelled out
+  filled it and truncated the URL beside it to two characters. It is **this** surface rather than the
+  inbox tab because the toggle exists to speak while the user is somewhere else: a note only the
+  inbox tab renders is a note they have to go looking for. It appears for neither an inbox whose
+  toggle is off (there is no promise to break) nor one that is stopped (it captures nothing).
 
   **Mock servers (#481 phase 2) have no start affordance here, and that is not an omission**: a
   mock needs a collection to serve, and this drawer has none selected. The collection header owns

@@ -942,14 +942,19 @@ opened it, and it does not act on this flag - only the desktop app does.
 }
 ```
 
-Three readers. Two at the moment a capture arrives:
+Four readers. Two at the moment a capture arrives:
 `modules/inbox/capture-notifier.ts` gates on it (the second gate;
 `services/notify.ts` reads the global opt-in), and the header toggle in
 `modules/inbox/index.tsx` writes it. The third is `hooks/useInboxWatchers.ts`,
 which reads the whole map continuously to decide which inboxes
 `services/inbox-watch-service.ts` should hold a live stream for: the toggle
 promises a notification while Vayu is in the background, and the inbox tab is
-mounted only while it is the active tab (issue #1400).
+mounted only while it is the active tab (issue #1400). The fourth is the
+Services drawer's inbox row (`modules/services/ServicesPanel.tsx`), which reads
+one inbox's entry to decide whether to say the promise is not currently being
+kept - a stream that gave up, or one the stream cap left out (issue #1412). It
+reads rather than writes, and an inbox whose toggle is off gets no note, because
+there is nothing to say about a promise that was never made.
 
 **Persisted**, and pruned: an inbox id belongs to the engine process that minted
 it, so `retainInboxes` drops every id a successful `GET /inbox` no longer names,
