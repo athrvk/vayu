@@ -18,7 +18,7 @@
  * loud. A monaco upgrade that changes these signatures does not - so keep this
  * to what the test calls, and nothing wider.
  */
-declare module "monaco-editor/esm/vs/language/json/jsonWorker.js" {
+declare module "monaco-editor/languages/features/json/jsonWorker.js" {
 	interface MirrorModel {
 		uri: { toString: () => string };
 		getValue: () => string;

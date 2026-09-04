@@ -30,10 +30,12 @@
  * Six things are guarded here, each catching a different way the
  * composition could regress:
  *
- * 1. The two `as unknown as` casts in `monaco-setup.ts` are honest - the
- *    modules they cast really export, at runtime, what the cast promises and
- *    what the call sites (`variables-schema.ts`,
- *    `useScriptTypeDefinitions.ts`) read.
+ * 1. The two language-service modules `monaco-setup.ts` assigns into the
+ *    composed namespace really export, at runtime, what the call sites
+ *    (`variables-schema.ts`, `useScriptTypeDefinitions.ts`) read. Since #1342
+ *    the two sides also type-check against each other, so this case is what
+ *    remains: the type says which module, only a runtime read says the
+ *    members are there.
  * 2. Every language id the app can put in an editor model has a grammar
  *    imported. This is the mirror of this codebase's most repeated defect - a
  *    field written and never read: here it would be a language id asked for
@@ -44,9 +46,13 @@
  *    answers #1147's "highlighting verified working" criterion: 2 proves the
  *    file asks for a grammar, only this proves one arrived, since the failure
  *    mode is a silent fall back to plain text rather than a throw.
- * 4. The three things that pull `css.worker` / `html.worker` back in - the
- *    bare package root, and the CSS and HTML language *services* (not their
- *    Monarch grammars, which stay) - are absent from the file.
+ * 4. The four ways back to the barrel are absent from the file: the bare
+ *    package root, the CSS and HTML language *services* (not their Monarch
+ *    grammars, which stay), and - since 0.56 gave every register directory an
+ *    `all` sibling (#1342) - either `register.all` under `languages/`. The
+ *    first three pull `css.worker` / `html.worker`; the grammars one pulls ~85
+ *    Monarch grammars and no worker at all, which is why it needs its own
+ *    assertion rather than being caught by 5.
  * 5. The emitted worker set, from an actual build, is exactly what
  *    `getWorker` in `monaco-setup.ts` constructs: editor, json, ts.
  * 6. The app's Monaco theme is defined during that composition (#1321).
@@ -54,8 +60,7 @@
  *    falls back to `vs` for a name it does not know and never revisits it.
  */
 
-import { readFileSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, mkdtempSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { build } from "vite";
@@ -85,7 +90,7 @@ function stripComments(source: string): string {
 
 const monacoSetupCode = stripComments(monacoSetupSource);
 
-describe("the two casts in monaco-setup.ts are honest at runtime", () => {
+describe("the two language services monaco-setup.ts composes are honest at runtime", () => {
 	beforeAll(() => {
 		// jsdom has no execCommand-based clipboard API; a contribution pulled in
 		// transitively by both language modules below probes it at module-load
@@ -97,12 +102,14 @@ describe("the two casts in monaco-setup.ts are honest at runtime", () => {
 	});
 
 	/*
-	 * monaco.contribution.js pulls in a large chunk of monaco's module graph on
+	 * The json register entry pulls in a large chunk of monaco's module graph on
 	 * first import, which vitest has to transform cold. It is the only cost in
 	 * this case - the four assertions below it are property reads.
 	 *
 	 * 6.85s measured on an idle Linux container (`vitest --reporter=verbose`,
-	 * this case alone). The budget was 20s, call it 3x, and it was not enough:
+	 * this case alone); 6.54s re-measured the same way on 0.56's graph, which
+	 * is what this case imports since #1342. The budget was 20s, call it 3x,
+	 * and it was not enough:
 	 * on `windows-latest` shard 1 it timed out twice in a row at 20s (#1219),
 	 * where this file shares two cores with the rest of the shard *and* with
 	 * the real `vite build` the last case in this file runs. Windows is the
@@ -118,17 +125,10 @@ describe("the two casts in monaco-setup.ts are honest at runtime", () => {
 	 * anything (see the render-heavy note in `app/CLAUDE.md`).
 	 */
 	it(
-		"json/monaco.contribution.js exports what the jsonDefaults cast promises",
+		"the json register entry exports what monaco.json's call sites read",
 		{ timeout: 45_000 },
 		async () => {
-			const jsonLanguage =
-				await import("monaco-editor/esm/vs/language/json/monaco.contribution.js");
-			// Declared as `export {}` (see monaco-setup.ts's own comment on the same
-			// cast), so TS infers no overlap with the runtime shape being asserted
-			// here - `unknown` first is the same escape monaco-setup.ts takes.
-			const { jsonDefaults } = jsonLanguage as unknown as {
-				jsonDefaults: { setDiagnosticsOptions: unknown; diagnosticsOptions: unknown };
-			};
+			const { jsonDefaults } = await import("monaco-editor/languages/features/json/register");
 			// variables-schema.ts's applyVariablesSchema reads exactly these two
 			// members off `monaco.json.jsonDefaults`.
 			expect(typeof jsonDefaults.setDiagnosticsOptions).toBe("function");
@@ -139,25 +139,14 @@ describe("the two casts in monaco-setup.ts are honest at runtime", () => {
 	// Still 20s, and deliberately not raised with its neighbour: this one runs
 	// warm. The json case above has already pulled monaco's shared editor graph
 	// through the transform, so what is left here is the typescript language
-	// module alone - 18ms in the same measured run. If these two are ever
-	// reordered or split, this is the number that has to move.
+	// module alone - 18ms in the same measured run, 9ms re-measured on 0.56.
+	// If these two are ever reordered or split, this is the number that has to
+	// move.
 	it(
-		"typescript/monaco.contribution.js exports what the typescript cast promises",
+		"the typescript register entry exports what monaco.typescript's call sites read",
 		{ timeout: 20_000 },
 		async () => {
-			const typescriptLanguage =
-				await import("monaco-editor/esm/vs/language/typescript/monaco.contribution.js");
-			// Same `export {}` stub mismatch as the json case above.
-			const mod = typescriptLanguage as unknown as {
-				javascriptDefaults: {
-					setCompilerOptions: unknown;
-					getCompilerOptions: unknown;
-					setDiagnosticsOptions: unknown;
-					setModeConfiguration: unknown;
-					addExtraLib: unknown;
-				};
-				ScriptTarget: Record<string, unknown>;
-			};
+			const mod = await import("monaco-editor/languages/features/typescript/register");
 			// useScriptTypeDefinitions.ts reads exactly these off
 			// `monaco.typescript.javascriptDefaults`, plus `ScriptTarget.ESNext` for
 			// the compiler target.
@@ -225,9 +214,9 @@ const MONACO_LANGUAGE_IDS = [...new Set([...languageMapValues, ...EXTRA_LANGUAGE
 );
 
 function hasGrammarImport(id: string): boolean {
-	const basicLanguage = `monaco-editor/esm/vs/basic-languages/${id}/${id}.contribution.js`;
-	const languageService = `monaco-editor/esm/vs/language/${id}/monaco.contribution.js`;
-	return monacoSetupCode.includes(basicLanguage) || monacoSetupCode.includes(languageService);
+	const monarchGrammar = `monaco-editor/languages/definitions/${id}/register`;
+	const languageService = `monaco-editor/languages/features/${id}/register`;
+	return monacoSetupCode.includes(monarchGrammar) || monacoSetupCode.includes(languageService);
 }
 
 describe("every language id the viewer or an editor can open has a grammar imported", () => {
@@ -290,7 +279,9 @@ describe("the composed entry registers those languages and really tokenizes them
 
 	// Loads the app's real setup module, which transforms monaco's editor core
 	// plus the grammars cold. Measured 8-11s locally; 40s is roughly 4x that for
-	// a slower or shared-core CI runner.
+	// a slower or shared-core CI runner. Re-measured at 3.3s on 0.56's graph,
+	// warm behind the json case above - well inside the same budget, so the
+	// number stands rather than being retuned to one container's figure.
 	it("colorizes each into more than one token class", { timeout: 40_000 }, async () => {
 		const { monaco } = await import("./monaco-setup");
 
@@ -319,23 +310,43 @@ describe("the composed entry registers those languages and really tokenizes them
 
 describe("the barrel and the two worker-pulling language services stay out", () => {
 	it("never imports the bare monaco-editor package root", () => {
-		// The bare root is `editor.main`: every Monarch grammar, all four
+		// The bare root is the full barrel: every Monarch grammar, all four
 		// language services (css and html included) and an LSP client -
 		// reintroducing it undoes the whole point of composing the entry by
 		// hand. Matched as a whole specifier, not a substring, because every
-		// `monaco-editor/esm/...` subpath import this file legitimately has
+		// `monaco-editor/...` subpath import this file legitimately has
 		// contains the string "monaco-editor" too.
 		expect(monacoSetupCode).not.toMatch(/\bfrom\s+["']monaco-editor["']/);
 		expect(monacoSetupCode).not.toMatch(/\bimport\s+["']monaco-editor["']/);
 	});
 
 	it("never imports the css or html language service (their grammars are fine)", () => {
-		// These two - not the `basic-languages/css` and `basic-languages/html`
-		// Monarch grammars, which stay imported for syntax highlighting - are
-		// what call `new Worker(new URL("css.worker.js", import.meta.url))` /
-		// `html.worker.js` inside monaco's own `workerManager`.
-		expect(monacoSetupCode).not.toContain("monaco-editor/esm/vs/language/css/");
-		expect(monacoSetupCode).not.toContain("monaco-editor/esm/vs/language/html/");
+		// These two - not the `languages/definitions/css` and
+		// `languages/definitions/html` Monarch grammars, which stay imported for
+		// syntax highlighting - are what call
+		// `new Worker(new URL("css.worker.js", import.meta.url))` /
+		// `html.worker.js` inside monaco's own `workerManager`. Under 0.56 the
+		// two sit one path segment apart (`features` vs `definitions`), where
+		// 0.55 spelled them `language/` and `basic-languages/`, so the pair being
+		// asserted here is easier to confuse than it used to be (#1342).
+		expect(monacoSetupCode).not.toContain("monaco-editor/languages/features/css/");
+		expect(monacoSetupCode).not.toContain("monaco-editor/languages/features/html/");
+	});
+
+	it("never takes a languages register.all in place of the six grammars", () => {
+		// 0.56 gives every register directory an `all` sibling (#1342).
+		// `features/register.all` is the editor core and is imported on purpose;
+		// the two under `languages/` are the barrel by another name -
+		// `languages/features/register.all` is all four services, which the
+		// worker-set build below would catch, and `languages/definitions/
+		// register.all` is all ~85 Monarch grammars, which emits no worker and so
+		// is caught nowhere else. One `.all` away from the composition being
+		// undone in silence is exactly the regression #1147 exists to prevent.
+		expect(monacoSetupCode).not.toContain("monaco-editor/languages/features/register.all");
+		expect(monacoSetupCode).not.toContain("monaco-editor/languages/definitions/register.all");
+		// The one that must stay: without it the editor mounts with no find
+		// widget, folding, suggest or hover.
+		expect(monacoSetupCode).toContain("monaco-editor/features/register.all");
 	});
 });
 
@@ -371,46 +382,54 @@ describe("the emitted worker set, from a real build", () => {
 
 	// Measured 5.6-7.4s locally for this exact fixture (13 specifiers, ~1055
 	// modules transformed). 30s is roughly 4x the upper end, for a slower or
-	// shared-core CI runner.
+	// shared-core CI runner. Re-measured on 0.56 (#1342): still 13 specifiers,
+	// 1084 modules, 6.7s - inside the range the budget was set from, so the
+	// budget is unchanged.
 	it("emits exactly editor/json/ts workers, never css or html", { timeout: 30_000 }, async () => {
 		// Guards everything below against a fixture that had no imports to
 		// build, which would otherwise pass this test by building nothing.
 		expect(specifiers.length).toBeGreaterThan(0);
 
-		const root = mkdtempSync(path.join(tmpdir(), "vayu-monaco-workers-"));
-		const entry = path.join(root, "entry.ts");
-		writeFileSync(entry, buildFixtureEntry(specifiers));
-		const outDir = path.join(root, "out");
+		// Inside the app, not in `tmpdir()`. This used to build from a temp
+		// directory with `monaco-editor` aliased at `app/node_modules/monaco-editor`,
+		// which worked only while the package's subpaths were literal file paths.
+		// 0.56 publishes an `exports` map (`"./*": "./esm/vs/*.js"`), so an alias
+		// onto the package directory resolves `monaco-editor/editor` to a file that
+		// does not exist and the fixture fails to build (#1342). Resolving
+		// `monaco-editor` the ordinary way, by node_modules lookup from a directory
+		// under `app/`, is also the higher-fidelity fixture: it is exactly how the
+		// real build reaches the package.
+		const root = mkdtempSync(path.join(APP_ROOT, ".monaco-worker-fixture-"));
+		try {
+			const entry = path.join(root, "entry.ts");
+			writeFileSync(entry, buildFixtureEntry(specifiers));
+			const outDir = path.join(root, "out");
 
-		// No app plugins, deliberately - same reason as fonts-woff2-only.test.ts:
-		// this proves what Vite's OWN worker plugin does with these specifiers,
-		// not what the app's larger pipeline happens to do to them today. The
-		// fixture lives outside the app, so `monaco-editor` is aliased straight
-		// at the app's own installed copy rather than copied around.
-		await build({
-			root,
-			logLevel: "silent",
-			resolve: {
-				alias: [
-					{
-						find: "monaco-editor",
-						replacement: path.join(APP_ROOT, "node_modules/monaco-editor"),
-					},
-				],
-			},
-			build: { outDir, rolldownOptions: { input: entry } },
-		});
+			// No app plugins, deliberately - same reason as fonts-woff2-only.test.ts:
+			// this proves what Vite's OWN worker plugin does with these specifiers,
+			// not what the app's larger pipeline happens to do to them today.
+			await build({
+				root,
+				logLevel: "silent",
+				build: { outDir, rolldownOptions: { input: entry } },
+			});
 
-		const assets = path.join(outDir, "assets");
-		const files = readdirSync(assets);
-		expect(files.length).toBeGreaterThan(0);
+			const assets = path.join(outDir, "assets");
+			const files = readdirSync(assets);
+			expect(files.length).toBeGreaterThan(0);
 
-		const workerFiles = files.filter((f) => f.includes(".worker"));
-		const workerStems = new Set(workerFiles.map((f) => f.split(".worker")[0]));
+			const workerFiles = files.filter((f) => f.includes(".worker"));
+			const workerStems = new Set(workerFiles.map((f) => f.split(".worker")[0]));
 
-		expect(workerFiles.some((f) => f.startsWith("css.worker"))).toBe(false);
-		expect(workerFiles.some((f) => f.startsWith("html.worker"))).toBe(false);
-		expect(workerStems).toEqual(new Set(["editor", "json", "ts"]));
+			expect(workerFiles.some((f) => f.startsWith("css.worker"))).toBe(false);
+			expect(workerFiles.some((f) => f.startsWith("html.worker"))).toBe(false);
+			expect(workerStems).toEqual(new Set(["editor", "json", "ts"]));
+		} finally {
+			// The fixture sits inside `app/`, so leaving it behind on a failure
+			// would put a stray build tree in the tree every other source scan
+			// walks.
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -426,7 +445,8 @@ describe("the composed entry registers the app's theme", () => {
 	 * There is no public way to ask Monaco which themes it knows (`defineTheme`
 	 * validates a *base* against the built-ins only, so a probe theme cannot ask
 	 * either), so the call itself is what is observed: `monaco-setup` spreads
-	 * `editor.api`'s own `editor` namespace into what it exports, so a spy
+	 * the `editor` entry point's own `editor` namespace into what it exports,
+	 * and both sides reach the same module instance through it, so a spy
 	 * installed on that namespace before the module is evaluated sees the call
 	 * it makes. The module registry is reset first because an earlier case in
 	 * this file has already imported the setup module, and a cached module
@@ -434,7 +454,7 @@ describe("the composed entry registers the app's theme", () => {
 	 */
 	it("defines it while composing, before any editor exists", { timeout: 40_000 }, async () => {
 		vi.resetModules();
-		const editorApi = await import("monaco-editor/esm/vs/editor/editor.api.js");
+		const editorApi = await import("monaco-editor/editor");
 		const defineTheme = vi.spyOn(editorApi.editor, "defineTheme");
 
 		await import("./monaco-setup");

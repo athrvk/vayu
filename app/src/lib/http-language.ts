@@ -11,7 +11,7 @@
  * The Raw tab has always passed `language="http"` to its editor, and there has
  * never been an `http` language to receive it. Monaco ships ~90 basic languages
  * and that is not one of them - checked against
- * `monaco-editor/esm/vs/basic-languages/`, which has `html`, `hcl` and
+ * `monaco-editor/languages/definitions/`, which has `html`, `hcl` and
  * `handlebars` but nothing HTTP. Monaco falls back to plain text for an unknown
  * id, so the one tab whose entire job is reading a protocol exchange rendered as
  * undifferentiated grey. The prop looked right and did nothing.
