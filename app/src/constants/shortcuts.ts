@@ -69,6 +69,25 @@ export const TOGGLE_CONTEXT_BAR_CHORD: Chord = {
 /** Open Settings, the platform convention for a preferences window. */
 export const SETTINGS_CHORD: Chord = { mod: true, key: ",", label: "Open settings" };
 
+/**
+ * Open the application menu - the keyboard half of the title-bar icon (#1361).
+ *
+ * F10 is what a Windows or Linux menu bar answers to, and the window here draws
+ * none: it is frameless, so the menu the main process installed is reachable
+ * only through the title bar. Alt on its own opens the same menu, the way it
+ * does natively, but it is not a chord - see `lib/alt-tap.ts` for why a
+ * modifier with no key of its own cannot be one.
+ *
+ * The label names the platforms because the binding is theirs: macOS keeps its
+ * menu bar and registers nothing, and a row that read "Application menu" there
+ * would advertise a key that does nothing. No modifier, so `AppIcon`'s handler
+ * matches it the way `Shell` matches F6: a function key no text field consumes.
+ */
+export const APP_MENU_CHORD: Chord = {
+	key: "F10",
+	label: "Application menu (Windows and Linux)",
+};
+
 /** Create a request. ⌘N is what every app that makes things binds. */
 export const NEW_REQUEST_CHORD: Chord = { mod: true, key: "N", label: "New request" };
 
@@ -309,6 +328,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 			TOGGLE_DRAWER_CHORD,
 			TOGGLE_CONTEXT_BAR_CHORD,
 			SETTINGS_CHORD,
+			APP_MENU_CHORD,
 		],
 	},
 	{

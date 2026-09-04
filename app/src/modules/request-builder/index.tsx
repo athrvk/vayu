@@ -171,8 +171,13 @@ export default function RequestBuilder() {
 			formData: toKeyValueItems(formFields),
 			urlEncoded: toKeyValueItems(urlEncodedFields),
 			auth: fetchedRequest.auth,
-			preRequestScript: fetchedRequest.preRequestScript,
-			testScript: fetchedRequest.postRequestScript,
+			// `?? ""` rather than the bare field: these are optional on the
+			// wire type, and spreading an explicit `undefined` over
+			// `createDefaultRequestState()` would replace the `""` default with
+			// it. The save payload below sends both verbatim, so a state that
+			// held `undefined` would drop the key and lose a clear.
+			preRequestScript: fetchedRequest.preRequestScript ?? "",
+			testScript: fetchedRequest.postRequestScript ?? "",
 			followRedirects: fetchedRequest.followRedirects,
 			maxRedirects: fetchedRequest.maxRedirects,
 			httpVersion: fetchedRequest.httpVersion,
@@ -524,8 +529,22 @@ export default function RequestBuilder() {
 				body: bodyPayload,
 				bodyType: bodyPayload.mode,
 				auth: authPayload,
-				preRequestScript: request.preRequestScript || undefined,
-				postRequestScript: request.testScript || undefined,
+				/*
+				 * Both scripts are sent as they are, empty string included.
+				 *
+				 * They used to be `|| undefined`, the only two fields in this
+				 * payload that were. `undefined` serialises the key out of the
+				 * body, and an absent key on a `PUT` means "leave the stored
+				 * value alone" (`apply_string_field` in the engine's routes) -
+				 * so deleting a whole script saved nothing while the Dock
+				 * reported "Saved", and the old script came back on the next
+				 * open. `""` is a value the engine stores, which is what
+				 * clearing a script means. Both fields are always strings here:
+				 * `createDefaultRequestState` seeds them `""` and the memo above
+				 * keeps them strings.
+				 */
+				preRequestScript: request.preRequestScript,
+				postRequestScript: request.testScript,
 				followRedirects: request.followRedirects,
 				maxRedirects: request.maxRedirects,
 				httpVersion: request.httpVersion,

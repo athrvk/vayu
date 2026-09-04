@@ -135,6 +135,12 @@ interface ElectronAPI {
 	windowMinimize: () => void;
 	/** Windows only: opens the app-icon system menu at the given viewport point. */
 	windowSystemMenu: (position?: { x: number; y: number }) => void;
+	/**
+	 * Windows and Linux: opens the application menu (File, Edit, View, Window,
+	 * Help) at the given viewport point. A no-op on macOS, where the menu bar
+	 * draws it already.
+	 */
+	windowAppMenu: (position?: { x: number; y: number }) => void;
 	windowMaximize: () => void;
 	windowClose: () => void;
 	windowIsMaximized: () => Promise<boolean>;

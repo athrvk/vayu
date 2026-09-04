@@ -22,9 +22,11 @@
  * macOS: traffic lights inset (~104px), no HTML controls
  * Windows: native overlay handles controls - no HTML buttons
  * Linux: custom HTML min/max/close buttons
+ * Windows and Linux: the app icon opens the application menu, which a frameless
+ * window draws no bar for (#1361)
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	Minus,
 	X,
@@ -45,11 +47,18 @@ import {
 	DropdownMenuItem,
 	TooltipIconButton,
 } from "@/components/ui";
-import { GO_BACK_CHORD, GO_FORWARD_CHORD } from "@/constants/shortcuts";
+import {
+	APP_MENU_CHORD,
+	GO_BACK_CHORD,
+	GO_FORWARD_CHORD,
+	matchesChord,
+} from "@/constants/shortcuts";
 import { formatChord } from "@/lib/platform";
 import { navigateHistory } from "@/lib/navigate-history";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
+import { createAltTapWatcher } from "@/lib/alt-tap";
+import { isModalOpen } from "@/lib/modal";
 import { CommandSearchBar } from "./CommandSearchBar";
 import { regionProps } from "./region-focus";
 import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
@@ -58,6 +67,8 @@ const isElectron = !!window.electronAPI;
 const isMac = window.electronAPI?.platform === "darwin";
 const isWindows = window.electronAPI?.platform === "win32";
 const isLinux = isElectron && !isMac && !isWindows;
+/** The platforms whose frameless window draws no menu bar of its own (#1361). */
+const hasMenuButton = isWindows || isLinux;
 
 function WindowControls() {
 	const [isMaximized, setIsMaximized] = useState(false);
@@ -103,83 +114,134 @@ function WindowControls() {
 }
 
 /**
- * The app icon, which on Windows is the system-menu control.
+ * The app icon: the application menu's only surface on Windows and Linux, and
+ * the Windows system-menu control besides.
  *
- * Windows convention is that the title-bar icon opens the system menu on left
+ * The window is frameless, and a frameless window draws no menu bar on either
+ * platform - so File, Edit, View, Window and Help existed there as accelerators
+ * and nothing else, and the items that carry none (Help > Documentation, About
+ * Vayu, Check for Updates) could be reached by no mouse at all (#1361). Left
+ * click opens the menu the main process already installed; nothing is rebuilt
+ * here, and the renderer never learns what is in it.
+ *
+ * Windows convention is that the title-bar icon opens the *system* menu on left
  * click, on right click, and on Alt+Space. Vayu had the right-click half for
  * free: a `-webkit-app-region: drag` area is treated as a non-client frame, and
  * Windows pops the real menu on it. Left click could not be added on top,
- * because a draggable area ignores every pointer event.
- *
- * So on Windows the icon leaves the drag region and both buttons are handled
- * here, against a menu built in the main process. Elsewhere it stays a plain
- * drag region - macOS and Linux have no such convention, and giving up the drag
- * area there would cost something and buy nothing.
+ * because a draggable area ignores every pointer event. So on Windows the icon
+ * leaves the drag region, right click keeps the system menu, and left click -
+ * which the platform never had here - is the application menu.
  *
  * Losing 44px of drag surface on Windows is not a regression: a real Win32
  * title-bar icon is HTSYSMENU, which does not drag the window either.
  */
 function AppIcon() {
-	// Typed on the currentTarget rather than on the event, because the keyboard
-	// path below opens the same menu from the same anchor and a `MouseEvent`
-	// parameter would have forced a second copy of the two lines that matter.
-	const openSystemMenu = (e: React.SyntheticEvent<HTMLElement>) => {
-		e.preventDefault();
+	// The keyboard paths open the menu from the same anchor as the pointer, and
+	// F10 has no `currentTarget` to read it from, so the element answers rather
+	// than the event.
+	const anchor = useRef<HTMLDivElement>(null);
+
+	const openAppMenu = useCallback(() => {
 		// Anchored to the icon's bottom-left, so the menu drops from the control
-		// rather than from the pointer - which is what the OS menu does.
-		const r = e.currentTarget.getBoundingClientRect();
-		window.electronAPI?.windowSystemMenu({ x: r.left, y: r.bottom });
-	};
+		// rather than from the pointer - which is what a menu bar does.
+		const r = anchor.current?.getBoundingClientRect();
+		if (!r) return;
+		window.electronAPI?.windowAppMenu({ x: r.left, y: r.bottom });
+	}, []);
+
+	useEffect(() => {
+		if (!hasMenuButton) return;
+		// The window's chords are bound on `window`, so they fire wherever focus
+		// is - including inside an open dialog, which owns the window while it is
+		// up (#935).
+		const open = () => {
+			if (isModalOpen()) return;
+			openAppMenu();
+		};
+		const altTap = createAltTapWatcher(open);
+		const onKeyDown = (e: KeyboardEvent) => {
+			altTap.keydown(e);
+			if (!matchesChord(e, APP_MENU_CHORD)) return;
+			e.preventDefault();
+			open();
+		};
+		const onKeyUp = (e: KeyboardEvent) => altTap.keyup(e);
+		const cancel = () => altTap.cancel();
+		window.addEventListener("keydown", onKeyDown);
+		window.addEventListener("keyup", onKeyUp);
+		// Alt+Tab moves focus before the keyup lands, and a pointer press mid-hold
+		// is not a tap either.
+		window.addEventListener("blur", cancel);
+		window.addEventListener("pointerdown", cancel);
+		return () => {
+			window.removeEventListener("keydown", onKeyDown);
+			window.removeEventListener("keyup", onKeyUp);
+			window.removeEventListener("blur", cancel);
+			window.removeEventListener("pointerdown", cancel);
+		};
+	}, [openAppMenu]);
 
 	/*
-	 * Windows only.
+	 * Windows and Linux.
 	 *
 	 * macOS states app identity twice already - the Dock icon and the menu bar -
 	 * and its traffic lights own this corner, so a logo beside them is the second
-	 * app mark in the same 124px. GNOME's header-bar contents are buttons, a
-	 * heading and menus, with no app icon, and Vayu draws client-side decorations
-	 * there; KDE shows one, but that is painted by the window manager, not the
-	 * app, so it is not Vayu's to place.
+	 * app mark in the same 124px. It is also the one platform that needs no
+	 * button: the menu bar draws the same template already.
 	 *
-	 * On Windows it stays because it is a control, not branding - see the system
-	 * menu handler in electron/main.ts.
+	 * On Linux the icon appears for the menu, not for branding. GNOME's header
+	 * bars carry no app icon, but they do carry the window's menus, and Vayu
+	 * draws client-side decorations there - so this is the header-bar menu
+	 * button, drawn where every other client-side-decorated app draws one.
 	 */
-	if (!isWindows) return null;
+	if (!hasMenuButton) return null;
 
 	return (
 		<div
+			ref={anchor}
 			// 16px at a 16px inset, per the Windows title-bar spec: "the size of the
 			// window icon is 16px by 16px", placed "16px from the left-most border"
 			// and vertically centred. It was 20px at 12px.
 			className="flex items-center pl-4 pr-3 shrink-0"
 			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-			// Both buttons, because taking the icon out of the drag region is what
-			// removed the platform's own right-click menu.
-			onClick={openSystemMenu}
-			onContextMenu={openSystemMenu}
+			onClick={(e) => {
+				e.preventDefault();
+				openAppMenu();
+			}}
+			// Windows only, because taking the icon out of the drag region is what
+			// removed the platform's own right-click menu. Linux has no system menu
+			// to offer, so the right click falls through to the app's context menu.
+			onContextMenu={(e) => {
+				if (!isWindows) return;
+				e.preventDefault();
+				const r = e.currentTarget.getBoundingClientRect();
+				window.electronAPI?.windowSystemMenu({ x: r.left, y: r.bottom });
+			}}
 			// Windows closes the window on a double-click of the icon. That is the
 			// icon's convention specifically - double-clicking the rest of the bar
-			// toggles maximise, which the drag region already gives us.
+			// toggles maximise, which the drag region already gives us. It is not a
+			// Linux convention, and a double click there is two menu openings.
 			onDoubleClick={(e) => {
+				if (!isWindows) return;
 				e.preventDefault();
 				window.electronAPI?.windowClose();
 			}}
 			// A `role="button"` owes the keyboard what a real button gives for free:
-			// a tab stop and Enter/Space. Alt+Space is the OS path to the same menu,
-			// which is why this went unnoticed - but the control is in the tab order
-			// of a window whose first row is otherwise reachable, and a control that
-			// answers only the pointer is the pattern jsx-a11y now fails the build
-			// over. Space is matched on `e.key` rather than a chord: it is the
-			// button-activation key, not one of the app's shortcuts.
+			// a tab stop and Enter/Space. Alt+Space is the OS path to the system menu
+			// on Windows, which is why this went unnoticed - but the control is in
+			// the tab order of a window whose first row is otherwise reachable, and a
+			// control that answers only the pointer is the pattern jsx-a11y now fails
+			// the build over. Space is matched on `e.key` rather than a chord: it is
+			// the button-activation key, not one of the app's shortcuts.
 			tabIndex={0}
 			onKeyDown={(e) => {
 				const activates = isCommitEnter(e) || (e.key === " " && !e.ctrlKey && !e.metaKey);
 				if (!activates) return;
 				e.preventDefault();
-				openSystemMenu(e);
+				openAppMenu();
 			}}
 			role="button"
-			aria-label="System menu"
+			aria-label="Application menu"
 			aria-haspopup="menu"
 		>
 			<img src={iconUrl} alt="" className="w-4 h-4" />

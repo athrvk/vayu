@@ -1401,6 +1401,18 @@ unfocusable, so those sites carry a one-line disable naming the hook - the same
 for a row whose Enter and Space arrive through the tree rather than through its
 own handler.
 
+**A radio group whose options are already buttons needs no disable.** The
+variable popover's "create in" row (issue #1380) is the same pattern with
+focusable children: the arrow handler sits on each `role="radio"` button, where
+the keydown starts, rather than on the container it would bubble to, so the
+group is a plain `role="radiogroup"` with no handler and nothing for
+`interactive-supports-focus` to report. Reach for the container handler only
+where the options are not focusable in their own right, and take the disable
+with it. Selection there is a modifier, not a destination: the arrows move
+selection and focus together between the chips, and a mouse click on one returns
+focus to the value field it qualifies, because a chip that keeps focus after a
+click leaves the next keystroke going nowhere.
+
 **The lint's allowlist.** Three rules are configured rather than obeyed as
 written, in `app/eslint.config.mjs`, each because the pattern it flags is the
 correct one here:

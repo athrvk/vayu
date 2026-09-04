@@ -19,7 +19,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 ```
 <App />                                  // App.tsx - mounts providers, kicks off health/prefetch queries, OS theme sync
 ├── <TitleBar />                         // components/layout/TitleBar.tsx - --titlebar-height drag region: icon + centered search bar + env pill
-│   ├── AppIcon (Windows only - the system-menu control)
+│   ├── AppIcon (Windows and Linux - the application-menu button; the system-menu control on Windows)
 │   ├── <CommandSearchBar />             // Input-shaped trigger for the ⌘K palette; never its own search
 │   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
 ├── <RecoveryBanner />                   // components/shared/RecoveryBanner.tsx - only when the engine restored or deleted the database
@@ -80,8 +80,10 @@ Custom window title bar (Electron frameless window, `--titlebar-height`). Render
 
 - **All platforms:** `NavigationControls` (Back / Forward, leading edge, issue #1245), `<CommandSearchBar />` (centre), `EnvPill` (right).
 - **macOS:** Native traffic light inset (`--traffic-light-inset`, 104px left); no HTML window controls.
-- **Windows:** App icon as the system-menu control (left); native window overlay, no HTML controls in the bar.
-- **Linux:** Custom HTML min/max/close buttons (right).
+- **Windows:** App icon as the application-menu button on left click and the system-menu control on right click (left); native window overlay, no HTML controls in the bar.
+- **Linux:** App icon as the application-menu button (left); custom HTML min/max/close buttons (right).
+
+`AppIcon` is where the application menu is reachable at all on Windows and Linux (issue #1361): the window is frameless, so neither platform draws a menu bar, and the template `createMenu` installs contributed accelerators and nothing else there - Help > Documentation, About Vayu and Check for Updates had no mouse route. Left click, Enter, Space, `APP_MENU_CHORD` (F10) and a tap of Alt all send `window:appMenu`, and main pops `Menu.getApplicationMenu()` at the icon: one template, two surfaces, no second menu in the renderer. Both keyboard routes ask `isModalOpen()` first, and the Alt tap is a state machine (`lib/alt-tap.ts`) rather than a `Chord`, because Alt held as a modifier - Alt+Tab, Alt+← - is not a menu request. macOS renders no button and registers no listener; its menu bar draws the same template already. → `app-icon-menus.test.tsx`, `electron/app-menu.test.ts`.
 
 The entire bar is marked as a drag region (`WebkitAppRegion: "drag"`) except for interactive elements, which explicitly set `no-drag` - a drag area ignores every pointer event, so a control that forgets is dead rather than merely awkward. Opting out per control or per cluster is fine; opting out a wrapper that spans the row's slack is not, because that slack is what the window is dragged by. → `TitleBar.search-bar.test.tsx`.
 
@@ -1852,6 +1854,18 @@ and the red sentence reads "defined, but every definition is switched off"
 instead of telling the reader to go and define it. The red itself stays - the
 token genuinely does not resolve. `data.*` is the one state with no list, for
 the same disjointness reason it has no create offer.
+
+**The create offer's scope chips are a radio group, and picking one keeps you in
+the value field** (issue #1380). They are one Tab stop on a roving `tabIndex`,
+arrows move the selection and the focus together wrapping at the ends, and Enter
+on the focused chip creates - a chip that has focus beside a value already typed
+leaves Enter nothing else to mean. A mouse click hands focus back to the field,
+because picking a scope qualifies the value rather than replacing it as the
+destination; as plain buttons the chips kept the focus a click gave them, and
+the next keystroke went nowhere. Create is refused while the field is empty:
+`mergeVariable` stores what it is handed, so an empty value defines the name as
+`""`, which resolves - the token stops reading as undefined and answers with
+nothing.
 
 Reaching the list into those states also reached the bound-row note into them,
 and it could not be carried over as written: "the definition above still

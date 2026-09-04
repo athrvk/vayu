@@ -1339,6 +1339,14 @@ coerced. Changing the global `defaultHttpVersion` afterward does not
 retroactively alter a request already saved; only an explicit `null` on this
 request re-seeds it.
 
+**`preRequestScript` and `postRequestScript`** take the same rule, and the empty
+string is where it bites: an absent key leaves the stored script untouched,
+while `""` is a value that stores and is therefore how a script is *cleared*.
+`null` clears it too, since the default for these fields is the empty string. A
+client that means "delete this script" has to send `""` rather than dropping the
+key - the app sent `script || undefined` until #1381, which serialises the key
+out of the body, so deleting a script saved nothing and reported success.
+
 **Response:** The updated request object.
 
 **Errors:** `404` if the request does not exist; `400` on a `null`
