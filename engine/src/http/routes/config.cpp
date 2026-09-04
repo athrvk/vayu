@@ -12,9 +12,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <expected>
 #include <format>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -400,6 +402,28 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
 }
 
 /**
+ * @brief Which send the caller is asking `GET /request-defaults` to describe.
+ *
+ * A `scope` nobody named is a design send, which is what the endpoint answered
+ * before it took the parameter at all. An empty one is absent rather than a
+ * scope of "", the reading `parse_live_resume_point` gives an empty
+ * `lastEventId`. Anything else is refused: the two answers differ (a load run
+ * reads `loadNegotiateCompression`), so a typo silently served the design
+ * answer would be the misdescription issue #1338 exists to end.
+ */
+std::expected<vayu::http::DefaultHeaderScope, RouteError>
+parse_default_header_scope (std::string_view scope) {
+    if (scope.empty () || scope == "design") {
+        return vayu::http::DefaultHeaderScope::Design;
+    }
+    if (scope == "load") {
+        return vayu::http::DefaultHeaderScope::Load;
+    }
+    return route_error (400,
+    std::format ("'scope' must be one of [design, load] (got '{}')", scope), "invalid_scope");
+}
+
+/**
  * @brief What the engine will add to a request that names none of it.
  *
  * The body of `GET /request-defaults`, split out for the reason
@@ -411,10 +435,14 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
  * deliberately the engine that declares them: a renderer re-deriving the set
  * from the config entries would be a second definition of the same rule, which
  * is how the two came to disagree before issue #1229.
+ *
+ * @p scope decides which compression key the answer reflects, because that is
+ * the one default a load run resolves differently from a Send (#1338). The
+ * caller names it; the endpoint never assumes one.
  */
-nlohmann::json request_defaults_json (vayu::db::Database& db) {
-    const auto policy = vayu::http::resolve_default_header_policy (
-    db, vayu::http::DefaultHeaderScope::Design);
+nlohmann::json request_defaults_json (vayu::db::Database& db,
+vayu::http::DefaultHeaderScope scope) {
+    const auto policy = vayu::http::resolve_default_header_policy (db, scope);
 
     nlohmann::json headers = nlohmann::json::array ();
     for (const auto& header : vayu::http::declared_default_headers (policy)) {
@@ -437,15 +465,32 @@ nlohmann::json request_defaults_json (vayu::db::Database& db) {
     return response;
 }
 
+/**
+ * @brief The whole of `GET /request-defaults`: the scope it was asked for, or
+ *        the refusal of one it does not know.
+ */
+std::pair<int, nlohmann::json>
+request_defaults_response (vayu::db::Database& db, std::string_view scope_param) {
+    const auto scope = parse_default_header_scope (scope_param);
+    if (!scope) {
+        return as_response (scope.error ());
+    }
+    return { 200, request_defaults_json (db, *scope) };
+}
+
 void register_config_routes (RouteContext& ctx) {
     /**
      * GET /request-defaults
-     * What the engine adds to a request that does not name it (issue #1229).
+     * What the engine adds to a request that does not name it (issue #1229),
+     * for the send the caller names in `?scope=` (issue #1338).
      */
     ctx.server.Get ("/request-defaults",
-    [&ctx] (const httplib::Request&, httplib::Response& res) {
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
-            res.set_content (request_defaults_json (ctx.db).dump (2), "application/json");
+            auto [status, response_body] =
+            request_defaults_response (ctx.db, req.get_param_value ("scope"));
+            res.status = status;
+            res.set_content (response_body.dump (2), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "GET /request-defaults - Error: " + std::string (e.what ()));

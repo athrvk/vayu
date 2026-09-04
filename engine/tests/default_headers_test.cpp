@@ -17,9 +17,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <curl/curl.h>
@@ -34,7 +37,12 @@
 
 namespace vayu::http::routes {
 // Declared in config.cpp, the body of GET /request-defaults.
-nlohmann::json request_defaults_json (vayu::db::Database& db);
+nlohmann::json request_defaults_json (vayu::db::Database& db,
+vayu::http::DefaultHeaderScope scope);
+// The whole route: the scope the caller named, or the refusal of one it does
+// not know.
+std::pair<int, nlohmann::json>
+request_defaults_response (vayu::db::Database& db, std::string_view scope_param);
 std::pair<int, nlohmann::json>
 apply_config_update (vayu::db::Database& db, const std::string& body);
 } // namespace vayu::http::routes
@@ -318,7 +326,8 @@ TEST_F (DefaultHeaderConfigTest, TheDeclaredSetIsWhatASendWouldAdd) {
     vayu::http::routes::apply_config_update (
     *db_, R"({"entries":{"correlationIdEnabled":"true"}})");
 
-    const auto declared = vayu::http::routes::request_defaults_json (*db_);
+    const auto declared =
+    vayu::http::routes::request_defaults_json (*db_, DefaultHeaderScope::Design);
     ASSERT_TRUE (declared.contains ("headers"));
 
     std::set<std::string> names;
@@ -343,10 +352,65 @@ TEST_F (DefaultHeaderConfigTest, ADefaultSwitchedOffIsNotDeclared) {
     vayu::http::routes::apply_config_update (
     *db_, R"({"entries":{"negotiateCompression":"false"}})");
 
-    const auto declared = vayu::http::routes::request_defaults_json (*db_);
+    const auto declared =
+    vayu::http::routes::request_defaults_json (*db_, DefaultHeaderScope::Design);
     for (const auto& row : declared["headers"]) {
         EXPECT_NE (row["name"], "Accept-Encoding");
     }
+}
+
+// Whether a scope's answer holds a row of this name. The name is read out of
+// the row before comparing: MSVC finds `json == std::string_view` ambiguous
+// between nlohmann's own operator and the string_view one.
+bool declares (const nlohmann::json& body, std::string_view name) {
+    return std::any_of (body["headers"].begin (), body["headers"].end (),
+    [name] (const nlohmann::json& row) {
+        return row.at ("name").get<std::string> () == name;
+    });
+}
+
+TEST_F (DefaultHeaderConfigTest, TheAnswerIsForTheScopeTheCallerNames) {
+    // The one default the two scopes resolve differently.
+    vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"loadNegotiateCompression":"false"}})");
+
+    const auto [design_status, design] =
+    vayu::http::routes::request_defaults_response (*db_, "design");
+    const auto [load_status, load] =
+    vayu::http::routes::request_defaults_response (*db_, "load");
+
+    EXPECT_EQ (design_status, 200);
+    EXPECT_EQ (load_status, 200);
+    EXPECT_TRUE (declares (design, "Accept-Encoding"));
+    EXPECT_FALSE (declares (load, "Accept-Encoding")) << load.dump ();
+}
+
+TEST_F (DefaultHeaderConfigTest, AScopeNobodyNamedIsADesignSend) {
+    vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"loadNegotiateCompression":"false"}})");
+
+    // Absent, and `?scope=` with nothing after it: both are the answer the
+    // endpoint gave before it took the parameter.
+    for (const std::string_view scope :
+    { std::string_view (""), std::string_view ("design") }) {
+        const auto [status, body] =
+        vayu::http::routes::request_defaults_response (*db_, scope);
+        EXPECT_EQ (status, 200);
+        EXPECT_TRUE (declares (body, "Accept-Encoding")) << "scope='" << scope << "'";
+    }
+}
+
+TEST_F (DefaultHeaderConfigTest, AScopeTheEndpointDoesNotKnowIsRefused) {
+    const auto [status, body] =
+    vayu::http::routes::request_defaults_response (*db_, "loud");
+
+    EXPECT_EQ (status, 400);
+    ASSERT_TRUE (body.contains ("error"));
+    EXPECT_EQ (body["error"]["code"], "invalid_scope");
+    // The refusal names what was typed, so a client can show it.
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("loud"), std::string::npos)
+    << body.dump ();
+    EXPECT_FALSE (body.contains ("headers"));
 }
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@
  * Following TanStack Query best practices for query key management.
  */
 
+import type { RequestDefaultsScope } from "@/types";
+
 export const queryKeys = {
 	// Collections
 	collections: {
@@ -240,8 +242,15 @@ export const queryKeys = {
 	// What a send would add on its own (issue #1229). Its own key rather than a
 	// slice of `config`: it is a different endpoint, and invalidating one must
 	// not refetch the other.
+	//
+	// Scoped by `scope` (issue #1338): design and load can disagree
+	// (`negotiateCompression` vs `loadNegotiateCompression`), so the two answers
+	// must not collide in one cache entry. `all` stays the invalidation root -
+	// a prefix key invalidates every descendant, so `useUpdateConfigMutation`
+	// still drops both scopes at once.
 	requestDefaults: {
 		all: ["requestDefaults"] as const,
+		scope: (scope: RequestDefaultsScope) => [...queryKeys.requestDefaults.all, scope] as const,
 	},
 
 	// Script Completions

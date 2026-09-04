@@ -40,6 +40,13 @@ vi.mock("../OAuth2LoadTestGuard", () => ({
  * assert the dialog followed it.
  */
 let configEntries: { key: string; value: string }[] = [];
+/**
+ * The design and load answers `GET /request-defaults` gives (issue #1338).
+ * Separate so a test can make them disagree - the scope argument decides
+ * which one a call reads, exactly as `useRequestDefaultsQuery` does for real.
+ */
+let designHeaders: { name: string; value?: string; generated: boolean }[] = [];
+let loadHeaders: { name: string; value?: string; generated: boolean }[] = [];
 vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({ data: { entries: configEntries } }),
 	// The data-file picker's column audit resolves the contract in scope from
@@ -47,6 +54,9 @@ vi.mock("@/queries", () => ({
 	// audit against, which is what every case here wants except the one that
 	// declares its own.
 	useCollectionsQuery: () => ({ data: collectionRows }),
+	useRequestDefaultsQuery: (scope: "design" | "load" = "design") => ({
+		data: { headers: scope === "load" ? loadHeaders : designHeaders },
+	}),
 }));
 
 /** Collections the contract walk sees. Mutable, like `configEntries` above. */
@@ -120,6 +130,8 @@ beforeEach(() => {
 	localStorage.clear();
 	configEntries = [];
 	collectionRows = [];
+	designHeaders = [];
+	loadHeaders = [];
 	// The ceilings store is module-level and persists across tests in this
 	// file; clearing localStorage does not roll it back.
 	useClientSettingsStore.getState().setLoadTestCeilings(DEFAULT_LOAD_TEST_CEILINGS);
@@ -511,6 +523,38 @@ describe("notices", () => {
 		pickProfile("Ramp-Up");
 		fireEvent.change(screen.getByLabelText(/total duration/i), { target: { value: "1" } });
 		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+	});
+});
+
+/**
+ * The Headers tab renders the design answer, and it is the tab a user reads
+ * right before opening this dialog - so with `negotiateCompression: true` and
+ * `loadNegotiateCompression: false` the tab shows `Accept-Encoding` for a
+ * request whose load run will not send it (issue #1338). These pin that the
+ * dialog reads both scopes and says so, and that agreement stays silent.
+ */
+describe("default headers vs. the Headers tab (issue #1338)", () => {
+	it("names the header when the load run's defaults differ from the design tab's", () => {
+		designHeaders = [
+			{ name: "User-Agent", value: "Vayu/1.0", generated: false },
+			{ name: "Accept-Encoding", value: "gzip, br", generated: false },
+		];
+		loadHeaders = [{ name: "User-Agent", value: "Vayu/1.0", generated: false }];
+
+		open();
+
+		expect(screen.getByText(/Accept-Encoding/)).toBeInTheDocument();
+		expect(screen.getByText(/not on this load run/i)).toBeInTheDocument();
+	});
+
+	it("says nothing when the two scopes agree", () => {
+		designHeaders = [{ name: "Accept-Encoding", value: "gzip, br", generated: false }];
+		loadHeaders = [{ name: "Accept-Encoding", value: "gzip, br", generated: false }];
+
+		open();
+
+		expect(screen.queryByText(/Accept-Encoding/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/default headers differ/i)).not.toBeInTheDocument();
 	});
 });
 
