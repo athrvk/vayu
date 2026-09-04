@@ -119,6 +119,15 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// history is made of.
 	let idleResetGeneration = 0;
 
+	// Is any registered context holding an unsaved edit? `exceptId` leaves out
+	// the context asking, which is the one entry that cannot be trusted at the
+	// moment it asks: a context's `hasPendingChanges` is refreshed by an effect,
+	// so its own still reads the pre-save `true` as its write lands.
+	const dirtyContextExists = (exceptId?: string) =>
+		[...get().contexts.values()].some(
+			(context) => context.id !== exceptId && context.hasPendingChanges
+		);
+
 	// Internal helper - runs a save for the given context and updates store state.
 	// Caller must own the in-progress guard if needed.
 	const runSave = async (context: SaveContext) => {
@@ -172,11 +181,25 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			// changes" - the context still holding the edit clears it when it
 			// writes. Guarding here rather than at the call sites covers the ones
 			// added later, which is the half a per-caller fix cannot do.
-			const othersDirty = [...get().contexts.values()].some(
-				(context) => context.id !== reportingContextId && context.hasPendingChanges
-			);
-			if (othersDirty) {
+			if (dirtyContextExists(reportingContextId)) {
 				set({ status: "pending" });
+				// A registry entry is refreshed by an effect, so a *sibling* that
+				// finished its own write moments ago can still read dirty above -
+				// two surfaces saving within a render of each other each see the
+				// other as unsaved, and this `pending` would then sit on the Dock
+				// until the next save, describing nothing. So re-derive it once the
+				// effects have flushed. The two guards are the ones below: a later
+				// save re-arms the generation and owns the status from then on, and
+				// a `pending` a context published for its own unsaved edit is not
+				// this timer's to clear - that context is still in the registry,
+				// still dirty.
+				const armed = ++idleResetGeneration;
+				setTimeout(() => {
+					if (armed !== idleResetGeneration) return;
+					if (get().status !== "pending") return;
+					if (dirtyContextExists()) return;
+					get().setStatus("idle");
+				}, TIMING.SAVED_STATUS_DURATION_MS);
 				return;
 			}
 

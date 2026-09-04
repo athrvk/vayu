@@ -147,6 +147,21 @@ describe("completeSaveThenIdle with other unsaved work on screen", () => {
 		expect(useSaveStore.getState().status).toBe("saved");
 	});
 
+	it("clears a 'pending' it invented once the lagging registry catches up", () => {
+		// Two surfaces finishing within a render of each other: each reads the
+		// other's not-yet-refreshed entry as dirty, so both report `pending` over
+		// an editor that holds nothing. Left alone that would describe nothing
+		// until the next save.
+		registerContext("request-1", true);
+		useSaveStore.getState().completeSaveThenIdle("settings");
+		expect(useSaveStore.getState().status).toBe("pending");
+
+		registerContext("request-1", false);
+		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
+
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
 	it("holds another context's unsaved work against a context's own success", () => {
 		registerContext("request-1", true);
 		registerContext("settings", true);

@@ -624,6 +624,14 @@ lands. A direct writer names nobody and is measured against all of them, which
 is the point of guarding in the store rather than at the call sites: the writer
 added next inherits it without knowing the rule exists.
 
+That same effect lag is why the `pending` this guard publishes is re-derived
+once, after `TIMING.SAVED_STATUS_DURATION_MS`. Two surfaces finishing within a
+render of each other each read the other's not-yet-refreshed entry as dirty, so
+both report `pending` over an editor holding nothing - and nothing would revisit
+it until the next save. The re-check clears it only while no context is dirty
+and no later save has re-armed the reset, so a `pending` a context published for
+its own unsaved edit is untouched.
+
 **SaveContext:**
 ```typescript
 {
