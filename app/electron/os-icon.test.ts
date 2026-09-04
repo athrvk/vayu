@@ -20,6 +20,7 @@ import {
 	createOsIcon,
 	parseOsIconSignal,
 	registerOsIconIpc,
+	NEW_REQUEST_ARG,
 	OPEN_COLLECTION_ARG,
 	OS_ICON_CHANNEL,
 	OS_ICON_MAX_RECENTS,
@@ -251,12 +252,15 @@ describe("createOsIcon - the icon's menu", () => {
 		os.painter.apply({ kind: "recents", collections });
 		expect(os.tasks).toHaveLength(1);
 		expect(os.tasks[0].map((task) => [task.title, task.arguments])).toEqual([
-			["New Request", ""],
+			["New Request", NEW_REQUEST_ARG],
 			["Payments", `${OPEN_COLLECTION_ARG}a`],
 			["Search", `${OPEN_COLLECTION_ARG}b`],
 			["Billing", `${OPEN_COLLECTION_ARG}c`],
 		]);
 		expect(os.tasks[0][0].program).toBe("/opt/vayu/vayu");
+		// Every task takes the executable's own icon; a Jump List of blank rows
+		// is what leaving the pair unset looks like.
+		expect(os.tasks[0].every((task) => task.iconPath === "/opt/vayu/vayu")).toBe(true);
 	});
 
 	it("survives a macOS build with no Dock to hang a menu on", () => {
@@ -320,9 +324,9 @@ describe("parseOsIconSignal", () => {
 		expect(parseOsIconSignal({ kind: "captured" })).toEqual({ kind: "captured" });
 		expect(parseOsIconSignal({ kind: "inboxOpened" })).toEqual({ kind: "inboxOpened" });
 		expect(parseOsIconSignal({ kind: "runFailed" })).toEqual({ kind: "runFailed" });
-		expect(parseOsIconSignal({ kind: "recents", collections: [{ id: "a", name: "A" }] })).toEqual(
-			{ kind: "recents", collections: [{ id: "a", name: "A" }] }
-		);
+		expect(
+			parseOsIconSignal({ kind: "recents", collections: [{ id: "a", name: "A" }] })
+		).toEqual({ kind: "recents", collections: [{ id: "a", name: "A" }] });
 	});
 
 	it("reads an empty recents list, which is a user who has been nowhere yet", () => {

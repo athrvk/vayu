@@ -68,7 +68,7 @@ const COUNT_FILL: Rgb = { r: 220, g: 38, b: 38 };
 /** The failed mark's disc. One value, so the two marks cannot be confused. */
 const FAILED_FILL: Rgb = { r: 185, g: 28, b: 28 };
 
-/** Glyphs and the failed mark's slash, both drawn in white. */
+/** Every glyph, count and failed mark alike, is drawn in white on its disc. */
 const INK: Rgb = { r: 255, g: 255, b: 255 };
 
 /**
@@ -136,7 +136,12 @@ function fillDisc(bitmap: Bitmap, colour: Rgb): void {
 }
 
 /** Draw one glyph with its top-left at `originX`/`originY`, scaled up. */
-function drawGlyph(bitmap: Bitmap, glyph: readonly string[], originX: number, originY: number): void {
+function drawGlyph(
+	bitmap: Bitmap,
+	glyph: readonly string[],
+	originX: number,
+	originY: number
+): void {
 	for (let row = 0; row < glyph.length; row++) {
 		for (let column = 0; column < glyph[row].length; column++) {
 			if (glyph[row][column] !== "#") continue;

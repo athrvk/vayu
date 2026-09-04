@@ -21,7 +21,7 @@ import {
 	parseOpenIntents,
 	type OpenIntent,
 } from "./open-intent";
-import { OPEN_COLLECTION_ARG } from "./os-icon";
+import { NEW_REQUEST_ARG, OPEN_COLLECTION_ARG } from "./os-icon";
 
 describe("isImportableFile", () => {
 	it("takes the extensions the import pipeline reads", () => {
@@ -65,6 +65,15 @@ describe("parseOpenIntents", () => {
 		expect(parseOpenIntents(["vayu", `${OPEN_COLLECTION_ARG}col-7`])).toEqual([
 			{ kind: "collection", collectionId: "col-7" },
 		]);
+	});
+
+	/*
+	 * Mutation check: give the Jump List's New Request task no argument and this
+	 * reddens - a warm launch would reach `second-instance` with nothing on it
+	 * and be indistinguishable from double-clicking the icon.
+	 */
+	it("reads the menu's New Request entry", () => {
+		expect(parseOpenIntents(["vayu", NEW_REQUEST_ARG])).toEqual([{ kind: "newRequest" }]);
 	});
 
 	it("ignores a collection argument carrying no id", () => {

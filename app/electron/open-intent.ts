@@ -37,17 +37,26 @@
 import path from "path";
 
 import { SPEC_FILE_EXTENSIONS } from "./spec-file.js";
-import { OPEN_COLLECTION_ARG } from "./os-icon.js";
+import { NEW_REQUEST_ARG, OPEN_COLLECTION_ARG } from "./os-icon.js";
 
 /** What main tells the renderer to open. */
 export const OPEN_INTENT_CHANNEL = "intent:open";
 
-/** One thing the OS asked for. */
+/**
+ * One thing the OS asked for.
+ *
+ * The Dock menu's own items land here too, rather than on a channel of their
+ * own: a click on **Payments** in the Dock menu and a Jump List task named
+ * Payments are the same request arriving through different doors, and the
+ * buffering below is what a click with no window yet needs either way.
+ */
 export type OpenIntent =
 	/** A document to import, by absolute path. */
 	| { kind: "import"; path: string }
-	/** A collection to open, by id, from the Jump List. */
-	| { kind: "collection"; collectionId: string };
+	/** A collection to open, by id. */
+	| { kind: "collection"; collectionId: string }
+	/** Somewhere to start, with nothing named. */
+	| { kind: "newRequest" };
 
 /**
  * Whether `candidate` is a document the import pipeline could read.
@@ -73,6 +82,10 @@ export function isImportableFile(candidate: string): boolean {
 export function parseOpenIntents(argv: readonly string[]): OpenIntent[] {
 	const intents: OpenIntent[] = [];
 	for (const argument of argv.slice(1)) {
+		if (argument === NEW_REQUEST_ARG) {
+			intents.push({ kind: "newRequest" });
+			continue;
+		}
 		if (argument.startsWith(OPEN_COLLECTION_ARG)) {
 			const collectionId = argument.slice(OPEN_COLLECTION_ARG.length);
 			if (collectionId) intents.push({ kind: "collection", collectionId });

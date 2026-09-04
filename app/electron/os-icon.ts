@@ -53,9 +53,6 @@ import { createRendererWatch, type IpcEventLike } from "./renderer-watch.js";
 /** What the renderer tells this side about, one way. */
 export const OS_ICON_CHANNEL = "icon:signal";
 
-/** What the user picked off the icon, pushed back to the renderer. */
-export const OS_ICON_ACTIVATED_CHANNEL = "icon:activated";
-
 /**
  * How many collections the icon's menu offers.
  *
@@ -75,6 +72,16 @@ export const OS_ICON_MAX_RECENTS = 3;
  */
 export const OPEN_COLLECTION_ARG = "--vayu-open-collection=";
 
+/**
+ * The argument the menu's other entry launches Vayu with.
+ *
+ * New Request needs one for the same reason a collection does: a task with no
+ * arguments is an ordinary launch, which opens the app rather than opening
+ * anything in it, and a warm one would reach `second-instance` with nothing to
+ * distinguish it from double-clicking the icon.
+ */
+export const NEW_REQUEST_ARG = "--vayu-new-request";
+
 /** A collection as the icon's menu needs it: something to show, something to open. */
 export interface OsIconCollection {
 	id: string;
@@ -93,7 +100,8 @@ export type OsIconSignal =
 	| { kind: "recents"; collections: OsIconCollection[] };
 
 /** What the user picked off the icon's menu. */
-export type OsIconActivation = { kind: "newRequest" } | { kind: "collection"; collectionId: string };
+export type OsIconActivation =
+	{ kind: "newRequest" } | { kind: "collection"; collectionId: string };
 
 /** The slice of `BrowserWindow` the Windows overlay needs. */
 export interface OverlayWindowLike {
@@ -118,6 +126,13 @@ export interface UserTask {
 	arguments: string;
 	title: string;
 	description: string;
+	/**
+	 * Where the shell reads the task's icon from. The executable's own, because
+	 * an app that ships no per-task icons showing none at all is a Jump List of
+	 * blank rows - and Electron requires the pair whether or not it is set.
+	 */
+	iconPath: string;
+	iconIndex: number;
 }
 
 export interface OsIconDeps {
@@ -233,8 +248,7 @@ export function createOsIcon(deps: OsIconDeps): OsIconPainter {
 				{ label: NEW_REQUEST_LABEL, click: () => deps.activate({ kind: "newRequest" }) },
 				...collections.map((collection) => ({
 					label: collection.name,
-					click: () =>
-						deps.activate({ kind: "collection", collectionId: collection.id }),
+					click: () => deps.activate({ kind: "collection", collectionId: collection.id }),
 				})),
 			])
 		);
@@ -242,14 +256,17 @@ export function createOsIcon(deps: OsIconDeps): OsIconPainter {
 
 	function setJumpList(collections: readonly OsIconCollection[]): void {
 		const program = deps.execPath ?? process.execPath;
+		const icon = { iconPath: program, iconIndex: 0 };
 		deps.setUserTasks([
 			{
+				...icon,
 				program,
-				arguments: "",
+				arguments: NEW_REQUEST_ARG,
 				title: NEW_REQUEST_LABEL,
 				description: "Open Vayu on a new request",
 			},
 			...collections.map((collection) => ({
+				...icon,
 				program,
 				arguments: `${OPEN_COLLECTION_ARG}${collection.id}`,
 				title: collection.name,

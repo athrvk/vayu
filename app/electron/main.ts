@@ -11,6 +11,7 @@ import {
 	clipboard,
 	dialog,
 	ipcMain,
+	nativeImage,
 	nativeTheme,
 	Menu,
 	Notification,
@@ -37,6 +38,8 @@ import { installQuitOnSignal } from "./quit-signals.js";
 import { createWakeLock, registerPowerIpc } from "./power-save.js";
 import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
+import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
+import { createOpenIntents, OPEN_INTENT_CHANNEL } from "./open-intent.js";
 import {
 	createServiceStopGuard,
 	holdForConfirmation,
@@ -177,6 +180,50 @@ function focusMainWindow(): void {
 	win.show();
 	win.focus();
 }
+
+/**
+ * What the OS is asking Vayu to open: a document dropped on the icon, or an
+ * entry picked off the icon's own menu (#1364).
+ *
+ * At module scope because the earliest of those doors opens before this file's
+ * `whenReady` handler runs - macOS raises `open-file` on a cold launch while the
+ * app is still starting - and everything it takes is buffered until the renderer
+ * reports it has loaded.
+ */
+const openIntents = createOpenIntents({
+	send: (intent) => {
+		const win = liveWindow();
+		if (!win) return false;
+		win.webContents.send(OPEN_INTENT_CHANNEL, intent);
+		return true;
+	},
+	focus: focusMainWindow,
+});
+
+/**
+ * What the Dock and taskbar icon carries, and what its menu offers (#1364).
+ *
+ * Every Electron surface arrives as a closure rather than a value: `app.dock`
+ * and the window are both read at paint time, since the app outlives its window
+ * on macOS. The menu's own entries go back out through `openIntents` rather than
+ * a second channel - a click on a Dock item and the Jump List task beside it are
+ * one request through two doors.
+ */
+const osIcon = createOsIcon({
+	isFocused: () => liveWindow()?.isFocused() ?? false,
+	window: () => liveWindow(),
+	dock: () => app.dock ?? null,
+	setBadgeCount: (count) => app.setBadgeCount(count),
+	setUserTasks: (tasks) => app.setUserTasks([...tasks]),
+	buildMenu: (template) => Menu.buildFromTemplate([...template]),
+	createImage: (bitmap, options) =>
+		nativeImage.createFromBitmap(Buffer.from(bitmap.data), {
+			width: bitmap.width,
+			height: bitmap.height,
+			scaleFactor: options.scaleFactor,
+		}),
+	activate: (activation) => openIntents.offer(activation),
+});
 
 /**
  * What the renderer said was under the pointer for the right-click being
@@ -440,6 +487,17 @@ function createWindow() {
 	});
 	mainWindow.webContents.on("did-finish-load", () => {
 		rendererRecovery.noteRendererAlive();
+		// The renderer can act on a request now - its stores are mounted and its
+		// subscriber is up. Anything the OS asked for before this point has been
+		// waiting since the launch that carried it (#1364).
+		openIntents.ready();
+	});
+
+	// Coming back to the window is what the failed-run mark was asking for, so
+	// this is where it comes off. The unread count is deliberately not cleared
+	// here: those captures are still unread until the Inbox is opened (#1364).
+	mainWindow.on("focus", () => {
+		osIcon.focused();
 	});
 	mainWindow.on("unresponsive", () => {
 		rendererRecovery.handleUnresponsive();
@@ -906,6 +964,13 @@ function setupIpcHandlers() {
 		})
 	);
 
+	// What the Dock and taskbar icon carries for the user who is not looking at
+	// the window (#1364): a count of the inbox captures that arrived while they
+	// were elsewhere, and a mark for a run that failed while they were. The
+	// renderer says what happened; whether it is worth painting is a question
+	// about the window's focus, which only this side can answer.
+	registerOsIconIpc(ipcMain, osIcon);
+
 	// What the Services drawer has listening, kept current for the close that
 	// would stop it (#1363). One snapshot per change, not a question asked while
 	// the user waits on the close - see service-stop-guard.ts.
@@ -1217,8 +1282,22 @@ if (!isPrimaryInstance) {
 	console.log("[Main] Another Vayu instance is already running; focusing it and exiting.");
 	app.quit();
 } else {
-	app.on("second-instance", () => {
+	// A second launch is how a Jump List task and a Windows file association
+	// reach an app that is already up: the request is on that launch's command
+	// line, and this instance is the one that can act on it (#1364).
+	// `offerArgv` focuses the window itself when it finds something; a launch
+	// carrying nothing is the plain double-click this always answered.
+	app.on("second-instance", (_event, argv) => {
 		focusMainWindow();
+		openIntents.offerArgv(argv);
+	});
+
+	// macOS hands a dropped or double-clicked document over here rather than on
+	// the command line, and it fires before `whenReady` resolves on a cold
+	// launch - which is why the intents are buffered rather than sent.
+	app.on("open-file", (event, filePath) => {
+		event.preventDefault();
+		openIntents.offer({ kind: "import", path: filePath });
 	});
 }
 
@@ -1284,6 +1363,12 @@ app.whenReady().then(async () => {
 	// optional convenience with no UI depending on it, so it still starts after
 	// everything the user can see is up and wired.
 	createWindow();
+
+	// A cold launch carries its request on its own command line - a document
+	// double-clicked with Vayu not running, or a Jump List task that started it
+	// (#1364). Offered after the window exists so `openIntents` has something to
+	// focus; delivery still waits for the renderer's `did-finish-load`.
+	openIntents.offerArgv(process.argv);
 
 	// Awaited, not fired and forgotten: the proxy bridge below talks to the
 	// engine, and the updater and MCP both read state the engine owns. The window
