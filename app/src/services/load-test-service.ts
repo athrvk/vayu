@@ -328,7 +328,15 @@ class LoadTestService {
 			// status are stale until the next 5s poll - and once the user has
 			// paged History, that poll is off.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-			this.activeRunId = null;
+			// Only if it is still this run's. Same window as the store read above,
+			// and the same fix: a run started while this fetch was in flight has
+			// already put its own id here, and forgetting it would leave the
+			// service unable to name the run it is watching - so the live run's
+			// reports would be dropped and its bar never cleared, both of which
+			// now turn on naming the run (#1405).
+			if (this.activeRunId === runId) {
+				this.activeRunId = null;
+			}
 		}
 	}
 }

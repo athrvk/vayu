@@ -53,6 +53,7 @@ vi.mock("./run-progress", () => ({
 
 import { loadTestService } from "./load-test-service";
 import { sseClient } from "./sse-client";
+import { apiService } from "./api";
 import { RUN_PROGRESS_KEYS } from "./run-progress";
 
 const LOAD_RUN = RUN_PROGRESS_KEYS.loadRun;
@@ -133,6 +134,37 @@ describe("LoadTestService - the OS progress indicator", () => {
 		loadTestService.startMonitoring("run_1");
 		failStream("engine went away");
 		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_1");
+	});
+
+	/*
+	 * The terminal fetch in `handleClose` is awaited, and a run started inside
+	 * that window has already put its own id on the service. Forgetting it there
+	 * would leave the service unable to name the run it is watching, and since
+	 * #1405 that is what every call to the indicator turns on: the live run's
+	 * fraction would be dropped from then on and its bar never cleared.
+	 *
+	 * Mutation check: drop the `this.activeRunId === runId` guard on the
+	 * assignment and the report below arrives naming `null`.
+	 */
+	it("keeps naming the run that started while the last one's report was in flight", async () => {
+		type RunReport = Awaited<ReturnType<typeof apiService.getRunReport>>;
+		let deliverReport: (report: RunReport) => void = () => {};
+		vi.mocked(apiService.getRunReport).mockReturnValueOnce(
+			new Promise<RunReport>((resolve) => {
+				deliverReport = resolve;
+			})
+		);
+
+		loadTestService.startMonitoring("run_1");
+		const closing = closeStream();
+		// The user starts the next run before the first one's report lands.
+		loadTestService.startMonitoring("run_2");
+		deliverReport({ summary: {}, latency: {} } as unknown as RunReport);
+		await closing;
+
+		mockReport.mockClear();
+		tickHandler()(tick(10));
+		expect(mockReport).toHaveBeenCalledWith(LOAD_RUN, "run_2", 0.5);
 	});
 
 	/*
