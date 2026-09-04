@@ -66,4 +66,35 @@ describe("startup ordering", () => {
 		// the quit. Revert it and this window contains no `return`.
 		expect(main.slice(notReadyAt, quitAt)).toContain("return;");
 	});
+
+	/*
+	 * Mutation check: move the `open-file` registration inside the `whenReady`
+	 * handler - which reads as the tidier place for it - and this reddens. That
+	 * move is silent at runtime on every platform but macOS, and on macOS it
+	 * loses exactly the case the event exists for: a document double-clicked
+	 * with Vayu not running raises `open-file` while the app is still starting,
+	 * so a listener attached inside `whenReady` is attached too late and the
+	 * file is dropped with nothing on screen to say the double-click did
+	 * anything (#1364).
+	 */
+	it("listens for open-file before whenReady, which is when macOS raises it", () => {
+		const openFileAt = main.indexOf('app.on("open-file"');
+		const whenReadyAt = main.indexOf("app.whenReady().then(");
+
+		expect(openFileAt).toBeGreaterThan(-1);
+		expect(whenReadyAt).toBeGreaterThan(-1);
+		expect(openFileAt).toBeLessThan(whenReadyAt);
+	});
+
+	it("reads the launch's own argv once there is a window to focus", () => {
+		// The other half of the same handoff, and it wants the opposite order:
+		// `offerArgv` focuses the window when it finds something, so it runs
+		// after `createWindow` rather than beside the `open-file` listener.
+		// Delivery still waits for the renderer's `did-finish-load` either way.
+		const windowAt = main.indexOf("\n\tcreateWindow();");
+		const argvAt = main.indexOf("openIntents.offerArgv(process.argv);");
+
+		expect(argvAt).toBeGreaterThan(-1);
+		expect(argvAt).toBeGreaterThan(windowAt);
+	});
 });
