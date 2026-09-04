@@ -17,7 +17,7 @@ import { compareTreeOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
 import { RowActionsMenu, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
-import { INDENT_STEP } from "@/constants/layout";
+import { childInsetPx, rowInsetPx } from "@/constants/layout";
 
 /**
  * What differs per row. Everything shared - the expanded set, the selection,
@@ -96,6 +96,20 @@ export default function CollectionItem({
 	// Ties the children's group back to this row for assistive tech - see the
 	// `aria-owns` note on the row itself.
 	const childrenId = `tree-group-${collection.id}`;
+	/**
+	 * An empty folder announces itself through the row, not the placeholder.
+	 * The group holds no treeitem in this state, so a screen reader walking the
+	 * tree reaches nothing and the emptiness is silent; `aria-describedby` on
+	 * the row says it at the moment the row is focused. The placeholder is not
+	 * given a role of its own - a `role="group"` inside a tree owns treeitems,
+	 * and a second role in there would be an invalid child rather than an extra
+	 * stop.
+	 */
+	const emptyId = `tree-empty-${collection.id}`;
+	const showsEmptyPlaceholder =
+		requests.length === 0 &&
+		childCollections.length === 0 &&
+		creatingSubfolder !== collection.id;
 
 	const rowRef = useRef<HTMLDivElement>(null);
 	/**
@@ -155,7 +169,14 @@ export default function CollectionItem({
 	 * reached it. Depth is shown by where the content sits, not where the row
 	 * starts.
 	 */
-	const indentPx = 8 + depth * INDENT_STEP;
+	const indentPx = rowInsetPx(depth);
+
+	/**
+	 * Everything inside this row's group - the "Empty folder" placeholder, the
+	 * new-subfolder form - takes the left edge a child row takes, so one level
+	 * shows one left edge whether it holds rows, a message, or a half-typed name.
+	 */
+	const childIndentPx = childInsetPx(depth);
 
 	return (
 		<div className={cn("select-none", isDeleting && "opacity-50")}>
@@ -189,6 +210,7 @@ export default function CollectionItem({
 				// way to say "that group belongs to me" without restructuring the
 				// DOM the roving-focus walk and the hit-area rules depend on.
 				aria-owns={isExpanded ? childrenId : undefined}
+				aria-describedby={isExpanded && showsEmptyPlaceholder ? emptyId : undefined}
 				onClick={(e) => isRowSurface(e) && handleClick(e)}
 				onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 				// Whole-row drag handle: the gesture is captured here and only
@@ -361,7 +383,10 @@ export default function CollectionItem({
 				<div id={childrenId} role="group" className="mt-1 space-y-0.5">
 					{/* Subfolder Creation Form */}
 					{creatingSubfolder === collection.id && (
-						<div className="flex gap-2 py-1 px-2">
+						<div
+							className="flex gap-2 py-1 pr-2"
+							style={{ paddingLeft: childIndentPx }}
+						>
 							<Input
 								type="text"
 								value={newSubCollectionName}
@@ -412,13 +437,15 @@ export default function CollectionItem({
 					))}
 
 					{/* Requests */}
-					{requests.length === 0 &&
-						childCollections.length === 0 &&
-						creatingSubfolder !== collection.id && (
-							<div className="py-2 px-3 text-xs text-muted-foreground">
-								Empty folder
-							</div>
-						)}
+					{showsEmptyPlaceholder && (
+						<div
+							id={emptyId}
+							className="py-2 pr-3 text-xs text-muted-foreground"
+							style={{ paddingLeft: childIndentPx }}
+						>
+							Empty folder
+						</div>
+					)}
 					{requests.map((request, index) => (
 						<RequestItem
 							key={request.id}

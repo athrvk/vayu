@@ -83,6 +83,25 @@ import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
  */
 const SCOPE_SECTIONS = 3;
 
+/**
+ * The left edge of everything inside a section's `role="group"`: the level-2
+ * rows, and equally the empty line, the new-environment field, the loading
+ * skeleton and a load error.
+ *
+ * 50px, past the header's chevron and icon, so a level-2 row reads as a child
+ * of the header rather than a sibling of it. Named because it was four
+ * different paddings before (#1372) - `px-3`, `pl-6`, `px-1`, and the rows'
+ * own `pl-12.5` - which put up to four left edges under one expanded header.
+ * The collection tree derives the same rule from its depth (`childInsetPx`);
+ * this tree is exactly two levels deep, so the value is a constant rather than
+ * a function of one.
+ *
+ * Always written *after* a `px-*` in the same class list, the order the rows
+ * already use: `cn` is tailwind-merge, which drops an earlier `pl-*` when a
+ * later `px-*` overrides it, and the row would silently lose its indent.
+ */
+const GROUP_CHILD_INSET = "pl-12.5";
+
 export default function VariablesCategoryTree() {
 	// Fetches its own data, like the other three drawer views. It used to
 	// receive both lists as props from the Drawer, which read them with `= []`
@@ -119,11 +138,11 @@ export default function VariablesCategoryTree() {
 
 	/*
 	 * The pane variant centres inside `p-8`, which would break the rhythm of a
-	 * tree of 32px rows. `px-3 py-2` is the padding the italic empty rows above
-	 * already use, so the failure line sits on the tree's left edge like every
-	 * other row; `justify-start` undoes the variant's centring.
+	 * tree of 32px rows. `justify-start` undoes that centring, and the inset
+	 * puts the failure line where the rows it replaces would have started -
+	 * inside a group, one level shows one left edge.
 	 */
-	const inlineErrorClass = "justify-start px-3 py-2 text-xs";
+	const inlineErrorClass = cn("justify-start px-3 py-2 text-xs", GROUP_CHILD_INSET);
 
 	const { selectedCategory, setSelectedCategory } = useVariablesStore();
 	const { openTab } = useTabsStore();
@@ -411,7 +430,7 @@ export default function VariablesCategoryTree() {
 							<div id={environmentsGroupId} role="group" className="mt-1">
 								{/* New Environment Input */}
 								{creatingEnvironment && (
-									<div className="px-3 py-1 pl-6">
+									<div className={cn("px-3 py-1", GROUP_CHILD_INSET)}>
 										<Input
 											value={newEnvName}
 											onChange={(e) => setNewEnvName(e.target.value)}
@@ -438,7 +457,10 @@ export default function VariablesCategoryTree() {
 								)}
 
 								{isLoadingEnvironments ? (
-									<ListSkeleton rows={2} className="px-1" />
+									<ListSkeleton
+										rows={2}
+										className={cn("pr-3", GROUP_CHILD_INSET)}
+									/>
 								) : showEnvironmentsError ? (
 									<ErrorState
 										variant="inline"
@@ -447,7 +469,12 @@ export default function VariablesCategoryTree() {
 										onRetry={() => void refetchEnvironments()}
 									/>
 								) : environments.length === 0 && !creatingEnvironment ? (
-									<div className="px-3 py-2 text-xs text-muted-foreground italic">
+									<div
+										className={cn(
+											"px-3 py-2 text-xs text-muted-foreground italic",
+											GROUP_CHILD_INSET
+										)}
+									>
 										No environments
 									</div>
 								) : (
@@ -470,7 +497,7 @@ export default function VariablesCategoryTree() {
 											 * The button therefore stays and owns the
 											 * action. The row *additionally* delegates
 											 * clicks landing on its own box - the 50px
-											 * `pl-12.5` indent, the gap, `px-3` - which
+											 * group inset, the gap, `px-3` - which
 											 * belong to no child and so had nowhere to
 											 * go. RequestItem carries the rule and why
 											 * the target check is what it is.
@@ -501,7 +528,8 @@ export default function VariablesCategoryTree() {
 													});
 												}}
 												className={cn(
-													"focus-row group flex h-8 cursor-pointer items-center gap-2 px-3 pl-12.5 text-sm hover:bg-accent transition-colors",
+													"focus-row group flex h-8 cursor-pointer items-center gap-2 px-3 text-sm hover:bg-accent transition-colors",
+													GROUP_CHILD_INSET,
 													isSelected({
 														type: "environment",
 														environmentId: environment.id,
@@ -704,7 +732,10 @@ export default function VariablesCategoryTree() {
 						{collectionsExpanded && (
 							<div id={collectionsGroupId} role="group" className="mt-1">
 								{isLoadingCollections ? (
-									<ListSkeleton rows={2} className="px-1" />
+									<ListSkeleton
+										rows={2}
+										className={cn("pr-3", GROUP_CHILD_INSET)}
+									/>
 								) : showCollectionsError ? (
 									<ErrorState
 										variant="inline"
@@ -713,7 +744,12 @@ export default function VariablesCategoryTree() {
 										onRetry={() => void refetchCollections()}
 									/>
 								) : collections.length === 0 ? (
-									<div className="px-3 py-2 text-xs text-muted-foreground italic">
+									<div
+										className={cn(
+											"px-3 py-2 text-xs text-muted-foreground italic",
+											GROUP_CHILD_INSET
+										)}
+									>
 										No collections
 									</div>
 								) : (
@@ -757,7 +793,10 @@ export default function VariablesCategoryTree() {
 													// covers all of it: the indent stays here
 													// rather than on the row, and no part of the
 													// 32px is dead to a click.
-													className="flex min-w-0 flex-1 self-stretch items-center gap-2 px-3 pl-12.5 text-left text-sm"
+													className={cn(
+														"flex min-w-0 flex-1 self-stretch items-center gap-2 px-3 text-left text-sm",
+														GROUP_CHILD_INSET
+													)}
 												>
 													{/* <Folder className="w-4 h-4 text-orange-400" /> */}
 													<TruncatedText className="flex-1">

@@ -15,7 +15,7 @@ import type { Request } from "@/types";
 import { Input } from "@/components/ui";
 import { RowActionsMenu, MethodBadge, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
-import { INDENT_STEP } from "@/constants/layout";
+import { rowInsetPx } from "@/constants/layout";
 
 /**
  * What differs per row. The selection, the rename and delete state and every
@@ -153,7 +153,7 @@ export default function RequestItem({
 			data-drop-blocked={dnd.isBlocked || undefined}
 			// Indent inside the row (see CollectionItem) so the fill still
 			// reaches both panel edges.
-			style={{ paddingLeft: 8 + depth * INDENT_STEP }}
+			style={{ paddingLeft: rowInsetPx(depth) }}
 			className={cn(
 				// focus-row: this row is the perceived target, not the narrower
 				// label button inside it - it paints the keyboard focus ring.
@@ -170,7 +170,7 @@ export default function RequestItem({
 				rowDndClasses(dnd)
 			)}
 		>
-			<RowDropIndicator edge={dnd.dropEdge} indentPx={8 + depth * INDENT_STEP} />
+			<RowDropIndicator edge={dnd.dropEdge} indentPx={rowInsetPx(depth)} />
 			<button
 				onClick={handleClick}
 				onDoubleClick={handleDoubleClick}
