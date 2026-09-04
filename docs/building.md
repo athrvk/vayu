@@ -267,9 +267,12 @@ there. Pass `-jN` to override. See
   - Lock file: `engine/data/vayu.lock`
 
 ### Production
-- **macOS**: `~/Library/Application Support/vayu/`
-- **Linux**: `~/.config/vayu/`
-- **Windows**: `%APPDATA%\vayu\`
+- **macOS**: `~/Library/Application Support/vayu-client/`
+- **Linux**: `~/.config/vayu-client/`
+- **Windows**: `%APPDATA%\vayu-client\`
+
+The directory name is `app/package.json`'s `name`, which is what Electron gives
+`app.getPath("userData")` - not the product name.
 
 ## Troubleshooting
 
