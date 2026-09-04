@@ -74,7 +74,10 @@ The Vayu Manager is an Electron-based desktop application built with React and T
 
 The main process is responsible for:
 
-- **Window Management**: Creates and manages the Electron `BrowserWindow`
+- **Window Management**: Creates and manages the Electron `BrowserWindow`. Its
+  `webPreferences` hold the renderer's security posture - no Node integration,
+  context isolation on, and Chromium's spellchecker off, so no field in the
+  request builder draws underlines and no dictionary is fetched over the network
 - **Engine Lifecycle**: Starts and stops the C++ engine via `EngineSidecar`
 - **App Lifecycle**: Handles app ready, window close, and quit events
 

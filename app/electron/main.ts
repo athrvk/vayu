@@ -273,6 +273,12 @@ function createWindow() {
 			nodeIntegration: false,
 			contextIsolation: true,
 			preload: path.join(__dirname, "preload.js"),
+			// Off for the whole renderer (#1355). Nothing here is prose - URLs,
+			// header values, {{tokens}} and JSON keys all draw squiggles - and on
+			// Windows and Linux the checker fetches Hunspell dictionaries from a
+			// Google CDN the first time it runs, which a tool pointed at internal
+			// APIs should not do for a feature it does not want.
+			spellcheck: false,
 		},
 		title: "Vayu",
 		backgroundColor: nativeTheme.shouldUseDarkColors ? WINDOW_BG_DARK : WINDOW_BG_LIGHT,
