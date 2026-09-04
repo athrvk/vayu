@@ -30,6 +30,7 @@ import { useMenuActions } from "./hooks/useMenuActions";
 import { useNotificationActivation } from "./hooks/useNotificationActivation";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
+import { useInboxWatchers } from "./hooks/useInboxWatchers";
 import { useRunningServicesPublisher } from "@/modules/services";
 import { useSaveStore } from "./stores/save-store";
 
@@ -100,6 +101,12 @@ function App() {
 	// no warning and the dashboard may not be the open tab, while the run it
 	// interrupts streams from a service that outlives every view (#1357).
 	useHostSleepRecorder();
+
+	// A webhook lands while the user is in another tab, or another application -
+	// which is when its notification matters. The inbox tab is mounted only
+	// while it is the active one, so the streams that hear those captures are
+	// held here instead (#1400).
+	useInboxWatchers();
 
 	// Everything the Services drawer started keeps listening inside the engine,
 	// and the engine goes down with the app. This is what lets the close name

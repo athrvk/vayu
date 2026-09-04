@@ -5863,6 +5863,32 @@ run publishes no `metrics` ticks:
 its work is sequential, so per-tick aggregates would be a rate of one request at
 a time rather than anything about the sequence.
 
+**Its stream opens with one `plan` frame** (issue #1398), published before the
+first `step`:
+
+```
+event: plan
+id: 0
+data: {"stepsPerIteration":4,"iterations":3,"stepsExpected":12}
+```
+
+`stepsPerIteration` is the plan's length, steps in one pass over it.
+`iterations` is how many passes the engine resolved - a data set's row count
+where the run named no explicit count of its own. `stepsExpected` is
+`stepsPerIteration * iterations`, an upper bound rather than a promise, on the
+same terms as the load path's `requestsExpected` above: an errored step ends
+its iteration, `POST /runs/:id/stop` ends the run, `setNextRequest` can walk
+an iteration in fewer steps than the plan holds, and the
+`maxStepsPerIteration` cap can end one that walks in more. It rides the same
+monotonic id space as the `step` frames that follow - the same ring, so
+`Last-Event-ID` resume works identically - and a client that attaches after
+the frame has aged out of the retained ring simply never sees it: it should
+read that as no total rather than compute a fraction of a number nobody sent,
+and show an indeterminate bar the way it would against an older engine that
+never sent this frame at all. One frame ahead of the work rather than a number
+on every tick, because this run publishes no ticks to carry one: the load
+path's total rides its `metrics` events precisely because that path has them.
+
 **A run with a [`monitor` block](#the-monitor-block-server-vitals) also streams
 `monitor` events**, one per successful scrape, interleaved with its `metrics`
 ticks on the same ring and the same monotonic `id:` numbering - so

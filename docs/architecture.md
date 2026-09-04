@@ -196,6 +196,10 @@ toggle is, which sits in the inbox's header rather than in Settings and is off
 by default. The captures of one window are coalesced into a single notification
 naming how many arrived, rather than posted one by one, and the window is a
 property of what a notification is for rather than a setting the user tunes.
+The stream that hears those captures is held app-wide, for every running inbox
+whose toggle is on, rather than by the inbox tab: one tab's surface is mounted
+at a time, so a view-owned stream was silenced by the click onto another tab
+that ordinarily precedes leaving the window (issue #1400).
 
 Because that answer only exists once something has been posted, Settings can ask
 for one: the Preview beside the toggle posts a real notification over
@@ -212,14 +216,18 @@ says what the fraction is - it is the only side that holds a run's denominator -
 and main says what each platform makes of it: a fill on the Windows taskbar
 button, a bar on the macOS Dock icon, and nothing on Linux, where Electron 44
 removed Unity launcher support. A run with no denominator (an open-ended load
-test, or a collection run, whose plan length only the engine resolves) shows
+test, or a collection run whose plan frame - the size the engine publishes on
+its stream as the run opens, issue #1398 - never reached the client) shows
 indeterminate on Windows and nothing on macOS; a failed run flashes the Windows
 error state; the bar clears on every terminal path, and main clears it itself
 when the renderer that asked for it is destroyed or reloads. One indicator is
 all the OS gives an application, and one run is all the renderer watches: the
 SSE client is a singleton, so starting a second run closes the first one's
-stream. The indicator follows the run being watched, and a superseded run's own
-stop is ignored rather than clearing the bar of the run that took over.
+stream. The indicator follows the run being watched: a run claims it by id when
+the renderer starts watching it, and a run that no longer holds that claim is
+ignored whether it reports, fails or stops - including a run of the same kind as
+the one that took over, and one whose last batched flush lands after it was
+superseded, neither of which a claim by kind could tell apart from the live run.
 
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 

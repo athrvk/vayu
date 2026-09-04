@@ -40,18 +40,20 @@ vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn(), disconnect: vi.f
 vi.mock("./api", () => ({
 	apiService: { getRunReport: vi.fn().mockResolvedValue({ summary: {}, latency: {} }) },
 }));
-const { mockReport, mockFail, mockClear } = vi.hoisted(() => ({
+const { mockClaim, mockReport, mockFail, mockClear } = vi.hoisted(() => ({
+	mockClaim: vi.fn(),
 	mockReport: vi.fn(),
 	mockFail: vi.fn(),
 	mockClear: vi.fn(),
 }));
 vi.mock("./run-progress", () => ({
-	runProgress: { report: mockReport, fail: mockFail, clear: mockClear },
+	runProgress: { claim: mockClaim, report: mockReport, fail: mockFail, clear: mockClear },
 	RUN_PROGRESS_KEYS: { loadRun: "load-run", collectionRun: "collection-run" },
 }));
 
 import { loadTestService } from "./load-test-service";
 import { sseClient } from "./sse-client";
+import { apiService } from "./api";
 import { RUN_PROGRESS_KEYS } from "./run-progress";
 
 const LOAD_RUN = RUN_PROGRESS_KEYS.loadRun;
@@ -89,9 +91,15 @@ describe("LoadTestService - the OS progress indicator", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("claims the indicator when the run starts, with no fraction yet", () => {
+	/*
+	 * The run id on every one of these is the point of #1405: the indicator is
+	 * claimed by the run, not by the kind, so a call that named only `load-run`
+	 * would let a superseded run paint over the run being watched. Mutation
+	 * check on each: pass anything but this run's id and the case reddens.
+	 */
+	it("claims the indicator for the run that started, with no fraction yet", () => {
 		loadTestService.startMonitoring("run_1");
-		expect(mockReport).toHaveBeenCalledWith(LOAD_RUN, null);
+		expect(mockClaim).toHaveBeenCalledWith(LOAD_RUN, "run_1");
 	});
 
 	it("reports the derived fraction on a committed batch", () => {
@@ -99,7 +107,7 @@ describe("LoadTestService - the OS progress indicator", () => {
 		mockReport.mockClear();
 		tickHandler()(tick(30));
 		expect(mockDerive).toHaveBeenCalledWith(config, tick(30));
-		expect(mockReport).toHaveBeenCalledWith(LOAD_RUN, 0.5);
+		expect(mockReport).toHaveBeenCalledWith(LOAD_RUN, "run_1", 0.5);
 	});
 
 	it("passes a run with no denominator through as null", () => {
@@ -107,25 +115,56 @@ describe("LoadTestService - the OS progress indicator", () => {
 		loadTestService.startMonitoring("run_1");
 		mockReport.mockClear();
 		tickHandler()(tick(30));
-		expect(mockReport).toHaveBeenCalledWith(LOAD_RUN, null);
+		expect(mockReport).toHaveBeenCalledWith(LOAD_RUN, "run_1", null);
 	});
 
 	it("gives the indicator up when the user stops the run", () => {
 		loadTestService.startMonitoring("run_1");
 		loadTestService.stopMonitoring();
-		expect(mockClear).toHaveBeenCalledWith(LOAD_RUN);
+		expect(mockClear).toHaveBeenCalledWith(LOAD_RUN, "run_1");
 	});
 
 	it("gives it up when the run completes", async () => {
 		loadTestService.startMonitoring("run_1");
 		await closeStream();
-		expect(mockClear).toHaveBeenCalledWith(LOAD_RUN);
+		expect(mockClear).toHaveBeenCalledWith(LOAD_RUN, "run_1");
 	});
 
 	it("says failed when the stream errors", () => {
 		loadTestService.startMonitoring("run_1");
 		failStream("engine went away");
-		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN);
+		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_1");
+	});
+
+	/*
+	 * The terminal fetch in `handleClose` is awaited, and a run started inside
+	 * that window has already put its own id on the service. Forgetting it there
+	 * would leave the service unable to name the run it is watching, and since
+	 * #1405 that is what every call to the indicator turns on: the live run's
+	 * fraction would be dropped from then on and its bar never cleared.
+	 *
+	 * Mutation check: drop the `this.activeRunId === runId` guard on the
+	 * assignment and the report below arrives naming `null`.
+	 */
+	it("keeps naming the run that started while the last one's report was in flight", async () => {
+		type RunReport = Awaited<ReturnType<typeof apiService.getRunReport>>;
+		let deliverReport: (report: RunReport) => void = () => {};
+		vi.mocked(apiService.getRunReport).mockReturnValueOnce(
+			new Promise<RunReport>((resolve) => {
+				deliverReport = resolve;
+			})
+		);
+
+		loadTestService.startMonitoring("run_1");
+		const closing = closeStream();
+		// The user starts the next run before the first one's report lands.
+		loadTestService.startMonitoring("run_2");
+		deliverReport({ summary: {}, latency: {} } as unknown as RunReport);
+		await closing;
+
+		mockReport.mockClear();
+		tickHandler()(tick(10));
+		expect(mockReport).toHaveBeenCalledWith(LOAD_RUN, "run_2", 0.5);
 	});
 
 	/*
@@ -138,7 +177,7 @@ describe("LoadTestService - the OS progress indicator", () => {
 		loadTestService.startMonitoring("run_1");
 		failStream("engine went away");
 		await closeStream();
-		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN);
+		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_1");
 		expect(mockClear).not.toHaveBeenCalled();
 	});
 });
