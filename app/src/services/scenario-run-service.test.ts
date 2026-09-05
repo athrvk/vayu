@@ -53,7 +53,10 @@ vi.mock("@/stores", () => ({
 		}),
 	},
 }));
-vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn() } }));
+// `disconnect` is here because `startMonitoring` ends the run it replaces
+// through it (#1417); the cross-service hand-off itself runs against the real
+// client in `run-supersession.test.ts`, a mock having no takeover to observe.
+vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn(), disconnect: vi.fn() } }));
 vi.mock("./api", () => ({ apiService: { getRunReport: vi.fn() } }));
 const { mockWakeLockHold, mockWakeLockRelease } = vi.hoisted(() => ({
 	mockWakeLockHold: vi.fn(),
