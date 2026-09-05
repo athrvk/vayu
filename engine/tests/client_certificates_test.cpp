@@ -895,7 +895,7 @@ TEST_F (ClientCertificateDbTest, UpdateChecksTheMergedRowNotTheBody) {
  * `before_write` seam and is given a window to finish (`competing_writer.hpp`).
  * Mutation check: drop the `with_lock` and the `port` assertion reds.
  */
-TEST_F (ClientCertificateDbTest, AConcurrentUpdateWaitsAndKeepsBothFieldsWritten) {
+TEST_F (ClientCertificateDbTest, AConcurrentCertificateUpdateWaitsAndKeepsBothFieldsWritten) {
     const auto [created_status, created] =
     routes::create_client_certificate_response (*db_, body ("api.example.com"));
     ASSERT_EQ (created_status, 200) << created.dump ();
