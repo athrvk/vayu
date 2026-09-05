@@ -59,6 +59,14 @@ function notes(overrides: Partial<ExportNotes> = {}): ExportNotes {
 		rowsNotDeclared: 0,
 		operationsEdited: 0,
 		vocabularyNotWritten: false,
+		authDropped: 0,
+		scriptsDropped: 0,
+		variablesDropped: 0,
+		foldersFlattened: 0,
+		bodiesDropped: 0,
+		formValuesDropped: 0,
+		settingsDropped: 0,
+		exampleHeadersDropped: 0,
 		...overrides,
 	};
 }
@@ -238,6 +246,53 @@ describe("ExportSpecDialog", () => {
 		expect(screen.getByText(/OpenAPI 3.1.0/)).toBeTruthy();
 	});
 
+	it("names what a free-form export could not carry, singular and plural alike", async () => {
+		exportSpec.mockResolvedValue(
+			answer({
+				notes: notes({
+					direction: "skeleton",
+					dialect: "OpenAPI 3.1.0",
+					operationsRemoved: 0,
+					requestsWithoutOperation: 0,
+					authDropped: 1,
+					scriptsDropped: 2,
+					variablesDropped: 3,
+					foldersFlattened: 1,
+					bodiesDropped: 1,
+					formValuesDropped: 1,
+					settingsDropped: 1,
+					exampleHeadersDropped: 2,
+				}),
+			})
+		);
+		open();
+
+		expect(await screen.findByText(/A skeleton document/)).toBeTruthy();
+		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		expect(lines).toContain(
+			"1 request whose auth OpenAPI has no securityScheme for - not written"
+		);
+		expect(lines).toContain(
+			"2 requests carrying a pre- or post-request script - OpenAPI has no operation-scoped hook for one"
+		);
+		expect(lines).toContain(
+			"3 collection variables besides baseUrl - a document has nowhere else to declare one"
+		);
+		expect(lines).toContain(
+			"1 request whose folder nests more than one level - written as a single flat tag"
+		);
+		expect(lines).toContain(
+			"1 request whose body is in a mode this direction has no media type for"
+		);
+		expect(lines).toContain(
+			"1 request whose form body declares field names but not their values"
+		);
+		expect(lines).toContain(
+			"1 request carrying a non-default execution setting - redirects, TLS, HTTP version, streaming"
+		);
+		expect(lines).toContain("2 examples carrying a header besides Content-Type - not written");
+	});
+
 	it("shows the engine's own sentence when there is no document, and downloads nothing", async () => {
 		// Not a skeleton behind the user's back: a skeleton in place of the
 		// document the user believes they are updating would drop every member of
@@ -294,11 +349,11 @@ describe("ExportSpecDialog", () => {
 		// the arriving card would push the dialog's edges away from.
 		const placeholder = screen.getByRole("status", { name: "Assembling the document" });
 		expect(placeholder.className).toContain("surface-sunken");
-		// A heading bar, two for the paragraph that wraps under it, and a row
-		// per count: ten, between the six a free-form summary lists and the
-		// fourteen a bound one does. jsdom measures no heights, so the row counts
-		// those heights come from are what a test can hold.
-		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(13);
+		// A heading bar, two for the paragraph that wraps under it, and a row per
+		// count: fourteen, the same for both directions since issue #1441. jsdom
+		// measures no heights, so the row counts those heights come from are what
+		// a test can hold.
+		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(17);
 
 		first.settle(answer());
 		expect(await screen.findByText(/own document, updated/)).toBeTruthy();

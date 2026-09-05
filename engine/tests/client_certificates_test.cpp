@@ -47,6 +47,11 @@ namespace vayu::http::routes {
 // Defined in client_certificates.cpp; each returns {http_status, json_body}.
 std::pair<int, nlohmann::json>
 create_client_certificate_response (vayu::db::Database& db, const nlohmann::json& json);
+// The create core with its `before_write` seam - invoked inside the lock scope
+// with the new row staged and immediately before it is written (#1455).
+std::pair<int, nlohmann::json> create_client_certificate_response (vayu::db::Database& db,
+const nlohmann::json& json,
+const std::function<void ()>& before_write);
 std::pair<int, nlohmann::json> update_client_certificate_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
@@ -809,6 +814,37 @@ TEST_F (ClientCertificateDbTest, RefusesASecondEntryForTheSameTarget) {
     // As is the catch-all beside them.
     EXPECT_EQ (
     routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
+}
+
+/**
+ * The create core's check and write are one lock scope (#1455), so a second
+ * create for the same host and port started during the first's window cannot
+ * pass `reject_duplicate_target` before the first's row lands. Without the
+ * lock, both checks run before either write, both pass, and two rows end up
+ * claiming one target - the state the 409 exists to prevent.
+ *
+ * The second writer runs from inside the first one's scope through the
+ * `before_write` seam and is given a window to finish (`competing_writer.hpp`).
+ * Mutation check: drop the `with_lock` and this reds with two rows stored and
+ * a 200 for both creates.
+ */
+TEST_F (ClientCertificateDbTest, AConcurrentCreateForOneTargetWaitsAndTheSecondGetsThe409) {
+    int other_status = 0;
+    json other_body;
+    vayu::tests::CompetingWriter other ([&] {
+        auto result = routes::create_client_certificate_response (
+        *db_, body ("api.example.com", 8443));
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    const auto [status, created] = routes::create_client_certificate_response (
+    *db_, body ("api.example.com", 8443), other.probe ());
+    ASSERT_EQ (status, 200) << created.dump ();
+    other.join ();
+
+    EXPECT_EQ (other_status, 409) << other_body.dump ();
+    EXPECT_EQ (db_->get_client_certificates ().size (), 1u);
 }
 
 TEST_F (ClientCertificateDbTest, AWildcardIsATargetLikeAnyOther) {

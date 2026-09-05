@@ -236,12 +236,13 @@ bool is_create) {
 } // namespace
 
 /**
- * Testable core of POST /client-certificates - **create only**, returning
- * {http_status, json_body}. The engine owns the id (#97), so a body carrying
- * one is a 400.
+ * The check-decide-write of POST /client-certificates, run under the caller's
+ * lock: stages a fresh row, proves no other row claims its host and port, and
+ * writes it.
  */
-std::pair<int, nlohmann::json>
-create_client_certificate_response (vayu::db::Database& db, const nlohmann::json& json) {
+static std::pair<int, nlohmann::json> create_client_certificate_locked (vayu::db::Database& db,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
     if (auto outcome = reject_client_supplied_id (json); !outcome) {
         return as_response (outcome.error ());
     }
@@ -258,8 +259,45 @@ create_client_certificate_response (vayu::db::Database& db, const nlohmann::json
         return as_response (outcome.error ());
     }
 
+    if (before_write) {
+        before_write ();
+    }
     db.save_client_certificate (c);
     return { 200, vayu::json::serialize (c) };
+}
+
+/**
+ * Testable core of POST /client-certificates - **create only**, returning
+ * {http_status, json_body}. The engine owns the id (#97), so a body carrying
+ * one is a 400.
+ *
+ * **The check and the write are one lock scope** (#1455, the create-side
+ * sibling of #1440): two creates for the same host and port racing each other
+ * must not both pass `reject_duplicate_target` before either writes, or two
+ * rows end up claiming one target and the certificate presented depends on
+ * row order - exactly what the 409 exists to prevent.
+ * `update_client_certificate_response`'s doc comment states the identical
+ * reasoning for the update side of this invariant; this is the second (not
+ * the only) lock scope in the engine that reads the filesystem, for the same
+ * reason - `apply_client_certificate_fields`'s usability check reads the
+ * first page of the file this create is about to register.
+ *
+ * @param before_write Test seam, invoked inside the lock scope with the new
+ *        row staged and immediately before it is written; see
+ *        `update_request_response` for why it is an overload.
+ */
+std::pair<int, nlohmann::json> create_client_certificate_response (vayu::db::Database& db,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock (
+    [&] { result = create_client_certificate_locked (db, json, before_write); });
+    return result;
+}
+
+std::pair<int, nlohmann::json>
+create_client_certificate_response (vayu::db::Database& db, const nlohmann::json& json) {
+    return create_client_certificate_response (db, json, nullptr);
 }
 
 /**
@@ -308,13 +346,14 @@ const std::function<void ()>& before_write) {
  * leave the presented certificate decided by row order, the state the 409
  * exists to prevent.
  *
- * It is also the one lock scope in the engine that touches the filesystem:
+ * It is also one of the two lock scopes in the engine that touch the
+ * filesystem (the other being this file's own create, #1455):
  * `client_cert_rejection` stats the paths and reads the first page of the
  * certificate to catch a `.p12` registered as a PEM pair. That check reads the
  * *merged* row, which is why it cannot be hoisted out - and moving it out
  * anyway would only trade this bounded read for a window between the check and
  * the write it exists to guard. Bounded, local, and one page per path; see
- * `docs/engine/architecture.md`, which names it as the exception to the rule
+ * `docs/engine/architecture.md`, which names both as the exception to the rule
  * that a file read stays outside.
  *
  * @param before_write Test seam, invoked inside the lock scope with the merged

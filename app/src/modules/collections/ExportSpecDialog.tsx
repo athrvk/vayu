@@ -208,14 +208,14 @@ function errorText(error: unknown): string {
  * moves the top edge as well as the bottom, and the whole window reads as
  * flickering.
  *
- * Which direction ran is not known until the answer lands, and the two shapes
- * differ: a free-form collection's summary lists six counts, a bound one's
- * fourteen. Ten rows is the midpoint, so the card that arrives moves the
- * dialog's edge by at most four lines in either direction rather than by eight
- * in one of them. The paragraph above them is two bars because the sentence it
- * stands for wraps at this width in both directions.
+ * Which direction ran is not known until the answer lands, but the two shapes
+ * agree on their length since issue #1441 gave the free-form direction its own
+ * eight counts: both list fourteen rows, so the card that arrives moves the
+ * dialog's edge by nothing regardless of which one ran. The paragraph above
+ * them is two bars because the sentence it stands for wraps at this width in
+ * both directions.
  */
-const PLACEHOLDER_ROWS = 10;
+const PLACEHOLDER_ROWS = 14;
 
 function SummarySkeleton() {
 	return (
@@ -319,6 +319,46 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 							count={notes.duplicateOperations}
 							label="request"
 							suffix="on a method and path another request already claimed - left out"
+						/>
+						<Line
+							count={notes.authDropped}
+							label="request"
+							suffix="whose auth OpenAPI has no securityScheme for - not written"
+						/>
+						<Line
+							count={notes.scriptsDropped}
+							label="request"
+							suffix="carrying a pre- or post-request script - OpenAPI has no operation-scoped hook for one"
+						/>
+						<Line
+							count={notes.variablesDropped}
+							label="collection variable"
+							suffix="besides baseUrl - a document has nowhere else to declare one"
+						/>
+						<Line
+							count={notes.foldersFlattened}
+							label="request"
+							suffix="whose folder nests more than one level - written as a single flat tag"
+						/>
+						<Line
+							count={notes.bodiesDropped}
+							label="request"
+							suffix="whose body is in a mode this direction has no media type for"
+						/>
+						<Line
+							count={notes.formValuesDropped}
+							label="request"
+							suffix="whose form body declares field names but not their values"
+						/>
+						<Line
+							count={notes.settingsDropped}
+							label="request"
+							suffix="carrying a non-default execution setting - redirects, TLS, HTTP version, streaming"
+						/>
+						<Line
+							count={notes.exampleHeadersDropped}
+							label="example"
+							suffix="carrying a header besides Content-Type - not written"
 						/>
 					</>
 				)}
