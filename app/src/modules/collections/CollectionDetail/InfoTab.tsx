@@ -48,6 +48,27 @@ interface InfoDraft {
 	description: string;
 }
 
+/**
+ * One field of the per-key merge #1437 needs: a field the user hasn't touched
+ * adopts an external change; a field both sides changed, to different values,
+ * is a conflict left at the user's own value until they choose.
+ */
+function mergeField<K extends keyof InfoDraft>(
+	key: K,
+	draft: InfoDraft,
+	baseline: InfoDraft,
+	externalValue: InfoDraft | null
+): { value: InfoDraft[K]; conflict: boolean } {
+	if (externalValue === null || externalValue[key] === baseline[key]) {
+		return { value: draft[key], conflict: false };
+	}
+	const touched = draft[key] !== baseline[key];
+	if (!touched || externalValue[key] === draft[key]) {
+		return { value: touched ? draft[key] : externalValue[key], conflict: false };
+	}
+	return { value: draft[key], conflict: true };
+}
+
 export default function InfoTab({ collection, requestCount, active = false }: InfoTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
@@ -70,22 +91,10 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 	// touched adopts an agent's change silently, the way a clean tab always
 	// has; a field both sides touched is a conflict, named and left for the
 	// user to resolve rather than picked for them.
-	const nameTouched = draft.name !== baseline.name;
-	const descriptionTouched = draft.description !== baseline.description;
-	const nameChangedElsewhere = externalValue !== null && externalValue.name !== baseline.name;
-	const descriptionChangedElsewhere =
-		externalValue !== null && externalValue.description !== baseline.description;
-	const nameConflict = nameTouched && nameChangedElsewhere && externalValue!.name !== draft.name;
-	const descriptionConflict =
-		descriptionTouched &&
-		descriptionChangedElsewhere &&
-		externalValue!.description !== draft.description;
-
-	const name = !nameTouched && nameChangedElsewhere ? externalValue!.name : draft.name;
-	const description =
-		!descriptionTouched && descriptionChangedElsewhere
-			? externalValue!.description
-			: draft.description;
+	const nameMerge = mergeField("name", draft, baseline, externalValue);
+	const descriptionMerge = mergeField("description", draft, baseline, externalValue);
+	const { value: name, conflict: nameConflict } = nameMerge;
+	const { value: description, conflict: descriptionConflict } = descriptionMerge;
 
 	const takeTheirName = () => {
 		if (externalValue) setDraft((d) => ({ ...d, name: externalValue.name }));

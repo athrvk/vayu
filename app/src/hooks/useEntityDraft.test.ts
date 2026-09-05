@@ -182,4 +182,20 @@ describe("useEntityDraft - a dirty draft against a background refetch (#1437)", 
 			description: "written by an agent",
 		});
 	});
+
+	it("a switch clears a pending conflict rather than carrying it to the new entity", () => {
+		const { result, rerender } = setup({ entityKey: "c1", value: acme });
+
+		act(() => result.current.setDraft({ name: "Renamed", description: "" }));
+		rerender({ entityKey: "c1", value: { ...acme, description: "written by an agent" } });
+		expect(result.current.externalValue).not.toBeNull();
+
+		const other = { name: "Other API", description: "" };
+		rerender({ entityKey: "c2", value: other });
+
+		expect(result.current.draft).toEqual(other);
+		expect(result.current.baseline).toEqual(other);
+		expect(result.current.externalValue).toBeNull();
+		expect(result.current.isDirty).toBe(false);
+	});
 });

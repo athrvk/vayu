@@ -109,6 +109,32 @@ describe("InfoTab - a background rename or edit while the tab is dirty", () => {
 		expect(screen.getByText("Changed elsewhere: name")).toBeInTheDocument();
 	});
 
+	it("shows a conflict on description too, the same as name", async () => {
+		const { container, rerender } = await renderTab();
+
+		// Click into the rendered markdown to reveal the source textarea, the
+		// same way InfoTab.markdown.test.tsx does.
+		fireEvent.click(container.querySelector('[role="button"]') as HTMLElement);
+		const descriptionField = screen.getByLabelText(
+			"Collection description"
+		) as HTMLTextAreaElement;
+		fireEvent.change(descriptionField, { target: { value: "Written by the user" } });
+
+		await act(async () => {
+			rerender(
+				<TooltipProvider>
+					<InfoTab
+						collection={{ ...collection, description: "Written by an agent" }}
+						requestCount={0}
+					/>
+				</TooltipProvider>
+			);
+		});
+
+		expect(descriptionField.value).toBe("Written by the user");
+		expect(screen.getByText("Changed elsewhere: description")).toBeInTheDocument();
+	});
+
 	it("Take theirs adopts the agent's value and clears the conflict", async () => {
 		const { rerender } = await renderTab();
 
