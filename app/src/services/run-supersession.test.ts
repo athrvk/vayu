@@ -291,6 +291,32 @@ describe("a run superseded by the other service's run", () => {
 		expect(mockDashboardSetStreaming).not.toHaveBeenCalledWith(false);
 	});
 
+	/*
+	 * The failed-run flash is a two-second mark the main process times out on
+	 * its own, so clearing it in the tick it was painted wipes it (#1362,
+	 * #1364). Every path that lets go of a run leaves it alone, and being
+	 * superseded is now one of those paths. Mutation check: drop the
+	 * `progressFailedRunId` guard from `releaseRun` and this reddens.
+	 *
+	 * Reached through the private handler the way the sibling suites do: in
+	 * production `onError` fires only when opening the stream threw, which
+	 * leaves no hand-off registered, so this pins the rule rather than a
+	 * reachable sequence - the rule is what a future caller of `releaseRun`
+	 * would otherwise have to re-derive from another file.
+	 */
+	it("leaves a superseded run's failure flash alone", () => {
+		const { load, collection } = runIds();
+		loadTestService.startMonitoring(load);
+		(loadTestService as unknown as { handleError: (e: Error) => void }).handleError(
+			new Error("stream refused")
+		);
+		mockProgressClear.mockClear();
+
+		scenarioRunService.startMonitoring(collection);
+
+		expect(mockProgressClear).not.toHaveBeenCalledWith(LOAD_KEY, load);
+	});
+
 	it("holds no lock for a superseded run when the setting is off", () => {
 		const { load, collection } = runIds();
 		settings.keepAwakeDuringRuns = false;

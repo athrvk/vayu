@@ -186,17 +186,19 @@ class LoadTestService {
 	 * ended at all.
 	 *
 	 * `handleClose` keeps a sequence of its own rather than calling this, and
-	 * the differences are the reason: it flushes where this discards, it cannot
-	 * null `activeRunId` until after its awaited report fetch, and it clears the
-	 * indicator only for a run that has not already flashed failed. That last
-	 * guard is absent here because neither of these two callers can reach the
-	 * case - `progressFailedRunId` is set only by `handleError`, which the
-	 * client calls only when opening the stream threw, and a caller that never
-	 * opened one registered no hand-off to be superseded through.
+	 * the differences are the reason: it flushes where this discards, and it
+	 * cannot null `activeRunId` until after its awaited report fetch. What it
+	 * does not differ on is the failed-run flash, which is why the guard below
+	 * is here too: a run that already reported a failure keeps that mark on
+	 * *every* path that lets go of it, so the two-second flash the main process
+	 * is timing out on its own is never wiped in the tick it was painted
+	 * (#1362, #1364). `ScenarioRunService.releaseRun` holds the same rule.
 	 */
 	private releaseRun(runId: string): void {
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
-		runProgress.clear(RUN_PROGRESS_KEYS.loadRun, runId);
+		if (this.progressFailedRunId !== runId) {
+			runProgress.clear(RUN_PROGRESS_KEYS.loadRun, runId);
+		}
 		this.metricsBatcher.discard();
 		this.pendingMonitor = [];
 		this.activeRunId = null;
