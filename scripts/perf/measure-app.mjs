@@ -604,6 +604,20 @@ async function measurePackagedStartup(repoRoot, packagedDir) {
 	const result = await timeLaunches(spec, repoRoot, "packaged", waitForEngineToExit);
 	if (!result.ok) return unavailable(result.reason);
 
+	// A launch the app's reveal fallback put on screen never produced a first
+	// frame: it waited that timer out and then showed the window anyway
+	// (#1347), so the figure it prints is the timer and not a cold start.
+	// Rejected rather than folded into the median - this is the case that used
+	// to be a 90-second timeout with no cause, and it is still not a
+	// measurement. Must match `RevealReason` in `app/electron/window-reveal.ts`;
+	// `app/electron/startup-probe.test.ts` holds the two ends together.
+	const fellBack = result.payloads.filter((payload) => payload.via === "reveal-fallback").length;
+	if (fellBack > 0) {
+		return unavailable(
+			`${fellBack} of ${result.payloads.length} launches never painted - the window was shown by the app's reveal fallback, so no cold start was measured (see issue #1347)`
+		);
+	}
+
 	const launches = result.payloads.map((payload) => payload.readyToShowMs);
 	// Every launch on one machine reports the same basis; a mixture would mean
 	// the app measured two different things across three launches.

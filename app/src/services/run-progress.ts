@@ -17,7 +17,9 @@
  * for both run types, because there is one stream" - so a second
  * `startMonitoring`, from either run service, closes the first stream where it
  * stands. The superseded run keeps running on the engine, but nothing here sees
- * another tick of it, and its terminal handlers never fire.
+ * another tick of it, and its *terminal* handlers never fire - it did not end.
+ * What does fire is the hand-off (issue #1417): the displaced service is told,
+ * and gives the claim up there.
  *
  * So a run `claim`s the indicator when the renderer starts watching it, and
  * every later call names the run it speaks for: one that no longer holds the
@@ -30,10 +32,13 @@
  * *kind* of run and the thing that owns the indicator is one run, so keying by
  * kind left two gaps: two runs of the same kind, where the superseded one's
  * terminal calls pass the guard outright, and a stranded reporter, where a
- * service that has lost the stream can still paint. Nothing tells a superseded
- * run that it lost - `sseClient.connect` closes the previous `EventSource`
- * without invoking a handler - so the run itself cannot know, and only the side
- * holding the claim can.
+ * service that has lost the stream can still paint. The displaced service is
+ * now told the moment it loses the stream and clears its own claim there
+ * (issue #1417), but that does not retire the guard: a batched flush already in
+ * flight lands *after* the hand-off, and a run of the same kind as the one that
+ * took over would otherwise pass the guard on its way out. The claim is what
+ * tells those apart from the live run; the hand-off is what stops the bar being
+ * left standing when nothing else would clear it.
  *
  * Nothing here throttles: a caller reports off the metrics flush, which is
  * already the live-refresh cadence (`throttled-batcher.ts`), so a second timer

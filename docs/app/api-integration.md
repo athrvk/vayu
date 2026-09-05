@@ -856,8 +856,15 @@ collection run's per-step progress.
   so a `CLOSED` readyState is treated as terminal. Transient `CONNECTING` errors are left to the
   browser's built-in `EventSource` retry. At run end the app converges on the stored report
   (`GET /runs/:id/report`) rather than reconnecting to the stream.
-- **Event Handling**: `metrics` events, `step` events, `monitor` events, `complete` event,
-  `error` handling
+- **Event Handling**: `metrics` events, `step` events, `monitor` events, `plan` events,
+  `complete` event, `error` handling
+- **One client, and a hand-off when it changes hands**: the client is a singleton, so a second
+  `connect` takes the socket from whoever held it. That subscriber's `onSuperseded` runs first,
+  before the new stream opens, so it can give up its wake lock and its OS progress claim (issue
+  #1417). `onClose` is not used for this: a close says the run ended and the stored report is
+  worth fetching, where a takeover says only that the app stopped watching a run the engine is
+  still executing. `disconnect()` tells nobody - a subscriber hanging up on itself, and a stream
+  that ended on the engine's `complete` frame, are not superseded by the next run to start
 - **Metrics Parsing**: `mapSseMetrics()` transforms the engine's camelCase blob to the frontend
   `LoadTestMetrics` shape (includes drops, queue-wait, percentiles, bytes, status-code map)
 - **Step Parsing**: `parseStepEvent()` narrows a scenario run's `step` payload and returns `null`
@@ -876,9 +883,11 @@ sseClient.connect(
   runId: string,
   onMessage: (metrics: LoadTestMetrics) => void,
   onError: (error: Error) => void,
-  onClose: () => void,
+  onClose: (status: SSETerminalStatus) => void,   // how the run ended, or null
   onStep?: (step: ScenarioStepEvent) => void,     // scenario runs only
-  onMonitor?: (sample: MonitorSample) => void     // runs with a `monitor` block only
+  onMonitor?: (sample: MonitorSample) => void,    // runs with a `monitor` block only
+  onPlan?: (plan: ScenarioRunPlanEvent) => void,  // scenario runs only
+  onSuperseded?: () => void                       // another run took the client
 );
 
 sseClient.disconnect();

@@ -28,6 +28,16 @@ int64_t now_ms () {
     .count ();
 }
 
+/// Monotonic companion to `now_ms()`, for the one thing here that is a length
+/// rather than a point in time: how far into the run a refresh landed. Wall
+/// time can step mid-run and would report an offset that never happened.
+/// Pairs with `RunContext::start_steady_ms`.
+int64_t steady_now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+    .count ();
+}
+
 /// Sleep in slices of `poll_ms` so a stop is honoured promptly: the worker
 /// joins this thread on the way out, and a watchdog asleep until the next
 /// expiry would hold a finished run open for the rest of the token's life.
@@ -173,7 +183,7 @@ const AuthRefreshTuning& tuning) {
         retry_ms                = tuning.retry_ms;
         const auto& token       = std::get<vayu::db::OAuthToken> (result);
         const double at_seconds = context->start_time_ms > 0 ?
-        static_cast<double> (now_ms () - context->start_time_ms) / 1000.0 :
+        static_cast<double> (steady_now_ms () - context->start_steady_ms) / 1000.0 :
         0.0;
         state->publish (
         vayu::http::oauth2_header_value (state->config (), token.access_token), at_seconds,

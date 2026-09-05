@@ -24,18 +24,12 @@
  */
 
 import { Callout } from "../Callout";
+import { formatBytes } from "@/modules/settings/utils/format-size";
 import type { RunSample } from "@/types/domain";
 
 export interface CapturedResponseNoticeProps {
 	response: RunSample["response"];
 	className?: string;
-}
-
-/** Human-readable byte count - "1.2 KB", "34 B". */
-function formatBytes(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function CapturedResponseNotice({ response, className }: CapturedResponseNoticeProps) {

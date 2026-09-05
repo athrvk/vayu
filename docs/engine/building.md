@@ -389,7 +389,11 @@ tracking issue.
   reproduces it 10 times out of 10, which is the cheap way to re-measure this
   one, and the way it was re-measured at `dc25029` after the baseline moved to
   cpp-httplib 0.53.1: 8 of 10 runs raced without the entry, 10 of 10 passed
-  with it. What is left is upstream in libstdc++.
+  with it. Re-measured the same way on the move to cpp-httplib 0.54.1
+  (2026-09-05): 10 of 10 raced without the entry, 10 of 10 passed with it, the
+  report frame for frame the same - that release rewrote
+  `process_and_close_socket` around a `serve_guarded` wrapper and left
+  `parse_status_line` alone. What is left is upstream in libstdc++.
 
 The matrix has therefore paid for itself twice over: two engine-side defects
 found and fixed, one of them a race the ordinary suite is structurally unable
