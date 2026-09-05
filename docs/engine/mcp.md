@@ -1366,7 +1366,16 @@ configurable in **Settings → MCP** and persisted.
   `restore_trash_entry` deliberately does **not** carry it: it puts data back
   rather than destroying it, so the write toggle alone is its gate (below).
 - **Write toggle** (`allowWrites`, default off) - gates every tool in the
-  **write** category: `create_collection`, `update_collection`,
+  **write** category, and while it is off they are **not registered at all**:
+  they are absent from `tools/list`, not merely refused by `tools/call`. The
+  refusal remains in every write handler, for a client still holding a list it
+  fetched while the toggle was on. Withholding the schema rather than only the
+  call is what makes the toggle free: those tools are ~40% of the tool payload
+  an agent is sent, and on a default install none of them could have succeeded.
+  Because the tool set is recomputed per built server (a fresh one per HTTP
+  request), flipping the toggle takes effect on the client's next `tools/list` -
+  the same timing the per-tool switch below already has. The category covers:
+  `create_collection`, `update_collection`,
   `delete_collection`, `create_request`, `update_request`, `delete_request`,
   `create_request_example`, `update_request_example`,
   `delete_request_example`, `move_item`,
@@ -1402,7 +1411,10 @@ configurable in **Settings → MCP** and persisted.
   at most 8 issuers at once - and the per-tool switch below.
 - **Per-tool control** - any tool or whole read/execute/write/load category can be
   switched off; a disabled tool is omitted from `tools/list` **and** rejected by
-  `tools/call`. This and the write toggle are **independent**, and a write tool
+  `tools/call`. Settings lists every tool whatever the write toggle says, so the
+  switches for write tools stay visible and settable while writes are off - the
+  toggle governs what the *agent* is offered, not what the user can configure.
+  This and the write toggle are **independent**, and a write tool
   needs both: switching the write category on here does nothing while
   `allowWrites` is off, and turning `allowWrites` on re-enables no tool that is
   in `disabledTools`. Settings states this on both cards, because a user who
