@@ -401,7 +401,7 @@ half of the notice list rather than the destructive one. `variable_metadata` is 
 folder, environment or globals variable whose `description` or a meaningfully declared `type`
 (anything but `secret` or Postman's own `default` marker) was read and discarded, because
 Vayu's variable record has a field for the value and the secret flag only (see
-[postman.md](./postman.md#variables-environments)).
+[postman.md](./postman.md#variables--environments)).
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`
