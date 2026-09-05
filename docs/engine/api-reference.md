@@ -2222,7 +2222,13 @@ of the export, because its requests describe the very operations being patched.
     "examplesWritten": 4,
     "examplesWithoutMediaType": 1,
     "examplesTruncated": 0,
+    "examplesAlreadyDeclared": 3,
+    "examplesSampledAtImport": 2,
     "sharedParametersLeft": 1,
+    "referencedResponsesLeft": 1,
+    "bodiesNotWritten": 2,
+    "rowsNotDeclared": 1,
+    "operationsEdited": 0,
     "vocabularyNotWritten": false
   }
 }
@@ -2238,10 +2244,44 @@ a declared parameter whose request row carries a value gets it as `example`, and
 stored examples become response examples - one as `example`, several as a named
 `examples` map. Everything else - `info`, `tags`, vendor extensions, `security`,
 components nothing references - is carried through by simply not being visited,
-and the dialect is left as it was. A **Swagger 2.0** document is the one partial
-case, reported as `vocabularyNotWritten`: operations nothing claims are still
-removed, but nothing is written *into* an operation, because 2.0 states
-parameters and examples in a vocabulary Vayu does not write.
+and the dialect is left as it was.
+
+**It adds, and never removes what the document declares** (#1442). A media
+object already answering with an `examples` map keeps every entry it had and
+gains one; a single `example` is replaced by the one value that would replace
+it, and moves into the map under the key `example` when a second example has to
+go somewhere. A response that is a `$ref` is left bare and counted as
+`referencedResponsesLeft`: a Reference Object admits no siblings in 3.0, so a
+`content` written beside it is ignored by conformant readers and rejects the
+document at a validator, and the component it names is shared with every
+operation that references it. An example whose value the document already
+declares is counted as `examplesAlreadyDeclared` and written nowhere, and an
+**imported** example (`origin: import`) for a media object that declares no
+example at all was sampled off that response's schema at import, so it is
+counted as `examplesSampledAtImport` rather than written back as though the API
+had stated it; where the document declares no such response either, the status
+is not documented from it at all, because putting back a response the contract
+dropped is not this export's to do. Values are compared as values, so an example
+whose members are stored in another order than the document writes them is the
+same example. An export of a spec-origin collection nobody edited is therefore
+the document it was bound to, structurally unchanged.
+
+**The edits it cannot express are counted, not silent.** The bound direction
+writes parameters and examples: a request body is `bodiesNotWritten`, a Params
+or Headers row the operation declares no parameter for is `rowsNotDeclared`
+(`Authorization` and `Content-Type` excepted - OpenAPI states them as `security`
+and as the body's media type), and a request whose method or path no longer
+matches the operation it is stamped as is `operationsEdited` - its values still
+land, in the operation the document declares. A parameter the operation declares
+by `$ref`, or one the Path Item declares for every method under it, is declared:
+its name is read through the reference, so a row that has a home is never
+counted as one the document has no place for, and `sharedParametersLeft` is what
+says its *value* was not written.
+
+A **Swagger 2.0** document is the one partial case, reported as
+`vocabularyNotWritten`: operations nothing claims are still removed, but nothing
+is written *into* an operation, because 2.0 states parameters and examples in a
+vocabulary Vayu does not write.
 
 **A skeleton invents nothing.** `{{variable}}` tokens are written as they stand
 in `servers` and paths alike (resolving `{{baseUrl}}` would export one machine's

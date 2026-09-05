@@ -210,12 +210,12 @@ function errorText(error: unknown): string {
  *
  * Which direction ran is not known until the answer lands, and the two shapes
  * differ: a free-form collection's summary lists six counts, a bound one's
- * eight. Seven rows is the midpoint, so the card that arrives moves the
- * dialog's edge by at most one line in either direction rather than by two in
- * one of them. The paragraph above them is two bars because the sentence it
+ * fourteen. Ten rows is the midpoint, so the card that arrives moves the
+ * dialog's edge by at most four lines in either direction rather than by eight
+ * in one of them. The paragraph above them is two bars because the sentence it
  * stands for wraps at this width in both directions.
  */
-const PLACEHOLDER_ROWS = 7;
+const PLACEHOLDER_ROWS = 10;
 
 function SummarySkeleton() {
 	return (
@@ -287,6 +287,26 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 							label="shared $ref parameter"
 							suffix="left as it is - it belongs to every operation that names it"
 						/>
+						<Line
+							count={notes.referencedResponsesLeft}
+							label="$ref response"
+							suffix="left as it is - a reference takes no siblings, and the component it names is shared"
+						/>
+						<Line
+							count={notes.bodiesNotWritten}
+							label="request"
+							suffix="whose body is not written - this direction writes parameters and examples"
+						/>
+						<Line
+							count={notes.rowsNotDeclared}
+							label="row"
+							suffix="the operation declares no parameter for - not written"
+						/>
+						<Line
+							count={notes.operationsEdited}
+							label="request"
+							suffix="no longer matching the operation it is stamped as - values land in the operation the document declares"
+						/>
 					</>
 				) : (
 					<>
@@ -317,6 +337,20 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 					label="example"
 					suffix="stored only in part - the response is written, the truncated body is not"
 				/>
+				{bound && (
+					<>
+						<Line
+							count={notes.examplesAlreadyDeclared}
+							label="example"
+							suffix="already declared in the document - nothing to write"
+						/>
+						<Line
+							count={notes.examplesSampledAtImport}
+							label="example"
+							suffix="the import sampled from a schema - not written back as the contract's own"
+						/>
+					</>
+				)}
 			</ul>
 			{notes.vocabularyNotWritten && (
 				<p className="text-[11px] text-muted-foreground">
