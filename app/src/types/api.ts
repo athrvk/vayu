@@ -1873,6 +1873,23 @@ export interface ExportNotes {
 	operationsEdited: number;
 	/** A Swagger 2.0 document: operations are removed, nothing is written in. */
 	vocabularyNotWritten: boolean;
+	// --- Skeleton-only: what a free-form export cannot carry (issue #1441) ---
+	/** Requests (plus the collection, once) whose auth OpenAPI has no `securityScheme` for. */
+	authDropped: number;
+	/** Requests (plus the collection, once) carrying a pre- or post-request script. */
+	scriptsDropped: number;
+	/** Collection variables besides `baseUrl`, which a document has nowhere to declare. */
+	variablesDropped: number;
+	/** Requests whose folder is nested more than one level - written as one flat tag. */
+	foldersFlattened: number;
+	/** Requests carrying a body in a mode a skeleton has no media type for (GraphQL today). */
+	bodiesDropped: number;
+	/** Requests whose form body has field values - only the field names are declared. */
+	formValuesDropped: number;
+	/** Requests carrying a non-default execution setting (redirects, TLS, HTTP version, streaming). */
+	settingsDropped: number;
+	/** Stored examples carrying a header besides `Content-Type`. */
+	exampleHeadersDropped: number;
 }
 
 export interface SpecExportResponse {

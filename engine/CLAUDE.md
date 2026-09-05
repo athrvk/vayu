@@ -398,7 +398,12 @@ logged as a warning: it means a client skipped composition.
     collection back out. A bound collection's stored bytes are *patched*
     (unclaimed operations removed, request values and stored examples written
     in, every member Vayu does not model carried through unvisited); an unbound
-    collection gets a skeleton that invents nothing. The subtree walk stops at
+    collection gets a skeleton that invents nothing but, since #1441, carries
+    what OpenAPI can name - folders as `tags`, auth as `securitySchemes` and
+    `security`, a `{{baseUrl}}` with a known value as a declared server
+    variable default, a row's toggle as `x-vayu-enabled` - and counts what it
+    cannot (scripts, other variables, unmapped bodies, form values, execution
+    settings, extra example headers) in `ExportNotes`. The subtree walk stops at
     a collection bound to a *different* document and not at one bound to the
     same (#721), as a predicate on `collection_subtree_ids`. YAML output is
     `core::emit_yaml`, beside the reader on purpose: `plain_scalar` decides

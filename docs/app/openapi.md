@@ -487,24 +487,50 @@ Everything in it is something the collection actually holds:
 - `info.title` is the collection's name. Its `version` is a placeholder
   (`0.0.0`), because a collection records no version and inventing one would read
   like a release.
-- **`servers` and paths keep your variables.** A URL beginning `{{baseUrl}}`
-  exports a server of `{{baseUrl}}`, verbatim. That is the portable form - it is
-  what an import writes back into a URL - and resolving it would bake one
-  machine's environment into a document meant to be shared.
+- **`servers` keeps your variables, with a real default when one is known.** A
+  URL beginning `{{baseUrl}}` exports a server. When the collection's own
+  `baseUrl` variable has a value, the server is the single-brace
+  `{baseUrl}` OpenAPI's own Server Variable syntax expects, with that value
+  declared as its `default` - so a re-import gets the value back, rather than a
+  variable whose own value is an unresolved token pointing at itself. With no
+  known value there is nothing to declare a default from, and the double-brace
+  token is kept exactly as written: an undeclared single-brace variable is
+  invalid OpenAPI, and a base you can see is unfinished beats one Vayu invented
+  a false default for.
 - **Path parameters are recovered.** A segment that is exactly one token -
   `/pets/{{petId}}` - is the OpenAPI `/pets/{petId}` it came from, declared as a
   required path parameter. A token inside a longer segment is left as it is:
   OpenAPI has no syntax for part of a segment.
-- **Rows are declared, not interpreted.** Every Params and Headers row becomes a
-  parameter, disabled ones included - the endpoint accepts them either way - and
-  none of them is marked `required`, because a toggle is what this request sends,
-  not what the API demands. `Authorization` and `Content-Type` are left out, the
-  two an import also drops.
+- **Folders become tags.** A request nested under a folder is tagged with the
+  full folder path (`Pets/Actions`), which is also declared once at the
+  document's top level. A folder nested more than one level flattens into a
+  single tag on the way back in - `folderStrategy: tags` regroups by tag name
+  flat, never by the original nesting - and that is counted.
+- **Auth becomes `securitySchemes` and `security`, for the modes OpenAPI can
+  name.** Basic, bearer, an API key in a header or query parameter, and OAuth 2
+  with the flow the request actually uses each get a scheme in
+  `components.securitySchemes` and a `security` requirement naming it - at the
+  document root for the collection's own auth, on the operation only where a
+  request's auth differs from it. A request explicitly set to no auth gets an
+  empty `security: []`; one left to inherit gets no override at all, which is
+  exactly what inheriting a document's default security means. A mode OpenAPI
+  has no scheme for (digest, AWS, NTLM, a custom one) is counted instead.
+- **Rows are declared, not interpreted - and say whether they are toggled on.**
+  Every Params and Headers row becomes a parameter, disabled ones included - the
+  endpoint accepts them either way - and none of them is marked `required`,
+  because a toggle is what this request sends, not what the API demands. The
+  toggle itself is stated explicitly as `x-vayu-enabled`, since neither a value
+  nor its absence says so on its own: a disabled row can carry a value and an
+  enabled one can carry none. `Authorization` and `Content-Type` are left out,
+  the two an import also drops.
 - **No schema Vayu did not see.** A request or response body is described only
   where there is a body to read a shape off, and what is written is the shape of
   that one example - types, nothing more - carrying a `description` that says so.
   An operation with no saved example documents no response at all, rather than an
-  invented `200 OK`.
+  invented `200 OK`. A JSON body holding a `{{variable}}` token is not valid JSON
+  on its own, so it is written as the text it is rather than a schema guessed
+  from something that would not parse - and read back the same way, byte for
+  byte, rather than re-quoted into a JSON string.
 
 ### What the counts mean
 
@@ -520,6 +546,17 @@ sampled off a schema when the document was imported), the `$ref` responses and
 `$ref` parameters it did not write into, and the edits this direction has no way
 to express - a request body, a row the operation declares no parameter for, and
 a request whose method or path is no longer the operation it is stamped as.
+
+A free-form export states eight things of its own, because a collection holds
+more than OpenAPI has names for: the auth it could not turn into a
+`securityScheme`, a request carrying a pre- or post-request script (OpenAPI has
+no operation-scoped hook for one), a collection variable besides `baseUrl` (a
+document has nowhere else to declare one), a folder nested more than one level
+(flattened to a single tag), a body in a mode this direction has no media type
+for (GraphQL today), a form body's field values (only the names are declared),
+a request holding a non-default execution setting (redirects, TLS verification,
+HTTP version, streaming - OpenAPI describes an API, not how to send to it), and
+an example's header besides `Content-Type`.
 
 A large document takes a moment to put together, and the dialog says so without
 moving anything: on the first read it holds the summary's shape until the

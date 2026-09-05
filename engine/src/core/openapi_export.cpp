@@ -62,6 +62,12 @@ constexpr std::string_view PLACEHOLDER_VERSION = "0.0.0";
 constexpr std::string_view DERIVED_SCHEMA_NOTE =
 "Shape derived from an example body, not a declared schema.";
 
+/**
+ * Whether a Params or Headers row is toggled on, since neither `required` nor
+ * an empty `value` says so on its own (issue #1441) - see `parameter_object`.
+ */
+constexpr std::string_view ROW_ENABLED_KEY = "x-vayu-enabled";
+
 /// The method keys a Path Item Object may carry - OpenAPI defines exactly
 /// these. `trace` is here and absent from `declared_operations_of`'s list on
 /// purpose: no request can carry a `trace` identity, but a document that
@@ -488,10 +494,28 @@ void write_media_examples (Json& media, const MediaWrite& write, ExportNotes& no
     notes.examples_written += static_cast<int> (writing.size ());
 }
 
+/// Stored headers besides `Content-Type` a skeleton export has no home for -
+/// counted, not written; the bound direction already has its own answer for
+/// every example (patch the document's own response) and does not go through
+/// this count.
+void count_dropped_example_headers (const std::vector<ExportExample>& examples,
+ExportDirection direction,
+ExportNotes& notes) {
+    if (direction != ExportDirection::Skeleton) {
+        return;
+    }
+    for (const ExportExample& example : examples) {
+        if (example.has_extra_headers) {
+            notes.example_headers_dropped += 1;
+        }
+    }
+}
+
 void write_response_examples (Json& responses,
 const std::vector<ExportExample>& examples,
 ExportNotes& notes,
 ExportDirection direction) {
+    count_dropped_example_headers (examples, direction, notes);
     std::vector<const ExportExample*> all;
     all.reserve (examples.size ());
     for (const ExportExample& example : examples) {
@@ -1141,6 +1165,10 @@ Json parameter_object (const ExportKeyValue& row, std::string_view location) {
     if (!row.value.empty ()) {
         parameter["example"] = row.value;
     }
+    // Written either way, not only when disabled: an empty-valued *enabled*
+    // row and a non-empty-valued *disabled* one are both real states a
+    // reimport cannot recover by looking at `value` alone (issue #1441).
+    parameter[std::string (ROW_ENABLED_KEY)] = row.enabled;
     return parameter;
 }
 
@@ -1161,7 +1189,7 @@ Json media_type_body (std::string_view content_type, const Json& value) {
  * against `optional`'s converting constructor, which GCC reports as
  * -Wconversion. Direct-initializing considers the constructor alone.
  */
-std::optional<Json> request_body_object (const ExportBody& body) {
+std::optional<Json> request_body_object (const ExportBody& body, ExportNotes& notes) {
     const std::string_view content = trim (body.content);
     if (body.mode == "json" || body.mode == "jsonrpc") {
         if (content.empty ()) {
@@ -1194,6 +1222,10 @@ std::optional<Json> request_body_object (const ExportBody& body) {
         if (properties.empty ()) {
             return std::nullopt;
         }
+        // The field *names* are declared below as schema properties; the
+        // values one machine typed into them are not carried at all - a form
+        // field's value is one send's data, not a claim about the endpoint.
+        notes.form_values_dropped += 1;
         const std::string content_type = body.mode == "form-data" ?
         "multipart/form-data" :
         "application/x-www-form-urlencoded";
@@ -1209,10 +1241,202 @@ std::optional<Json> request_body_object (const ExportBody& body) {
     // time. Writing the query as though it were the body would describe a
     // request the endpoint never receives, so this is left out and the
     // operation keeps its path, parameters and responses.
+    if (body.mode == "graphql" && !content.empty ()) {
+        notes.bodies_dropped += 1;
+    }
     return std::nullopt;
 }
 
-Json operation_object (const ExportRequest& entry, const std::string& templated, ExportNotes& notes) {
+/// Explicit no-auth - `security: []` is exact for it, no scheme needed.
+bool auth_is_none (const std::string& mode) {
+    return mode.empty () || mode == "none" || mode == "noauth";
+}
+
+/// A mode OpenAPI has a `securityScheme` type for.
+bool auth_is_expressible (const std::string& mode) {
+    return mode == "basic" || mode == "bearer" || mode == "apikey" || mode == "oauth2";
+}
+
+/// A space-separated OAuth2 scope string as a `scopes` map, each entry
+/// undescribed - Vayu stores no per-scope description to carry.
+Json oauth2_scopes_of (const std::string& scope) {
+    Json scopes    = Json::object ();
+    std::size_t at = 0;
+    while (at < scope.size ()) {
+        while (at < scope.size () &&
+        std::isspace (static_cast<unsigned char> (scope[at])) != 0) {
+            ++at;
+        }
+        const std::size_t start = at;
+        while (at < scope.size () &&
+        std::isspace (static_cast<unsigned char> (scope[at])) == 0) {
+            ++at;
+        }
+        if (at > start) {
+            scopes[scope.substr (start, at - start)] = "";
+        }
+    }
+    return scopes;
+}
+
+/// `auth` as a 3.x `securityScheme`, for the modes `auth_is_expressible` names.
+Json security_scheme_of (const ExportAuth& auth) {
+    if (auth.mode == "basic") {
+        return Json{ { "type", "http" }, { "scheme", "basic" } };
+    }
+    if (auth.mode == "bearer") {
+        return Json{ { "type", "http" }, { "scheme", "bearer" } };
+    }
+    if (auth.mode == "apikey") {
+        return Json{ { "type", "apiKey" }, { "name", auth.api_key_name },
+            { "in", auth.api_key_in.empty () ? "header" : auth.api_key_in } };
+    }
+    // oauth2. `clientCredentials` is the fallback for a stored grant type this
+    // file does not recognize - the same default `default_oauth2_config`
+    // gives a fresh config, so an unrecognized value reads as though the
+    // request had never set one.
+    std::string flow = "clientCredentials";
+    if (auth.oauth2_grant_type == "authorization_code") {
+        flow = "authorizationCode";
+    } else if (auth.oauth2_grant_type == "password") {
+        flow = "password";
+    }
+    Json flow_object = Json::object ();
+    if (flow == "authorizationCode") {
+        flow_object["authorizationUrl"] = auth.oauth2_authorization_url;
+    }
+    flow_object["tokenUrl"] = auth.oauth2_token_url;
+    if (!auth.oauth2_refresh_url.empty ()) {
+        flow_object["refreshUrl"] = auth.oauth2_refresh_url;
+    }
+    flow_object["scopes"] = oauth2_scopes_of (auth.oauth2_scope);
+    return Json{ { "type", "oauth2" },
+        { "flows", Json{ { flow, std::move (flow_object) } } } };
+}
+
+/// What an auth mode resolves to for export purposes: nothing to inherit
+/// from (`inherit`), an explicit absence (`auth_is_none`), a scheme this file
+/// can build, or a mode OpenAPI cannot name at all.
+struct AuthDisposition {
+    enum class Kind : std::uint8_t { Inherit, None, Scheme, Unsupported };
+    Kind kind = Kind::Inherit;
+    Json scheme;
+};
+
+AuthDisposition disposition_of (const ExportAuth& auth) {
+    if (auth.mode == "inherit") {
+        return { AuthDisposition::Kind::Inherit, {} };
+    }
+    if (auth_is_none (auth.mode)) {
+        return { AuthDisposition::Kind::None, {} };
+    }
+    if (auth_is_expressible (auth.mode)) {
+        return { AuthDisposition::Kind::Scheme, security_scheme_of (auth) };
+    }
+    return { AuthDisposition::Kind::Unsupported, {} };
+}
+
+/**
+ * `components.securitySchemes`, built up as requests ask for one. Two
+ * requests whose auth reduces to the same scheme share it; the name is
+ * derived from the scheme's own type and de-duplicated only when two
+ * *different* schemes would otherwise collide (two api keys named
+ * differently, say).
+ */
+class SecuritySchemeRegistry {
+    public:
+    std::string name_for (const Json& scheme) {
+        const std::string canonical = scheme.dump ();
+        if (const auto found = by_shape_.find (canonical); found != by_shape_.end ()) {
+            return found->second;
+        }
+        const std::string base = base_name_of (scheme);
+        std::string name       = base;
+        for (int suffix = 2; used_names_.contains (name); ++suffix) {
+            name = base + std::to_string (suffix);
+        }
+        used_names_.insert (name);
+        by_shape_[canonical] = name;
+        order_.push_back (name);
+        schemes_.emplace (name, scheme);
+        return name;
+    }
+
+    [[nodiscard]] bool empty () const {
+        return order_.empty ();
+    }
+
+    [[nodiscard]] Json schemes_object () const {
+        Json out = Json::object ();
+        for (const std::string& name : order_) {
+            out[name] = schemes_.at (name);
+        }
+        return out;
+    }
+
+    private:
+    static std::string base_name_of (const Json& scheme) {
+        const std::string type = string_member (scheme, "type");
+        if (type == "http") {
+            return string_member (scheme, "scheme") == "basic" ? "basicAuth" : "bearerAuth";
+        }
+        if (type == "apiKey") {
+            return "apiKeyAuth";
+        }
+        if (type == "oauth2") {
+            return "oauth2Auth";
+        }
+        return "auth";
+    }
+
+    std::unordered_map<std::string, std::string> by_shape_;
+    std::unordered_set<std::string> used_names_;
+    std::vector<std::string> order_;
+    std::unordered_map<std::string, Json> schemes_;
+};
+
+/// `security` requirement referencing @p name, with no scopes named - Vayu
+/// resolves a token or key wholesale, never a subset of an oauth2 scope list.
+Json security_requirement (const std::string& name) {
+    return Json::array ({ Json{ { name, Json::array () } } });
+}
+
+/**
+ * The operation-level `security` override for @p request_disp against
+ * @p collection_disp already in force - `nullopt` when the operation simply
+ * inherits the document's (an unresolved `inherit`, or an identical scheme).
+ * Registers a new scheme with @p schemes and counts an unsupported mode into
+ * @p notes exactly where it is found, collection and request alike.
+ */
+std::optional<Json> operation_security_of (const AuthDisposition& request_disp,
+const AuthDisposition& collection_disp,
+SecuritySchemeRegistry& schemes,
+ExportNotes& notes) {
+    if (request_disp.kind == AuthDisposition::Kind::Inherit) {
+        return std::nullopt;
+    }
+    if (request_disp.kind == AuthDisposition::Kind::Unsupported) {
+        notes.auth_dropped += 1;
+        return std::nullopt;
+    }
+    const bool same_as_collection = request_disp.kind == collection_disp.kind &&
+    (request_disp.kind != AuthDisposition::Kind::Scheme ||
+    request_disp.scheme == collection_disp.scheme);
+    if (same_as_collection) {
+        return std::nullopt;
+    }
+    if (request_disp.kind == AuthDisposition::Kind::None) {
+        return std::make_optional (Json::array ());
+    }
+    return std::make_optional (
+    security_requirement (schemes.name_for (request_disp.scheme)));
+}
+
+Json operation_object (const ExportRequest& entry,
+const std::string& templated,
+ExportNotes& notes,
+const AuthDisposition& collection_disp,
+SecuritySchemeRegistry& schemes) {
     Json operation = Json::object ();
     if (!entry.name.empty ()) {
         operation["summary"] = entry.name;
@@ -1241,8 +1465,20 @@ Json operation_object (const ExportRequest& entry, const std::string& templated,
         operation["parameters"] = std::move (parameters);
     }
 
-    if (const auto body = request_body_object (entry.body)) {
+    if (const auto body = request_body_object (entry.body, notes)) {
         operation["requestBody"] = *body;
+    }
+
+    if (const auto security = operation_security_of (
+        disposition_of (entry.auth), collection_disp, schemes, notes)) {
+        operation["security"] = *security;
+    }
+    if (!entry.pre_request_script.empty () || !entry.post_request_script.empty ()) {
+        notes.scripts_dropped += 1;
+    }
+    if (!entry.follow_redirects || entry.max_redirects != 10 ||
+    entry.http_version != "auto" || !entry.verify_ssl || entry.stream) {
+        notes.settings_dropped += 1;
     }
 
     if (!entry.examples.empty ()) {
@@ -1259,15 +1495,108 @@ Json operation_object (const ExportRequest& entry, const std::string& templated,
     return operation;
 }
 
+/// The literal server-URL token every `{{baseUrl}}`-prefixed request writes.
+constexpr std::string_view VAYU_BASE_URL_TOKEN = "{{baseUrl}}";
+
+/**
+ * @p origin as a Server Object. A bare `{{baseUrl}}` becomes the single-brace
+ * `{baseUrl}` OpenAPI's own Server Variable syntax expects, with a declared
+ * `default` when the collection has one - `resolve_server_url` substitutes it
+ * exactly, so a re-import gets the real value back instead of a variable
+ * whose own value is its own unresolved token (issue #1441). With no known
+ * value, the bare double-brace token is kept exactly as before: an
+ * undeclared single-brace variable is invalid OpenAPI, and a base the user
+ * can see is unfinished beats one Vayu silently declared a false default for.
+ */
+Json server_object (const std::string& origin, const ExportCollection& collection) {
+    if (origin != VAYU_BASE_URL_TOKEN || collection.base_url_value.empty ()) {
+        return Json{ { "url", origin } };
+    }
+    return Json{ { "url", "{baseUrl}" },
+        { "variables",
+        Json{ { "baseUrl", Json{ { "default", collection.base_url_value } } } } } };
+}
+
+/// One tag per folder path (`Pets/Actions` for a request two levels deep),
+/// counting a nested one as flattened - `folderStrategy: tags` regroups by
+/// tag name flat, so a multi-level chain re-imports as one folder rather than
+/// its original nesting.
+std::optional<std::string> tag_of (const ExportRequest& entry, ExportNotes& notes) {
+    if (entry.folder_path.empty ()) {
+        return std::nullopt;
+    }
+    if (entry.folder_path.size () > 1) {
+        notes.folders_flattened += 1;
+    }
+    std::string joined;
+    for (const std::string& segment : entry.folder_path) {
+        if (!joined.empty ()) {
+            joined += '/';
+        }
+        joined += segment;
+    }
+    return joined;
+}
+
+/// `servers` and `tags`, each written only when there is one to write.
+void write_servers_and_tags (Json& document,
+const std::vector<std::string>& servers,
+const std::vector<std::string>& tag_order,
+const ExportCollection& collection) {
+    if (!servers.empty ()) {
+        Json entries = Json::array ();
+        for (const std::string& url : servers) {
+            entries.push_back (server_object (url, collection));
+        }
+        document["servers"] = std::move (entries);
+    }
+    if (!tag_order.empty ()) {
+        Json entries = Json::array ();
+        for (const std::string& name : tag_order) {
+            entries.push_back (Json{ { "name", name } });
+        }
+        document["tags"] = std::move (entries);
+    }
+}
+
+/// The document's own `security` (from the collection's auth) and the
+/// `securitySchemes` every operation and the root together asked for.
+void write_root_security (Json& document,
+const AuthDisposition& collection_disp,
+SecuritySchemeRegistry& schemes) {
+    if (collection_disp.kind == AuthDisposition::Kind::None) {
+        document["security"] = Json::array ();
+    } else if (collection_disp.kind == AuthDisposition::Kind::Scheme) {
+        document["security"] =
+        security_requirement (schemes.name_for (collection_disp.scheme));
+    }
+    if (!schemes.empty ()) {
+        document["components"] = Json{ { "securitySchemes", schemes.schemes_object () } };
+    }
+}
+
 Assembly skeleton_document (const ExportCollection& collection,
 const std::vector<ExportRequest>& requests) {
     Assembly assembly;
     assembly.notes =
     empty_notes ("skeleton", "OpenAPI " + std::string (SKELETON_VERSION));
 
+    const AuthDisposition collection_disp = disposition_of (collection.auth);
+    if (collection_disp.kind == AuthDisposition::Kind::Unsupported) {
+        assembly.notes.auth_dropped += 1;
+    }
+    if (!collection.pre_request_script.empty () ||
+    !collection.post_request_script.empty ()) {
+        assembly.notes.scripts_dropped += 1;
+    }
+    assembly.notes.variables_dropped += collection.other_variables;
+
+    SecuritySchemeRegistry schemes;
     Json paths = Json::object ();
     std::vector<std::string> servers;
     std::unordered_set<std::string> claimed;
+    std::vector<std::string> tag_order;
+    std::unordered_set<std::string> tags_seen;
 
     for (const ExportRequest& entry : requests) {
         const RequestUrlParts parts = split_request_url (entry.url);
@@ -1288,8 +1617,16 @@ const std::vector<ExportRequest>& requests) {
             servers.push_back (*parts.origin);
         }
 
-        Json& item   = child_record (paths, templated);
-        item[method] = operation_object (entry, templated, assembly.notes);
+        Json& item = child_record (paths, templated);
+        Json operation =
+        operation_object (entry, templated, assembly.notes, collection_disp, schemes);
+        if (const auto tag = tag_of (entry, assembly.notes)) {
+            operation["tags"] = Json::array ({ *tag });
+            if (tags_seen.insert (*tag).second) {
+                tag_order.push_back (*tag);
+            }
+        }
+        item[method] = std::move (operation);
         assembly.notes.requests_exported += 1;
     }
 
@@ -1301,13 +1638,8 @@ const std::vector<ExportRequest>& requests) {
 
     assembly.document = Json{ { "openapi", std::string (SKELETON_VERSION) },
         { "info", std::move (info) } };
-    if (!servers.empty ()) {
-        Json entries = Json::array ();
-        for (const std::string& url : servers) {
-            entries.push_back (Json{ { "url", url } });
-        }
-        assembly.document["servers"] = std::move (entries);
-    }
+    write_servers_and_tags (assembly.document, servers, tag_order, collection);
+    write_root_security (assembly.document, collection_disp, schemes);
     assembly.document["paths"] = std::move (paths);
     return assembly;
 }
@@ -1382,7 +1714,14 @@ nlohmann::json export_notes_json (const ExportNotes& notes) {
         { "bodiesNotWritten", notes.bodies_not_written },
         { "rowsNotDeclared", notes.rows_not_declared },
         { "operationsEdited", notes.operations_edited },
-        { "vocabularyNotWritten", notes.vocabulary_not_written } };
+        { "vocabularyNotWritten", notes.vocabulary_not_written },
+        { "authDropped", notes.auth_dropped }, { "scriptsDropped", notes.scripts_dropped },
+        { "variablesDropped", notes.variables_dropped },
+        { "foldersFlattened", notes.folders_flattened },
+        { "bodiesDropped", notes.bodies_dropped },
+        { "formValuesDropped", notes.form_values_dropped },
+        { "settingsDropped", notes.settings_dropped },
+        { "exampleHeadersDropped", notes.example_headers_dropped } };
 }
 
 } // namespace vayu::core

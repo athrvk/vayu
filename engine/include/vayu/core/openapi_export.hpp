@@ -58,6 +58,32 @@ struct ExportKeyValue {
     std::string key;
     std::string value;
     std::string description;
+    /// Whether the row is toggled on. A skeleton declares the row either way
+    /// (the endpoint accepts it regardless) but must say which, or a
+    /// disabled row with a value reads as enabled on the way back in and an
+    /// enabled row with none reads as disabled (issue #1441).
+    bool enabled = true;
+};
+
+/**
+ * A request or collection's auth, in the stored vocabulary rather than a
+ * translated one - only the fields a `securityScheme` can state, never a
+ * secret (`token`, `password`, `clientSecret`). `mode` is the stored value
+ * verbatim (`"bearer"`, `"apikey"`, `"oauth2"`, `"basic"`, `"none"`,
+ * `"noauth"`, `"inherit"`, or anything else the resolver treats as
+ * unsupported - `"digest"`, `"aws"`, `"ntlm"`, `"hawk"`).
+ */
+struct ExportAuth {
+    std::string mode;
+    /// apikey
+    std::string api_key_name;
+    std::string api_key_in; // "header" or "query"
+    /// oauth2 (`config.grantType` etc, secrets left out)
+    std::string oauth2_grant_type;
+    std::string oauth2_authorization_url;
+    std::string oauth2_token_url;
+    std::string oauth2_refresh_url;
+    std::string oauth2_scope;
 };
 
 /**
@@ -98,6 +124,12 @@ struct ExportExample {
      * which is what this export has always written.
      */
     bool from_import = false;
+    /// Whether the stored response carried a header besides `Content-Type`
+    /// (already denormalized into `content_type` above). Counted, never
+    /// written: an OpenAPI response's `headers` map describes headers the
+    /// endpoint always sends, and a header saved off one captured response is
+    /// a sample, not a claim about every response this operation returns.
+    bool has_extra_headers = false;
 };
 
 /** The identity a request carries, when it carries one (`spec_operation`). */
@@ -126,12 +158,39 @@ struct ExportRequest {
      * whole reason `origin` (#588) does not gate this side.
      */
     std::vector<ExportExample> examples;
+    /// The request's own auth, `inherit` included - a skeleton export reads
+    /// this to say whether the request overrides the collection's.
+    ExportAuth auth;
+    std::string pre_request_script;
+    std::string post_request_script;
+    // Execution settings, mirroring `db::Request`'s own defaults so a request
+    // written before these existed compares as "nothing customized".
+    bool follow_redirects    = true;
+    int max_redirects        = 10;
+    std::string http_version = "auto";
+    bool verify_ssl          = true;
+    bool stream              = false;
+    /// The chain of folder (sub-collection) names from directly under the
+    /// exported root down to this request, root excluded. Empty for a
+    /// request the root owns directly.
+    std::vector<std::string> folder_path;
 };
 
 /** What a skeleton names the API after. */
 struct ExportCollection {
     std::string name;
     std::string description;
+    ExportAuth auth;
+    std::string pre_request_script;
+    std::string post_request_script;
+    /// The collection's own `baseUrl` variable value, empty when it has none
+    /// - a skeleton needs it to declare a server variable default rather than
+    /// exporting a token that means nothing outside this machine.
+    std::string base_url_value;
+    /// Collection variables besides `baseUrl`, which OpenAPI has nowhere to
+    /// declare (a document's variables are server variables, scoped to the
+    /// URL, not arbitrary named values).
+    int other_variables = 0;
 };
 
 /**
@@ -243,6 +302,42 @@ struct ExportNotes {
      * into a 2.0 document would produce a file that is neither.
      */
     bool vocabulary_not_written = false;
+
+    // --- Skeleton-only: what a free-form export cannot carry (issue #1441) --
+
+    /**
+     * Requests (plus the collection itself, once) whose auth is a mode
+     * OpenAPI has no `securityScheme` for (`digest`, `aws`, `ntlm`, `hawk`,
+     * an unrecognized custom mode) or an unresolved `inherit` with nothing to
+     * inherit from. Every other mode - `none`, `basic`, `bearer`, `apikey`,
+     * `oauth2` - is written as `security` / `securitySchemes`.
+     */
+    int auth_dropped = 0;
+    /// Requests (plus the collection, once) carrying a pre- or post-request
+    /// script - not written. OpenAPI has no operation-scoped script hook.
+    int scripts_dropped = 0;
+    /// Collection variables besides `baseUrl`, which every request's `{{...}}`
+    /// tokens already carry portably - there is nowhere in a document to
+    /// declare an arbitrary named value that is not part of a server URL.
+    int variables_dropped = 0;
+    /// Requests whose folder is nested more than one level deep. Written as a
+    /// single tag named by the full path (`Pets/Actions`), which re-imports as
+    /// one flat folder rather than the original nesting.
+    int folders_flattened = 0;
+    /// Requests carrying a body in a mode a skeleton has no media type for
+    /// (`graphql` today) - not written, the operation keeps its path,
+    /// parameters and responses.
+    int bodies_dropped = 0;
+    /// Requests whose body is `form-data` or `x-www-form-urlencoded` with at
+    /// least one field - the field *names* are declared as schema properties,
+    /// the values are one machine's data, not part of the contract.
+    int form_values_dropped = 0;
+    /// Requests carrying a non-default execution setting (redirects, TLS
+    /// verification, HTTP version, streaming) - OpenAPI describes an API, not
+    /// how a client should send to it.
+    int settings_dropped = 0;
+    /// Stored examples carrying a header besides `Content-Type` - not written.
+    int example_headers_dropped = 0;
 };
 
 /**
