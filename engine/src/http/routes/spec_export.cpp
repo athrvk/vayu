@@ -40,9 +40,13 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/openapi_export.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <algorithm>
 #include <string>
+#include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -77,10 +81,117 @@ std::vector<vayu::core::ExportKeyValue> read_rows (const std::string& blob) {
         if (!row.is_object ()) {
             continue;
         }
-        out.push_back (
-        { text (row, "key"), text (row, "value"), text (row, "description") });
+        // Absent or non-boolean `enabled` means enabled (D17, the same rule
+        // `variable-resolution.ts` and `parse_variables` apply).
+        const auto enabled_field = row.find ("enabled");
+        const bool enabled       = enabled_field == row.end () ||
+        !enabled_field->is_boolean () || enabled_field->get<bool> ();
+        out.push_back ({ text (row, "key"), text (row, "value"),
+        text (row, "description"), enabled });
     }
     return out;
+}
+
+/** `requests.auth` / `collections.auth`, secrets left out - only what a
+ * `securityScheme` can state. */
+vayu::core::ExportAuth read_auth (const std::string& blob) {
+    vayu::core::ExportAuth auth;
+    if (blob.empty ()) {
+        return auth;
+    }
+    const auto parsed = nlohmann::json::parse (blob, nullptr, /*allow_exceptions=*/false);
+    if (!parsed.is_object ()) {
+        return auth;
+    }
+    const auto text = [&] (const nlohmann::json& node, const char* key) {
+        const auto found = node.find (key);
+        return found != node.end () && found->is_string () ?
+        found->get<std::string> () :
+        std::string ();
+    };
+    auth.mode = text (parsed, "mode");
+    if (auth.mode == "apikey") {
+        auth.api_key_name = text (parsed, "key");
+        auth.api_key_in   = text (parsed, "in") == "query" ? "query" : "header";
+    } else if (auth.mode == "oauth2") {
+        const auto config_field = parsed.find ("config");
+        const auto& config = config_field != parsed.end () && config_field->is_object () ?
+        *config_field :
+        nlohmann::json::object ();
+        auth.oauth2_grant_type        = text (config, "grantType");
+        auth.oauth2_authorization_url = text (config, "authorizationUrl");
+        auth.oauth2_token_url         = text (config, "accessTokenUrl");
+        auth.oauth2_refresh_url       = text (config, "refreshTokenUrl");
+        auth.oauth2_scope             = text (config, "scope");
+    }
+    return auth;
+}
+
+/**
+ * The collection's own `baseUrl` variable value, and how many others it
+ * declares - a skeleton export needs the first to give `{{baseUrl}}` a real
+ * default and counts the rest, since a document has nowhere else to put them.
+ */
+std::pair<std::string, int> read_collection_variables (const std::string& blob) {
+    if (blob.empty ()) {
+        return { {}, 0 };
+    }
+    const auto parsed = nlohmann::json::parse (blob, nullptr, /*allow_exceptions=*/false);
+    if (!parsed.is_object ()) {
+        return { {}, 0 };
+    }
+    std::string base_url;
+    int others = 0;
+    for (const auto& [name, entry] : parsed.items ()) {
+        const auto value_field =
+        entry.is_object () ? entry.find ("value") : entry.end ();
+        const std::string value =
+        value_field != entry.end () && value_field->is_string () ?
+        value_field->get<std::string> () :
+        std::string ();
+        if (name == "baseUrl") {
+            base_url = value;
+        } else {
+            others += 1;
+        }
+    }
+    return { base_url, others };
+}
+
+/**
+ * The chain of folder names between the exported root and @p target, root
+ * excluded - `["Pets", "Actions"]` for a request three levels under the root.
+ * Empty when @p target *is* the root: its own direct requests have no folder.
+ */
+std::vector<std::string> folder_path_of (const std::vector<vayu::db::Collection>& collections,
+const std::string& root_id,
+const std::string& target_id) {
+    if (target_id == root_id) {
+        return {};
+    }
+    std::unordered_map<std::string, const vayu::db::Collection*> by_id;
+    for (const auto& collection : collections) {
+        by_id[collection.id] = &collection;
+    }
+    std::vector<std::string> reversed;
+    std::string current = target_id;
+    // The subtree walk that built `collections` already refuses a cycle back
+    // to the root's own document; this still bounds the climb rather than
+    // trusting that, since a malformed `parent_id` chain must stop, not loop.
+    for (std::size_t hops = 0; hops < collections.size () + 1 && current != root_id; ++hops) {
+        const auto found = by_id.find (current);
+        if (found == by_id.end ()) {
+            break;
+        }
+        reversed.push_back (found->second->name);
+        const auto& parent_id = found->second->parent_id;
+        if (!parent_id || parent_id->empty ()) {
+            break;
+        }
+        current = *parent_id;
+    }
+    std::reverse (reversed.begin (), reversed.end ());
+    return reversed;
 }
 
 vayu::core::ExportBody read_body (const std::string& blob) {
@@ -139,6 +250,57 @@ const std::optional<std::string>& blob) {
         return std::nullopt;
     }
     return identity;
+}
+
+/// Whether a stored example's headers blob names one besides `Content-Type`
+/// (already denormalized into `content_type`, so this asks only about the
+/// rest) - counted on export, never written, see `ExportExample::has_extra_headers`.
+bool example_has_extra_headers (const std::string& blob) {
+    const auto headers = nlohmann::json::parse (blob, nullptr, /*allow_exceptions=*/false);
+    if (!headers.is_array ()) {
+        return false;
+    }
+    return std::any_of (headers.begin (), headers.end (), [] (const nlohmann::json& h) {
+        const auto key = h.is_object () ? h.find ("key") : h.end ();
+        return key != h.end () && key->is_string () &&
+        !vayu::utils::ascii_lower_equal (key->get<std::string> (), "content-type");
+    });
+}
+
+/// One request, and the examples stored against it, as the exporter reads
+/// them - @p folder_collection_id is the collection it is directly filed
+/// under, which may differ from @p row's own `collection_id` on nothing here
+/// (kept as a parameter because the caller already has it from its own walk).
+vayu::core::ExportRequest build_export_request (vayu::db::Database& db,
+const vayu::db::Request& row,
+const std::vector<vayu::db::Collection>& collections,
+const std::string& root_id,
+const std::string& folder_collection_id) {
+    vayu::core::ExportRequest entry;
+    entry.name                = row.name;
+    entry.description         = row.description;
+    entry.method              = vayu::to_string (row.method);
+    entry.url                 = row.url;
+    entry.params              = read_rows (row.params);
+    entry.headers             = read_rows (row.headers);
+    entry.body                = read_body (row.body);
+    entry.spec_operation      = read_identity (row.spec_operation);
+    entry.auth                = read_auth (row.auth);
+    entry.pre_request_script  = row.pre_request_script;
+    entry.post_request_script = row.post_request_script;
+    entry.follow_redirects    = row.follow_redirects;
+    entry.max_redirects       = row.max_redirects;
+    entry.http_version        = row.http_version;
+    entry.verify_ssl          = row.verify_ssl;
+    entry.stream              = row.stream;
+    entry.folder_path = folder_path_of (collections, root_id, folder_collection_id);
+    for (const auto& example : db.get_request_examples (row.id)) {
+        entry.examples.push_back ({ example.name, example.status, example.body,
+        example.content_type, example.body_truncated,
+        example.origin == vayu::core::constants::request_example::ORIGIN_IMPORT,
+        example_has_extra_headers (example.headers) });
+    }
+    return entry;
 }
 
 } // namespace
@@ -212,26 +374,22 @@ export_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
             continue;
         }
         for (const auto& row : db.get_requests_in_collection (collection.id)) {
-            vayu::core::ExportRequest entry;
-            entry.name           = row.name;
-            entry.description    = row.description;
-            entry.method         = vayu::to_string (row.method);
-            entry.url            = row.url;
-            entry.params         = read_rows (row.params);
-            entry.headers        = read_rows (row.headers);
-            entry.body           = read_body (row.body);
-            entry.spec_operation = read_identity (row.spec_operation);
-            for (const auto& example : db.get_request_examples (row.id)) {
-                entry.examples.push_back ({ example.name, example.status,
-                example.body, example.content_type, example.body_truncated,
-                example.origin == vayu::core::constants::request_example::ORIGIN_IMPORT });
-            }
-            requests.push_back (std::move (entry));
+            requests.push_back (build_export_request (
+            db, row, collections, collection_id, collection.id));
         }
     }
 
-    const auto outcome = vayu::core::export_openapi (
-    { root->name, root->description }, requests, spec_content, format);
+    vayu::core::ExportCollection export_collection;
+    export_collection.name                = root->name;
+    export_collection.description         = root->description;
+    export_collection.auth                = read_auth (root->auth);
+    export_collection.pre_request_script  = root->pre_request_script;
+    export_collection.post_request_script = root->post_request_script;
+    std::tie (export_collection.base_url_value, export_collection.other_variables) =
+    read_collection_variables (root->variables);
+
+    const auto outcome =
+    vayu::core::export_openapi (export_collection, requests, spec_content, format);
     if (!outcome.ok ()) {
         return { 409, error_body (409, outcome.error) };
     }

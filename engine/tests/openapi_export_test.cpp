@@ -53,7 +53,7 @@ namespace {
  * function-local static is still usable as a default argument below.
  */
 const ExportCollection& petstore () {
-    static const ExportCollection collection{ "Petstore", "" };
+    static const ExportCollection collection{ "Petstore", "", {}, "", "", "", 0 };
     return collection;
 }
 
@@ -124,6 +124,30 @@ ExportExample imported (ExportExample stored) {
 
 ExportKeyValue row (std::string key, std::string value) {
     return { std::move (key), std::move (value), {} };
+}
+
+/** An `ExportAuth`, every field given explicitly - `-Wmissing-field-initializers`
+ * fires on a partial brace-init even with designators, so this is the one
+ * place that lists all of them; every call site names only what it means. */
+vayu::core::ExportAuth auth (std::string mode,
+std::string api_key_name             = "",
+std::string api_key_in               = "",
+std::string oauth2_grant_type        = "",
+std::string oauth2_authorization_url = "",
+std::string oauth2_token_url         = "",
+std::string oauth2_refresh_url       = "",
+std::string oauth2_scope             = "") {
+    return { std::move (mode), std::move (api_key_name), std::move (api_key_in),
+        std::move (oauth2_grant_type), std::move (oauth2_authorization_url),
+        std::move (oauth2_token_url), std::move (oauth2_refresh_url),
+        std::move (oauth2_scope) };
+}
+
+/** An `ExportCollection` named @p name, its auth `inherit` unless given -
+ * see `auth`'s comment for why every field is listed. */
+ExportCollection named_collection (std::string name,
+vayu::core::ExportAuth collection_auth = {}) {
+    return { std::move (name), "", std::move (collection_auth), "", "", "", 0 };
 }
 
 /** An export that must have succeeded, with its text parsed back. */
@@ -569,10 +593,26 @@ TEST (SkeletonExport, DeclaresTheRowsTheRequestHoldsWithoutClaimingAnyAreRequire
 
     const Exported exported = export_json ({ entry });
     EXPECT_EQ (operation_of (exported.document, "/pets", "get")["parameters"], json::parse (R"([
-        {"name":"status","in":"query","schema":{"type":"string"},"example":"available"},
-        {"name":"verbose","in":"query","schema":{"type":"string"}},
-        {"name":"X-Tenant","in":"header","schema":{"type":"string"},"example":"acme"}
+        {"name":"status","in":"query","schema":{"type":"string"},"example":"available","x-vayu-enabled":true},
+        {"name":"verbose","in":"query","schema":{"type":"string"},"x-vayu-enabled":true},
+        {"name":"X-Tenant","in":"header","schema":{"type":"string"},"example":"acme","x-vayu-enabled":true}
     ])"));
+}
+
+TEST (SkeletonExport, WritesADisabledRowsToggleRatherThanGuessingItFromItsValue) {
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    // A disabled row with a value, and an enabled row with none - the two
+    // shapes the old `!value.empty()` heuristic could not tell apart
+    // (issue #1441).
+    ExportKeyValue disabled_with_value   = row ("verbose", "1");
+    disabled_with_value.enabled          = false;
+    ExportKeyValue enabled_without_value = row ("tag", "");
+    entry.params = { disabled_with_value, enabled_without_value };
+
+    const Exported exported = export_json ({ entry });
+    const json& parameters = operation_of (exported.document, "/pets", "get")["parameters"];
+    EXPECT_EQ (parameters[0]["x-vayu-enabled"], false);
+    EXPECT_EQ (parameters[1]["x-vayu-enabled"], true);
 }
 
 TEST (SkeletonExport, DescribesABodyOnlyFromTheBodyThatIsThereAndMarksTheShapeAsDerived) {
@@ -599,13 +639,14 @@ TEST (SkeletonExport, WritesTheQueryTextOfAGraphqlRequestNowhere) {
     // GraphQL over HTTP posts a JSON envelope Vayu composes at send time, so
     // the stored query text is not the body the endpoint receives. The
     // operation keeps its path; it gains no `requestBody` describing a request
-    // nobody sends.
+    // nobody sends - counted, since it is real content the export drops.
     ExportRequest posted = request ("POST", "{{baseUrl}}/graphql");
     posted.body          = { "graphql", "query { pets { id } }", {} };
 
     const Exported exported = export_json ({ posted });
     EXPECT_FALSE (
     operation_of (exported.document, "/graphql", "post").contains ("requestBody"));
+    EXPECT_EQ (exported.notes.bodies_dropped, 1);
 }
 
 TEST (SkeletonExport, DeclaresAFormsFieldNamesAndNoneOfItsValues) {
@@ -617,6 +658,122 @@ TEST (SkeletonExport, DeclaresAFormsFieldNamesAndNoneOfItsValues) {
     operation_of (exported.document, "/pets",
     "post")["requestBody"]["content"]["application/x-www-form-urlencoded"],
     json::parse (R"({"schema":{"type":"object","properties":{"name":{"type":"string"},"tag":{"type":"string"}}}})"));
+    EXPECT_EQ (exported.notes.form_values_dropped, 1);
+}
+
+TEST (SkeletonExport, GivesATemplatedBaseUrlServerVariableItsRealDefault) {
+    const ExportCollection collection{ "Petstore", "", {}, "", "",
+        "https://api.example.com", 0 };
+
+    const Exported exported =
+    export_json ({ request ("GET", "{{baseUrl}}/pets") }, std::nullopt, collection);
+    EXPECT_EQ (exported.document["servers"], json::parse (R"([{"url":"{baseUrl}",
+        "variables":{"baseUrl":{"default":"https://api.example.com"}}}])"));
+}
+
+TEST (SkeletonExport, KeepsTheDoubleBraceTokenWithNoKnownValueToDefaultTo) {
+    // The collection below has no known `baseUrl` value (the default-built
+    // `ExportCollection`), so nothing here can give a single-brace variable a
+    // default - and an undeclared one is invalid OpenAPI. The bare token from
+    // before this issue is the honest fallback.
+    const Exported exported = export_json ({ request ("GET", "{{baseUrl}}/pets") });
+    EXPECT_EQ (exported.document["servers"], json::parse (R"([{"url":"{{baseUrl}}"}])"));
+}
+
+TEST (SkeletonExport, FilesARequestUnderItsFolderPathAsOneTag) {
+    ExportRequest nested = request ("GET", "{{baseUrl}}/pets");
+    nested.folder_path   = { "Pets", "Actions" };
+    ExportRequest direct = request ("GET", "{{baseUrl}}/health");
+
+    const Exported exported = export_json ({ nested, direct });
+    EXPECT_EQ (operation_of (exported.document, "/pets", "get")["tags"],
+    json::parse (R"(["Pets/Actions"])"));
+    EXPECT_FALSE (operation_of (exported.document, "/health", "get").contains ("tags"));
+    EXPECT_EQ (exported.document["tags"], json::parse (R"([{"name":"Pets/Actions"}])"));
+    // Two levels of nesting collapse into one flat tag on reimport - counted,
+    // since the original hierarchy does not survive.
+    EXPECT_EQ (exported.notes.folders_flattened, 1);
+}
+
+TEST (SkeletonExport, WritesEveryAuthModeOpenApiCanNameAndCountsTheRest) {
+    ExportRequest basic  = request ("GET", "{{baseUrl}}/a");
+    basic.auth           = auth ("basic");
+    ExportRequest bearer = request ("GET", "{{baseUrl}}/b");
+    bearer.auth          = auth ("bearer");
+    ExportRequest apikey = request ("GET", "{{baseUrl}}/c");
+    apikey.auth          = auth ("apikey", "X-Api-Key", "header");
+    ExportRequest oauth2 = request ("GET", "{{baseUrl}}/d");
+    oauth2.auth          = auth ("oauth2", "", "", "client_credentials", "",
+             "https://auth.example.com/token", "", "read write");
+    ExportRequest digest = request ("GET", "{{baseUrl}}/e");
+    digest.auth          = auth ("digest");
+
+    const Exported exported = export_json ({ basic, bearer, apikey, oauth2, digest });
+    const json& schemes = exported.document["components"]["securitySchemes"];
+    EXPECT_EQ (schemes["basicAuth"], json::parse (R"({"type":"http","scheme":"basic"})"));
+    EXPECT_EQ (schemes["bearerAuth"], json::parse (R"({"type":"http","scheme":"bearer"})"));
+    EXPECT_EQ (schemes["apiKeyAuth"],
+    json::parse (R"({"type":"apiKey","name":"X-Api-Key","in":"header"})"));
+    EXPECT_EQ (schemes["oauth2Auth"], json::parse (R"({"type":"oauth2","flows":{
+        "clientCredentials":{"tokenUrl":"https://auth.example.com/token",
+        "scopes":{"read":"","write":""}}}})"));
+
+    EXPECT_EQ (operation_of (exported.document, "/a", "get")["security"],
+    json::parse (R"([{"basicAuth":[]}])"));
+    EXPECT_EQ (operation_of (exported.document, "/b", "get")["security"],
+    json::parse (R"([{"bearerAuth":[]}])"));
+    EXPECT_EQ (operation_of (exported.document, "/c", "get")["security"],
+    json::parse (R"([{"apiKeyAuth":[]}])"));
+    EXPECT_EQ (operation_of (exported.document, "/d", "get")["security"],
+    json::parse (R"([{"oauth2Auth":[]}])"));
+    // `digest` has no OpenAPI securityScheme this file writes - counted, no
+    // `security` override left on an operation nothing could describe.
+    EXPECT_FALSE (operation_of (exported.document, "/e", "get").contains ("security"));
+    EXPECT_EQ (exported.notes.auth_dropped, 1);
+}
+
+TEST (SkeletonExport, WritesNoAuthAsAnEmptySecurityRequirement) {
+    // Against a collection with no auth of its own, an explicit `noauth`
+    // request is indistinguishable from the document's own default and gets
+    // no override (the case `LeavesAnInheritingRequestsOperationWithNoSecurityOverride`
+    // covers) - so this needs a collection whose own auth is *not* none, to
+    // make the override meaningful.
+    const ExportCollection collection = named_collection ("Petstore", auth ("bearer"));
+    ExportRequest none = request ("GET", "{{baseUrl}}/a");
+    none.auth          = auth ("noauth");
+
+    const Exported exported = export_json ({ none }, std::nullopt, collection);
+    EXPECT_EQ (operation_of (exported.document, "/a", "get")["security"],
+    json::parse ("[]"));
+}
+
+TEST (SkeletonExport, LeavesAnInheritingRequestsOperationWithNoSecurityOverride) {
+    const ExportCollection collection = named_collection ("Petstore", auth ("bearer"));
+    ExportRequest inheriting = request ("GET", "{{baseUrl}}/a");
+    inheriting.auth          = auth ("inherit");
+
+    const Exported exported = export_json ({ inheriting }, std::nullopt, collection);
+    EXPECT_EQ (exported.document["security"], json::parse (R"([{"bearerAuth":[]}])"));
+    EXPECT_FALSE (operation_of (exported.document, "/a", "get").contains ("security"));
+}
+
+TEST (SkeletonExport, CountsScriptsSettingsVariablesAndExampleHeadersItCannotCarry) {
+    ExportCollection collection   = named_collection ("Petstore");
+    collection.pre_request_script = "console.log('hi')";
+    collection.other_variables    = 2;
+
+    ExportRequest entry       = request ("GET", "{{baseUrl}}/pets");
+    entry.post_request_script = "pm.test('ok', () => {})";
+    entry.follow_redirects    = false;
+    ExportExample stamped     = example ();
+    stamped.has_extra_headers = true;
+    entry.examples            = { stamped };
+
+    const Exported exported = export_json ({ entry }, std::nullopt, collection);
+    EXPECT_EQ (exported.notes.scripts_dropped, 2); // collection and request
+    EXPECT_EQ (exported.notes.settings_dropped, 1);
+    EXPECT_EQ (exported.notes.variables_dropped, 2);
+    EXPECT_EQ (exported.notes.example_headers_dropped, 1);
 }
 
 TEST (SkeletonExport, WritesResponsesFromStoredExamplesAndNothingElse) {
@@ -664,8 +821,8 @@ TEST (SkeletonExport, CountsARequestItCannotPlaceInsteadOfGuessingAtOne) {
 }
 
 TEST (SkeletonExport, NamesTheCollectionAndNeverInventsAVersionItWasTold) {
-    const Exported exported =
-    export_json ({}, std::nullopt, { "Internal tools", "Scratch space" });
+    const Exported exported = export_json (
+    {}, std::nullopt, { "Internal tools", "Scratch space", {}, "", "", "", 0 });
     EXPECT_EQ (exported.document["info"],
     json::parse (R"({"title":"Internal tools","version":"0.0.0","description":"Scratch space"})"));
     EXPECT_FALSE (exported.document.contains ("servers"));
@@ -739,7 +896,7 @@ TEST (ExportSerialization, QuotesAMappingKeyThatWouldComeBackAsANumber) {
 
 TEST (ExportSerialization, NamesTheFileAfterTheCollectionHoweverItIsNamed) {
     const auto named = [] (const std::string& name) {
-        return export_openapi ({ name, "" }, {}, std::nullopt, ExportFormat::Json)
+        return export_openapi (named_collection (name), {}, std::nullopt, ExportFormat::Json)
         .file_name;
     };
     EXPECT_EQ (named ("Pet Store / v2"), "pet-store-v2.openapi.json");

@@ -366,19 +366,28 @@ std::optional<std::string> param_value_text (const json* declared) {
     return std::nullopt;
 }
 
-/// `declaredParamRow(name, declared, required, description)`.
+/// `declaredParamRow(name, declared, required, description, enabledOverride)`.
 DraftField declared_param_row (std::string name,
 const json* declared,
 const json* required,
-const std::string* description) {
+const std::string* description,
+const json* enabled_override) {
     DraftField row;
     row.key   = std::move (name);
     row.value = param_value_text (declared).value_or ("");
-    // `required === true`, strictly: a document writing `required: "true"` has
-    // said something the importer does not act on.
-    row.enabled =
-    (required != nullptr && required->is_boolean () && required->get<bool> ()) ||
-    !row.value.empty ();
+    if (enabled_override != nullptr && enabled_override->is_boolean ()) {
+        // A Vayu-authored skeleton export states the row's toggle explicitly
+        // (`x-vayu-enabled`, issue #1441) precisely because an empty-valued
+        // enabled row and a non-empty-valued disabled one both defeat the
+        // heuristic below - trust it over guessing from `required`/`value`.
+        row.enabled = enabled_override->get<bool> ();
+    } else {
+        // `required === true`, strictly: a document writing `required: "true"`
+        // has said something the importer does not act on.
+        row.enabled =
+        (required != nullptr && required->is_boolean () && required->get<bool> ()) ||
+        !row.value.empty ();
+    }
     if (description != nullptr) {
         row.description = *description;
     }
@@ -580,6 +589,12 @@ const json* declared_param_value_v3 (const Sampler& sampler, const json* param) 
     return prop (schema, "default");
 }
 
+/// `exampleBodyText(value)`: a documented string is the body verbatim - a spec
+/// that writes `"<xml/>"` documents those bytes, not a quoted JSON string.
+/// Declared here and defined with the documented-response reader below, which
+/// needs the same rule for the same reason.
+std::string example_body_text (const json& value);
+
 /// An operation's `requestBody` → the request's body (3.x).
 DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally* tally) {
     DraftBody body;
@@ -600,12 +615,23 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally
         } else {
             sample = json::object ();
         }
-        body.mode    = "json";
-        body.content = js_json_text (sample);
+        body.mode = "json";
+        // A string `example` is the body's bytes as written, `{{variable}}`
+        // tokens included - `js_json_text` would re-quote it into a JSON
+        // string literal, which is exactly what the export side avoids by
+        // writing such a body as a string in the first place (issue #1441).
+        body.content = example_body_text (sample);
         return body;
     }
-    if (truthy (prop (content, "text/plain"))) {
+    if (const json* text_media = prop (content, "text/plain"); truthy (text_media)) {
         body.mode = "text";
+        // The `example` is the whole reason a skeleton export writes this
+        // media type at all (issue #1441) - reading only `mode` back left a
+        // text body's content behind on every round trip.
+        if (const json* example = prop (text_media, "example");
+        example != nullptr && !example->is_null ()) {
+            body.content = example_body_text (*example);
+        }
         return body;
     }
     for (const char* type : { "application/x-www-form-urlencoded", "multipart/form-data" }) {
@@ -956,13 +982,15 @@ std::vector<DraftField>& form_fields) {
     const json* required           = prop (parameter, "required");
     const std::string* description = as_str (prop (parameter, "description"));
 
+    const json* enabled_override = prop (parameter, "x-vayu-enabled");
     if (kind == "query") {
         const json* value = dialect == walk::Dialect::V3 ?
         declared_param_value_v3 (sampler, parameter) :
         // 2.0 states a non-body parameter's value inline as `default`;
         // it has no `example` keyword (that arrived with 3.x).
         prop (parameter, "default");
-        draft.params.push_back (declared_param_row (name, value, required, description));
+        draft.params.push_back (
+        declared_param_row (name, value, required, description, enabled_override));
     } else if (kind == "header") {
         if (is_self_produced_header (name)) {
             return;
@@ -972,7 +1000,8 @@ std::vector<DraftField>& form_fields) {
         prop (parameter, "default");
         // No description: the Headers table has no column for one, so
         // carrying it would be a field nothing reads.
-        draft.headers.push_back (declared_param_row (name, value, required, nullptr));
+        draft.headers.push_back (
+        declared_param_row (name, value, required, nullptr, enabled_override));
     } else if (dialect == walk::Dialect::V2 && kind == "body") {
         const json* schema = prop (parameter, "schema");
         const json sample = truthy (schema) ? sampler.sample (schema) : json::object ();

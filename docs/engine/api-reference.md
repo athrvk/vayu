@@ -2243,7 +2243,15 @@ of the export, because its requests describe the very operations being patched.
     "bodiesNotWritten": 2,
     "rowsNotDeclared": 1,
     "operationsEdited": 0,
-    "vocabularyNotWritten": false
+    "vocabularyNotWritten": false,
+    "authDropped": 0,
+    "scriptsDropped": 0,
+    "variablesDropped": 0,
+    "foldersFlattened": 0,
+    "bodiesDropped": 0,
+    "formValuesDropped": 0,
+    "settingsDropped": 0,
+    "exampleHeadersDropped": 0
   }
 }
 ```
@@ -2298,12 +2306,39 @@ is written *into* an operation, because 2.0 states parameters and examples in a
 vocabulary Vayu does not write.
 
 **A skeleton invents nothing.** `{{variable}}` tokens are written as they stand
-in `servers` and paths alike (resolving `{{baseUrl}}` would export one machine's
-environment as though the contract named it), a path segment that is exactly one
+in paths (resolving them would export one machine's environment as though the
+contract named it); a `{{baseUrl}}` server gets a real default when the
+collection's own `baseUrl` variable has a value - written as the single-brace
+`{baseUrl}` OpenAPI's Server Variable syntax expects, with that value as its
+`default` - and the bare double-brace token otherwise, since an undeclared
+single-brace variable is invalid OpenAPI. A path segment that is exactly one
 token becomes the OpenAPI `{petId}` it came from, every Params and Headers row
-is declared without a `required` it was never given, and a body or response is
-described only where there is a stored example to read a shape off - carrying a
-`description` that says the shape is derived.
+is declared without a `required` it was never given but carries its toggle
+explicitly as `x-vayu-enabled` (neither a value nor its absence says whether a
+row is on), and a body or response is described only where there is a stored
+example to read a shape off - carrying a `description` that says the shape is
+derived. A JSON body holding a `{{variable}}` token is not valid JSON on its
+own, so it is written as the text it is and read back the same way, byte for
+byte, rather than re-quoted into a JSON string.
+
+**It carries what OpenAPI can name, for the modes it has names for** (#1441).
+A folder becomes a `tag` named by its full path, declared once at the document
+root and on every operation under it - a folder nested more than one level
+flattens to a single tag, counted as `foldersFlattened`, since
+`folderStrategy: tags` regroups by tag name flat. Auth becomes
+`components.securitySchemes` plus a `security` requirement - basic and bearer
+as `http`, an API key as `apiKey`, OAuth 2 as `oauth2` with the flow the
+request uses - at the document root for the collection's own auth and on the
+operation only where a request's differs from it; an explicit no-auth request
+is `security: []`, one left to inherit gets no override, and a mode with no
+OpenAPI name (`digest`, `aws`, `ntlm`, an unrecognized one) is
+`authDropped`. What is left with nowhere to go is counted rather than
+guessed at: `scriptsDropped` (a pre- or post-request script), `variablesDropped`
+(a collection variable besides `baseUrl`), `bodiesDropped` (a body in a mode
+this direction has no media type for - GraphQL today), `formValuesDropped` (a
+form body's field values, its names still declared), `settingsDropped` (a
+non-default redirect, TLS, HTTP-version or streaming setting), and
+`exampleHeadersDropped` (a stored example's header besides `Content-Type`).
 
 **Errors:** `400` for a missing or empty `collectionId`, or a `format` other
 than `json`/`yaml`. `404` when the collection does not exist. `409` when the

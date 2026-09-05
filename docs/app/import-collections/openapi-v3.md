@@ -110,6 +110,8 @@ Built inline in `parse`.
 2. **A relative URL is resolved against the URL the document was fetched from**, which is what OpenAPI says it is relative to. `/api/v3` fetched from `https://acme.dev/specs/openapi.yaml` becomes `https://acme.dev/api/v3`. The source URL reaches the parser as the fourth argument to `parse` - the factory has always known it (it is also `spec_documents.source_url`) and now hands it over.
 3. **Anything still unresolvable is kept exactly as written and counted** as an `unresolved_base_url` `SkippedItem`: a variable with no declared default, or a relative URL in a pasted or file-picked document, which has no location to be relative to. A base URL the user can see is unfinished beats a host Vayu invented.
 
+This substitution is what a Vayu-exported skeleton round-trips through (issue #1441, see [the export doc](../openapi.md#a-free-form-collection-exports-a-skeleton)): a collection whose requests all use `{{baseUrl}}` exports a server of `{baseUrl}` with `variables: { baseUrl: { default: "<the value>" } }`, and step 1 above substitutes that default back exactly - never the self-referential value a bare, undeclared `{{baseUrl}}` used to leave behind.
+
 An absolute URL is passed through untouched - not re-serialized through `URL`, so a stored document's own spelling survives.
 
 **Parameter resolution & merge.** `buildOperation` concatenates path-item-level `parameters` with operation-level `op.parameters`, resolving any `$ref` entries via `resolveRef`. Each parameter is keyed by `` `${in}:${name}` `` in a `Map`, so an operation-level parameter **overrides** a path-level one with the same `in`+`name` (later writes win). Entries missing `in` or `name` after resolution are skipped.
@@ -189,6 +191,8 @@ Value precedence is the parameter's own `example`, then the first entry of its `
 Only scalars become a value. An array or object is serialized by the parameter's `style`/`explode`, which this parser does not read, and one row holds one string - so such a parameter imports value-less, like one declaring nothing. A declared `""` is value-less too: an empty-value row writes as a bare key, so `?q=` is not a shape the Params table can hold.
 
 Why optional value-less parameters import **disabled** (issues #622, #658): the row is documentation ("this endpoint accepts `verbose`"), not intent ("send `verbose` always"). Enabled, a query row joined the stored URL as `?verbose`, which some APIs read as `verbose=true`, and a header row claimed an `X-Request-Id:` with nothing in it - both a wire change nobody chose. Disabled, the row is still listed in its table one click from use.
+
+**An explicit `x-vayu-enabled` overrides this heuristic entirely** (issue #1441). The heuristic above answers "does this look sent" for a document Vayu did not write; it cannot tell a disabled row that carries a value from an enabled one that carries none - and a Vayu-exported skeleton writes both shapes, since a toggle is not derived from its value there either. So a parameter carrying `x-vayu-enabled` (boolean) takes its `enabled` from that flag directly, and only falls back to the `required`/value-presence table when the extension is absent.
 
 ## URL & path parameters
 

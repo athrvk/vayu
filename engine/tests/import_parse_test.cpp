@@ -73,6 +73,32 @@ json read_fixture () {
     return fixture;
 }
 
+/**
+ * The first request anywhere under a parsed document's root collection - a
+ * request whose path has a segment is filed under a folder named by that path
+ * (issue #710), not under the root's own `requests`, so a case that does not
+ * care which folder needs this rather than `collections[0].at("requests")[0]`.
+ *
+ * `nlohmann::ordered_json`, not this file's `json` alias (`nlohmann::json`):
+ * `ImportParse::result` is `ordered_json`, and a `const json&` parameter here
+ * would bind to a *converted temporary* rather than to `parsed.result` itself,
+ * so the reference this returns would dangle the moment the call expression
+ * ends - a real instance of the shape `VAYU_IGNORE_FALSE_DANGLING_REFERENCE`
+ * exists to tell apart from, not one of its false positives.
+ */
+const nlohmann::ordered_json& first_request (const nlohmann::ordered_json& collection) {
+    if (const auto requests = collection.find ("requests");
+    requests != collection.end () && !requests->empty ()) {
+        return requests->at (0);
+    }
+    for (const nlohmann::ordered_json& child : collection.at ("children")) {
+        return first_request (child);
+    }
+    ADD_FAILURE () << "no request found under " << collection.dump ();
+    static const nlohmann::ordered_json none;
+    return none;
+}
+
 /// `meta.skipped` as `{kind: count}` - see the file comment.
 json skip_counts (const json& skipped) {
     json counts = json::object ();
@@ -266,6 +292,76 @@ TEST (ImportParse, ResolvesARelativeServerUrlAgainstTheDocumentsOwn) {
     EXPECT_EQ (base_url ("https://other.example.com/v1", source), "https://other.example.com/v1");
     // A base that is not absolute resolves nothing; the URL imports as written.
     EXPECT_EQ (base_url ("/v3", "not-a-url"), "/v3");
+}
+
+/**
+ * A round trip of the skeleton export's own `{{baseUrl}}` fix (issue #1441):
+ * a single-brace server variable with a declared default substitutes to
+ * exactly that default, rather than the self-referential value a bare
+ * `{{baseUrl}}` with no declared variable used to produce.
+ */
+TEST (ImportParse, ResolvesATemplatedServerUrlFromItsOwnDeclaredDefault) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "servers":[{"url":"{baseUrl}",
+        "variables":{"baseUrl":{"default":"https://api.example.com"}}}],
+        "paths":{}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json variables =
+    json::parse (parsed.result.at ("collections")[0].at ("variables").dump ());
+    EXPECT_EQ (variables.at ("baseUrl").at ("value"), "https://api.example.com");
+}
+
+/**
+ * A JSON body's `example` is written as a plain string when the source text
+ * is not valid JSON on its own - typically a `{{variable}}` token a JSON
+ * parser cannot see through. Reading it back must return that text verbatim,
+ * not re-quote it into a JSON string literal (issue #1441).
+ */
+TEST (ImportParse, ReadsATemplatedJsonBodyExampleVerbatimRatherThanReQuotingIt) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/pets":{"post":{"requestBody":{"content":{"application/json":{
+        "example":"{\"amount\": {{amount}}}"}}},"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& body =
+    first_request (parsed.result.at ("collections")[0]).at ("body");
+    EXPECT_EQ (body.at ("mode"), "json");
+    EXPECT_EQ (body.at ("content"), R"({"amount": {{amount}}})");
+}
+
+TEST (ImportParse, ReadsATextPlainRequestBodyExampleBackIntoItsContent) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/pets":{"post":{"requestBody":{"content":{"text/plain":{
+        "example":"hello world"}}},"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& body =
+    first_request (parsed.result.at ("collections")[0]).at ("body");
+    EXPECT_EQ (body.at ("mode"), "text");
+    EXPECT_EQ (body.at ("content"), "hello world");
+}
+
+/**
+ * `x-vayu-enabled`, which a Vayu skeleton export writes on every Params and
+ * Headers row (issue #1441), is trusted over the `required`/non-empty-value
+ * heuristic used for a document Vayu did not write - the heuristic cannot
+ * tell a disabled row with a value from an enabled one with none.
+ */
+TEST (ImportParse, TrustsAnExplicitEnabledMarkerOverTheValuePresenceHeuristic) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/pets":{"get":{"parameters":[
+            {"name":"verbose","in":"query","example":"1","x-vayu-enabled":false},
+            {"name":"tag","in":"query","x-vayu-enabled":true}
+        ],"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& params =
+    first_request (parsed.result.at ("collections")[0]).at ("params");
+    EXPECT_EQ (params[0].at ("key"), "verbose");
+    EXPECT_EQ (params[0].at ("enabled"), false);
+    EXPECT_EQ (params[1].at ("key"), "tag");
+    EXPECT_EQ (params[1].at ("enabled"), true);
 }
 
 class ImportParseRoute : public ::testing::Test {
