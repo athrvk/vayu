@@ -1150,10 +1150,11 @@ void ImportTally::add (std::string_view kind, int count) {
 nlohmann::ordered_json ImportTally::items () const {
     // The order `SkippedItem["kind"]` declares, so that two walks of one
     // document produce one list whatever order they met the losses in.
-    static constexpr std::array<const char*, 15> ORDER = { "websocket", "grpc",
+    static constexpr std::array<const char*, 19> ORDER = { "websocket", "grpc",
         "api_spec", "unit_test", "file_body", "malformed_item", "unsupported_method",
         "malformed_spec", "example_no_status", "default_response", "external_ref",
-        "duplicate_operation_id", "cookie_param", "unmapped_body", "unresolved_base_url" };
+        "duplicate_operation_id", "cookie_param", "unmapped_body", "unresolved_base_url",
+        "unsupported_auth", "path_variables", "url_without_raw", "variable_metadata" };
 
     nlohmann::ordered_json items = nlohmann::ordered_json::array ();
     for (const char* kind : ORDER) {

@@ -348,7 +348,8 @@ than tallying while building them, so the number and the rows cannot disagree.
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
 "default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
-"unmapped_body" | "unresolved_base_url", count }`.
+"unmapped_body" | "unresolved_base_url" | "unsupported_auth" | "path_variables" |
+"url_without_raw" | "variable_metadata", count }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
 HTTP method has no `HttpMethod` (OpenAPI 3's `trace`), and `malformed_item` / `malformed_spec`
@@ -387,6 +388,20 @@ an operation that declared no body is still not counted, because it lost nothing
 could reach - a `{variable}` the document declares no default for, or a relative URL in a
 document that arrived with no URL to resolve it against (see
 [OpenAPI 3.0](./openapi-v3.md#the-base-url)).
+
+The last four are Postman kinds added by issue #1443, closing gaps in the same "dropped is
+counted" promise. `unsupported_auth` is an `auth.type` Postman defines and Vayu has no mode
+for (`hawk`, `oauth1`, `edgegrid`, or a non-string `type`), unlike `awsv4`/`digest`/`ntlm`,
+which import as data and count under `nonExecutableAuth` instead. `path_variables` and
+`url_without_raw` are not losses: the first counts a request whose `url.variable[]` path
+segment was turned into a `{{key}}` template plus a collection variable, the second a URL
+assembled from `host[]`/`path[]` because it carried no `raw` - both are mappings the Preview
+should say happened, not damage, so like `default_response` they sort into the informational
+half of the notice list rather than the destructive one. `variable_metadata` is a collection,
+folder, environment or globals variable whose `description` or a meaningfully declared `type`
+(anything but `secret` or Postman's own `default` marker) was read and discarded, because
+Vayu's variable record has a field for the value and the secret flag only (see
+[postman.md](./postman.md#variables-environments)).
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`

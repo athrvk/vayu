@@ -268,6 +268,141 @@ TEST (ImportParse, ResolvesARelativeServerUrlAgainstTheDocumentsOwn) {
     EXPECT_EQ (base_url ("/v3", "not-a-url"), "/v3");
 }
 
+/**
+ * The Postman fields that used to be dropped with no counter (issue #1443):
+ * a custom HTTP verb, an auth scheme Vayu cannot execute, a path variable, a
+ * `raw`-less URL, `strictSSL`, and variable metadata. Each case is a mutation
+ * check on its own counter - reverting the fix leaves the mapped field wrong
+ * and the count at zero.
+ */
+constexpr const char* POSTMAN_SCHEMA =
+"https://schema.getpostman.com/json/collection/v2.1.0/collection.json";
+
+TEST (PostmanImport, CountsAnUnsupportedMethodAndFallsBackToGet) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) +
+    R"("},"item":[{"name":"R","request":{"method":"PROPFIND","url":"https://api.example.com/x"}}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
+    EXPECT_EQ (request.at ("method"), "GET");
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("unsupported_method"), 1);
+}
+
+TEST (PostmanImport, CountsAnUnsupportedAuthTypeButNotAnExplicitNoAuth) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"A","request":{"method":"GET","url":"https://x.com/a",
+            "auth":{"type":"hawk","hawk":[]}}},
+        {"name":"B","request":{"method":"GET","url":"https://x.com/b",
+            "auth":{"type":"noauth"}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    EXPECT_EQ (requests[0].at ("auth").at ("mode"), "none");
+    EXPECT_EQ (requests[1].at ("auth").at ("mode"), "none");
+    // Only the unsupported scheme counts - an explicit `noauth` already means
+    // "send nothing", which is exactly what it mapped to.
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("unsupported_auth"), 1);
+}
+
+TEST (PostmanImport, SubstitutesAPathVariableIntoATemplateAndACollectionVariable) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":{
+            "raw":"https://api.example.com/users/:userId?x=1",
+            "query":[{"key":"x","value":"1"}],
+            "variable":[{"key":"userId","value":"42"}]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& collection = parsed.result.at ("collections")[0];
+    // `join_params_into_urls` rejoins the enabled query param after `pm_url`
+    // splits it off - see "The url/params invariant" in the Postman doc.
+    EXPECT_EQ (collection.at ("requests")[0].at ("url"),
+    "https://api.example.com/users/{{userId}}?x=1");
+    ASSERT_TRUE (collection.at ("variables").contains ("userId"));
+    EXPECT_EQ (collection.at ("variables").at ("userId").at ("value"), "42");
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("path_variables"), 1);
+}
+
+TEST (PostmanImport, KeepsAnExplicitCollectionVariableOverAPathVariableOfTheSameName) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},
+        "variable":[{"key":"userId","value":"explicit"}],
+        "item":[{"name":"R","request":{"method":"GET",
+            "url":{"raw":"https://api.example.com/users/:userId",
+                "variable":[{"key":"userId","value":"42"}]}}}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("variables").at ("userId").at ("value"), "explicit");
+}
+
+TEST (PostmanImport, AssemblesAUrlFromHostAndPathWhenRawIsAbsent) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":{
+            "protocol":"https","host":["api","example","com"],"path":["v1","users"]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("url"),
+    "https://api.example.com/v1/users");
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("url_without_raw"), 1);
+}
+
+TEST (PostmanImport, MapsStrictSSLFalseToVerifySSLThroughToTheApplyPayload) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://x.com/a"},
+         "protocolProfileBehavior":{"strictSSL":false}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("verifySSL"), false);
+
+    // The draft carrying the field is not the same as the apply payload
+    // carrying it - `apply_request`'s optional-field allowlist has its own
+    // copy to remember (issue #1436's class of defect).
+    const json payload =
+    json::parse (vayu::core::import_apply_payload (parsed.result).dump ());
+    EXPECT_EQ (payload.at ("requests")[0].at ("verifySSL"), false);
+}
+
+TEST (PostmanImport, CountsVariableMetadataDroppedFromCollectionAndEnvironmentVariables) {
+    const ImportParse collection =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[],
+        "variable":[{"key":"host","value":"x","description":"the host"},
+                    {"key":"token","value":"y","type":"secret"}]})",
+    {}, {});
+    ASSERT_TRUE (collection.ok ()) << collection.error;
+    const json& variables =
+    collection.result.at ("collections")[0].at ("variables");
+    EXPECT_FALSE (variables.at ("host").contains ("secret"));
+    EXPECT_TRUE (variables.at ("token").at ("secret").get<bool> ());
+    // Only `host` carried metadata Vayu has nowhere to put; `token`'s `type`
+    // is the one it stores.
+    EXPECT_EQ (
+    skip_counts (collection.result.at ("meta").at ("skipped")).at ("variable_metadata"), 1);
+
+    const ImportParse environment = parse_import (
+    R"({"_postman_variable_scope":"environment","name":"Prod",
+        "values":[{"key":"host","value":"x","description":"the host"},
+                  {"key":"user","value":"y"}]})",
+    {}, {});
+    ASSERT_TRUE (environment.ok ()) << environment.error;
+    EXPECT_EQ (skip_counts (environment.result.at ("meta").at ("skipped")).at ("variable_metadata"),
+    1);
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";
