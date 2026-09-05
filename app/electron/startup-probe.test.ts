@@ -29,6 +29,7 @@ import {
 	sampleStartup,
 	type StartupClock,
 } from "./startup-probe.js";
+import { type RevealReason } from "./window-reveal.js";
 import { ENGINE_PORT } from "./constants.js";
 import { ROOT_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
@@ -44,9 +45,13 @@ function fixedClock(overrides: Partial<StartupClock> = {}): StartupClock {
 	};
 }
 
-function collect(env: Record<string, string | undefined>, clock = fixedClock()) {
+function collect(
+	env: Record<string, string | undefined>,
+	clock = fixedClock(),
+	via: RevealReason = "ready-to-show"
+) {
 	const lines: string[] = [];
-	const wrote = reportStartupIfRequested(env, clock, (line) => lines.push(line));
+	const wrote = reportStartupIfRequested(via, env, clock, (line) => lines.push(line));
 	return { lines, wrote };
 }
 
@@ -75,7 +80,21 @@ describe("the startup probe's guard", () => {
 		expect(lines[0].startsWith(`${STARTUP_MARKER} `)).toBe(true);
 
 		const payload = JSON.parse(lines[0].slice(STARTUP_MARKER.length));
-		expect(payload).toEqual({ readyToShowMs: 500, basis: "process-creation" });
+		expect(payload).toEqual({
+			readyToShowMs: 500,
+			basis: "process-creation",
+			via: "ready-to-show",
+		});
+	});
+
+	it("says when the window was shown without ever painting", () => {
+		// Same number, a different thing measured: the reveal fallback's timer
+		// rather than a first frame (#1347). Without this the reader would take
+		// an 8-second timeout for a cold start.
+		const { lines } = collect({ [STARTUP_MEASURE_ENV]: "1" }, fixedClock(), "reveal-fallback");
+
+		const payload = JSON.parse(lines[0].slice(STARTUP_MARKER.length));
+		expect(payload.via).toBe("reveal-fallback");
 	});
 
 	it("writes no newline of its own - the sink adds it", () => {
@@ -88,16 +107,20 @@ describe("the startup probe's guard", () => {
 
 describe("what the number is measured from", () => {
 	it("measures from process creation when the platform can say", () => {
-		const sample = sampleStartup(fixedClock());
-		expect(sample).toEqual({ readyToShowMs: 500, basis: "process-creation" });
+		const sample = sampleStartup("ready-to-show", fixedClock());
+		expect(sample).toEqual({
+			readyToShowMs: 500,
+			basis: "process-creation",
+			via: "ready-to-show",
+		});
 	});
 
 	it("falls back to the time origin, and says so", () => {
 		// Electron's getCreationTime() answers null where the platform cannot
 		// tell. Reporting the fallback as if it were a cold start would compare
 		// numbers that start counting at different moments.
-		const sample = sampleStartup(fixedClock({ processCreatedAt: () => null }));
-		expect(sample).toEqual({ readyToShowMs: 320, basis: "time-origin" });
+		const sample = sampleStartup("ready-to-show", fixedClock({ processCreatedAt: () => null }));
+		expect(sample).toEqual({ readyToShowMs: 320, basis: "time-origin", via: "ready-to-show" });
 	});
 });
 
@@ -106,16 +129,17 @@ describe("the probe's two ends", () => {
 	const main = readFileSync(join(electronDir, "main.ts"), "utf8");
 	const measurer = readFileSync(measurerPath, "utf8");
 
-	it("is called from the window's ready-to-show handler", () => {
+	it("is called from the reveal that puts the window on screen", () => {
 		// main.ts creates windows and starts the engine at import time, so the
 		// wiring can only be read - the approach startup-order.test.ts takes to
-		// the same file. Without this the probe is a function nobody calls.
-		const handlerAt = main.indexOf('mainWindow.once("ready-to-show"');
-		expect(handlerAt).toBeGreaterThan(-1);
+		// the same file. Without this the probe is a function nobody calls, and
+		// with the `via` dropped it would report a fallback reveal as a paint.
+		const revealAt = main.indexOf("revealWhenReady(mainWindow, (via) => {");
+		expect(revealAt).toBeGreaterThan(-1);
 
-		const handlerEnd = main.indexOf("});", handlerAt);
-		expect(handlerEnd).toBeGreaterThan(handlerAt);
-		expect(main.slice(handlerAt, handlerEnd)).toContain("reportStartupIfRequested()");
+		const revealEnd = main.indexOf("\n\t});", revealAt);
+		expect(revealEnd).toBeGreaterThan(revealAt);
+		expect(main.slice(revealAt, revealEnd)).toContain("reportStartupIfRequested(via)");
 	});
 
 	it("prints the marker the perf script waits for", () => {
@@ -130,6 +154,14 @@ describe("the probe's two ends", () => {
 
 		expect(declared, "measure-app.mjs no longer declares PACKAGED_MEASURE_ENV").not.toBeNull();
 		expect(declared?.[1]).toBe(STARTUP_MEASURE_ENV);
+	});
+
+	it("makes the reader reject a launch the fallback revealed", () => {
+		// The app prints `via`; only this script reads it. A rename on one side
+		// alone would silently turn an 8-second fallback timer back into a
+		// reported cold start (#1347).
+		const fallback: RevealReason = "reveal-fallback";
+		expect(measurer).toContain(`payload.via === "${fallback}"`);
 	});
 
 	it("waits on the port the sidecar would adopt an engine from", () => {

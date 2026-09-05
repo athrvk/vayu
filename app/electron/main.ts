@@ -60,6 +60,7 @@ import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
 import { reportStartupIfRequested } from "./startup-probe.js";
+import { revealWhenReady } from "./window-reveal.js";
 /*
  * MCP is imported by weight, not through its barrel.
  *
@@ -449,13 +450,14 @@ function createWindow() {
 		mainWindow.maximize();
 	}
 
-	// Show window when ready to prevent visual flash
-	mainWindow.once("ready-to-show", () => {
-		mainWindow?.show();
+	// Show the window when it has a frame to show - and show it anyway if that
+	// frame never arrives, rather than leaving a started app invisible with
+	// nothing said about it (#1347). See window-reveal.ts.
+	revealWhenReady(mainWindow, (via) => {
 		// Nothing unless VAYU_MEASURE_STARTUP=1 asked - see startup-probe.ts. The
 		// packaged app is the only thing that can answer "how long until a window",
 		// which is why the perf workflow packages before it measures (#1165).
-		reportStartupIfRequested();
+		reportStartupIfRequested(via);
 	});
 
 	// The preload re-runs on whatever this window navigates to, so a navigation
