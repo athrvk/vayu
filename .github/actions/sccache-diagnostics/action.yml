@@ -1,0 +1,121 @@
+name: sccache diagnostics
+description: >
+  Print sccache's error log when the run recorded cache errors, and fail the
+  blind spot where it recorded errors but logged nothing.
+
+# f7b9b90b added SCCACHE_ERROR_LOG and a step that prints it, because v0.17.1's
+# Windows leg reported 18 "Cache errors" that `--show-stats` could only count.
+# Three weeks and several releases later that step had never printed a line,
+# while every Windows run went on reporting the same 18. The diagnostic was not
+# reporting "no errors"; it was reporting nothing at all, and nothing could tell
+# the two apart, because the step branched on whether the log file was empty and
+# said "No sccache errors logged." either way.
+#
+# So the check here keys off the **stats**, not off the log. sccache knows how
+# many compilations errored whether or not it wrote a word about them, and the
+# only honest states are:
+#
+#   errors == 0                -> nothing to report.
+#   errors > 0, log has lines  -> print them; this is the case f7b9b90b wanted.
+#   errors > 0, log is empty   -> the diagnostic is broken, and saying so is the
+#                                 whole point. This is the state that hid for
+#                                 three weeks.
+#
+# It is an action rather than a step in each workflow for the reason
+# winget-preflight is: release.yml runs on tag push alone, so a diagnostic that
+# lives only there cannot be exercised without cutting a release - which is
+# exactly why nobody noticed it was mute. cache-warm.yml runs on master pushes
+# and on workflow_dispatch, so the same check there can be run on demand.
+
+inputs:
+  error-log:
+    description: >
+      Path sccache was told to write its log to (SCCACHE_ERROR_LOG). Read from
+      the environment when not given.
+    required: false
+    default: ''
+  fail-on-blind-spot:
+    description: >
+      Fail the job when sccache recorded cache errors but wrote no log. True on
+      the warm workflow, which is cheap to re-run and blocks nothing; false on a
+      release, where a broken diagnostic must not stop a build that is otherwise
+      fine - an sccache error falls through to the real compiler, so it costs
+      time and nothing else.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Report sccache errors
+      if: always()
+      shell: bash
+      run: |
+        set -uo pipefail
+
+        log="${{ inputs.error-log }}"
+        if [ -z "$log" ]; then
+          log="${SCCACHE_ERROR_LOG:-}"
+        fi
+
+        # The text form is parsed rather than the JSON, matching the existing
+        # non-empty-scan check in cache-warm.yml: a stats-format change on a
+        # future sccache then breaks the parse loudly instead of silently
+        # answering zero.
+        stats="$(sccache --show-stats 2>/dev/null || true)"
+        if [ -z "$stats" ]; then
+          echo "::warning::sccache --show-stats returned nothing; cannot tell whether this run had cache errors."
+          exit 0
+        fi
+
+        errors="$(printf '%s\n' "$stats" \
+          | awk '$1=="Cache" && $2=="errors" && $3 ~ /^[0-9]+$/ {print $3; exit}')"
+        if [ -z "${errors:-}" ]; then
+          echo "::warning::Could not read sccache's cache-error count from --show-stats - this check just stopped checking."
+          exit 0
+        fi
+
+        echo "sccache recorded $errors cache error(s)."
+
+        if [ "$errors" -eq 0 ]; then
+          echo "Nothing to report."
+          exit 0
+        fi
+
+        # Errors happened. Everything below decides whether we can say why.
+        echo "::group::sccache error-log status"
+        if [ -z "$log" ]; then
+          echo "SCCACHE_ERROR_LOG is not set."
+        else
+          echo "SCCACHE_ERROR_LOG=$log"
+          ls -l "$log" 2>&1 || echo "(the path does not exist)"
+        fi
+        echo "::endgroup::"
+
+        if [ -n "$log" ] && [ -s "$log" ]; then
+          # A debug-level log is large and mostly uninteresting, so lead with the
+          # lines that carry a level worth reading and keep a bounded tail behind
+          # them for context. The whole file is never printed: it is per-compile
+          # chatter, and burying the cause in it would repeat the original defect
+          # in a different shape.
+          echo "::group::sccache log - WARN and ERROR lines"
+          grep -aiE '\[(warn|error)\]|\bERROR\b|\bWARN\b' "$log" | tail -n 200 \
+            || echo "(no lines at WARN or ERROR level)"
+          echo "::endgroup::"
+
+          echo "::group::sccache log - last 100 lines"
+          tail -n 100 "$log"
+          echo "::endgroup::"
+
+          echo "::notice::sccache recorded $errors cache error(s); the log is above. These fall through to the real compiler, so they cost build time and nothing else."
+          exit 0
+        fi
+
+        # The blind spot. Stats say the errors happened; the log says nothing.
+        msg="sccache recorded $errors cache error(s) but wrote no log, so the reason is still unrecoverable. Check that SCCACHE_ERROR_LOG and SCCACHE_LOG reached the sccache *server* process, which reads them when it starts."
+        if [ "${{ inputs.fail-on-blind-spot }}" = "true" ]; then
+          echo "::error::$msg" >&2
+          exit 1
+        fi
+        echo "::warning::$msg"
+        exit 0

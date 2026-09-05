@@ -48,7 +48,12 @@ jobs:
       # every artifact glob (`app/release/*`, `artifacts/*`), so it cannot end
       # up shipped.
       SCCACHE_ERROR_LOG: '${{ github.workspace }}/sccache-error.log'
-      SCCACHE_LOG: 'warn'
+      # `warn` was the original level and produced an empty log across every
+      # release since f7b9b90b, while the same runs reported 18 cache errors -
+      # so whatever sccache says about them, it does not say at warn. Scoped to
+      # the sccache crate so its dependencies do not drown the file. The log is
+      # never printed whole; the diagnostics action extracts from it.
+      SCCACHE_LOG: 'sccache=debug'
 
     steps:
       - name: Checkout repository
@@ -217,21 +222,13 @@ jobs:
       # skipped exactly then. It never fails the job - it is diagnostics, and a
       # missing or empty log is the good case, not an error. Steps after this
       # one carry no `always()`, so a failed build still stops here.
+      # A broken diagnostic must not fail a release: an sccache error falls
+      # through to the real compiler, so it costs time and nothing else. The
+      # warm workflow runs the same check with fail-on-blind-spot, because it is
+      # cheap to re-run and blocks nobody.
       - name: Report sccache errors
         if: always()
-        shell: bash
-        run: |
-          log="${SCCACHE_ERROR_LOG:-}"
-          if [ -z "$log" ] || [ ! -s "$log" ]; then
-            echo "No sccache errors logged."
-            exit 0
-          fi
-          echo "::group::sccache error log"
-          cat "$log"
-          echo "::endgroup::"
-          # Surfaced as a notice rather than a warning: these fall through to
-          # the real compiler, so they cost time and nothing else.
-          echo "::notice::sccache logged $(wc -l < "$log" | tr -d ' ') line(s) to its error log - see the 'Report sccache errors' step."
+        uses: ./.github/actions/sccache-diagnostics
 
       - name: Install frontend dependencies
         working-directory: app

@@ -316,6 +316,15 @@ jobs:
       VCPKG_COMMIT: '04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
+      # The same pair release.yml sets, and for a better reason: this workflow
+      # reports the identical cache errors that one does, and it runs on master
+      # pushes and on workflow_dispatch. release.yml runs on a tag alone, so a
+      # diagnostic living only there cannot be exercised without cutting a
+      # release - which is why f7b9b90b's went three weeks unnoticed while
+      # logging nothing. Job level, not $GITHUB_ENV, because sccache reads these
+      # when its server starts and the server can be up before a step runs.
+      SCCACHE_ERROR_LOG: '${{ github.workspace }}/sccache-error.log'
+      SCCACHE_LOG: 'sccache=debug'
 
     steps:
       - uses: actions/checkout@v7
@@ -421,6 +430,16 @@ jobs:
             echo "::error::sccache processed zero compile requests - the engine did not compile through it, so the master scope was not warmed." >&2
             exit 1
           fi
+
+      # fail-on-blind-spot here and nowhere else: this job is cheap, runs off a
+      # push, and blocks nothing, so "sccache errored and would not say why" is
+      # worth a red run. On a release the same state is a warning - the build is
+      # correct either way, and a mute diagnostic must not stop it.
+      - name: Report sccache errors
+        if: always()
+        uses: ./.github/actions/sccache-diagnostics
+        with:
+          fail-on-blind-spot: 'true'
 
       - name: Report what the cache now holds
         shell: bash
