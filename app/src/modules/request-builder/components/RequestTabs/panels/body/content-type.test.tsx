@@ -66,10 +66,14 @@ describe("when a mode needs a Content-Type", () => {
 		expect(contentTypeToAdd("xml", [])).toBe("application/xml");
 	});
 
-	it.each(["none", "json", "text", "form-data", "x-www-form-urlencoded"] as const)(
+	it("asks for one on JSON, the panel's most common mode", () => {
+		expect(contentTypeToAdd("json", [])).toBe("application/json");
+	});
+
+	it.each(["none", "text", "form-data", "x-www-form-urlencoded"] as const)(
 		"asks for nothing on %s",
 		(mode) => {
-			// Only the three modes above write a header the user did not type. The
+			// Only the four modes above write a header the user did not type. The
 			// others declare a content type, but the engine sets it from the mode.
 			expect(contentTypeToAdd(mode, [])).toBeNull();
 		}
@@ -184,10 +188,10 @@ describe("what a mode change does to the header", () => {
 		expect(off.added).toBeNull();
 	});
 
-	it.each(["json", "text", "form-data", "x-www-form-urlencoded"] as const)(
+	it.each(["text", "form-data", "x-www-form-urlencoded"] as const)(
 		"removes it on the way to %s too",
 		(mode) => {
-			// JSON declares the same content type, but the engine sets it from the
+			// These modes declare a content type, but the engine sets it from the
 			// mode - the row we wrote is still ours to clear.
 			const on = intoGraphql();
 			expect(switchContentType(mode, on.headers, REQUEST, on.auto).headers).toEqual(base);
@@ -227,7 +231,7 @@ describe("what a mode change does to the header", () => {
 	it("returns the same array when there is nothing to do", () => {
 		// The panel skips `updateField` on identity, so an unrelated mode change
 		// must not mark the request dirty.
-		const result = switchContentType("json", base, REQUEST, null);
+		const result = switchContentType("text", base, REQUEST, null);
 		expect(result.headers).toBe(base);
 	});
 
@@ -254,6 +258,16 @@ describe("what a mode change does to the header", () => {
 		// And leaving JSON-RPC still takes back the row GraphQL added.
 		expect(switchContentType("none", rpc.headers, REQUEST, rpc.auto).headers).toEqual(base);
 	});
+
+	it("keeps it across GraphQL and JSON, which need the same one", () => {
+		// json now auto-writes the same header, so switching into it from GraphQL
+		// must not churn the row any more than switching to JSON-RPC does.
+		const on = intoGraphql();
+		const json = switchContentType("json", on.headers, REQUEST, on.auto);
+		expect(json.headers).toBe(on.headers);
+		expect(json.auto).toBe(on.auto);
+		expect(json.added).toBeNull();
+	});
 });
 
 describe("what a mode requires", () => {
@@ -262,7 +276,7 @@ describe("what a mode requires", () => {
 		// there; the switch needs "does this mode still want that value?", which
 		// must stay true for a request that already carries it.
 		expect(requiredContentType("graphql")).toBe("application/json");
-		expect(requiredContentType("json")).toBeNull();
+		expect(requiredContentType("text")).toBeNull();
 	});
 });
 
