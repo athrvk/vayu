@@ -48,5 +48,6 @@ export function templatedRequest(
 		// composed payload.
 		stream: request.stream,
 		verifySSL: request.verifySSL,
+		followRedirects: request.followRedirects,
 	};
 }

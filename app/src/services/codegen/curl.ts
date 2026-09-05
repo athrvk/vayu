@@ -69,6 +69,14 @@ export function generateCurl(
 		args.push("-k");
 	}
 
+	if (prepared.followRedirects) {
+		// The opposite split from `-k`: curl does NOT follow redirects unless
+		// told to, while the engine does by default, so the common case is the
+		// one that needs the flag (issue #1445). `parseCurl` reads `-L` back as
+		// the same setting.
+		args.push("-L");
+	}
+
 	if (prepared.basicAuth) {
 		args.push(
 			`-u ${shellQuote(`${prepared.basicAuth.username}:${prepared.basicAuth.password}`)}`

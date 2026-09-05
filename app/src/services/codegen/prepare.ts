@@ -56,6 +56,8 @@ export interface PreparedRequest {
 	stream: boolean;
 	/** Whether TLS verification is on - see `SnippetRequest.verifySSL`. */
 	verifySSL: boolean;
+	/** Whether redirects are followed - see `SnippetRequest.followRedirects`. */
+	followRedirects: boolean;
 	notes: string[];
 	masked: boolean;
 }
@@ -115,18 +117,24 @@ function appendQueryParam(url: string, key: string, value: string): string {
  *
  * The engine's `implied_content_type` (`engine/src/http/form_body.cpp`) is what
  * reaches the wire, and this is the same table for the snippet: a mode whose
- * meaning includes its media type - GraphQL's and JSON-RPC's JSON envelopes,
- * XML's document - carries it, and `json`/`text` do not, because the user writes
- * that header themselves.
+ * meaning includes its media type - JSON's, GraphQL's and JSON-RPC's JSON
+ * envelopes, XML's document - carries it, and `text` does not, because a
+ * `text/plain`, a CSV, a JWT and a raw signature are all that one mode and the
+ * header is the author's to write.
  *
  * Without this, every snippet fell through as raw content with **no** header,
  * so a copied curl of a GraphQL request went out as libcurl's default
  * `application/x-www-form-urlencoded` and most servers answered 400 - a snippet
- * that does not do what the app just did. The form modes are absent on purpose:
- * their generators express the body as `-F` / `--data-urlencode` and the client
- * writes the header itself, boundary included.
+ * that does not do what the app just did. `json` fell through the same way
+ * (issue #1445): the engine implies `application/json` for it exactly like
+ * GraphQL and JSON-RPC, so a snippet that carried no header for a json-mode
+ * body was already wrong the day it was generated, and pasting it back through
+ * `parseCurl` landed it as `text` rather than `json`. The form modes are absent
+ * on purpose: their generators express the body as `-F` / `--data-urlencode`
+ * and the client writes the header itself, boundary included.
  */
 const IMPLIED_CONTENT_TYPE: Record<string, string> = {
+	json: "application/json",
 	graphql: "application/json",
 	jsonrpc: "application/json",
 	xml: "application/xml",
@@ -273,6 +281,10 @@ export function prepareRequest(
 		// Absent means verifying: the engine's default, and the safe reading of
 		// a caller that never set it.
 		verifySSL: request.verifySSL !== false,
+		// Absent means following: the engine's own default (issue #1445), unlike
+		// curl's, which is why the flag is worth emitting on the common case
+		// rather than only when it departs from one.
+		followRedirects: request.followRedirects !== false,
 		notes,
 		masked: masker.wasUsed(),
 	};
