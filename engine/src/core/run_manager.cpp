@@ -34,6 +34,24 @@ inline int64_t now_ms () {
 }
 
 /**
+ * The clock every *elapsed* figure is measured on.
+ *
+ * `now_ms()` is wall time: NTP steps it and the user can set it, so a run that
+ * spans an adjustment reports a duration that never happened, and a backward
+ * step reports a negative one. Durations therefore come from here and
+ * timestamps from `now_ms()` - a tick's `timestamp` is a point in time a reader
+ * compares against their own clock, while its `elapsedSeconds` is a length.
+ *
+ * The epoch is arbitrary, so a value is only ever meaningful against another
+ * value from this same function.
+ */
+inline int64_t steady_now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+    .count ();
+}
+
+/**
  * @brief One deferred replay: a script, the samples it runs against, and the
  *        identity `pm.info` reports while it does.
  *
@@ -1009,8 +1027,9 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
 
         // IMPORTANT: Set is_running BEFORE spawning threads to avoid race condition
         // where metrics_thread exits immediately because is_running is still false
-        context->is_running    = true;
-        context->start_time_ms = now_ms ();
+        context->is_running      = true;
+        context->start_time_ms   = now_ms ();
+        context->start_steady_ms = steady_now_ms ();
 
         // The handle is kept - not detached - so shutdown can join the worker
         // before `db` and this manager go out of scope from under the
@@ -1437,8 +1456,8 @@ void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 bool verbose,
 RunManager& manager) {
-    // Note: is_running and start_time_ms are set in start_run() before threads
-    // spawn to avoid race condition with metrics_thread
+    // Note: is_running and both start stamps are set in start_run() before
+    // threads spawn to avoid race condition with metrics_thread
 
     auto& db           = *db_ptr;
     const auto& config = context->config;
@@ -1568,7 +1587,7 @@ RunManager& manager) {
             auto& mc                       = *context->metrics_collector;
             inputs.total_requests          = mc.total_requests ();
             const double elapsed_s         = context->start_time_ms > 0 ?
-                    static_cast<double> (now_ms () - context->start_time_ms) / 1000.0 :
+                    static_cast<double> (steady_now_ms () - context->start_steady_ms) / 1000.0 :
                     0.0;
             inputs.rps                     = elapsed_s > 0 ?
                                 static_cast<double> (inputs.total_requests) / elapsed_s :
@@ -1820,11 +1839,12 @@ struct TickWindow {
 void persist_metric_tick (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 int64_t tick_wall_ms,
+int64_t tick_steady_ms,
 double elapsed,
 const std::map<int, size_t>& status_snapshot,
 const TickWindow& window,
 size_t& last_total,
-int64_t& first_tick_wall_ms) {
+int64_t& first_tick_steady_ms) {
     size_t current_total  = context->total_requests ();
     size_t current_errors = context->total_errors ();
     size_t delta          = current_total - last_total;
@@ -1837,7 +1857,7 @@ int64_t& first_tick_wall_ms) {
     // Calculate send rate (requests dispatched per second) and throughput (responses per second)
     size_t requests_sent = context->requests_sent.load ();
     double run_elapsed_s =
-    (static_cast<double> (tick_wall_ms - context->start_time_ms)) / 1000.0;
+    (static_cast<double> (tick_steady_ms - context->start_steady_ms)) / 1000.0;
     double send_rate =
     run_elapsed_s > 0 ? static_cast<double> (requests_sent) / run_elapsed_s : 0.0;
     double throughput =
@@ -1879,15 +1899,15 @@ int64_t& first_tick_wall_ms) {
         // tick, not from the run's start: the 1 Hz gate means the
         // first stored tick lands ~1s in, and a series that starts
         // at 0 is what the charts have always drawn.
-        if (first_tick_wall_ms == 0) {
-            first_tick_wall_ms = tick_wall_ms;
+        if (first_tick_steady_ms == 0) {
+            first_tick_steady_ms = tick_steady_ms;
         }
 
         auto& mc = *context->metrics_collector;
         MetricTickSample sample;
         sample.timestamp = tick_wall_ms;
         sample.elapsed_seconds =
-        static_cast<double> (tick_wall_ms - first_tick_wall_ms) / 1000.0;
+        static_cast<double> (tick_steady_ms - first_tick_steady_ms) / 1000.0;
         sample.requests_completed  = current_total;
         sample.requests_failed     = current_errors;
         sample.current_rps         = current_rps;
@@ -1941,9 +1961,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // Declared here so it is in scope inside the try block below.
     int tick_interval_ms = 0;
 
-    // Wall clock of the first persisted tick; the origin every stored tick's
-    // elapsed_seconds is relative to. 0 until the first DB-gated tick.
-    int64_t first_tick_wall_ms = 0;
+    // Monotonic reading at the first persisted tick; the origin every stored
+    // tick's elapsed_seconds is relative to. 0 until the first DB-gated tick.
+    int64_t first_tick_steady_ms = 0;
 
     // Windowed (rolling) percentiles sampled by emit_live_tick each tick. Captured
     // here so the 1 Hz DB-gated block below can persist the same window it just
@@ -1957,12 +1977,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // persisted enrichment for the same logical tick share one timestamp -
     // re-sampling now_ms() inside drifts them into adjacent ms buckets and the
     // dashboard sees status-codes shift left vs throughput on the same x-axis.
-    auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot, int64_t now_wall_ms) {
+    auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot,
+                          int64_t now_wall_ms, int64_t now_steady_ms) {
         size_t active_count      = context->active_transfer_count ();
         size_t requests_sent     = context->requests_sent.load ();
         size_t requests_expected = context->requests_expected.load ();
         double elapsed_seconds   = context->start_time_ms > 0 ?
-          static_cast<double> (now_wall_ms - context->start_time_ms) / 1000.0 :
+          static_cast<double> (now_steady_ms - context->start_steady_ms) / 1000.0 :
           0.0;
 
         // Sample the rolling window exactly once per tick (it resets on read) and
@@ -2036,7 +2057,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         static_cast<int> (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS)))));
 
         // Tick 0: emit immediately so consumers see data before the first sleep.
-        emit_live_tick (nullptr, now_ms ());
+        emit_live_tick (nullptr, now_ms (), steady_now_ms ());
 
         // Loop on is_running alone. should_stop is only the *request* to stop:
         // the worker acts on it, then blocks in event_loop->stop (cancelling on
@@ -2049,10 +2070,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         while (context->is_running) {
             std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
 
-            // Single wall-clock sample per tick - shared by the SSE payload
-            // timestamp, the run-elapsed calc, and (on DB-gated ticks) every
-            // persisted metric row below. See #27.
-            int64_t tick_wall_ms = now_ms ();
+            // Single sample of each clock per tick - the wall one is shared by
+            // the SSE payload timestamp and (on DB-gated ticks) every persisted
+            // metric row below (see #27); the monotonic one carries every
+            // elapsed figure derived from the same tick, so the two stay one
+            // logical instant without a duration riding on wall time.
+            int64_t tick_wall_ms   = now_ms ();
+            int64_t tick_steady_ms = steady_now_ms ();
 
             // Snapshot the status-code distribution once per tick and share it
             // with both the SSE builder and (on DB-gated ticks) the persisted
@@ -2060,22 +2084,23 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             auto status_snapshot = context->metrics_collector->status_code_distribution ();
 
             // Emit a live tick every iteration regardless of the 1 Hz DB gate.
-            emit_live_tick (&status_snapshot, tick_wall_ms);
+            emit_live_tick (&status_snapshot, tick_wall_ms, tick_steady_ms);
 
             auto now = std::chrono::steady_clock::now ();
             auto elapsed = std::chrono::duration<double> (now - last_update).count ();
 
             if (elapsed >= 1.0) // Update every second
             {
-                persist_metric_tick (context, db, tick_wall_ms, elapsed, status_snapshot,
-                TickWindow{ win_p50, win_p95, win_p99 }, last_total, first_tick_wall_ms);
+                persist_metric_tick (context, db, tick_wall_ms, tick_steady_ms,
+                elapsed, status_snapshot, TickWindow{ win_p50, win_p95, win_p99 },
+                last_total, first_tick_steady_ms);
                 last_update = now;
             }
         }
 
         // Final settled tick before signalling closed - consumers use this ordering
         // as the termination contract (last data before closed==true).
-        emit_live_tick (nullptr, now_ms ());
+        emit_live_tick (nullptr, now_ms (), steady_now_ms ());
     } catch (const std::exception& e) {
         vayu::utils::log_error ("collect_metrics: " + std::string (e.what ()));
     } catch (...) {
