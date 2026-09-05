@@ -57,14 +57,27 @@ const ExportCollection& petstore () {
     return collection;
 }
 
-std::string bound_fixture () {
-    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
-    "tests" / "fixtures" / "petstore-bound.json";
+std::string fixture (const std::string& name) {
+    const std::filesystem::path path =
+    std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "tests" / "fixtures" / name;
     std::ifstream in (path);
     EXPECT_TRUE (in.good ()) << "fixture missing: " << path;
     std::ostringstream buffer;
     buffer << in.rdbuf ();
     return buffer.str ();
+}
+
+std::string bound_fixture () {
+    return fixture ("petstore-bound.json");
+}
+
+/**
+ * A document written the way real ones are: a response with several named
+ * examples, a response that is a `$ref`, and one that declares a schema and no
+ * example at all - the three shapes the bound direction used to rewrite.
+ */
+std::string refs_fixture () {
+    return fixture ("petstore-refs-bound.json");
 }
 
 ExportRequest request (std::string method, std::string url) {
@@ -89,11 +102,24 @@ std::vector<ExportRequest> bound_requests () {
         bound_request ("DELETE", "{{baseUrl}}/pets/{{petId}}", "deletePet", "/pets/{petId}") };
 }
 
+/** The two requests `petstore-refs-bound.json` describes, identities intact. */
+std::vector<ExportRequest> refs_requests () {
+    return { bound_request ("GET", "{{baseUrl}}/pets", "listPets", "/pets"),
+        bound_request ("GET", "{{baseUrl}}/owners/{{ownerId}}/pets",
+        "listOwnerPets", "/owners/{ownerId}/pets") };
+}
+
 ExportExample example (std::string name = "200 - ok",
 int status                              = 200,
 std::string body                        = R"({"id":"p1","name":"Rex"})",
 std::string content_type                = "application/json") {
     return { std::move (name), status, std::move (body), std::move (content_type), false };
+}
+
+/** The same example as the spec import stored it (`origin: import`, #588). */
+ExportExample imported (ExportExample stored) {
+    stored.from_import = true;
+    return stored;
 }
 
 ExportKeyValue row (std::string key, std::string value) {
@@ -221,6 +247,111 @@ TEST (BoundExport, WritesOneStoredExampleAsExampleAndSeveralAsANamedMap) {
     EXPECT_EQ (created["examples"],
     json::parse (R"({"created":{"value":{"id":"p1"}},"created twin":{"value":{"id":"p2"}}})"));
     EXPECT_EQ (exported.notes.examples_written, 3);
+}
+
+TEST (BoundExport, WritesNothingIntoADocumentNobodyEdited) {
+    const std::string content           = refs_fixture ();
+    std::vector<ExportRequest> requests = refs_requests ();
+    // What an import of this document stored: the first named example of the
+    // 200, the body of the `$ref`d 404 read through one hop, and - for the
+    // operation that declares no example at all - a value sampled off the
+    // schema. None of the three is news to the document it came out of.
+    requests[0].examples = { imported (example ("200 - A list of pets", 200,
+                             R"([{"id":"p1"},{"id":"p2"}])")),
+        imported (example ("404 - No such pet", 404, R"({"code":"missing"})")) };
+    requests[1].examples = { imported (
+    example ("200 - The owner's pets", 200, R"({"id":"","status":"available"})")) };
+
+    const Exported exported = export_json (requests, content);
+    // The whole document, structurally: an export of a collection nobody edited
+    // is the document it was bound to, key order included.
+    EXPECT_EQ (exported.document, json::parse (content));
+    EXPECT_EQ (exported.notes.examples_written, 0);
+    EXPECT_EQ (exported.notes.examples_already_declared, 1);
+    EXPECT_EQ (exported.notes.examples_sampled_at_import, 1);
+    EXPECT_EQ (exported.notes.referenced_responses_left, 1);
+}
+
+TEST (BoundExport, AddsAKeptResponseBesideTheDocumentsExamplesRatherThanOverThem) {
+    std::vector<ExportRequest> requests = refs_requests ();
+    requests[0].examples = { example ("Rex alone", 200, R"([{"id":"p9"}])") };
+
+    const Exported exported = export_json (requests, refs_fixture ());
+    const json& media       = operation_of (exported.document, "/pets",
+          "get")["responses"]["200"]["content"]["application/json"];
+    // Both declared entries, their summaries, and the kept one after them. The
+    // old behaviour wrote `example` and erased this map with the other example
+    // of the user's own contract inside it.
+    EXPECT_EQ (keys_of (media["examples"]),
+    (std::vector<std::string>{ "two", "none", "Rex alone" }));
+    EXPECT_EQ (media["examples"]["none"]["summary"], "No pets");
+    EXPECT_EQ (media["examples"]["Rex alone"]["value"], json::parse (R"([{"id":"p9"}])"));
+    EXPECT_FALSE (media.contains ("example"));
+    EXPECT_EQ (exported.notes.examples_written, 1);
+}
+
+TEST (BoundExport, LeavesARefdResponseBareAndLeavesTheComponentItNamesAlone) {
+    std::vector<ExportRequest> requests = refs_requests ();
+    requests[0].examples = { example ("404 - kept from a send", 404, R"({"code":"gone"})") };
+
+    const Exported exported = export_json (requests, refs_fixture ());
+    const json& response =
+    operation_of (exported.document, "/pets", "get")["responses"]["404"];
+    // A Reference Object admits no siblings in 3.0: a `content` written beside
+    // the `$ref` is ignored by conformant readers and rejected by validators.
+    EXPECT_EQ (keys_of (response), (std::vector<std::string>{ "$ref" }));
+    EXPECT_EQ (response["$ref"], "#/components/responses/NotFound");
+    // And the component it names is shared with every operation referencing it,
+    // so it is not patched in the reference's place either.
+    EXPECT_EQ (exported.document["components"], json::parse (refs_fixture ())["components"]);
+    EXPECT_EQ (exported.notes.referenced_responses_left, 1);
+    EXPECT_EQ (exported.notes.examples_written, 0);
+}
+
+TEST (BoundExport, WritesBackAResponseSomebodyKeptButNotOneTheImportSampled) {
+    const std::string body             = R"({"id":"","status":"available"})";
+    std::vector<ExportRequest> sampled = refs_requests ();
+    sampled[1].examples = { imported (example ("200 - The owner's pets", 200, body)) };
+    std::vector<ExportRequest> kept = refs_requests ();
+    kept[1].examples = { example ("200 - what the API answered", 200, body) };
+
+    const Exported after_import = export_json (sampled, refs_fixture ());
+    const Exported after_send   = export_json (kept, refs_fixture ());
+    const json& from_import = operation_of (after_import.document, "/owners/{ownerId}/pets",
+    "get")["responses"]["200"]["content"]["application/json"];
+    const json& from_send = operation_of (after_send.document, "/owners/{ownerId}/pets",
+    "get")["responses"]["200"]["content"]["application/json"];
+
+    // The same body, written or not by where it came from: an imported example
+    // the document declares no example for was sampled off the schema at import,
+    // and writing it back would document a value the API never stated.
+    EXPECT_EQ (keys_of (from_import), (std::vector<std::string>{ "schema" }));
+    EXPECT_EQ (after_import.notes.examples_sampled_at_import, 1);
+    EXPECT_EQ (after_import.notes.examples_written, 0);
+    EXPECT_EQ (from_send["example"], json::parse (body));
+    EXPECT_EQ (after_send.notes.examples_sampled_at_import, 0);
+    EXPECT_EQ (after_send.notes.examples_written, 1);
+}
+
+TEST (BoundExport, CountsTheEditsItHasNoWayToWriteIntoTheDocument) {
+    std::vector<ExportRequest> requests = refs_requests ();
+    requests[0].body                    = { "raw", R"({"name":"Rex"})", {} };
+    requests[0].params = { row ("limit", "25"), row ("cursor", "p9") };
+    requests[0].headers = { row ("Authorization", "Bearer t"), row ("X-Tenant", "acme") };
+    requests[1].url = "{{baseUrl}}/owners/{{ownerId}}/animals";
+
+    const Exported exported = export_json (requests, refs_fixture ());
+    EXPECT_EQ (exported.notes.bodies_not_written, 1);
+    // `cursor` and `X-Tenant`. `limit` is declared, and `Authorization` is
+    // stated as `security` rather than as a parameter, so it was never a row
+    // this document had a place for.
+    EXPECT_EQ (exported.notes.rows_not_declared, 2);
+    // The stamp still finds `listOwnerPets`, so the values land - in the
+    // operation the document declares, at the path *it* declares.
+    EXPECT_EQ (exported.notes.operations_edited, 1);
+    EXPECT_TRUE (
+    exported.document["paths"].contains ("/owners/{ownerId}/pets"));
+    EXPECT_EQ (operation_of (exported.document, "/pets", "get")["parameters"][0]["example"], "25");
 }
 
 TEST (BoundExport, DocumentsAStatusTheSpecNeverDeclaredAndSaysWhenABodyHadNoMediaType) {

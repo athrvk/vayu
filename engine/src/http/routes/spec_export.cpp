@@ -37,6 +37,7 @@
  * is. The document it returns is the caller's to save, copy or hand to an agent.
  */
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/openapi_export.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
@@ -222,7 +223,8 @@ export_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
             entry.spec_operation = read_identity (row.spec_operation);
             for (const auto& example : db.get_request_examples (row.id)) {
                 entry.examples.push_back ({ example.name, example.status,
-                example.body, example.content_type, example.body_truncated });
+                example.body, example.content_type, example.body_truncated,
+                example.origin == vayu::core::constants::request_example::ORIGIN_IMPORT });
             }
             requests.push_back (std::move (entry));
         }

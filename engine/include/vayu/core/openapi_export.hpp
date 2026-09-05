@@ -85,6 +85,19 @@ struct ExportExample {
     /// The stored body is only the first slice of the response it was saved
     /// from (issue #659).
     bool body_truncated = false;
+    /**
+     * Whether the spec import wrote this row rather than a person
+     * (`request_examples.origin`, #588).
+     *
+     * The bound direction reads it to tell an example the document *declares*
+     * from one the import *sampled off a schema*: an imported example exists
+     * because the import read this media object, so a media object that
+     * declares no example at all is one the import sampled. Writing that sample
+     * back would document a value the API never stated. `false` is the safe
+     * default - an example nobody attributed to the import is new information,
+     * which is what this export has always written.
+     */
+    bool from_import = false;
 };
 
 /** The identity a request carries, when it carries one (`spec_operation`). */
@@ -174,11 +187,55 @@ struct ExportNotes {
      */
     int examples_truncated = 0;
     /**
+     * Stored examples the document already declares the same value for -
+     * nothing to write. An import took its examples out of this document, so
+     * an unedited spec-origin collection exports with every one of them here
+     * and none in `examples_written`, which is how this export says it changed
+     * nothing.
+     */
+    int examples_already_declared = 0;
+    /**
+     * Imported examples the document declares no example for. The import
+     * sampled them off the response's schema, and an export that wrote one back
+     * would put a value in the contract that the API never stated - as though
+     * the document had always documented it.
+     */
+    int examples_sampled_at_import = 0;
+    /**
      * `$ref` parameters left exactly as they were. A shared parameter belongs
      * to every operation that names it, so writing one request's value into it
      * would edit the contract for operations this collection may not even have.
      */
     int shared_parameters_left = 0;
+    /**
+     * `$ref` responses left exactly as they were, for both of a Reference
+     * Object's reasons: it admits no siblings in 3.0, so a `content` written
+     * beside one is ignored by conformant readers and rejected by validators,
+     * and the component it names is shared with every operation that references
+     * it. The sibling of `shared_parameters_left`.
+     */
+    int referenced_responses_left = 0;
+    /**
+     * Requests carrying a body, in a bound export - not written. The bound
+     * direction patches parameters and examples: a document's `requestBody` is
+     * its schema, and a body somebody typed into Vayu is one machine's payload,
+     * not a new contract.
+     */
+    int bodies_not_written = 0;
+    /**
+     * Params or Headers rows carrying a value that the operation declares no
+     * parameter for - not written. A value goes into the parameter the document
+     * declares; a row added in Vayu would have the export declare a parameter
+     * the contract does not have.
+     */
+    int rows_not_declared = 0;
+    /**
+     * Requests whose method or path no longer matches the operation they are
+     * stamped as. Their values still land, in the operation the document
+     * declares - moving or renaming an operation is an edit to the contract,
+     * which this export does not make.
+     */
+    int operations_edited = 0;
     /**
      * True for a Swagger 2.0 document: operations Vayu no longer has are
      * removed, but nothing is written *into* an operation. 2.0 states

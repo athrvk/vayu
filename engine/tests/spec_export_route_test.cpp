@@ -218,12 +218,31 @@ TEST_F (SpecExportRouteTest, WritesAStoredExampleIntoTheBoundDocument) {
     create_request (root_, "POST", "{{baseUrl}}/pets",
     json{ { "operationId", "createPet" }, { "method", "POST" }, { "path", "/pets" } });
     add_example (listed,
-    json{ { "name", "200 - ok" }, { "status", 200 },
+    json{ { "name", "200 - ok" }, { "status", 200 }, { "origin", "user" },
     { "body", R"({"id":"p1"})" }, { "contentType", "application/json" } });
 
     const json document = json::parse (export_collection ()["text"].get<std::string> ());
     EXPECT_EQ (document["paths"]["/pets"]["get"]["responses"]["200"]["content"]["application/json"]["example"],
     json::parse (R"({"id":"p1"})"));
+}
+
+TEST_F (SpecExportRouteTest, LeavesAnImportedExampleTheDocumentDeclaresNoneForAlone) {
+    const std::string spec = store_spec (PETS_DOC);
+    bind (root_, spec);
+    const std::string listed = create_request (root_, "GET", "{{baseUrl}}/pets",
+    json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } });
+    // `origin` defaults to `import`, which is the row a spec sync may replace -
+    // and the document's 200 declares no example, so this body was sampled off
+    // a schema rather than read out of the contract.
+    add_example (listed,
+    json{ { "name", "200 - ok" }, { "status", 200 },
+    { "body", R"({"id":"p1"})" }, { "contentType", "application/json" } });
+
+    const json body     = export_collection ();
+    const json document = json::parse (body["text"].get<std::string> ());
+    EXPECT_FALSE (document["paths"]["/pets"]["get"]["responses"]["200"].contains ("content"));
+    EXPECT_EQ (body["notes"]["examplesSampledAtImport"], 1);
+    EXPECT_EQ (body["notes"]["examplesWritten"], 0);
 }
 
 TEST_F (SpecExportRouteTest, ExportsAFreeFormCollectionAsASkeleton) {
