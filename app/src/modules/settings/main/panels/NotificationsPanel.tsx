@@ -299,6 +299,7 @@ function SystemNotificationsCard() {
 	 * without a run having to finish first.
 	 */
 	const previewSystem = async () => {
+		if (previewing || unavailableReason !== null || !enabled) return;
 		setPreviewing(true);
 		setPreviewResult(null);
 		try {
@@ -321,7 +322,9 @@ function SystemNotificationsCard() {
 		? PREVIEW_RESULT_HINTS[previewResult]
 		: unavailableReason
 			? "Nothing to preview - this build cannot post system notifications."
-			: "Posts a real one now, whether or not the setting above is on.";
+			: !enabled
+				? "Turn the setting on to preview one."
+				: "Posts a real one now.";
 
 	return (
 		<Card>
@@ -345,9 +348,10 @@ function SystemNotificationsCard() {
 				/>
 				{/*
 				 * One Preview per channel, in the same row idiom, so the panel
-				 * offers one verb rather than two names for it. Enabled whether or
-				 * not the setting above is on, deliberately: previewing is how
-				 * someone decides whether to turn it on.
+				 * offers one verb rather than two names for it. Disabled until the
+				 * setting above is on, like the toggle it sits beside: a control that
+				 * fires past a switch reading "off" is the trust defect this row
+				 * exists not to have (#1447).
 				 */}
 				<div className="flex items-center gap-2 mt-3">
 					<Button
@@ -357,7 +361,7 @@ function SystemNotificationsCard() {
 						// which channel, so the two are not one word twice.
 						aria-label="Preview a system notification"
 						onClick={() => void previewSystem()}
-						disabled={previewing || unavailableReason !== null}
+						disabled={previewing || unavailableReason !== null || !enabled}
 						className="gap-1.5"
 					>
 						<Play className="w-3.5 h-3.5" />

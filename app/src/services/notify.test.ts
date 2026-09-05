@@ -104,26 +104,36 @@ describe("systemNotify.post", () => {
 });
 
 describe("systemNotify.sendTest", () => {
-	it("posts whatever the opt-in says - it is how someone decides to turn it on", async () => {
+	it("posts when the setting is on - pressing Preview is how someone confirms it works", async () => {
 		const { sendTestNotification } = stubElectron();
 		sendTestNotification.mockResolvedValue("shown");
+		useClientSettingsStore.setState({ systemNotifications: true });
 
-		// Deliberately not gated the way `post` is. Add the setting check here
-		// and the button does nothing on exactly the machine someone is trying
-		// to find out about.
 		await expect(systemNotify.sendTest()).resolves.toBe("shown");
 		expect(sendTestNotification).toHaveBeenCalledTimes(1);
+	});
+
+	it("sends nothing with the setting off - the default", async () => {
+		const { sendTestNotification } = stubElectron();
+
+		// Pins the opt-in read on this path too (#1447). The panel already
+		// disables the button while the setting is off; drop this check and a
+		// caller that reaches the service directly still posts past it.
+		await expect(systemNotify.sendTest()).resolves.toBeNull();
+		expect(sendTestNotification).not.toHaveBeenCalled();
 	});
 
 	it("passes the system's refusal through rather than smoothing it over", async () => {
 		const { sendTestNotification } = stubElectron();
 		sendTestNotification.mockResolvedValue("unavailable");
+		useClientSettingsStore.setState({ systemNotifications: true });
 
 		await expect(systemNotify.sendTest()).resolves.toBe("unavailable");
 	});
 
 	it("answers null outside Electron instead of throwing at the button", async () => {
 		vi.stubGlobal("window", {});
+		useClientSettingsStore.setState({ systemNotifications: true });
 
 		await expect(systemNotify.sendTest()).resolves.toBeNull();
 	});
