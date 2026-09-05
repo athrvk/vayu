@@ -36,7 +36,17 @@ export default defineConfig({
 			"@": path.resolve(__dirname, "./src"),
 			// Keep in sync with vite.config.ts - this config does not inherit it.
 			"@shared": path.resolve(__dirname, "../shared"),
-			graphql: path.resolve(__dirname, "./node_modules/graphql/index.js"),
+			/*
+			 * The ESM entry specifically. graphql 17 ships both builds, and its
+			 * dev build refuses a type built by another copy of itself
+			 * ("Cannot use GraphQLScalarType ... from another module or realm").
+			 * `graphql-language-service` is inlined above, so its own import
+			 * resolves to `index.mjs`; pointing this at `index.js` handed the app
+			 * side the CommonJS copy and every schema object crossing into the
+			 * language service failed that check. `dedupe` alone does not settle
+			 * it - one package, two builds, is not a duplicate it can collapse.
+			 */
+			graphql: path.resolve(__dirname, "./node_modules/graphql/index.mjs"),
 		},
 		dedupe: ["graphql"],
 	},

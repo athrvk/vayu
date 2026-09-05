@@ -152,7 +152,7 @@ See [Architecture Documentation](https://athrvk.github.io/vayu/architecture/) fo
 
 | Layer | Technology |
 |---|---|
-| UI | Electron + React 19 + TypeScript 5 |
+| UI | Electron + React 19 + TypeScript 7 |
 | UI state | Zustand |
 | Server state | TanStack Query |
 | Styling | Tailwind CSS v4 |

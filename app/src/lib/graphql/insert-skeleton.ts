@@ -55,8 +55,8 @@ import {
 	isCompositeType,
 	isEnumType,
 	isInterfaceType,
-	isNonNullType,
 	isObjectType,
+	isRequiredArgument,
 	isScalarType,
 	isUnionType,
 	parse,
@@ -394,9 +394,7 @@ function indentBlock(block: string): string {
  * supply turns a convenience into a chore.
  */
 function renderArguments(field: GraphQLField<unknown, unknown>, namer: VariableNamer): string {
-	const required = field.args.filter(
-		(a) => isNonNullType(a.type) && a.defaultValue === undefined
-	);
+	const required = field.args.filter(isRequiredArgument);
 	if (required.length === 0) return "";
 	const parts = required.map((arg) => {
 		const named = getNamedType(arg.type);
@@ -422,8 +420,7 @@ function leafSelection(type: GraphQLNamedType): string | null {
 			.filter((f) => {
 				const named = getNamedType(f.type);
 				return (
-					(isScalarType(named) || isEnumType(named)) &&
-					!f.args.some((a) => isNonNullType(a.type) && a.defaultValue === undefined)
+					(isScalarType(named) || isEnumType(named)) && !f.args.some(isRequiredArgument)
 				);
 			})
 			/*
@@ -566,7 +563,7 @@ function presentLeaf(
 	if (!isObjectType(owner) && !isInterfaceType(owner)) return null;
 	const field: GraphQLField<unknown, unknown> | undefined = owner.getFields()[step.fieldName];
 	if (!field) return null;
-	if (field.args.some((a) => isNonNullType(a.type) && a.defaultValue === undefined)) return null;
+	if (field.args.some(isRequiredArgument)) return null;
 	if (leafSelection(getNamedType(field.type)) !== null) return null;
 
 	return (

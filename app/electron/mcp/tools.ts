@@ -199,10 +199,15 @@ export type ToolCategory = "read" | "execute" | "write" | "load";
 export interface McpTool {
 	name: string;
 	description: string;
-	/** Zod raw shape for the tool's arguments (SDK validates + builds JSON Schema). */
-	inputSchema: z.ZodRawShape;
+	/**
+	 * Zod raw shape for the tool's arguments (SDK validates + builds JSON Schema).
+	 * Spelled out rather than written `z.ZodRawShape`, which in Zod 4 is an alias
+	 * for the core `$ZodType` and drops the classic surface - `.description`, the
+	 * per-field text a client renders beside the input - from every field here.
+	 */
+	inputSchema: Record<string, z.ZodType>;
 	/** Optional Zod schema for structured results (SDK validates `structuredContent`). */
-	outputSchema?: z.ZodTypeAny;
+	outputSchema?: z.ZodType;
 	/** MCP tool annotations (title + read-only/destructive/idempotent/open-world hints). */
 	annotations: ToolAnnotations;
 	/**
@@ -1066,7 +1071,7 @@ const VARIABLE_INPUT = z.union([
 /** The `variables` argument, described for whichever blob it is writing. */
 function variablesInput(subject: string) {
 	return z
-		.record(VARIABLE_INPUT)
+		.record(z.string(), VARIABLE_INPUT)
 		.optional()
 		.describe(
 			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
@@ -1858,7 +1863,7 @@ const MAX_STREAM_BUDGET_MS = 60_000;
  * a 400 it cannot explain.
  */
 const dataRowInput = z
-	.record(z.unknown())
+	.record(z.string(), z.unknown())
 	.optional()
 	.describe(
 		'One data row to bind, as an object of name/value pairs (e.g. {"id": "7", "email": "a@b.c"}). Every {{data.column}} in the URL, headers, body and auth credentials is substituted against it, and pre-request and post-response scripts read it as pm.iterationData (pm.info.iteration is 0). A column the row does not carry is an error naming the token and the row\'s columns, and nothing is sent. A credential binds before it is encoded, so basic auth base64s the row\'s values; the exception is OAuth 2.0, whose token comes from the token endpoint rather than the request, so a {{data.*}} in an oauth2 config is refused by name. Omit this to send without a row, which leaves {{data.*}} tokens written as they stand.'
@@ -1947,7 +1952,7 @@ const scenarioRecursiveInput = z
  * would be a second copy of a limit the user can raise in Settings.
  */
 const scenarioDataInput = z
-	.array(z.record(z.unknown()))
+	.array(z.record(z.string(), z.unknown()))
 	.optional()
 	.describe(
 		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The row set is not persisted - only its count is recorded on the run - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
@@ -2256,7 +2261,7 @@ const runComparisonSchema = z.object({
 	latency: z.array(metricDeltaSchema),
 	throughput: z.array(metricDeltaSchema),
 	reliability: z.array(metricDeltaSchema),
-	statusCodes: z.record(z.object({ base: z.number(), target: z.number() })),
+	statusCodes: z.record(z.string(), z.object({ base: z.number(), target: z.number() })),
 });
 
 const engineHealthSchema = z
@@ -4106,7 +4111,10 @@ export const TOOLS: McpTool[] = [
 		inputSchema: {
 			method: z.string().optional().describe("HTTP method (default GET)."),
 			url: z.string().describe("Request URL (may contain {{variables}})."),
-			headers: z.record(z.string()).optional().describe("Request headers as a string map."),
+			headers: z
+				.record(z.string(), z.string())
+				.optional()
+				.describe("Request headers as a string map."),
 			body: z.string().optional().describe("Request body content."),
 			bodyType: z
 				.string()
@@ -4230,7 +4238,7 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: {
 			entries: z
-				.record(z.string())
+				.record(z.string(), z.string())
 				.describe('Map of config key to new value, e.g. { "workers": "8" }.'),
 		},
 		outputSchema: configUpdateSchema,
@@ -5012,7 +5020,10 @@ export const TOOLS: McpTool[] = [
 			name: z.string().describe("Display name for the saved request."),
 			url: z.string().describe("Request URL (may contain {{variables}})."),
 			method: z.string().optional().describe("HTTP method (default GET)."),
-			headers: z.record(z.string()).optional().describe("Headers as a string map."),
+			headers: z
+				.record(z.string(), z.string())
+				.optional()
+				.describe("Headers as a string map."),
 			body: z.string().optional().describe("Request body content."),
 			bodyType: z
 				.string()
@@ -5081,7 +5092,7 @@ export const TOOLS: McpTool[] = [
 			url: z.string().optional().describe("New URL (may contain {{variables}})."),
 			method: z.string().optional().describe("New HTTP method."),
 			headers: z
-				.record(z.string())
+				.record(z.string(), z.string())
 				.optional()
 				.describe("Replacement headers as a string map (replaces the stored list)."),
 			body: z.string().optional().describe("New request body content."),
@@ -5366,7 +5377,10 @@ export const TOOLS: McpTool[] = [
 				.max(599)
 				.optional()
 				.describe("HTTP status the example answers with (default 200)."),
-			headers: z.record(z.string()).optional().describe("Response headers as a string map."),
+			headers: z
+				.record(z.string(), z.string())
+				.optional()
+				.describe("Response headers as a string map."),
 			body: z.string().optional().describe("Response body, stored verbatim."),
 			contentType: z
 				.string()
@@ -5407,7 +5421,7 @@ export const TOOLS: McpTool[] = [
 			name: z.string().optional().describe("New display name."),
 			status: z.number().int().min(100).max(599).optional().describe("New HTTP status."),
 			headers: z
-				.record(z.string())
+				.record(z.string(), z.string())
 				.optional()
 				.describe(
 					"Replacement response headers as a string map (replaces the stored list)."
@@ -6300,7 +6314,7 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					"Target URL (may contain {{variables}}). Required unless `requestId` names a saved request to load-test; supplying both retargets that request at this URL."
 				),
-			headers: z.record(z.string()).optional(),
+			headers: z.record(z.string(), z.string()).optional(),
 			body: z.string().optional().describe("Request body content."),
 			// The two sibling tools have carried this text since they existed and
 			// this one carried nothing, so an agent load-testing a GraphQL endpoint
@@ -6438,7 +6452,10 @@ export const TOOLS: McpTool[] = [
 					minThroughputRps: z.number().positive().max(1_000_000_000).optional(),
 				})
 				.refine((t) => Object.keys(t).length > 0, {
-					message: "Declare at least one budget, or omit `thresholds` entirely.",
+					// `error`, not zod 3's `message`: v4 still reads the old key as a
+					// deprecated alias, and a deprecated alias is what the next major
+					// takes away.
+					error: "Declare at least one budget, or omit `thresholds` entirely.",
 				})
 				.optional()
 				.describe(
@@ -6551,7 +6568,7 @@ export const TOOLS: McpTool[] = [
 			// limit the user can raise in Settings would refuse payloads the
 			// engine accepts.
 			data: z
-				.array(z.record(z.unknown()))
+				.array(z.record(z.string(), z.unknown()))
 				.optional()
 				.describe(
 					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
@@ -7035,7 +7052,7 @@ export const TOOLS: McpTool[] = [
 					"Lifetime of a minted access token, in seconds (default 3600). Set it low to make a token expire mid-test."
 				),
 			claims: z
-				.record(z.unknown())
+				.record(z.string(), z.unknown())
 				.optional()
 				.describe(
 					'Extra JWT claims, e.g. {"sub": "alice", "roles": ["admin"]}. iss, iat, exp and jti are always the issuer\'s own; sub, client_id and scope are filled in only when you do not set them.'
@@ -7306,7 +7323,7 @@ export const TOOLS: McpTool[] = [
 						.describe("Status code the inbox answers with (default 200)."),
 					body: z.string().optional().describe("Response body the inbox answers with."),
 					headers: z
-						.record(z.string())
+						.record(z.string(), z.string())
 						.optional()
 						.describe(
 							'Response headers, e.g. {"Content-Type": "application/json"}. Replaces the current set rather than merging into it.'
@@ -7513,7 +7530,7 @@ export const TOOLS: McpTool[] = [
 				.describe("New status code. Omit to leave it unchanged."),
 			body: z.string().optional().describe("New response body. Omit to leave it unchanged."),
 			headers: z
-				.record(z.string())
+				.record(z.string(), z.string())
 				.optional()
 				.describe(
 					"New response header set, replacing the current one entirely. Omit to leave it unchanged."
