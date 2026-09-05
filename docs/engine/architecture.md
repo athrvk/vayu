@@ -122,7 +122,14 @@ timing (`tests/competing_writer.hpp`).
 
 Hold the lock only for a bounded composite: `/health`, the runs poll and SSE
 serialize on it too, so everything waits for the whole of it. A merge is
-microseconds; a network call or a file read is not, and does not belong inside.
+microseconds, and anything unbounded - a transfer, a wait on another thread -
+never belongs inside. The one file read in a lock scope is
+`PUT /client-certificates/:id`, whose usability check reads the first page of
+the file the merged row names: the check runs on the merged row, so hoisting it
+out would either give up the atomicity or re-open the window between the check
+and the write it exists to guard. It is called out at the site, and it is the
+shape of exception to argue for - bounded, local, and load-bearing - not a
+precedent for reaching further.
 
 ### Listeners
 

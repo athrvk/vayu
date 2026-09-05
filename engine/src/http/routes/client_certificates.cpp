@@ -308,6 +308,15 @@ const std::function<void ()>& before_write) {
  * leave the presented certificate decided by row order, the state the 409
  * exists to prevent.
  *
+ * It is also the one lock scope in the engine that touches the filesystem:
+ * `client_cert_rejection` stats the paths and reads the first page of the
+ * certificate to catch a `.p12` registered as a PEM pair. That check reads the
+ * *merged* row, which is why it cannot be hoisted out - and moving it out
+ * anyway would only trade this bounded read for a window between the check and
+ * the write it exists to guard. Bounded, local, and one page per path; see
+ * `docs/engine/architecture.md`, which names it as the exception to the rule
+ * that a file read stays outside.
+ *
  * @param before_write Test seam, invoked inside the lock scope with the merged
  *        row staged and immediately before it is written; see
  *        `update_request_response` for why it is an overload.

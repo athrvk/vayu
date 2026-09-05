@@ -223,13 +223,17 @@ under a fast enough writer, and it would make row identity depend on clock
 resolution across the three platforms Vayu builds on.
 
 **Repositioning several rows at once** is [`POST /reorder`](#post-reorder), not a
-run of `PUT`s. Each `PUT` is its own write under its own lock, so a reorder
-expressed as N sibling `PUT`s is last-write-wins between concurrent clients, can
-be interrupted halfway (leaving two rows at one `order` and a gap where the
-moved one was), and its collection cycle guard is read-then-write across two lock
-scopes. The batch endpoint validates and writes under one lock scope, which
-closes all three. The per-row `PUT`s remain correct for a single row - a rename,
-a move that appends - and still carry those caveats when used in a loop.
+run of `PUT`s. Each `PUT` is one row under its own lock, so a reorder expressed
+as N sibling `PUT`s can be interrupted halfway, leaving two rows at one `order`
+and a gap where the moved one was, and a concurrent client's move lands between
+any two of them. The batch endpoint validates and writes the whole set under one
+lock scope, which closes both. What is *not* a difference any more is the cycle
+guard: since a `PUT` holds its own read to its own write, its guard and its write
+are one scope too, so two conflicting reparents sent as single `PUT`s are
+serialized and the second is refused against the first's committed graph - it is
+refused after that first move is already stored, which is the part only a batch
+avoids. The per-row `PUT`s remain correct for a single row - a rename, a move
+that appends - and still carry those caveats when used in a loop.
 
 ### Accepted field shapes
 
