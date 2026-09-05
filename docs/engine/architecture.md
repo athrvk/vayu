@@ -114,6 +114,12 @@ Two shapes need it, and both are in the code today:
   first - whole fields, with neither request failing. Each of those cores is a
   thin wrapper over an `update_*_locked` function holding the read, the merge
   and the write, in the shape `reorder_response` established.
+- **The uniqueness-checked create** - `POST /client-certificates` (issue
+  #1455), the one create with a cross-row invariant to protect. Proving no
+  other row already claims a candidate's host and port is only as good as the
+  window between that proof and the write, so the create holds the lock across
+  both, in a `create_*_locked` core of the same shape as the merge-patch
+  update's.
 
 Both wrappers take an optional `before_write` seam, invoked inside the scope
 immediately before the commit. It is what lets a test drive a genuinely
@@ -123,12 +129,13 @@ timing (`tests/competing_writer.hpp`).
 Hold the lock only for a bounded composite: `/health`, the runs poll and SSE
 serialize on it too, so everything waits for the whole of it. A merge is
 microseconds, and anything unbounded - a transfer, a wait on another thread -
-never belongs inside. The one file read in a lock scope is
-`PUT /client-certificates/:id`, whose usability check reads the first page of
-the file the merged row names: the check runs on the merged row, so hoisting it
-out would either give up the atomicity or re-open the window between the check
-and the write it exists to guard. It is called out at the site, and it is the
-shape of exception to argue for - bounded, local, and load-bearing - not a
+never belongs inside. The file reads in a lock scope are
+`PUT /client-certificates/:id` and `POST /client-certificates` (#1455), whose
+usability check reads the first page of the file the merged (or, for the
+create, the staged) row names: the check runs on that row, so hoisting it out
+would either give up the atomicity or re-open the window between the check and
+the write it exists to guard. Both are called out at their site, and they are
+the shape of exception to argue for - bounded, local, and load-bearing - not a
 precedent for reaching further.
 
 ### Listeners
