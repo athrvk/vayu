@@ -31,6 +31,7 @@ import { useNotificationActivation } from "./hooks/useNotificationActivation";
 import { useOsIcon } from "./hooks/useOsIcon";
 import { useOpenIntent } from "./hooks/useOpenIntent";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
+import { useRunWatchers } from "./hooks/useRunWatchers";
 import { useHostSleepRecorder } from "./hooks/useHostSleepRecorder";
 import { useInboxWatchers } from "./hooks/useInboxWatchers";
 import { useRunningServicesPublisher } from "@/modules/services";
@@ -109,6 +110,12 @@ function App() {
 	// An agent writing over MCP mutates the engine from the main process, which
 	// no query can see. This is the channel that tells the cache to refetch.
 	useMcpDataInvalidation();
+
+	// A run an agent started reaches no surface of this app, so nothing used to
+	// watch it: no taskbar bar, no wake lock and no notification when it ended,
+	// until its dashboard tab was opened. Mounted here beside the line above
+	// because the two read the same channel and a run is not a screen (#1419).
+	useRunWatchers();
 
 	// The app asks the OS not to sleep under a run, but a closed lid overrides
 	// that. Mounted here rather than on the dashboard: the suspend arrives with
