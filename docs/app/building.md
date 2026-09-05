@@ -425,7 +425,7 @@ Key settings in `vite.config.ts`:
 ### Production Dependencies
 
 - **React 19**: UI framework
-- **Electron 28**: Desktop app framework
+- **Electron 44**: Desktop app framework
 - **Zustand**: State management
 - **TanStack Query**: Server state
 - **Radix UI**: Component primitives
