@@ -58,7 +58,9 @@ const INSTRUCTIONS =
 	"load (start and stop load tests). " +
 	"Every tool that puts traffic on the network is restricted to an allowlist, " +
 	"and load runs additionally enforce hard RPS/concurrency/duration caps. Write " +
-	"tools require the user to enable write access, and the destructive ones ask " +
+	"tools require the user to enable write access - until it is on they are not " +
+	"listed at all, so a task that needs one is blocked on the user enabling it " +
+	"rather than on finding the right call - and the destructive ones ask " +
 	"for confirmation - via elicitation where the client supports it, otherwise by " +
 	"returning what the call would destroy and waiting for a `confirmed: true` " +
 	"retry. A tool that is subject to either gate says so in its own description. " +
@@ -110,6 +112,19 @@ export function createMcpServer(
 
 	for (const tool of TOOLS) {
 		if (baseCtx.config.disabledTools.includes(tool.name)) continue;
+		/*
+		 * A write tool that cannot succeed does not ship its schema. Writes are
+		 * off by default, and every write handler already refuses without
+		 * `allowWrites`, so on a default install those 28 tools were ~40% of a
+		 * `tools/list` an agent could do nothing with - paid for on every
+		 * session, by every agent, to describe capabilities it does not have.
+		 *
+		 * Registration, not just refusal, because the cost is the schema rather
+		 * than the call. The handler check stays: a client that cached a list
+		 * from a session where writes were on still gets the actionable error
+		 * rather than a silent failure.
+		 */
+		if (tool.category === "write" && !baseCtx.config.allowWrites) continue;
 		mcp.registerTool(
 			tool.name,
 			{

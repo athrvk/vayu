@@ -25,7 +25,7 @@ import { createMcpServer } from "./server.js";
 import { McpHttpServer } from "./http.js";
 import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import { TOOLS, type ToolContext } from "./tools.js";
+import { TOOLS, toolCatalog, type ToolContext } from "./tools.js";
 import { PROMPTS } from "./prompts.js";
 import type { EngineClient } from "./engine-client.js";
 
@@ -119,15 +119,50 @@ async function connectClient(
 }
 
 describe("MCP protocol handshake (in-memory)", () => {
-	it("initializes and lists every tool by default", async () => {
+	it("lists the read, execute and load tools by default", async () => {
 		const { client, server } = await connectClient();
 		const { tools } = await client.listTools();
 		const names = tools.map((t) => t.name);
 		expect(names).toContain("get_engine_health");
 		expect(names).toContain("get_engine_config");
-		expect(names).toContain("update_engine_config");
 		expect(names).toContain("start_load_run");
 		await server.close();
+	});
+
+	/*
+	 * Writes ship off, and a write tool that cannot succeed does not ship its
+	 * schema either: on a default install that is 28 of the 68 tools, described
+	 * in full to an agent that can only be refused by them.
+	 *
+	 * Asserted from both sides, because only the pair shows the tools are
+	 * *gated* rather than gone - a registration bug that dropped them
+	 * unconditionally would pass the first of these alone.
+	 */
+	it("withholds write tools until write access is enabled", async () => {
+		const off = await connectClient();
+		const offNames = (await off.client.listTools()).tools.map((t) => t.name);
+		const writeNames = TOOLS.filter((t) => t.category === "write").map((t) => t.name);
+		expect(writeNames.length).toBeGreaterThan(20);
+		expect(offNames.filter((n) => writeNames.includes(n))).toEqual([]);
+		// The read/execute surface is untouched by the gate.
+		expect(offNames).toContain("list_collections");
+		await off.server.close();
+
+		const on = await connectClient({ safety: { allowWrites: true } });
+		const onNames = (await on.client.listTools()).tools.map((t) => t.name);
+		expect(writeNames.filter((n) => !onNames.includes(n))).toEqual([]);
+		await on.server.close();
+	});
+
+	/*
+	 * Settings lists every tool with a per-tool switch, so the catalog behind it
+	 * must stay whole however the write toggle is set - otherwise turning writes
+	 * off would silently empty the half of that list a user turns them back on
+	 * from. `main.ts` also validates saved `disabledTools` names against it.
+	 */
+	it("keeps the Settings tool catalog complete regardless of the write toggle", () => {
+		expect(toolCatalog().length).toBe(TOOLS.length);
+		expect(toolCatalog().some((t) => t.category === "write")).toBe(true);
 	});
 
 	it("exposes Vayu's identity to the client (title / description / website + instructions)", async () => {
