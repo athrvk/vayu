@@ -268,10 +268,15 @@ describe("a run superseded by the other service's run", () => {
 
 	/*
 	 * The same-service case was already handled and must stay that way: the
-	 * load service stops itself before reconnecting, which disconnects the
-	 * client, so the new hand-off has nobody to tell. Mutation check: have
-	 * `disconnect()` keep the handler and this run gets both the "stopped"
-	 * notification it should and a supersede it should not.
+	 * load service stops itself before reconnecting, which both says what ended
+	 * the run and disconnects the client, so the new hand-off has nobody to
+	 * tell. Mutation check: drop the `stopMonitoring()` call from
+	 * `startMonitoring` and the notification asserted below never happens.
+	 *
+	 * What this does *not* pin is that `disconnect()` drops the registration -
+	 * `stopMonitoring` nulls `activeRunId` before disconnecting, so this
+	 * service's own `handleSuperseded` would early-return either way. That rule
+	 * is pinned where it lives, on the client (`sse-client.test.ts`).
 	 */
 	it("does not double up on a run superseded by its own service", () => {
 		const { load } = runIds();
@@ -315,6 +320,70 @@ describe("a run superseded by the other service's run", () => {
 		scenarioRunService.startMonitoring(collection);
 
 		expect(mockProgressClear).not.toHaveBeenCalledWith(LOAD_KEY, load);
+	});
+
+	/*
+	 * The same-service rule holds on the collection side too, and it is the
+	 * side with no `stopMonitoring` to lean on (#1417): `startMonitoring` ends
+	 * the run it replaces itself. Mutation check: drop that ending and the
+	 * hand-off registered against this very service fires for the run that
+	 * just started - it releases the lock it took a line earlier, wipes the bar
+	 * it just claimed, and nulls the run id, so every assertion below reddens.
+	 */
+	it("leaves a collection run that replaced another holding its own lock and bar", () => {
+		const first = runIds().collection;
+		const second = runIds().collection;
+		scenarioRunService.startMonitoring(first);
+		mockWakeLockHold.mockClear();
+		mockWakeLockRelease.mockClear();
+		mockProgressClaim.mockClear();
+		mockProgressClear.mockClear();
+
+		scenarioRunService.startMonitoring(second);
+
+		// The run that left gives up what it held, named by run so the arriving
+		// run's bar is not what gets wiped (#1405).
+		expect(mockProgressClear).toHaveBeenCalledWith(COLLECTION_KEY, first);
+		expect(mockProgressClear).not.toHaveBeenCalledWith(COLLECTION_KEY, second);
+		expect(mockProgressClaim).toHaveBeenCalledWith(COLLECTION_KEY, second);
+		// Released for the run that left and taken again for the one that
+		// arrived, in that order - the key is held by kind, so a release after
+		// the new hold would leave the machine free to sleep under a live run.
+		expect(mockWakeLockRelease).toHaveBeenCalledWith(COLLECTION_KEY);
+		expect(mockWakeLockHold).toHaveBeenCalledWith(COLLECTION_KEY, expect.any(String));
+		expect(mockWakeLockRelease.mock.invocationCallOrder[0]).toBeLessThan(
+			mockWakeLockHold.mock.invocationCallOrder[0] ?? 0
+		);
+		// And the run that left is still not spoken for: it has not ended.
+		expect(mockNotifyPost).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * Acceptance criterion 3 for the collection side: a run that happens to
+	 * have replaced another must end exactly as a first run does. This is what
+	 * the regression cost - `handleClose` read a null run id and returned
+	 * before any of it.
+	 */
+	it("still ends a collection run normally after it replaced another", async () => {
+		const first = runIds().collection;
+		const second = runIds().collection;
+		scenarioRunService.startMonitoring(first);
+		scenarioRunService.startMonitoring(second);
+		mockNotifyPost.mockClear();
+		mockGetRunReport.mockClear();
+
+		await (
+			scenarioRunService as unknown as {
+				handleClose: (status: string | null) => Promise<void>;
+			}
+		).handleClose("Completed");
+
+		expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+		expect(mockNotifyPost.mock.calls[0]?.[0]).toMatchObject({
+			kind: "collection-run-finished",
+			target: { view: "run", runId: second },
+		});
+		expect(mockGetRunReport).toHaveBeenCalledWith(second);
 	});
 
 	it("holds no lock for a superseded run when the setting is off", () => {

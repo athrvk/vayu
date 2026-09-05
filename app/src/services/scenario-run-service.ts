@@ -91,6 +91,22 @@ class ScenarioRunService {
 	startMonitoring(runId: string): void {
 		if (this.activeRunId === runId) return;
 
+		// End the run this one replaces *before* registering anything for the
+		// new one. `LoadTestService` reaches the same state through its
+		// `stopMonitoring`; this side has none by design, so it says it here.
+		//
+		// Both halves are load-bearing (#1417). The release is what the
+		// displaced run is owed - it is no less superseded for having been
+		// superseded by its own service. The `disconnect()` is what drops this
+		// service's own hand-off registration from the client: without it, the
+		// `supersede()` inside `connect` below would fire `handleSuperseded`
+		// against the run started here, releasing the lock, bar and run id that
+		// the lines in between had only just taken.
+		if (this.activeRunId) {
+			this.releaseRun(this.activeRunId);
+			sseClient.disconnect();
+		}
+
 		// Only on the user's standing say-so (#1357), the same read
 		// `LoadTestService` makes. A collection run is never asked about: it
 		// declares no duration, so nothing here can tell a two-second sequence
@@ -101,9 +117,11 @@ class ScenarioRunService {
 			wakeLock.hold(WAKE_LOCK_KEYS.collectionRun, "Collection run streaming");
 		}
 
-		// Whatever the previous run left buffered belongs to a list the store is
-		// about to clear, so it is dropped rather than flushed into this run's.
-		this.discardPending();
+		// Nothing is dropped here: whatever a previous run left buffered belongs
+		// to a list the store is about to clear, and `releaseRun` above - or the
+		// flush in whichever terminal path ended that run - has already let go
+		// of it. A second discard on this line could only be a copy of that rule
+		// that drifts.
 		this.activeRunId = runId;
 		this.stepsExpected = null;
 		this.stepsCompleted = 0;
