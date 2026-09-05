@@ -1197,6 +1197,43 @@ UI-only: Which category (globals/collection/environment) is selected in the vari
 const { selectedCategory, setSelectedCategory, reset } = useVariablesStore();
 ```
 
+#### A variable-map write merges onto the freshest map, never onto its own copy
+
+`PUT /environments/:id`, `PUT /globals` and `PUT /collections/:id` replace the
+whole `variables` map, so any writer holding less than the freshest map risks
+carrying a key it never touched back to its pre-write value. Two surfaces write
+these maps and both go through `lib/variable-merge.ts`'s `mergeVariableChanges`
+rather than each re-deriving the read-fresh-merge-write shape (#1439):
+
+- **The context bar's `useVariableCommit`** (`components/layout/context-bar/
+  variable-commit.ts`) commits one key. `CommitScope.read()` re-reads the query
+  cache **at commit time**, not the value the input was rendered with, and
+  `mergeVariableChanges` applies the one changed key onto it before `write`/
+  `mutate`.
+- **`VariableTableEditor`** (`modules/variables/main/`) commits every row the
+  user has actually edited. `performSave` diffs the current rows against
+  `baselineRef` - the map the table last agreed with the server on - to get a
+  `VariableChanges` of only the touched keys, then merges that onto
+  `dataVariables`, the query-cache-backed prop, which is why it stays current
+  even while the row-init effect below is refusing to reseed. A key nobody
+  touched - an MCP agent's `update_environment` landing while the table has an
+  unrelated unsaved edit - therefore survives the next save regardless of what
+  the editor's own copy of it says.
+
+**A key both sides touched is a conflict, not a coin flip.** While the table is
+dirty, the row-init effect recomputes the same diff against `baselineRef` on
+every `dataVariables` change purely to call `findVariableConflicts`, which
+reports a key only when the fresh map *and* the user's edit both moved it away
+from the baseline to different values. The table renders one `Callout` per
+conflicting key naming it, with a "Take theirs" action; the user's value is
+what saves by default (it is already the value `performSave` sends for that
+key) until they explicitly take the other side's. `baselineRef` itself only
+advances on a full reseed, on this editor's own successful save (to the map
+that save just wrote, so a later write is never compared against this save's
+own history), and when a conflict is resolved - never merely because the table
+was dirty when a fresh write arrived, since a key nobody has touched needs no
+conflict bookkeeping at all.
+
 #### `modules/settings/settings-store.ts` - Settings Category Selection
 
 UI-only: Which settings category (e.g., "ui") is selected in the sidebar.
