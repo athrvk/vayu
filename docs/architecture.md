@@ -218,11 +218,13 @@ that ordinarily precedes leaving the window (issue #1400).
 
 Because that answer only exists once something has been posted, Settings can ask
 for one: the Preview beside the toggle posts a real notification over
-`notify:test`, the single path that ignores both the focus check and the opt-in -
-the user is looking at the panel when they press it, and previewing is how they
-decide whether to turn the setting on. It waits for the OS rather than reporting
-what was attempted, so a refusal turns the row unavailable there and then instead
-of on the first run that ends.
+`notify:test`, which ignores the focus check - the user is looking at the panel
+when they press it - but respects the opt-in like everything else: Preview is
+disabled while the setting is off, so seeing what the OS does costs turning the
+setting on, pressing Preview, and turning it off again if it does not fit,
+rather than a button that contradicts the switch beside it. It waits for the OS
+rather than reporting what was attempted, so a refusal turns the row unavailable
+there and then instead of on the first run that ends.
 
 **A run's progress is also mirrored onto the OS chrome**, over `runs:progress`
 (`services/run-progress.ts` to `electron/run-progress.ts`), so a user in another

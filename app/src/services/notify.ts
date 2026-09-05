@@ -109,12 +109,14 @@ export const systemNotify = {
 	/**
 	 * Show one on purpose, because the user asked to see what these look like.
 	 *
-	 * Deliberately not gated on the opt-in the way `post` is: the setting
-	 * governs the events that fire on their own, and this one fires because
-	 * someone pressed a button to find out whether it works at all. `null`
-	 * outside Electron.
+	 * Gated on the opt-in exactly like `post`: the panel already disables the
+	 * button while the setting is off, but that is a UI courtesy, not the
+	 * guarantee - a caller that reaches this directly must not be able to post
+	 * past a setting the user turned off. `null` outside Electron or with the
+	 * setting off.
 	 */
 	async sendTest(): Promise<SystemNotificationOutcome | null> {
+		if (!useClientSettingsStore.getState().systemNotifications) return null;
 		const api = bridge();
 		if (!api?.sendTestNotification) return null;
 		try {

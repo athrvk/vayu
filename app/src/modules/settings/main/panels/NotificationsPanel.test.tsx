@@ -39,8 +39,8 @@ import { DEFAULT_NOTIFICATION_PREFS } from "@/constants/toast";
 
 beforeEach(() => {
 	cleanup();
-	mockAvailability.mockResolvedValue({ available: true, reason: null });
-	mockSendTest.mockResolvedValue("shown");
+	mockAvailability.mockReset().mockResolvedValue({ available: true, reason: null });
+	mockSendTest.mockReset().mockResolvedValue("shown");
 	useToastStore.setState({ toasts: [] });
 	useClientSettingsStore.setState({
 		notifications: { ...DEFAULT_NOTIFICATION_PREFS },
@@ -137,6 +137,7 @@ describe("NotificationsPanel", () => {
 		});
 
 		it("posts a real one on demand, so nobody has to finish a run to find out", async () => {
+			useClientSettingsStore.setState({ systemNotifications: true });
 			render(<NotificationsPanel />);
 
 			fireEvent.click(screen.getByRole("button", { name: /preview a system notification/i }));
@@ -151,18 +152,37 @@ describe("NotificationsPanel", () => {
 			);
 		});
 
-		it("offers the preview with the setting off - that is when someone reaches for it", () => {
+		it("disables Preview and says why while the setting is off", () => {
 			render(<NotificationsPanel />);
 
 			expect(
 				screen.getByRole("switch", { name: /notify through the system/i })
 			).not.toBeChecked();
+			const preview = screen.getByRole("button", { name: /preview a system notification/i });
+			expect(preview).toBeDisabled();
+			expect(screen.getByText(/turn the setting on to preview one/i)).toBeInTheDocument();
+
+			// Mutation check: drop the `!enabled` guard and this click posts a
+			// real notification with the switch reading "off" beside it.
+			fireEvent.click(preview);
+			expect(mockSendTest).not.toHaveBeenCalled();
+		});
+
+		it("enables Preview once the setting is on", () => {
+			render(<NotificationsPanel />);
+			const toggle = screen.getByRole("switch", { name: /notify through the system/i });
+			const preview = screen.getByRole("button", { name: /preview a system notification/i });
+
+			fireEvent.click(toggle);
+
+			expect(preview).toBeEnabled();
 			expect(
-				screen.getByRole("button", { name: /preview a system notification/i })
-			).toBeEnabled();
+				screen.queryByText(/turn the setting on to preview one/i)
+			).not.toBeInTheDocument();
 		});
 
 		it("reports a refusal, and the row turns unavailable with it", async () => {
+			useClientSettingsStore.setState({ systemNotifications: true });
 			mockSendTest.mockResolvedValue("unavailable");
 			mockAvailability
 				.mockResolvedValueOnce({ available: true, reason: null })
@@ -184,6 +204,7 @@ describe("NotificationsPanel", () => {
 		});
 
 		it("says the preview is desktop-only when there is no bridge to ask", async () => {
+			useClientSettingsStore.setState({ systemNotifications: true });
 			mockSendTest.mockResolvedValue(null);
 			render(<NotificationsPanel />);
 
