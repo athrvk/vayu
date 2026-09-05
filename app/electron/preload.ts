@@ -36,12 +36,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	onMcpDataChanged: (
 		callback: (event: {
 			entity:
-				"collection" | "request" | "environment" | "run" | "cookie" | "config" | "service";
+				| "collection"
+				| "request"
+				| "environment"
+				| "run"
+				| "cookie"
+				| "config"
+				| "service"
+				| "oauth";
 			collectionId?: string;
 			requestId?: string;
 			runId?: string;
 			inboxId?: string;
 			mockId?: string;
+			startedRun?: { runId: string; kind: "load" | "collection" };
 		}) => void
 	) => {
 		const handler = (_event: unknown, change: unknown) =>
