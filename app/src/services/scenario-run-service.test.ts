@@ -89,6 +89,22 @@ vi.mock("./run-progress", () => ({
 	},
 	RUN_PROGRESS_KEYS: { loadRun: "load-run", collectionRun: "collection-run" },
 }));
+// The Dock/taskbar mark for a failed run (#1364), mocked at the same boundary
+// as `notify` above: whether and how the OS shows it is `electron/os-icon.ts`'s
+// question.
+const { mockOsIconRunFailed, mockOsIconRunFinished } = vi.hoisted(() => ({
+	mockOsIconRunFailed: vi.fn(),
+	mockOsIconRunFinished: vi.fn(),
+}));
+vi.mock("./os-icon", () => ({
+	osIcon: {
+		captured: vi.fn(),
+		inboxOpened: vi.fn(),
+		runFailed: mockOsIconRunFailed,
+		runFinished: mockOsIconRunFinished,
+		recents: vi.fn(),
+	},
+}));
 
 import { NOTIFY_KINDS } from "./notify";
 import { scenarioRunService } from "./scenario-run-service";
@@ -103,9 +119,17 @@ import type { ScenarioStepEvent } from "@/types";
 /** The live-refresh cadence these cases run at. */
 const FLUSH_MS = 500;
 
-/** `handleClose` is private; the SSE client is what calls it in production. */
-function closeStream(): Promise<void> {
-	return (scenarioRunService as unknown as { handleClose: () => Promise<void> }).handleClose();
+/**
+ * `handleClose` is private; the SSE client is what calls it in production, with
+ * the status off the engine's completion frame (#1415). `null` is a stream that
+ * ended without one.
+ */
+function closeStream(status: "Completed" | "Stopped" | "Failed" | null = null): Promise<void> {
+	return (
+		scenarioRunService as unknown as {
+			handleClose: (status: "Completed" | "Stopped" | "Failed" | null) => Promise<void>;
+		}
+	).handleClose(status);
 }
 
 /** Likewise `handleError` - a transport failure is what calls it. */
@@ -582,6 +606,80 @@ describe("ScenarioRunService", () => {
 				"run_23"
 			);
 			expect(mockProgressClear).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("Dock/taskbar mark for a failed run (issue #1364)", () => {
+		it("marks the icon when a run fails", () => {
+			scenarioRunService.startMonitoring("run_28");
+
+			failStream("engine gone");
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		/*
+		 * Mutation check: call `osIcon.runFailed()` beside `runProgress.fail` in
+		 * `handleError` instead of inside `notifyTerminal`, and this reddens -
+		 * `notifyTerminal`'s `notifiedRunId` latch is what keeps the mark to
+		 * once per run; a call beside `runProgress.fail` has no such guard.
+		 */
+		it("does not mark the icon a second time for a run already reported failed", async () => {
+			scenarioRunService.startMonitoring("run_29");
+
+			failStream("engine gone");
+			await closeStream();
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not mark the icon for a run that finishes cleanly", async () => {
+			scenarioRunService.startMonitoring("run_30");
+
+			await closeStream();
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+		});
+
+		/*
+		 * The quieter cue (#1364 item 4). This service has no stopped kind -
+		 * every terminal state it reports is one the user did not ask for - so
+		 * the cue follows all of them. Mutation check: drop the `runFinished`
+		 * call and a user with notifications off learns nothing when a
+		 * collection run ends.
+		 */
+		/*
+		 * #1415: until the completion frame's status was read, every terminal
+		 * close reported `collectionRunFinished`, so a failed collection run
+		 * said finished and marked nothing.
+		 *
+		 * The frame is the only source here, unlike the load service's: this
+		 * service notifies before it fetches the report, deliberately, so there
+		 * is no stored verdict to fall back to at this point. Mutation check:
+		 * restore the unconditional finished kind and this reddens.
+		 */
+		it("marks the icon when the engine's frame says the run failed", async () => {
+			scenarioRunService.startMonitoring("run_32");
+
+			await closeStream("Failed");
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		it("marks nothing when the frame says the run completed", async () => {
+			scenarioRunService.startMonitoring("run_33");
+
+			await closeStream("Completed");
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+		});
+
+		it("raises the quieter end-of-run cue when a collection run ends", async () => {
+			scenarioRunService.startMonitoring("run_31");
+
+			await closeStream();
+
+			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
 		});
 	});
 });

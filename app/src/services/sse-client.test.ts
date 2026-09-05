@@ -6,7 +6,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { mapSseMetrics, parseMonitorEvent, parsePlanEvent, parseStepEvent } from "./sse-client";
+import {
+	mapSseMetrics,
+	parseMonitorEvent,
+	parsePlanEvent,
+	parseStepEvent,
+	parseTerminalStatus,
+} from "./sse-client";
 
 describe("mapSseMetrics", () => {
 	it("maps bytes and the full status-code map", () => {
@@ -220,5 +226,35 @@ describe("parsePlanEvent", () => {
 			parsePlanEvent({ stepsPerIteration: "4", iterations: 3, stepsExpected: 12 })
 		).toBeNull();
 		expect(parsePlanEvent(null)).toBeNull();
+	});
+});
+
+describe("parseTerminalStatus", () => {
+	/*
+	 * The frame is the only place a client hears how a run ended while the run
+	 * is ending (#1415): the stored report is fetched afterwards, and a dropped
+	 * stream never produces one at all.
+	 */
+	it("reads the three statuses the engine emits", () => {
+		expect(parseTerminalStatus('{"status":"Completed"}')).toBe("Completed");
+		expect(parseTerminalStatus('{"status":"Stopped"}')).toBe("Stopped");
+		expect(parseTerminalStatus('{"status":"Failed"}')).toBe("Failed");
+	});
+
+	/*
+	 * Null is "ask the report", never "it finished" - which is the distinction
+	 * the whole fix turns on. Mutation check: default an unparseable frame to
+	 * "Completed" and a failed run whose frame was malformed reports success.
+	 */
+	it("answers null for a frame that carries no status it knows", () => {
+		for (const raw of [
+			'{"event":"complete","runId":"r1"}',
+			'{"status":"Running"}',
+			'{"status":42}',
+			"not json",
+			"",
+		]) {
+			expect(parseTerminalStatus(raw), JSON.stringify(raw)).toBeNull();
+		}
 	});
 });

@@ -55,6 +55,22 @@ vi.mock("./notify", async (importOriginal) => ({
 	...(await importOriginal<typeof import("./notify")>()),
 	systemNotify: { post: mockNotifyPost, availability: vi.fn() },
 }));
+// The Dock/taskbar mark for a failed run (#1364), mocked at the same boundary
+// as `notify` above: whether and how the OS shows it is `electron/os-icon.ts`'s
+// question.
+const { mockOsIconRunFailed, mockOsIconRunFinished } = vi.hoisted(() => ({
+	mockOsIconRunFailed: vi.fn(),
+	mockOsIconRunFinished: vi.fn(),
+}));
+vi.mock("./os-icon", () => ({
+	osIcon: {
+		captured: vi.fn(),
+		inboxOpened: vi.fn(),
+		runFailed: mockOsIconRunFailed,
+		runFinished: mockOsIconRunFinished,
+		recents: vi.fn(),
+	},
+}));
 
 import { loadTestService } from "./load-test-service";
 import { sseClient } from "./sse-client";
@@ -62,9 +78,17 @@ import { apiService } from "./api";
 import { WAKE_LOCK_KEYS } from "./wake-lock";
 import { NOTIFY_KINDS } from "./notify";
 
-/** `handleClose` is private; the SSE client is what calls it in production. */
-function closeStream(): Promise<void> {
-	return (loadTestService as unknown as { handleClose: () => Promise<void> }).handleClose();
+/**
+ * `handleClose` is private; the SSE client is what calls it in production, with
+ * the status off the engine's completion frame (#1415). `null` is a stream that
+ * ended without one - a dropped connection, or an older engine.
+ */
+function closeStream(status: "Completed" | "Stopped" | "Failed" | null = null): Promise<void> {
+	return (
+		loadTestService as unknown as {
+			handleClose: (status: "Completed" | "Stopped" | "Failed" | null) => Promise<void>;
+		}
+	).handleClose(status);
 }
 
 describe("LoadTestService", () => {
@@ -283,6 +307,140 @@ describe("LoadTestService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunStopped })
 			);
+		});
+	});
+
+	describe("Dock/taskbar mark for a failed run (issue #1364)", () => {
+		function failStream(message: string): void {
+			(loadTestService as unknown as { handleError: (e: Error) => void }).handleError(
+				new Error(message)
+			);
+		}
+
+		it("marks the icon when a run fails", () => {
+			loadTestService.startMonitoring("run_13");
+
+			failStream("transport gone");
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		/*
+		 * Mutation check: call `osIcon.runFailed()` beside `runProgress.fail` in
+		 * `handleError` instead of inside `notifyTerminal`, and this reddens -
+		 * `notifyTerminal`'s `notifiedRunId` latch is what a genuinely once-only
+		 * mark depends on; a call sitting beside `runProgress.fail` would fire
+		 * again for a run whose failure had already been reported.
+		 */
+		it("does not mark the icon a second time for a run already reported failed", async () => {
+			dashboard.currentRunId = "run_14";
+			loadTestService.startMonitoring("run_14");
+
+			failStream("transport gone");
+			await closeStream();
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not mark the icon for a run that finishes cleanly", async () => {
+			dashboard.currentRunId = "run_15";
+			loadTestService.startMonitoring("run_15");
+
+			await closeStream();
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+		});
+
+		/*
+		 * The quieter cue (#1364 item 4): a run the user was not watching ended,
+		 * so the taskbar button flashes where the notification they turned off
+		 * would have spoken. The service sends it for every terminal state; the
+		 * opt-in check and the platform rules are the two layers below.
+		 *
+		 * Mutation check: drop the `runFinished` call from `notifyTerminal` and
+		 * this reddens - a user with notifications off would get nothing at all
+		 * when a run ends, which is the gap the cue exists to close.
+		 */
+		it("raises the quieter end-of-run cue for a run that finished", async () => {
+			dashboard.currentRunId = "run_15b";
+			loadTestService.startMonitoring("run_15b");
+
+			await closeStream();
+
+			expect(mockOsIconRunFinished).toHaveBeenCalledTimes(1);
+		});
+
+		/*
+		 * Mutation check: send it for every kind and this reddens. A stopped run
+		 * is one the user pressed Stop on, so they were at the window and need
+		 * no cue that it ended.
+		 */
+		/*
+		 * #1415: until the completion frame's status was read, every terminal
+		 * close reported `loadRunFinished` - so a failed run notified "finished",
+		 * left the taskbar bar unmarked and never reached this icon mark at all.
+		 *
+		 * Mutation check: go back to the unconditional `loadRunFinished` and
+		 * this reddens, which is the whole of what #1415 was.
+		 */
+		it("marks the icon when the engine's frame says the run failed", async () => {
+			dashboard.currentRunId = "run_15d";
+			loadTestService.startMonitoring("run_15d");
+
+			await closeStream("Failed");
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFailed })
+			);
+		});
+
+		/*
+		 * The fallback, for a stream that ended without a frame - a dropped
+		 * connection, or an engine older than #1415's change. Mutation check:
+		 * drop the `reportStatus` half and this reddens while the case above
+		 * still passes, which is why both are here.
+		 */
+		it("falls back to the stored report when the frame carried no status", async () => {
+			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
+				summary: {},
+				latency: {},
+				metadata: { status: "Failed" },
+			} as Awaited<ReturnType<typeof apiService.getRunReport>>);
+			dashboard.currentRunId = "run_15e";
+			loadTestService.startMonitoring("run_15e");
+
+			await closeStream(null);
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		it("still says finished when neither the frame nor the report says otherwise", async () => {
+			dashboard.currentRunId = "run_15f";
+			loadTestService.startMonitoring("run_15f");
+
+			await closeStream("Completed");
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFinished })
+			);
+		});
+
+		it("raises no cue for a run the user stopped themselves", () => {
+			loadTestService.startMonitoring("run_15c");
+
+			loadTestService.stopMonitoring();
+
+			expect(mockOsIconRunFinished).not.toHaveBeenCalled();
+		});
+
+		it("does not mark the icon for a run the user stopped", () => {
+			loadTestService.startMonitoring("run_16");
+
+			loadTestService.stopMonitoring();
+
+			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
 		});
 	});
 });

@@ -66,6 +66,43 @@ export interface RunningServiceSummary {
 }
 
 /**
+ * A collection as the OS icon's menu needs it. Mirrors `OsIconCollection` in
+ * `electron/os-icon.ts`.
+ */
+export interface OsIconCollection {
+	id: string;
+	name: string;
+}
+
+/**
+ * What the renderer reports about the app's own icon. Mirrors `OsIconSignal` in
+ * `electron/os-icon.ts`; the two are separated only by the process boundary.
+ *
+ * None of these says what to paint. Whether a capture counts, and whether a
+ * failure is worth marking, both turn on the window's focus, which is main's to
+ * answer - the renderer only knows the thing happened.
+ */
+export type OsIconSignal =
+	| { kind: "captured" }
+	| { kind: "inboxOpened" }
+	| { kind: "runFailed" }
+	| { kind: "runFinished" }
+	| { kind: "recents"; collections: OsIconCollection[] };
+
+/**
+ * Something the OS asked Vayu to open. Mirrors `OpenIntent` in
+ * `electron/open-intent.ts`.
+ *
+ * `import` carries a path, not the document: the renderer reads it back through
+ * `readSpecFile`, which is the gated door onto the file system that already
+ * exists, rather than main growing a second one.
+ */
+export type OpenIntent =
+	| { kind: "import"; path: string }
+	| { kind: "collection"; collectionId: string }
+	| { kind: "newRequest" };
+
+/**
  * Where a notification's click should land. Mirrors `NotifyTarget` in
  * `electron/notify.ts`, which echoes it back untouched: main carries the
  * target, the renderer is the only side that knows what it means.
@@ -316,6 +353,26 @@ interface ElectronAPI {
 	 * indicator the OS gives an application.
 	 */
 	setRunProgress: (update: RunProgressUpdate) => void;
+
+	/**
+	 * What the Dock and taskbar icon carries, and what its menu offers (issue
+	 * #1364). Mirrors `electron/os-icon.ts`.
+	 *
+	 * One-way, for the progress bar's reason: nothing the OS answers would change
+	 * what the renderer does. Renderer callers go through `@/services/os-icon`,
+	 * which holds the one rule main cannot - which collections the user has been
+	 * in, and when the Inbox is on screen.
+	 */
+	setOsIconSignal: (signal: OsIconSignal) => void;
+
+	/**
+	 * The OS handed Vayu something to open: a document dropped on the icon, an
+	 * entry picked off the icon's menu, or a Jump List task (issue #1364).
+	 *
+	 * Main buffers these until this subscription exists, because the earliest of
+	 * them arrives on a cold launch before there is a window at all.
+	 */
+	onOpenIntent: (callback: (intent: OpenIntent) => void) => () => void;
 
 	/**
 	 * What the engine is holding for this window, so the close that would stop it

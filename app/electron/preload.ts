@@ -300,6 +300,46 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		value?: number | null;
 	}): void => ipcRenderer.send("runs:progress", update),
 
+	// What the Dock and taskbar icon carries, and what its menu offers (#1364).
+	// One-way for the same reason as the progress bar: nothing the OS answers
+	// would change what the renderer does. The renderer reports what happened -
+	// a capture landed, the Inbox was opened, a run failed, these are the
+	// collections it has been in - and main decides whether the user is looking
+	// and what this platform can show. The shapes mirror `OsIconSignal` in
+	// `electron/os-icon.ts`, inlined because this file is a CommonJS script and
+	// must not grow imports.
+	setOsIconSignal: (
+		signal:
+			| { kind: "captured" }
+			| { kind: "inboxOpened" }
+			| { kind: "runFailed" }
+			| { kind: "runFinished" }
+			| { kind: "recents"; collections: Array<{ id: string; name: string }> }
+	): void => ipcRenderer.send("icon:signal", signal),
+
+	// Something the OS asked Vayu to open (#1364): a document dropped on the
+	// icon, an entry picked off the icon's menu, or a Jump List task. Main
+	// buffers these until this callback exists, so a cold launch's file is not
+	// lost to the window that was not up yet.
+	onOpenIntent: (
+		callback: (
+			intent:
+				| { kind: "import"; path: string }
+				| { kind: "collection"; collectionId: string }
+				| { kind: "newRequest" }
+		) => void
+	) => {
+		const handler = (
+			_event: unknown,
+			payload:
+				| { kind: "import"; path: string }
+				| { kind: "collection"; collectionId: string }
+				| { kind: "newRequest" }
+		) => callback(payload);
+		ipcRenderer.on("intent:open", handler);
+		return () => ipcRenderer.removeListener("intent:open", handler);
+	},
+
 	// What the engine is holding for this window - inboxes, mock servers, mock
 	// issuers (#1363). Sent on every change so the close that would stop them can
 	// name them without asking anything while the user waits; the shape mirrors

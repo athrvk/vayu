@@ -229,6 +229,55 @@ ignored whether it reports, fails or stops - including a run of the same kind as
 the one that took over, and one whose last batched flush lands after it was
 superseded, neither of which a claim by kind could tell apart from the live run.
 
+**The icon itself carries what the window is not showing**, over `icon:signal`
+(`services/os-icon.ts` to `electron/os-icon.ts`), on the same split as the bar
+above: the renderer reports that a capture landed, that the Inbox is on screen,
+that a run failed, and which collections the user has been in, and main decides
+whether any of it is worth painting and what this platform can paint. Whether
+turns on the window's focus, which is main's question for the reason `notify.ts`
+gives - a capture the user watched arrive is not unread, and a run that failed
+in front of them needs no mark. What each platform can show is the other half:
+macOS takes a count on the Dock icon (`app.setBadgeCount`) and a single critical
+bounce for a failure, Windows draws both onto the one taskbar overlay it gives
+an application, and Linux gets neither, since Electron 44 removed Unity launcher
+support. Windows having one overlay and two things to say through it is settled
+in favour of the failure while it stands, with the count coming back underneath
+it when focus takes the failure off. That focus does not clear the count: those
+captures are still unread, and opening the Inbox is what says otherwise. The
+overlay images are drawn rather than shipped (`electron/os-icon-overlay.ts`),
+which is what lets a test read a count back instead of a person looking at a
+taskbar.
+
+**One of those cues does reach Linux, and it is the one that is conditional.**
+A run reaching a terminal state the user did not ask for flashes the taskbar
+button on Windows and Linux (`flashFrame`) and bounces the macOS Dock once
+(`bounce("informational")`), and it does so **only when the system
+notifications are off** - it is the quieter substitute for the toast the user
+declined, not a second cue beside it. The condition is the renderer's, because
+the opt-in lives in a store main cannot see, so nothing is sent at all when the
+setting is on. macOS takes a bounce rather than a flash on purpose: there
+`flashFrame` bounces until something turns it off, which is the weight a
+*failed* run already gets from `bounce("critical")`, while the informational
+bounce ends by itself and so is the one cue here that needs no clearing. The
+flash is cleared by the window's focus, alongside the failed mark.
+
+**The icon offers a way in as well as a state**, and everything arriving that
+way is one kind of thing: an intent, over `intent:open`
+(`electron/open-intent.ts`). Three doors lead to it. The macOS Dock menu and the
+Windows Jump List both list New Request and the three most recently opened
+collections, and a click on either is the same request - the Dock menu calls
+into main directly, while a Jump List task is a shortcut to the executable and
+arrives as a command line, on a cold start as `process.argv` and on a warm one
+as `second-instance`. A document dropped on the icon is the third: macOS raises
+`open-file`, the other two put the path on that same command line. Intents are
+buffered until the renderer reports `did-finish-load`, because the earliest of
+them arrives before there is a window at all, and a dropped document that
+vanished into a cold start would look like the app ignoring the double-click.
+Main carries the path and never reads the file; the renderer reads it back
+through the gated `specFile:read` channel the import batch already uses, so
+nothing here becomes a second door onto the file system, and the document lands
+in the Import dialog's ledger exactly as a picked file does.
+
 See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
 
 ## Sidecar Pattern

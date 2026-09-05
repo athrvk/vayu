@@ -172,7 +172,34 @@ export function parseMonitorEvent(raw: unknown): MonitorSample | null {
 
 export type SSEMessageHandler = (metrics: LoadTestMetrics) => void;
 export type SSEErrorHandler = (error: Error) => void;
-export type SSECloseHandler = () => void;
+/**
+ * How a run's stream ended, when the engine said (issue #1415).
+ *
+ * `null` for a stream that ended without one: a dropped connection, or a
+ * completion frame from an engine that predates the status field. The caller
+ * converges on the stored report either way, and a null here means "ask it",
+ * never "it finished".
+ */
+export type SSETerminalStatus = "Completed" | "Stopped" | "Failed" | null;
+
+export type SSECloseHandler = (status: SSETerminalStatus) => void;
+
+/**
+ * The status off a `complete` frame, or null for anything else.
+ *
+ * Unknown values are null rather than passed through: the caller decides what
+ * a run's end means from this, and an unrecognised string is not a decision
+ * either way - it is an engine this client does not understand yet.
+ */
+export function parseTerminalStatus(raw: string): SSETerminalStatus {
+	try {
+		const { status } = JSON.parse(raw) as { status?: unknown };
+		if (status === "Completed" || status === "Stopped" || status === "Failed") return status;
+		return null;
+	} catch {
+		return null;
+	}
+}
 /** One step execution of a scenario run, from the `step` event. */
 export type SSEStepHandler = (step: ScenarioStepEvent) => void;
 /** The size a collection run resolved to, from its opening `plan` event. */
@@ -308,11 +335,14 @@ export class SSEClient {
 				});
 			}
 
-			this.eventSource.addEventListener("complete", () => {
+			this.eventSource.addEventListener("complete", (event) => {
 				// Send final metrics before closing
 				onMessage({ ...this.currentMetrics });
 				this.disconnect();
-				onClose();
+				// The frame says how the run ended, and this is the only place
+				// that hears it: the stored report is fetched afterwards and a
+				// dropped stream never gets one at all (#1415).
+				onClose(parseTerminalStatus((event as MessageEvent).data));
 			});
 
 			this.eventSource.addEventListener("error", (_event) => {
@@ -337,7 +367,8 @@ export class SSEClient {
 					// the console.
 					console.warn("SSE connection closed unexpectedly - treating as terminal");
 					this.disconnect();
-					onClose();
+					// No frame arrived, so nothing here knows how the run ended.
+					onClose(null);
 				}
 				// For CONNECTING state errors, wait - the browser will retry.
 			});

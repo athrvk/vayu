@@ -5818,8 +5818,16 @@ data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "statusCodes":{"200":1495,"404":3,"500":2}}
 
 event: complete
-data: {"event":"complete","runId":"run_1234567890"}
+data: {"event":"complete","runId":"run_1234567890","status":"Completed"}
 ```
+
+`status` is the run's own terminal status - `Completed`, `Stopped` or `Failed` -
+and it is what tells a client which of the three happened while the run is
+ending, rather than after the stored report has been fetched (issue #1415). It
+is **omitted** when the stream closes before the run's status has been written,
+which a client must read as "ask the report", never as success: the field is
+absent on that frame, not `null`, and a client older than it saw no `status` at
+all.
 
 **A scenario run streams `step` events instead of `metrics` ticks.** One per
 step execution, on the same ring and the same monotonic `id:` numbering, so
@@ -5838,8 +5846,11 @@ data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
                      "failures":[],"failuresTotal":0}}
 
 event: complete
-data: {"event":"complete","runId":"run_1234567890"}
+data: {"event":"complete","runId":"run_1234567890","status":"Completed"}
 ```
+
+`status` carries the same three values and the same absent-means-ask rule as on
+the metrics stream above.
 
 `outcome` is one of `passed`, `failed`, `skipped`, `errored` - see
 [Scenario runs](#scenario-runs). `dataRowIndex` is present only for a run with
