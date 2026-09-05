@@ -3549,8 +3549,9 @@ describe("start_load_run scenario runs", () => {
 		// design runner's pass count and the load executor never looks at it, so
 		// offering it here would be an argument written and never read.
 		const tool = TOOLS.find((t) => t.name === "start_load_run");
-		const shape = (tool!.inputSchema.scenario as z.ZodOptional<z.ZodObject<z.ZodRawShape>>)._def
-			.innerType.shape;
+		const shape = (
+			tool!.inputSchema.scenario as z.ZodOptional<z.ZodObject<Record<string, z.ZodType>>>
+		)._def.innerType.shape;
 		expect(Object.keys(shape).sort()).toEqual(["collectionId", "data", "recursive"]);
 	});
 });
@@ -7172,7 +7173,7 @@ describe("start_load_run recording knobs", () => {
 
 	test("a sampling period of 0 is refused at the schema, not sent as a divide by zero", () => {
 		const schema = z.object(
-			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as z.ZodRawShape
+			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<string, z.ZodType>
 		);
 		expect(schema.safeParse({ successSamplePeriod: 0 }).success).toBe(false);
 		expect(schema.safeParse({ successSamplePeriod: 1 }).success).toBe(true);
@@ -7202,7 +7203,7 @@ describe("start_load_run recording knobs", () => {
 		expect(composed.request).toMatchObject({ followRedirects: false, maxRedirects: 3 });
 
 		const schema = z.object(
-			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as z.ZodRawShape
+			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<string, z.ZodType>
 		);
 		expect(schema.safeParse({ maxRedirects: -1 }).success).toBe(false);
 		expect(schema.safeParse({ maxRedirects: 0 }).success).toBe(true);

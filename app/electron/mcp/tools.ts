@@ -6451,7 +6451,10 @@ export const TOOLS: McpTool[] = [
 					minThroughputRps: z.number().positive().max(1_000_000_000).optional(),
 				})
 				.refine((t) => Object.keys(t).length > 0, {
-					message: "Declare at least one budget, or omit `thresholds` entirely.",
+					// `error`, not zod 3's `message`: v4 still reads the old key as a
+					// deprecated alias, and a deprecated alias is what the next major
+					// takes away.
+					error: "Declare at least one budget, or omit `thresholds` entirely.",
 				})
 				.optional()
 				.describe(

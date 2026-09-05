@@ -747,15 +747,20 @@ function argsSignature(args: readonly SchemaArgument[]): string {
  * default printed as something the user could not type back. The literal
  * already carries that distinction.
  *
- * `default.value` is the other half of graphql's union, set only by a schema
- * built in code; `valueToLiteral` renders it, and answers undefined for a
- * value the type cannot hold, which is a default worth omitting rather than
- * printing wrong.
+ * `default.value` is the other half of graphql's union, and `defaultValue` the
+ * pre-17 spelling of the same thing; a schema built in code can still set
+ * either, and graphql's own `isRequiredArgument` reads both, so a row that
+ * skipped one would call a defaulted argument required in one file and
+ * optional in the next. `valueToLiteral` renders a runtime value, and answers
+ * undefined for a value the type cannot hold - a default worth omitting rather
+ * than printing wrong.
  */
 function formatDefault(element: GraphQLArgument | GraphQLInputField): string | null {
 	const declared = element.default;
-	if (declared === undefined) return null;
-	const literal = declared.literal ?? valueToLiteral(declared.value, element.type);
+	if (declared?.literal !== undefined) return print(declared.literal);
+	const value = declared ? declared.value : element.defaultValue;
+	if (value === undefined) return null;
+	const literal = valueToLiteral(value, element.type);
 	return literal === undefined ? null : print(literal);
 }
 
