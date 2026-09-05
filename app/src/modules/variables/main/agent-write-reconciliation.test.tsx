@@ -314,4 +314,56 @@ describe("variables editor - a write that lands while the table is dirty", () =>
 		expect(pendingSave.payload.variables.host.value).toBe("theirs");
 		expect(screen.queryByText(/changed elsewhere/i)).toBeNull();
 	});
+
+	it("drops a conflict for a row the user deletes instead of resolving", () => {
+		// Deleting a conflicting row used to leave its callout on screen for a
+		// row that no longer existed: "Take theirs" found nothing to update (the
+		// row was gone), and the save that followed still read the key's absence
+		// from the baseline as the user's own deletion - silently discarding the
+		// agent's value the button claimed to take.
+		const initial = makeCollection({
+			host: {
+				value: "example.com",
+				enabled: true,
+				secret: false,
+				type: "string",
+				createdAt: 1000,
+			},
+		});
+
+		const { rerender } = render(
+			<TooltipProvider>
+				<VariableTableEditor config={{ type: "collection", collection: initial }} />
+			</TooltipProvider>
+		);
+
+		fireEvent.change(valueInputs()[0], { target: { value: "mine" } });
+
+		rerender(
+			<TooltipProvider>
+				<VariableTableEditor
+					config={{
+						type: "collection",
+						collection: makeCollection({
+							host: {
+								value: "theirs",
+								enabled: true,
+								secret: false,
+								type: "string",
+								createdAt: 1000,
+							},
+						}),
+					}}
+				/>
+			</TooltipProvider>
+		);
+
+		expect(screen.getByText(/changed elsewhere: host/i)).toBeTruthy();
+
+		// The user deletes the row instead of choosing a side.
+		fireEvent.click(screen.getByRole("button", { name: /delete variable/i }));
+
+		expect(screen.queryByText(/changed elsewhere/i)).toBeNull();
+		expect(pendingSave.payload.variables.host).toBeUndefined();
+	});
 });

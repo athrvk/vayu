@@ -409,7 +409,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const performSave = useCallback(async () => {
 		const varsToSave = variablesRef.current;
 		const changes = computeUserChanges(varsToSave, baselineRef.current);
-		const merged = mergeVariableChanges(dataVariables as VariableMap, changes);
+		const merged = mergeVariableChanges(dataVariables, changes);
 		const sorted = sortByCreatedAt(Object.entries(merged));
 		const variablesObj: Record<string, VariableValue> = {};
 		sorted.forEach(([key, val]) => {
@@ -522,7 +522,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	useEffect(() => {
 		const isNewDataSource = lastSeededSourceRef.current !== contextId;
 		lastSeededSourceRef.current = contextId;
-		const freshMap = dataVariables as VariableMap;
+		const freshMap = dataVariables;
 
 		// A save's `onSuccess` writes the query cache, which arrives back here as
 		// a new `dataVariables` - the same scope, still dirty if anything was
@@ -609,6 +609,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	};
 
 	const removeVariable = (index: number) => {
+		const removedKey = variables[index]?.key;
 		const newVariables = variables.filter((_, i) => i !== index);
 		if (newVariables.length === 0 || !newVariables.some((v) => v.isNew)) {
 			newVariables.push(blankRow());
@@ -616,6 +617,11 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		setVariables(newVariables);
 		variablesRef.current = newVariables;
 		markDirty();
+		// A conflict named this row before it was deleted: with the row gone,
+		// "Take theirs" would find nothing to update and then immediately
+		// re-delete the key on save, since `computeUserChanges` reads its
+		// absence from the rows as the user's own deletion either way.
+		if (removedKey) setConflicts((prev) => prev.filter((c) => c.key !== removedKey));
 		performSaveRef.current();
 	};
 
@@ -627,7 +633,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	 */
 	const resolveConflict = useCallback(
 		(key: string) => {
-			const theirs = (dataVariables as VariableMap)[key];
+			const theirs = dataVariables[key];
 			// Computed synchronously and assigned to the ref directly, not inside
 			// the `setVariables` updater: `performSaveRef.current()` below reads
 			// `variablesRef.current` before this render commits, and a functional
