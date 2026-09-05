@@ -266,10 +266,17 @@ export const queryKeys = {
 	// variables substituted and `inherit` auth walked. Keyed by environment as
 	// well as request: the same request composes differently per environment,
 	// and one key for both would serve the wrong snippet after a switch.
+	//
+	// `allForRequest` is the per-request invalidation root, and `forRequest` is
+	// built from it rather than beside it so the prefix relationship holds by
+	// construction: a write that names one request drops that request's
+	// compositions under every environment, and no other request's (issue
+	// #1438).
 	compose: {
 		all: ["compose"] as const,
+		allForRequest: (requestId: string) => [...queryKeys.compose.all, requestId] as const,
 		forRequest: (requestId: string, environmentId: string | null) =>
-			[...queryKeys.compose.all, requestId, environmentId] as const,
+			[...queryKeys.compose.allForRequest(requestId), environmentId] as const,
 	},
 
 	// OAuth 2.0 token cache
