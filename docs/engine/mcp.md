@@ -1367,10 +1367,14 @@ configurable in **Settings → MCP** and persisted.
   rather than destroying it, so the write toggle alone is its gate (below).
 - **Write toggle** (`allowWrites`, default off) - gates every tool in the
   **write** category, and while it is off they are **not registered at all**:
-  they are absent from `tools/list`, not merely refused by `tools/call`. The
-  refusal remains in every write handler, for a client still holding a list it
-  fetched while the toggle was on. Withholding the schema rather than only the
-  call is what makes the toggle free: those tools are ~40% of the tool payload
+  they are absent from `tools/list`, not merely refused by `tools/call`. A call
+  on one of their names anyway - guessed, or held over from a list fetched while
+  the toggle was on - is answered with the handlers' own refusal, which names the
+  setting to turn on; the SDK would otherwise reject the unregistered name with
+  `Tool <name> not found`, which tells an agent nothing it can act on. The
+  server instructions say the same thing up front, in the sessions where the
+  toggle is off. Withholding the schema rather than only the call is what makes
+  the toggle free: those tools are ~40% of the tool payload
   an agent is sent, and on a default install none of them could have succeeded.
   Because the tool set is recomputed per built server (a fresh one per HTTP
   request), flipping the toggle takes effect on the client's next `tools/list` -
@@ -1410,8 +1414,13 @@ configurable in **Settings → MCP** and persisted.
   endpoint needs no auth token. The bounds that do apply are the engine's own -
   at most 8 issuers at once - and the per-tool switch below.
 - **Per-tool control** - any tool or whole read/execute/write/load category can be
-  switched off; a disabled tool is omitted from `tools/list` **and** rejected by
-  `tools/call`. Settings lists every tool whatever the write toggle says, so the
+  switched off; a disabled tool is omitted from `tools/list`, and calling its
+  name is answered with `Tool <name> not found` - it is unregistered, so the SDK
+  rejects the name before any Vayu code runs. (The write toggle's refusal above
+  is the deliberate exception, and it does not claim a tool the user switched
+  off: that tool would still be off after enabling writes. The rejection in
+  `dispatchTool` is what any other caller of it gets.) Settings lists every tool
+  whatever the write toggle says, so the
   switches for write tools stay visible and settable while writes are off - the
   toggle governs what the *agent* is offered, not what the user can configure.
   This and the write toggle are **independent**, and a write tool

@@ -155,6 +155,69 @@ describe("MCP protocol handshake (in-memory)", () => {
 	});
 
 	/*
+	 * Withholding a write tool took its handler's refusal off the wire with it:
+	 * the SDK rejects a name it never registered before any Vayu code runs, so
+	 * an agent that guessed the name - from its own memory, or from a list it
+	 * fetched while writes were on - got "not found" and nothing to ask the user
+	 * for (#1431). The refusal is the one the handlers return, so the two
+	 * cannot say different things about the same gate.
+	 */
+	it("answers a call to a withheld write tool with the refusal that names the setting", async () => {
+		const { client, server } = await connectClient();
+		const res = (await client.callTool({
+			name: "create_collection",
+			arguments: { name: "API" },
+		})) as { content: Array<{ text: string }>; isError?: boolean };
+
+		expect(res.isError).toBe(true);
+		expect(res.content[0].text).toMatch(/write access in Vayu Settings/i);
+		expect(res.content[0].text).not.toMatch(/not found/i);
+		await server.close();
+	});
+
+	/*
+	 * The wrapper stands in front of the SDK's dispatch, so the other three
+	 * categories must reach it unchanged - including a name that genuinely does
+	 * not exist, which still gets the SDK's answer.
+	 */
+	it("leaves every other name to the SDK's dispatch while writes are off", async () => {
+		const { client, server } = await connectClient();
+		const ok = (await client.callTool({ name: "get_engine_health", arguments: {} })) as {
+			content: Array<{ text: string }>;
+			isError?: boolean;
+		};
+		expect(ok.isError).toBeFalsy();
+		expect(ok.content[0].text).toContain("9.9.9");
+
+		const unknown = (await client.callTool({ name: "no_such_tool", arguments: {} })) as {
+			content: Array<{ text: string }>;
+			isError?: boolean;
+		};
+		expect(unknown.isError).toBe(true);
+		expect(unknown.content[0].text).toMatch(/not found/i);
+		await server.close();
+	});
+
+	/*
+	 * A write tool the *user* switched off is unregistered for the other reason,
+	 * and answering it with the write gate would send a user who enabled writes
+	 * back to a tool that is still off. It keeps the disabled-tool answer.
+	 */
+	it("does not claim the write gate for a write tool switched off in Settings", async () => {
+		const { client, server } = await connectClient({
+			safety: { disabledTools: ["create_collection"] },
+		});
+		const res = (await client.callTool({
+			name: "create_collection",
+			arguments: { name: "API" },
+		})) as { content: Array<{ text: string }>; isError?: boolean };
+
+		expect(res.isError).toBe(true);
+		expect(res.content[0].text).not.toMatch(/write access in Vayu Settings/i);
+		await server.close();
+	});
+
+	/*
 	 * Settings lists every tool with a per-tool switch, so the catalog behind it
 	 * must stay whole however the write toggle is set - otherwise turning writes
 	 * off would silently empty the half of that list a user turns them back on
@@ -201,6 +264,27 @@ describe("MCP protocol handshake (in-memory)", () => {
 
 		expect(named).toEqual([]);
 		await server.close();
+	});
+
+	/*
+	 * The one cross-cutting fact a withheld tool's own description can no longer
+	 * carry, because the description ships with the tool. It names the setting
+	 * and no tool, and it ships only in the sessions it is true of - the server
+	 * is rebuilt per request, so it cannot go stale against `tools/list`.
+	 */
+	it("states the write gate in the instructions only while writes are off", async () => {
+		const off = await connectClient();
+		expect(off.client.getInstructions() ?? "").toMatch(
+			/write access is off in this session[\s\S]*Vayu Settings → MCP/i
+		);
+		await off.server.close();
+
+		const on = await connectClient({ safety: { allowWrites: true } });
+		const onInstructions = on.client.getInstructions() ?? "";
+		expect(onInstructions).not.toMatch(/write access is off/i);
+		// The rest of the text is one string either way.
+		expect(onInstructions).toMatch(/grouped by capability/i);
+		await on.server.close();
 	});
 
 	it("exposes tool annotations (read-only / destructive hints + title)", async () => {

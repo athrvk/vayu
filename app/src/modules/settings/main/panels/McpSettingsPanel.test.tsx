@@ -328,6 +328,21 @@ describe("McpSettingsPanel write-switch cross-references", () => {
 		expect(screen.getByText(/write access, below/i)).toBeInTheDocument();
 	});
 
+	/*
+	 * What the card says the toggle *does*, not just how it interacts with the
+	 * Tools card: with writes off a write tool is not offered to the agent at
+	 * all (#1429). The panel said so from the day that shipped and nothing held
+	 * it there, so it could have drifted back to the older "they refuse" while
+	 * every assertion here stayed green (#1431).
+	 */
+	it("tells the Write access card that a write tool is not offered at all", async () => {
+		await renderPanel();
+
+		expect(
+			screen.getByText(/no tool in the write group above is offered to the agent at all/i)
+		).toBeInTheDocument();
+	});
+
 	it("tells the Write access card that a tool switched off in Tools stays off", async () => {
 		await renderPanel();
 
