@@ -45,6 +45,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/utils/diagnostics.hpp"
 
 namespace vayu::http::routes {
 std::pair<int, nlohmann::json>
@@ -85,7 +86,14 @@ json read_fixture () {
  * so the reference this returns would dangle the moment the call expression
  * ends - a real instance of the shape `VAYU_IGNORE_FALSE_DANGLING_REFERENCE`
  * exists to tell apart from, not one of its false positives.
+ *
+ * `VAYU_IGNORE_FALSE_NULL_DEREFERENCE`: a release build inlines `at(0)`'s
+ * `is_array()` check deep enough at `-O3` that GCC loses track of the
+ * iterator's non-nullness and reports a `-Wnull-dereference` on nlohmann's
+ * own internals - the traced-into-libstdc++ family that macro exists for,
+ * not a real path through this function.
  */
+VAYU_IGNORE_FALSE_NULL_DEREFERENCE
 const nlohmann::ordered_json& first_request (const nlohmann::ordered_json& collection) {
     if (const auto requests = collection.find ("requests");
     requests != collection.end () && !requests->empty ()) {
@@ -98,6 +106,7 @@ const nlohmann::ordered_json& first_request (const nlohmann::ordered_json& colle
     static const nlohmann::ordered_json none;
     return none;
 }
+VAYU_DIAGNOSTIC_POP
 
 /// `meta.skipped` as `{kind: count}` - see the file comment.
 json skip_counts (const json& skipped) {
