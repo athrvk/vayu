@@ -3285,6 +3285,12 @@ id](#the-engine-owns-every-id)).
 | `keyPath` | for `pem` | Path to the private key file. Must be readable now, and must be **absent** for `p12`. |
 | `passphrase` | no | The key's passphrase, or a PKCS#12 bundle's import password. Write-only. |
 
+**The uniqueness check and the write are one lock scope.** Proving no other
+row already claims this `host` + `port` and writing the new row happen under
+one acquisition of the database lock, so two creates for the same target
+racing each other cannot both pass the check before either writes - the second
+is answered with the `409` below rather than landing beside the first.
+
 **Errors:**
 
 | Status | When |
