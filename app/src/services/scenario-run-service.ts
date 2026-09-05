@@ -12,7 +12,9 @@
  * The two share `sseClient`, which is a singleton holding one `EventSource`,
  * so they cannot stream at once - starting a scenario run stops whatever the
  * client was attached to. That is the engine's model too (a run at a time from
- * this app), not a limitation introduced here.
+ * this app), not a limitation introduced here. The takeover is a hand-off
+ * rather than a silent close (issue #1417): the displaced service is told, and
+ * `handleSuperseded` gives up what that run was holding.
  *
  * Step events are buffered and committed on the live-refresh cadence, the same
  * throttle `LoadTestService` puts on its ticks (issue #1153). This file used to
@@ -89,6 +91,22 @@ class ScenarioRunService {
 	startMonitoring(runId: string): void {
 		if (this.activeRunId === runId) return;
 
+		// End the run this one replaces *before* registering anything for the
+		// new one. `LoadTestService` reaches the same state through its
+		// `stopMonitoring`; this side has none by design, so it says it here.
+		//
+		// Both halves are load-bearing (#1417). The release is what the
+		// displaced run is owed - it is no less superseded for having been
+		// superseded by its own service. The `disconnect()` is what drops this
+		// service's own hand-off registration from the client: without it, the
+		// `supersede()` inside `connect` below would fire `handleSuperseded`
+		// against the run started here, releasing the lock, bar and run id that
+		// the lines in between had only just taken.
+		if (this.activeRunId) {
+			this.releaseRun(this.activeRunId);
+			sseClient.disconnect();
+		}
+
 		// Only on the user's standing say-so (#1357), the same read
 		// `LoadTestService` makes. A collection run is never asked about: it
 		// declares no duration, so nothing here can tell a two-second sequence
@@ -99,9 +117,11 @@ class ScenarioRunService {
 			wakeLock.hold(WAKE_LOCK_KEYS.collectionRun, "Collection run streaming");
 		}
 
-		// Whatever the previous run left buffered belongs to a list the store is
-		// about to clear, so it is dropped rather than flushed into this run's.
-		this.discardPending();
+		// Nothing is dropped here: whatever a previous run left buffered belongs
+		// to a list the store is about to clear, and `releaseRun` above - or the
+		// flush in whichever terminal path ended that run - has already let go
+		// of it. A second discard on this line could only be a copy of that rule
+		// that drifts.
 		this.activeRunId = runId;
 		this.stepsExpected = null;
 		this.stepsCompleted = 0;
@@ -135,7 +155,8 @@ class ScenarioRunService {
 			// A collection run scrapes no vitals; the plan frame sits after the
 			// monitor slot because the load path already passes that one.
 			undefined,
-			this.handlePlan.bind(this)
+			this.handlePlan.bind(this),
+			this.handleSuperseded.bind(this)
 		);
 	}
 
@@ -194,6 +215,56 @@ class ScenarioRunService {
 		this.stepBatcher.discard();
 	}
 
+	/**
+	 * Let go of everything this service holds on `runId`'s behalf.
+	 *
+	 * The one place that does it, because two paths need it - the stream
+	 * ending, and a load run taking the shared client away (#1417) - and a
+	 * second copy is a release that drifts out of step with the first. What it
+	 * deliberately leaves to its callers is anything that *speaks* for the run:
+	 * a close has a notification and a stored record to converge on, and a
+	 * superseded run has neither, because it has not ended.
+	 */
+	private releaseRun(runId: string | null): void {
+		this.activeRunId = null;
+		this.discardPending();
+		useScenarioRunStore.getState().setStreaming(false);
+		// Before any awaited fetch a caller makes: the run is no longer this
+		// service's the moment it gets here, and the machine must not stay
+		// pinned awake through a round trip taken on its behalf.
+		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
+		// And the OS stops saying a run is going. A run that already reported
+		// its failure keeps that flash - see `progressFailedRunId`. A release
+		// with no run to name clears nothing: it holds no claim, and the bar it
+		// would wipe belongs to whatever run is being watched now (#1405).
+		if (this.progressFailedRunId !== runId) {
+			runProgress.clear(RUN_PROGRESS_KEYS.collectionRun, runId);
+		}
+	}
+
+	/**
+	 * A load run took the shared stream client (issue #1417).
+	 *
+	 * Before this existed the takeover was silent: `sseClient.connect` closed
+	 * the socket and no terminal path ran, so the wake lock stayed held for the
+	 * rest of the session and the taskbar kept a bar for a run nothing watched.
+	 *
+	 * The run is *not* over - the engine is still running it - so this says so
+	 * to no one: no notification (#1358), no failed-icon mark (#1364), and none
+	 * of the invalidations that flip the run tab from the live list to the
+	 * stored record. The run's row reaches its terminal status on the next list
+	 * read, which is where a run this app is not watching belongs.
+	 *
+	 * The buffered steps go with it rather than being flushed, the same choice
+	 * `startMonitoring` already makes when one collection run supersedes
+	 * another: a superseded run is a superseded run whichever service took it.
+	 */
+	private handleSuperseded(): void {
+		const runId = this.activeRunId;
+		if (!runId) return;
+		this.releaseRun(runId);
+	}
+
 	/*
 	 * There is deliberately no `stopMonitoring` here, unlike `LoadTestService`.
 	 * The stream ends on its own - the engine sends `complete` when the run
@@ -231,11 +302,21 @@ class ScenarioRunService {
 		osIcon.runFinished();
 	}
 
+	/**
+	 * Redden the taskbar bar for a run that failed, and remember that it did.
+	 * The record is what keeps `releaseRun`'s clear from wiping the flash a
+	 * moment later: both failure paths - the SSE error and a `complete` frame
+	 * saying `Failed` - release the run immediately afterwards.
+	 */
+	private failProgress(runId: string | null): void {
+		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun, runId);
+		this.progressFailedRunId = runId;
+	}
+
 	private handleError(error: Error): void {
 		console.error("[ScenarioRunService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
-		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun, this.activeRunId);
-		this.progressFailedRunId = this.activeRunId;
+		this.failProgress(this.activeRunId);
 		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.collectionRunFailed, error.message);
 		// Before the error, so the steps that did arrive are on screen under the
 		// notice explaining why no more will be. A buffered batch stranded here
@@ -256,24 +337,23 @@ class ScenarioRunService {
 	 */
 	private async handleClose(status: SSETerminalStatus = null): Promise<void> {
 		const runId = this.activeRunId;
+		// Before the flush, so the batch it commits paints no progress: the run
+		// is over, and `reportProgress` reads this field to name whose bar it
+		// is speaking for.
 		this.activeRunId = null;
 		// The last window's steps, before anything reads the list as final. The
 		// stored rows supersede them a moment later, but only if the report
 		// fetch below succeeds - and a run that ended without one is exactly the
-		// case where the live rows are all the reader will ever have.
+		// case where the live rows are all the reader will ever have. This is
+		// the one path that flushes rather than discards, which is why it is
+		// here and not in `releaseRun`.
 		this.stepBatcher.flush();
-		this.discardPending();
-		useScenarioRunStore.getState().setStreaming(false);
-		// Before the awaited fetches below: the run is over the moment the
-		// stream closed, and the machine must not stay pinned awake through them.
-		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
-		// And the OS stops saying a run is going. A run that already reported its
-		// failure keeps that flash - see `progressFailedRunId`. A close with no
-		// run to name clears nothing: it holds no claim, and the bar it would
-		// wipe belongs to whatever run is being watched now (#1405).
-		if (this.progressFailedRunId !== runId) {
-			runProgress.clear(RUN_PROGRESS_KEYS.collectionRun, runId);
-		}
+		// Before the release, whose clear would otherwise wipe the bar: until
+		// #1415 `runProgress.fail` was reachable only from `handleError`, which
+		// the engine's own failures never reach, so a real failure cleared the
+		// taskbar instead of reddening it.
+		if (status === "Failed") this.failProgress(runId);
+		this.releaseRun(runId);
 		if (!runId) return;
 
 		// From the store's own fold rather than the report fetched below: the

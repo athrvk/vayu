@@ -550,7 +550,141 @@ describe("dispatch emits mcp:data-changed", () => {
 		expect(res.isError).toBeFalsy();
 		expect(onDataChanged).not.toHaveBeenCalled();
 	});
+});
 
+/*
+ * The one field on the event that is not a scope hint (#1419). Every other hint
+ * is read off the call's arguments; this one is read off the engine's answer,
+ * because a run has no id until the engine has given it one - and it is what
+ * tells the renderer to watch a run no surface of its own started.
+ */
+describe("a run that started says so", () => {
+	/** A client whose collection `c1` holds one allowlisted request. */
+	function runClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
+		return fakeClient({
+			startRun: vi.fn().mockResolvedValue({ runId: "run_5", status: "running" }),
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "login" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/r1" }),
+			...overrides,
+		});
+	}
+
+	const ALLOWED: Partial<McpSafetyConfig> = { allowlist: ["api.example.com"] };
+
+	test("a confirmed load run names the run and the service that watches it", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(runClient(), ALLOWED);
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				url: "https://api.example.com/x",
+				mode: "constant_rps",
+				targetRps: 10,
+				confirmed: true,
+			},
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).toHaveBeenCalledWith({
+			entity: "run",
+			startedRun: { runId: "run_5", kind: "load" },
+		});
+	});
+
+	test("a scenario load run is a load run - the metrics stream watches it", async () => {
+		// Which service, not which surface the user would call it from: a
+		// scenario *load* run publishes metric ticks like any other load run,
+		// while `run_collection` publishes steps. Mutation check: hand this one
+		// "collection" and the dashboard attaches a step listener to a tick
+		// stream and stays empty for the whole run.
+		const { ctx, onDataChanged } = ctxWithNotifier(runClient(), ALLOWED);
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "c1" },
+				mode: "constant_concurrency",
+				concurrency: 2,
+				duration: "10s",
+				confirmed: true,
+			},
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).toHaveBeenCalledWith({
+			entity: "run",
+			startedRun: { runId: "run_5", kind: "load" },
+		});
+	});
+
+	test("a collection run says so on its run event and not on the cookie jar", async () => {
+		const { ctx, onDataChanged } = ctxWithNotifier(runClient(), ALLOWED);
+		const res = await dispatchTool("run_collection", { collectionId: "c1" }, ctx);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).toHaveBeenCalledWith({
+			entity: "run",
+			collectionId: "c1",
+			startedRun: { runId: "run_5", kind: "collection" },
+		});
+		// The jar went stale too, but a cookie invalidation has no use for a run
+		// to watch - and a second copy of the bit would be a second thing to
+		// keep in step.
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "cookie", collectionId: "c1" });
+	});
+
+	test("a smoke run starts no run to watch", async () => {
+		// It sends its requests one at a time through `POST /execute`: there is
+		// no run id and no stream, so there is nothing to attach to.
+		const client = runClient({
+			executeRequest: vi.fn().mockResolvedValue({ statusCode: 200 }),
+		});
+		const { ctx, onDataChanged } = ctxWithNotifier(client, ALLOWED);
+		const res = await dispatchTool("run_collection_smoke", { collectionId: "c1" }, ctx);
+		expect(res.isError).toBeFalsy();
+		expect(client.startRun).not.toHaveBeenCalled();
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "run", collectionId: "c1" });
+	});
+
+	test("the run tools that name an existing run start nothing", async () => {
+		for (const [tool, args] of [
+			["stop_run", { runId: "run_1" }],
+			["set_run_baseline", { runId: "run_1", baseline: true }],
+			["delete_run", { runId: "run_1", confirmed: true }],
+		] as const) {
+			const { ctx, onDataChanged } = ctxWithNotifier(runClient(), WRITES_ENABLED);
+			const res = await dispatchTool(tool, args, ctx);
+			expect(res.isError, `${tool} dispatched`).toBeFalsy();
+			expect(onDataChanged, `${tool} emitted`).toHaveBeenCalledWith({
+				entity: "run",
+				runId: "run_1",
+			});
+		}
+	});
+
+	test("an engine answer with no run id announces no run", async () => {
+		// The 202 body is what says a run exists. Anything else is handed to the
+		// agent as it came rather than turned into a run the renderer would open
+		// a stream on - and the history lists are still stale either way.
+		const { ctx, onDataChanged } = ctxWithNotifier(
+			runClient({ startRun: vi.fn().mockResolvedValue({ message: "accepted" }) }),
+			ALLOWED
+		);
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				url: "https://api.example.com/x",
+				mode: "constant_rps",
+				targetRps: 10,
+				confirmed: true,
+			},
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged).toHaveBeenCalledWith({ entity: "run" });
+	});
+});
+
+describe("dispatch emits mcp:data-changed, continued", () => {
 	test("a context without a notifier dispatches normally", async () => {
 		const client = fakeClient();
 		const ctx: ToolContext = { client, config: resolveSafetyConfig(WRITES_ENABLED) };

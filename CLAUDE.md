@@ -46,8 +46,9 @@ cd app && pnpm run electron:dev   # Run the app
 ```
 
 Prerequisites: CMake >= 3.25, Ninja, a C++23 compiler (GCC 13+, Clang 19+ on
-libstdc++, MSVC 2022+), Node.js >= 20.19 (22 LTS recommended, see
-`app/.nvmrc`), pnpm >= 11, and vcpkg with `$VCPKG_ROOT` set on Linux/macOS. On
+libstdc++, MSVC 2022+), Node.js >= 22 (the LTS line, see `app/.nvmrc`;
+`concurrently` 10, which `pnpm type-check` runs, declares `node >= 22`, and the
+20 line went end-of-life on 2026-04-30), pnpm >= 11, and vcpkg with `$VCPKG_ROOT` set on Linux/macOS. On
 Linux and macOS also `autoconf`, `autoconf-archive`, `automake` and `libtool`:
 vcpkg builds libsodium from source there and runs `autoreconf` first. `python
 build.py --setup` installs them; without them the *dependency* install fails,
@@ -153,6 +154,11 @@ and assert **both** branches.
 - **A hand-rolled copy of a primitive does not receive the primitive's fixes.**
   Before styling or reimplementing something that already exists as a
   primitive, `rg` for the primitive.
+- **The platform before a dependency, a dependency before new code.** Before
+  adding a package or hand-building a control, check whether the platform
+  already covers it: an HTML input type, CSS, `Intl`, a DB constraint, the
+  STL. A dependency taken on for what a native feature already does is a
+  permanent maintenance cost bought for a one-time convenience.
 - **Mutation-check behavioural tests** (revert the fix, confirm failure,
   restore). Source-scanning guards must assert they scanned something
   non-empty; vitest stubs CSS imports to `""`, so a guard over a stylesheet can

@@ -110,6 +110,11 @@ describe("LoadTestService", () => {
 			// because a run configured with a `monitor` block streams its
 			// scrapes on this same connection.
 			undefined,
+			expect.any(Function),
+			// No plan handler either: that frame is a collection run's
+			// denominator. Last is the hand-off - how this service hears that a
+			// collection run took the shared client from it (#1417).
+			undefined,
 			expect.any(Function)
 		);
 	});
@@ -413,6 +418,32 @@ describe("LoadTestService", () => {
 			await closeStream(null);
 
 			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+		});
+
+		/*
+		 * #1415's fourth criterion. The report fetch is the source of the
+		 * notification's body, not of its kind, and it can fail - so a failure
+		 * that could not be read must still be reported as one rather than
+		 * quietly reported as success.
+		 *
+		 * Mutation check: read the kind from `reportStatus` alone and this
+		 * reddens, because there is no report to read it from.
+		 */
+		it("still reports a failure when the frame said so and the report could not be read", async () => {
+			vi.mocked(apiService.getRunReport).mockRejectedValueOnce(new Error("engine gone"));
+			vi.spyOn(console, "warn").mockImplementation(() => {});
+			dashboard.currentRunId = "run_15g";
+			loadTestService.startMonitoring("run_15g");
+
+			await closeStream("Failed");
+
+			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({
+					kind: NOTIFY_KINDS.loadRunFailed,
+					body: "The run ended, but its report could not be read.",
+				})
+			);
 		});
 
 		it("still says finished when neither the frame nor the report says otherwise", async () => {

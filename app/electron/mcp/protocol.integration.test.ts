@@ -25,7 +25,8 @@ import { createMcpServer } from "./server.js";
 import { McpHttpServer } from "./http.js";
 import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import type { ToolContext } from "./tools.js";
+import { TOOLS, toolCatalog, type ToolContext } from "./tools.js";
+import { PROMPTS } from "./prompts.js";
 import type { EngineClient } from "./engine-client.js";
 
 const REPORT = {
@@ -118,15 +119,113 @@ async function connectClient(
 }
 
 describe("MCP protocol handshake (in-memory)", () => {
-	it("initializes and lists every tool by default", async () => {
+	it("lists the read, execute and load tools by default", async () => {
 		const { client, server } = await connectClient();
 		const { tools } = await client.listTools();
 		const names = tools.map((t) => t.name);
 		expect(names).toContain("get_engine_health");
 		expect(names).toContain("get_engine_config");
-		expect(names).toContain("update_engine_config");
 		expect(names).toContain("start_load_run");
 		await server.close();
+	});
+
+	/*
+	 * Writes ship off, and a write tool that cannot succeed does not ship its
+	 * schema either: on a default install that is 28 of the 68 tools, described
+	 * in full to an agent that can only be refused by them.
+	 *
+	 * Asserted from both sides, because only the pair shows the tools are
+	 * *gated* rather than gone - a registration bug that dropped them
+	 * unconditionally would pass the first of these alone.
+	 */
+	it("withholds write tools until write access is enabled", async () => {
+		const off = await connectClient();
+		const offNames = (await off.client.listTools()).tools.map((t) => t.name);
+		const writeNames = TOOLS.filter((t) => t.category === "write").map((t) => t.name);
+		expect(writeNames.length).toBeGreaterThan(20);
+		expect(offNames.filter((n) => writeNames.includes(n))).toEqual([]);
+		// The read/execute surface is untouched by the gate.
+		expect(offNames).toContain("list_collections");
+		await off.server.close();
+
+		const on = await connectClient({ safety: { allowWrites: true } });
+		const onNames = (await on.client.listTools()).tools.map((t) => t.name);
+		expect(writeNames.filter((n) => !onNames.includes(n))).toEqual([]);
+		await on.server.close();
+	});
+
+	/*
+	 * Withholding a write tool took its handler's refusal off the wire with it:
+	 * the SDK rejects a name it never registered before any Vayu code runs, so
+	 * an agent that guessed the name - from its own memory, or from a list it
+	 * fetched while writes were on - got "not found" and nothing to ask the user
+	 * for (#1431). The refusal is the one the handlers return, so the two
+	 * cannot say different things about the same gate.
+	 */
+	it("answers a call to a withheld write tool with the refusal that names the setting", async () => {
+		const { client, server } = await connectClient();
+		const res = (await client.callTool({
+			name: "create_collection",
+			arguments: { name: "API" },
+		})) as { content: Array<{ text: string }>; isError?: boolean };
+
+		expect(res.isError).toBe(true);
+		expect(res.content[0].text).toMatch(/write access in Vayu Settings/i);
+		expect(res.content[0].text).not.toMatch(/not found/i);
+		await server.close();
+	});
+
+	/*
+	 * The wrapper stands in front of the SDK's dispatch, so the other three
+	 * categories must reach it unchanged - including a name that genuinely does
+	 * not exist, which still gets the SDK's answer.
+	 */
+	it("leaves every other name to the SDK's dispatch while writes are off", async () => {
+		const { client, server } = await connectClient();
+		const ok = (await client.callTool({ name: "get_engine_health", arguments: {} })) as {
+			content: Array<{ text: string }>;
+			isError?: boolean;
+		};
+		expect(ok.isError).toBeFalsy();
+		expect(ok.content[0].text).toContain("9.9.9");
+
+		const unknown = (await client.callTool({ name: "no_such_tool", arguments: {} })) as {
+			content: Array<{ text: string }>;
+			isError?: boolean;
+		};
+		expect(unknown.isError).toBe(true);
+		expect(unknown.content[0].text).toMatch(/not found/i);
+		await server.close();
+	});
+
+	/*
+	 * A write tool the *user* switched off is unregistered for the other reason,
+	 * and answering it with the write gate would send a user who enabled writes
+	 * back to a tool that is still off. It keeps the disabled-tool answer.
+	 */
+	it("does not claim the write gate for a write tool switched off in Settings", async () => {
+		const { client, server } = await connectClient({
+			safety: { disabledTools: ["create_collection"] },
+		});
+		const res = (await client.callTool({
+			name: "create_collection",
+			arguments: { name: "API" },
+		})) as { content: Array<{ text: string }>; isError?: boolean };
+
+		expect(res.isError).toBe(true);
+		expect(res.content[0].text).not.toMatch(/write access in Vayu Settings/i);
+		await server.close();
+	});
+
+	/*
+	 * Settings lists every tool with a per-tool switch, so the catalog behind it
+	 * must stay whole however the write toggle is set - otherwise turning writes
+	 * off would silently empty the half of that list a user turns them back on
+	 * from. `main.ts` also validates saved `disabledTools` names against it.
+	 */
+	it("keeps the Settings tool catalog complete regardless of the write toggle", () => {
+		expect(toolCatalog().length).toBe(TOOLS.length);
+		expect(toolCatalog().some((t) => t.category === "write")).toBe(true);
 	});
 
 	it("exposes Vayu's identity to the client (title / description / website + instructions)", async () => {
@@ -138,6 +237,54 @@ describe("MCP protocol handshake (in-memory)", () => {
 		expect(info?.websiteUrl).toContain("github.com/athrvk/vayu");
 		expect(client.getInstructions()).toMatch(/API testing and load-testing/i);
 		await server.close();
+	});
+
+	/*
+	 * The instructions carry the cross-cutting facts - the capability taxonomy,
+	 * the allowlist, the two gates - and deliberately name no tool. A roster
+	 * here is a list of things that may not exist: the user can disable any
+	 * tool individually, and this text used to end by telling the reader to
+	 * trust `tools/list` over itself, which is the shape of the bug rather than
+	 * a fix for it. Each tool's own description ships only when the tool does.
+	 *
+	 * `compare_runs` is exempt because it is also a prompt name, and the
+	 * instructions legitimately point at the prompts - which nothing disables.
+	 */
+	it("does not name individual tools in the server instructions", async () => {
+		const { client, server } = await connectClient();
+		const instructions = client.getInstructions() ?? "";
+		// The guard is only meaningful if it read both sides of the comparison.
+		expect(instructions.length).toBeGreaterThan(100);
+		expect(TOOLS.length).toBeGreaterThan(20);
+
+		const promptNames = new Set(PROMPTS.map((p) => p.name));
+		const named = TOOLS.map((t) => t.name)
+			.filter((name) => !promptNames.has(name))
+			.filter((name) => new RegExp(`\\b${name}\\b`).test(instructions));
+
+		expect(named).toEqual([]);
+		await server.close();
+	});
+
+	/*
+	 * The one cross-cutting fact a withheld tool's own description can no longer
+	 * carry, because the description ships with the tool. It names the setting
+	 * and no tool, and it ships only in the sessions it is true of - the server
+	 * is rebuilt per request, so it cannot go stale against `tools/list`.
+	 */
+	it("states the write gate in the instructions only while writes are off", async () => {
+		const off = await connectClient();
+		expect(off.client.getInstructions() ?? "").toMatch(
+			/write access is off in this session[\s\S]*Vayu Settings → MCP/i
+		);
+		await off.server.close();
+
+		const on = await connectClient({ safety: { allowWrites: true } });
+		const onInstructions = on.client.getInstructions() ?? "";
+		expect(onInstructions).not.toMatch(/write access is off/i);
+		// The rest of the text is one string either way.
+		expect(onInstructions).toMatch(/grouped by capability/i);
+		await on.server.close();
 	});
 
 	it("exposes tool annotations (read-only / destructive hints + title)", async () => {

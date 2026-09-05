@@ -42,7 +42,7 @@ We are committed to providing a friendly, safe, and welcoming environment. Pleas
 ### Prerequisites
 
 - **C++ Engine**: CMake 3.25+, C++20 compiler, vcpkg
-- **Electron App**: Node.js ≥ 20 LTS, pnpm ≥ 8
+- **Electron App**: Node.js ≥ 22 LTS, pnpm ≥ 11
 
 ### Quick Start
 

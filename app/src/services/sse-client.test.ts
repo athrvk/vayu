@@ -5,13 +5,14 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
 	mapSseMetrics,
 	parseMonitorEvent,
 	parsePlanEvent,
 	parseStepEvent,
 	parseTerminalStatus,
+	SSEClient,
 } from "./sse-client";
 
 describe("mapSseMetrics", () => {
@@ -256,5 +257,137 @@ describe("parseTerminalStatus", () => {
 		]) {
 			expect(parseTerminalStatus(raw), JSON.stringify(raw)).toBeNull();
 		}
+	});
+});
+
+/**
+ * Who is told when a second run takes the client (issue #1417).
+ *
+ * The class itself rather than a service, because this is the rule the two run
+ * services now share: `connect` displaces whoever held the socket, and only a
+ * displacement invokes `onSuperseded`. A subscriber that hangs up on itself,
+ * or whose run ended, is not superseded by the next run to start - and calling
+ * it there would run a terminal path twice.
+ */
+class MockEventSource {
+	static instances: MockEventSource[] = [];
+	static CLOSED = 2;
+	readyState = 1;
+	listeners = new Map<string, (event: MessageEvent) => void>();
+	constructor(readonly url: string) {
+		MockEventSource.instances.push(this);
+	}
+	addEventListener(type: string, fn: (event: MessageEvent) => void): void {
+		this.listeners.set(type, fn);
+	}
+	close(): void {
+		this.readyState = MockEventSource.CLOSED;
+	}
+	/** Deliver the engine's terminal frame, the way a finished run does. */
+	complete(status: string): void {
+		this.listeners.get("complete")?.({ data: JSON.stringify({ status }) } as MessageEvent);
+	}
+}
+
+/** The four lifecycle handlers, named so a case can assert on one of them. */
+function handlers() {
+	return { onMessage: vi.fn(), onError: vi.fn(), onClose: vi.fn(), onSuperseded: vi.fn() };
+}
+
+function attach(client: SSEClient, runId: string, h: ReturnType<typeof handlers>): void {
+	client.connect(
+		runId,
+		h.onMessage,
+		h.onError,
+		h.onClose,
+		undefined,
+		undefined,
+		undefined,
+		h.onSuperseded
+	);
+}
+
+describe("SSEClient - the hand-off when a run is displaced", () => {
+	beforeEach(() => {
+		MockEventSource.instances = [];
+		vi.stubGlobal("EventSource", MockEventSource);
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	/*
+	 * Mutation check: drop the `supersede()` call at the top of `connect` (the
+	 * bare `disconnect()` this replaced) and the first expectation reddens -
+	 * which is exactly the bug, a socket closed with nobody told.
+	 */
+	it("tells the displaced subscriber once, and never through onClose", () => {
+		const client = new SSEClient();
+		const first = handlers();
+		const second = handlers();
+
+		attach(client, "run_1", first);
+		attach(client, "run_2", second);
+
+		expect(first.onSuperseded).toHaveBeenCalledTimes(1);
+		// A close means the run ended and the report is worth fetching. A
+		// takeover means neither, so the two must not share a handler.
+		expect(first.onClose).not.toHaveBeenCalled();
+		expect(first.onError).not.toHaveBeenCalled();
+		// The new subscriber holds the client; nothing has displaced it.
+		expect(second.onSuperseded).not.toHaveBeenCalled();
+		expect(MockEventSource.instances[0]?.readyState).toBe(MockEventSource.CLOSED);
+	});
+
+	it("displaces before the new stream is opened", () => {
+		const client = new SSEClient();
+		const first = handlers();
+		/** How many sockets existed when the displaced subscriber was told. */
+		let socketsAtHandOff = -1;
+		first.onSuperseded.mockImplementation(() => {
+			socketsAtHandOff = MockEventSource.instances.length;
+		});
+
+		attach(client, "run_1", first);
+		attach(client, "run_2", handlers());
+
+		// One: the run being displaced. The replacement is opened afterwards, so
+		// the displaced service can give up its claims without the new run's
+		// having been taken yet.
+		expect(socketsAtHandOff).toBe(1);
+	});
+
+	it("supersedes nobody after a subscriber disconnects itself", () => {
+		const client = new SSEClient();
+		const first = handlers();
+
+		attach(client, "run_1", first);
+		client.disconnect();
+		attach(client, "run_2", handlers());
+
+		expect(first.onSuperseded).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * The run ended on its own, so its terminal path already ran. Mutation
+	 * check: stop clearing the handler in `disconnect` and this reddens, with a
+	 * finished run being told it was superseded by the next one to start.
+	 */
+	it("supersedes nobody after the stream ended with the engine's frame", () => {
+		const client = new SSEClient();
+		const first = handlers();
+
+		attach(client, "run_1", first);
+		MockEventSource.instances[0]?.complete("Completed");
+		expect(first.onClose).toHaveBeenCalledWith("Completed");
+
+		attach(client, "run_2", handlers());
+		expect(first.onSuperseded).not.toHaveBeenCalled();
+	});
+
+	it("accepts a subscriber that passes no supersede handler at all", () => {
+		const client = new SSEClient();
+		client.connect("run_1", vi.fn(), vi.fn(), vi.fn());
+		expect(() => client.connect("run_2", vi.fn(), vi.fn(), vi.fn())).not.toThrow();
 	});
 });

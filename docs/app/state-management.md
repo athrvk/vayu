@@ -1786,6 +1786,24 @@ from, since a mock's record dies with its listener. Both are what
 All three lists are invalidated on every `service` event rather than one per
 kind, because the entity is deliberately one family: the drawer and the Dock's
 count ask "what is listening", not "which kind".
+**One field on that event is not about the cache at all.** `startedRun` rides
+the `run` event of `start_load_run` and `run_collection` and names the run those
+tools just created, plus which of the two run services owns its stream
+(`{runId, kind}`, issue #1419). `useRunWatchers()` - registered once in
+`App.tsx`, beside `useMcpDataInvalidation()` - reads it and calls
+`loadTestService.startMonitoring` or `scenarioRunService.startMonitoring`, which
+is the same path the dashboard and the Run Collection dialog take, so the wake
+lock, the OS progress bar and the finished notification all begin when an
+agent's run does rather than when someone opens its tab. For a load run it
+points `dashboard-store` at the run first, exactly as those surfaces do:
+`startMonitoring` states that its caller has registered the run, and a store
+left unpointed would collect the ticks of a run it does not name. It carries no
+config - the agent's arguments are the engine's business, and a run with no
+declared duration is one whose bar has no denominator yet. Every other `run`
+event names a run that already exists (a stop, a baseline change, a delete) and
+starts no watcher; `run_collection_smoke` sends its requests one at a time and
+has no run to watch at all.
+
 The entity list is duplicated across the process boundary
 (`MCP_DATA_ENTITIES` in `electron/mcp/tools.ts`, `McpDataEntity` in
 `types/domain.ts`) because production code under `electron/` cannot import from

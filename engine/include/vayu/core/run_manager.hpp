@@ -291,7 +291,15 @@ struct RunContext {
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
     nlohmann::json config;
+    // Wall-clock stamp of the run's start. Its remaining job is the sentinel
+    // for "this run has started" - every duration is measured on the monotonic
+    // base below, because wall time can step under a running load test.
     int64_t start_time_ms = 0;
+    // Monotonic base for every elapsed figure the run reports: the final
+    // report's duration and rates, each persisted tick's elapsed_seconds, the
+    // live SSE tick, and when a mid-run auth refresh landed. Meaningful only
+    // against another reading of the same clock.
+    int64_t start_steady_ms = 0;
 
     // Test script for deferred validation
     std::string test_script;

@@ -222,6 +222,10 @@ jobs:
               - 'docs/app/api-integration.md'
               - 'docs/app/data-driven-runs.md'
               - 'docs/app/COMPONENTS.md'
+              - 'docs/index.md'
+              - 'docs/engine/mcp.md'
+              - 'docs/compare/vayu-vs-bruno.md'
+              - 'docs/compare/vayu-vs-postman.md'
             # The files under `engine/` that a suite in `app/` reads: engine
             # headers and sources a parity guard pins a value against, and the
             # fixtures a conformance guard replays. Same defect as the pages
@@ -654,7 +658,7 @@ jobs:
     # headroom is for that shape of change; nothing routine goes near it.
     timeout-minutes: 90
     env:
-      VCPKG_COMMIT: '114d9fe62faf35856b45cf55cb93b57028a45d63'
+      VCPKG_COMMIT: '04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
 

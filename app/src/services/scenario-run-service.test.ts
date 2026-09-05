@@ -53,7 +53,10 @@ vi.mock("@/stores", () => ({
 		}),
 	},
 }));
-vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn() } }));
+// `disconnect` is here because `startMonitoring` ends the run it replaces
+// through it (#1417); the cross-service hand-off itself runs against the real
+// client in `run-supersession.test.ts`, a mock having no takeover to observe.
+vi.mock("./sse-client", () => ({ sseClient: { connect: vi.fn(), disconnect: vi.fn() } }));
 vi.mock("./api", () => ({ apiService: { getRunReport: vi.fn() } }));
 const { mockWakeLockHold, mockWakeLockRelease } = vi.hoisted(() => ({
 	mockWakeLockHold: vi.fn(),
@@ -233,6 +236,9 @@ describe("ScenarioRunService", () => {
 			// No monitor handler: a collection run scrapes no vitals. The plan
 			// handler after it is what makes the run's progress a fraction.
 			undefined,
+			expect.any(Function),
+			// And last, the hand-off: how this service hears that a load run
+			// took the shared client from it (#1417).
 			expect.any(Function)
 		);
 	});
@@ -606,6 +612,42 @@ describe("ScenarioRunService", () => {
 				"run_23"
 			);
 			expect(mockProgressClear).not.toHaveBeenCalled();
+		});
+
+		/*
+		 * #1415's third criterion, and the half that was still missing after the
+		 * frame's status started choosing the notification kind: a run that
+		 * fails on the engine ends through `handleClose`, not `handleError`, so
+		 * until the failed frame painted the bar itself the Windows taskbar
+		 * error state was never reached by a real failure - the close cleared
+		 * the bar instead.
+		 *
+		 * Mutation check: drop the `status === "Failed"` branch in `handleClose`
+		 * and this reddens twice over - no `fail`, and a `clear` that wipes the
+		 * bar the criterion is about.
+		 */
+		it("says failed when the engine's frame says the run failed", async () => {
+			scenarioRunService.startMonitoring("run_24");
+
+			await closeStream("Failed");
+
+			expect(mockProgressFail).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_24"
+			);
+			expect(mockProgressClear).not.toHaveBeenCalled();
+		});
+
+		it("clears rather than reddens when the frame says the run completed", async () => {
+			scenarioRunService.startMonitoring("run_25");
+
+			await closeStream("Completed");
+
+			expect(mockProgressFail).not.toHaveBeenCalled();
+			expect(mockProgressClear).toHaveBeenCalledWith(
+				RUN_PROGRESS_KEYS.collectionRun,
+				"run_25"
+			);
 		});
 	});
 

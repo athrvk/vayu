@@ -105,4 +105,12 @@ race:crypto/hashtable/hashtable.c
 # runs of that test raced without the line, 10 of 10 passed with it, and the
 # report was the stack above with the same libstdc++ and httplib frames. The
 # entry still earns its place on the version the engine now pins.
+#
+# Re-measured again on the move to cpp-httplib 0.54.1 (2026-09-05), the same
+# way and for the same reason: 10 of 10 runs raced without the line, 10 of 10
+# passed with it, and the report was again the stack above, frame for frame -
+# 0.54.1 rewrote `process_and_close_socket` around a `serve_guarded` wrapper
+# but left `parse_status_line` alone. This is the reading to repeat on the
+# next baseline move; it is not a standing pass, and the entry goes the day a
+# run without it comes back clean.
 race:std::ctype<char>::narrow

@@ -9,8 +9,10 @@ This document outlines how to build the Vayu Manager Electron application from s
 
 ## Prerequisites
 
-- **Node.js**: Version ≥ 20 LTS
-- **pnpm**: Version ≥ 8 (package manager)
+- **Node.js**: Version ≥ 22 LTS (`concurrently` 10, which `pnpm type-check`
+  runs, declares `node >= 22`; the 20 line is end-of-life)
+- **pnpm**: Version ≥ 11 (package manager; the version CI pins, and the one
+  that reads `minimumReleaseAge` from `pnpm-workspace.yaml`)
 - **Vayu Engine**: Must be built first (see `docs/engine/building.md`)
 
 ## Quick Start
@@ -206,27 +208,40 @@ them:
 
 ## TypeScript Configuration
 
-### Two compilers, one on purpose
+### One compiler runs, two are installed
 
-`pnpm type-check` runs the **native TypeScript 7** compiler; `pnpm build`,
-`pnpm electron:compile` and `pnpm electron:watch` run **TypeScript 5.9**. That
-is a deliberate half-step (#467 Stage 1): 7.x takes the gate, where it is worth
-roughly 6x (31.8s → 4.9s on a cloud runner), while the compiler that *emits*
-the main process stays where it has been, and `typescript-eslint` keeps the 5.x
-it needs - its peer range is `>=4.8.4 <6.1.0`, so a single `typescript@7` would
-break `pnpm lint`, which CI enforces at zero warnings. The full swap waits for
-7.1, which is the release that gives typescript-eslint the stable API.
+Every script that compiles runs the **native TypeScript 7** compiler:
+`pnpm type-check` checks the three projects with it, and `pnpm build`,
+`pnpm electron:compile` and `pnpm electron:watch` emit with it. It is worth
+roughly 6x on the gate (31.8s → 4.9s on a cloud runner).
+
+The emit moved to 7 only after the two compilers were shown to produce the same
+main process: `tsconfig.node.json` built with each in turn differs in **one
+line of one `.d.ts`**, where 7 quotes a string containing `"` with single
+quotes instead of escaping it. All 47 emitted `.js` files are byte-identical.
+Re-run that comparison rather than trusting this sentence if the pinned 7.x
+moves.
+
+`typescript` 5.9 stays installed even though nothing invokes it as a compiler
+any more (#467 Stage 1). Two things still read it by package name:
+`typescript-eslint`, whose peer range is `>=4.8.4 <6.1.0`, so a single
+`typescript@7` would break `pnpm lint`, which CI enforces at zero warnings; and
+`src/hooks/script-typedefs.docs-compile.test.ts`, which drives the Compiler API
+(`ts.createProgram`) to type-check the `pm.*` documentation examples. Stage 2 -
+one `typescript@7`, alias gone - waits for 7.1, the release that gives
+typescript-eslint the stable API.
 
 TypeScript 7 is installed under the alias `tsc7` (`tsc7: npm:typescript@^7`), so
 both packages are present. **Both claim the `tsc` bin, and only one wins
 `node_modules/.bin/tsc`** - so no script may invoke a bare `tsc`. Each names its
-compiler by path (`node node_modules/typescript/bin/tsc`,
-`node node_modules/tsc7/bin/tsc`), because the alternative is letting a package
-manager's bin-conflict resolution decide which compiler emits the code that
-ships. `src/typescript-toolchain.test.ts` fails on a bare `tsc` in any script.
+compiler by path (`node node_modules/tsc7/bin/tsc`), because the alternative is
+letting a package manager's bin-conflict resolution decide which compiler emits
+the code that ships. `src/typescript-toolchain.test.ts` fails on a bare `tsc` in
+any script.
 
-The two compilers are held to identical diagnostics on all three projects - see
-`strict` under the main-process config below for the one place they diverged.
+Both compilers are still held to identical diagnostics on all three projects -
+see `strict` under the main-process config below for the one place they
+diverged, which is also why every config states it out loud.
 
 ### React App (`tsconfig.json`)
 
@@ -325,12 +340,19 @@ is one.** Under `xvfb-run` the app produced a figure once across the runs that
 landed this leg and timed out every other time, each time having come up whole
 - engine listening, MCP up, the renderer fetching config, collections and
 globals from it, inside a second - and then produced no frame, so
-`ready-to-show` never fired and the leg reported `"unavailable"` with that
-output in `note`. The harness's plain window becomes
-showable in the same session every time, and the app's window is frameless.
-Running a window manager in the session changed nothing. #1347 tracks it; the
-Windows and macOS figures are unaffected, as is a Linux desktop, where this has
-not been seen.
+`ready-to-show` never fired. The harness's plain window becomes showable in the
+same session every time, and the app's window comes up hidden. Running a window
+manager in the session changed nothing.
+
+The app no longer hangs on that (#1347): `app/electron/window-reveal.ts` shows
+the window anyway once a first frame has not arrived within 8 seconds, and
+warns why. What that does for this measurement is make the failure fast and
+legible rather than fixable - a launch revealed that way waited out a timer
+instead of painting, so it is not a cold start. The app says which path it took
+(`via` in the startup line) and `measure-app.mjs` reports the leg
+`"unavailable"` naming the count, in seconds rather than after three 90-second
+timeouts. The Windows and macOS figures are unaffected, as is a Linux desktop,
+where this has not been seen.
 
 **The packaged figure is the real cold start.** The workflow builds the
 renderer, compiles the Electron main process, stages the engine binary into
@@ -425,7 +447,7 @@ Key settings in `vite.config.ts`:
 ### Production Dependencies
 
 - **React 19**: UI framework
-- **Electron 28**: Desktop app framework
+- **Electron 44**: Desktop app framework
 - **Zustand**: State management
 - **TanStack Query**: Server state
 - **Radix UI**: Component primitives
@@ -437,10 +459,17 @@ Key settings in `vite.config.ts`:
 
 ### Development Dependencies
 
-- **TypeScript 5.9**: Compilation (`build`, `electron:compile`) and the
-  `typescript-eslint` parser
-- **TypeScript 7** (installed as `tsc7`): the `pnpm type-check` gate - see
-  [Two compilers, one on purpose](#two-compilers-one-on-purpose)
+- **TypeScript 7** (installed as `tsc7`): every compile - the `pnpm type-check`
+  gate and the `build` / `electron:compile` emit - see
+  [One compiler runs, two are installed](#one-compiler-runs-two-are-installed)
+- **TypeScript 5.9**: invoked by nothing; kept for the `typescript-eslint`
+  parser's peer range and for the Compiler API the `pm.*` doc-example test
+  drives
+- **`@types/node` 24**: held at the major Electron's bundled Node is (44 ships
+  Node 24.x), not the newest published. Types ahead of the runtime describe
+  APIs `electron/` can call and the shipped app then does not have, and the
+  main process is the code that consumes them. Bump this when Electron's Node
+  major moves, not when DefinitelyTyped's does
 - **Vite**: Build tool
 - **ESLint 10**: Linting, with `@eslint/js` and `eslint-config-prettier` on
   their own 10.x lines. `eslint:recommended` gained `no-unassigned-vars`,

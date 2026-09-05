@@ -389,7 +389,11 @@ tracking issue.
   reproduces it 10 times out of 10, which is the cheap way to re-measure this
   one, and the way it was re-measured at `dc25029` after the baseline moved to
   cpp-httplib 0.53.1: 8 of 10 runs raced without the entry, 10 of 10 passed
-  with it. What is left is upstream in libstdc++.
+  with it. Re-measured the same way on the move to cpp-httplib 0.54.1
+  (2026-09-05): 10 of 10 raced without the entry, 10 of 10 passed with it, the
+  report frame for frame the same - that release rewrote
+  `process_and_close_socket` around a `serve_guarded` wrapper and left
+  `parse_status_line` alone. What is left is upstream in libstdc++.
 
 The matrix has therefore paid for itself twice over: two engine-side defects
 found and fixed, one of them a race the ordinary suite is structurally unable
@@ -953,7 +957,7 @@ It runs in two places, and both of them can stop a change:
 
 | Where | What it checks | What a difference does |
 |-------|----------------|------------------------|
-| `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **whole** of every staged `engine/{src,include,tests}` source | Refuses the commit |
+| `scripts/pre-commit` (installed by `python build.py --setup`) | The **whole** of every staged `engine/{src,include,tests}` source | Refuses the commit |
 | `Engine formatting`, a job of its own in `.github/workflows/pr-tests.yml` | The **whole tree** under those three roots | Fails CI |
 
 Unlike the two clang-tidy gates below, these two agree on scope, because
@@ -1010,7 +1014,7 @@ clang-tidy runs in two places, and both of them can stop a change:
 
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
-| `scripts/pre-commit` (install with `bash scripts/install-git-hooks.sh`) | The **whole** of every staged `.c/.cpp/.h/.hpp` file | Refuses the commit |
+| `scripts/pre-commit` (installed by `python build.py --setup`) | The **whole** of every staged `.c/.cpp/.h/.hpp` file | Refuses the commit |
 | `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **whole** of every changed `engine/{src,include,tests}` **translation unit**, on Linux and Windows alike. Headers are never direct inputs | Fails CI |
 | `Engine tidy scan` (`.github/workflows/engine-tidy-scan.yml`), **weekly** plus `workflow_dispatch` | The **whole tree**, on Linux and Windows both. Not a pull-request gate - the denominator no per-change gate can give | Fails the run |
 

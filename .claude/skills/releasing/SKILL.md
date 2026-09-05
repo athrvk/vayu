@@ -17,8 +17,11 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    with curl, openssl and sqlite3 each missing point releases, purely because
    the pin had gone unexamined since June. A bump is `builtin-baseline` in
    `engine/vcpkg.json` **and** `VCPKG_COMMIT` in `release.yml`, `pr-tests.yml`,
-   `codeql.yml` and `cache-warm.yml` - one SHA in five places, and the `guard`
-   job in `cache-warm.yml` fails the build if any of them drift. Land a bump as
+   `codeql.yml`, `cache-warm.yml`, `sanitizers.yml`, `engine-tidy-scan.yml`
+   and `perf-measure.yml` - one SHA in eight places, and the `guard` job in
+   `cache-warm.yml` fails the build if any of them drift. Read that job's
+   `files=(...)` list rather than this sentence: it is the authority, and it
+   has grown twice. Land a bump as
    **its own PR before the release commit**, never inside it: a dependency
    change and a version bump that break one platform together cannot be told
    apart. Before merging a bump, run it against a **deliberately stale clone**
@@ -33,6 +36,17 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    /tmp/stale-vcpkg/bootstrap-vcpkg.sh -disableMetrics
    VCPKG_ROOT=/tmp/stale-vcpkg python build.py -e     # must self-heal, then build
    ```
+
+   Expect the bump to be **work, not a rubber stamp**. `inbox.cpp` mirrors
+   cpp-httplib's private `Server::process_and_close_socket` behind a
+   `static_assert` on `CPPHTTPLIB_VERSION`, so any cpp-httplib move fails the
+   build until the mirror is re-read against the new source and the assert
+   updated (#1283 tracks retiring it; check first whether the release finally
+   carries a public hook that can rewrite `Request::path` before routing). And
+   `sanitizers/tsan.supp`'s `race:std::ctype<char>::narrow` entry is re-measured
+   on every cpp-httplib move, not carried forward - 10 runs of
+   `TransportPolicyPaths.LoadRunTraversesManualProxy` with the line and 10
+   without, recorded in that file and in `docs/engine/building.md`.
 3. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
    Changelog format, see below).
 4. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes
@@ -84,21 +98,80 @@ page (there is no `CHANGELOG.md` in the repo). Write them in
 across versions:
 
 - **Heading:** `## [X.Y.Z] - YYYY-MM-DD` (ISO date).
-- **Lead paragraph:** 2-4 sentences naming the release theme and where the change
-  concentrates (engine vs app), e.g. "The OAuth 2.0 release ... the bulk of the
-  change is new C++ in the engine and new React/Electron surface in the app."
+- **Lead paragraph:** what to read before updating, then a plain list of the
+  headline changes. Two to four sentences. Do **not** name a "theme" and argue
+  for it: "The **desktop integration release**. Until now Vayu was a window you
+  had to be looking at ..." is a thesis statement, not an introduction.
 - **Grouped sections, in this order, omitting any that are empty:** `### Added`,
   `### Changed`, `### Fixed`. Use `### Security` / `### Removed` /
   `### Deprecated` only when they apply.
-- **Bullets:** lead with a bold headline, then the detail, e.g. `- **OAuth 2.0
-  auth mode.** A new \`oauth2\` mode in the request Auth panel and Collection
-  Detail ...`. Prefer user-facing wording; reference files/endpoints only when
-  they aid a contributor.
 - **Fold internal churn** (doc hygiene, refactors with no user-visible effect)
   into a single summary bullet rather than listing each commit.
 - **Compare link footer:** `[X.Y.Z]: https://github.com/athrvk/vayu/compare/vPREV...vX.Y.Z`.
 - **Version choice:** patch = fixes only; minor = new user-facing feature; major
   = breaking change (still `0.x`, so reserve major for a stable milestone).
+
+### How the entries are written
+
+The 0.26.0 notes were drafted from `git log` and came out at 3,880 words of
+near-identical 80-to-120-word bullets, each re-narrating its commit message.
+Rewritten to 1,890 without losing a fact. Two of the rules above were the cause
+("lead with a bold headline, then the detail" made every bullet the same shape;
+"naming the release theme" produced the thesis lead), so they are gone. What
+replaces them:
+
+- **Lead with the change, not the history of the defect.** "Every terminal state
+  took the same close path, which said 'finished' without reading the status,
+  so ..." is commit-message material. "A run that failed was reported as
+  finished, so you got no failure notification and no error state on the
+  taskbar" is the entry. Symptom, what it broke, one clause on the fix.
+- **The test for a name or number: would the reader type or see this string in
+  the product?** `X-Vayu-Request-Id`, `Accept-Encoding`, `stop_run` and
+  `Keep awake during runs` stay - a user searches for or types those. `libcurl`,
+  `allowWrites`, `tools/list`, `GET /request-defaults`, "completion frame",
+  "the SSE client" and `7ch` do not. Settings, tabs, dialogs and buttons are
+  nouns the user has; services, sockets, streams and frames are not.
+- **Translate a clock, a timer or a thread into what it did to the numbers.**
+  Not "measured on the monotonic clock ... an NTP step during a run", but "if
+  the clock changed during a run (a time sync, for instance), the reported
+  duration was wrong, and with it the RPS and throughput figures".
+- **A number earns its place only against something the reader has.** Keep
+  "below ~500 RPS" and "about 12,100 of the 30,500 tokens in the tool list".
+  Cut "`7ch` to `5ch`" and "pairs ~3.1 ms apart instead of singles 2.5 ms
+  apart" - nobody has measured a column in `ch`.
+- **Bold marks the entries a reader must find**, not every bullet. Breaking
+  changes and the four or five features people will search for. A one-line fix
+  is plain text: "The application menu is reachable on Windows and Linux."
+- **Vary the length.** Most entries are one or two sentences; some are half a
+  line. An entry needing three sentences should be rare enough to notice.
+- **Say "fixed" when the fix has no user-facing shape.** Describing the
+  mechanism invites the reader to evaluate something they cannot see.
+- **Do not argue for a default or a threshold.** "Off by default." not "Off by
+  default, because a machine that refuses to sleep is your battery and not the
+  app's decision." The reasoning belongs in the PR.
+- **Cut the tail that restates the sentence's own premise** - "generated per
+  transfer rather than per save", "rather than joining it". Keep `rather than`
+  only where the contrast tells the reader something they act on.
+- **No editorial asides about the reader**: "which is exactly the case where you
+  are not looking at the window", "worth calling out". They carry no fact.
+- **Tests, guards and conformance checks are never release-note material.** A
+  test proves the change to the maintainer; the reader needs the change.
+- **One mechanism sentence at most, and only if a contributor would act on it.**
+
+**A change inside the same unreleased window is not a change.** Notes compare
+against the last tag, not against last week's branch. 0.26.0 nearly shipped
+"the keep-awake prompt triggers at ten minutes, not five" - both commits were
+in the same window, so no user ever saw five.
+
+**Re-read the draft against the diff before committing it.** Long re-narrated
+bullets make it easy for two entries to describe one thing differently without
+either looking wrong. 0.26.0's draft carried two such errors: the wake-lock
+threshold said five in one section and ten in another, and an MCP entry claimed
+a refusal "stays" when withholding the tools had taken it off the wire.
+
+**Re-sync the notes on every rebase, not just the branch.** A release PR that
+sits while master moves goes stale in content, not only in commits: each
+re-sync of 0.26.0 added entries, and one caught a factual error.
 
 **Release notes are published from a file - no manual paste.** On tag push,
 `.github/workflows/release.yml` reads `.github/release-notes/<tag>.md` and sets
@@ -108,11 +181,15 @@ automatically generated PR-based notes (`generate_release_notes`) so a release i
 never published empty.
 
 **Authoring the notes (Claude's job before tagging).** Derive them from
-`git log vPREV..vX.Y.Z`; read a recent entry to match voice. Because the workflow
-resolves the file from the tagged commit's tree, the notes file must be committed
-**before** the tag is pushed (i.e. it rides along in the release PR). To correct
-a published release's notes after the fact, edit the file, then either re-run the
-release workflow or update the release body by hand.
+`git log vPREV..vX.Y.Z`, then rewrite - a first pass off the log reliably comes
+out as one re-narrated commit message per bullet, which is what the rules above
+exist to catch. Match `v0.26.0.md`, the first file written to them; **`v0.25.0`
+and earlier are the pattern being corrected, not the voice to copy.** Because
+the workflow resolves the file from the tagged commit's tree, the notes file
+must be committed **before** the tag is pushed (i.e. it rides along in the
+release PR). To correct a published release's notes after the fact, edit the
+file, then either re-run the release workflow or update the release body by
+hand.
 
 ## `install.sh` (repo root) installs *and updates*, on macOS and Linux
 

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildSchema } from "graphql";
+import { buildSchema, GraphQLInt, GraphQLObjectType, GraphQLSchema, GraphQLString } from "graphql";
 import { fixtureSchema } from "@/test/graphql-schema-fixture";
 import {
 	branchRootTypeName,
@@ -116,6 +116,40 @@ describe("childNodes", () => {
 			"ranking",
 			"tags",
 		]);
+	});
+
+	it("reads a default the pre-17 way too, so one file cannot call it absent and another present", () => {
+		// A schema built in code can still set the runtime `defaultValue` that
+		// SDL and introspection stopped populating in graphql 17, and graphql's
+		// own `isRequiredArgument` - which `insert-skeleton.ts` asks - counts it.
+		// Reading only `default` here would print no default for an argument the
+		// insertion path is meanwhile leaving out as already answered.
+		const inCode = new GraphQLSchema({
+			query: new GraphQLObjectType({
+				name: "Query",
+				fields: {
+					report: {
+						type: GraphQLString,
+						args: { range: { type: GraphQLInt, defaultValue: 7 } },
+					},
+				},
+			}),
+		});
+		const queryBranch = schemaBranches(inCode).find((b) => b.branch === "query")!;
+		const report = childNodes(inCode, queryBranch).find((c) => c.name === "report")!;
+
+		expect(report.signature).toBe("(range: Int = 7): String");
+		expect(report.args).toEqual([{ name: "range", type: "Int", defaultValue: "7" }]);
+	});
+
+	it("prints an input field's default the same way an argument's is printed", () => {
+		// The two rows are built by different functions and only one of them
+		// used to print through GraphQL: the input field went out as
+		// `= "RELEVANCE"`, quoted by `JSON.stringify` into something the schema
+		// would reject, while the identically-declared argument read `= RELEVANCE`.
+		const filter = childNamed(branch("types"), "PostFilter");
+		const ranking = childNamed(filter, "ranking");
+		expect(ranking.signature).toBe(": Ranking = RELEVANCE");
 	});
 
 	it("expands a union into its members, under the routes that reach it", () => {

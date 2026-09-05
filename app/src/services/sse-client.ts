@@ -200,6 +200,14 @@ export function parseTerminalStatus(raw: string): SSETerminalStatus {
 		return null;
 	}
 }
+/**
+ * Another run took this client (issue #1417).
+ *
+ * Not a variant of {@link SSECloseHandler}: a close says the run ended and the
+ * subscriber converges on the stored report, where this says only that nobody
+ * is watching the run any more. The run itself is still going in the engine.
+ */
+export type SSESupersededHandler = () => void;
 /** One step execution of a scenario run, from the `step` event. */
 export type SSEStepHandler = (step: ScenarioStepEvent) => void;
 /** The size a collection run resolved to, from its opening `plan` event. */
@@ -209,6 +217,17 @@ export type SSEMonitorHandler = (sample: MonitorSample) => void;
 
 export class SSEClient {
 	private eventSource: EventSource | null = null;
+
+	/**
+	 * How to tell the current subscriber that another run took the client
+	 * (issue #1417), for as long as it is the current one.
+	 *
+	 * The only handler this class holds as state. The rest live as closures on
+	 * the `EventSource` they were registered against, which is exactly why one
+	 * is needed here: a displaced subscriber's closures go with the socket that
+	 * is being closed, so there would be nothing left to call.
+	 */
+	private onSuperseded: SSESupersededHandler | null = null;
 
 	// Current metrics state (reset on each connect)
 	private currentMetrics: LoadTestMetrics = this.createEmptyMetrics();
@@ -248,6 +267,12 @@ export class SSEClient {
 	 * about the events it has no use for rather than passing handlers it will
 	 * not read: a load run emits no steps and no plan, and only a run
 	 * configured with a `monitor` block emits scrapes.
+	 *
+	 * One client for both run types also means this call *takes* the client
+	 * from whoever held it, and `onSuperseded` is how that subscriber hears
+	 * about it (issue #1417). It runs before the new stream is opened, so the
+	 * displaced run has given up everything it held by the time the new one
+	 * starts taking anything.
 	 */
 	connect(
 		runId: string,
@@ -256,10 +281,13 @@ export class SSEClient {
 		onClose: SSECloseHandler,
 		onStep?: SSEStepHandler,
 		onMonitor?: SSEMonitorHandler,
-		onPlan?: SSEPlanHandler
+		onPlan?: SSEPlanHandler,
+		onSuperseded?: SSESupersededHandler
 	): void {
-		// Close existing connection
-		this.disconnect();
+		// Close whatever is attached, and tell its owner it was displaced -
+		// which `disconnect()` deliberately does not do, because a subscriber
+		// that hangs up on itself is not superseded by anyone.
+		this.supersede();
 
 		// Reset metrics state for new connection
 		this.currentMetrics = this.createEmptyMetrics();
@@ -270,6 +298,10 @@ export class SSEClient {
 
 		try {
 			this.eventSource = new EventSource(url);
+			// Recorded only once there is a stream to be displaced from. A
+			// caller whose connect threw is told by `onError` below and holds
+			// nothing, so a later connect has nobody to supersede.
+			this.onSuperseded = onSuperseded ?? null;
 
 			// Handle metrics event - unified format from both endpoints
 			this.eventSource.addEventListener("metrics", (event) => {
@@ -377,11 +409,32 @@ export class SSEClient {
 		}
 	}
 
+	/**
+	 * Close the stream. The subscriber is told nothing: every caller of this is
+	 * either the subscriber itself hanging up (`stopMonitoring`) or a terminal
+	 * frame this client is about to report through `onClose`.
+	 */
 	disconnect(): void {
+		// Dropped with the socket it belongs to, so a later `connect` cannot
+		// supersede a subscriber that already let go.
+		this.onSuperseded = null;
 		if (this.eventSource) {
 			this.eventSource.close();
 			this.eventSource = null;
 		}
+	}
+
+	/**
+	 * Close the stream on behalf of a *new* subscriber, and tell the old one.
+	 *
+	 * The handler is cleared before it is invoked, not after: it fires once per
+	 * displaced subscriber even if the handler itself reaches back into this
+	 * client, and a subscriber that already hung up has none to fire.
+	 */
+	private supersede(): void {
+		const displaced = this.onSuperseded;
+		this.disconnect();
+		displaced?.();
 	}
 
 	isConnected(): boolean {

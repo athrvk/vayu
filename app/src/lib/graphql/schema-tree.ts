@@ -42,6 +42,8 @@
 import {
 	getNamedType,
 	isEnumType,
+	print,
+	valueToLiteral,
 	isInputObjectType,
 	isInterfaceType,
 	isObjectType,
@@ -622,7 +624,11 @@ function inputFieldNode(
 		id: memberNodeId(parentId, owner.name, field.name),
 		kind: "input-field",
 		name: field.name,
-		signature: `: ${field.type.toString()}${field.defaultValue === undefined ? "" : ` = ${JSON.stringify(field.defaultValue)}`}`,
+		signature: typeSuffix({
+			name: field.name,
+			type: field.type.toString(),
+			defaultValue: formatDefault(field),
+		}),
 		returnType: field.type.toString(),
 		args: [],
 		argumentOwner: null,
@@ -712,7 +718,7 @@ function schemaArgument(arg: GraphQLArgument): SchemaArgument {
 	return {
 		name: arg.name,
 		type: arg.type.toString(),
-		defaultValue: arg.defaultValue === undefined ? null : formatDefault(arg.defaultValue),
+		defaultValue: formatDefault(arg),
 	};
 }
 
@@ -728,15 +734,34 @@ function argsSignature(args: readonly SchemaArgument[]): string {
 }
 
 /**
- * A default value as GraphQL would print it.
+ * A default value as GraphQL would print it, or null when the element declares
+ * none.
  *
- * Enum defaults are the reason this is not `JSON.stringify`: the schema holds
- * `RELEVANCE` as the string `"RELEVANCE"`, and quoting it in a signature shows
- * the user something that would not parse if they typed it back.
+ * Read from the literal the schema carries (`default.literal`), not from the
+ * runtime `defaultValue`: since graphql 17 anything built from SDL or from an
+ * endpoint's introspection stores its default as that literal and leaves
+ * `defaultValue` undefined, so reading the old field showed every default as
+ * absent. Printing the literal also retires the guess the previous formatter
+ * had to make - it took every string bare so that an enum default read as
+ * `RELEVANCE` rather than `"RELEVANCE"`, which meant a genuine `String`
+ * default printed as something the user could not type back. The literal
+ * already carries that distinction.
+ *
+ * `default.value` is the other half of graphql's union, and `defaultValue` the
+ * pre-17 spelling of the same thing; a schema built in code can still set
+ * either, and graphql's own `isRequiredArgument` reads both, so a row that
+ * skipped one would call a defaulted argument required in one file and
+ * optional in the next. `valueToLiteral` renders a runtime value, and answers
+ * undefined for a value the type cannot hold - a default worth omitting rather
+ * than printing wrong.
  */
-function formatDefault(value: unknown): string {
-	if (typeof value === "string") return value;
-	return JSON.stringify(value);
+function formatDefault(element: GraphQLArgument | GraphQLInputField): string | null {
+	const declared = element.default;
+	if (declared?.literal !== undefined) return print(declared.literal);
+	const value = declared ? declared.value : element.defaultValue;
+	if (value === undefined) return null;
+	const literal = valueToLiteral(value, element.type);
+	return literal === undefined ? null : print(literal);
 }
 
 /**

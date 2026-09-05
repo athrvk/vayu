@@ -2500,6 +2500,31 @@ export interface McpDataChangedEvent {
 	 * no id until the engine answers.
 	 */
 	mockId?: string;
+	/**
+	 * The run this call just started, and which run service watches it (#1419).
+	 *
+	 * The one field here that is not a scope hint: it says the run is *live*, and
+	 * `useRunWatchers` reads it to attach the matching service's stream to a run
+	 * no surface of this app started - which is what gives an agent's run the OS
+	 * progress indicator, the keep-awake hold and the finished notification it
+	 * would otherwise only get once its dashboard tab was opened.
+	 *
+	 * Present on the `run` event of `start_load_run` and `run_collection` and on
+	 * no other: the remaining `run` tools name a run that already exists.
+	 */
+	startedRun?: StartedRun;
+}
+
+/**
+ * A run an MCP call put in flight, named for the renderer that watches it.
+ *
+ * `kind` is which service owns the stream: a load run and a collection run
+ * publish different frames, so attaching the wrong one is a permanently empty
+ * view rather than a degraded one.
+ */
+export interface StartedRun {
+	runId: string;
+	kind: "load" | "collection";
 }
 
 export interface ScriptCompletion {

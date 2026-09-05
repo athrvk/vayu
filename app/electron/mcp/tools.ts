@@ -160,6 +160,38 @@ export interface McpDataChangedEvent {
 	 * no longer exists. `useStopMockServerMutation` already drops it app-side.
 	 */
 	mockId?: string;
+	/**
+	 * The run this call just started, and which run service watches it (#1419).
+	 *
+	 * The one field on this event that is not a scope hint: it says the run is
+	 * *live*, which is what lets the renderer attach its stream to a run no
+	 * surface of its own started - and with it the OS progress indicator (#1362),
+	 * the keep-awake hold (#1357) and the finished notification (#1358), all of
+	 * which live inside the run services and used to begin only once a dashboard
+	 * was opened.
+	 *
+	 * Present on the `run` event of the two tools that create a run
+	 * (`start_load_run`, `run_collection`) and on no other: `run_collection_smoke`
+	 * sends its requests one at a time and has no run to watch, and the tools that
+	 * stop, re-baseline or delete a run are naming one that already exists. Read
+	 * from the engine's answer rather than from the call's arguments, because a
+	 * run has no id until the engine has given it one - which is also why it
+	 * cannot be spelled the way the hints above are.
+	 */
+	startedRun?: StartedRun;
+}
+
+/**
+ * A run an agent's call put in flight, named for the renderer that watches it.
+ *
+ * `kind` is which service owns the stream rather than what the user would call
+ * the run: a load run and a collection run publish different frames, so
+ * attaching the wrong service is a permanently empty view and not a degraded
+ * one - the fork `RunCollectionDialog` already records for the app's own runs.
+ */
+export interface StartedRun {
+	runId: string;
+	kind: "load" | "collection";
 }
 
 export interface ToolContext {
@@ -199,10 +231,15 @@ export type ToolCategory = "read" | "execute" | "write" | "load";
 export interface McpTool {
 	name: string;
 	description: string;
-	/** Zod raw shape for the tool's arguments (SDK validates + builds JSON Schema). */
-	inputSchema: z.ZodRawShape;
+	/**
+	 * Zod raw shape for the tool's arguments (SDK validates + builds JSON Schema).
+	 * Spelled out rather than written `z.ZodRawShape`, which in Zod 4 is an alias
+	 * for the core `$ZodType` and drops the classic surface - `.description`, the
+	 * per-field text a client renders beside the input - from every field here.
+	 */
+	inputSchema: Record<string, z.ZodType>;
 	/** Optional Zod schema for structured results (SDK validates `structuredContent`). */
-	outputSchema?: z.ZodTypeAny;
+	outputSchema?: z.ZodType;
 	/** MCP tool annotations (title + read-only/destructive/idempotent/open-world hints). */
 	annotations: ToolAnnotations;
 	/**
@@ -805,6 +842,28 @@ function writesDisabled(ctx: ToolContext): ToolResult | null {
 }
 
 /**
+ * The answer for a write tool the toggle withheld from registration, or null
+ * when @p name is not one - a read/execute/load tool, a name no registry entry
+ * carries, or a write tool in a session where writes are on.
+ *
+ * The same refusal the handlers return, because it is the same fact: the tool
+ * exists, the user has not enabled writes, and enabling them is what unblocks
+ * it. Without this the SDK answers an unregistered name with "Tool <name> not
+ * found", which tells an agent nothing it can act on (issue #1431).
+ *
+ * A tool the *user* switched off is deliberately not covered: it is unregistered
+ * for a different reason, and answering it here would tell a user who then
+ * enabled writes to expect a tool that is still off.
+ */
+export function withheldWriteRefusal(name: string, ctx: ToolContext): ToolResult | null {
+	if (ctx.config.allowWrites) return null;
+	if (ctx.config.disabledTools.includes(name)) return null;
+	const tool = findTool(name);
+	if (!tool || tool.category !== "write") return null;
+	return writesDisabled(ctx);
+}
+
+/**
  * The run pinned as baseline for whatever saved request @p targetRunId ran -
  * `compare_runs`'s answer when the caller named no base, tool and prompt alike:
  * the prompt asked for both ids while the tool resolved one, so the same
@@ -878,6 +937,32 @@ const NOTHING_CHANGED = new WeakSet<ToolResult>();
 /** Mark a successful result as having changed nothing (see {@link NOTHING_CHANGED}). */
 function unchanged(result: ToolResult): ToolResult {
 	NOTHING_CHANGED.add(result);
+	return result;
+}
+
+/**
+ * Results that started a run the app should watch (#1419), keyed by the run.
+ *
+ * A WeakMap for the reason {@link NOTHING_CHANGED} is a WeakSet: the result
+ * object is handed to the SDK verbatim (`server.ts`), so a field here would be
+ * serialized to the client as though it were part of the MCP result shape.
+ */
+const STARTED_RUNS = new WeakMap<ToolResult, StartedRun>();
+
+/**
+ * Mark a result as having started `kind`'s run, taking the id from the engine's
+ * own answer (see {@link STARTED_RUNS}).
+ *
+ * An answer without a `runId` marks nothing: the engine's 202 body is what says
+ * a run exists, and a body shaped some other way is handed back to the agent as
+ * it came rather than announced to the renderer as a run to attach to.
+ */
+function watchedRun(result: ToolResult, kind: StartedRun["kind"], started: unknown): ToolResult {
+	const runId =
+		started && typeof started === "object" && !Array.isArray(started)
+			? (started as Record<string, unknown>).runId
+			: undefined;
+	if (typeof runId === "string" && runId !== "") STARTED_RUNS.set(result, { runId, kind });
 	return result;
 }
 
@@ -1066,7 +1151,7 @@ const VARIABLE_INPUT = z.union([
 /** The `variables` argument, described for whichever blob it is writing. */
 function variablesInput(subject: string) {
 	return z
-		.record(VARIABLE_INPUT)
+		.record(z.string(), VARIABLE_INPUT)
 		.optional()
 		.describe(
 			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
@@ -1858,7 +1943,7 @@ const MAX_STREAM_BUDGET_MS = 60_000;
  * a 400 it cannot explain.
  */
 const dataRowInput = z
-	.record(z.unknown())
+	.record(z.string(), z.unknown())
 	.optional()
 	.describe(
 		'One data row to bind, as an object of name/value pairs (e.g. {"id": "7", "email": "a@b.c"}). Every {{data.column}} in the URL, headers, body and auth credentials is substituted against it, and pre-request and post-response scripts read it as pm.iterationData (pm.info.iteration is 0). A column the row does not carry is an error naming the token and the row\'s columns, and nothing is sent. A credential binds before it is encoded, so basic auth base64s the row\'s values; the exception is OAuth 2.0, whose token comes from the token endpoint rather than the request, so a {{data.*}} in an oauth2 config is refused by name. Omit this to send without a row, which leaves {{data.*}} tokens written as they stand.'
@@ -1947,7 +2032,7 @@ const scenarioRecursiveInput = z
  * would be a second copy of a limit the user can raise in Settings.
  */
 const scenarioDataInput = z
-	.array(z.record(z.unknown()))
+	.array(z.record(z.string(), z.unknown()))
 	.optional()
 	.describe(
 		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The row set is not persisted - only its count is recorded on the run - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
@@ -2256,7 +2341,7 @@ const runComparisonSchema = z.object({
 	latency: z.array(metricDeltaSchema),
 	throughput: z.array(metricDeltaSchema),
 	reliability: z.array(metricDeltaSchema),
-	statusCodes: z.record(z.object({ base: z.number(), target: z.number() })),
+	statusCodes: z.record(z.string(), z.object({ base: z.number(), target: z.number() })),
 });
 
 const engineHealthSchema = z
@@ -2841,12 +2926,24 @@ async function startScenarioLoadRun(
 	});
 	if (unconfirmed) return unconfirmed;
 
-	return withCaveat(
-		await callEngine(() => ctx.client.startRun(payload, signal)),
-		`\n\nThe plan is ${plannedSteps} step(s) per iteration. Follow the run with ` +
-			`get_run_report: its \`scenario\` section carries the virtual-user, iteration and ` +
-			`per-step breakdown. Pre-request scripts DO run on a scenario load run - each virtual ` +
-			`user walks the plan the way the design runner does.`
+	// Read here rather than through `callEngine` for the reason the single-target
+	// path states: the run id in the answer is what the renderer watches (#1419).
+	let started: unknown;
+	try {
+		started = await ctx.client.startRun(payload, signal);
+	} catch (err) {
+		return engineErrorResult(err);
+	}
+	return watchedRun(
+		withCaveat(
+			jsonResult(started),
+			`\n\nThe plan is ${plannedSteps} step(s) per iteration. Follow the run with ` +
+				`get_run_report: its \`scenario\` section carries the virtual-user, iteration and ` +
+				`per-step breakdown. Pre-request scripts DO run on a scenario load run - each virtual ` +
+				`user walks the plan the way the design runner does.`
+		),
+		"load",
+		started
 	);
 }
 
@@ -3759,7 +3856,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Check the Vayu engine's status and version. Use this first to confirm Vayu is running.",
+			'Check the Vayu engine\'s status and version. Use this first to confirm Vayu is running. Returns `status`, plus `version` when the engine reports one. An engine answering mid-restart may not return that shape at all; rather than failing, this reports `status: "unknown"` with the engine\'s raw body under `raw`, so a restarting engine reads as unknown rather than as a broken tool. An engine that is not running at all - port closed, nothing listening - comes back as a tool error instead, which is the difference between "starting up" and "not there".',
 		annotations: {
 			title: "Check engine health",
 			readOnlyHint: true,
@@ -3809,7 +3906,8 @@ export const TOOLS: McpTool[] = [
 		name: "list_requests",
 		category: "read",
 		invalidates: [],
-		description: "List the saved requests inside a collection.",
+		description:
+			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. The one exception is a stored column the engine cannot hand back: one that will not parse, or one past its 10 MB field cap, comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small.",
 		annotations: {
 			title: "List requests",
 			readOnlyHint: true,
@@ -4074,7 +4172,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Get the engine's tunable configuration entries (workers, timeouts, connection limits, buffer sizes, etc.), each with its current value, default, type, and allowed range.",
+			"Get the engine's tunable configuration entries (workers, timeouts, connection limits, buffer sizes, etc.), each with its current value, default, type, and allowed range. Read this before update_engine_config rather than assuming a key exists or what it accepts - the ranges here are what that call validates against. The values are what the engine has saved, which is not always what it is running: a key changed since the last restart reads as its new value here while the running engine still uses the old one.",
 		annotations: {
 			title: "Get engine config",
 			readOnlyHint: true,
@@ -4105,7 +4203,10 @@ export const TOOLS: McpTool[] = [
 		inputSchema: {
 			method: z.string().optional().describe("HTTP method (default GET)."),
 			url: z.string().describe("Request URL (may contain {{variables}})."),
-			headers: z.record(z.string()).optional().describe("Request headers as a string map."),
+			headers: z
+				.record(z.string(), z.string())
+				.optional()
+				.describe("Request headers as a string map."),
 			body: z.string().optional().describe("Request body content."),
 			bodyType: z
 				.string()
@@ -4229,7 +4330,7 @@ export const TOOLS: McpTool[] = [
 		},
 		inputSchema: {
 			entries: z
-				.record(z.string())
+				.record(z.string(), z.string())
 				.describe('Map of config key to new value, e.g. { "workers": "8" }.'),
 		},
 		outputSchema: configUpdateSchema,
@@ -5011,7 +5112,10 @@ export const TOOLS: McpTool[] = [
 			name: z.string().describe("Display name for the saved request."),
 			url: z.string().describe("Request URL (may contain {{variables}})."),
 			method: z.string().optional().describe("HTTP method (default GET)."),
-			headers: z.record(z.string()).optional().describe("Headers as a string map."),
+			headers: z
+				.record(z.string(), z.string())
+				.optional()
+				.describe("Headers as a string map."),
 			body: z.string().optional().describe("Request body content."),
 			bodyType: z
 				.string()
@@ -5080,7 +5184,7 @@ export const TOOLS: McpTool[] = [
 			url: z.string().optional().describe("New URL (may contain {{variables}})."),
 			method: z.string().optional().describe("New HTTP method."),
 			headers: z
-				.record(z.string())
+				.record(z.string(), z.string())
 				.optional()
 				.describe("Replacement headers as a string map (replaces the stored list)."),
 			body: z.string().optional().describe("New request body content."),
@@ -5365,7 +5469,10 @@ export const TOOLS: McpTool[] = [
 				.max(599)
 				.optional()
 				.describe("HTTP status the example answers with (default 200)."),
-			headers: z.record(z.string()).optional().describe("Response headers as a string map."),
+			headers: z
+				.record(z.string(), z.string())
+				.optional()
+				.describe("Response headers as a string map."),
 			body: z.string().optional().describe("Response body, stored verbatim."),
 			contentType: z
 				.string()
@@ -5406,7 +5513,7 @@ export const TOOLS: McpTool[] = [
 			name: z.string().optional().describe("New display name."),
 			status: z.number().int().min(100).max(599).optional().describe("New HTTP status."),
 			headers: z
-				.record(z.string())
+				.record(z.string(), z.string())
 				.optional()
 				.describe(
 					"Replacement response headers as a string map (replaces the stored list)."
@@ -6263,18 +6370,22 @@ export const TOOLS: McpTool[] = [
 			if (!started || typeof started !== "object" || Array.isArray(started)) {
 				return jsonResult(started);
 			}
-			return structuredResult({
-				...(started as Record<string, unknown>),
-				plannedSteps,
-				nextStep:
-					`The run executes engine-side. Read it with get_run_report(runId): the ` +
-					`\`scenario\` section carries the iteration and pass/fail/skip totals plus ` +
-					`\`stepsStored\`/\`stepsDropped\`, and \`results\` returns at most 100 step rows ` +
-					`(non-passing steps are kept first). Each row's \`trace\` carries that step's ` +
-					`request and response bodies inline, so a long plan against large responses ` +
-					`makes for a large report - read the totals first and the rows when you need ` +
-					`them. stop_run ends the run early.`,
-			});
+			return watchedRun(
+				structuredResult({
+					...(started as Record<string, unknown>),
+					plannedSteps,
+					nextStep:
+						`The run executes engine-side. Read it with get_run_report(runId): the ` +
+						`\`scenario\` section carries the iteration and pass/fail/skip totals plus ` +
+						`\`stepsStored\`/\`stepsDropped\`, and \`results\` returns at most 100 step rows ` +
+						`(non-passing steps are kept first). Each row's \`trace\` carries that step's ` +
+						`request and response bodies inline, so a long plan against large responses ` +
+						`makes for a large report - read the totals first and the rows when you need ` +
+						`them. stop_run ends the run early.`,
+				}),
+				"collection",
+				started
+			);
 		},
 	},
 	{
@@ -6299,7 +6410,7 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					"Target URL (may contain {{variables}}). Required unless `requestId` names a saved request to load-test; supplying both retargets that request at this URL."
 				),
-			headers: z.record(z.string()).optional(),
+			headers: z.record(z.string(), z.string()).optional(),
 			body: z.string().optional().describe("Request body content."),
 			// The two sibling tools have carried this text since they existed and
 			// this one carried nothing, so an agent load-testing a GraphQL endpoint
@@ -6437,7 +6548,10 @@ export const TOOLS: McpTool[] = [
 					minThroughputRps: z.number().positive().max(1_000_000_000).optional(),
 				})
 				.refine((t) => Object.keys(t).length > 0, {
-					message: "Declare at least one budget, or omit `thresholds` entirely.",
+					// `error`, not zod 3's `message`: v4 still reads the old key as a
+					// deprecated alias, and a deprecated alias is what the next major
+					// takes away.
+					error: "Declare at least one budget, or omit `thresholds` entirely.",
 				})
 				.optional()
 				.describe(
@@ -6550,7 +6664,7 @@ export const TOOLS: McpTool[] = [
 			// limit the user can raise in Settings would refuse payloads the
 			// engine accepts.
 			data: z
-				.array(z.record(z.unknown()))
+				.array(z.record(z.string(), z.unknown()))
 				.optional()
 				.describe(
 					'Data rows for a single-target run, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). One row is bound per request sent, claimed off a run-wide cursor that wraps, so a run longer than the set repeats it. Every {{data.column}} in the URL, headers, body and auth credentials binds per submission, and the post-request script reads that submission\'s row as pm.iterationData. A present-but-empty array is refused by the engine, as is `data` beside a `scenario` block - a collection run states its rows as scenario.data instead. The set is not persisted (only its count is recorded on the run), but a bound value travels in the request that carried it and is stored with the run\'s retained traces.'
@@ -6719,14 +6833,24 @@ export const TOOLS: McpTool[] = [
 			});
 			if (unconfirmed) return unconfirmed;
 
-			return withCaveat(await callEngine(() => ctx.client.startRun(payload, signal)), caveat);
+			// The engine's answer is read here rather than left to `callEngine`,
+			// because the run id it carries is what the renderer attaches its stream
+			// to (#1419) - a run has no id until this call returns.
+			let started: unknown;
+			try {
+				started = await ctx.client.startRun(payload, signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			return watchedRun(withCaveat(jsonResult(started), caveat), "load", started);
 		},
 	},
 	{
 		name: "stop_run",
 		category: "load",
 		invalidates: ["run"],
-		description: "Stop an in-progress load test.",
+		description:
+			"Stop a run that is still in progress: a load test, or a streaming Design-mode send that is holding its connection open. The run ends where it is and keeps what it already recorded rather than being discarded, so get_run_report and get_run_samples still answer for it afterwards. Read the status in the result: a stream that closes within the engine's 5 s settle budget comes back `stopped`, and one that has not settled yet comes back `running` with a message saying the stop was signalled - it is not a failure, and re-reading the run reports the end state. Calling it on a run that has already finished is not an error: the result reports the status it was already in. A run id the engine does not know is an error.",
 		annotations: {
 			title: "Stop run",
 			readOnlyHint: false,
@@ -7033,7 +7157,7 @@ export const TOOLS: McpTool[] = [
 					"Lifetime of a minted access token, in seconds (default 3600). Set it low to make a token expire mid-test."
 				),
 			claims: z
-				.record(z.unknown())
+				.record(z.string(), z.unknown())
 				.optional()
 				.describe(
 					'Extra JWT claims, e.g. {"sub": "alice", "roles": ["admin"]}. iss, iat, exp and jti are always the issuer\'s own; sub, client_id and scope are filled in only when you do not set them.'
@@ -7304,7 +7428,7 @@ export const TOOLS: McpTool[] = [
 						.describe("Status code the inbox answers with (default 200)."),
 					body: z.string().optional().describe("Response body the inbox answers with."),
 					headers: z
-						.record(z.string())
+						.record(z.string(), z.string())
 						.optional()
 						.describe(
 							'Response headers, e.g. {"Content-Type": "application/json"}. Replaces the current set rather than merging into it.'
@@ -7511,7 +7635,7 @@ export const TOOLS: McpTool[] = [
 				.describe("New status code. Omit to leave it unchanged."),
 			body: z.string().optional().describe("New response body. Omit to leave it unchanged."),
 			headers: z
-				.record(z.string())
+				.record(z.string(), z.string())
 				.optional()
 				.describe(
 					"New response header set, replacing the current one entirely. Omit to leave it unchanged."
@@ -7590,7 +7714,7 @@ export async function dispatchTool(
 	// an invalidation storm on every rejected call would be worse than the one
 	// stale list a genuinely-partial failure leaves behind. A confirmation
 	// preview is the third case: successful, and deliberately without effect.
-	if (!result.isError && !NOTHING_CHANGED.has(result)) notifyDataChanged(tool, args, ctx);
+	if (!result.isError && !NOTHING_CHANGED.has(result)) notifyDataChanged(tool, args, ctx, result);
 	return result;
 }
 
@@ -7605,13 +7729,22 @@ export async function dispatchTool(
  * throwing listener is logged and swallowed rather than turned into a tool
  * error the agent would read as "the write did not happen".
  */
-function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: ToolContext): void {
+function notifyDataChanged(
+	tool: McpTool,
+	args: Record<string, unknown>,
+	ctx: ToolContext,
+	result: ToolResult
+): void {
 	if (!ctx.onDataChanged || tool.invalidates.length === 0) return;
 	const collectionId = str(args, "collectionId");
 	const requestId = str(args, "requestId");
 	const runId = str(args, "runId");
 	const inboxId = str(args, "inboxId");
 	const mockId = str(args, "mockId");
+	// Rides the `run` event alone: that a run started is a fact about the run
+	// family, and `run_collection`'s other entity is the cookie jar, which has no
+	// use for it.
+	const startedRun = STARTED_RUNS.get(result);
 	for (const entity of tool.invalidates) {
 		try {
 			ctx.onDataChanged({
@@ -7621,6 +7754,7 @@ function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: To
 				...(runId !== undefined ? { runId } : {}),
 				...(inboxId !== undefined ? { inboxId } : {}),
 				...(mockId !== undefined ? { mockId } : {}),
+				...(entity === "run" && startedRun !== undefined ? { startedRun } : {}),
 			});
 		} catch (err) {
 			console.error(`[MCP] Failed to notify "${entity}" change from ${tool.name}:`, err);

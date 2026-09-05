@@ -1366,7 +1366,20 @@ configurable in **Settings → MCP** and persisted.
   `restore_trash_entry` deliberately does **not** carry it: it puts data back
   rather than destroying it, so the write toggle alone is its gate (below).
 - **Write toggle** (`allowWrites`, default off) - gates every tool in the
-  **write** category: `create_collection`, `update_collection`,
+  **write** category, and while it is off they are **not registered at all**:
+  they are absent from `tools/list`, not merely refused by `tools/call`. A call
+  on one of their names anyway - guessed, or held over from a list fetched while
+  the toggle was on - is answered with the handlers' own refusal, which names the
+  setting to turn on; the SDK would otherwise reject the unregistered name with
+  `Tool <name> not found`, which tells an agent nothing it can act on. The
+  server instructions say the same thing up front, in the sessions where the
+  toggle is off. Withholding the schema rather than only the call is what makes
+  the toggle free: those tools are ~40% of the tool payload
+  an agent is sent, and on a default install none of them could have succeeded.
+  Because the tool set is recomputed per built server (a fresh one per HTTP
+  request), flipping the toggle takes effect on the client's next `tools/list` -
+  the same timing the per-tool switch below already has. The category covers:
+  `create_collection`, `update_collection`,
   `delete_collection`, `create_request`, `update_request`, `delete_request`,
   `create_request_example`, `update_request_example`,
   `delete_request_example`, `move_item`,
@@ -1401,8 +1414,16 @@ configurable in **Settings → MCP** and persisted.
   endpoint needs no auth token. The bounds that do apply are the engine's own -
   at most 8 issuers at once - and the per-tool switch below.
 - **Per-tool control** - any tool or whole read/execute/write/load category can be
-  switched off; a disabled tool is omitted from `tools/list` **and** rejected by
-  `tools/call`. This and the write toggle are **independent**, and a write tool
+  switched off; a disabled tool is omitted from `tools/list`, and calling its
+  name is answered with `Tool <name> not found` - it is unregistered, so the SDK
+  rejects the name before any Vayu code runs. (The write toggle's refusal above
+  is the deliberate exception, and it does not claim a tool the user switched
+  off: that tool would still be off after enabling writes. The rejection in
+  `dispatchTool` is what any other caller of it gets.) Settings lists every tool
+  whatever the write toggle says, so the
+  switches for write tools stay visible and settable while writes are off - the
+  toggle governs what the *agent* is offered, not what the user can configure.
+  This and the write toggle are **independent**, and a write tool
   needs both: switching the write category on here does nothing while
   `allowWrites` is off, and turning `allowWrites` on re-enables no tool that is
   in `disabledTools`. Settings states this on both cards, because a user who
@@ -1542,8 +1563,26 @@ exists: an agent names the key it clears, but the key a `fetch_oauth2_token`
 writes under is derived engine-side and appears only in the answer, so a hint
 would be present for one tool and absent for the other - the shape that leaves
 a stale row exactly when it matters. The family is invalidated at its prefix
-instead. The renderer side, including
-which query keys each family maps to, is in
+instead.
+
+**One field on the event is not a hint at all.** `startedRun` rides the `run`
+event of the two tools that *create* a run - `start_load_run` and
+`run_collection` - and says that the run is live, naming it and which of the
+renderer's two run services owns its stream (`{runId, kind: "load" |
+"collection"}`, issue #1419). It is read from the engine's 202 answer rather
+than from the call's arguments, because a run has no id until the engine has
+given it one, and an answer carrying no `runId` announces no run. Everything a
+run does in the background - the taskbar/Dock progress bar, the keep-awake hold
+and the finished notification - lives in those services and begins when one is
+told to watch a run, and before this field existed only a renderer surface ever
+told them: a run an agent started painted nothing and said nothing until its
+dashboard tab was opened. `useRunWatchers` reads the field and enters the same
+`startMonitoring` path the dashboard does, so the main process still tracks no
+runs of its own. `run_collection_smoke` sends its requests one at a time through
+`POST /execute` and has no run to watch, so its `run` event carries nothing
+extra.
+
+The renderer side, including which query keys each family maps to, is in
 [`docs/app/state-management.md`](../app/state-management.md).
 
 Declaring the families per tool rather than deriving them from `category` is

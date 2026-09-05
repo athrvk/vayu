@@ -904,13 +904,14 @@ export default function McpSettingsPanel() {
 					</div>
 					<CardDescription>
 						When off (default), agents can read and send requests but cannot change
-						saved data: every tool in the Write group above refuses - creating, renaming
-						and deleting collections and saved requests, and editing environments and
-						engine config. Turning it on grants no tool you switched off in Tools; the
-						two switches are separate, and a delete still asks you to confirm each time,
-						stating how much a collection contains before it goes. Sending requests and
-						load runs are unaffected either way - the allowlist and the caps govern
-						those.
+						saved data: no tool in the Write group above is offered to the agent at all
+						- creating, renaming and deleting collections and saved requests, and
+						editing environments and engine config. The switches above stay yours to set
+						either way; they decide what an agent gets once writes are on. Turning it on
+						grants no tool you switched off in Tools; the two switches are separate, and
+						a delete still asks you to confirm each time, stating how much a collection
+						contains before it goes. Sending requests and load runs are unaffected
+						either way - the allowlist and the caps govern those.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

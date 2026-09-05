@@ -148,11 +148,21 @@ class AnyPathServer final : public httplib::Server {
         // is the `setup_request` callback below, which that one passes as null -
         // and `process_request` is its only caller, so there is no narrower
         // override that reaches the callback.
-        static_assert (std::string_view (CPPHTTPLIB_VERSION) == "0.53.1",
+        //
+        // `serve_guarded` is 0.54.0's addition and is copied rather than
+        // dropped: `process_request` wraps only `routing()` in a try/catch, so
+        // an exception from a content provider, a post-routing, error, logging
+        // or expect-100 handler runs outside it, and the task queue calls the
+        // job with no catch of its own. Omitting the guard here would terminate
+        // the process on a throw from any of those - on the one listener that
+        // may bind past loopback.
+        static_assert (std::string_view (CPPHTTPLIB_VERSION) == "0.54.1",
         "cpp-httplib moved: re-read Server::process_and_close_socket, "
         "confirm this override still mirrors it, then update this assert - "
         "or retire the mirror entirely if the release carries a public "
-        "request-setup hook (issue #1283).");
+        "request-setup hook (issue #1283). As of 0.54.1 it does not: "
+        "`set_pre_request_handler` is a `HandlerWithResponse`, which takes a "
+        "`const Request&` and so cannot rewrite the path either.");
 
         std::string remote_addr;
         int remote_port = 0;
@@ -163,14 +173,16 @@ class AnyPathServer final : public httplib::Server {
         httplib::detail::get_local_ip_and_port (sock, local_addr, local_port);
 
         bool websocket_upgraded = false;
-        const auto ret = httplib::detail::process_server_socket (svr_sock_,
-        sock, keep_alive_max_count_, keep_alive_timeout_sec_, read_timeout_sec_,
-        read_timeout_usec_, write_timeout_sec_, write_timeout_usec_,
-        [&] (httplib::Stream& strm, bool close_connection, bool& connection_closed) {
-            return process_request (
-            strm, remote_addr, remote_port, local_addr, local_port,
-            close_connection, connection_closed,
-            [] (httplib::Request& req) { req.path = ROUTE; }, &websocket_upgraded);
+        const auto ret          = serve_guarded ([&] () {
+            return httplib::detail::process_server_socket (svr_sock_, sock,
+                     keep_alive_max_count_, keep_alive_timeout_sec_, read_timeout_sec_,
+                     read_timeout_usec_, write_timeout_sec_, write_timeout_usec_,
+                     [&] (httplib::Stream& strm, bool close_connection, bool& connection_closed) {
+                return process_request (
+                strm, remote_addr, remote_port, local_addr, local_port,
+                close_connection, connection_closed,
+                [] (httplib::Request& req) { req.path = ROUTE; }, &websocket_upgraded);
+            });
         });
 
         httplib::detail::drain_and_close_socket (sock);
