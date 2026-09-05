@@ -16,7 +16,14 @@
  */
 
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { TOOLS, dispatchTool, type ElicitFn, type ToolContext } from "./tools.js";
+import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+	TOOLS,
+	dispatchTool,
+	withheldWriteRefusal,
+	type ElicitFn,
+	type ToolContext,
+} from "./tools.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE, extractRunIds } from "./resources.js";
 import { PROMPTS } from "./prompts.js";
 
@@ -47,7 +54,7 @@ const VAYU_WEBSITE = "https://github.com/athrvk/vayu";
  * trust `tools/list` over it. Each tool's own description is the one copy of
  * its contract, and it ships only when the tool does.
  */
-const INSTRUCTIONS =
+const INSTRUCTIONS_HEAD =
 	"Vayu is a local API testing and load-testing platform (Postman-style requests " +
 	"plus k6-level load tests in one app, backed by a native C++ engine); these " +
 	"tools drive that engine. Start by checking engine health, so a later failure " +
@@ -58,12 +65,27 @@ const INSTRUCTIONS =
 	"load (start and stop load tests). " +
 	"Every tool that puts traffic on the network is restricted to an allowlist, " +
 	"and load runs additionally enforce hard RPS/concurrency/duration caps. Write " +
-	"tools require the user to enable write access - until it is on they are not " +
-	"listed at all, so a task that needs one is blocked on the user enabling it " +
-	"rather than on finding the right call - and the destructive ones ask " +
+	"tools require write access, and the destructive ones ask " +
 	"for confirmation - via elicitation where the client supports it, otherwise by " +
 	"returning what the call would destroy and waiting for a `confirmed: true` " +
-	"retry. A tool that is subject to either gate says so in its own description. " +
+	"retry. A tool that is subject to either gate says so in its own description. ";
+
+/**
+ * The write gate, stated where an agent reads it before its first call - and
+ * only in the sessions it applies to, since the server is rebuilt per request
+ * and this text is therefore as current as `tools/list` itself.
+ *
+ * Withholding the write tools (#1429) took the handlers' "turn on write access"
+ * refusal off the wire with them: the SDK rejects an unregistered name before
+ * dispatch, so an agent on a default install saw no write tool and no reason
+ * for its absence (#1431). It names the setting, and no tool.
+ */
+const WRITE_GATE_SENTENCE =
+	"Write access is off in this session, so no write tool is listed: a task that " +
+	"needs one is blocked on the user turning on Write access in Vayu Settings → " +
+	"MCP, after which they appear in `tools/list`. ";
+
+const INSTRUCTIONS_TAIL =
 	"`tools/list` is authoritative for what this session actually has. " +
 	"Vayu data is also available as resources (vayu://runs, vayu://collections, " +
 	"vayu://environments, vayu://config, and vayu://run/{runId}/report) to attach as " +
@@ -72,6 +94,11 @@ const INSTRUCTIONS =
 	"preRequestScript or postRequestScript, read vayu://scripting/completions - it is " +
 	"the engine's own list of every pm.* name the script sandbox provides, including " +
 	"synchronous pm.crypto hashing and btoa/atob for signing a request.";
+
+/** The server instructions for one session, gated on that session's config. */
+function instructionsFor(allowWrites: boolean): string {
+	return INSTRUCTIONS_HEAD + (allowWrites ? "" : WRITE_GATE_SENTENCE) + INSTRUCTIONS_TAIL;
+}
 
 /**
  * Create an MCP server exposing the Vayu tools. `contextProvider` is invoked
@@ -83,6 +110,8 @@ export function createMcpServer(
 	info: McpServerInfo,
 	contextProvider: ToolContextProvider
 ): McpServer {
+	const baseCtx = contextProvider();
+
 	const mcp = new McpServer(
 		{
 			name: info.name,
@@ -91,10 +120,11 @@ export function createMcpServer(
 			description: VAYU_DESCRIPTION,
 			websiteUrl: VAYU_WEBSITE,
 		},
-		{ capabilities: { tools: {} }, instructions: INSTRUCTIONS }
+		{
+			capabilities: { tools: {} },
+			instructions: instructionsFor(baseCtx.config.allowWrites),
+		}
 	);
-
-	const baseCtx = contextProvider();
 
 	// Bridge a tool's elicitation request to the client - but only if the client
 	// negotiated the elicitation capability; otherwise throw so the tool falls
@@ -109,6 +139,8 @@ export function createMcpServer(
 	};
 
 	const ctx: ToolContext = { ...baseCtx, elicit };
+
+	const sdkCallTool = captureCallToolHandler(mcp);
 
 	for (const tool of TOOLS) {
 		if (baseCtx.config.disabledTools.includes(tool.name)) continue;
@@ -153,10 +185,89 @@ export function createMcpServer(
 		);
 	}
 
+	answerWithheldWriteCalls(mcp, ctx, sdkCallTool());
+
 	registerResources(mcp, ctx);
 	registerPrompts(mcp, ctx);
 
 	return mcp;
+}
+
+/**
+ * A `tools/call` handler as the SDK's `Server` holds it.
+ *
+ * Deliberately loose in its request type: the wrapper below reads one field and
+ * forwards the rest untouched, and restating the SDK's request shape here is a
+ * second copy of it to drift.
+ */
+type CallToolHandler = (
+	request: { params: { name: string } },
+	extra: unknown
+) => unknown | Promise<unknown>;
+
+/**
+ * Watch for the `tools/call` handler `registerTool` installs, and return a
+ * getter for it.
+ *
+ * The SDK offers no pre-dispatch hook (1.30.0): its handler looks the name up in
+ * its own registry and throws before anything of Vayu's runs, and it refuses to
+ * be installed twice (`assertCanSetRequestHandler`), so a wrapper can only be
+ * put in front of it by replacing it - which needs the original to delegate to.
+ * `setRequestHandler` is public on both sides of this, and the interception is
+ * removed again as soon as the registration loop is done.
+ *
+ * A capture that came back empty would leave the refusal unshipped exactly as
+ * it is unshipped today, so what holds this to the SDK across an upgrade is the
+ * protocol test that calls a withheld name and reads the answer.
+ */
+function captureCallToolHandler(mcp: McpServer): () => CallToolHandler | undefined {
+	const server = mcp.server as unknown as {
+		setRequestHandler: (schema: unknown, handler: CallToolHandler) => void;
+	};
+	const install = server.setRequestHandler.bind(server);
+	let captured: CallToolHandler | undefined;
+
+	server.setRequestHandler = (schema: unknown, handler: CallToolHandler) => {
+		if (methodOf(schema) === "tools/call") captured = handler;
+		install(schema, handler);
+	};
+
+	return () => {
+		delete (server as Partial<typeof server>).setRequestHandler;
+		return captured;
+	};
+}
+
+/** The JSON-RPC method a request schema pins, or undefined for any other shape. */
+function methodOf(schema: unknown): string | undefined {
+	const method = (schema as { shape?: { method?: { value?: unknown } } })?.shape?.method?.value;
+	return typeof method === "string" ? method : undefined;
+}
+
+/**
+ * Answer a call to a write tool this session withheld with the refusal that
+ * names the setting, in place of the SDK's "Tool <name> not found".
+ *
+ * The withholding (#1429) is what makes this necessary: it took the handlers'
+ * refusal off the wire along with the schemas, leaving an agent that guessed a
+ * write tool's name - from its own memory, or from a list it fetched while
+ * writes were on - with an unknown-tool error and nothing to ask the user for
+ * (#1431). Every other name reaches the SDK's handler unchanged, so schema
+ * validation, structured output and task support are untouched.
+ */
+function answerWithheldWriteCalls(
+	mcp: McpServer,
+	ctx: ToolContext,
+	sdkCallTool: CallToolHandler | undefined
+): void {
+	if (ctx.config.allowWrites || !sdkCallTool) return;
+	const server = mcp.server as unknown as {
+		setRequestHandler: (schema: unknown, handler: CallToolHandler) => void;
+	};
+	server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
+		const refusal = withheldWriteRefusal(request.params.name, ctx);
+		return refusal ?? sdkCallTool(request, extra);
+	});
 }
 
 /** Register the read-only Vayu data resources (static lists + run-report template). */

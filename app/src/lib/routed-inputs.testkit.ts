@@ -136,6 +136,22 @@ export const DOC_READING_GUARDS = {
 		reader: "app/src/modules/collections/row-persistence-claims.test.ts",
 		paths: ["docs/app/data-driven-runs.md", "docs/app/COMPONENTS.md"],
 	},
+	/*
+	 * The one guard whose input is a *number* in prose (#1431): the MCP tool
+	 * registry grows by a tool, and every page that says how many there are
+	 * stays on the figure that was true when it was written - 24 on two pages,
+	 * 49 on two more, against 68 in `TOOLS`. The pages that name no count are
+	 * listed too, so the guard covers them from the day one is added.
+	 */
+	mcpToolCount: {
+		reader: "app/electron/mcp/tool-count-docs.test.ts",
+		paths: [
+			"docs/index.md",
+			"docs/engine/mcp.md",
+			"docs/compare/vayu-vs-bruno.md",
+			"docs/compare/vayu-vs-postman.md",
+		],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**
@@ -272,6 +288,14 @@ export const ROOT_READING_GUARDS = {
 	startupMarker: {
 		reader: "app/electron/startup-probe.test.ts",
 		paths: ["scripts/perf/measure-app.mjs"],
+	},
+	/*
+	 * The README states the MCP tool count twice, so the doc guard above reads
+	 * it as well - the same number, drifting for the same reason (#1431).
+	 */
+	mcpToolCount: {
+		reader: "app/electron/mcp/tool-count-docs.test.ts",
+		paths: ["README.md"],
 	},
 } as const satisfies Record<string, ReadingGuard>;
 

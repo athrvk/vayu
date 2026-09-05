@@ -842,6 +842,28 @@ function writesDisabled(ctx: ToolContext): ToolResult | null {
 }
 
 /**
+ * The answer for a write tool the toggle withheld from registration, or null
+ * when @p name is not one - a read/execute/load tool, a name no registry entry
+ * carries, or a write tool in a session where writes are on.
+ *
+ * The same refusal the handlers return, because it is the same fact: the tool
+ * exists, the user has not enabled writes, and enabling them is what unblocks
+ * it. Without this the SDK answers an unregistered name with "Tool <name> not
+ * found", which tells an agent nothing it can act on (issue #1431).
+ *
+ * A tool the *user* switched off is deliberately not covered: it is unregistered
+ * for a different reason, and answering it here would tell a user who then
+ * enabled writes to expect a tool that is still off.
+ */
+export function withheldWriteRefusal(name: string, ctx: ToolContext): ToolResult | null {
+	if (ctx.config.allowWrites) return null;
+	if (ctx.config.disabledTools.includes(name)) return null;
+	const tool = findTool(name);
+	if (!tool || tool.category !== "write") return null;
+	return writesDisabled(ctx);
+}
+
+/**
  * The run pinned as baseline for whatever saved request @p targetRunId ran -
  * `compare_runs`'s answer when the caller named no base, tool and prompt alike:
  * the prompt asked for both ids while the tool resolved one, so the same
@@ -3885,7 +3907,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small.",
+			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. The one exception is a stored column the engine cannot hand back: one that will not parse, or one past its 10 MB field cap, comes back as an empty value rather than failing the row. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small.",
 		annotations: {
 			title: "List requests",
 			readOnlyHint: true,
@@ -6828,7 +6850,7 @@ export const TOOLS: McpTool[] = [
 		category: "load",
 		invalidates: ["run"],
 		description:
-			"Stop a run that is still in progress: a load test, or a streaming Design-mode send that is holding its connection open. The run ends where it is and keeps what it already recorded - it is marked `stopped` rather than discarded, so get_run_report and get_run_samples still answer for it afterwards. Calling it on a run that has already finished is not an error: the result reports the status it was already in. A run id the engine does not know is an error.",
+			"Stop a run that is still in progress: a load test, or a streaming Design-mode send that is holding its connection open. The run ends where it is and keeps what it already recorded rather than being discarded, so get_run_report and get_run_samples still answer for it afterwards. Read the status in the result: a stream that closes within the engine's 5 s settle budget comes back `stopped`, and one that has not settled yet comes back `running` with a message saying the stop was signalled - it is not a failure, and re-reading the run reports the end state. Calling it on a run that has already finished is not an error: the result reports the status it was already in. A run id the engine does not know is an error.",
 		annotations: {
 			title: "Stop run",
 			readOnlyHint: false,

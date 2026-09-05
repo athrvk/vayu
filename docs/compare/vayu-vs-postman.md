@@ -76,7 +76,9 @@ two runs. Postman also exposes MCP, but against its cloud workspace; Vayu's runs
 locally and hands the agent the load engine itself. Because that is a real
 capability, it is gated: network tools refuse any host outside an allowlist that
 **starts empty**, load runs are capped on RPS, concurrency and duration, and the
-tools that write to saved data sit behind a toggle that ships off.
+tools that write to saved data sit behind a toggle that ships off - while it is
+off those tools are not offered to the agent at all, and calling one by name
+answers with the setting to turn on rather than an unknown-tool error.
 
 ## When to choose Postman
 
