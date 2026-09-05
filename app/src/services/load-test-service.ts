@@ -184,6 +184,15 @@ class LoadTestService {
 	 * ended the run is the caller's to say: `stopMonitoring` has a notification
 	 * for it and a superseded run has nothing to report, because it has not
 	 * ended at all.
+	 *
+	 * `handleClose` keeps a sequence of its own rather than calling this, and
+	 * the differences are the reason: it flushes where this discards, it cannot
+	 * null `activeRunId` until after its awaited report fetch, and it clears the
+	 * indicator only for a run that has not already flashed failed. That last
+	 * guard is absent here because neither of these two callers can reach the
+	 * case - `progressFailedRunId` is set only by `handleError`, which the
+	 * client calls only when opening the stream threw, and a caller that never
+	 * opened one registered no hand-off to be superseded through.
 	 */
 	private releaseRun(runId: string): void {
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
