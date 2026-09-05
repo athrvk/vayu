@@ -59,7 +59,8 @@ The HTTP server handles all API requests from the Electron UI. It runs on `127.0
 **Key Features:**
 - RESTful API endpoints for collections, requests, environments, and runs
 - Server-Sent Events (SSE) for real-time metrics streaming
-- Single-threaded request handling (non-blocking I/O)
+- Requests served on cpp-httplib's default thread pool, so two clients - the
+  app and an MCP agent - are genuinely concurrent inside the daemon
 
 #### How a route says no
 
@@ -92,6 +93,36 @@ propagates, and the response is reachable only through `.error ()`.
 
 All error bodies, either way, come from `error_body` - one shape,
 `{"error": {"code", "message"}}`, which the app's http-client reads.
+
+#### A core that reads, decides and writes holds one lock
+
+`Database` takes its mutex per call, which is enough while a write depends only
+on its own arguments. It is not enough for a core that reads a row, decides
+something from it and then writes: between the read and the write another
+client's write can move the ground. `Database::with_lock` (issue #386) scopes
+the mutex around the whole composite, and because the mutex is recursive the
+lambda calls the same public `get_*` / `save_*` methods everything else does.
+
+Two shapes need it, and both are in the code today:
+
+- **The validate-then-commit batch** - `POST /reorder`, `POST /import/apply`,
+  `POST /specs/sync`, `POST /specs/bind`. The validation the write is based on
+  has to still be true when the write lands.
+- **The merge-patch update** - every `PUT /<resource>/:id` (issue #1440). The
+  write carries each field the body did not name, read a moment earlier, so a
+  read not held to its write loses whichever of two concurrent updates read
+  first - whole fields, with neither request failing. Each of those cores is a
+  thin wrapper over an `update_*_locked` function holding the read, the merge
+  and the write, in the shape `reorder_response` established.
+
+Both wrappers take an optional `before_write` seam, invoked inside the scope
+immediately before the commit. It is what lets a test drive a genuinely
+concurrent writer into the window rather than asserting the absence of a race by
+timing (`tests/competing_writer.hpp`).
+
+Hold the lock only for a bounded composite: `/health`, the runs poll and SSE
+serialize on it too, so everything waits for the whole of it. A merge is
+microseconds; a network call or a file read is not, and does not belong inside.
 
 ### Listeners
 

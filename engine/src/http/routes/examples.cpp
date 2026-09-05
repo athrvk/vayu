@@ -251,13 +251,14 @@ const nlohmann::json& json) {
 }
 
 /**
- * Testable core of PUT /requests/:id/examples/:exampleId - **update only**,
- * merge-patch, 404 on a missing example rather than a silent create.
+ * The read-merge-write of PUT /requests/:id/examples/:exampleId, run under the
+ * caller's lock.
  */
-std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+static std::pair<int, nlohmann::json> update_request_example_locked (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id,
-const nlohmann::json& json) {
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, example_id); !outcome) {
         return as_response (outcome.error ());
     }
@@ -274,8 +275,44 @@ const nlohmann::json& json) {
     }
     x.updated_at = now_ms ();
 
+    if (before_write) {
+        before_write ();
+    }
     db.save_request_example (x);
     return { 200, vayu::json::serialize (x) };
+}
+
+/**
+ * Testable core of PUT /requests/:id/examples/:exampleId - **update only**,
+ * merge-patch, 404 on a missing example rather than a silent create.
+ *
+ * **The read, the merge and the write are one lock scope** (#1440), for the
+ * reason `update_request_response` states. The ownership check is inside it
+ * too: an example reached through the wrong request is a 404, and a check that
+ * released the lock before the write would answer for a row a concurrent
+ * `delete_request` cascade could take in between.
+ *
+ * @param before_write Test seam, invoked inside the lock scope with the merged
+ *        row staged and immediately before it is written; see
+ *        `update_request_response` for why it is an overload.
+ */
+std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock ([&] {
+        result = update_request_example_locked (db, request_id, example_id, json, before_write);
+    });
+    return result;
+}
+
+std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id,
+const nlohmann::json& json) {
+    return update_request_example_response (db, request_id, example_id, json, nullptr);
 }
 
 /**

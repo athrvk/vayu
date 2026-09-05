@@ -263,13 +263,13 @@ create_client_certificate_response (vayu::db::Database& db, const nlohmann::json
 }
 
 /**
- * Testable core of PUT /client-certificates/:id - **update only**
- * (merge-patch), returning {http_status, json_body}. A missing id is a 404
- * rather than a silent create, like every other resource.
+ * The read-merge-write of PUT /client-certificates/:id, run under the caller's
+ * lock.
  */
-std::pair<int, nlohmann::json> update_client_certificate_response (vayu::db::Database& db,
+static std::pair<int, nlohmann::json> update_client_certificate_locked (vayu::db::Database& db,
 const std::string& id,
-const nlohmann::json& json) {
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
         return as_response (outcome.error ());
     }
@@ -288,8 +288,45 @@ const nlohmann::json& json) {
     }
     c.updated_at = now_ms ();
 
+    if (before_write) {
+        before_write ();
+    }
     db.save_client_certificate (c);
     return { 200, vayu::json::serialize (c) };
+}
+
+/**
+ * Testable core of PUT /client-certificates/:id - **update only**
+ * (merge-patch), returning {http_status, json_body}. A missing id is a 404
+ * rather than a silent create, like every other resource.
+ *
+ * **The read, the merge and the write are one lock scope** (#1440), for the
+ * reason `update_request_response` states. This resource has a second stake in
+ * it: `reject_duplicate_target` proves no other row claims this host and port,
+ * and that proof is only worth as much as the window between it and the write -
+ * two PUTs converging on one target from either side of it would both pass and
+ * leave the presented certificate decided by row order, the state the 409
+ * exists to prevent.
+ *
+ * @param before_write Test seam, invoked inside the lock scope with the merged
+ *        row staged and immediately before it is written; see
+ *        `update_request_response` for why it is an overload.
+ */
+std::pair<int, nlohmann::json> update_client_certificate_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock ([&] {
+        result = update_client_certificate_locked (db, id, json, before_write);
+    });
+    return result;
+}
+
+std::pair<int, nlohmann::json> update_client_certificate_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json) {
+    return update_client_certificate_response (db, id, json, nullptr);
 }
 
 void register_client_certificate_routes (RouteContext& ctx) {

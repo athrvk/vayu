@@ -38,19 +38,16 @@
 
 #include <gtest/gtest.h>
 
-#include <chrono>
-#include <condition_variable>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "competing_writer.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
@@ -573,62 +570,12 @@ TEST_F (ReorderRouteTest, TheResponseCarriesTheRowsAsWritten) {
 // ---------------------------------------------------------------------------
 
 /**
- * A writer started from inside a batch's `before_write` seam - that is, on
- * another thread, while the batch holds the DB lock - and given a window to
- * finish before the batch commits.
- *
- * The window is what makes these tests decide in both directions, and it cannot
- * be designed away: the defect *is* an interleaving, so a test for it has to
- * produce one. With the lock scope spanning the batch, the writer blocks on the
- * DB mutex, the wait runs its full timeout every time, and the batch commits
- * first deterministically - there is no ordering in which it does not. Remove
- * the lock scope and the writer proceeds immediately against the pre-write
- * state, the wait returns as soon as it is done, and each test below sees the
- * interleaving it forbids.
+ * The competing writer these three tests drive into the window is
+ * `vayu::tests::CompetingWriter` (`competing_writer.hpp`), shared with the
+ * resource PUTs' own lock-scope tests (#1440); its header carries why the
+ * window makes each case decide in both directions.
  */
-class CompetingWriter {
-    public:
-    explicit CompetingWriter (std::function<void ()> work)
-    : work_ (std::move (work)) {
-    }
-    ~CompetingWriter () {
-        if (thread_.joinable ()) {
-            thread_.join ();
-        }
-    }
-    CompetingWriter (const CompetingWriter&)            = delete;
-    CompetingWriter& operator= (const CompetingWriter&) = delete;
-    CompetingWriter (CompetingWriter&&)                 = delete;
-    CompetingWriter& operator= (CompetingWriter&&)      = delete;
-
-    /** The `before_write` probe: starts the writer, then waits out the window. */
-    std::function<void ()> probe () {
-        return [this] {
-            thread_ = std::thread ([this] {
-                work_ ();
-                {
-                    std::lock_guard<std::mutex> guard (mutex_);
-                    done_ = true;
-                }
-                cv_.notify_all ();
-            });
-            std::unique_lock<std::mutex> guard (mutex_);
-            cv_.wait_for (
-            guard, std::chrono::milliseconds (300), [this] { return done_; });
-        };
-    }
-
-    void join () {
-        thread_.join ();
-    }
-
-    private:
-    std::function<void ()> work_;
-    std::thread thread_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    bool done_ = false;
-};
+using vayu::tests::CompetingWriter;
 
 TEST_F (ReorderRouteTest, AConflictingBatchWaitsAndIsRejectedAgainstTheCommittedGraph) {
     const std::string a = make_collection ("A");

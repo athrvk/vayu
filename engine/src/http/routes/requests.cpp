@@ -16,6 +16,7 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -351,15 +352,11 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
     return { 200, vayu::json::serialize (r) };
 }
 
-/**
- * Testable core of PUT /requests/:id - **update only**, returning
- * {http_status, json_body}. A missing id is a 404 rather than a silent create.
- * Merge-patch semantics, same as collections - including the 400 on a body `id`
- * that disagrees with the path (#97).
- */
-std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+/** The read-merge-write of PUT /requests/:id, run under the caller's lock. */
+static std::pair<int, nlohmann::json> update_request_locked (vayu::db::Database& db,
 const std::string& id,
-const nlohmann::json& json) {
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
         return as_response (outcome.error ());
     }
@@ -389,8 +386,52 @@ const nlohmann::json& json) {
     }
     r.updated_at = now_ms ();
 
+    if (before_write) {
+        before_write ();
+    }
     db.save_request (r);
     return { 200, vayu::json::serialize (r) };
+}
+
+/**
+ * Testable core of PUT /requests/:id - **update only**, returning
+ * {http_status, json_body}. A missing id is a 404 rather than a silent create.
+ * Merge-patch semantics, same as collections - including the 400 on a body `id`
+ * that disagrees with the path (#97).
+ *
+ * **The read, the merge and the write are one lock scope** (#1440, the rule
+ * `POST /reorder` states at length under #386). Merge-patch means the write
+ * carries every field the body did not name, read a moment earlier - so two
+ * PUTs to one row interleaved as read, read, write, write leave the second
+ * writer's stale copy of the fields it never mentioned on top of the first
+ * writer's changes, and the first client's edit is gone with no error on either
+ * side. cpp-httplib serves on a thread pool and the renderer's autosave and an
+ * MCP agent are genuinely concurrent clients, so the interleaving is reachable
+ * today. Holding the lock across the composite makes the row the merge was
+ * computed from still the stored row when the merge lands; the merge itself is
+ * microseconds, which is the whole cost to everything else serializing here.
+ *
+ * @param before_write Test seam, invoked inside the lock scope with the merged
+ *        row staged and immediately before it is written - the only way to
+ *        drive a competing writer into the window this closes. It is a separate
+ *        overload rather than the defaulted parameter `reorder_response` uses
+ *        because ten test files already declare the three-argument form, and a
+ *        defaulted parameter would move the symbol they link against.
+ */
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock (
+    [&] { result = update_request_locked (db, id, json, before_write); });
+    return result;
+}
+
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json) {
+    return update_request_response (db, id, json, nullptr);
 }
 
 void register_request_routes (RouteContext& ctx) {

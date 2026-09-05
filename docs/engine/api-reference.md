@@ -92,6 +92,16 @@ omitted field keeps its stored value. We deliberately did not add a separate
 client call site expects it. The `:id` in the path is the record's identity; the
 body carries the changed fields only.
 
+**An update is atomic against a concurrent one.** The read the merge is computed
+from, the merge itself and the write are one acquisition of the database lock, so
+two clients patching one record at the same moment - the app's autosave and an
+MCP agent, say - each merge onto what the other committed rather than onto the
+row as both of them found it. The alternative is not a conflict but a silent
+loss: the merge carries every field the body did not name, so the loser's fields
+come back written with the values the winner read a moment earlier, and neither
+request fails. There is no precondition header; a client that needs to *detect*
+that the row moved under it has nothing to read yet.
+
 ### The engine owns every id
 
 A create must **not** carry an `id`. The engine generates one via `generate_id`,
@@ -2450,8 +2460,10 @@ every named row and owner, and the acyclicity of the **post-move** collection
 graph are all checked first; a failure is a `400` naming the offending row with
 nothing written. The cycle check reading the post-move shape is what makes two
 reparents that each look legal alone (`A` under `B` and `B` under `A`) a
-deterministic rejection rather than a race - unlike `PUT /collections/:id`, which
-validates and writes under different locks.
+deterministic rejection rather than a race. The same pair sent as two
+`PUT /collections/:id` calls is caught as well - each update holds its read to
+its write - but one at a time, so the first reparent is already committed when
+the second is refused; the batch refuses both and writes nothing.
 
 That rejection is deterministic **because the check and the commit share one lock
 scope**: two such batches arriving concurrently are serialized whole, and the

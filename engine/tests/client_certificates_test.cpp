@@ -22,6 +22,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -31,6 +32,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "competing_writer.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
@@ -48,6 +50,12 @@ create_client_certificate_response (vayu::db::Database& db, const nlohmann::json
 std::pair<int, nlohmann::json> update_client_certificate_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
+// The update core with its `before_write` seam - invoked inside the lock scope
+// with the merged row staged and immediately before it is written (#1440).
+std::pair<int, nlohmann::json> update_client_certificate_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write);
 } // namespace vayu::http::routes
 
 namespace vayu::http {
@@ -873,6 +881,46 @@ TEST_F (ClientCertificateDbTest, UpdateChecksTheMergedRowNotTheBody) {
     *db_, id, json{ { "keyPath", "/nope/client.key" } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (db_->get_client_certificates ().front ().key_path, key_.path ());
+}
+
+/**
+ * The update core's read, merge and write are one lock scope (#1440), so two
+ * PUTs to one entry naming different fields both land. Merge-patch is what
+ * makes an unheld read destructive: the write carries the fields the body never
+ * named, so the loser's change is overwritten with a value nobody sent - here
+ * either a passphrase that stops matching the key, or a port the entry was
+ * narrowed to and silently widens back out of.
+ *
+ * The second writer runs from inside the first one's scope through the
+ * `before_write` seam and is given a window to finish (`competing_writer.hpp`).
+ * Mutation check: drop the `with_lock` and the `port` assertion reds.
+ */
+TEST_F (ClientCertificateDbTest, AConcurrentUpdateWaitsAndKeepsBothFieldsWritten) {
+    const auto [created_status, created] =
+    routes::create_client_certificate_response (*db_, body ("api.example.com"));
+    ASSERT_EQ (created_status, 200) << created.dump ();
+    const std::string id = created["id"];
+
+    int other_status = 0;
+    json other_body;
+    vayu::tests::CompetingWriter other ([&] {
+        auto result = routes::update_client_certificate_response (
+        *db_, id, json{ { "port", 8443 } });
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    const auto [status, updated] = routes::update_client_certificate_response (
+    *db_, id, json{ { "passphrase", "s3cret" } }, other.probe ());
+    ASSERT_EQ (status, 200) << updated.dump ();
+    other.join ();
+    ASSERT_EQ (other_status, 200) << other_body.dump ();
+
+    const auto stored = db_->get_client_certificate (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->passphrase, "s3cret");
+    EXPECT_EQ (stored->port, std::optional<int> (8443))
+    << "the port write merged against the row this write had already staged";
 }
 
 TEST_F (ClientCertificateDbTest, UpdatingAMissingEntryIs404) {
