@@ -88,7 +88,7 @@ jobs:
             mock: ./mock-server
             pack: --mac dir
     env:
-      VCPKG_COMMIT: '114d9fe62faf35856b45cf55cb93b57028a45d63'
+      VCPKG_COMMIT: '04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
 
@@ -305,12 +305,17 @@ jobs:
       # once (743 ms) and timed out every other time, each time having come up
       # whole - engine listening, MCP up, the renderer fetching config,
       # collections and globals from it, all inside a second - and then produced
-      # no frame at all, so `ready-to-show` never fired. The harness's plain window becomes showable in the
-      # same session every time; the app's is frameless. Running a window
-      # manager (openbox, waited for with `_NET_SUPPORTING_WM_CHECK`) changed
-      # nothing, so none is carried here. #1347 holds the evidence and is where
-      # a fix belongs. Until then the note in the summary carries the app's own
-      # output, and the Windows and macOS figures are the ones to read.
+      # no frame at all, so `ready-to-show` never fired. The harness's plain
+      # window becomes showable in the same session every time; the app's comes
+      # up hidden. Running a window manager (openbox, waited for with
+      # `_NET_SUPPORTING_WM_CHECK`) changed nothing, so none is carried here.
+      #
+      # #1347 bounded that wait rather than leaving it open: the app shows the
+      # window anyway after 8 s and says so, which makes this leg fail in
+      # seconds with the cause in `note` instead of burning three 90-second
+      # timeouts. It is still not a figure - a window revealed by that fallback
+      # never painted - so the Windows and macOS numbers remain the ones to
+      # read here.
       - name: Measure the app
         shell: bash
         env:

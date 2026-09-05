@@ -17,8 +17,11 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    with curl, openssl and sqlite3 each missing point releases, purely because
    the pin had gone unexamined since June. A bump is `builtin-baseline` in
    `engine/vcpkg.json` **and** `VCPKG_COMMIT` in `release.yml`, `pr-tests.yml`,
-   `codeql.yml` and `cache-warm.yml` - one SHA in five places, and the `guard`
-   job in `cache-warm.yml` fails the build if any of them drift. Land a bump as
+   `codeql.yml`, `cache-warm.yml`, `sanitizers.yml`, `engine-tidy-scan.yml`
+   and `perf-measure.yml` - one SHA in eight places, and the `guard` job in
+   `cache-warm.yml` fails the build if any of them drift. Read that job's
+   `files=(...)` list rather than this sentence: it is the authority, and it
+   has grown twice. Land a bump as
    **its own PR before the release commit**, never inside it: a dependency
    change and a version bump that break one platform together cannot be told
    apart. Before merging a bump, run it against a **deliberately stale clone**
@@ -33,6 +36,17 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    /tmp/stale-vcpkg/bootstrap-vcpkg.sh -disableMetrics
    VCPKG_ROOT=/tmp/stale-vcpkg python build.py -e     # must self-heal, then build
    ```
+
+   Expect the bump to be **work, not a rubber stamp**. `inbox.cpp` mirrors
+   cpp-httplib's private `Server::process_and_close_socket` behind a
+   `static_assert` on `CPPHTTPLIB_VERSION`, so any cpp-httplib move fails the
+   build until the mirror is re-read against the new source and the assert
+   updated (#1283 tracks retiring it; check first whether the release finally
+   carries a public hook that can rewrite `Request::path` before routing). And
+   `sanitizers/tsan.supp`'s `race:std::ctype<char>::narrow` entry is re-measured
+   on every cpp-httplib move, not carried forward - 10 runs of
+   `TransportPolicyPaths.LoadRunTraversesManualProxy` with the line and 10
+   without, recorded in that file and in `docs/engine/building.md`.
 3. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
    Changelog format, see below).
 4. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes

@@ -29,7 +29,7 @@ jobs:
             preset: macos-prod-arm64
     timeout-minutes: 120
     env:
-      VCPKG_COMMIT: '114d9fe62faf35856b45cf55cb93b57028a45d63'
+      VCPKG_COMMIT: '04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
       # v0.17.1's Windows leg reported 18 sccache "Cache errors" where v0.17.0

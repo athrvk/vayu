@@ -325,12 +325,19 @@ is one.** Under `xvfb-run` the app produced a figure once across the runs that
 landed this leg and timed out every other time, each time having come up whole
 - engine listening, MCP up, the renderer fetching config, collections and
 globals from it, inside a second - and then produced no frame, so
-`ready-to-show` never fired and the leg reported `"unavailable"` with that
-output in `note`. The harness's plain window becomes
-showable in the same session every time, and the app's window is frameless.
-Running a window manager in the session changed nothing. #1347 tracks it; the
-Windows and macOS figures are unaffected, as is a Linux desktop, where this has
-not been seen.
+`ready-to-show` never fired. The harness's plain window becomes showable in the
+same session every time, and the app's window comes up hidden. Running a window
+manager in the session changed nothing.
+
+The app no longer hangs on that (#1347): `app/electron/window-reveal.ts` shows
+the window anyway once a first frame has not arrived within 8 seconds, and
+warns why. What that does for this measurement is make the failure fast and
+legible rather than fixable - a launch revealed that way waited out a timer
+instead of painting, so it is not a cold start. The app says which path it took
+(`via` in the startup line) and `measure-app.mjs` reports the leg
+`"unavailable"` naming the count, in seconds rather than after three 90-second
+timeouts. The Windows and macOS figures are unaffected, as is a Linux desktop,
+where this has not been seen.
 
 **The packaged figure is the real cold start.** The workflow builds the
 renderer, compiles the Electron main process, stages the engine binary into
@@ -425,7 +432,7 @@ Key settings in `vite.config.ts`:
 ### Production Dependencies
 
 - **React 19**: UI framework
-- **Electron 28**: Desktop app framework
+- **Electron 44**: Desktop app framework
 - **Zustand**: State management
 - **TanStack Query**: Server state
 - **Radix UI**: Component primitives

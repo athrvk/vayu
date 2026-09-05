@@ -70,7 +70,7 @@ The Manager is the "face" of Vayu-a standard Electron application that provides 
 - Run history viewing
 
 **Technology Stack:**
-- **Electron 28**: Desktop app framework
+- **Electron 44**: Desktop app framework
 - **React 19**: UI framework
 - **TypeScript**: Type safety - 5.9 compiles and lints, 7 runs the `pnpm type-check` gate (see [app building](app/building.md#two-compilers-one-on-purpose))
 - **Zustand**: UI state management

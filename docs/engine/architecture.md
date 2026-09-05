@@ -5,9 +5,6 @@ description: >-
 
 # Vayu Engine Architecture
 
-**Version:** 0.3.0  
-**Last Updated:** June 2026
-
 ## Overview
 
 The Vayu Engine is a high-performance C++ daemon that executes HTTP requests and load tests. It uses a sidecar architecture pattern, running as a separate process from the Electron UI and communicating via HTTP on `localhost:9876` (configurable).

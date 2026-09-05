@@ -34,6 +34,8 @@
  * `window-navigation.ts` and `quit-shutdown.ts` sit beside it.
  */
 
+import type { RevealReason } from "./window-reveal.js";
+
 /**
  * Must match `PACKAGED_MARKER` in `scripts/perf/measure-app.mjs`, which is the
  * only reader. A rename that missed one end reports every launch as an
@@ -60,6 +62,13 @@ export type StartupBasis = "process-creation" | "time-origin";
 export interface StartupSample {
 	readyToShowMs: number;
 	basis: StartupBasis;
+	/**
+	 * Which path put the window on screen. A launch revealed by
+	 * `window-reveal.ts`'s fallback waited out a timer instead of painting, so
+	 * the number it carries is that timer and not a cold start; the reader
+	 * rejects the leg rather than reporting it (#1347).
+	 */
+	via: RevealReason;
 }
 
 /** The clock readings this needs, so a test can hand it fixed ones. */
@@ -89,12 +98,15 @@ export const defaultStartupClock: StartupClock = {
 };
 
 /** Time from process start to this call, on the best basis the platform offers. */
-export function sampleStartup(clock: StartupClock = defaultStartupClock): StartupSample {
+export function sampleStartup(
+	via: RevealReason,
+	clock: StartupClock = defaultStartupClock
+): StartupSample {
 	const createdAt = clock.processCreatedAt();
 	if (createdAt === null) {
-		return { readyToShowMs: clock.elapsedMs(), basis: "time-origin" };
+		return { readyToShowMs: clock.elapsedMs(), basis: "time-origin", via };
 	}
-	return { readyToShowMs: clock.now() - createdAt, basis: "process-creation" };
+	return { readyToShowMs: clock.now() - createdAt, basis: "process-creation", via };
 }
 
 /**
@@ -104,13 +116,14 @@ export function sampleStartup(clock: StartupClock = defaultStartupClock): Startu
  * caller ignores it.
  */
 export function reportStartupIfRequested(
+	via: RevealReason,
 	env: Record<string, string | undefined> = process.env,
 	clock: StartupClock = defaultStartupClock,
 	write: (line: string) => void = (line) => void process.stdout.write(`${line}\n`)
 ): boolean {
 	if (env[STARTUP_MEASURE_ENV] !== "1") return false;
 
-	const sample = sampleStartup(clock);
+	const sample = sampleStartup(via, clock);
 	write(`${STARTUP_MARKER} ${JSON.stringify(sample)}`);
 	return true;
 }
