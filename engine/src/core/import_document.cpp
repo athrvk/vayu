@@ -2236,6 +2236,12 @@ PrimaryScheme primary_scheme (const json* schemes, const json* security) {
  * `openIdConnect`, an unrecognised `type`) - is counted as `security_unmapped`
  * and left on `inherit`, the safe default that sends what the collection
  * already sends rather than guessing.
+ *
+ * Every non-`nullopt` return is `std::make_optional`, never a bare `json`:
+ * copy-initializing an `optional<json>` from a `json` puts nlohmann's
+ * `operator ValueType()` up against `optional`'s converting constructor,
+ * which GCC's release build reports as an ambiguity under `-Werror` (the same
+ * reason `scalar_stub` in `openapi_drafts.cpp` does).
  */
 std::optional<json> operation_auth_override (const json* op_security,
 const json* schemes,
@@ -2246,7 +2252,7 @@ ImportTally& tally) {
         return std::nullopt;
     }
     if (op_security->empty ()) {
-        return json{ { "mode", "none" } };
+        return std::make_optional (json{ { "mode", "none" } });
     }
     if (op_security->size () > 1) {
         // An OR of alternative schemes - Vayu sends one mode per request and
@@ -2258,7 +2264,7 @@ ImportTally& tally) {
     if (requirement == nullptr || requirement->empty ()) {
         // `[{}]` - OpenAPI's spelling for "security is optional here". Vayu
         // has no optional mode; sending none is the closer of the two guesses.
-        return json{ { "mode", "none" } };
+        return std::make_optional (json{ { "mode", "none" } });
     }
     if (requirement->size () > 1) {
         // An AND of multiple schemes at once - Vayu has no combined mode.
@@ -2281,7 +2287,7 @@ ImportTally& tally) {
         tally.add ("security_unmapped");
         return std::nullopt;
     }
-    return mapped;
+    return std::make_optional (std::move (mapped));
 }
 
 /// One draft table row as a request stores it.
