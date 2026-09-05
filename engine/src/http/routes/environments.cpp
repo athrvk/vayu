@@ -15,6 +15,7 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -87,15 +88,11 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
     return { 200, vayu::json::serialize (e) };
 }
 
-/**
- * Testable core of PUT /environments/:id - **update only**, returning
- * {http_status, json_body}. A missing id is a 404 rather than a silent create.
- * Merge-patch semantics, same as collections and requests - including the 400
- * on a body `id` that disagrees with the path (#97).
- */
-std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
+/** The read-merge-write of PUT /environments/:id, run under the caller's lock. */
+static std::pair<int, nlohmann::json> update_environment_locked (vayu::db::Database& db,
 const std::string& id,
-const nlohmann::json& json) {
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
         return as_response (outcome.error ());
     }
@@ -110,8 +107,45 @@ const nlohmann::json& json) {
     }
     e.updated_at = now_ms ();
 
+    if (before_write) {
+        before_write ();
+    }
     db.save_environment (e);
     return { 200, vayu::json::serialize (e) };
+}
+
+/**
+ * Testable core of PUT /environments/:id - **update only**, returning
+ * {http_status, json_body}. A missing id is a 404 rather than a silent create.
+ * Merge-patch semantics, same as collections and requests - including the 400
+ * on a body `id` that disagrees with the path (#97).
+ *
+ * **The read, the merge and the write are one lock scope** (#1440), for the
+ * reason `update_request_response` states: a merge-patch write carries the
+ * fields the body did not name, so a read that is not held to the write loses
+ * whichever writer read first. This resource is the one with a second reader
+ * inside its own window - MCP's `update_environment` merges across two HTTP
+ * round trips (`app/electron/mcp/tools.ts`), which this lock cannot close;
+ * what it closes is the engine's own.
+ *
+ * @param before_write Test seam, invoked inside the lock scope with the merged
+ *        row staged and immediately before it is written; see
+ *        `update_request_response` for why it is an overload.
+ */
+std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock (
+    [&] { result = update_environment_locked (db, id, json, before_write); });
+    return result;
+}
+
+std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json) {
+    return update_environment_response (db, id, json, nullptr);
 }
 
 void register_environment_routes (RouteContext& ctx) {

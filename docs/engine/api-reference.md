@@ -92,6 +92,16 @@ omitted field keeps its stored value. We deliberately did not add a separate
 client call site expects it. The `:id` in the path is the record's identity; the
 body carries the changed fields only.
 
+**An update is atomic against a concurrent one.** The read the merge is computed
+from, the merge itself and the write are one acquisition of the database lock, so
+two clients patching one record at the same moment - the app's autosave and an
+MCP agent, say - each merge onto what the other committed rather than onto the
+row as both of them found it. The alternative is not a conflict but a silent
+loss: the merge carries every field the body did not name, so the loser's fields
+come back written with the values the winner read a moment earlier, and neither
+request fails. There is no precondition header; a client that needs to *detect*
+that the row moved under it has nothing to read yet.
+
 ### The engine owns every id
 
 A create must **not** carry an `id`. The engine generates one via `generate_id`,
@@ -213,13 +223,17 @@ under a fast enough writer, and it would make row identity depend on clock
 resolution across the three platforms Vayu builds on.
 
 **Repositioning several rows at once** is [`POST /reorder`](#post-reorder), not a
-run of `PUT`s. Each `PUT` is its own write under its own lock, so a reorder
-expressed as N sibling `PUT`s is last-write-wins between concurrent clients, can
-be interrupted halfway (leaving two rows at one `order` and a gap where the
-moved one was), and its collection cycle guard is read-then-write across two lock
-scopes. The batch endpoint validates and writes under one lock scope, which
-closes all three. The per-row `PUT`s remain correct for a single row - a rename,
-a move that appends - and still carry those caveats when used in a loop.
+run of `PUT`s. Each `PUT` is one row under its own lock, so a reorder expressed
+as N sibling `PUT`s can be interrupted halfway, leaving two rows at one `order`
+and a gap where the moved one was, and a concurrent client's move lands between
+any two of them. The batch endpoint validates and writes the whole set under one
+lock scope, which closes both. What is *not* a difference any more is the cycle
+guard: since a `PUT` holds its own read to its own write, its guard and its write
+are one scope too, so two conflicting reparents sent as single `PUT`s are
+serialized and the second is refused against the first's committed graph - it is
+refused after that first move is already stored, which is the part only a batch
+avoids. The per-row `PUT`s remain correct for a single row - a rename, a move
+that appends - and still carry those caveats when used in a loop.
 
 ### Accepted field shapes
 
@@ -2490,8 +2504,10 @@ every named row and owner, and the acyclicity of the **post-move** collection
 graph are all checked first; a failure is a `400` naming the offending row with
 nothing written. The cycle check reading the post-move shape is what makes two
 reparents that each look legal alone (`A` under `B` and `B` under `A`) a
-deterministic rejection rather than a race - unlike `PUT /collections/:id`, which
-validates and writes under different locks.
+deterministic rejection rather than a race. The same pair sent as two
+`PUT /collections/:id` calls is caught as well - each update holds its read to
+its write - but one at a time, so the first reparent is already committed when
+the second is refused; the batch refuses both and writes nothing.
 
 That rejection is deterministic **because the check and the commit share one lock
 scope**: two such batches arriving concurrently are serialized whole, and the

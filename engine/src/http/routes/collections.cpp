@@ -16,6 +16,7 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -349,19 +350,11 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     return result;
 }
 
-/**
- * Testable core of PUT /collections/:id - **update only**, returning
- * {http_status, json_body}. A missing id is a 404 rather than a silent create.
- *
- * Semantics are merge-patch: absent fields keep their stored value. We use PUT
- * loosely rather than adding a separate PATCH verb (documented in
- * api-reference.md) because that is what the update branch has always done and
- * what every renderer call site expects. A body `id` that disagrees with the
- * path is a 400 (#97); the path is the identity.
- */
-std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+/** The read-merge-write of PUT /collections/:id, run under the caller's lock. */
+static std::pair<int, nlohmann::json> update_collection_locked (vayu::db::Database& db,
 const std::string& id,
-const nlohmann::json& json) {
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
     if (auto outcome = reject_mismatched_body_id (json, id); !outcome) {
         return as_response (outcome.error ());
     }
@@ -376,25 +369,61 @@ const nlohmann::json& json) {
     }
     c.updated_at = now_ms ();
 
-    // One lock scope over check-then-write, exactly as the create core does -
-    // see there for why the two cannot be separate acquisitions. The check runs
-    // only when the write states a binding: a collection bound to a spec that
-    // has since been deleted out of band must stay editable by a PUT that says
-    // nothing about `openapi`, rather than becoming unwritable - the same
-    // reading `reject_missing_collection` gets on a request move.
-    std::pair<int, nlohmann::json> result;
-    db.with_lock ([&] {
-        if (json.contains ("openapi")) {
-            if (auto outcome = reject_unbindable_spec (db, c.openapi, {}); !outcome) {
-                result = as_response (outcome.error ());
-                return;
-            }
-            stamp_binding_from_store (db, c.openapi);
+    // The spec check runs only when the write states a binding: a collection
+    // bound to a spec that has since been deleted out of band must stay
+    // editable by a PUT that says nothing about `openapi`, rather than becoming
+    // unwritable - the same reading `reject_missing_collection` gets on a
+    // request move.
+    if (json.contains ("openapi")) {
+        if (auto outcome = reject_unbindable_spec (db, c.openapi, {}); !outcome) {
+            return as_response (outcome.error ());
         }
-        db.create_collection (c);
-        result = { 200, vayu::json::serialize (c) };
-    });
+        stamp_binding_from_store (db, c.openapi);
+    }
+    if (before_write) {
+        before_write ();
+    }
+    db.create_collection (c);
+    return { 200, vayu::json::serialize (c) };
+}
+
+/**
+ * Testable core of PUT /collections/:id - **update only**, returning
+ * {http_status, json_body}. A missing id is a 404 rather than a silent create.
+ *
+ * Semantics are merge-patch: absent fields keep their stored value. We use PUT
+ * loosely rather than adding a separate PATCH verb (documented in
+ * api-reference.md) because that is what the update branch has always done and
+ * what every renderer call site expects. A body `id` that disagrees with the
+ * path is a 400 (#97); the path is the identity.
+ *
+ * **The read, the merge and the write are one lock scope** (#1440). The create
+ * core states why the spec check and the write cannot be separate acquisitions;
+ * merge-patch extends the same argument to the read the merge is computed from.
+ * The write carries every field the body did not name, read a moment earlier,
+ * so two PUTs interleaved as read, read, write, write leave the second writer's
+ * stale copy of the untouched fields on top of the first writer's changes -
+ * silently, on both sides. That window used to sit between `get_collection`
+ * here and `create_collection` inside the lock.
+ *
+ * @param before_write Test seam, invoked inside the lock scope with the merged
+ *        row staged and immediately before it is written; see
+ *        `update_request_response` for why it is an overload.
+ */
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock (
+    [&] { result = update_collection_locked (db, id, json, before_write); });
     return result;
+}
+
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json) {
+    return update_collection_response (db, id, json, nullptr);
 }
 
 void register_collection_routes (RouteContext& ctx) {

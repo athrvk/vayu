@@ -474,8 +474,9 @@ Notes:
   its denormalized column move together or the two disagree about what the
   request sends). `update_collection` carries a collection's own state - name,
   description, variables, auth, both scripts - and never its position:
-  re-parenting is `move_item`'s job (below), because `POST /reorder` is the only
-  write path that is atomic against a concurrent one.
+  re-parenting is `move_item`'s job (below), because a move is a batch. The
+  destination's siblings renumber with it, and `POST /reorder` is the write path
+  that commits the whole batch or none of it; a `PUT` writes one row.
 - **`delete_collection` cascades**, so it reads the subtree first: `GET
   /collections` gives it every descendant through `parentId`, one `GET
   /requests?collectionId=` per collection in that subtree gives the request
@@ -562,8 +563,12 @@ Notes:
 - **`move_item` is a bounded move, not a reorder** (issue #759). It maps to
   `POST /reorder`, whose batch validates and commits under one acquisition of the
   engine's DB mutex (#386) - which is why re-parenting goes here rather than
-  through `PUT /collections/:id`'s own `parentId`, where two concurrent moves can
-  each pass an acyclicity check neither one's commit was visible to. What the
+  through `PUT /collections/:id`'s own `parentId`. That `PUT` holds its own read
+  to its write since #1440, so two concurrent moves no longer each pass an
+  acyclicity check neither one's commit was visible to; what one row at a time
+  still cannot do is refuse the pair together - the first move is committed by
+  the time the second is rejected - or renumber the destination's siblings in the
+  same write. What the
   tool offers is the row menu's "Move to...": a destination, and `first` or
   `last` among its new siblings. Positions in between stay a UI gesture on
   purpose - naming one means reproducing the app's ordering arithmetic
