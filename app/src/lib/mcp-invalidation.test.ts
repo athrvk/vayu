@@ -42,7 +42,10 @@ function keysFor(event: McpDataChangedEvent) {
  */
 function familyOf(keys: (readonly unknown[] | undefined)[], prefix: readonly unknown[]) {
 	return keys.filter(
-		(key) => Array.isArray(key) && key.length >= prefix.length && key[0] === prefix[0]
+		(key) =>
+			Array.isArray(key) &&
+			key.length >= prefix.length &&
+			prefix.every((part, index) => part === key[index])
 	);
 }
 
@@ -52,17 +55,21 @@ afterEach(() => {
 
 describe("invalidateForMcpEvent", () => {
 	test("a created request invalidates only its own collection's list", () => {
+		// "Only" is the claim, so the request family is read whole - the event also
+		// drops keys outside it, which is what `familyOf` is for.
 		const { handled, keys } = keysFor({ entity: "request", collectionId: "col_1" });
 		expect(handled).toBe(true);
-		expect(keys).toContainEqual(queryKeys.requests.listByCollection("col_1"));
-		expect(keys).not.toContainEqual(queryKeys.requests.lists());
+		expect(familyOf(keys, queryKeys.requests.all)).toEqual([
+			queryKeys.requests.listByCollection("col_1"),
+		]);
 	});
 
 	test("a request change with no named collection invalidates every list", () => {
 		// The owner is unknowable from here, and a per-collection key would leave
-		// whichever list actually changed stale.
+		// whichever list actually changed stale. Whole family again: the prefix is
+		// taken *instead of* a narrower key, never beside one.
 		const { keys } = keysFor({ entity: "request" });
-		expect(keys).toContainEqual(queryKeys.requests.lists());
+		expect(familyOf(keys, queryKeys.requests.all)).toEqual([queryKeys.requests.lists()]);
 	});
 
 	test("an updated request also drops its detail cache", () => {
@@ -96,20 +103,20 @@ describe("invalidateForMcpEvent", () => {
 
 	test("a created request touches no detail cache", () => {
 		// A create names no request id, and the row it made has no detail entry to
-		// invalidate - the narrowing exists for the tools that name one row. Read
-		// within the family, because this event also drops keys outside it.
+		// invalidate - the narrowing exists for the tools that name one row. Read at
+		// the `details()` prefix rather than one id's key, so a detail invalidation
+		// under *any* id would red this.
 		const { keys } = keysFor({ entity: "request", collectionId: "col_1" });
-		expect(familyOf(keys, queryKeys.requests.all)).toEqual([
-			queryKeys.requests.listByCollection("col_1"),
-		]);
+		expect(familyOf(keys, queryKeys.requests.details())).toEqual([]);
 	});
 
 	test("a collection change invalidates collections and every request family", () => {
 		// A cascade delete takes descendants and their requests with it, and which
-		// rows those were is engine-side knowledge - so both families go wholesale.
+		// rows those were is engine-side knowledge - so both families go wholesale,
+		// at their roots and nowhere narrower.
 		const { keys } = keysFor({ entity: "collection" });
-		expect(keys).toContainEqual(queryKeys.collections.all);
-		expect(keys).toContainEqual(queryKeys.requests.all);
+		expect(familyOf(keys, queryKeys.collections.all)).toEqual([queryKeys.collections.all]);
+		expect(familyOf(keys, queryKeys.requests.all)).toEqual([queryKeys.requests.all]);
 	});
 
 	test("a deleted request reaches the Trash drawer's list", () => {
