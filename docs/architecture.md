@@ -163,8 +163,10 @@ the session (issue #1417). A run replaced by another of its own kind hands the
 key back on the same path: each service ends the run it is replacing before it
 registers the new one, so the key is released and taken again in that order,
 rather than the arriving run being handed its own hand-off and freeing the lock
-it had just taken. The screen may still dim and lock; only suspension is
-refused.
+it had just taken. A run an MCP agent started holds the lock on the same terms:
+main does not watch runs, it names the run its `mcp:data-changed` event just
+started and the renderer enters the same watch path a dashboard would (issue
+#1419). The screen may still dim and lock; only suspension is refused.
 
 **It is off by default, because the machine's power settings are the user's.**
 Two things turn it on. The standing preference (Settings > Load testing > Keep
@@ -188,10 +190,14 @@ lives in a localStorage-backed store main cannot see - over `notify:show`
 (`services/notify.ts`); `electron/notify.ts` decides *whether and how*, from the
 window's focus and the platform's support, and answers `notify:availability`
 for the settings row. Nothing is posted while the window is focused - the toast
-already said it. Windows shows nothing at all unless `app.setAppUserModelId`
-matches the shortcut's id; macOS authorizes per bundle and refuses one whose
-code signature does not bind its own `Info.plist`. Ad-hoc signing satisfies it,
-and `install.sh` re-signs what it installs, so an installed build notifies - but
+already said it. A run an agent started over MCP notifies like any other: the
+renderer is told the run began and watches it from that moment, so its end
+reaches the user who handed it over and walked away - which is the case the
+setting exists for (issue #1419). Windows shows nothing at all unless
+`app.setAppUserModelId` matches the shortcut's id; macOS authorizes per bundle
+and refuses one whose code signature does not bind its own `Info.plist`. Ad-hoc
+signing satisfies it, and `install.sh` re-signs what it installs, so an
+installed build notifies - but
 the dev `Electron.app` and a bundle dragged straight out of the DMG do not, so
 system notifications cannot be exercised by `pnpm electron:dev` on macOS. That
 refusal is caught, latched, and reported in Settings, with the toast standing in
@@ -229,15 +235,19 @@ test, or a collection run whose plan frame - the size the engine publishes on
 its stream as the run opens, issue #1398 - never reached the client) shows
 indeterminate on Windows and nothing on macOS; a failed run flashes the Windows
 error state; the bar clears on every terminal path, and main clears it itself
-when the renderer that asked for it is destroyed or reloads. One indicator is
-all the OS gives an application, and one run is all the renderer watches: the
-SSE client is a singleton, so starting a second run closes the first one's
-stream - and tells its service so, which hands the displaced run's wake lock
-back and gives up its bar rather than leaving both standing (issue #1417). The
-lock is the half with a visible outcome: the incoming run claims the indicator
-before it connects, so the bar is transferred rather than cleared, and the
-displaced run's release - named by the run it speaks for - finds nothing of its
-own left to wipe. The
+when the renderer that asked for it is destroyed or reloads. The bar is not the
+app's own runs only: a run started by an MCP agent is watched from the moment
+the main process reports it (`startedRun` on `mcp:data-changed`, issue #1419),
+so it paints the same fill, and opening its dashboard tab later attaches nothing
+new - `startMonitoring` is idempotent for a run already being watched. One
+indicator is all the OS gives an application, and one run is all the renderer
+watches: the SSE client is a singleton, so starting a second run closes the
+first one's stream - and tells its service so, which hands the displaced run's
+wake lock back and gives up its bar rather than leaving both standing (issue
+#1417). The lock is the half with a visible outcome: the incoming run claims the
+indicator before it connects, so the bar is transferred rather than cleared, and
+the displaced run's release - named by the run it speaks for - finds nothing of
+its own left to wipe. The
 superseded run is not stopped and says nothing to the user: it is still running
 in the engine, and its row reaches a terminal status on the next list read
 rather than through a notification for a run nobody is watching. The indicator

@@ -160,6 +160,38 @@ export interface McpDataChangedEvent {
 	 * no longer exists. `useStopMockServerMutation` already drops it app-side.
 	 */
 	mockId?: string;
+	/**
+	 * The run this call just started, and which run service watches it (#1419).
+	 *
+	 * The one field on this event that is not a scope hint: it says the run is
+	 * *live*, which is what lets the renderer attach its stream to a run no
+	 * surface of its own started - and with it the OS progress indicator (#1362),
+	 * the keep-awake hold (#1357) and the finished notification (#1358), all of
+	 * which live inside the run services and used to begin only once a dashboard
+	 * was opened.
+	 *
+	 * Present on the `run` event of the two tools that create a run
+	 * (`start_load_run`, `run_collection`) and on no other: `run_collection_smoke`
+	 * sends its requests one at a time and has no run to watch, and the tools that
+	 * stop, re-baseline or delete a run are naming one that already exists. Read
+	 * from the engine's answer rather than from the call's arguments, because a
+	 * run has no id until the engine has given it one - which is also why it
+	 * cannot be spelled the way the hints above are.
+	 */
+	startedRun?: StartedRun;
+}
+
+/**
+ * A run an agent's call put in flight, named for the renderer that watches it.
+ *
+ * `kind` is which service owns the stream rather than what the user would call
+ * the run: a load run and a collection run publish different frames, so
+ * attaching the wrong service is a permanently empty view and not a degraded
+ * one - the fork `RunCollectionDialog` already records for the app's own runs.
+ */
+export interface StartedRun {
+	runId: string;
+	kind: "load" | "collection";
 }
 
 export interface ToolContext {
@@ -883,6 +915,32 @@ const NOTHING_CHANGED = new WeakSet<ToolResult>();
 /** Mark a successful result as having changed nothing (see {@link NOTHING_CHANGED}). */
 function unchanged(result: ToolResult): ToolResult {
 	NOTHING_CHANGED.add(result);
+	return result;
+}
+
+/**
+ * Results that started a run the app should watch (#1419), keyed by the run.
+ *
+ * A WeakMap for the reason {@link NOTHING_CHANGED} is a WeakSet: the result
+ * object is handed to the SDK verbatim (`server.ts`), so a field here would be
+ * serialized to the client as though it were part of the MCP result shape.
+ */
+const STARTED_RUNS = new WeakMap<ToolResult, StartedRun>();
+
+/**
+ * Mark a result as having started `kind`'s run, taking the id from the engine's
+ * own answer (see {@link STARTED_RUNS}).
+ *
+ * An answer without a `runId` marks nothing: the engine's 202 body is what says
+ * a run exists, and a body shaped some other way is handed back to the agent as
+ * it came rather than announced to the renderer as a run to attach to.
+ */
+function watchedRun(result: ToolResult, kind: StartedRun["kind"], started: unknown): ToolResult {
+	const runId =
+		started && typeof started === "object" && !Array.isArray(started)
+			? (started as Record<string, unknown>).runId
+			: undefined;
+	if (typeof runId === "string" && runId !== "") STARTED_RUNS.set(result, { runId, kind });
 	return result;
 }
 
@@ -2846,12 +2904,24 @@ async function startScenarioLoadRun(
 	});
 	if (unconfirmed) return unconfirmed;
 
-	return withCaveat(
-		await callEngine(() => ctx.client.startRun(payload, signal)),
-		`\n\nThe plan is ${plannedSteps} step(s) per iteration. Follow the run with ` +
-			`get_run_report: its \`scenario\` section carries the virtual-user, iteration and ` +
-			`per-step breakdown. Pre-request scripts DO run on a scenario load run - each virtual ` +
-			`user walks the plan the way the design runner does.`
+	// Read here rather than through `callEngine` for the reason the single-target
+	// path states: the run id in the answer is what the renderer watches (#1419).
+	let started: unknown;
+	try {
+		started = await ctx.client.startRun(payload, signal);
+	} catch (err) {
+		return engineErrorResult(err);
+	}
+	return watchedRun(
+		withCaveat(
+			jsonResult(started),
+			`\n\nThe plan is ${plannedSteps} step(s) per iteration. Follow the run with ` +
+				`get_run_report: its \`scenario\` section carries the virtual-user, iteration and ` +
+				`per-step breakdown. Pre-request scripts DO run on a scenario load run - each virtual ` +
+				`user walks the plan the way the design runner does.`
+		),
+		"load",
+		started
 	);
 }
 
@@ -6278,18 +6348,22 @@ export const TOOLS: McpTool[] = [
 			if (!started || typeof started !== "object" || Array.isArray(started)) {
 				return jsonResult(started);
 			}
-			return structuredResult({
-				...(started as Record<string, unknown>),
-				plannedSteps,
-				nextStep:
-					`The run executes engine-side. Read it with get_run_report(runId): the ` +
-					`\`scenario\` section carries the iteration and pass/fail/skip totals plus ` +
-					`\`stepsStored\`/\`stepsDropped\`, and \`results\` returns at most 100 step rows ` +
-					`(non-passing steps are kept first). Each row's \`trace\` carries that step's ` +
-					`request and response bodies inline, so a long plan against large responses ` +
-					`makes for a large report - read the totals first and the rows when you need ` +
-					`them. stop_run ends the run early.`,
-			});
+			return watchedRun(
+				structuredResult({
+					...(started as Record<string, unknown>),
+					plannedSteps,
+					nextStep:
+						`The run executes engine-side. Read it with get_run_report(runId): the ` +
+						`\`scenario\` section carries the iteration and pass/fail/skip totals plus ` +
+						`\`stepsStored\`/\`stepsDropped\`, and \`results\` returns at most 100 step rows ` +
+						`(non-passing steps are kept first). Each row's \`trace\` carries that step's ` +
+						`request and response bodies inline, so a long plan against large responses ` +
+						`makes for a large report - read the totals first and the rows when you need ` +
+						`them. stop_run ends the run early.`,
+				}),
+				"collection",
+				started
+			);
 		},
 	},
 	{
@@ -6737,7 +6811,16 @@ export const TOOLS: McpTool[] = [
 			});
 			if (unconfirmed) return unconfirmed;
 
-			return withCaveat(await callEngine(() => ctx.client.startRun(payload, signal)), caveat);
+			// The engine's answer is read here rather than left to `callEngine`,
+			// because the run id it carries is what the renderer attaches its stream
+			// to (#1419) - a run has no id until this call returns.
+			let started: unknown;
+			try {
+				started = await ctx.client.startRun(payload, signal);
+			} catch (err) {
+				return engineErrorResult(err);
+			}
+			return watchedRun(withCaveat(jsonResult(started), caveat), "load", started);
 		},
 	},
 	{
@@ -7609,7 +7692,7 @@ export async function dispatchTool(
 	// an invalidation storm on every rejected call would be worse than the one
 	// stale list a genuinely-partial failure leaves behind. A confirmation
 	// preview is the third case: successful, and deliberately without effect.
-	if (!result.isError && !NOTHING_CHANGED.has(result)) notifyDataChanged(tool, args, ctx);
+	if (!result.isError && !NOTHING_CHANGED.has(result)) notifyDataChanged(tool, args, ctx, result);
 	return result;
 }
 
@@ -7624,13 +7707,22 @@ export async function dispatchTool(
  * throwing listener is logged and swallowed rather than turned into a tool
  * error the agent would read as "the write did not happen".
  */
-function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: ToolContext): void {
+function notifyDataChanged(
+	tool: McpTool,
+	args: Record<string, unknown>,
+	ctx: ToolContext,
+	result: ToolResult
+): void {
 	if (!ctx.onDataChanged || tool.invalidates.length === 0) return;
 	const collectionId = str(args, "collectionId");
 	const requestId = str(args, "requestId");
 	const runId = str(args, "runId");
 	const inboxId = str(args, "inboxId");
 	const mockId = str(args, "mockId");
+	// Rides the `run` event alone: that a run started is a fact about the run
+	// family, and `run_collection`'s other entity is the cookie jar, which has no
+	// use for it.
+	const startedRun = STARTED_RUNS.get(result);
 	for (const entity of tool.invalidates) {
 		try {
 			ctx.onDataChanged({
@@ -7640,6 +7732,7 @@ function notifyDataChanged(tool: McpTool, args: Record<string, unknown>, ctx: To
 				...(runId !== undefined ? { runId } : {}),
 				...(inboxId !== undefined ? { inboxId } : {}),
 				...(mockId !== undefined ? { mockId } : {}),
+				...(entity === "run" && startedRun !== undefined ? { startedRun } : {}),
 			});
 		} catch (err) {
 			console.error(`[MCP] Failed to notify "${entity}" change from ${tool.name}:`, err);
