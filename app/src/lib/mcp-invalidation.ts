@@ -42,10 +42,40 @@ const INVALIDATORS: Record<
 	 * engine's definition of "descendant". `requests.all` rather than a list key
 	 * because `requests.detail` entries carry `staleTime: Infinity`, so a deleted
 	 * request would otherwise stay fresh forever and keep feeding restored tabs.
+	 *
+	 * `trash` because a delete is what *adds* a row to it and a restore or purge
+	 * is what takes one away - `delete_collection` declares this family alone,
+	 * and `restore_trash_entry` and `purge_trash_entry` declare it beside
+	 * `request` (issue #1438). The list is the only read of that family, so
+	 * without this an agent's delete never appears in an open Trash drawer and a
+	 * row it purged stays there until the drawer is closed and reopened; clicking
+	 * Restore on that phantom row 404s.
+	 *
+	 * `compose` at the `all` prefix rather than per request: a collection write
+	 * changes the chain every descendant request inherits its auth, headers and
+	 * scripts from, and which requests those are is the same engine-side
+	 * knowledge `requests.all` is taken wholesale for. Only a mounted Code
+	 * section composes at all (the section is unmounted while collapsed), so the
+	 * cost is one round trip per open snippet.
+	 *
+	 * `prefetch.allRequests` for the reason its key comment gives: the warm-cache
+	 * pass succeeds once and would stay fresh forever, so a collection an agent
+	 * created mid-session never gets one - the same invalidation
+	 * `useCreateCollectionMutation` and `useRestoreTrashMutation` already do. The
+	 * cost is knowingly the largest here: the pass fans out one list fetch per
+	 * collection, and `requests.all` above has just marked every one of them
+	 * stale, so a collection event refetches the whole set rather than the
+	 * mounted part of it. That is the trade the two app-side callers already
+	 * make, and this family's tools are the coarse, occasional ones (a create, an
+	 * import, a spec sync), not the ones an agent loops over row by row - which
+	 * is exactly why the `request` family below does *not* take this key.
 	 */
 	collection: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.compose.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
 	},
 
 	/*
@@ -62,6 +92,30 @@ const INVALIDATORS: Record<
 	 * open. Only the tools that name one row (`update_request`, `delete_request`)
 	 * carry the hint; `create_request` names none, and its row has no detail
 	 * entry yet.
+	 *
+	 * `trash` for the same reason the `collection` family takes it:
+	 * `delete_request` declares this family alone and stamps a row the Trash
+	 * drawer lists, and `restore_trash_entry` / `purge_trash_entry` declare it
+	 * beside `collection` (issue #1438). Unguarded, because the two trash tools
+	 * name no request and the event says which family changed, never how - so a
+	 * `create_request` pays a refetch of a short list that the drawer has to be
+	 * open to mount at all. That is this map's standing trade, taken here for the
+	 * same reason the `run` family takes it: a stale answer is a lie, a refetch
+	 * is a wait. There is no per-row key to narrow to - the list is the family's
+	 * only read.
+	 *
+	 * `compose` only when the event names a request, and then only that
+	 * request's compositions. A composition is per request, and every tool that
+	 * can change one either names the row it wrote (`update_request`,
+	 * `delete_request`, the three example tools) or declares `collection` too
+	 * (`move_item`, `import_document`, `bind_spec`, `sync_spec`, the two trash
+	 * tools), where the prefix above already covers it. The one `request` tool
+	 * that names no row is `create_request`, and a row that has never been
+	 * composed has nothing cached to drop. So the narrow key loses no coverage,
+	 * and it is what keeps an agent looping request writes from re-composing an
+	 * open snippet for a request it never touched: `invalidateQueries` refetches
+	 * a *mounted* observer whatever its `staleTime`, so `compose.all` here would
+	 * put the Code section through one round trip per write in the loop.
 	 */
 	request: (queryClient, event) => {
 		void queryClient.invalidateQueries({
@@ -69,9 +123,13 @@ const INVALIDATORS: Record<
 				? queryKeys.requests.listByCollection(event.collectionId)
 				: queryKeys.requests.lists(),
 		});
+		void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 		if (event.requestId) {
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.requests.detail(event.requestId),
+			});
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.compose.allForRequest(event.requestId),
 			});
 		}
 	},
@@ -178,8 +236,23 @@ const INVALIDATORS: Record<
 		void queryClient.invalidateQueries({ queryKey: queryKeys.cookies.all });
 	},
 
+	/*
+	 * `requestDefaults` beside `config` because it is a second endpoint reading
+	 * the same entries, not a slice of the first: four of them
+	 * (`negotiateCompression`, `loadNegotiateCompression`, `correlationIdEnabled`,
+	 * `correlationIdHeader`) decide what a send adds on its own, and the engine
+	 * resolves the answer - its libcurl decides which encodings can even be
+	 * asked for - so the declared set has to be re-read rather than derived here.
+	 * `useUpdateConfigMutation` drops both keys for exactly this reason, and this
+	 * map dropping only the first is the asymmetry issue #1438 names: the Headers
+	 * tab's read-only "Added by Vayu" rows and the load-test dialog's
+	 * design-vs-load notice keep listing a header the engine no longer adds.
+	 * `all` rather than a scope key: design and load are separate cache entries
+	 * and one write can move both.
+	 */
 	config: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.config.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.requestDefaults.all });
 	},
 
 	/*

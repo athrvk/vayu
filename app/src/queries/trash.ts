@@ -52,6 +52,13 @@ export function useTrashQuery() {
  * from the engine's answer. `prefetch.allRequests` goes with them - it is the
  * warm-cache pass over every collection's requests, and a restored collection
  * is one it has never seen.
+ *
+ * A failure invalidates the list too (issue #1438). The row this acted on is
+ * one the list said existed, so the likeliest failure is that it no longer
+ * does - an agent purged it, or restored it, between the drawer's last read and
+ * this click. Leaving the list alone there keeps a phantom row on screen that
+ * fails the same way on every further click; refetching either removes it or
+ * proves it real.
  */
 export function useRestoreTrashMutation() {
 	const queryClient = useQueryClient();
@@ -64,6 +71,9 @@ export function useRestoreTrashMutation() {
 			queryClient.invalidateQueries({ queryKey: queryKeys.requests.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
 		},
+		onError: () => {
+			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
+		},
 	});
 }
 
@@ -73,6 +83,10 @@ export function useRestoreTrashMutation() {
  * Only the trash list is invalidated. Every other cache stopped serving these
  * rows when they were stamped, so purging them changes nothing a live read can
  * see - invalidating the tree here would refetch it to produce the same answer.
+ *
+ * The failure path is the restore's, for the same reason and no other: a purge
+ * that fails on a row the list still shows is the same phantom, and the rule is
+ * worth having whole rather than on one of the two buttons a trash row carries.
  */
 export function usePurgeTrashMutation() {
 	const queryClient = useQueryClient();
@@ -80,6 +94,9 @@ export function usePurgeTrashMutation() {
 	return useMutation({
 		mutationFn: (id: string) => apiService.purgeTrashEntry(id),
 		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
+		},
+		onError: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 		},
 	});

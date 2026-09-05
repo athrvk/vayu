@@ -1411,6 +1411,13 @@ are how the app sees what got stamped (`queries/trash.ts`).
   already stopped serving these rows when they were stamped, so purging them
   changes nothing a live read can see.
 
+Both mutations also invalidate `trash.all` on **failure** (#1438). The row
+either acted on is one this list said existed, so the likeliest failure is that
+it no longer does - an agent's `purge_trash_entry` or `restore_trash_entry`
+landed between the drawer's last read and the click. Leaving the list alone
+there keeps a phantom row on screen that fails the same way on every further
+click; refetching either removes it or proves it real.
+
 #### Environments & Variables
 
 - **`useEnvironmentsQuery()`** - Fetch all environments
@@ -1580,7 +1587,13 @@ into a pane that can never load on every restart.
   recompose: the section is only mounted while expanded, so this is the "compose
   on expand, not per keystroke" rule. The section also ships collapsed by
   default (`CONTEXT_BAR_DEFAULT_COLLAPSED`), so that round trip now happens on
-  first expansion rather than on every request tab opened (#1310)
+  first expansion rather than on every request tab opened (#1310).
+  `queryKeys.compose.allForRequest(requestId)` is the per-request invalidation
+  root, and `forRequest` is built from it rather than beside it so the prefix
+  relationship holds by construction - that is the key an MCP write to one
+  request drops (#1438), and `staleTime: Infinity` does not stand in its way:
+  it gates the *cost* of composing, not the correctness, because
+  `invalidateQueries` refetches a mounted observer whatever its `staleTime`
 
 ### Query Keys & Cache Invalidation
 
@@ -1731,12 +1744,12 @@ to keys through `lib/mcp-invalidation.ts`:
 
 | Entity | Invalidates | Why that key |
 |--------|-------------|--------------|
-| `collection` | `collections.all`, `requests.all` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely |
-| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, plus `requests.detail(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open |
+| `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` because the warm-cache pass succeeds once and would stay fresh forever, so a collection created mid-session never gets one - the same invalidation `useCreateCollectionMutation` and `useRestoreTrashMutation` do (#1438) |
+| `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open. `trash.all` because `delete_request` declares this family alone and stamps a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. `prefetch.allRequests()` is deliberately **not** here for the same reason: it fans out one list fetch per collection, and this is the family an agent loops over row by row (#1438) |
 | `environment` | `environments.all`, `globals.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and nothing refetches a composition on its own. `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader |
 | `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The four prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |
 | `cookie` | `cookies.all` | One key for every jar - the engine reports them together |
-| `config` | `config.all` | |
+| `config` | `config.all`, `requestDefaults.all` | `requestDefaults` is a second endpoint over the same entries rather than a slice of the first: four of them (`negotiateCompression`, `loadNegotiateCompression`, `correlationIdEnabled`, `correlationIdHeader`) decide what a send adds on its own and the engine resolves the answer, so the declared set is re-read rather than derived here - which is why `useUpdateConfigMutation` drops both keys. At the root, because design and load are separate cache entries and one write can move both (#1438) |
 | `service` | `inbox.list()`, `mockServer.list()`, `mockIssuer.list()`, plus a **removal** of `inbox.captures(inboxId)` for a named inbox and of `mockServer.routes(mockId)` for a named mock | The drawer and the Dock's count poll, so the lists are about immediacy; the captures cannot be invalidated, because `useInboxCapturesQuery` merges its fetched page into the cache and would union back the rows a `clear_inbox_captures` just destroyed, and a stopped mock's route table has no id left to refetch from |
 | `oauth` | `oauth.all` | The whole prefix, not the one key: `useOAuth2TokenStatusQuery` is keyed per cache key, and the key a `fetch_oauth2_token` writes under is derived engine-side and appears only in the answer, so the event carries no hint to narrow by. The query polls at 30s on its own, so this is immediacy - an agent that clears a token must not leave the row saying it is valid |
 

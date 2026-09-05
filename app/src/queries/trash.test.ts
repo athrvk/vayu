@@ -108,6 +108,23 @@ describe("useRestoreTrashMutation", () => {
 		// And the row has left the trash it was listed in.
 		expect(invalidatedKeys()).toContain(queryKeys.trash.all.join("/"));
 	});
+
+	it("refetches the list when the restore fails, so a phantom row cannot survive", async () => {
+		// The row this acted on is one the list said existed, so the likeliest
+		// failure is that it no longer does - an agent purged or restored it since
+		// the drawer's last read (issue #1438). Leaving the list alone keeps a row
+		// on screen that fails the same way on every further click.
+		vi.mocked(apiService.restoreTrashEntry).mockRejectedValue(new Error("Request not found"));
+		const { result } = renderHook(() => useRestoreTrashMutation(), { wrapper });
+
+		await expect(result.current.mutateAsync("gone")).rejects.toThrow("Request not found");
+
+		expect(invalidatedKeys()).toContain(queryKeys.trash.all.join("/"));
+		// Only the list: nothing crossed back into the live caches, because nothing
+		// was restored.
+		expect(invalidatedKeys()).not.toContain(queryKeys.collections.all.join("/"));
+		expect(invalidatedKeys()).not.toContain(queryKeys.requests.all.join("/"));
+	});
 });
 
 describe("usePurgeTrashMutation", () => {
@@ -127,5 +144,17 @@ describe("usePurgeTrashMutation", () => {
 
 		expect(invalidatedKeys()).not.toContain(queryKeys.collections.all.join("/"));
 		expect(invalidatedKeys()).not.toContain(queryKeys.requests.all.join("/"));
+	});
+
+	it("refetches the list when the purge fails, the same way a failed restore does", async () => {
+		// A purge that fails on a row the list still shows is the same phantom the
+		// restore path has, and a rule that held on one of the two buttons a trash
+		// row carries would be the harder one to keep true.
+		vi.mocked(apiService.purgeTrashEntry).mockRejectedValue(new Error("Request not found"));
+		const { result } = renderHook(() => usePurgeTrashMutation(), { wrapper });
+
+		await expect(result.current.mutateAsync("gone")).rejects.toThrow("Request not found");
+
+		expect(invalidatedKeys()).toContain(queryKeys.trash.all.join("/"));
 	});
 });
