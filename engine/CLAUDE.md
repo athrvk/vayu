@@ -185,7 +185,12 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `ryml`) fetches three `vcpkg_download_distfile` sub-archives the fixer leaves
   alone; rewrite those to `vcpkg_from_git` in the overlay. Only this
   environment needs it; CI reaches the archives.
-- Install the git pre-commit hook: `bash scripts/install-git-hooks.sh`.
+- **The git pre-commit hook installs itself** with `python build.py --setup`,
+  which `.claude/hooks/session-start.sh` also runs - `.git/hooks` is not tracked,
+  so every clone and every cloud session would otherwise start without the one
+  thing that format-checks a commit before it exists. `bash
+  scripts/install-git-hooks.sh` still installs it directly, which is what a
+  Windows checkout needs: `--setup` refuses to run there.
 
 ## Formatting and linting
 
