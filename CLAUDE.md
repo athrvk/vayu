@@ -153,6 +153,11 @@ and assert **both** branches.
 - **A hand-rolled copy of a primitive does not receive the primitive's fixes.**
   Before styling or reimplementing something that already exists as a
   primitive, `rg` for the primitive.
+- **The platform before a dependency, a dependency before new code.** Before
+  adding a package or hand-building a control, check whether the platform
+  already covers it: an HTML input type, CSS, `Intl`, a DB constraint, the
+  STL. A dependency taken on for what a native feature already does is a
+  permanent maintenance cost bought for a one-time convenience.
 - **Mutation-check behavioural tests** (revert the fix, confirm failure,
   restore). Source-scanning guards must assert they scanned something
   non-empty; vitest stubs CSS imports to `""`, so a guard over a stylesheet can
