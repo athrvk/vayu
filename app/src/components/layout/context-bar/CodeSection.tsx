@@ -22,10 +22,11 @@
  * bearer token typed literally is exactly as sensitive as one that came from a
  * `{{token}}`.
  *
- * Composing happens when the section is expanded and when the user asks for it
- * again, never per keystroke: the section is only mounted while expanded (see
+ * Composing happens when the section is expanded, when the user asks for it
+ * again, and when a write the renderer did not make lands on this request,
+ * never per keystroke: the section is only mounted while expanded (see
  * `Section.tsx`) and the query is `staleTime: Infinity` behind an explicit
- * refresh.
+ * refresh or an invalidation (see `lib/mcp-invalidation.ts`).
  */
 
 import { useState } from "react";
@@ -76,8 +77,14 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 				...(activeEnvironmentId ? { environmentId: activeEnvironmentId } : {}),
 			}),
 		enabled: mode === "resolved" && !!request?.id,
-		// The request does not change under us while the bar is open - the user
-		// asks for a recompose with the refresh button when they have edited it.
+		// Never refetched on its own: a compose is a round trip, and the section
+		// would otherwise pay one per keystroke behind it (#1310). It is refreshed
+		// by an explicit act instead - the user's refresh button, or an
+		// invalidation from a write the renderer did not make, which is how an MCP
+		// agent's edit to this request or its collection chain reaches the snippet
+		// (`lib/mcp-invalidation.ts`, #1438). `invalidateQueries` refetches a
+		// mounted observer whatever its `staleTime`, so this value gates the cost
+		// without gating correctness.
 		staleTime: Infinity,
 		retry: false,
 	});
