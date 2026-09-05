@@ -129,3 +129,73 @@ describe("useEntityDraft - switching entity", () => {
 		expect(reset).toHaveBeenCalledTimes(2);
 	});
 });
+
+describe("useEntityDraft - a dirty draft against a background refetch (#1437)", () => {
+	it("keeps the draft and records the pending value instead of overwriting it", () => {
+		// On today's unfixed master this rerender replaces the draft with the
+		// agent's write, which is the exact defect #1437 reports.
+		const { result, rerender } = setup({ entityKey: "c1", value: acme });
+
+		act(() => result.current.setDraft({ name: "Renamed", description: "" }));
+		rerender({ entityKey: "c1", value: { ...acme, description: "written by an agent" } });
+
+		expect(result.current.draft).toEqual({ name: "Renamed", description: "" });
+		expect(result.current.isDirty).toBe(true);
+		expect(result.current.externalValue).toEqual({
+			name: "Acme API",
+			description: "written by an agent",
+		});
+		// The baseline stays what the draft actually diverged from, not the
+		// pending value - callers diff against this to tell which side touched
+		// which field.
+		expect(result.current.baseline).toEqual(acme);
+	});
+
+	it("does not flag a conflict when the refetch only echoes the draft's own save", () => {
+		const { result, rerender } = setup({ entityKey: "c1", value: acme });
+
+		act(() => result.current.setDraft({ name: "Renamed", description: "" }));
+		rerender({ entityKey: "c1", value: { name: "Renamed", description: "" } });
+
+		expect(result.current.externalValue).toBeNull();
+		expect(result.current.isDirty).toBe(false);
+		expect(result.current.baseline).toEqual({ name: "Renamed", description: "" });
+	});
+
+	it("reset adopts the pending value and clears the conflict", () => {
+		const { result, rerender } = setup({ entityKey: "c1", value: acme });
+
+		act(() => result.current.setDraft({ name: "Renamed", description: "" }));
+		rerender({ entityKey: "c1", value: { ...acme, description: "written by an agent" } });
+		expect(result.current.externalValue).not.toBeNull();
+
+		act(() => result.current.reset());
+
+		expect(result.current.draft).toEqual({
+			name: "Acme API",
+			description: "written by an agent",
+		});
+		expect(result.current.isDirty).toBe(false);
+		expect(result.current.externalValue).toBeNull();
+		expect(result.current.baseline).toEqual({
+			name: "Acme API",
+			description: "written by an agent",
+		});
+	});
+
+	it("a switch clears a pending conflict rather than carrying it to the new entity", () => {
+		const { result, rerender } = setup({ entityKey: "c1", value: acme });
+
+		act(() => result.current.setDraft({ name: "Renamed", description: "" }));
+		rerender({ entityKey: "c1", value: { ...acme, description: "written by an agent" } });
+		expect(result.current.externalValue).not.toBeNull();
+
+		const other = { name: "Other API", description: "" };
+		rerender({ entityKey: "c2", value: other });
+
+		expect(result.current.draft).toEqual(other);
+		expect(result.current.baseline).toEqual(other);
+		expect(result.current.externalValue).toBeNull();
+		expect(result.current.isDirty).toBe(false);
+	});
+});

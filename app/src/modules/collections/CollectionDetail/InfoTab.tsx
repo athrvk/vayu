@@ -28,7 +28,7 @@ import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { reportBlankNameRefused } from "@/lib/blank-name";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
-import { Field, SaveFailed, Stat } from "./shared";
+import { ExternalChangeCallout, Field, SaveFailed, Stat } from "./shared";
 import { formatRelative } from "./format";
 
 interface InfoTabProps {
@@ -48,6 +48,27 @@ interface InfoDraft {
 	description: string;
 }
 
+/**
+ * One field of the per-key merge #1437 needs: a field the user hasn't touched
+ * adopts an external change; a field both sides changed, to different values,
+ * is a conflict left at the user's own value until they choose.
+ */
+function mergeField<K extends keyof InfoDraft>(
+	key: K,
+	draft: InfoDraft,
+	baseline: InfoDraft,
+	externalValue: InfoDraft | null
+): { value: InfoDraft[K]; conflict: boolean } {
+	if (externalValue === null || externalValue[key] === baseline[key]) {
+		return { value: draft[key], conflict: false };
+	}
+	const touched = draft[key] !== baseline[key];
+	if (!touched || externalValue[key] === draft[key]) {
+		return { value: touched ? draft[key] : externalValue[key], conflict: false };
+	}
+	return { value: draft[key], conflict: true };
+}
+
 export default function InfoTab({ collection, requestCount, active = false }: InfoTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
@@ -60,12 +81,27 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 	// clears the post-trim divergence: `persist` writes `name.trim()`, so a
 	// draft with trailing whitespace would otherwise stay dirty against the
 	// trimmed saved value forever.
-	const { draft, setDraft, isDirty } = useEntityDraft<InfoDraft>({
+	const { draft, setDraft, isDirty, baseline, externalValue } = useEntityDraft<InfoDraft>({
 		entityKey: collection.id,
 		value: { name: collection.name, description: collection.description ?? "" },
 		mutation: updateCollection,
 	});
-	const { name, description } = draft;
+
+	// Merged per key rather than as one value (#1437): a field the user has not
+	// touched adopts an agent's change silently, the way a clean tab always
+	// has; a field both sides touched is a conflict, named and left for the
+	// user to resolve rather than picked for them.
+	const nameMerge = mergeField("name", draft, baseline, externalValue);
+	const descriptionMerge = mergeField("description", draft, baseline, externalValue);
+	const { value: name, conflict: nameConflict } = nameMerge;
+	const { value: description, conflict: descriptionConflict } = descriptionMerge;
+
+	const takeTheirName = () => {
+		if (externalValue) setDraft((d) => ({ ...d, name: externalValue.name }));
+	};
+	const takeTheirDescription = () => {
+		if (externalValue) setDraft((d) => ({ ...d, description: externalValue.description }));
+	};
 
 	// A collection must keep a name, so a blank one is not saveable - and the
 	// store-driven paths (Ctrl/Cmd+S, the quit flush) have no disabled button to
@@ -114,6 +150,11 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 
 	return (
 		<div className="max-w-[540px] flex flex-col gap-5">
+			{nameConflict && <ExternalChangeCallout what="name" onTakeTheirs={takeTheirName} />}
+			{descriptionConflict && (
+				<ExternalChangeCallout what="description" onTakeTheirs={takeTheirDescription} />
+			)}
+
 			<Field label="Collection name">
 				<Input
 					value={name}

@@ -49,7 +49,7 @@ import { isDataVariableName } from "@/lib/variable-resolution";
 import { useDataContract, useVariableResolver } from "@/hooks";
 import { cn } from "@/lib/utils";
 import type { Collection } from "@/types";
-import { InfoBanner, SaveFailed } from "./shared";
+import { ExternalChangeCallout, InfoBanner, SaveFailed } from "./shared";
 
 type ScriptKind = "pre" | "post";
 
@@ -77,6 +77,8 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 		draft: script,
 		setDraft: setScript,
 		isDirty,
+		reset: takeTheirScript,
+		externalValue,
 	} = useEntityDraft<string>({
 		entityKey: `${collection.id}:${fieldKey}`,
 		value: collection[fieldKey] ?? "",
@@ -179,6 +181,10 @@ export default function ScriptTab({ collection, kind, active = false }: ScriptTa
 					: "shared test assertions and teardown"}
 				.
 			</InfoBanner>
+
+			{externalValue !== null && (
+				<ExternalChangeCallout what="the script" onTakeTheirs={takeTheirScript} />
+			)}
 
 			{/*
 			 * "Names mentioned", and each chip in the syntax the script actually

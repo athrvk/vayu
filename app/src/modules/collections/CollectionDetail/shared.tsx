@@ -10,6 +10,7 @@
  */
 
 import { Info } from "lucide-react";
+import { Button } from "@/components/ui";
 import { Callout } from "@/components/shared";
 
 /**
@@ -38,6 +39,39 @@ export function SaveFailed({
 	return (
 		<Callout severity="blocking" title={`Couldn't save ${what}`} className={className}>
 			{detail ?? "The change was not saved. Try again."}
+		</Callout>
+	);
+}
+
+/**
+ * A background change that arrived while a draft was dirty - see
+ * `useEntityDraft`'s `externalValue`. The tab never overwrites the
+ * in-progress edit; this is what it shows instead, with a "Take theirs"
+ * action that adopts the external value.
+ */
+export function ExternalChangeCallout({
+	what,
+	onTakeTheirs,
+	className,
+}: {
+	/** Named in the title, e.g. "name", "description", "the script", "auth". */
+	what: string;
+	onTakeTheirs: () => void;
+	/** Spacing is the caller's - see `SaveFailed` above. */
+	className?: string;
+}) {
+	return (
+		<Callout
+			severity="warning"
+			title={`Changed elsewhere: ${what}`}
+			className={className}
+			action={
+				<Button variant="outline" size="sm" onClick={onTakeTheirs}>
+					Take theirs
+				</Button>
+			}
+		>
+			Someone else changed this while you were editing. Your edit is kept until you choose.
 		</Callout>
 	);
 }
