@@ -143,6 +143,40 @@ describe("parseCommand - curl", () => {
 		expect(r.urlEncoded).toEqual(kv([{ key: "q", value: "hello world" }]));
 	});
 
+	test("--data-urlencode is one pair per occurrence, not split on & (issue #1445)", () => {
+		// curl treats the whole value after the first `=` as the field's content
+		// and encodes it as a unit - splitting on `&` first (as `-d` legitimately
+		// does) turned one field into two.
+		const r = parseCommand(`curl https://x.com --data-urlencode 'q=café au lait & more'`)!;
+		expect(r.urlEncoded).toEqual(kv([{ key: "q", value: "café au lait & more" }]));
+	});
+
+	test("two --data-urlencode occurrences are two fields", () => {
+		const r = parseCommand(`curl https://x.com --data-urlencode 'a=1' --data-urlencode 'b=2'`)!;
+		expect(r.urlEncoded).toEqual(
+			kv([
+				{ key: "a", value: "1" },
+				{ key: "b", value: "2" },
+			])
+		);
+	});
+
+	test("a pre-encoded -d value is decoded on the way in, so it is not re-encoded on the way out (issue #1445)", () => {
+		// curl sends `-d`'s bytes on the wire exactly as written, so `%20` here is
+		// already the wire's own percent-escape - stored undecoded, a later
+		// `--data-urlencode 'b=x%20y'` would have curl encode the literal `%`
+		// again, landing as `x%2520y` on a real send.
+		const r = parseCommand(
+			`curl -X POST https://x.com -H 'Content-Type: application/x-www-form-urlencoded' -d 'a=1&b=x%20y'`
+		)!;
+		expect(r.urlEncoded).toEqual(
+			kv([
+				{ key: "a", value: "1" },
+				{ key: "b", value: "x y" },
+			])
+		);
+	});
+
 	test("-G moves data to query params and forces GET", () => {
 		const r = parseCommand(`curl -G https://x.com -d 'a=1' -d 'b=2'`)!;
 		expect(r.method).toBe("GET");
@@ -243,6 +277,40 @@ describe("parseCommand - curl", () => {
 		expect(r.method).toBe("PATCH");
 	});
 
+	test("-T is disclosed as an upload, not silently dropped (issue #1445)", () => {
+		const imported = importCommand(`curl -T upload.bin https://x.com`)!;
+		expect(imported.dropped).toEqual([
+			expect.objectContaining({ flag: "-T", what: expect.stringContaining("uploaded") }),
+		]);
+	});
+
+	test("-L sets followRedirects; its absence means false, not Vayu's own default", () => {
+		expect(parseCommand(`curl -L https://x.com`)?.followRedirects).toBe(true);
+		expect(parseCommand(`curl https://x.com`)?.followRedirects).toBe(false);
+	});
+
+	test("--max-redirs sets maxRedirects", () => {
+		const r = parseCommand(`curl -L --max-redirs 3 https://x.com`)!;
+		expect(r.followRedirects).toBe(true);
+		expect(r.maxRedirects).toBe(3);
+	});
+
+	test("--digest and --ntlm beside -u are their own auth mode, not silently basic (issue #1445)", () => {
+		expect(parseCommand(`curl --digest -u a:b https://x.com`)?.auth).toEqual({
+			mode: "digest",
+			config: { username: "a", password: "b" },
+		});
+		expect(parseCommand(`curl --ntlm -u a:b https://x.com`)?.auth).toEqual({
+			mode: "ntlm",
+			config: { username: "a", password: "b" },
+		});
+	});
+
+	test("--negotiate has no auth mode here, and says so instead of guessing", () => {
+		const imported = importCommand(`curl --negotiate -u a:b https://x.com`)!;
+		expect(imported.dropped.map((d) => d.flag)).toContain("--negotiate");
+	});
+
 	test("-d @file is skipped", () => {
 		const r = parseCommand(`curl -X POST https://x.com -d @body.json`)!;
 		expect(r.method).toBe("POST");
@@ -263,6 +331,22 @@ describe("parseCommand - curl", () => {
 	test("ignored flags don't swallow the URL", () => {
 		const r = parseCommand(`curl -sL --compressed -o out.txt https://x.com`)!;
 		expect(r.url).toBe("https://x.com");
+	});
+
+	test("a known value-carrying flag this parser has no other case for imports the right URL (issue #1445)", () => {
+		// Before the fix, the value token (`1M`) fell through to the "first
+		// positional wins" rule on the next loop turn and became the URL.
+		const imported = importCommand(`curl --limit-rate 1M https://x.com`)!;
+		expect(imported.request.url).toBe("https://x.com");
+		expect(imported.dropped.map((d) => d.flag)).toContain("--limit-rate");
+	});
+
+	test("a genuinely unknown flag is disclosed rather than silently eaten (issue #1445)", () => {
+		const imported = importCommand(`curl --some-future-flag https://x.com`)!;
+		expect(imported.dropped.map((d) => d.flag)).toContain("--some-future-flag");
+		// Not consumed as a value, since we do not know it takes one - the next
+		// positional (the URL) is still the URL.
+		expect(imported.request.url).toBe("https://x.com");
 	});
 
 	test("--header=value inline form", () => {
