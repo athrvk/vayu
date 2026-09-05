@@ -94,6 +94,28 @@ inline Dialect spec_dialect (const nlohmann::ordered_json& document) {
     return claimed ? Dialect::V2 : Dialect::None;
 }
 
+/**
+ * The `format` string a document's dialect is reported as, distinguishing
+ * 3.1 from 3.0 (issue #1444) - @ref spec_dialect folds both into one `V3` for
+ * every reader that only needs "is this 3.x", which a document description is
+ * not. `None` reports empty, matching every caller's existing convention for
+ * "readable, not a contract".
+ */
+inline std::string
+dialect_format_name (const nlohmann::ordered_json& document, Dialect dialect) {
+    switch (dialect) {
+    case Dialect::V3: {
+        const auto version = document.find ("openapi");
+        const bool is_31 = version != document.end () && version->is_string () &&
+        version->get_ref<const std::string&> ().rfind ("3.1", 0) == 0;
+        return is_31 ? "OpenAPI 3.1" : "OpenAPI 3.0";
+    }
+    case Dialect::V2: return "OpenAPI 2.0 (Swagger)";
+    case Dialect::None: return {};
+    }
+    return {};
+}
+
 /// Whether the document claims to be one of the two formats Vayu imports.
 inline bool is_openapi (const nlohmann::ordered_json& document) {
     return spec_dialect (document) != Dialect::None;
