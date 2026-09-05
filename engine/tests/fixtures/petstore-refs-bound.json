@@ -1,0 +1,91 @@
+{
+	"openapi": "3.0.3",
+	"info": { "title": "Petstore", "version": "2.4.1" },
+	"paths": {
+		"/pets": {
+			"parameters": [
+				{
+					"name": "X-Tenant",
+					"in": "header",
+					"schema": { "type": "string" }
+				}
+			],
+			"get": {
+				"operationId": "listPets",
+				"summary": "List pets",
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": { "type": "integer" }
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "A list of pets",
+						"content": {
+							"application/json": {
+								"schema": { "type": "array" },
+								"examples": {
+									"two": {
+										"summary": "Two pets",
+										"value": [
+											{ "id": "p1", "name": "Rex" },
+											{ "id": "p2", "name": "Momo" }
+										]
+									},
+									"none": { "summary": "No pets", "value": [] }
+								}
+							}
+						}
+					},
+					"404": { "$ref": "#/components/responses/NotFound" }
+				}
+			}
+		},
+		"/owners/{ownerId}/pets": {
+			"get": {
+				"operationId": "listOwnerPets",
+				"summary": "List an owner's pets",
+				"parameters": [
+					{
+						"name": "ownerId",
+						"in": "path",
+						"required": true,
+						"schema": { "type": "string" }
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The owner's pets",
+						"content": {
+							"application/json": {
+								"schema": { "$ref": "#/components/schemas/Pet" }
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"responses": {
+			"NotFound": {
+				"description": "No such pet",
+				"content": {
+					"application/json": { "schema": { "type": "object" } }
+				}
+			}
+		},
+		"schemas": {
+			"Pet": {
+				"type": "object",
+				"properties": {
+					"id": { "type": "string" },
+					"status": { "type": "string", "example": "available" }
+				}
+			}
+		}
+	}
+}

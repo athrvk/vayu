@@ -4,7 +4,7 @@
  *        null-vs-absent rule across collections, requests and environments
  *        (issues #95, #97).
  *
- * Four things are pinned here, for each of the three resources:
+ * What is pinned here, for each of the three resources:
  *
  *  - **POST creates and only creates.** Before the split, POSTing a stale or
  *    typo'd id merged two records into one - the same upsert that turned an id
@@ -35,12 +35,21 @@
  *    Those tests assert the **stored blob**, because a response-only
  *    assertion passes against the old code too.
  *
+ *  - **The read, the merge and the write are one lock scope** (issue #1440).
+ *    Merge-patch means the write carries every field the body did not name,
+ *    read a moment earlier, so a read that is not held to its write loses
+ *    whichever of two concurrent PUTs read first - whole fields, silently, on
+ *    both sides. The three tests at the bottom of this file drive a genuinely
+ *    concurrent second PUT into that window through each core's `before_write`
+ *    seam and assert both writers' fields survive.
+ *
  * Follows the suite's route-test convention (requests_route_test.cpp): the
  * routes' extracted cores are exercised directly, no in-process HTTP server.
  */
 
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -48,6 +57,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "competing_writer.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
@@ -73,6 +83,23 @@ create_environment_response (vayu::db::Database& db, const nlohmann::json& json)
 std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
+// The same three cores with their `before_write` seam - invoked inside the lock
+// scope with the merged row staged and immediately before it is written, which
+// is the only way to drive a second writer into the window (#1440). A separate
+// overload rather than a defaulted parameter, so the three-argument
+// declarations every other test file carries keep naming the same symbol.
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write);
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write);
+std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write);
 // Defined in requests.cpp - the list serializer, which is separate code from
 // the single-request one and has been the half a new field missed before.
 std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id);
@@ -1179,6 +1206,107 @@ TEST_F (ResourceWriteRouteTest, EnvironmentNullNameIsRejected) {
     const auto stored_environment = db_->get_environment (id);
     ASSERT_HAS_VALUE (stored_environment);
     EXPECT_EQ (stored_environment->name, "Keep me");
+}
+
+// ---------------------------------------------------------------------------
+// The lock scope: read + merge + write (issue #1440)
+// ---------------------------------------------------------------------------
+
+/**
+ * Each case below is the same experiment on a different resource, and it is the
+ * one the defect's own report describes: two clients PUT one row at the same
+ * moment, each naming a field the other does not, and *both* fields must be
+ * stored afterwards. Merge-patch is what makes that a real risk - the write
+ * carries the whole row, including the fields the body never mentioned - so the
+ * loser of an unheld read has its change overwritten with a value nobody sent.
+ *
+ * The second writer is started from inside the first one's lock scope, through
+ * the `before_write` seam, and given a window to finish (see
+ * `competing_writer.hpp`). Holding the read to the write makes it block, so it
+ * merges against the committed row and both fields survive; without the lock it
+ * merges against the row as it was before either write and the first writer's
+ * field is gone. Mutation check: drop either `with_lock` and its case reds on
+ * the second field.
+ */
+using vayu::tests::CompetingWriter;
+
+TEST_F (ResourceWriteRouteTest, AConcurrentRequestUpdateWaitsAndKeepsBothFieldsWritten) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+
+    int other_status = 0;
+    json other_body;
+    CompetingWriter other ([&] {
+        auto result = update_request_response (*db_, id, json{ { "name", "Renamed" } });
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    auto [status, body] = update_request_response (
+    *db_, id, json{ { "url", "https://example.com/v2" } }, other.probe ());
+    ASSERT_EQ (status, 200) << body.dump ();
+    other.join ();
+    ASSERT_EQ (other_status, 200) << other_body.dump ();
+
+    const auto stored = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->url, "https://example.com/v2");
+    EXPECT_EQ (stored->name, "Renamed")
+    << "the rename merged against the row this write had already staged";
+}
+
+TEST_F (ResourceWriteRouteTest, AConcurrentCollectionUpdateWaitsAndKeepsBothFieldsWritten) {
+    const std::string id = make_collection ("Billing");
+
+    int other_status = 0;
+    json other_body;
+    CompetingWriter other ([&] {
+        auto result =
+        update_collection_response (*db_, id, json{ { "description", "Invoices" } });
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    auto [status, body] = update_collection_response (
+    *db_, id, json{ { "name", "Renamed" } }, other.probe ());
+    ASSERT_EQ (status, 200) << body.dump ();
+    other.join ();
+    ASSERT_EQ (other_status, 200) << other_body.dump ();
+
+    const auto stored = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Renamed");
+    EXPECT_EQ (stored->description, "Invoices")
+    << "the description merged against the row this write had already staged";
+}
+
+TEST_F (ResourceWriteRouteTest, AConcurrentEnvironmentUpdateWaitsAndKeepsBothFieldsWritten) {
+    auto [created_status, created] =
+    create_environment_response (*db_, json{ { "name", "Staging" } });
+    ASSERT_EQ (created_status, 200);
+    const std::string id = created["id"].get<std::string> ();
+
+    int other_status = 0;
+    json other_body;
+    CompetingWriter other ([&] {
+        auto result  = update_environment_response (*db_, id,
+         json{ { "variables", json{ { "host", "api.example.com" } } } });
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    auto [status, body] = update_environment_response (
+    *db_, id, json{ { "name", "Production" } }, other.probe ());
+    ASSERT_EQ (status, 200) << body.dump ();
+    other.join ();
+    ASSERT_EQ (other_status, 200) << other_body.dump ();
+
+    const auto stored = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Production");
+    EXPECT_EQ (json::parse (stored->variables)["host"], "api.example.com")
+    << "the variables write merged against the row this write had already "
+       "staged";
 }
 
 } // namespace

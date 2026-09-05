@@ -17,12 +17,14 @@
 
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
 
 #include <nlohmann/json.hpp>
 
+#include "competing_writer.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
@@ -44,6 +46,13 @@ const nlohmann::json& json);
 std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id);
+// The update core with its `before_write` seam - invoked inside the lock scope
+// with the merged row staged and immediately before it is written (#1440).
+std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write);
 // Defined in import.cpp - the bulk path that also writes examples.
 std::pair<int, nlohmann::json>
 import_apply_response (vayu::db::Database& db, const nlohmann::json& body);
@@ -593,6 +602,41 @@ TEST_F (ExamplesRouteTest, ImportApplyRejectsABadExampleAndWritesNothing) {
     const auto collections = db_->get_collections ();
     ASSERT_EQ (collections.size (), 1u);
     EXPECT_EQ (collections[0].id, "col_1");
+}
+
+/**
+ * The update core's read, merge and write are one lock scope (#1440), so two
+ * PUTs to one example naming different fields both land. Merge-patch is what
+ * makes an unheld read destructive: the write carries the fields the body never
+ * named, so the loser's change is overwritten with a value nobody sent.
+ *
+ * The second writer runs from inside the first one's scope through the
+ * `before_write` seam and is given a window to finish (`competing_writer.hpp`).
+ * Mutation check: drop the `with_lock` and the `status` assertion reds.
+ */
+TEST_F (ExamplesRouteTest, AConcurrentExampleUpdateWaitsAndKeepsBothFieldsWritten) {
+    const std::string id = create_example ("req_1", json{ { "name", "Saved" } });
+
+    int other_status = 0;
+    json other_body;
+    vayu::tests::CompetingWriter other ([&] {
+        auto result = routes::update_request_example_response (
+        *db_, "req_1", id, json{ { "status", 404 } });
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    auto [status, body] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "name", "Renamed" } }, other.probe ());
+    ASSERT_EQ (status, 200) << body.dump ();
+    other.join ();
+    ASSERT_EQ (other_status, 200) << other_body.dump ();
+
+    const auto stored = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Renamed");
+    EXPECT_EQ (stored->status, 404)
+    << "the status write merged against the row this write had already staged";
 }
 
 } // namespace

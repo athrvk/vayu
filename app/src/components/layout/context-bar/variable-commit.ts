@@ -30,15 +30,8 @@ import {
 	useUpdateCollectionMutation,
 } from "@/queries";
 import { queryKeys } from "@/queries/keys";
-import type {
-	Collection,
-	Environment,
-	GlobalVariables,
-	ResolvedVariable,
-	VariableValue,
-} from "@/types";
-
-type VariableMap = Record<string, VariableValue>;
+import { mergeVariableChanges, type VariableMap } from "@/lib/variable-merge";
+import type { Collection, Environment, GlobalVariables, ResolvedVariable } from "@/types";
 
 /**
  * Where one scope's variables live and how a commit gets written back.
@@ -253,7 +246,9 @@ export function useVariableCommit(): (
 		const previous = stored?.[name];
 		if (!previous) return gone();
 
-		const next = { ...stored, [name]: { ...previous, value: newValue } };
+		const next = mergeVariableChanges(stored ?? {}, {
+			[name]: { ...previous, value: newValue },
+		});
 		scope.write(next);
 
 		const settle = beginCommit();
@@ -264,7 +259,7 @@ export function useVariableCommit(): (
 				// replacing it wholesale would revert that one too - the very
 				// staleness the fresh read exists to avoid.
 				const current = scope.read();
-				if (current) scope.write({ ...current, [name]: previous });
+				if (current) scope.write(mergeVariableChanges(current, { [name]: previous }));
 				rollBack(error instanceof Error ? error.message : `Couldn't save {{${name}}}`);
 			},
 			onSettled: settle,

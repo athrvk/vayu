@@ -68,8 +68,17 @@ import {
 	SecretInput,
 	TooltipIconButton,
 } from "@/components/ui";
+import { Callout } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import type { VariableType } from "@/lib/variable-cast";
+import {
+	mergeVariableChanges,
+	findVariableConflicts,
+	variableValuesEqual,
+	type VariableMap,
+	type VariableChanges,
+	type VariableConflict,
+} from "@/lib/variable-merge";
 
 const VARIABLE_TYPES: { value: VariableType; label: string }[] = [
 	{ value: "string", label: "String" },
@@ -153,6 +162,52 @@ function sameRows(a: VariableRow[], b: VariableRow[]): boolean {
 			(row.isNew ?? false) === (other.isNew ?? false)
 		);
 	});
+}
+
+function toVariableValue(row: VariableRow): VariableValue {
+	return {
+		value: row.value,
+		enabled: row.enabled,
+		secret: row.secret ?? false,
+		type: row.type ?? "string",
+		// See the comment on this same guard in `performSave`: an unknown
+		// creation time is never invented, only carried forward.
+		...(row.createdAt !== undefined && { createdAt: row.createdAt }),
+	};
+}
+
+function rowFromValue(key: string, value: VariableValue, id?: string): VariableRow {
+	return {
+		id: id ?? nextRowId(),
+		key,
+		value: value.value,
+		enabled: value.enabled,
+		secret: value.secret ?? false,
+		type: value.type ?? "string",
+		createdAt: value.createdAt,
+	};
+}
+
+/**
+ * The rows the user has actually edited since `baseline`, as a diff rather
+ * than a snapshot: a key the diff does not name is a key the save should
+ * never touch, which is what lets `mergeVariableChanges` carry a concurrent
+ * write for it through untouched. A key present in `baseline` but no longer
+ * among the rows is a deletion.
+ */
+function computeUserChanges(rows: VariableRow[], baseline: VariableMap): VariableChanges {
+	const changes: VariableChanges = {};
+	const seenKeys = new Set<string>();
+	rows.forEach((row) => {
+		if (!row.key || row.isNew) return;
+		seenKeys.add(row.key);
+		const value = toVariableValue(row);
+		if (!variableValuesEqual(baseline[row.key], value)) changes[row.key] = value;
+	});
+	Object.keys(baseline).forEach((key) => {
+		if (!seenKeys.has(key)) changes[key] = null;
+	});
+	return changes;
 }
 
 interface VariableEditorConfig {
@@ -249,8 +304,17 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const [variables, setVariables] = useState<VariableRow[]>([]);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 	const [hasPendingChanges, setHasPendingChanges] = useState(false);
+	const [conflicts, setConflicts] = useState<VariableConflict[]>([]);
 	const variablesRef = useRef<VariableRow[]>([]);
 	const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+	/**
+	 * The map the user's edits are diffed against - the state a save last
+	 * agreed with the server on. Advanced on every full reseed, on a
+	 * successful save (to the map that save just wrote, so the save's own
+	 * history is never mistaken for a later external change), and per key
+	 * when a conflict is resolved.
+	 */
+	const baselineRef = useRef<VariableMap>({});
 	// The dirty flag, readable from an effect without being one of its
 	// dependencies - the row-init effect has to know whether the user has
 	// uncommitted edits *at the moment the cache changes under it*, and taking
@@ -336,33 +400,17 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		[completeSaveThenIdle, contextId]
 	);
 
-	// Auto-save function (payload order by createdAt so round-trip preserves order)
+	// Auto-save function. Sends the freshest known map (`dataVariables`, kept
+	// live through the query cache) with only the keys the user actually
+	// changed applied on top - never the editor's whole local copy, which
+	// would carry a key an MCP agent wrote after this editor last reseeded
+	// back to its pre-agent value (#1439). Payload order is by `createdAt` so
+	// the round trip preserves display order.
 	const performSave = useCallback(async () => {
 		const varsToSave = variablesRef.current;
-		const entries: [string, VariableValue][] = [];
-		varsToSave.forEach((v) => {
-			if (v.key && !v.isNew) {
-				entries.push([
-					v.key,
-					{
-						value: v.value,
-						enabled: v.enabled,
-						secret: v.secret ?? false,
-						type: v.type ?? "string",
-						// Never backfill to `Date.now()`. A row whose creation
-						// time is unknown - one written before the field
-						// existed, or stripped by an older engine - would get
-						// stamped at whatever moment its scope happened to be
-						// saved, which is *after* the row the user just typed,
-						// so the pre-existing row leapfrogged the new one
-						// (issue #135). Unknown stays unknown; the sort reads it
-						// as older than everything, which is stable.
-						...(v.createdAt !== undefined && { createdAt: v.createdAt }),
-					},
-				]);
-			}
-		});
-		const sorted = sortByCreatedAt(entries);
+		const changes = computeUserChanges(varsToSave, baselineRef.current);
+		const merged = mergeVariableChanges(dataVariables, changes);
+		const sorted = sortByCreatedAt(Object.entries(merged));
 		const variablesObj: Record<string, VariableValue> = {};
 		sorted.forEach(([key, val]) => {
 			variablesObj[key] = val;
@@ -371,20 +419,26 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		startSaving();
 
 		return new Promise<void>((resolve, reject) => {
+			const handlers = {
+				onSuccess: () => {
+					// The map just written, not `dataVariables`: the cache echo of
+					// this save has not arrived yet, and advancing the baseline
+					// here is what keeps a later external write from being
+					// compared against this save's own pre-image and misread as a
+					// conflict with itself.
+					baselineRef.current = variablesObj;
+					setConflicts([]);
+					finishSave(varsToSave);
+					resolve();
+				},
+				onError: (error: unknown) => {
+					failSave(error instanceof Error ? error.message : "Save failed");
+					reject(error);
+				},
+			};
+
 			if (type === "globals") {
-				updateGlobalsMutation.mutate(
-					{ variables: variablesObj },
-					{
-						onSuccess: () => {
-							finishSave(varsToSave);
-							resolve();
-						},
-						onError: (error) => {
-							failSave(error instanceof Error ? error.message : "Save failed");
-							reject(error);
-						},
-					}
-				);
+				updateGlobalsMutation.mutate({ variables: variablesObj }, handlers);
 			} else if (type === "environment" && environment) {
 				updateEnvironmentMutation.mutate(
 					{
@@ -396,34 +450,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						// this environment from a stale read - deactivating whichever
 						// one the engine actually holds. Only the switch writes it.
 					},
-					{
-						onSuccess: () => {
-							finishSave(varsToSave);
-							resolve();
-						},
-						onError: (error) => {
-							failSave(error instanceof Error ? error.message : "Save failed");
-							reject(error);
-						},
-					}
+					handlers
 				);
 			} else if (type === "collection" && collection) {
 				updateCollectionMutation.mutate(
-					{
-						id: collection.id,
-						name: collection.name,
-						variables: variablesObj,
-					},
-					{
-						onSuccess: () => {
-							finishSave(varsToSave);
-							resolve();
-						},
-						onError: (error) => {
-							failSave(error instanceof Error ? error.message : "Save failed");
-							reject(error);
-						},
-					}
+					{ id: collection.id, name: collection.name, variables: variablesObj },
+					handlers
 				);
 			}
 		});
@@ -431,6 +463,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		type,
 		environment,
 		collection,
+		dataVariables,
 		sortByCreatedAt,
 		updateGlobalsMutation,
 		updateEnvironmentMutation,
@@ -485,19 +518,36 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// the editor and by a save's completion. Deriving the rows while rendering
 	// would mean reading that ref during render, which is the defect the guard
 	// exists to prevent; moving the guard into state would make it one render late
-	// and let a save echo overwrite keystrokes again - so the seed stays here, and
-	// `set-state-in-effect` is suppressed on the two writes below with that reason.
+	// and let a save echo overwrite keystrokes again - so the seed stays here.
 	useEffect(() => {
 		const isNewDataSource = lastSeededSourceRef.current !== contextId;
 		lastSeededSourceRef.current = contextId;
+		const freshMap = dataVariables;
 
 		// A save's `onSuccess` writes the query cache, which arrives back here as
-		// a new `dataVariables`. Rebuilding rows from it would revert anything
-		// typed while that save was in flight - the payload was snapshotted
-		// before those keystrokes, so the cache is genuinely one edit behind.
-		// Only a *different* entity is allowed to overwrite uncommitted edits;
-		// a refetch or an echo of our own write waits for the editor to be clean.
-		if (!isNewDataSource && hasPendingChangesRef.current) return;
+		// a new `dataVariables` - the same scope, still dirty if anything was
+		// typed while that save was in flight, or genuinely a concurrent write
+		// (an MCP agent's `update_environment`/`update_globals`) that has
+		// nothing to do with this editor's own save. Rebuilding rows from it
+		// would revert anything typed since the last seed, so the row array is
+		// left alone either way - only a *different* entity overwrites
+		// uncommitted edits. What must not wait for the editor to go clean is
+		// knowing whether the fresh map moved a key the user is also editing:
+		// #1439 was exactly that - an editor that waits still sends its whole
+		// stale local map on the next save, silently overwriting the write it
+		// was waiting out. So the diff against `baseline` is recomputed here
+		// too, purely to report a conflict; `performSave` recomputes the same
+		// diff at save time and is what actually keeps both sides' work,
+		// merging onto the freshest map rather than this editor's own copy of
+		// it (`mergeVariableChanges`, shared with the context bar's commit).
+		if (!isNewDataSource && hasPendingChangesRef.current) {
+			const changes = computeUserChanges(variablesRef.current, baselineRef.current);
+			setConflicts(findVariableConflicts(baselineRef.current, changes, freshMap));
+			return;
+		}
+
+		baselineRef.current = freshMap;
+		setConflicts([]);
 
 		// A reseed of the *same* scope keeps the ids the rows already have,
 		// matched by the name the variable is stored under. Most reseeds are the
@@ -528,7 +578,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				createdAt: val.createdAt,
 			}));
 			rows.push(blankRow(carriedBlankId));
-			// eslint-disable-next-line react-hooks/set-state-in-effect -- see the guard note above
 			setVariables(rows);
 		} else {
 			setVariables([blankRow(carriedBlankId)]);
@@ -560,6 +609,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	};
 
 	const removeVariable = (index: number) => {
+		const removedKey = variables[index]?.key;
 		const newVariables = variables.filter((_, i) => i !== index);
 		if (newVariables.length === 0 || !newVariables.some((v) => v.isNew)) {
 			newVariables.push(blankRow());
@@ -567,8 +617,45 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		setVariables(newVariables);
 		variablesRef.current = newVariables;
 		markDirty();
+		// A conflict named this row before it was deleted: with the row gone,
+		// "Take theirs" would find nothing to update and then immediately
+		// re-delete the key on save, since `computeUserChanges` reads its
+		// absence from the rows as the user's own deletion either way.
+		if (removedKey) setConflicts((prev) => prev.filter((c) => c.key !== removedKey));
 		performSaveRef.current();
 	};
+
+	/**
+	 * The explicit half of "the user's value is kept until they choose": drop
+	 * the local edit for one conflicting key and take whatever the fresh map
+	 * holds instead, then save immediately - the same "toggle acts now"
+	 * pattern the enabled checkbox and the secret button already use.
+	 */
+	const resolveConflict = useCallback(
+		(key: string) => {
+			const theirs = dataVariables[key];
+			// Computed synchronously and assigned to the ref directly, not inside
+			// the `setVariables` updater: `performSaveRef.current()` below reads
+			// `variablesRef.current` before this render commits, and a functional
+			// updater's body does not run until then. Mirrors `updateVariable` /
+			// `removeVariable`.
+			const next = theirs
+				? variablesRef.current.map((row) =>
+						row.key === key && !row.isNew ? rowFromValue(key, theirs, row.id) : row
+					)
+				: variablesRef.current.filter((row) => row.isNew || row.key !== key);
+			setVariables(next);
+			variablesRef.current = next;
+			baselineRef.current = theirs
+				? { ...baselineRef.current, [key]: theirs }
+				: Object.fromEntries(
+						Object.entries(baselineRef.current).filter(([k]) => k !== key)
+					);
+			setConflicts((prev) => prev.filter((c) => c.key !== key));
+			performSaveRef.current();
+		},
+		[dataVariables]
+	);
 
 	// Environment-specific handlers
 	const handleDeleteEnvironment = () => {
@@ -701,6 +788,29 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					onConfirm={handleDeleteEnvironment}
 					isDeleting={deleteEnvironmentMutation.isPending}
 				/>
+			)}
+
+			{conflicts.length > 0 && (
+				<div className={cn("space-y-2", embedded ? "px-0 pt-2" : "px-4 pt-3")}>
+					{conflicts.map((conflict) => (
+						<Callout
+							key={conflict.key}
+							severity="warning"
+							title={`Changed elsewhere: ${conflict.key}`}
+							action={
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => resolveConflict(conflict.key)}
+								>
+									Take theirs
+								</Button>
+							}
+						>
+							Your edit is kept until you choose.
+						</Callout>
+					))}
+				</div>
 			)}
 
 			{/*
