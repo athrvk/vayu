@@ -26,10 +26,10 @@
  */
 
 import { ChevronRight } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 import { useTabsStore } from "@/stores";
 import { MethodBadge, TruncatedText } from "@/components/shared";
 import { Eyebrow } from "@/components/ui";
+import { formatRelativeTime } from "@/utils";
 import type { Run } from "@/types";
 
 const RECENT_RUN_LIMIT = 5;
@@ -118,7 +118,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 								)}
 								{run.startTime > 0 && (
 									<span className="text-xs font-mono tabular-nums text-muted-foreground">
-										{formatDistanceToNow(run.startTime, { addSuffix: true })}
+										{formatRelativeTime(run.startTime)}
 									</span>
 								)}
 								<ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
