@@ -28,9 +28,9 @@ import type { BodyMode, KeyValueItem } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { generateId } from "@/lib/id";
 import { fileBaseName } from "@/lib/file-path";
-import { parseQueryParams } from "@/modules/request-builder/utils/url";
+import { parseQueryParams, safeDecode } from "@/modules/request-builder/utils/url";
 import { autoHeaderToAdd } from "@/modules/request-builder/utils/auto-header";
-import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
+import { ACCEPT_HEADER, DEFAULT_MAX_REDIRECTS, SSE_ACCEPT } from "@/constants/request";
 import { tokenize } from "./tokenize";
 // Re-exported rather than defined here: the main process asks the same question
 // of the clipboard, and a leaf module is what its test can import (#1359).
@@ -52,6 +52,8 @@ export type ParsedRequest = Pick<
 	| "auth"
 	| "stream"
 	| "verifySSL"
+	| "followRedirects"
+	| "maxRedirects"
 >;
 
 // ============================================================================
@@ -111,9 +113,13 @@ const NETWORK: SettingsCategory = "network_performance";
  * unreachable rather than wrong. `parseCurl.test.ts` asserts that every key
  * here is still in a skip set, so "unreachable" fails the suite too.
  *
- * Only value-carrying flags are listed, and only those are recorded: a `-s` or
- * a `--compressed` asked for nothing about the request, and a notice that fired
- * on every pasted command would be one nobody reads by the third time.
+ * Only value-carrying flags with a known home (or a known absence of one) are
+ * listed: a `-s` or a `--compressed` asked for nothing about the request, and
+ * a notice that fired on every pasted command would be one nobody reads by
+ * the third time. A flag this parser has never seen at all is still ledgered
+ * (issue #1445), through the generic fallback rather than an entry here - it
+ * might carry a value or might not, and disclosing the gap costs less than
+ * guessing wrong about which.
  */
 export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: DisclosurePointer }> = {
 	"-x": {
@@ -147,6 +153,25 @@ export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: Disclos
 			anchor: "clientCertificates",
 			label: "the client-certificate registry",
 		},
+	},
+	// `-E` is curl's short alias for `--cert` - same flag, same home.
+	"-E": {
+		what: "presented a client certificate",
+		pointer: {
+			category: NETWORK,
+			anchor: "clientCertificates",
+			label: "the client-certificate registry",
+		},
+	},
+	"-c": { what: "saved cookies to a file" },
+	"--cookie-jar": { what: "saved cookies to a file" },
+	"-D": { what: "wrote the response headers to a file" },
+	"--dump-header": { what: "wrote the response headers to a file" },
+	"--limit-rate": { what: "limited its own transfer rate" },
+	"--aws-sigv4": { what: "signed the request with AWS Signature V4" },
+	"--proxy-user": {
+		what: "authenticated to a proxy",
+		pointer: { category: NETWORK, anchor: "proxyUrl", label: "Proxy settings" },
 	},
 	"--connect-timeout": { what: "set a connection timeout" },
 	"-m": { what: "set a total request timeout" },
@@ -219,9 +244,13 @@ interface Builder {
 	jsonShortcut: boolean; // curl --json
 	uploadFile: boolean; // curl -T (implies PUT)
 	basic: { username: string; password: string } | null;
+	/** `--digest` / `--ntlm` beside `-u` - which scheme the credentials are for. */
+	authScheme: "digest" | "ntlm" | null;
 	bearer: string | null; // curl --oauth2-bearer
 	stream: boolean; // -N / --no-buffer
 	insecure: boolean; // curl -k / --insecure, wget --no-check-certificate
+	followRedirects: boolean; // curl -L / --location
+	maxRedirects: number; // curl --max-redirs
 	/** Flags carrying a value that this parser skipped - see `DroppedFlag`. */
 	dropped: DroppedFlag[];
 }
@@ -238,9 +267,15 @@ function newBuilder(): Builder {
 		jsonShortcut: false,
 		uploadFile: false,
 		basic: null,
+		authScheme: null,
 		bearer: null,
 		stream: false,
 		insecure: false,
+		// curl's own default: a command with no `-L` does not follow redirects,
+		// unlike Vayu's (issue #1445) - `parseWget` overrides this to match
+		// wget's opposite default.
+		followRedirects: false,
+		maxRedirects: DEFAULT_MAX_REDIRECTS,
 		dropped: [],
 	};
 }
@@ -254,9 +289,16 @@ function newBuilder(): Builder {
  * from the ledger with no edit here at all. Deduplicated by flag, because a
  * command may name the same one twice and one notice per flag is the point.
  */
-function recordDropped(b: Builder, flag: string): void {
+function recordDropped(
+	b: Builder,
+	flag: string,
+	override?: { what: string; pointer?: DisclosurePointer }
+): void {
 	if (b.dropped.some((entry) => entry.flag === flag)) return;
-	const info = DROPPED_FLAG_INFO[flag];
+	// `-T` is the one flag curl and wget disagree about (an upload vs. a
+	// timeout), so a call that already knows which one bypasses the shared
+	// table rather than risk the other command's description.
+	const info = override ?? DROPPED_FLAG_INFO[flag];
 	b.dropped.push({
 		flag,
 		what: info?.what ?? "was not carried over",
@@ -413,6 +455,16 @@ function resolve(b: Builder): CommandImport {
 	let auth: ParsedRequest["auth"] = { mode: "none" };
 	if (b.bearer !== null) {
 		auth = { mode: "bearer", token: b.bearer };
+	} else if (b.basic && b.authScheme) {
+		// `--digest` / `--ntlm` beside `-u` name a different scheme for the same
+		// credentials (issue #1445) - without this, both silently became `basic`,
+		// which is a request that would send an Authorization header the
+		// challenge never asked for, rather than the stored-but-unresolved mode
+		// the auth editor warns about (`isUneditableAuthMode`).
+		auth = {
+			mode: b.authScheme,
+			config: { username: b.basic.username, password: b.basic.password },
+		};
 	} else if (b.basic) {
 		auth = { mode: "basic", username: b.basic.username, password: b.basic.password };
 	}
@@ -430,7 +482,7 @@ function resolve(b: Builder): CommandImport {
 		formData = toFormItems(b.formParts);
 	} else if (b.urlEncodeParts.length > 0) {
 		bodyMode = "x-www-form-urlencoded";
-		urlEncoded = toItems(parseFormPairs(b.urlEncodeParts));
+		urlEncoded = toItems(parseUrlEncodeParts(b.urlEncodeParts));
 	} else if (!b.forceGet && (b.dataParts.length > 0 || b.jsonShortcut)) {
 		if (contentType.includes("application/x-www-form-urlencoded")) {
 			bodyMode = "x-www-form-urlencoded";
@@ -471,6 +523,8 @@ function resolve(b: Builder): CommandImport {
 			// verify, and importing it as a verifying request means the paste
 			// fails on the first send for a reason the command already named.
 			verifySSL: !b.insecure,
+			followRedirects: b.followRedirects,
+			maxRedirects: b.maxRedirects,
 		},
 		dropped: b.dropped,
 	};
@@ -491,20 +545,52 @@ function looksLikeFormData(data: string): boolean {
 		.every((pair) => pair.indexOf("=") > 0);
 }
 
-/** Split `key=value` data parts into pairs (for urlencoded bodies/params). */
+/**
+ * Split `-d`/`--data*` parts into pairs, for the urlencoded bodies these are
+ * reinterpreted as (explicit Content-Type, or the form-shaped heuristic).
+ *
+ * curl sends `-d`'s bytes on the wire exactly as written, so a `%20` in one is
+ * already the wire's own percent-escape of the logical value - decoded here
+ * with the same `safeDecode` query params use, so the stored value matches
+ * what every other urlencoded row in the app holds (decoded; re-encoded once,
+ * at send or codegen time). Decoding twice (once here, again at generation)
+ * is issue #1445's `-d 'b=x%20y'` bug: without this, the stored `x%20y` came
+ * back out through `--data-urlencode` re-encoded to `x%2520y`.
+ */
 function parseFormPairs(parts: string[]): Array<{ key: string; value: string }> {
 	const pairs: Array<{ key: string; value: string }> = [];
 	for (const part of parts) {
 		for (const piece of part.split("&").filter(Boolean)) {
 			const idx = piece.indexOf("=");
 			if (idx === -1) {
-				pairs.push({ key: piece, value: "" });
+				pairs.push({ key: safeDecode(piece), value: "" });
 			} else {
-				pairs.push({ key: piece.slice(0, idx), value: piece.slice(idx + 1) });
+				pairs.push({
+					key: safeDecode(piece.slice(0, idx)),
+					value: safeDecode(piece.slice(idx + 1)),
+				});
 			}
 		}
 	}
 	return pairs;
+}
+
+/**
+ * Split `--data-urlencode` parts into pairs.
+ *
+ * Each occurrence of the flag is one whole `name=content` pair - curl does not
+ * split its value on `&` the way `-d`'s form-shaped content is, and it encodes
+ * the value itself when the command runs, so what the user typed is exactly
+ * the logical (unencoded) value and is kept verbatim (issue #1445: `--data-urlencode
+ * 'q=café au lait & more'` is one field named `q`, not two).
+ */
+function parseUrlEncodeParts(parts: string[]): Array<{ key: string; value: string }> {
+	return parts.map((part) => {
+		const idx = part.indexOf("=");
+		return idx === -1
+			? { key: part, value: "" }
+			: { key: part.slice(0, idx), value: part.slice(idx + 1) };
+	});
 }
 
 // ============================================================================
@@ -518,8 +604,6 @@ const CURL_NOARG = new Set([
 	"--silent",
 	"-v",
 	"--verbose",
-	"-L",
-	"--location",
 	"-f",
 	"--fail",
 	"-S",
@@ -544,10 +628,18 @@ const CURL_SKIP_WITH_ARG = new Set([
 	"--retry",
 	"--cacert",
 	"--cert",
+	"-E",
 	"--key",
 	"-x",
 	"--proxy",
 	"--resolve",
+	"-c",
+	"--cookie-jar",
+	"-D",
+	"--dump-header",
+	"--limit-rate",
+	"--aws-sigv4",
+	"--proxy-user",
 ]);
 
 function parseCurl(args: string[]): CommandImport {
@@ -595,6 +687,20 @@ function parseCurl(args: string[]): CommandImport {
 			case "-u":
 			case "--user":
 				setBasicAuth(b, value());
+				break;
+			case "--digest":
+				b.authScheme = "digest";
+				break;
+			case "--ntlm":
+				b.authScheme = "ntlm";
+				break;
+			case "--negotiate":
+				// SPNEGO/Kerberos - Vayu has no auth mode for it, unlike digest and
+				// ntlm, so `-u`'s credentials are disclosed rather than silently
+				// relabelled to a scheme they were never for.
+				recordDropped(b, flag, {
+					what: "authenticated with SPNEGO/Negotiate, which has no matching auth mode here",
+				});
 				break;
 			case "--oauth2-bearer":
 				// curl's dedicated OAuth 2.0 bearer flag → Vayu bearer auth.
@@ -644,14 +750,30 @@ function parseCurl(args: string[]): CommandImport {
 			case "-T":
 			case "--upload-file":
 				// File contents can't be read from a pasted command, but the flag
-				// implies a PUT - record the intent and discard the path.
+				// implies a PUT - record the intent and discard the path. Ledgered
+				// with its own text (issue #1445) rather than through the shared
+				// table: curl's `-T` uploads, wget's means a timeout, and the two
+				// disagree about the same flag spelling.
 				value();
 				b.uploadFile = true;
+				recordDropped(b, flag, { what: "uploaded a local file as the request body" });
 				break;
 			case "-k":
 			case "--insecure":
 				b.insecure = true;
 				break;
+			case "-L":
+			case "--location":
+				// Mapped, not ledgered (issue #1445): curl does not follow
+				// redirects unless told to, so a plain command with no `-L`
+				// genuinely means `followRedirects: false`, not "unspecified".
+				b.followRedirects = true;
+				break;
+			case "--max-redirs": {
+				const n = Number.parseInt(value(), 10);
+				if (Number.isFinite(n)) b.maxRedirects = n;
+				break;
+			}
 			case "-N":
 			case "--no-buffer":
 				// curl's unbuffered flag is how a streaming endpoint is consumed
@@ -678,8 +800,13 @@ function parseCurl(args: string[]): CommandImport {
 				} else if (!flag.startsWith("-")) {
 					// Positional argument → URL (first one wins).
 					if (!b.url) b.url = arg;
+				} else {
+					// A flag this parser has never seen. It may take a value the
+					// next token would otherwise become the URL for (issue #1445) -
+					// safer to disclose the gap than guess at consuming a token
+					// that might be the URL itself.
+					recordDropped(b, flag);
 				}
-				// Unknown flags are ignored.
 				break;
 		}
 	}
@@ -716,6 +843,10 @@ const WGET_SKIP_WITH_ARG = new Set([
 
 function parseWget(args: string[]): CommandImport {
 	const b = newBuilder();
+	// wget's own default is the opposite of curl's - it follows redirects
+	// unless told not to - so the shared builder's curl-shaped default is
+	// overridden here rather than in `resolve`, which has no protocol to ask.
+	b.followRedirects = true;
 	let username: string | undefined;
 	let password: string | undefined;
 
@@ -785,6 +916,10 @@ function parseWget(args: string[]): CommandImport {
 					// no value
 				} else if (!flag.startsWith("-")) {
 					if (!b.url) b.url = arg;
+				} else {
+					// See the curl branch: an option this parser has never seen is
+					// disclosed rather than silently eaten (issue #1445).
+					recordDropped(b, flag);
 				}
 				break;
 		}

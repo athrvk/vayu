@@ -863,6 +863,37 @@ describe("a request with TLS verification off", () => {
 });
 
 /**
+ * A request that follows redirects (issue #1445). The split is the opposite
+ * of `-k` above: curl does NOT follow unless told to, while the engine (and
+ * this field's own default) does, so it is the common case that needs the
+ * flag rather than the departure from it.
+ */
+describe("a request that follows redirects", () => {
+	const FOLLOWING: SnippetRequest = {
+		method: "GET",
+		url: "https://api.example.com/",
+		followRedirects: true,
+	};
+
+	it("curl emits -L, and parseCurl reads it back as the same setting", () => {
+		const { code } = generateCurl(FOLLOWING);
+		expect(code).toContain(" -L");
+		const reparsed = parseCommand(code.split("\\\n").join(" "));
+		expect(reparsed?.followRedirects).toBe(true);
+	});
+
+	it("says nothing when the request does not follow, which is curl's own default", () => {
+		const { code } = generateCurl({ ...FOLLOWING, followRedirects: false });
+		expect(code).not.toContain(" -L");
+	});
+
+	it("treats an unstated followRedirects as following, the engine's own default", () => {
+		const { code } = generateCurl({ method: "GET", url: "https://api.example.com/" });
+		expect(code).toContain(" -L");
+	});
+});
+
+/**
  * A stream-flagged request (issue #575). Two targets have a first-class
  * unbuffered mode and emit it; the three whose stock idiom buffers the whole
  * body say so, because a snippet that looked like the request would hang on an
@@ -947,6 +978,7 @@ describe("the Content-Type a body mode implies", () => {
 	});
 
 	const CASES = [
+		["json", '{"a":1}', "application/json"],
 		["graphql", '{"query":"{ hero { name } }"}', "application/json"],
 		["jsonrpc", '{"method":"eth_blockNumber","params":[]}', "application/json"],
 		["xml", "<soap:Envelope><soap:Body/></soap:Envelope>", "application/xml"],
@@ -983,12 +1015,22 @@ describe("the Content-Type a body mode implies", () => {
 		expect(code).not.toContain("application/xml");
 	});
 
-	// `json` and `text` are the modes a user writes the header for themselves,
-	// and the engine derives nothing for them either. Emitting one here would be
-	// the app inventing a request the user did not describe.
-	it.each(["json", "text"])("adds nothing for a %s body", (mode) => {
-		const { code } = generateCurl(withBody(mode, '{"a":1}'));
+	// `text` is the one mode a user writes the header for themselves - a
+	// `text/plain`, a CSV, a JWT and a raw signature are all this mode, and the
+	// engine derives nothing for it either (issue #1445; `json` used to be
+	// grouped here, which is the bug: the engine implies `application/json` for
+	// it exactly like GraphQL and JSON-RPC, so a copied snippet with no header
+	// went out under libcurl's `x-www-form-urlencoded` default too).
+	it("adds nothing for a text body", () => {
+		const { code } = generateCurl(withBody("text", '{"a":1}'));
 		expect(code).not.toContain("Content-Type");
+	});
+
+	it("a json-mode snippet's Content-Type parses back as json (issue #1445)", () => {
+		const { code } = generateCurl(withBody("json", '{"a":1}'));
+		const reparsed = parseCommand(code.split("\\\n").join(" "));
+		expect(reparsed?.bodyMode).toBe("json");
+		expect(reparsed?.body).toBe('{"a":1}');
 	});
 
 	// An empty body is not a body: `has_wire_body` is false engine-side, so no

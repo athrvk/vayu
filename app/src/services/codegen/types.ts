@@ -61,6 +61,14 @@ export interface SnippetRequest {
 	 * request, the same split `stream` above takes.
 	 */
 	verifySSL?: boolean;
+	/**
+	 * Follow redirects (issue #1445). Default `true` - the engine's own
+	 * default, unlike curl's - so `curl -L` is the flag `parseCurl` reads back:
+	 * a request pasted from a command with no `-L` came from one that does not
+	 * follow, and the generated command for a following request needs it to
+	 * describe the same behaviour.
+	 */
+	followRedirects?: boolean;
 }
 
 export interface CodegenOptions {

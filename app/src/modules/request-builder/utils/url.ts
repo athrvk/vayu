@@ -97,7 +97,7 @@ export function parseQueryParams(url: string): KeyValueItem[] {
 }
 
 /** decodeURIComponent that leaves `{{var}}` tokens (and malformed input) untouched. */
-function safeDecode(part: string): string {
+export function safeDecode(part: string): string {
 	if (part.includes("{{")) return part;
 	try {
 		return decodeURIComponent(part);

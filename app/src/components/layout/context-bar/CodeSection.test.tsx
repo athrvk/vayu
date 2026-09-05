@@ -55,6 +55,7 @@ const STORED = {
 	],
 	body: { mode: "json", content: '{"a":1}' },
 	auth: { mode: "inherit" },
+	followRedirects: true,
 };
 
 vi.mock("@/queries", () => ({
@@ -221,6 +222,24 @@ describe("CodeSection - the secret policy", () => {
 		expect(snippet()).not.toContain("X-Off");
 		// Nothing to hide, so no reveal control to offer.
 		expect(screen.queryByRole("button", { name: /secrets/i })).not.toBeInTheDocument();
+	});
+});
+
+describe("CodeSection - redirect policy reaches both funnels", () => {
+	// `stream` has its own overlay comment above because `POST /compose`
+	// deliberately omits it; `followRedirects` has no such overlay; it is
+	// carried straight through the composed payload in resolved mode. Templated
+	// mode builds its own `SnippetRequest` in `templatedRequest` (issue #1445:
+	// it read every field but this one, so a stored request that followed
+	// redirects generated a curl command that did not).
+	it("templated mode's -L matches the stored request's setting, same as resolved mode's", async () => {
+		renderSection();
+		await waitFor(() => expect(snippet()).toContain("curl"));
+		expect(snippet()).toContain(" -L");
+
+		fireEvent.click(screen.getByRole("radio", { name: "Templated" }));
+		await waitFor(() => expect(snippet()).toContain("{{host}}"));
+		expect(snippet()).toContain(" -L");
 	});
 });
 

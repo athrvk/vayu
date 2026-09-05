@@ -192,8 +192,10 @@ the tree, variables, auth and scripts.
     into Vayu's globals scope rather than creating an environment; variables you
     already had are kept, and a name that clashes is overwritten.
 
-    Binary and file bodies are dropped and reported with a count rather than
-    silently, and Digest / AWS / NTLM auth imports as data but will not execute.
+    Binary and file bodies, a custom HTTP verb, and an auth scheme Vayu cannot
+    execute (hawk, oauth1, edgegrid) are dropped and reported with a count
+    rather than silently, and Digest / AWS / NTLM auth imports as data but will
+    not execute.
 
 === "Insomnia"
 
