@@ -433,9 +433,11 @@ Vayu has something to say, and otherwise left exactly as it was:
 - **An example the document already documents is written nowhere**, and neither
   is one the *import* produced for a response that declares no example: the
   import sampled that value off the response's schema, and writing it back would
-  document a value the API never stated. Both are counted in the dialog. It is
-  why exporting a collection you imported and did not edit gives you back the
-  document you imported - not one with examples it never had.
+  document a value the API never stated. Where the document declares no such
+  response at all, the status is not documented from it either - a response the
+  contract dropped is not one an export puts back. Each of these is counted in
+  the dialog. It is why exporting a collection you imported and did not edit
+  gives you back the document you imported - not one with examples it never had.
 - **Everything else survives.** Vendor extensions, `info`, `tags`, `security`,
   components nothing references - all of it is carried through, because export
   patches the document rather than rebuilding it. A response written as a `$ref`
@@ -449,7 +451,9 @@ Vayu has something to say, and otherwise left exactly as it was:
   declares no parameter for, and a request whose method or path you changed after
   it was matched are each counted in the dialog rather than left to a diff of
   the file. The values that do have a home still land - in the operation the
-  document declares.
+  document declares. A parameter declared by `$ref`, or one the path declares
+  for every method under it, is a home: the row is not counted as undeclared,
+  and the shared-parameter count is what says its value was left out.
 
 *Structurally* left as it was, to be exact: the document is read into memory and
 written back out, so its members and their order survive and comments, anchors

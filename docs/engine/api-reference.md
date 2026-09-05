@@ -2259,7 +2259,11 @@ declares is counted as `examplesAlreadyDeclared` and written nowhere, and an
 **imported** example (`origin: import`) for a media object that declares no
 example at all was sampled off that response's schema at import, so it is
 counted as `examplesSampledAtImport` rather than written back as though the API
-had stated it. An export of a spec-origin collection nobody edited is therefore
+had stated it; where the document declares no such response either, the status
+is not documented from it at all, because putting back a response the contract
+dropped is not this export's to do. Values are compared as values, so an example
+whose members are stored in another order than the document writes them is the
+same example. An export of a spec-origin collection nobody edited is therefore
 the document it was bound to, structurally unchanged.
 
 **The edits it cannot express are counted, not silent.** The bound direction
@@ -2268,10 +2272,16 @@ or Headers row the operation declares no parameter for is `rowsNotDeclared`
 (`Authorization` and `Content-Type` excepted - OpenAPI states them as `security`
 and as the body's media type), and a request whose method or path no longer
 matches the operation it is stamped as is `operationsEdited` - its values still
-land, in the operation the document declares. A **Swagger 2.0** document is the one partial
-case, reported as `vocabularyNotWritten`: operations nothing claims are still
-removed, but nothing is written *into* an operation, because 2.0 states
-parameters and examples in a vocabulary Vayu does not write.
+land, in the operation the document declares. A parameter the operation declares
+by `$ref`, or one the Path Item declares for every method under it, is declared:
+its name is read through the reference, so a row that has a home is never
+counted as one the document has no place for, and `sharedParametersLeft` is what
+says its *value* was not written.
+
+A **Swagger 2.0** document is the one partial case, reported as
+`vocabularyNotWritten`: operations nothing claims are still removed, but nothing
+is written *into* an operation, because 2.0 states parameters and examples in a
+vocabulary Vayu does not write.
 
 **A skeleton invents nothing.** `{{variable}}` tokens are written as they stand
 in `servers` and paths alike (resolving `{{baseUrl}}` would export one machine's

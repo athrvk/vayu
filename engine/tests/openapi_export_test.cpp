@@ -255,9 +255,11 @@ TEST (BoundExport, WritesNothingIntoADocumentNobodyEdited) {
     // What an import of this document stored: the first named example of the
     // 200, the body of the `$ref`d 404 read through one hop, and - for the
     // operation that declares no example at all - a value sampled off the
-    // schema. None of the three is news to the document it came out of.
+    // schema. None of the three is news to the document it came out of. The
+    // 200's body is stored with its keys in the other order, which is the same
+    // example: an object is a set of members, not a sequence of them.
     requests[0].examples = { imported (example ("200 - A list of pets", 200,
-                             R"([{"id":"p1"},{"id":"p2"}])")),
+                             R"([{"name":"Rex","id":"p1"},{"name":"Momo","id":"p2"}])")),
         imported (example ("404 - No such pet", 404, R"({"code":"missing"})")) };
     requests[1].examples = { imported (
     example ("200 - The owner's pets", 200, R"({"id":"","status":"available"})")) };
@@ -342,16 +344,58 @@ TEST (BoundExport, CountsTheEditsItHasNoWayToWriteIntoTheDocument) {
 
     const Exported exported = export_json (requests, refs_fixture ());
     EXPECT_EQ (exported.notes.bodies_not_written, 1);
-    // `cursor` and `X-Tenant`. `limit` is declared, and `Authorization` is
-    // stated as `security` rather than as a parameter, so it was never a row
-    // this document had a place for.
-    EXPECT_EQ (exported.notes.rows_not_declared, 2);
+    // `cursor` alone. `limit` is declared by the operation, `X-Tenant` by the
+    // path item - which declares it for every method under it, so a row that
+    // matches it has a home - and `Authorization` is stated as `security`
+    // rather than as a parameter, so it was never a row to place.
+    EXPECT_EQ (exported.notes.rows_not_declared, 1);
     // The stamp still finds `listOwnerPets`, so the values land - in the
     // operation the document declares, at the path *it* declares.
     EXPECT_EQ (exported.notes.operations_edited, 1);
     EXPECT_TRUE (
     exported.document["paths"].contains ("/owners/{ownerId}/pets"));
     EXPECT_EQ (operation_of (exported.document, "/pets", "get")["parameters"][0]["example"], "25");
+}
+
+TEST (BoundExport, CountsNoUndeclaredRowForAParameterTheDocumentDeclaresByReference) {
+    std::vector<ExportRequest> requests = bound_requests ();
+    // `X-Trace-Id` is the fixture's `$ref` parameter, declared once in
+    // `components` and named by this operation. The row has a home in the
+    // document; it is the *value* that cannot be written into a shared
+    // parameter, which `sharedParametersLeft` is what says.
+    requests[0].headers = { row ("X-Trace-Id", "t-1") };
+    requests[0].params  = { row ("limit", "25"), row ("cursor", "p9") };
+
+    const Exported exported = export_json (requests, bound_fixture ());
+    EXPECT_EQ (exported.notes.shared_parameters_left, 1);
+    EXPECT_EQ (exported.notes.rows_not_declared, 1) << "only `cursor`";
+    // Read through the reference, never written through it.
+    EXPECT_EQ (exported.document["components"], json::parse (bound_fixture ())["components"]);
+}
+
+TEST (BoundExport, DocumentsAStatusFromAKeptResponseButNotFromASampledOne) {
+    std::vector<ExportRequest> sampled = refs_requests ();
+    sampled[0].examples = { imported (example ("500 - Boom", 500, R"({"code":"boom"})")) };
+    std::vector<ExportRequest> kept = refs_requests ();
+    kept[0].examples = { example ("500 - what the API answered", 500, R"({"code":"boom"})") };
+
+    const Exported after_import = export_json (sampled, refs_fixture ());
+    const Exported after_send   = export_json (kept, refs_fixture ());
+
+    // The document declares no 500. An imported example for a status it does
+    // not declare is one the import sampled off a response the contract has
+    // since dropped, so documenting the status from it would put back what the
+    // contract removed - not even as a bare description.
+    EXPECT_FALSE (
+    operation_of (after_import.document, "/pets", "get")["responses"].contains ("500"));
+    EXPECT_EQ (after_import.notes.examples_sampled_at_import, 1);
+    // A response somebody kept is news, and lands with its body.
+    const json& documented =
+    operation_of (after_send.document, "/pets", "get")["responses"]["500"];
+    EXPECT_EQ (documented["description"], "500 - what the API answered");
+    EXPECT_EQ (documented["content"]["application/json"]["example"],
+    json::parse (R"({"code":"boom"})"));
+    EXPECT_EQ (after_send.notes.examples_written, 1);
 }
 
 TEST (BoundExport, DocumentsAStatusTheSpecNeverDeclaredAndSaysWhenABodyHadNoMediaType) {

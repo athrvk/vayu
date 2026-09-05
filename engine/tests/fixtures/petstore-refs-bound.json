@@ -3,6 +3,13 @@
 	"info": { "title": "Petstore", "version": "2.4.1" },
 	"paths": {
 		"/pets": {
+			"parameters": [
+				{
+					"name": "X-Tenant",
+					"in": "header",
+					"schema": { "type": "string" }
+				}
+			],
 			"get": {
 				"operationId": "listPets",
 				"summary": "List pets",
@@ -23,7 +30,10 @@
 								"examples": {
 									"two": {
 										"summary": "Two pets",
-										"value": [{ "id": "p1" }, { "id": "p2" }]
+										"value": [
+											{ "id": "p1", "name": "Rex" },
+											{ "id": "p2", "name": "Momo" }
+										]
 									},
 									"none": { "summary": "No pets", "value": [] }
 								}

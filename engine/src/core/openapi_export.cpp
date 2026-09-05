@@ -296,6 +296,20 @@ std::vector<const Json*> declared_example_values (const Json* media) {
     return values;
 }
 
+/**
+ * Whether two example values say the same thing.
+ *
+ * Through `nlohmann::json`, not the `ordered_json` both sides are held in: an
+ * ordered object compares its members *positionally*, so `{"id":1,"name":"a"}`
+ * and `{"name":"a","id":1}` would read as two different examples. An object is
+ * a set of members, and a document reformatted between the import and this
+ * export declares the example it always did - answering otherwise would have
+ * the export add a second copy of a value already in the contract.
+ */
+bool same_value (const Json& left, const Json& right) {
+    return nlohmann::json (left) == nlohmann::json (right);
+}
+
 /** What one stored example is to the media object it would be written into. */
 enum class ExampleDisposition : std::uint8_t {
     Write,
@@ -319,7 +333,7 @@ ExportDirection direction) {
     }
     const std::vector<const Json*> declared = declared_example_values (media);
     const bool documented = std::any_of (declared.begin (), declared.end (),
-    [&] (const Json* candidate) { return *candidate == value; });
+    [&] (const Json* candidate) { return same_value (*candidate, value); });
     if (documented) {
         return ExampleDisposition::AlreadyDeclared;
     }
@@ -371,9 +385,12 @@ writable_examples (const std::vector<const ExportExample*>& group, ExportNotes& 
  * A read, deliberately, where the write path uses `child_record`: asking what
  * the document says must not add a `content` key to a response that has none.
  */
-const Json* declared_media_of (const Json& response, const std::string& content_type) {
-    const auto content = response.find ("content");
-    if (content == response.end () || !content->is_object ()) {
+const Json* declared_media_of (const Json* response, const std::string& content_type) {
+    if (response == nullptr) {
+        return nullptr;
+    }
+    const auto content = response->find ("content");
+    if (content == response->end () || !content->is_object ()) {
         return nullptr;
     }
     const auto media = content->find (content_type);
@@ -493,7 +510,34 @@ ExportDirection direction) {
             notes.referenced_responses_left += 1;
             continue;
         }
-        if (existing == responses.end () || !existing->is_object ()) {
+        const bool declared_here = existing != responses.end () && existing->is_object ();
+        const Json* declared_response = declared_here ? &*existing : nullptr;
+
+        const std::vector<const ExportExample*> writable =
+        writable_examples (group, notes);
+        // Decided before anything is created: a response the document does not
+        // declare must not appear just because it was asked about.
+        std::vector<std::pair<std::string, MediaWrite>> planned;
+        for (const auto& [content_type, media_group] : group_by (
+             writable, [] (const ExportExample& e) { return e.content_type; })) {
+            MediaWrite write = select_examples (media_group,
+            declared_media_of (declared_response, content_type), notes, direction);
+            if (!write.examples.empty ()) {
+                planned.emplace_back (content_type, std::move (write));
+            }
+        }
+        if (!declared_here && !writable.empty () && planned.empty ()) {
+            // Every example of a status this document does not declare turned
+            // out to be one the import sampled off a schema - of a response the
+            // document has since dropped. Documenting the status from it would
+            // be this export putting back what the contract removed. A status
+            // whose examples were left out for a reason of *this* export's -
+            // a truncated body, a media type nobody recorded - still lands
+            // below, because there the response is known and only its body is
+            // missing.
+            continue;
+        }
+        if (!declared_here) {
             // A Response Object's `description` is required, so one has to be
             // written for a status the document does not already document. The
             // example's own name is what the user (or the import) called it,
@@ -504,20 +548,7 @@ ExportDirection direction) {
                                             group.front ()->name } };
         }
         Json& response = responses[status];
-
-        const std::vector<const ExportExample*> writable =
-        writable_examples (group, notes);
-        if (writable.empty ()) {
-            continue;
-        }
-
-        for (const auto& [content_type, media_group] : group_by (
-             writable, [] (const ExportExample& e) { return e.content_type; })) {
-            const MediaWrite write = select_examples (media_group,
-            declared_media_of (response, content_type), notes, direction);
-            if (write.examples.empty ()) {
-                continue;
-            }
+        for (const auto& [content_type, write] : planned) {
             write_media_examples (
             child_record (child_record (response, "content"), content_type),
             write, notes, direction);
@@ -587,16 +618,106 @@ struct DeclaredParameters {
 };
 
 /**
+ * The node a local JSON pointer names, or `nullptr` - one hop, no cycle to
+ * chase, and nothing outside this document.
+ *
+ * The export follows a reference to *read* it, never to write through it, and
+ * only for the one question a reference would otherwise make unanswerable:
+ * which parameter the document declares here. Anything it cannot follow - an
+ * external file, a pointer into a node that is not there - answers nothing,
+ * which lands back on the behaviour of not knowing.
+ */
+const Json* resolve_local_ref (const Json& document, std::string_view pointer) {
+    if (!pointer.starts_with ("#/")) {
+        return nullptr;
+    }
+    const Json* node = &document;
+    size_t start     = 2;
+    while (start <= pointer.size ()) {
+        const size_t slash = pointer.find ('/', start);
+        std::string segment (pointer.substr (start,
+        slash == std::string_view::npos ? pointer.size () - start : slash - start));
+        // JSON Pointer's two escapes, in the order the standard states: `~1`
+        // before `~0`, or an encoded `~1` would decode twice.
+        for (const auto& [from, to] :
+        std::array<std::pair<std::string_view, std::string_view>, 2>{
+        { { "~1", "/" }, { "~0", "~" } } }) {
+            for (size_t at = segment.find (from); at != std::string::npos;
+            at             = segment.find (from, at + to.size ())) {
+                segment.replace (at, from.size (), to);
+            }
+        }
+        if (!node->is_object ()) {
+            return nullptr;
+        }
+        const auto found = node->find (segment);
+        if (found == node->end ()) {
+            return nullptr;
+        }
+        node = &*found;
+        if (slash == std::string_view::npos) {
+            break;
+        }
+        start = slash + 1;
+    }
+    return node;
+}
+
+/// One declared parameter's name, recorded under the location it sits in.
+void declare_parameter (const Json* parameter, DeclaredParameters& declared) {
+    if (parameter == nullptr || !parameter->is_object ()) {
+        return;
+    }
+    const std::string name = string_member (*parameter, "name");
+    if (name.empty ()) {
+        return;
+    }
+    const std::string location = string_member (*parameter, "in");
+    if (location == "query") {
+        declared.query.insert (vayu::utils::ascii_lower (name));
+    } else if (location == "header") {
+        declared.header.insert (vayu::utils::ascii_lower (name));
+    }
+}
+
+/**
+ * The names a Path Item declares for every operation under it.
+ *
+ * OpenAPI's path-level `parameters` are the operation's parameters too, so a
+ * row that matches one has a home in the document even though the operation
+ * does not list it. Read, never written: an example written here would be one
+ * request's value on every method of the path.
+ */
+DeclaredParameters inherited_parameters (const Json& document, const Json& path_item) {
+    DeclaredParameters declared;
+    const auto parameters = path_item.find ("parameters");
+    if (parameters == path_item.end () || !parameters->is_array ()) {
+        return declared;
+    }
+    for (const Json& parameter : *parameters) {
+        const std::string reference = string_member (parameter, "$ref");
+        declare_parameter (
+        reference.empty () ? &parameter : resolve_local_ref (document, reference), declared);
+    }
+    return declared;
+}
+
+/**
  * A declared parameter's `example`, from the request row that carries a value
  * for it, and the names the operation declared.
  *
  * A blank row writes nothing - an import creates blank header rows, and a blank
  * one deleting the document's example would lose the contract's own
  * documentation to a row nobody typed in.
+ *
+ * @p declared arrives holding the path item's own parameters and comes back
+ * holding this operation's too.
  */
-DeclaredParameters
-patch_parameters (Json& operation, const ExportRequest& entry, ExportNotes& notes) {
-    DeclaredParameters declared;
+DeclaredParameters patch_parameters (Json& operation,
+const Json& document,
+const ExportRequest& entry,
+DeclaredParameters declared,
+ExportNotes& notes) {
     const auto parameters = operation.find ("parameters");
     if (parameters == operation.end () || !parameters->is_array ()) {
         return declared;
@@ -605,10 +726,17 @@ patch_parameters (Json& operation, const ExportRequest& entry, ExportNotes& note
         if (!parameter.is_object ()) {
             continue;
         }
-        if (!string_member (parameter, "$ref").empty ()) {
+        if (const std::string reference = string_member (parameter, "$ref");
+        !reference.empty ()) {
             notes.shared_parameters_left += 1;
+            // Not written into - a shared parameter belongs to every operation
+            // that names it - but its *name* is read through the reference, so
+            // a row the document declares this way is not then reported as a
+            // row the operation declares nowhere.
+            declare_parameter (resolve_local_ref (document, reference), declared);
             continue;
         }
+        declare_parameter (&parameter, declared);
         const std::string name = string_member (parameter, "name");
         if (name.empty ()) {
             continue;
@@ -618,10 +746,8 @@ patch_parameters (Json& operation, const ExportRequest& entry, ExportNotes& note
         const std::vector<ExportKeyValue>* rows = nullptr;
         if (location == "query") {
             rows = &entry.params;
-            declared.query.insert (wanted);
         } else if (location == "header") {
             rows = &entry.headers;
-            declared.header.insert (wanted);
         } else {
             continue;
         }
@@ -713,8 +839,13 @@ void count_edited_identity (const ExportRequest& entry, ExportNotes& notes) {
     }
 }
 
-void patch_operation (Json& operation, const ExportRequest& entry, ExportNotes& notes) {
-    const DeclaredParameters declared = patch_parameters (operation, entry, notes);
+void patch_operation (Json& operation,
+const Json& document,
+const ExportRequest& entry,
+DeclaredParameters inherited,
+ExportNotes& notes) {
+    const DeclaredParameters declared =
+    patch_parameters (operation, document, entry, std::move (inherited), notes);
     count_undeclared_rows (entry, declared, notes);
     count_unwritten_body (entry, notes);
     count_edited_identity (entry, notes);
@@ -769,15 +900,23 @@ std::unordered_map<std::string, size_t>& by_method_path) {
     }
 }
 
-/** Every operation on one path item, patched or removed. */
+/**
+ * Every operation on one path item, patched or removed.
+ *
+ * @p document is the whole stored document, read for the components a `$ref`
+ * names. Only members *under* @p path_item are written, so nothing this reads
+ * moves while it is being read.
+ */
 void patch_path_item (Assembly& assembly,
 const std::vector<ExportRequest>& requests,
+const Json& document,
 const Dialect& dialect,
 const std::string& path,
 const std::unordered_map<std::string, size_t>& by_operation_id,
 const std::unordered_map<std::string, size_t>& by_method_path,
 std::unordered_set<size_t>& claimed,
 Json& path_item) {
+    const DeclaredParameters inherited = inherited_parameters (document, path_item);
     for (const std::string_view method : PATH_ITEM_METHODS) {
         const std::string key (method);
         const auto operation = path_item.find (key);
@@ -794,7 +933,8 @@ Json& path_item) {
         claimed.insert (*found);
         assembly.notes.requests_exported += 1;
         if (dialect.writable) {
-            patch_operation (*operation, requests[*found], assembly.notes);
+            patch_operation (
+            *operation, document, requests[*found], inherited, assembly.notes);
         }
     }
 }
@@ -824,8 +964,11 @@ std::unordered_set<std::string>& referenced_paths) {
                 referenced_paths.insert (entry.key ());
                 continue;
             }
-            patch_path_item (assembly, requests, dialect, entry.key (),
-            by_operation_id, by_method_path, claimed, path_item);
+            // The document is read (for the components a `$ref` names) while a
+            // path item inside it is written; the two never touch the same
+            // node, and no member of the root is added or removed here.
+            patch_path_item (assembly, requests, assembly.document, dialect,
+            entry.key (), by_operation_id, by_method_path, claimed, path_item);
             const bool has_operation = std::any_of (PATH_ITEM_METHODS.begin (),
             PATH_ITEM_METHODS.end (), [&] (std::string_view method) {
                 return path_item.contains (std::string (method));
