@@ -31,7 +31,8 @@ export interface McpPromptDef {
 	name: string;
 	title: string;
 	description: string;
-	argsSchema: z.ZodRawShape;
+	/** Same spelling as `McpTool.inputSchema`, for the reason recorded there. */
+	argsSchema: Record<string, z.ZodType>;
 	build: (
 		args: Record<string, unknown>,
 		ctx: ToolContext,

@@ -1707,7 +1707,7 @@ describe("document CRUD parity", () => {
 	function schemaOf(tool: string, field: string) {
 		const found = TOOLS.find((t) => t.name === tool);
 		expect(found, tool).toBeDefined();
-		return found!.inputSchema[field] as z.ZodTypeAny;
+		return found!.inputSchema[field] as z.ZodType;
 	}
 
 	describe("saved-request auth and settings", () => {
@@ -3283,7 +3283,7 @@ describe("run_collection", () => {
 		 */
 		test("each surface states its own default, in its own unit", () => {
 			const shapeOf = (name: string) =>
-				TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodTypeAny>;
+				TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>;
 			const scenario = shapeOf("run_collection").failOnSchemaError.description ?? "";
 			const smoke = shapeOf("run_collection_smoke").failOnSchemaError.description ?? "";
 			expect(scenario).toContain("fails its step (default false)");
@@ -3399,7 +3399,7 @@ describe("start_load_run scenario runs", () => {
 		// this refusal exists to prevent.
 		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
 			string,
-			z.ZodTypeAny
+			z.ZodType
 		>;
 		expect(shape.failOnSchemaError).toBeDefined();
 		expect(shape.failOnSchemaError.description).toMatch(/Not available on a load run/);
@@ -3596,7 +3596,7 @@ describe("get_live_metrics limit", () => {
 	test("the input schema rejects a non-positive limit too", () => {
 		const shape = TOOLS.find((t) => t.name === "get_live_metrics")!.inputSchema as Record<
 			string,
-			z.ZodTypeAny
+			z.ZodType
 		>;
 		expect(shape.limit.safeParse(0).success).toBe(false);
 		expect(shape.limit.safeParse(-3).success).toBe(false);
@@ -4530,7 +4530,7 @@ describe("dispatchTool", () => {
 		// dispatchTool alone does not validate, so asserting on it would pass
 		// with the field removed and prove nothing.
 		const tool = TOOLS.find((t) => t.name === "run_request");
-		const args = z.object(tool!.inputSchema as Record<string, z.ZodTypeAny>).parse({
+		const args = z.object(tool!.inputSchema as Record<string, z.ZodType>).parse({
 			url: "https://api.example.com/users",
 			preRequestScript: "pm.request.headers['X-Signature'] = 'abc';",
 			postRequestScript: "pm.test('ok', function () {});",
@@ -4562,7 +4562,7 @@ describe("dispatchTool", () => {
 		// composition. Asserting only the first would stay green if the handler
 		// ever started spreading raw args into the payload.
 		const tool = TOOLS.find((t) => t.name === "run_request");
-		const args = z.object(tool!.inputSchema as Record<string, z.ZodTypeAny>).parse({
+		const args = z.object(tool!.inputSchema as Record<string, z.ZodType>).parse({
 			url: "https://api.example.com/users",
 			allowScriptRequests: true,
 			preRequestScript: "pm.sendRequest('https://evil.example.com', function () {});",
@@ -4612,7 +4612,7 @@ describe("dispatchTool", () => {
 		for (const name of ["run_request", "start_load_run"]) {
 			const shape = TOOLS.find((t) => t.name === name)!.inputSchema as Record<
 				string,
-				z.ZodTypeAny
+				z.ZodType
 			>;
 			expect(Object.keys(shape)).toContain("postRequestScript");
 			// The engine's own spelling stays accepted on both: a zod object
@@ -4630,7 +4630,7 @@ describe("dispatchTool", () => {
 	 */
 	const parseArgs = (name: string, args: Record<string, unknown>) =>
 		z
-			.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodTypeAny>)
+			.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>)
 			.parse(args);
 
 	test("start_load_run sends postRequestScript to /runs under the key it reads", async () => {
@@ -5599,7 +5599,7 @@ describe("dispatchTool", () => {
 describe("default-header opt-outs reach the engine", () => {
 	const parseArgs = (name: string, args: Record<string, unknown>) =>
 		z
-			.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodTypeAny>)
+			.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>)
 			.parse(args);
 
 	test("run_request forwards the refused names to /execute", async () => {
@@ -5711,7 +5711,7 @@ describe("start_load_run rejects an unusable concurrency at the schema", () => {
 	const concurrencySchema = () => {
 		const tool = TOOLS.find((t) => t.name === "start_load_run");
 		expect(tool).toBeDefined();
-		const shape = tool!.inputSchema as Record<string, z.ZodTypeAny>;
+		const shape = tool!.inputSchema as Record<string, z.ZodType>;
 		expect(shape.concurrency).toBeDefined();
 		return shape.concurrency;
 	};
@@ -5952,7 +5952,7 @@ describe("mock issuer tools", () => {
 	test("update refuses a start-only setting through the schema, not the engine", () => {
 		const shape = TOOLS.find((t) => t.name === "update_mock_issuer")!.inputSchema as Record<
 			string,
-			z.ZodTypeAny
+			z.ZodType
 		>;
 		// Port, clients, claims and issueRefreshTokens cannot change under a bound
 		// listener - the engine answers "stop it and start a new one" - so they
@@ -6036,7 +6036,7 @@ describe("mock issuer tools", () => {
 	test("the schema refuses a malformed config before the engine sees it", () => {
 		const shape = TOOLS.find((t) => t.name === "start_mock_issuer")!.inputSchema as Record<
 			string,
-			z.ZodTypeAny
+			z.ZodType
 		>;
 		// A failure mode outside the closed set would start an issuer that behaves
 		// nothing like the one the agent asked for.
@@ -6295,7 +6295,7 @@ describe("mock server tools", () => {
 	test("the schema refuses a malformed knob before the engine sees it", () => {
 		const shape = TOOLS.find((t) => t.name === "start_mock_server")!.inputSchema as Record<
 			string,
-			z.ZodTypeAny
+			z.ZodType
 		>;
 		expect(shape.port.safeParse(70000).success).toBe(false);
 		expect(shape.port.safeParse(0).success).toBe(true);

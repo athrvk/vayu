@@ -25,7 +25,7 @@ cd app && pnpm run electron:dev
 
 ### All Platforms
 
-- **Node.js** v20+ with pnpm
+- **Node.js** v22+ with pnpm
 - **CMake** v3.25+
 - **Ninja** build system
 - **vcpkg** package manager

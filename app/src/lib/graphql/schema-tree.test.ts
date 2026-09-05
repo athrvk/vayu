@@ -118,6 +118,16 @@ describe("childNodes", () => {
 		]);
 	});
 
+	it("prints an input field's default the same way an argument's is printed", () => {
+		// The two rows are built by different functions and only one of them
+		// used to print through GraphQL: the input field went out as
+		// `= "RELEVANCE"`, quoted by `JSON.stringify` into something the schema
+		// would reject, while the identically-declared argument read `= RELEVANCE`.
+		const filter = childNamed(branch("types"), "PostFilter");
+		const ranking = childNamed(filter, "ranking");
+		expect(ranking.signature).toBe(": Ranking = RELEVANCE");
+	});
+
 	it("expands a union into its members, under the routes that reach it", () => {
 		const union = childNamed(branch("types"), "SearchResult");
 		expect(childNodes(schema, union).map((m) => m.name)).toEqual([
