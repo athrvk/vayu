@@ -54,7 +54,7 @@ import {
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
-import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
+import { ExternalChangeCallout, InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import InheritanceChain from "./InheritanceChain";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
 
@@ -126,6 +126,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 		setDraft: setAuth,
 		isDirty,
 		reset: resetDraft,
+		externalValue,
 	} = useEntityDraft<CollectionAuth>({
 		entityKey: collection.id,
 		value: collection.auth,
@@ -171,6 +172,10 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 				</code>
 				. Nested folders take precedence over parent folders.
 			</InfoBanner>
+
+			{externalValue !== null && (
+				<ExternalChangeCallout what="auth" onTakeTheirs={resetDraft} className="mb-5" />
+			)}
 
 			{uneditableLabel && (
 				<Callout

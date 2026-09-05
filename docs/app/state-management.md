@@ -2261,7 +2261,9 @@ const {
   draft: T                                 // The editable copy
   setDraft: Dispatch<SetStateAction<T>>    // Standard setState signature
   isDirty: boolean                         // Draft differs from the persisted value
-  reset: () => void                        // Discard the draft
+  reset: () => void                        // Discard the draft, adopting the persisted value
+  baseline: T                              // The value the draft last agreed with the server on
+  externalValue: T | null                  // A persisted change pending while the draft is dirty
 } = useEntityDraft<T>({
   entityKey: string                        // Identity of the thing being edited
   value: T                                 // The persisted value
@@ -2270,9 +2272,10 @@ const {
 ```
 
 **Behaviour:**
-- **Seeds and resyncs:** the draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`. The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the name it holds is adopted, not captured](#the-request-name-the-builder-holds-is-adopted-not-captured).
+- **Seeds and resyncs while clean:** a clean draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`. The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the name it holds is adopted, not captured](#the-request-name-the-builder-holds-is-adopted-not-captured).
+- **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ScriptTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose.
 - **Tracks by JSON value, not identity:** `value` may be a fresh object literal every render (`InfoTab` builds `{ name, description }` inline); callers do not have to memoize it.
-- **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ScriptTab` passes `${collection.id}:${fieldKey}`, since pre- and post-request scripts are two different things to edit under one collection id.
+- **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`, discarding any pending `externalValue` too. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ScriptTab` passes `${collection.id}:${fieldKey}`, since pre- and post-request scripts are two different things to edit under one collection id.
 - **Requiring the mutation is the point:** the three hand-rolled copies this replaced had drifted, and the one that omitted the reset had exactly that bug.
 
 **Usage:**
