@@ -3759,7 +3759,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Check the Vayu engine's status and version. Use this first to confirm Vayu is running.",
+			'Check the Vayu engine\'s status and version. Use this first to confirm Vayu is running. Returns `status`, plus `version` when the engine reports one. An engine answering mid-restart may not return that shape at all; rather than failing, this reports `status: "unknown"` with the engine\'s raw body under `raw`, so a restarting engine reads as unknown rather than as a broken tool. An engine that is not running at all - port closed, nothing listening - comes back as a tool error instead, which is the difference between "starting up" and "not there".',
 		annotations: {
 			title: "Check engine health",
 			readOnlyHint: true,
@@ -3809,7 +3809,8 @@ export const TOOLS: McpTool[] = [
 		name: "list_requests",
 		category: "read",
 		invalidates: [],
-		description: "List the saved requests inside a collection.",
+		description:
+			"List the saved requests directly inside one collection. Each row is the *whole* stored request - method, url, headers, body, auth and both scripts - not a summary, so a large collection returns a correspondingly large result and there is no separate call needed to read one request. A sub-collection's requests are not included; list them by calling this again with the sub-collection id that list_collections returns. A stored request that cannot be serialized is omitted from the array rather than failing the call, so a short list is not proof the collection is small.",
 		annotations: {
 			title: "List requests",
 			readOnlyHint: true,
@@ -4074,7 +4075,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Get the engine's tunable configuration entries (workers, timeouts, connection limits, buffer sizes, etc.), each with its current value, default, type, and allowed range.",
+			"Get the engine's tunable configuration entries (workers, timeouts, connection limits, buffer sizes, etc.), each with its current value, default, type, and allowed range. Read this before update_engine_config rather than assuming a key exists or what it accepts - the ranges here are what that call validates against. The values are what the engine has saved, which is not always what it is running: a key changed since the last restart reads as its new value here while the running engine still uses the old one.",
 		annotations: {
 			title: "Get engine config",
 			readOnlyHint: true,
@@ -6726,7 +6727,8 @@ export const TOOLS: McpTool[] = [
 		name: "stop_run",
 		category: "load",
 		invalidates: ["run"],
-		description: "Stop an in-progress load test.",
+		description:
+			"Stop a run that is still in progress: a load test, or a streaming Design-mode send that is holding its connection open. The run ends where it is and keeps what it already recorded - it is marked `stopped` rather than discarded, so get_run_report and get_run_samples still answer for it afterwards. Calling it on a run that has already finished is not an error: the result reports the status it was already in. A run id the engine does not know is an error.",
 		annotations: {
 			title: "Stop run",
 			readOnlyHint: false,
