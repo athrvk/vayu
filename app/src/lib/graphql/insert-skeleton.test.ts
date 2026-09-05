@@ -95,6 +95,30 @@ describe("insertField - a root field with no document", () => {
 		expect(result.text).not.toContain("ranking:");
 	});
 
+	it("leaves out a non-null argument the schema defaults, which the fixture has none of", () => {
+		// Non-null *and* defaulted is the one shape where "required" and "has no
+		// default" disagree, and the fixture never writes it - `ranking` is
+		// nullable, `term` has no default. The predicate reads the default
+		// through graphql's own `isRequiredArgument`, which since 17 is the only
+		// thing that sees a default declared as a literal; asking
+		// `defaultValue === undefined` instead makes `range` a variable the user
+		// must fill for a value the server already has.
+		const defaulted = buildSchema(`
+			type Query { report(range: Int! = 7, label: String!): String }
+		`);
+		const result = inserted(
+			insertField(defaulted, "", 0, {
+				parentTypeName: "Query",
+				fieldName: "report",
+				rootPath: [{ parentTypeName: "Query", fieldName: "report" }],
+			})
+		);
+
+		expect(result.variables).toEqual({ label: "" });
+		expect(result.text).not.toContain("range");
+		expect(validate(defaulted, parse(result.text)).map((e) => e.message)).toEqual([]);
+	});
+
 	it("puts the caret inside the new selection set", () => {
 		const result = inserted(
 			insertField(schema, "", 0, {

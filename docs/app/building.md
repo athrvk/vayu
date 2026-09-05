@@ -11,7 +11,8 @@ This document outlines how to build the Vayu Manager Electron application from s
 
 - **Node.js**: Version ≥ 22 LTS (`concurrently` 10, which `pnpm type-check`
   runs, declares `node >= 22`; the 20 line is end-of-life)
-- **pnpm**: Version ≥ 8 (package manager)
+- **pnpm**: Version ≥ 11 (package manager; the version CI pins, and the one
+  that reads `minimumReleaseAge` from `pnpm-workspace.yaml`)
 - **Vayu Engine**: Must be built first (see `docs/engine/building.md`)
 
 ## Quick Start
