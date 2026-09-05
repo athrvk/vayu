@@ -284,11 +284,21 @@ class ScenarioRunService {
 		osIcon.runFinished();
 	}
 
+	/**
+	 * Redden the taskbar bar for a run that failed, and remember that it did.
+	 * The record is what keeps `releaseRun`'s clear from wiping the flash a
+	 * moment later: both failure paths - the SSE error and a `complete` frame
+	 * saying `Failed` - release the run immediately afterwards.
+	 */
+	private failProgress(runId: string | null): void {
+		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun, runId);
+		this.progressFailedRunId = runId;
+	}
+
 	private handleError(error: Error): void {
 		console.error("[ScenarioRunService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
-		runProgress.fail(RUN_PROGRESS_KEYS.collectionRun, this.activeRunId);
-		this.progressFailedRunId = this.activeRunId;
+		this.failProgress(this.activeRunId);
 		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.collectionRunFailed, error.message);
 		// Before the error, so the steps that did arrive are on screen under the
 		// notice explaining why no more will be. A buffered batch stranded here
@@ -320,6 +330,11 @@ class ScenarioRunService {
 		// the one path that flushes rather than discards, which is why it is
 		// here and not in `releaseRun`.
 		this.stepBatcher.flush();
+		// Before the release, whose clear would otherwise wipe the bar: until
+		// #1415 `runProgress.fail` was reachable only from `handleError`, which
+		// the engine's own failures never reach, so a real failure cleared the
+		// taskbar instead of reddening it.
+		if (status === "Failed") this.failProgress(runId);
 		this.releaseRun(runId);
 		if (!runId) return;
 

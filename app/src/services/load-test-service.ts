@@ -321,11 +321,21 @@ class LoadTestService {
 		if (this.pendingMonitor.length > 0) this.commitBatch([]);
 	}
 
+	/**
+	 * Redden the taskbar bar for a run that failed, and remember that it did.
+	 * The record is what keeps the terminal clear from wiping the flash a
+	 * moment later: both failure paths - the SSE error and a `complete` frame
+	 * saying `Failed` - are followed by one.
+	 */
+	private failProgress(runId: string | null): void {
+		runProgress.fail(RUN_PROGRESS_KEYS.loadRun, runId);
+		this.progressFailedRunId = runId;
+	}
+
 	private handleError(error: Error): void {
 		console.error("[LoadTestService] SSE error:", error);
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
-		runProgress.fail(RUN_PROGRESS_KEYS.loadRun, this.activeRunId);
-		this.progressFailedRunId = this.activeRunId;
+		this.failProgress(this.activeRunId);
 		this.notifyTerminal(this.activeRunId, NOTIFY_KINDS.loadRunFailed, error.message);
 		const store = useDashboardStore.getState();
 		store.setError(error.message);
@@ -344,6 +354,13 @@ class LoadTestService {
 		// stream closed, and the machine must not stay pinned awake through a
 		// slow fetch.
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
+		// A run the engine says failed paints the error state here, before the
+		// clear below and before the awaited fetch: until #1415 the only caller
+		// of `runProgress.fail` was `handleError`, which the engine's own
+		// failures never reach, so a real failure cleared the bar instead of
+		// reddening it. Marking it also sets `progressFailedRunId`, which is
+		// what makes the clear below leave the flash standing.
+		if (status === "Failed") this.failProgress(runId);
 		// Same reason, and the same moment: the run is over, so the taskbar stops
 		// claiming one is going. A run that already reported its failure keeps
 		// that flash instead - see `progressFailedRunId`. A close with no run to

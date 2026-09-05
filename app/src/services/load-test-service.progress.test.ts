@@ -71,8 +71,12 @@ function tick(elapsed: number): LoadTestMetrics {
 }
 
 /** The two private handlers the SSE client calls in production. */
-function closeStream(): Promise<void> {
-	return (loadTestService as unknown as { handleClose: () => Promise<void> }).handleClose();
+function closeStream(status: "Completed" | "Stopped" | "Failed" | null = null): Promise<void> {
+	return (
+		loadTestService as unknown as {
+			handleClose: (status: "Completed" | "Stopped" | "Failed" | null) => Promise<void>;
+		}
+	).handleClose(status);
 }
 function failStream(message: string): void {
 	(loadTestService as unknown as { handleError: (e: Error) => void }).handleError(
@@ -178,6 +182,54 @@ describe("LoadTestService - the OS progress indicator", () => {
 		failStream("engine went away");
 		await closeStream();
 		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_1");
+		expect(mockClear).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * #1415's third criterion, and the half that was still missing after the
+	 * frame's status started choosing the notification kind: a run that fails
+	 * on the engine ends through `handleClose`, not `handleError`, so until the
+	 * failed frame painted the bar itself the Windows taskbar error state was
+	 * never reached by a real failure - the close cleared the bar instead.
+	 *
+	 * Mutation check: drop the `status === "Failed"` branch in `handleClose`
+	 * and this reddens twice over - no `fail`, and a `clear` that wipes the bar
+	 * the criterion is about.
+	 */
+	it("says failed when the engine's frame says the run failed", async () => {
+		loadTestService.startMonitoring("run_3");
+
+		await closeStream("Failed");
+
+		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_3");
+		expect(mockClear).not.toHaveBeenCalled();
+	});
+
+	it("clears rather than reddens when the frame says the run completed", async () => {
+		loadTestService.startMonitoring("run_4");
+
+		await closeStream("Completed");
+
+		expect(mockFail).not.toHaveBeenCalled();
+		expect(mockClear).toHaveBeenCalledWith(LOAD_RUN, "run_4");
+	});
+
+	/*
+	 * The bar is painted before the awaited report fetch, which is the same
+	 * reason the notification prefers the frame to the stored row (#1415's
+	 * fourth criterion): a failure whose report could not be read is still a
+	 * failure, and the taskbar must say so.
+	 *
+	 * Mutation check: move the `fail` call after the fetch and this reddens.
+	 */
+	it("reddens a failed run whose report could not be read", async () => {
+		vi.mocked(apiService.getRunReport).mockRejectedValueOnce(new Error("engine gone"));
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+		loadTestService.startMonitoring("run_5");
+
+		await closeStream("Failed");
+
+		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_5");
 		expect(mockClear).not.toHaveBeenCalled();
 	});
 });
