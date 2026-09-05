@@ -110,6 +110,11 @@ describe("LoadTestService", () => {
 			// because a run configured with a `monitor` block streams its
 			// scrapes on this same connection.
 			undefined,
+			expect.any(Function),
+			// No plan handler either: that frame is a collection run's
+			// denominator. Last is the hand-off - how this service hears that a
+			// collection run took the shared client from it (#1417).
+			undefined,
 			expect.any(Function)
 		);
 	});

@@ -233,6 +233,9 @@ describe("ScenarioRunService", () => {
 			// No monitor handler: a collection run scrapes no vitals. The plan
 			// handler after it is what makes the run's progress a fraction.
 			undefined,
+			expect.any(Function),
+			// And last, the hand-off: how this service hears that a load run
+			// took the shared client from it (#1417).
 			expect.any(Function)
 		);
 	});

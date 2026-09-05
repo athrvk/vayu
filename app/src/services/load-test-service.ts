@@ -149,7 +149,9 @@ class LoadTestService {
 			this.handleError.bind(this),
 			this.handleClose.bind(this),
 			undefined,
-			this.handleMonitorSample.bind(this)
+			this.handleMonitorSample.bind(this),
+			undefined,
+			this.handleSuperseded.bind(this)
 		);
 	}
 
@@ -163,18 +165,70 @@ class LoadTestService {
 			return;
 		}
 
-		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
-		runProgress.clear(RUN_PROGRESS_KEYS.loadRun, runId);
+		this.releaseRun(runId);
 		this.notifyTerminal(
 			runId,
 			NOTIFY_KINDS.loadRunStopped,
 			"The run was stopped before it finished."
 		);
+		sseClient.disconnect();
+	}
+
+	/**
+	 * Let go of everything this service holds on `runId`'s behalf, and say
+	 * nothing about how the run ended.
+	 *
+	 * The one place that does it, because two paths need it - the user stopping
+	 * the run, and another run taking the shared client away (#1417) - and a
+	 * second copy is a release that drifts out of step with the first. What
+	 * ended the run is the caller's to say: `stopMonitoring` has a notification
+	 * for it and a superseded run has nothing to report, because it has not
+	 * ended at all.
+	 *
+	 * `handleClose` keeps a sequence of its own rather than calling this, and
+	 * the differences are the reason: it flushes where this discards, and it
+	 * cannot null `activeRunId` until after its awaited report fetch. What it
+	 * does not differ on is the failed-run flash, which is why the guard below
+	 * is here too: a run that already reported a failure keeps that mark on
+	 * *every* path that lets go of it, so the two-second flash the main process
+	 * is timing out on its own is never wiped in the tick it was painted
+	 * (#1362, #1364). `ScenarioRunService.releaseRun` holds the same rule.
+	 */
+	private releaseRun(runId: string): void {
+		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
+		if (this.progressFailedRunId !== runId) {
+			runProgress.clear(RUN_PROGRESS_KEYS.loadRun, runId);
+		}
 		this.metricsBatcher.discard();
 		this.pendingMonitor = [];
 		this.activeRunId = null;
 		this.isConnected = false;
-		sseClient.disconnect();
+	}
+
+	/**
+	 * A collection run took the shared stream client (issue #1417).
+	 *
+	 * Before this existed the takeover was silent: `sseClient.connect` closed
+	 * the socket and no terminal path ran, so the wake lock stayed held for the
+	 * rest of the session and the taskbar kept a bar for a run nothing watched.
+	 *
+	 * The run is *not* over - the engine is still running it - so this says so
+	 * to no one: no notification (#1358), no failed-icon mark (#1364), and no
+	 * report fetch. The history row reaches its terminal status on the next
+	 * list read, which is where a run this app is not watching belongs.
+	 *
+	 * The buffered ticks go with it rather than being committed, the same
+	 * choice `stopMonitoring` makes: the dashboard is stale from this moment
+	 * either way, and one more partial window does not make it less so.
+	 */
+	private handleSuperseded(): void {
+		const runId = this.activeRunId;
+		if (!runId) return;
+		this.releaseRun(runId);
+		// Nothing else will lower it: the spinner is raised in `startMonitoring`
+		// and lowered in `handleClose`, and `handleClose` is exactly what does
+		// not run for a run whose stream was taken.
+		useDashboardStore.getState().setStreaming(false);
 	}
 
 	/**
