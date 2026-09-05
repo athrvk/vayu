@@ -1864,7 +1864,13 @@ export interface ExportNotes {
 	examplesWritten: number;
 	examplesWithoutMediaType: number;
 	examplesTruncated: number;
+	examplesAlreadyDeclared: number;
+	examplesSampledAtImport: number;
 	sharedParametersLeft: number;
+	referencedResponsesLeft: number;
+	bodiesNotWritten: number;
+	rowsNotDeclared: number;
+	operationsEdited: number;
 	/** A Swagger 2.0 document: operations are removed, nothing is written in. */
 	vocabularyNotWritten: boolean;
 }

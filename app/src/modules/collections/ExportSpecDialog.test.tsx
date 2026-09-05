@@ -51,7 +51,13 @@ function notes(overrides: Partial<ExportNotes> = {}): ExportNotes {
 		examplesWritten: 0,
 		examplesWithoutMediaType: 0,
 		examplesTruncated: 0,
+		examplesAlreadyDeclared: 0,
+		examplesSampledAtImport: 0,
 		sharedParametersLeft: 0,
+		referencedResponsesLeft: 0,
+		bodiesNotWritten: 0,
+		rowsNotDeclared: 0,
+		operationsEdited: 0,
 		vocabularyNotWritten: false,
 		...overrides,
 	};
@@ -150,6 +156,39 @@ describe("ExportSpecDialog", () => {
 			"1 request with no operation identity - not written, bind the collection to give them one"
 		);
 		expect(lines).toContain("1 request exported as an operation");
+	});
+
+	it("names what a bound export could not write in, singular and plural alike", async () => {
+		exportSpec.mockResolvedValue(
+			answer({
+				notes: notes({
+					examplesAlreadyDeclared: 2,
+					examplesSampledAtImport: 1,
+					referencedResponsesLeft: 1,
+					bodiesNotWritten: 3,
+					rowsNotDeclared: 1,
+					operationsEdited: 1,
+				}),
+			})
+		);
+		open();
+
+		expect(await screen.findByText(/own document, updated/)).toBeTruthy();
+		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		expect(lines).toContain("2 examples already declared in the document - nothing to write");
+		expect(lines).toContain(
+			"1 example the import sampled from a schema - not written back as the contract's own"
+		);
+		expect(lines).toContain(
+			"1 $ref response left as it is - a reference takes no siblings, and the component it names is shared"
+		);
+		expect(lines).toContain(
+			"3 requests whose body is not written - this direction writes parameters and examples"
+		);
+		expect(lines).toContain("1 row the operation declares no parameter for - not written");
+		expect(lines).toContain(
+			"1 request no longer matching the operation it is stamped as - values land in the operation the document declares"
+		);
 	});
 
 	it("downloads the document under the name the engine gave it, in the chosen format", async () => {
@@ -256,10 +295,10 @@ describe("ExportSpecDialog", () => {
 		const placeholder = screen.getByRole("status", { name: "Assembling the document" });
 		expect(placeholder.className).toContain("surface-sunken");
 		// A heading bar, two for the paragraph that wraps under it, and a row
-		// per count: seven, between the six a free-form summary lists and the
-		// eight a bound one does. jsdom measures no heights, so the row counts
+		// per count: ten, between the six a free-form summary lists and the
+		// fourteen a bound one does. jsdom measures no heights, so the row counts
 		// those heights come from are what a test can hold.
-		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(10);
+		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(13);
 
 		first.settle(answer());
 		expect(await screen.findByText(/own document, updated/)).toBeTruthy();
