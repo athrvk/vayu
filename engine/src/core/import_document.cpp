@@ -125,7 +125,14 @@ json map_key_values (const json* rows) {
 /// `toVarRecord(vars)`: a variable array as Vayu's `{name: {value, enabled}}`.
 /// `type: "secret"` is the one Postman per-variable kind Vayu stores - the rest
 /// describe a value type it does not have, since every value is a string.
-json to_var_record (const json* vars) {
+/// @p skipped_variable_metadata counts a row whose `description` or a
+/// meaningfully declared `type` was read and discarded, once per row
+/// regardless of how many of the two it carried. `"default"` is Postman's own
+/// unset marker - every environment and globals export the app can produce
+/// stamps it on every ordinary variable - so it counts no more than an absent
+/// `type` does; only a value naming an actual kind (`"boolean"`, `"number"`,
+/// a custom string) is a declaration Vayu had something to lose.
+json to_var_record (const json* vars, int& skipped_variable_metadata) {
     json out = json::object ();
     if (vars == nullptr || !vars->is_array ()) {
         return out;
@@ -134,6 +141,11 @@ json to_var_record (const json* vars) {
         const json* record = as_record (&row);
         if (record == nullptr || !truthy (prop (record, "key"))) {
             continue;
+        }
+        const std::string* declared_type = as_str (prop (record, "type"));
+        if (truthy (prop (record, "description")) ||
+        (declared_type != nullptr && *declared_type != "secret" && *declared_type != "default")) {
+            skipped_variable_metadata += 1;
         }
         // `disabled != null ? !disabled : enabled != null ? !!enabled : true` -
         // JavaScript truthiness on both, not a boolean test.
@@ -148,8 +160,7 @@ json to_var_record (const json* vars) {
         json value;
         value["value"]   = normalize_vars (as_string (prop (record, "value")));
         value["enabled"] = enabled;
-        if (const std::string* type = as_str (prop (record, "type"));
-        type != nullptr && *type == "secret") {
+        if (declared_type != nullptr && *declared_type == "secret") {
             value["secret"] = true;
         }
         out[as_string (prop (record, "key"))] = std::move (value);
@@ -588,8 +599,11 @@ json map_swagger_oauth2 (const json* scheme) {
 }
 
 /// `mapPostmanAuth(auth)`: a Postman `auth` object (collection, folder or
-/// request) as a Vayu auth.
-json map_postman_auth (const json* auth) {
+/// request) as a Vayu auth. @p skipped_unsupported_auth counts a scheme Vayu
+/// cannot execute and has no config shape for (`hawk`, `oauth1`, `edgegrid`,
+/// or a non-string `type`) - not `noauth`, whose `{mode: "none"}` answer is
+/// the correct mapping rather than a loss.
+json map_postman_auth (const json* auth, int& skipped_unsupported_auth) {
     const json* node = as_record (auth);
     if (node == nullptr || !truthy (prop (node, "type"))) {
         return json{ { "mode", "inherit" } };
@@ -597,6 +611,7 @@ json map_postman_auth (const json* auth) {
     const std::string* type = as_str (prop (node, "type"));
     if (type == nullptr) {
         // A `type` that is not a string names no scheme, so nothing can be sent.
+        skipped_unsupported_auth += 1;
         return json{ { "mode", "none" } };
     }
     const std::map<std::string, std::string> detail = auth_detail (prop (node, *type));
@@ -630,6 +645,12 @@ json map_postman_auth (const json* auth) {
     if (*type == "inherit") {
         return json{ { "mode", "inherit" } };
     }
+    if (*type == "noauth") {
+        return json{ { "mode", "none" } };
+    }
+    // `hawk`, `oauth1`, `edgegrid` - schemes Postman defines and Vayu has no
+    // mode for, unlike `awsv4`/`digest`/`ntlm` above, which import as data.
+    skipped_unsupported_auth += 1;
     return json{ { "mode", "none" } };
 }
 
@@ -638,26 +659,40 @@ json map_postman_auth (const json* auth) {
 // ---------------------------------------------------------------------------
 
 /// The seven methods Vayu executes. Anything else - Postman lets a user type a
-/// verb - imports as `GET`, which is the renderer's answer too.
-std::string to_method (const json* declared) {
+/// verb - imports as `GET`, which is the renderer's answer too. @p unsupported,
+/// when given, reports whether the declared method fell back rather than
+/// matched, so a caller that counts drops (Postman) can and one that does not
+/// need to (Insomnia) is unaffected.
+std::string to_method (const json* declared, bool* unsupported = nullptr) {
     static constexpr std::array<const char*, 7> METHODS = { "GET", "POST",
         "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" };
     const std::string upper                             = walk::upper (
     declared == nullptr || declared->is_null () ? std::string ("GET") : as_string (declared));
-    return std::any_of (METHODS.begin (), METHODS.end (),
-           [&upper] (const char* method) { return upper == method; }) ?
-    upper :
-    std::string ("GET");
+    const bool matched = std::any_of (METHODS.begin (), METHODS.end (),
+    [&upper] (const char* method) { return upper == method; });
+    if (unsupported != nullptr) {
+        *unsupported = !matched;
+    }
+    return matched ? upper : std::string ("GET");
 }
 
 /// What a Postman parse accumulates across its recursive walk.
 struct PostmanCounts {
     ImportOptions options;
-    int requests          = 0;
-    int folders           = 0;
-    int non_executable    = 0;
-    int skipped_file_body = 0;
-    int skipped_malformed = 0;
+    int requests                   = 0;
+    int folders                    = 0;
+    int non_executable             = 0;
+    int skipped_file_body          = 0;
+    int skipped_malformed          = 0;
+    int skipped_unsupported_method = 0;
+    int skipped_unsupported_auth   = 0;
+    int skipped_path_variables     = 0;
+    int skipped_url_without_raw    = 0;
+    int skipped_variable_metadata  = 0;
+    // `{key: {value, enabled}}` collected from every request's `url.variable[]`,
+    // merged into the root collection's variables once the walk finishes - see
+    // `substitutePathVariables`.
+    json path_variables = json::object ();
 };
 
 /**
@@ -880,8 +915,122 @@ json query_entries (const std::string& query) {
     return out;
 }
 
+/// `host` as a single string - Postman's `host[]` array joined with `.`, or
+/// the bare string some exports use instead.
+std::string postman_host (const json* url) {
+    const json* declared = prop (url, "host");
+    if (declared == nullptr) {
+        return {};
+    }
+    if (!declared->is_array ()) {
+        const std::string* text = as_str (declared);
+        return text == nullptr ? std::string () : *text;
+    }
+    std::string host;
+    for (const json& part : *declared) {
+        const std::string* text = as_str (&part);
+        if (text == nullptr || text->empty ()) {
+            continue;
+        }
+        if (!host.empty ()) {
+            host += '.';
+        }
+        host += *text;
+    }
+    return host;
+}
+
+/// Appends `path[]` segments to @p out as `/segment`, returning whether any
+/// segment was appended. A segment may be a plain string or a `{value}`
+/// variable object.
+bool append_postman_path (const json* url, std::string& out) {
+    const json* declared = prop (url, "path");
+    if (declared == nullptr || !declared->is_array ()) {
+        return false;
+    }
+    bool appended = false;
+    for (const json& part : *declared) {
+        const std::string* text = as_str (&part);
+        const std::string segment =
+        text != nullptr ? *text : as_string (prop (&part, "value"));
+        if (segment.empty ()) {
+            continue;
+        }
+        out += '/';
+        out += segment;
+        appended = true;
+    }
+    return appended;
+}
+
+/// `hostPathUrl(url)`: assembles a raw URL from Postman's `protocol` +
+/// `host[]` + `port` + `path[]`, for the schema-legal shape that gives no
+/// `raw` at all.
+std::string host_path_url (const json* url) {
+    const std::string* protocol = as_str (prop (url, "protocol"));
+    std::string out =
+    (protocol == nullptr || protocol->empty () ? "https" : *protocol) + "://";
+
+    const std::string host = postman_host (url);
+    out += host;
+
+    if (const std::string* port = as_str (prop (url, "port"));
+    port != nullptr && !port->empty ()) {
+        out += ':';
+        out += *port;
+    }
+
+    const bool has_path = append_postman_path (url, out);
+    // Neither part contributed anything: there is no URL to assemble, the same
+    // answer an absent `raw` used to give.
+    return host.empty () && !has_path ? std::string () : out;
+}
+
+/// `substitutePathVariables(base, variable[])`: Postman's `:key` path segments
+/// as Vayu's `{{key}}` template. The first value seen for a key is recorded
+/// into @p counts so the caller can give the template something to resolve
+/// against; counted once per URL that carried at least one substitution,
+/// which is a mapping (the value survives as a variable), not a loss.
+std::string substitute_path_variables (const std::string& base,
+const json* declared,
+PostmanCounts& counts) {
+    if (declared == nullptr || !declared->is_array () || declared->empty ()) {
+        return base;
+    }
+    std::string out = base;
+    for (const json& row : *declared) {
+        const json* record = as_record (&row);
+        const std::string* declared_key =
+        record == nullptr ? nullptr : as_str (prop (record, "key"));
+        if (declared_key == nullptr || declared_key->empty ()) {
+            continue;
+        }
+        const std::string token = ":" + *declared_key;
+        const size_t at         = out.find (token);
+        if (at == std::string::npos) {
+            continue;
+        }
+        // A genuine path segment - `:key` followed by `/`, `?` or the end -
+        // rather than a value that merely contains the substring.
+        const size_t after = at + token.size ();
+        if (after != out.size () && out[after] != '/' && out[after] != '?') {
+            continue;
+        }
+        out.replace (at, token.size (), "{{" + *declared_key + "}}");
+        if (!counts.path_variables.contains (*declared_key)) {
+            counts.path_variables[*declared_key] =
+            json{ { "value", normalize_vars (as_string (prop (record, "value"))) },
+                { "enabled", true } };
+        }
+    }
+    if (out != base) {
+        counts.skipped_path_variables += 1;
+    }
+    return out;
+}
+
 /// A Postman `url`, which is a string in v2.0 and either shape in v2.1.
-std::pair<std::string, json> pm_url (const json* url) {
+std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     if (url != nullptr && url->is_string ()) {
         const std::string text = url->get<std::string> ();
         const size_t question  = text.find ('?');
@@ -892,9 +1041,18 @@ std::pair<std::string, json> pm_url (const json* url) {
             query_entries (text.substr (question + 1)) };
     }
     const std::string* declared = as_str (prop (url, "raw"));
-    const std::string raw = declared == nullptr ? std::string () : *declared;
+    std::string raw;
+    if (declared != nullptr) {
+        raw = *declared;
+    } else {
+        counts.skipped_url_without_raw += 1;
+        raw = host_path_url (url);
+    }
     const size_t question = raw.find ('?');
-    const std::string base = question == std::string::npos ? raw : raw.substr (0, question);
+    const std::string base_raw =
+    question == std::string::npos ? raw : raw.substr (0, question);
+    const std::string base =
+    substitute_path_variables (base_raw, prop (url, "variable"), counts);
     json structured = map_key_values (prop (url, "query"));
     // `query[]` wins when it has anything - it carries disabled state and
     // descriptions that `raw` cannot. Falling back to `raw` matters for
@@ -939,7 +1097,8 @@ const json* pm_event (const std::vector<const json*>& events, const char* listen
  * engine's `followRedirects` defaults to **true** - so an omitted `false`
  * silently follows the 3xx the request exists to inspect. Only well-typed
  * values are read: a coerced `"false"` would read as the user's setting while
- * being the opposite of it.
+ * being the opposite of it. `strictSSL` follows the same rule onto
+ * `verifySSL`, which likewise defaults to `true`.
  */
 void pm_redirects (const json* item, json& request) {
     const json* behavior = as_record (prop (item, "protocolProfileBehavior"));
@@ -953,6 +1112,10 @@ void pm_redirects (const json* item, json& request) {
     if (const json* limit = prop (behavior, "maxRedirects"); limit != nullptr &&
     limit->is_number () && std::isfinite (limit->get<double> ())) {
         request["maxRedirects"] = *limit;
+    }
+    if (const json* strict = prop (behavior, "strictSSL");
+    strict != nullptr && strict->is_boolean ()) {
+        request["verifySSL"] = strict->get<bool> ();
     }
 }
 
@@ -1015,11 +1178,11 @@ std::string pm_description_text (const std::string* text, const std::string* nes
 }
 
 json pm_request (const json* item, PostmanCounts& counts) {
-    const json* declared   = as_record (prop (item, "request"));
-    const json empty       = json::object ();
-    const json* rq         = declared == nullptr ? &empty : declared;
-    auto [url, params]     = pm_url (prop (rq, "url"));
-    json auth              = map_postman_auth (prop (rq, "auth"));
+    const json* declared = as_record (prop (item, "request"));
+    const json empty     = json::object ();
+    const json* rq       = declared == nullptr ? &empty : declared;
+    auto [url, params]   = pm_url (prop (rq, "url"), counts);
+    json auth = map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth);
     const std::string mode = auth.at ("mode").get<std::string> ();
     if (mode == "digest" || mode == "aws" || mode == "ntlm") {
         counts.non_executable += 1;
@@ -1033,12 +1196,16 @@ json pm_request (const json* item, PostmanCounts& counts) {
     const std::string* nested = as_str (prop (prop (rq, "description"), "content"));
     const json* name = prop (item, "name");
 
+    bool unsupported_method = false;
     json request;
     request["name"] = name == nullptr || name->is_null () ? "Untitled" : as_string (name);
     request["description"] = pm_description_text (description, nested);
-    request["method"]      = to_method (prop (rq, "method"));
-    request["url"]         = url;
-    request["params"]      = params;
+    request["method"] = to_method (prop (rq, "method"), &unsupported_method);
+    if (unsupported_method) {
+        counts.skipped_unsupported_method += 1;
+    }
+    request["url"]    = url;
+    request["params"] = params;
     request["headers"] =
     with_required_content_type (map_key_values (prop (rq, "header")), body);
     request["body"] = std::move (body);
@@ -1060,11 +1227,11 @@ json pm_request (const json* item, PostmanCounts& counts) {
  * must not collapse into `none`, which a descendant's `inherit` walks past.
  * Collections never inherit, so `inherit` and absent both become `none`.
  */
-json collection_auth (const json* auth) {
+json collection_auth (const json* auth, int& skipped_unsupported_auth) {
     if (const json* type = prop (auth, "type"); type != nullptr && *type == "noauth") {
         return json{ { "mode", "noauth" } };
     }
-    json mapped = map_postman_auth (auth);
+    json mapped = map_postman_auth (auth, skipped_unsupported_auth);
     return mapped.at ("mode") == "inherit" ? json{ { "mode", "none" } } : mapped;
 }
 
@@ -1109,8 +1276,10 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     collection["name"] =
     name == nullptr || name->is_null () ? "Imported Collection" : as_string (name);
     collection["description"] = pm_description_text (text, nested);
-    collection["variables"]   = to_var_record (prop (node, "variable"));
-    collection["auth"]        = collection_auth (prop (node, "auth"));
+    collection["variables"] =
+    to_var_record (prop (node, "variable"), counts.skipped_variable_metadata);
+    collection["auth"] =
+    collection_auth (prop (node, "auth"), counts.skipped_unsupported_auth);
     collection["preRequestScript"] =
     counts.options.import_scripts ? join_exec (pm_event (events, "prerequest")) : "";
     collection["postRequestScript"] =
@@ -1128,9 +1297,24 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     collections.push_back (
     pm_folder (as_record (&parsed) == nullptr ? &empty : &parsed, counts));
 
+    // Path variables are collected while walking every request, then merged
+    // once so an explicit collection variable of the same name is never
+    // overwritten by one only a request's URL implied.
+    json& root_variables = collections.front ().at ("variables");
+    for (auto& [key, value] : counts.path_variables.items ()) {
+        if (!root_variables.contains (key)) {
+            root_variables[key] = value;
+        }
+    }
+
     ImportTally tally;
     tally.add ("file_body", counts.skipped_file_body);
     tally.add ("malformed_item", counts.skipped_malformed);
+    tally.add ("unsupported_method", counts.skipped_unsupported_method);
+    tally.add ("unsupported_auth", counts.skipped_unsupported_auth);
+    tally.add ("path_variables", counts.skipped_path_variables);
+    tally.add ("url_without_raw", counts.skipped_url_without_raw);
+    tally.add ("variable_metadata", counts.skipped_variable_metadata);
 
     json meta;
     meta["format"]              = format;
@@ -1170,9 +1354,10 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
     // the draft carries nothing and the counts report 0, so the preview shows
     // what will actually be created. The one toggle covers both scopes - it
     // reads "Import environments & variables", and globals are variables.
-    const json variables = options.import_environments ?
-    to_var_record (prop (&parsed, "values")) :
-    json::object ();
+    int skipped_variable_metadata = 0;
+    const json variables          = options.import_environments ?
+             to_var_record (prop (&parsed, "values"), skipped_variable_metadata) :
+             json::object ();
 
     json environments = json::array ();
     if (!globals && options.import_environments) {
@@ -1195,8 +1380,10 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
     meta["globalCount"]      = static_cast<int> (scope.size ());
     // An environment or globals export has no requests, so no examples and no
     // file parts either.
-    meta["exampleCount"]        = 0;
-    meta["skipped"]             = json::array ();
+    meta["exampleCount"] = 0;
+    ImportTally tally;
+    tally.add ("variable_metadata", skipped_variable_metadata);
+    meta["skipped"]             = tally.items ();
     meta["nonExecutableAuth"]   = 0;
     meta["unattachedFileParts"] = 0;
 
@@ -2407,7 +2594,7 @@ int order) {
     item["preRequestScript"]  = draft.at ("preRequestScript");
     item["postRequestScript"] = draft.at ("postRequestScript");
     for (const char* optional :
-    { "followRedirects", "maxRedirects", "examples", "specOperation" }) {
+    { "followRedirects", "maxRedirects", "verifySSL", "examples", "specOperation" }) {
         carry (draft, item, optional);
     }
     item["order"] = order;

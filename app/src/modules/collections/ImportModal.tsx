@@ -1166,7 +1166,14 @@ function PreviewView({
  * the user could act on ("1 file part needs a file"). It is still counted and
  * still named - nothing is dropped silently - but at the severity it deserves.
  */
-const INFORMATIONAL_KINDS: ReadonlySet<SkippedItem["kind"]> = new Set(["default_response"]);
+const INFORMATIONAL_KINDS: ReadonlySet<SkippedItem["kind"]> = new Set([
+	"default_response",
+	// Both are Postman URL shapes the importer now maps rather than drops
+	// (issue #1443): a template plus a collection variable, or an assembled
+	// URL. The count says a shape changed, not that anything went missing.
+	"path_variables",
+	"url_without_raw",
+]);
 
 /**
  * What this file lost, in words - or `""` when it lost nothing.
@@ -1430,6 +1437,24 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 	unresolved_base_url: [
 		"server URL that could not be resolved to a real address",
 		"server URLs that could not be resolved to a real address",
+	],
+	unsupported_auth: [
+		"auth scheme Vayu cannot execute (hawk, oauth1, edgegrid) - imported with no auth",
+		"auth schemes Vayu cannot execute (hawk, oauth1, edgegrid) - imported with no auth",
+	],
+	// Informational (see INFORMATIONAL_KINDS): the variable's value survives,
+	// so the wording says what changed rather than what was lost.
+	path_variables: [
+		"request whose path variable was turned into a collection variable",
+		"requests whose path variables were turned into collection variables",
+	],
+	url_without_raw: [
+		"URL assembled from its host and path (no raw URL in the source)",
+		"URLs assembled from their host and path (no raw URL in the source)",
+	],
+	variable_metadata: [
+		"variable's description or type, which Vayu does not store",
+		"variables' descriptions or types, which Vayu does not store",
 	],
 };
 

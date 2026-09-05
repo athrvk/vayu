@@ -109,6 +109,39 @@ describe("the import preview's notices", () => {
 		);
 	});
 
+	it("names Postman's mapped URL shapes in muted type, apart from the losses", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "API", requests: [request({ name: "Get user" })] }),
+				],
+				meta: {
+					format: "Postman Collection v2.1",
+					skipped: [
+						{ kind: "path_variables", count: 1 },
+						{ kind: "unsupported_auth", count: 1 },
+					],
+				},
+			})
+		);
+		preview();
+
+		await waitFor(() =>
+			expect(
+				screen.getByText(
+					/1 request whose path variable was turned into a collection variable/i
+				)
+			).toBeInTheDocument()
+		);
+		expect(
+			severityOf(/1 request whose path variable was turned into a collection variable/i)
+		).toContain("text-muted-foreground");
+		// An auth scheme Vayu cannot execute is a real loss and keeps the
+		// destructive treatment, on a line of its own.
+		expect(screen.getByText(/1 auth scheme Vayu cannot execute/i)).toBeInTheDocument();
+		expect(severityOf(/1 auth scheme Vayu cannot execute/i)).toContain("text-destructive-text");
+	});
+
 	it("says where the folders came from when the spec declared no operation tags", async () => {
 		stubParse(vendorParse);
 		preview();

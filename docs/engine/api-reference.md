@@ -2650,9 +2650,13 @@ about a document" true rather than nearly true.
 per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
 `default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
-`unmapped_body`, `unresolved_base_url`. An import that loses something and says
-nothing is the defect this list exists to prevent, so a format with nothing to
-report answers `[]` rather than omitting the field. `meta.folderStrategy`
+`unmapped_body`, `unresolved_base_url`, `unsupported_auth`, `path_variables`,
+`url_without_raw`, `variable_metadata`. Not every kind is a loss: `default_response`,
+`path_variables` and `url_without_raw` count a mapping the import made rather than
+something it dropped (see `docs/app/import-collections/postman.md`). An import
+that loses something and says nothing is the defect this list exists to
+prevent, so a format with nothing to report answers `[]` rather than omitting
+the field. `meta.folderStrategy`
 (`tags` / `paths` / `mixed`) is present only when an OpenAPI import built
 folders, since a document that declares no operation tags gets a tree it never
 spelled out.
