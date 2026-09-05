@@ -21,11 +21,13 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "vayu/core/openapi_document.hpp"
 
 namespace {
@@ -395,6 +397,57 @@ TEST (SpecRequestDrafts, FilesAnOperationWhereAnImportWouldHavePutIt) {
     // folders is two requests to edit.
     EXPECT_EQ (find_draft (drafts, "GET /pets").folder, "Pets");
     EXPECT_EQ (find_draft (drafts, "GET /v1").folder, "");
+}
+
+TEST (SpecRequestDrafts, RemembersWhichNamedExampleKeyAResponseWasTakenFrom) {
+    // The bound export must write an edited example back into the entry it
+    // came from rather than beside it (issue #1457), which needs the map key
+    // `first_named_example` used to discard.
+    const auto drafts = drafts_of (R"({
+      "openapi": "3.0.0",
+      "paths": { "/pets": { "get": { "operationId": "list", "responses": {
+        "200": { "description": "ok", "content": { "application/json": {
+          "examples": {
+            "two": { "summary": "Two pets", "value": [1, 2] },
+            "none": { "summary": "No pets", "value": [] }
+          }
+        } } } }
+      } } }
+    })");
+    ASSERT_EQ (drafts.size (), 1u);
+    ASSERT_EQ (drafts[0].draft.examples.size (), 1u);
+    // The *first* entry of the map, same as `first_named_example` always took.
+    const std::optional<std::string>& key = drafts[0].draft.examples[0].spec_example_key;
+    ASSERT_HAS_VALUE (key);
+    EXPECT_EQ (*key, "two");
+}
+
+TEST (SpecRequestDrafts, RecordsNoKeyForAnExampleFromASingleExampleOrASampledSchema) {
+    // A single `example` and a schema-sampled value name no map entry - the
+    // key stays absent, which is what makes a row that predates issue #1457
+    // read exactly like one of these.
+    const auto drafts = drafts_of (R"({
+      "openapi": "3.0.0",
+      "paths": {
+        "/pets": { "get": { "operationId": "list", "responses": {
+          "200": { "description": "ok", "content": { "application/json": {
+            "example": [1, 2]
+          } } }
+        } } },
+        "/owners": { "get": { "operationId": "owners", "responses": {
+          "200": { "description": "ok", "content": { "application/json": {
+            "schema": { "type": "object", "example": { "id": "o1" } }
+          } } }
+        } } }
+      }
+    })");
+    ASSERT_EQ (drafts.size (), 2u);
+    ASSERT_EQ (find_draft (drafts, "GET /pets").draft.examples.size (), 1u);
+    EXPECT_FALSE (
+    find_draft (drafts, "GET /pets").draft.examples[0].spec_example_key.has_value ());
+    ASSERT_EQ (find_draft (drafts, "GET /owners").draft.examples.size (), 1u);
+    EXPECT_FALSE (
+    find_draft (drafts, "GET /owners").draft.examples[0].spec_example_key.has_value ());
 }
 
 } // namespace

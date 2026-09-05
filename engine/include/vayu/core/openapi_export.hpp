@@ -98,6 +98,17 @@ struct ExportExample {
      * which is what this export has always written.
      */
     bool from_import = false;
+    /**
+     * The map key the import took this example from, if any
+     * (`request_examples.spec_example_key`, issue #1457).
+     *
+     * A value comparison alone cannot tell an edited example from a new one:
+     * once the body has changed it no longer equals the entry it came from,
+     * so it read as news to the document and was added beside that entry
+     * rather than replacing it. This key, when the document still names it,
+     * says which entry to write into instead of adding a new one.
+     */
+    std::optional<std::string> spec_example_key = std::nullopt;
 };
 
 /** The identity a request carries, when it carries one (`spec_operation`). */

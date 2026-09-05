@@ -127,7 +127,7 @@ Both lists go through the walk's `parameters` guard (`openapi_drafts.cpp`) first
 | the JSON media type's `example` → first `examples[*].value` → `sampleSchema(schema)` | `body` | the same precedence `buildBody` uses for a request body; a string is stored as-is, anything else is `JSON.stringify(value, null, 2)` |
 | the JSON media type key | `contentType`, and a single `Content-Type` header | `application/json`, an `application/json;…` variant or a `+json` suffix, by the same rule request bodies use |
 
-A response `$ref` is resolved (single hop, like the parser's other refs). An `examples` entry is unwrapped from its Example Object - the payload is in `value`, and storing the wrapper would put a body on disk no server would send; an `externalValue` names a URL rather than carrying a payload, so it yields nothing (an import must not fetch).
+A response `$ref` is resolved (single hop, like the parser's other refs). An `examples` entry is unwrapped from its Example Object - the payload is in `value`, and storing the wrapper would put a body on disk no server would send; an `externalValue` names a URL rather than carrying a payload, so it yields nothing (an import must not fetch). The map key the entry was taken from is remembered too (`spec_example_key`, issue #1457, engine-side only - no surface here displays it): the bound export needs it to write an edited example back into that same entry rather than adding a new one beside it.
 
 A response that documents **no body** still imports: `204 No Content` is a real answer and a mock server has to be able to give it.
 

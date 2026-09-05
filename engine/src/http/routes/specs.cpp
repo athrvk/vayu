@@ -144,9 +144,16 @@ nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& 
             headers.push_back ({ { "key", "Content-Type" },
             { "value", example.content_type }, { "enabled", true } });
         }
-        rows.push_back ({ { "name", example.name },
-        { "status", example.status }, { "headers", std::move (headers) },
-        { "body", example.body }, { "contentType", example.content_type } });
+        nlohmann::json row = { { "name", example.name },
+            { "status", example.status }, { "headers", std::move (headers) },
+            { "body", example.body }, { "contentType", example.content_type } };
+        // Engine-side provenance only (issue #1457): carried through
+        // `POST /specs/sync` to the stored row so the bound export can write
+        // an edited example back into the entry it came from.
+        if (example.spec_example_key) {
+            row["specExampleKey"] = *example.spec_example_key;
+        }
+        rows.push_back (std::move (row));
     }
     return rows;
 }

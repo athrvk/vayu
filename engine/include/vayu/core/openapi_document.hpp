@@ -65,6 +65,7 @@
 
 #include <cstddef>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -308,6 +309,16 @@ struct DraftExample {
     /// The payload as text - a documented string verbatim, anything else as
     /// `JSON.stringify(value, null, 2)` writes it.
     std::string body;
+    /**
+     * The key this payload was taken from a 3.x response's `examples` map
+     * (issue #1457), absent when it came from a single `example` or was
+     * sampled off a schema.
+     *
+     * Carried so the bound export can write an edited example back into the
+     * entry it came from rather than adding a new one beside it - the export
+     * cannot ask a value comparison which entry an edited body used to be.
+     */
+    std::optional<std::string> spec_example_key;
 };
 
 /// A draft request's body, in the shape `requests.body` stores.

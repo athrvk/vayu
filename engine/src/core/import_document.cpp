@@ -2260,9 +2260,16 @@ json draft_request (const SpecRequestDraft& entry) {
             rows.push_back ({ { "key", "Content-Type" },
             { "value", example.content_type }, { "enabled", true } });
         }
-        examples.push_back ({ { "name", example.name },
-        { "status", example.status }, { "headers", std::move (rows) },
-        { "body", example.body }, { "contentType", example.content_type } });
+        json row = { { "name", example.name }, { "status", example.status },
+            { "headers", std::move (rows) }, { "body", example.body },
+            { "contentType", example.content_type } };
+        // Engine-side provenance only (issue #1457): the renderer never reads
+        // it, but `POST /import/apply` must carry it through to the stored
+        // row so the bound export can find its way back to this entry.
+        if (example.spec_example_key) {
+            row["specExampleKey"] = *example.spec_example_key;
+        }
+        examples.push_back (std::move (row));
     }
 
     json request;

@@ -224,7 +224,8 @@ export_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
             for (const auto& example : db.get_request_examples (row.id)) {
                 entry.examples.push_back ({ example.name, example.status,
                 example.body, example.content_type, example.body_truncated,
-                example.origin == vayu::core::constants::request_example::ORIGIN_IMPORT });
+                example.origin == vayu::core::constants::request_example::ORIGIN_IMPORT,
+                example.spec_example_key });
             }
             requests.push_back (std::move (entry));
         }

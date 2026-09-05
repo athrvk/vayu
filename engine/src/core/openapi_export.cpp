@@ -252,6 +252,37 @@ const std::vector<Json>& values) {
 }
 
 /**
+ * Several examples of one status and media type, written into an `examples`
+ * map by the entry each was imported from (issue #1457), falling back to
+ * `add_named_examples` for the rest.
+ *
+ * A value comparison alone cannot tell an edited example from a new one, so
+ * an example that named a key when it was imported and whose value has since
+ * changed is written into that map entry - keeping its `summary` and
+ * `description` - rather than beside it. An example naming no key, or one the
+ * document no longer declares (the spec was re-fetched and the entry
+ * renamed), takes today's answer: added under a free key of its own.
+ */
+void write_named_examples (Json& map,
+const std::vector<const ExportExample*>& examples,
+const std::vector<Json>& values) {
+    std::vector<const ExportExample*> unmatched_examples;
+    std::vector<Json> unmatched_values;
+    for (size_t index = 0; index < examples.size (); ++index) {
+        const ExportExample& example = *examples[index];
+        const auto entry =
+        example.spec_example_key ? map.find (*example.spec_example_key) : map.end ();
+        if (entry != map.end () && entry->is_object ()) {
+            (*entry)["value"] = values[index];
+            continue;
+        }
+        unmatched_examples.push_back (examples[index]);
+        unmatched_values.push_back (values[index]);
+    }
+    add_named_examples (map, unmatched_examples, unmatched_values);
+}
+
+/**
  * Stored examples as an operation's `responses`, for both export directions.
  *
  * One implementation, because it is one decision made twice: a bound document
@@ -482,7 +513,7 @@ void write_media_examples (Json& media, const MediaWrite& write, ExportNotes& no
         media["example"] = values.front ();
     } else {
         Json map = examples_map_of (media);
-        add_named_examples (map, writing, values);
+        write_named_examples (map, writing, values);
         media["examples"] = std::move (map);
     }
     notes.examples_written += static_cast<int> (writing.size ());

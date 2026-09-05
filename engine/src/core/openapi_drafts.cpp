@@ -544,17 +544,61 @@ const json* find_json_media (const json& content) {
     return nullptr;
 }
 
-/// `firstNamedExample(examples)`: the first entry of a 3.x `examples` map,
-/// unwrapped from its Example Object. `{"user": {"value": {...}}}` documents
-/// `{...}`, not the wrapper. `externalValue` names a URL rather than carrying a
-/// payload, and an import must not fetch one.
-const json* first_named_example (const json* examples) {
+/// One 3.x `examples` map entry, unwrapped from its Example Object, with the
+/// key it was found at (issue #1457) - what the bound export needs to write
+/// an edited example back into that same entry rather than beside it.
+struct NamedExample {
+    std::string key;
+    const json* value = nullptr;
+};
+
+/// `firstNamedExampleEntry(examples)`: the first entry of a 3.x `examples`
+/// map, unwrapped from its Example Object. `{"user": {"value": {...}}}`
+/// documents `{...}`, not the wrapper. `externalValue` names a URL rather than
+/// carrying a payload, and an import must not fetch one.
+std::optional<NamedExample> first_named_example_entry (const json* examples) {
     const json* map = as_record (examples);
     if (map == nullptr || map->empty ()) {
-        return nullptr;
+        return std::nullopt;
     }
-    const json* entry = as_record (&map->begin ().value ());
-    return entry == nullptr ? nullptr : prop (entry, "value");
+    auto begin        = map->begin ();
+    const json* entry = as_record (&begin.value ());
+    const json* value = entry == nullptr ? nullptr : prop (entry, "value");
+    if (value == nullptr) {
+        return std::nullopt;
+    }
+    return NamedExample{ begin.key (), value };
+}
+
+/// `firstNamedExample(examples)`: the value half of `first_named_example_entry`,
+/// for the callers that have no use for which entry it came from.
+const json* first_named_example (const json* examples) {
+    const std::optional<NamedExample> found = first_named_example_entry (examples);
+    return found ? found->value : nullptr;
+}
+
+/// A value found under a media object's `example` or `examples`, and, when it
+/// came from the map, the key it came from (issue #1457).
+struct DeclaredExampleValue {
+    const json* value = nullptr;
+    std::optional<std::string> key;
+};
+
+/// `media.example ?? firstNamedExample(media.examples)`: `??` falls through
+/// `null` as well as absence, so a documented `example: null` is not the
+/// answer - the named example, then nothing, still is. Pulled out of
+/// `examples_v3`'s payload lambda to keep that lambda's own branching within
+/// the cognitive-complexity budget.
+DeclaredExampleValue declared_example_value (const json* media) {
+    if (const json* example = prop (media, "example");
+    example != nullptr && !example->is_null ()) {
+        return { example, std::nullopt };
+    }
+    if (const std::optional<NamedExample> named =
+        first_named_example_entry (prop (media, "examples"))) {
+        return { named->value, named->key };
+    }
+    return { nullptr, std::nullopt };
 }
 
 /**
@@ -673,6 +717,9 @@ std::string example_body_text (const json& value) {
 struct ExamplePayload {
     std::string body;
     std::string content_type;
+    /// The `examples` map key this payload was read from (issue #1457),
+    /// absent when it came from a single `example` or a sampled schema.
+    std::optional<std::string> example_key;
 };
 
 /**
@@ -719,10 +766,11 @@ response_example (const std::string& code, const json* response, ImportTally* ta
     // examples for.
     const std::string* description = as_str (prop (node, "description"));
     example.name = description == nullptr ? code : code + " - " + *description;
-    example.status       = status;
-    example.documented   = found.has_value ();
-    example.content_type = found ? found->content_type : std::string ();
-    example.body         = found ? found->body : std::string ();
+    example.status           = status;
+    example.documented       = found.has_value ();
+    example.content_type     = found ? found->content_type : std::string ();
+    example.body             = found ? found->body : std::string ();
+    example.spec_example_key = found ? found->example_key : std::nullopt;
     return example;
 }
 
@@ -753,18 +801,16 @@ examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) 
             if (media == nullptr) {
                 return std::nullopt;
             }
-            // `media.example ?? firstNamedExample(...) ?? sample`: `??` falls
-            // through `null` as well as absence, so a documented `example: null`
-            // is not the answer - the named example, then the schema, still is.
-            const json* value = prop (media, "example");
-            if (value == nullptr || value->is_null ()) {
-                value = first_named_example (prop (media, "examples"));
-            }
-            if (value != nullptr && !value->is_null ()) {
-                return ExamplePayload{ example_body_text (*value), *type };
+            // `declared ?? sample`: see `declared_example_value` for the `??`
+            // this stands in for.
+            const DeclaredExampleValue declared = declared_example_value (media);
+            if (declared.value != nullptr && !declared.value->is_null ()) {
+                return ExamplePayload{ example_body_text (*declared.value),
+                    *type, declared.key };
             }
             if (const json* schema = prop (media, "schema"); truthy (schema)) {
-                return ExamplePayload{ example_body_text (sampler.sample (schema)), *type };
+                return ExamplePayload{ example_body_text (sampler.sample (schema)),
+                    *type, {} };
             }
             return std::nullopt;
         });
@@ -837,14 +883,14 @@ const std::string& content_type) {
             value             = plain != nullptr ? plain : value;
         }
         if (value != nullptr) {
-            return ExamplePayload{ example_body_text (*value), content_type };
+            return ExamplePayload{ example_body_text (*value), content_type, {} };
         }
     }
     const json* schema = prop (&node, "schema");
     if (!truthy (schema)) {
         return std::nullopt;
     }
-    return ExamplePayload{ example_body_text (sampler.sample (schema)), content_type };
+    return ExamplePayload{ example_body_text (sampler.sample (schema)), content_type, {} };
 }
 
 std::vector<DraftExample> examples_v2 (const json& document,

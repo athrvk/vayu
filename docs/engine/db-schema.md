@@ -401,6 +401,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `origin`       | TEXT    | `import` \| `user`; NOT NULL, default `import`     |
 | `body_truncated` | INTEGER | `body` stops short of the captured response; NOT NULL, default `0` |
 | `suppressed`   | INTEGER | A tombstone: an imported example the user deleted; NOT NULL, default `0` |
+| `spec_example_key` | TEXT | The `examples` map key this was imported from; NULL when there is none |
 | `created_at`   | INTEGER | Unix ms                                           |
 | `updated_at`   | INTEGER | Unix ms                                           |
 
@@ -460,6 +461,19 @@ mock server and an export behave exactly as though the delete had removed it -
 and `get_suppressed_request_examples` is the one read that sees them, for the
 one caller that must. A `user` row is still deleted outright: nothing re-creates
 a saved response, so there is no intent to keep.
+
+**spec_example_key** (issue #1457) records which entry of a 3.x response's
+named `examples` map the import took this example's payload from - the *first*
+one, unwrapped, since `firstNamedExample` never read past it. Nullable rather
+than NOT NULL with a default, on the `requests.spec_operation` precedent: a row
+that predates the column, or one taken from a single `example` or sampled off a
+schema, names no entry, and NULL is the only spelling of that - there is
+nothing to backfill it from. It exists because a value comparison alone cannot
+tell an edited example from a new one: once its body has changed, it no longer
+equals the entry it came from, so exporting it back would add it beside that
+entry rather than replace it. The bound export reads the key to find its way
+back to the same entry when the document still declares it, and falls back to
+adding a new one when it does not. Not a display field: no app surface reads it.
 
 **Cascade.** Examples are owned by their request: `DELETE /requests/:id` removes
 them in the same transaction, and the `delete_collection` cascade removes each

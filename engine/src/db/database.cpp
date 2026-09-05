@@ -301,6 +301,12 @@ inline auto make_storage (const std::string& path) {
     // precedent as the two columns above, and `false` is right for every
     // pre-existing row: before this column a delete removed the row outright.
     make_column ("suppressed", &RequestExample::suppressed, default_value (false)),
+    // The key of the 3.x response `examples` map entry this example was
+    // imported from (issue #1457). Nullable rather than NOT NULL with a
+    // default, on the `requests.spec_operation` precedent above: nothing to
+    // backfill a pre-existing row from, and NULL is the only spelling of "no
+    // key".
+    make_column ("spec_example_key", &RequestExample::spec_example_key),
     make_column ("created_at", &RequestExample::created_at),
     make_column ("updated_at", &RequestExample::updated_at)),
 
