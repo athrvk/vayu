@@ -37,26 +37,32 @@ const VAYU_DESCRIPTION =
 	"tests, and read or tune engine configuration on the user's machine.";
 const VAYU_WEBSITE = "https://github.com/athrvk/vayu";
 
+/*
+ * What belongs here: the cross-cutting facts no single tool description can
+ * carry - the capability taxonomy, the safety model, and the other surfaces.
+ *
+ * What does not: tool names. The user can disable any tool individually, so a
+ * roster written here is a list of things that may not exist in the session
+ * reading it - which is why this text used to end by telling the reader to
+ * trust `tools/list` over it. Each tool's own description is the one copy of
+ * its contract, and it ships only when the tool does.
+ */
 const INSTRUCTIONS =
 	"Vayu is a local API testing and load-testing platform (Postman-style requests " +
 	"plus k6-level load tests in one app, backed by a native C++ engine); these " +
-	"tools drive that engine. Call get_engine_health first. Tools are grouped by " +
-	"capability: read (inspect collections, requests, environments, runs, config, " +
-	"and live metrics - always safe), execute (run_request, run_collection_smoke - " +
-	"send real traffic to a target), write (create/update/delete collections and " +
-	"saved requests, update_environment, update_engine_config - mutate saved data " +
-	"or engine config), and load (start_load_run, stop_run - start/stop a load " +
-	"test). Traffic-touching tools " +
-	"(run_request, run_collection_smoke, start_load_run) are restricted to an " +
-	"allowlist, and load runs also enforce hard RPS/concurrency/duration caps. " +
-	"start_load_run, delete_collection and delete_request ask the user to confirm " +
-	"(via elicitation when supported, otherwise a confirmed:true flag); " +
-	"delete_collection cascades, so its prompt states how many sub-collections and " +
-	"saved requests it would destroy. The write tools require the user to enable " +
-	"write access. Some update_engine_config keys need an engine restart to take " +
-	"effect; the result flags those under restartRequired (saved, but the running " +
-	"engine keeps the old value until restarted). The user may disable individual " +
-	"tools, so treat tools/list as authoritative and expect some tools to be absent. " +
+	"tools drive that engine. Start by checking engine health, so a later failure " +
+	"is not mistaken for a bad request. Tools are grouped by capability, named in " +
+	"each tool's own description: read (inspect collections, requests, " +
+	"environments, runs, config and live metrics - always safe), execute (send " +
+	"real traffic to a target), write (mutate saved data or engine config), and " +
+	"load (start and stop load tests). " +
+	"Every tool that puts traffic on the network is restricted to an allowlist, " +
+	"and load runs additionally enforce hard RPS/concurrency/duration caps. Write " +
+	"tools require the user to enable write access, and the destructive ones ask " +
+	"for confirmation - via elicitation where the client supports it, otherwise by " +
+	"returning what the call would destroy and waiting for a `confirmed: true` " +
+	"retry. A tool that is subject to either gate says so in its own description. " +
+	"`tools/list` is authoritative for what this session actually has. " +
 	"Vayu data is also available as resources (vayu://runs, vayu://collections, " +
 	"vayu://environments, vayu://config, and vayu://run/{runId}/report) to attach as " +
 	"context, and prompts (summarize_run, compare_runs, diagnose_errors, " +

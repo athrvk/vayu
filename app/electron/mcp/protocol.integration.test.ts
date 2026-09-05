@@ -25,7 +25,8 @@ import { createMcpServer } from "./server.js";
 import { McpHttpServer } from "./http.js";
 import { MCP_ENDPOINT_URL, MCP_HOST, MCP_PORT } from "../constants.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import type { ToolContext } from "./tools.js";
+import { TOOLS, type ToolContext } from "./tools.js";
+import { PROMPTS } from "./prompts.js";
 import type { EngineClient } from "./engine-client.js";
 
 const REPORT = {
@@ -137,6 +138,33 @@ describe("MCP protocol handshake (in-memory)", () => {
 		expect(String(info?.description)).toMatch(/load-testing platform/i);
 		expect(info?.websiteUrl).toContain("github.com/athrvk/vayu");
 		expect(client.getInstructions()).toMatch(/API testing and load-testing/i);
+		await server.close();
+	});
+
+	/*
+	 * The instructions carry the cross-cutting facts - the capability taxonomy,
+	 * the allowlist, the two gates - and deliberately name no tool. A roster
+	 * here is a list of things that may not exist: the user can disable any
+	 * tool individually, and this text used to end by telling the reader to
+	 * trust `tools/list` over itself, which is the shape of the bug rather than
+	 * a fix for it. Each tool's own description ships only when the tool does.
+	 *
+	 * `compare_runs` is exempt because it is also a prompt name, and the
+	 * instructions legitimately point at the prompts - which nothing disables.
+	 */
+	it("does not name individual tools in the server instructions", async () => {
+		const { client, server } = await connectClient();
+		const instructions = client.getInstructions() ?? "";
+		// The guard is only meaningful if it read both sides of the comparison.
+		expect(instructions.length).toBeGreaterThan(100);
+		expect(TOOLS.length).toBeGreaterThan(20);
+
+		const promptNames = new Set(PROMPTS.map((p) => p.name));
+		const named = TOOLS.map((t) => t.name)
+			.filter((name) => !promptNames.has(name))
+			.filter((name) => new RegExp(`\\b${name}\\b`).test(instructions));
+
+		expect(named).toEqual([]);
 		await server.close();
 	});
 
