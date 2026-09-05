@@ -234,20 +234,25 @@ removed Unity launcher support. A run with no denominator (an open-ended load
 test, or a collection run whose plan frame - the size the engine publishes on
 its stream as the run opens, issue #1398 - never reached the client) shows
 indeterminate on Windows and nothing on macOS; a failed run flashes the Windows
-error state; the bar clears on every terminal path, and main clears it itself
-when the renderer that asked for it is destroyed or reloads. The bar is not the
-app's own runs only: a run started by an MCP agent is watched from the moment
-the main process reports it (`startedRun` on `mcp:data-changed`, issue #1419),
-so it paints the same fill, and opening its dashboard tab later attaches nothing
-new - `startMonitoring` is idempotent for a run already being watched. One
-indicator is all the OS gives an application, and one run is all the renderer
-watches: the SSE client is a singleton, so starting a second run closes the
-first one's stream - and tells its service so, which hands the displaced run's
-wake lock back and gives up its bar rather than leaving both standing (issue
-#1417). The lock is the half with a visible outcome: the incoming run claims the
-indicator before it connects, so the bar is transferred rather than cleared, and
-the displaced run's release - named by the run it speaks for - finds nothing of
-its own left to wipe. The
+error state, and keeps it - the terminal clear that follows skips the run that
+just reported a failure, or the flash would be wiped in the tick that painted
+it. A failure gets there two ways, and the second is the ordinary one: the SSE
+client failing to open the stream at all, and the engine's own `complete` frame
+arriving with `status: "Failed"`, which is what a run that fails while being
+watched sends (issue #1415). Every other terminal path clears the bar, and main
+clears it itself when the renderer that asked for it is destroyed or reloads.
+The bar is not the app's own runs only: a run started by an MCP agent is watched
+from the moment the main process reports it (`startedRun` on
+`mcp:data-changed`, issue #1419), so it paints the same fill, and opening its
+dashboard tab later attaches nothing new - `startMonitoring` is idempotent for a
+run already being watched. One indicator is all the OS gives an application, and
+one run is all the renderer watches: the SSE client is a singleton, so starting a
+second run closes the first one's stream - and tells its service so, which hands
+the displaced run's wake lock back and gives up its bar rather than leaving both
+standing (issue #1417). The lock is the half with a visible outcome: the incoming
+run claims the indicator before it connects, so the bar is transferred rather
+than cleared, and the displaced run's release - named by the run it speaks for -
+finds nothing of its own left to wipe. The
 superseded run is not stopped and says nothing to the user: it is still running
 in the engine, and its row reaches a terminal status on the next list read
 rather than through a notification for a run nobody is watching. The indicator
