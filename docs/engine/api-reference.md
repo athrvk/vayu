@@ -5750,6 +5750,15 @@ offset - because a tick's `elapsed_seconds` is measured from the run's first
 onto one timeline is what the wall clock is for. A series the target did not
 report in that scrape is **absent** from its `series` object rather than zero.
 
+The two fields are read off different clocks, which is why they can disagree.
+`timestamp` is wall time, so it moves when the host's clock is adjusted, while
+every elapsed figure the engine reports (`elapsed_seconds` here, and a run's
+duration and rates) is measured on a monotonic clock that an NTP step or a
+manual clock change cannot move. Over a run that spans an adjustment, the
+difference between two `timestamp` values is therefore not exactly the
+difference between their `elapsed_seconds`; the elapsed pair is the one that
+measures how long the run actually took.
+
 A run that configured no monitor returns `200` with an empty `data` array; only
 a run that does not exist is a `404`. Samples are deleted with the run, like
 every other child row.
