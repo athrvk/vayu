@@ -159,7 +159,11 @@ that stops being watched without ending hands its lock back too: the two
 services share one SSE client, so starting a collection run takes the socket
 from a streaming load run, and the client tells the displaced service rather
 than closing on it in silence, which used to leave that key held for the rest of
-the session (issue #1417). The screen may still dim and lock; only suspension is
+the session (issue #1417). A run replaced by another of its own kind hands the
+key back on the same path: each service ends the run it is replacing before it
+registers the new one, so the key is released and taken again in that order,
+rather than the arriving run being handed its own hand-off and freeing the lock
+it had just taken. The screen may still dim and lock; only suspension is
 refused.
 
 **It is off by default, because the machine's power settings are the user's.**
@@ -228,8 +232,12 @@ error state; the bar clears on every terminal path, and main clears it itself
 when the renderer that asked for it is destroyed or reloads. One indicator is
 all the OS gives an application, and one run is all the renderer watches: the
 SSE client is a singleton, so starting a second run closes the first one's
-stream - and tells its service so, which is what gives up the displaced run's
-bar and its wake lock rather than leaving both standing (issue #1417). The
+stream - and tells its service so, which hands the displaced run's wake lock
+back and gives up its bar rather than leaving both standing (issue #1417). The
+lock is the half with a visible outcome: the incoming run claims the indicator
+before it connects, so the bar is transferred rather than cleared, and the
+displaced run's release - named by the run it speaks for - finds nothing of its
+own left to wipe. The
 superseded run is not stopped and says nothing to the user: it is still running
 in the engine, and its row reaches a terminal status on the next list read
 rather than through a notification for a run nobody is watching. The indicator
