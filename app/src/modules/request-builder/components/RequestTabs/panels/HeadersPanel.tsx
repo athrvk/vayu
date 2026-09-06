@@ -140,7 +140,9 @@ export default function HeadersPanel() {
 				<>
 					<code className="bg-muted px-1 rounded-md">Name: value</code>, one per line -{" "}
 					<code className="bg-muted px-1 rounded-md">=</code> works too. Repeated names
-					are kept as separate headers.
+					are kept as separate headers. A leading{" "}
+					<code className="bg-muted px-1 rounded-md">// </code> disables the row;
+					everything after the separator's first space is sent exactly as typed.
 				</>
 			}
 			tableHeader={

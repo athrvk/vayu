@@ -21,7 +21,11 @@
 import { useCallback, useMemo } from "react";
 import type { KeyValueItem } from "@/types";
 import { withTrailingBlank } from "@/components/shared/KeyValueEditor/key-value";
-import { formatHeadersToText, parseHeadersFromText } from "../utils/headers-format";
+import {
+	formatHeadersToText,
+	parseHeadersFromText,
+	isNoOpHeadersEdit,
+} from "../utils/headers-format";
 
 interface UseHeadersManagerOptions {
 	headers: KeyValueItem[];
@@ -51,9 +55,12 @@ export function useHeadersManager({
 
 	const handleBulkEdit = useCallback(
 		(text: string) => {
+			// Opening Bulk edit and switching straight back without typing must not
+			// re-enable every row or dirty the request (issue #1480).
+			if (isNoOpHeadersEdit(text, headers)) return;
 			onUpdate(withTrailingBlank(parseHeadersFromText(text)));
 		},
-		[onUpdate]
+		[headers, onUpdate]
 	);
 
 	const formatForBulkEdit = useCallback(() => {

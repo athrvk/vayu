@@ -30,11 +30,13 @@
 
 import type { KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
-import { splitKeyValueLine, HEADER_SEPARATORS } from "./kv-line";
+import { splitKeyValueLine, stripDisabledMarker, HEADER_SEPARATORS } from "./kv-line";
 
 /**
  * Format headers array to text format for bulk edit
- * Format: "Header-Name: value" (one per line)
+ * Format: "Header-Name: value" (one per line); a disabled row is prefixed
+ * `// ` (issue #1480) - the one marker the text form has for a state the
+ * table already shows as an unticked checkbox.
  *
  * Every row the table holds is offered: there is no protected version row to
  * hide since issue #1229, and what the engine adds is not in this list at all.
@@ -42,7 +44,7 @@ import { splitKeyValueLine, HEADER_SEPARATORS } from "./kv-line";
 export const formatHeadersToText = (headers: KeyValueItem[]): string => {
 	return headers
 		.filter((h) => h.key.trim() || h.value.trim())
-		.map((h) => `${h.key}: ${h.value}`)
+		.map((h) => `${h.enabled ? "" : "// "}${h.key}: ${h.value}`)
 		.join("\n");
 };
 
@@ -62,7 +64,8 @@ const splitHeaderLine = (line: string): { key: string; value: string } | null =>
 
 /**
  * Parse text format to headers array
- * Format: "Header-Name: value" (one per line); "Header-Name=value" also accepted
+ * Format: "Header-Name: value" (one per line); "Header-Name=value" also
+ * accepted; a leading `// ` disables the row (issue #1480).
  *
  * Every row is rebuilt fresh, so a `source` marker (issue #1481) on a row that
  * passes through Bulk Edit is dropped, matched or not: the text form is the
@@ -77,16 +80,36 @@ export const parseHeadersFromText = (text: string): KeyValueItem[] => {
 	const headers: KeyValueItem[] = [];
 
 	lines.forEach((line) => {
-		const parsed = splitHeaderLine(line);
+		const { enabled, rest } = stripDisabledMarker(line);
+		const parsed = splitHeaderLine(rest);
 		if (!parsed) return;
 
 		headers.push({
 			id: generateId(),
 			key: parsed.key,
 			value: parsed.value,
-			enabled: true,
+			enabled,
 		});
 	});
 
 	return headers;
+};
+
+/**
+ * Whether committing `text` would change nothing about `headers` (issue
+ * #1480) - opening Bulk edit and pressing Table with no typing must not
+ * re-enable every row, retype every value through the trim, or dirty the
+ * request. Compares by content, not by text: both sides are normalised the
+ * same way `formatHeadersToText`/`parseHeadersFromText` already would, so an
+ * incidental difference in spacing or row order that the round trip itself
+ * would erase does not count as a change.
+ */
+export const isNoOpHeadersEdit = (text: string, headers: KeyValueItem[]): boolean => {
+	const normalize = (list: KeyValueItem[]) =>
+		list
+			.filter((h) => h.key.trim() || h.value.trim())
+			.map(({ key, value, enabled }) => ({ key, value, enabled }));
+	return (
+		JSON.stringify(normalize(parseHeadersFromText(text))) === JSON.stringify(normalize(headers))
+	);
 };

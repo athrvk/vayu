@@ -62,6 +62,29 @@ export interface SplitOptions {
 }
 
 /**
+ * A leading `//`, the row's disabled marker in bulk-edit text (issue #1480).
+ *
+ * Matched only at the start of the line (leading whitespace tolerated, the way
+ * a hand-typed comment usually is), never mid-line - a header value routinely
+ * contains `//` of its own (`Referer: https://example.com`), and that must
+ * never be mistaken for the marker.
+ */
+const DISABLED_MARKER = /^\s*\/\/ ?/;
+
+/**
+ * Strip a leading disabled marker, if the line carries one.
+ *
+ * `formatXToText` writes the marker as `// ` (with its one space); this reads
+ * it back with or without that space, since a hand-typed `//key: value` should
+ * still disable the row.
+ */
+export function stripDisabledMarker(line: string): { enabled: boolean; rest: string } {
+	const match = line.match(DISABLED_MARKER);
+	if (!match) return { enabled: true, rest: line };
+	return { enabled: false, rest: line.slice(match[0].length) };
+}
+
+/**
  * Split one line into a key and a value, or return null if it names nothing.
  *
  * A line that opens with its separator - `: orphaned`, `=orphaned` - names no
@@ -74,6 +97,12 @@ export interface SplitOptions {
  * Once a tier matches, the result stands - it does not fall through to a later
  * tier. A line whose `=` is at position 0 is malformed, not a line that meant
  * to be split at its colon instead.
+ *
+ * The value is not trimmed. Only the key is - a header or param name carrying
+ * leading/trailing space is never intentional - but a value's whitespace can
+ * be load-bearing (a signature, a padded token), so only the one conventional
+ * space right after the separator (`key: value`, not `key:value`) is dropped;
+ * anything past that, leading or trailing, survives verbatim (issue #1480).
  */
 export function splitKeyValueLine(
 	line: string,
@@ -87,7 +116,9 @@ export function splitKeyValueLine(
 		const at = Math.min(...positions);
 		const key = line.slice(0, at).trim();
 		if (!key) return null;
-		return { key, value: line.slice(at + 1).trim() };
+		const rawValue = line.slice(at + 1);
+		const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+		return { key, value };
 	}
 
 	if (!allowBareKey) return null;

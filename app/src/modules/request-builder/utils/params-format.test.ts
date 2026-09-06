@@ -27,7 +27,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { formatParamsToText, parseParamsFromText } from "./params-format";
+import { formatParamsToText, parseParamsFromText, isNoOpParamsEdit } from "./params-format";
 import type { KeyValueItem } from "@/types";
 
 const pairs = (text: string) => parseParamsFromText(text).map(({ key, value }) => ({ key, value }));
@@ -130,5 +130,63 @@ describe("system params", () => {
 			{ id: "2", key: "internal", value: "x", enabled: true, system: true },
 		];
 		expect(formatParamsToText(withSystem)).toBe("page=1");
+	});
+});
+
+describe("a disabled row round-trips disabled (issue #1480)", () => {
+	it("writes a disabled row with a leading `// `", () => {
+		const rows: KeyValueItem[] = [
+			{ id: "1", key: "debug", value: "1", enabled: false },
+			{ id: "2", key: "page", value: "2", enabled: true },
+		];
+		expect(formatParamsToText(rows)).toBe("// debug=1\npage=2");
+	});
+
+	it("reads the marker back as enabled: false", () => {
+		const parsed = parseParamsFromText("// debug=1\npage=2");
+		expect(parsed.map(({ key, value, enabled }) => ({ key, value, enabled }))).toEqual([
+			{ key: "debug", value: "1", enabled: false },
+			{ key: "page", value: "2", enabled: true },
+		]);
+	});
+
+	it("disables a bare, valueless key too", () => {
+		const parsed = parseParamsFromText("// verbose");
+		expect(parsed[0]).toMatchObject({ key: "verbose", value: "", enabled: false });
+	});
+});
+
+describe("a value keeps its whitespace (issue #1480)", () => {
+	it("preserves a trailing space", () => {
+		expect(pairs("q=hello ")).toEqual([{ key: "q", value: "hello " }]);
+	});
+
+	it("round-trips a value with meaningful whitespace unchanged", () => {
+		const original: KeyValueItem[] = [{ id: "1", key: "q", value: "hello ", enabled: true }];
+		expect(pairs(formatParamsToText(original))).toEqual([{ key: "q", value: "hello " }]);
+	});
+});
+
+describe("isNoOpParamsEdit", () => {
+	const rows: KeyValueItem[] = [
+		{ id: "1", key: "page", value: "1", enabled: true },
+		{ id: "2", key: "debug", value: "1", enabled: false },
+	];
+
+	it("is true for the exact text the panel would offer for these rows", () => {
+		expect(isNoOpParamsEdit(formatParamsToText(rows), rows)).toBe(true);
+	});
+
+	it("ignores a system row on either side", () => {
+		const withSystem: KeyValueItem[] = [
+			...rows,
+			{ id: "3", key: "internal", value: "x", enabled: true, system: true },
+		];
+		expect(isNoOpParamsEdit(formatParamsToText(rows), withSystem)).toBe(true);
+	});
+
+	it("is false when a row's enabled state actually changed", () => {
+		const reEnabled = formatParamsToText(rows).replace("// debug=1", "debug=1");
+		expect(isNoOpParamsEdit(reEnabled, rows)).toBe(false);
 	});
 });

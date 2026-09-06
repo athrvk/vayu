@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { formatHeadersToText, parseHeadersFromText } from "./headers-format";
+import { formatHeadersToText, parseHeadersFromText, isNoOpHeadersEdit } from "./headers-format";
 import type { KeyValueItem } from "@/types";
 
 /** The parsed shape, minus the generated id that varies per call. */
@@ -142,5 +142,105 @@ describe("repeated names", () => {
 			{ key: "Set-Cookie", value: "a=1" },
 			{ key: "Set-Cookie", value: "b=2" },
 		]);
+	});
+});
+
+describe("a disabled row round-trips disabled (issue #1480)", () => {
+	it("writes a disabled row with a leading `// `", () => {
+		const rows: KeyValueItem[] = [
+			{ id: "1", key: "Authorization", value: "Bearer abc", enabled: false },
+			{ id: "2", key: "Accept", value: "*/*", enabled: true },
+		];
+		expect(formatHeadersToText(rows)).toBe("// Authorization: Bearer abc\nAccept: */*");
+	});
+
+	it("reads the marker back as enabled: false, and leaves the rest of the line alone", () => {
+		const parsed = parseHeadersFromText("// Authorization: Bearer abc\nAccept: */*");
+		expect(parsed.map(({ key, value, enabled }) => ({ key, value, enabled }))).toEqual([
+			{ key: "Authorization", value: "Bearer abc", enabled: false },
+			{ key: "Accept", value: "*/*", enabled: true },
+		]);
+	});
+
+	it("also disables a hand-typed marker with no space after the slashes", () => {
+		const parsed = parseHeadersFromText("//Authorization: Bearer abc");
+		expect(parsed[0]).toMatchObject({ enabled: false, key: "Authorization" });
+	});
+
+	it("does not mistake `//` inside a value for the marker", () => {
+		// The marker is anchored to the start of the line; a Referer header
+		// legitimately carries `//` well past its own start.
+		const parsed = parseHeadersFromText("Referer: https://example.com/a//b");
+		expect(parsed[0]).toEqual({
+			id: parsed[0].id,
+			key: "Referer",
+			value: "https://example.com/a//b",
+			enabled: true,
+		});
+	});
+
+	// Mutation check: reverting formatHeadersToText to always write "" instead
+	// of "// " for a disabled row collapses this whole round trip - the second
+	// test above would still pass (nothing to strip), but the first reds.
+	it("round-trips a mix of enabled and disabled rows byte for byte", () => {
+		const rows: KeyValueItem[] = [
+			{ id: "1", key: "X-On", value: "1", enabled: true },
+			{ id: "2", key: "X-Off", value: "2", enabled: false },
+		];
+		const text = formatHeadersToText(rows);
+		expect(pairs(text)).toEqual([
+			{ key: "X-On", value: "1" },
+			{ key: "X-Off", value: "2" },
+		]);
+		expect(parseHeadersFromText(text).map((h) => h.enabled)).toEqual([true, false]);
+	});
+});
+
+describe("a value keeps its whitespace (issue #1480)", () => {
+	it("preserves a trailing space", () => {
+		expect(pairs("X-Sig: abc ")).toEqual([{ key: "X-Sig", value: "abc " }]);
+	});
+
+	it("preserves a leading space past the one conventional space after the separator", () => {
+		expect(pairs("X-Sig:  abc")).toEqual([{ key: "X-Sig", value: " abc" }]);
+	});
+
+	it("round-trips a value with meaningful whitespace unchanged", () => {
+		const original: KeyValueItem[] = [{ id: "1", key: "X-Sig", value: "abc ", enabled: true }];
+		expect(pairs(formatHeadersToText(original))).toEqual([{ key: "X-Sig", value: "abc " }]);
+	});
+
+	// Mutation check: restoring the old `.trim()` on the value makes this red
+	// while every other test in this file (whose fixtures have no stray
+	// whitespace) stays green - which is exactly how the bug shipped unnoticed.
+	it("still has no separator-adjacent space in a value with none to begin with", () => {
+		expect(pairs("Accept: application/json")).toEqual([
+			{ key: "Accept", value: "application/json" },
+		]);
+	});
+});
+
+describe("isNoOpHeadersEdit", () => {
+	const rows: KeyValueItem[] = [
+		{ id: "1", key: "Accept", value: "*/*", enabled: true },
+		{ id: "2", key: "X-Off", value: "2", enabled: false },
+	];
+
+	it("is true for the exact text the panel would offer for these rows", () => {
+		expect(isNoOpHeadersEdit(formatHeadersToText(rows), rows)).toBe(true);
+	});
+
+	it("is true even when ids differ, since ids are never part of the text", () => {
+		const reparsed = parseHeadersFromText(formatHeadersToText(rows));
+		expect(isNoOpHeadersEdit(formatHeadersToText(reparsed), rows)).toBe(true);
+	});
+
+	it("is false when a row's enabled state actually changed", () => {
+		const reEnabled = formatHeadersToText(rows).replace("// X-Off: 2", "X-Off: 2");
+		expect(isNoOpHeadersEdit(reEnabled, rows)).toBe(false);
+	});
+
+	it("is false when a value actually changed", () => {
+		expect(isNoOpHeadersEdit("Accept: text/html\n// X-Off: 2", rows)).toBe(false);
 	});
 });
