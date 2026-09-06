@@ -125,6 +125,31 @@ RouteResult apply_origin_field (const nlohmann::json& json, std::string& out, bo
     "' or '" + example_bounds::ORIGIN_USER + "'");
 }
 
+/**
+ * The null-vs-absent rule for `specExampleKey` (issue #1457): the `examples`
+ * map key an OpenAPI import took this example from.
+ *
+ * Engine-side provenance, not a field the renderer ever sends - only the two
+ * import writers (`POST /import/apply`, `POST /specs/sync`) name it, through
+ * the same applier every other example write goes through. Nothing here
+ * validates the value beyond the shape: a stale key the document no longer
+ * declares is not this applier's to catch, since it can only be judged
+ * against the document at export time.
+ */
+void apply_spec_example_key_field (const nlohmann::json& json,
+std::optional<std::string>& out,
+bool is_create) {
+    if (!json.contains ("specExampleKey")) {
+        if (is_create) {
+            out = std::nullopt;
+        }
+        return;
+    }
+    out = json["specExampleKey"].is_string () ?
+    std::make_optional (json["specExampleKey"].get<std::string> ()) :
+    std::nullopt;
+}
+
 } // namespace
 
 /**
@@ -177,6 +202,7 @@ bool is_create) {
     // not claim otherwise: only the client that captured the response knows it
     // was cut, and no later read of the row can tell (issue #659).
     apply_bool_field (json, "bodyTruncated", x.body_truncated, false, is_create);
+    apply_spec_example_key_field (json, x.spec_example_key, is_create);
     return apply_origin_field (json, x.origin, is_create);
 }
 

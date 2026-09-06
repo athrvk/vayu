@@ -424,12 +424,17 @@ Vayu has something to say, and otherwise left exactly as it was:
   or from a response you kept. One example for a status and media type is written
   as `example`; where the response already answers with a named `examples` map,
   the kept response is added to it as another entry and every entry the document
-  had stays. This is where work done in Vayu flows back into the contract. An
-  example Vayu only kept **part** of - the Examples panel marks those, and a big
-  response is capped as it is saved - is the one kind that does not: the status
-  is documented, the body is not, and the dialog counts it. Half a payload
-  written as the payload would be indistinguishable from a complete one to
-  everyone downstream, including the mock server.
+  had stays - unless it is an *edited* import, in which case it is written into
+  the entry it was imported from instead: Vayu remembers which one that was
+  (issue #1457), so the map keeps the same entries it had and only that one's
+  value changes. If the document has since dropped or renamed that entry, it is
+  added beside the rest, same as an example with no such history. This is where
+  work done in Vayu flows back into the contract. An example Vayu only kept
+  **part** of - the Examples panel marks those, and a big response is capped as
+  it is saved - is the one kind that does not: the status is documented, the
+  body is not, and the dialog counts it. Half a payload written as the payload
+  would be indistinguishable from a complete one to everyone downstream,
+  including the mock server.
 - **An example the document already documents is written nowhere**, and neither
   is one the *import* produced for a response that declares no example: the
   import sampled that value off the response's schema, and writing it back would
