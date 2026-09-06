@@ -154,6 +154,7 @@ add_executable(vayu_tests
     trash_test.cpp
     spec_coverage_test.cpp
     schema_validation_test.cpp
+    elements_registry_test.cpp
     version_isolation_test.cpp
     reentrant_test.cpp
     ascii_case_test.cpp
@@ -318,6 +319,7 @@ set(vayu_scratch_database_suites
     DatabaseTest
     DbRecoveryTest
     DeleteRunTest
+    ElementsRouteTest
     ErrorShapeRouteTest
     ExamplesRouteTest
     GlobalsRouteTest
@@ -358,6 +360,7 @@ set(vayu_scratch_database_suites
     ScenarioRunnerTest
     ScratchDatabaseCleanup
     ScriptRequestNameTest
+    ScriptsFoldedIntoElementsTest
     ScriptSendRequestCapLoadTest
     ScriptVariableScopesTest
     ServerBindTest
