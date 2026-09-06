@@ -121,15 +121,39 @@ export interface SkippedItem {
 		 */
 		| "oauth2_dropped_field"
 		/**
-		 * An OpenAPI operation's own `security` that cannot be resolved to one
-		 * concrete auth mode (issue #1444) - more than one requirement (an OR of
-		 * alternatives Vayu cannot pick between), a requirement naming more than
-		 * one scheme (an AND), or a scheme type Vayu has no mode for
-		 * (`mutualTLS`, `openIdConnect`, an unrecognised `type`). The request
-		 * keeps `{ mode: "inherit" }`, the collection's own auth, rather than the
-		 * mode its own document declared and Vayu could not carry out.
+		 * An OpenAPI operation's `security` offering more than one alternative
+		 * requirement (an OR) - Vayu sends one mode per request and cannot pick
+		 * between them (issue #1444). The request keeps `{ mode: "inherit" }`.
 		 */
-		| "security_unmapped"
+		| "security_unmapped_or"
+		/**
+		 * An OpenAPI operation's `security` requirement naming more than one
+		 * scheme at once (an AND) - Vayu has no combined mode (issue #1444). The
+		 * request keeps `{ mode: "inherit" }`.
+		 */
+		| "security_unmapped_and"
+		/**
+		 * An OpenAPI operation's `security` naming a scheme the document never
+		 * declares (issue #1444). The request keeps `{ mode: "inherit" }`.
+		 */
+		| "security_unmapped_scheme"
+		/**
+		 * An OpenAPI operation secured with a `mutualTLS` scheme, which Vayu has
+		 * no mode for (issue #1444). The request keeps `{ mode: "inherit" }`.
+		 */
+		| "security_unmapped_mutualtls"
+		/**
+		 * An OpenAPI operation secured with an `openIdConnect` scheme, which Vayu
+		 * has no mode for (issue #1444). The request keeps `{ mode: "inherit" }`.
+		 */
+		| "security_unmapped_openidconnect"
+		/**
+		 * An OpenAPI operation's `security` naming a scheme of any other type
+		 * Vayu has no mode for - an `http` scheme other than bearer/basic, or a
+		 * scheme with no readable `type` at all (issue #1444). The request keeps
+		 * `{ mode: "inherit" }`.
+		 */
+		| "security_unmapped_type"
 		/**
 		 * An OpenAPI document declaring more than one `servers` entry (issue
 		 * #1444). Only `servers[0]` becomes the collection's `baseUrl`; each

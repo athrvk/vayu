@@ -75,9 +75,10 @@ namespace vayu::core {
  * The fields an OpenAPI import writes, and therefore the only ones a sync has
  * any claim on.
  *
- * A request's auth and scripts are absent on purpose: an import sets auth to
- * `inherit` and both scripts to empty for every operation, so a difference
- * there is always the user's and never the document's.
+ * A request's auth and scripts are absent on purpose: an import sets each
+ * operation's auth from its own `security` (issue #1444) and leaves both
+ * scripts empty, and a sync never revisits either field afterward, so a
+ * difference there is always the user's and never the document's.
  */
 enum class SpecField : std::uint8_t {
     Name,

@@ -2269,6 +2269,25 @@ PrimaryScheme primary_scheme (const json* schemes, const json* security) {
 }
 
 /**
+ * The tally kind for a declared scheme `scheme_to_auth_*` mapped to no mode -
+ * named by its OpenAPI `type` where the type alone says why (`mutualTLS`,
+ * `openIdConnect`), and by a shared catch-all otherwise (an `http` scheme
+ * other than bearer/basic, an `apiKey` case `scheme_to_auth_*` still refuses,
+ * or a scheme with no readable `type` at all).
+ */
+std::string_view unmapped_security_kind (const json* scheme) {
+    const json* node = as_record (scheme);
+    const json* type = node != nullptr ? prop (node, "type") : nullptr;
+    if (type != nullptr && *type == "mutualTLS") {
+        return "security_unmapped_mutualtls";
+    }
+    if (type != nullptr && *type == "openIdConnect") {
+        return "security_unmapped_openidconnect";
+    }
+    return "security_unmapped_type";
+}
+
+/**
  * A per-operation `security` requirement as an override onto the collection's
  * auth (issue #1444), or `nullopt` when the operation names no override and
  * the request should keep today's answer, `inherit`.
@@ -2280,10 +2299,12 @@ PrimaryScheme primary_scheme (const json* schemes, const json* security) {
  * identical and `inherit` keeps following the collection if its auth is later
  * edited. Anything Vayu cannot resolve to one concrete mode - more than one
  * requirement (an OR of alternatives), a requirement naming more than one
- * scheme (an AND), or a scheme type Vayu has no mode for (`mutualTLS`,
- * `openIdConnect`, an unrecognised `type`) - is counted as `security_unmapped`
- * and left on `inherit`, the safe default that sends what the collection
- * already sends rather than guessing.
+ * scheme (an AND), a requirement naming a scheme the document never declares,
+ * or a scheme type Vayu has no mode for (`mutualTLS`, `openIdConnect`, an
+ * unrecognised `type`) - is left on `inherit`, the safe default that sends
+ * what the collection already sends rather than guessing, and counted under
+ * its own `security_unmapped_*` kind rather than one shared bucket, so the
+ * import summary says which of the four reasons applied.
  *
  * Every non-`nullopt` return is `std::make_optional`, never a bare `json`:
  * copy-initializing an `optional<json>` from a `json` puts nlohmann's
@@ -2305,7 +2326,7 @@ ImportTally& tally) {
     if (op_security->size () > 1) {
         // An OR of alternative schemes - Vayu sends one mode per request and
         // has no way to pick which alternative the caller meant.
-        tally.add ("security_unmapped");
+        tally.add ("security_unmapped_or");
         return std::nullopt;
     }
     const json* requirement = as_record (&op_security->front ());
@@ -2316,7 +2337,7 @@ ImportTally& tally) {
     }
     if (requirement->size () > 1) {
         // An AND of multiple schemes at once - Vayu has no combined mode.
-        tally.add ("security_unmapped");
+        tally.add ("security_unmapped_and");
         return std::nullopt;
     }
     const std::string scheme_name = requirement->begin ().key ();
@@ -2325,14 +2346,14 @@ ImportTally& tally) {
     }
     const json* named = prop (schemes, scheme_name);
     if (!truthy (named)) {
-        tally.add ("security_unmapped");
+        tally.add ("security_unmapped_scheme");
         return std::nullopt;
     }
     json mapped = v3 ? scheme_to_auth_v3 (named) : scheme_to_auth_v2 (named);
     if (mapped.at ("mode") == "none") {
         // A declared scheme of a type `scheme_to_auth_*` has no mode for
         // (`mutualTLS`, `openIdConnect`, an `apiKey` outside header/query).
-        tally.add ("security_unmapped");
+        tally.add (unmapped_security_kind (named));
         return std::nullopt;
     }
     return std::make_optional (std::move (mapped));

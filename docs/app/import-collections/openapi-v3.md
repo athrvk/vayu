@@ -281,7 +281,7 @@ Collection auth is built the same way it always was, and every request still def
 | `[]`, or `[{}]` (OpenAPI's "security is optional here" shape) | `{ mode: "none" }` |
 | one requirement naming the same scheme the collection already took | `{ mode: "inherit" }` - identical either way, and `inherit` keeps following the collection if its auth is edited later |
 | one requirement naming a different scheme `schemeToAuth` can map | that scheme's mode, mapped the same way the collection-level scheme is |
-| anything else Vayu cannot resolve to one concrete mode - more than one requirement (an OR of alternatives), a requirement naming more than one scheme (an AND), or a scheme type `schemeToAuth` has no mode for | `{ mode: "inherit" }`, counted as `security_unmapped` |
+| anything else Vayu cannot resolve to one concrete mode - more than one requirement (an OR), a requirement naming more than one scheme (an AND), a requirement naming a scheme the document never declares, or a scheme type `schemeToAuth` has no mode for (`mutualTLS`, `openIdConnect`, any other unmapped type) | `{ mode: "inherit" }`, counted under its own `security_unmapped_*` kind - see the table below |
 
 **`nonExecutableAuth`:** always `0` - `oauth2` now maps to an executable config, and the other mapped schemes (bearer/basic/apikey) are executable too.
 
@@ -319,7 +319,12 @@ Dropped / not represented:
 | `unmapped_body` | a `requestBody` declaring only media types with no Vayu mode - one per operation, however many such media types it listed |
 | `unresolved_base_url` | `servers[0].url` still carries a `{variable}` with no declared default, or is relative in a document with no source URL (see [The base URL](#the-base-url)) |
 | `servers_dropped` | the document declares more than one `servers` entry - counted per entry past the first (issue #1444) |
-| `security_unmapped` | an operation's `security` cannot be resolved to one concrete auth mode - see [Auth / security](#auth--security) (issue #1444) |
+| `security_unmapped_or` | an operation's `security` offers more than one alternative requirement (an OR) - see [Auth / security](#auth--security) (issue #1444) |
+| `security_unmapped_and` | an operation's `security` requirement names more than one scheme at once (an AND) (issue #1444) |
+| `security_unmapped_scheme` | an operation's `security` names a scheme the document never declares (issue #1444) |
+| `security_unmapped_mutualtls` | an operation's `security` names a `mutualTLS` scheme - `schemeToAuth` has no mode for it (issue #1444) |
+| `security_unmapped_openidconnect` | an operation's `security` names an `openIdConnect` scheme - `schemeToAuth` has no mode for it (issue #1444) |
+| `security_unmapped_type` | an operation's `security` names a scheme of any other type `schemeToAuth` has no mode for - an `http` scheme other than bearer/basic, or a scheme with no readable `type` (issue #1444) |
 
 An import with nothing to report still yields `skipped: []` - only non-zero kinds are emitted.
 

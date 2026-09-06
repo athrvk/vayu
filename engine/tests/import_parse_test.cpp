@@ -445,8 +445,12 @@ TEST (ImportParse, OperationSecurityNamingTheCollectionsOwnSchemeStaysInherited)
 
 /**
  * A scheme type Vayu has no mode for (`mutualTLS`), an OR of alternatives, and
- * an AND of multiple schemes all stay `inherit` - the safe default - and are
- * counted as `security_unmapped` rather than guessed at (issue #1444).
+ * an AND of multiple schemes all stay `inherit` - the safe default - and each
+ * is counted under its own `security_unmapped_*` kind rather than one shared
+ * bucket (issue #1444). Mutation check: folding the three `tally.add` calls in
+ * `operation_auth_override` back onto one literal reds this to three separate
+ * kinds each missing, or `security_unmapped_type` picking up the OR/AND cases
+ * `unmapped_security_kind` never sees.
  */
 TEST (ImportParse, OperationSecurityItCannotMapStaysInheritedAndIsCounted) {
     const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
@@ -474,8 +478,33 @@ TEST (ImportParse, OperationSecurityItCannotMapStaysInheritedAndIsCounted) {
     for (const nlohmann::ordered_json& request : folder.at ("requests")) {
         EXPECT_EQ (request.at ("auth").at ("mode"), "inherit") << request.at ("url");
     }
-    EXPECT_EQ (
-    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("security_unmapped"), 3);
+    const nlohmann::json counts =
+    skip_counts (parsed.result.at ("meta").at ("skipped"));
+    EXPECT_EQ (counts.at ("security_unmapped_mutualtls"), 1);
+    EXPECT_EQ (counts.at ("security_unmapped_or"), 1);
+    EXPECT_EQ (counts.at ("security_unmapped_and"), 1);
+    EXPECT_FALSE (counts.contains ("security_unmapped_type"));
+}
+
+/**
+ * An operation naming a scheme the document never declares is a fourth,
+ * distinct reason `security` cannot resolve to one mode - counted under its
+ * own kind rather than folded into the type-mapping bucket (issue #1444).
+ * Mutation check: reverting the `security_unmapped_scheme` call back to the
+ * flat literal reds this to whatever kind that literal now spells.
+ */
+TEST (ImportParse, OperationSecurityNamingAnUndeclaredSchemeStaysInheritedAndIsCounted) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}}},
+        "security":[{"bearerAuth":[]}],
+        "paths":{"/ghost":{"get":{"security":[{"noSuchScheme":[]}],"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& auth =
+    first_request (parsed.result.at ("collections")[0]).at ("auth");
+    EXPECT_EQ (auth.at ("mode"), "inherit");
+    EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("security_unmapped_scheme"),
+    1);
 }
 
 /// An operation with no `security` key at all keeps today's answer.
@@ -489,8 +518,7 @@ TEST (ImportParse, OperationWithNoSecurityKeyInheritsAndCountsNothing) {
     const nlohmann::ordered_json& auth =
     first_request (parsed.result.at ("collections")[0]).at ("auth");
     EXPECT_EQ (auth.at ("mode"), "inherit");
-    EXPECT_FALSE (
-    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("security_unmapped"));
+    EXPECT_TRUE (skip_counts (parsed.result.at ("meta").at ("skipped")).empty ());
 }
 
 /// The same per-operation `security` rule applies to Swagger 2.0's
