@@ -370,40 +370,29 @@ export function useTreeCrud({
 	);
 
 	/**
-	 * Duplicate a request, contents and all - method, URL, params, headers,
-	 * body, auth and both scripts. Collections deliberately have no equivalent:
-	 * copying one means recursing through nested folders and issuing a create
-	 * per request, which is its own feature. The previous collection "Duplicate"
-	 * only created an empty folder named "(Copy)", which read as a working clone
-	 * and was not one, so it was removed rather than left misleading.
+	 * Duplicate a request, the whole record. Collections deliberately have no
+	 * equivalent: copying one means recursing through nested folders and
+	 * issuing a create per request, which is its own feature. The previous
+	 * collection "Duplicate" only created an empty folder named "(Copy)",
+	 * which read as a working clone and was not one, so it was removed rather
+	 * than left misleading.
 	 */
 	const handleDuplicateRequest = useCallback(
 		async (request: Request) => {
 			if (createRequestMutation.isPending) return;
 			try {
+				// Spread the source record rather than a hand-written field list
+				// (#1519): a named list drops every field added after it was
+				// written, which is how the previous version silently reset
+				// verifySSL, httpVersion and specOperation on every copy. `id`,
+				// `createdAt` and `updatedAt` are the only fields a copy must not
+				// carry; `order` is kept deliberately - it lands the copy directly
+				// *after* the source, the tie falling to `createdAt` (see
+				// `compareTreeOrder`, pinned to the engine's SQL).
+				const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = request;
 				const copy = await createRequestMutation.mutateAsync({
-					collectionId: request.collectionId,
+					...rest,
 					name: `${request.name} (Copy)`,
-					description: request.description,
-					method: request.method,
-					url: request.url,
-					params: request.params,
-					headers: request.headers,
-					body: request.body,
-					bodyType: request.bodyType,
-					auth: request.auth,
-					preRequestScript: request.preRequestScript,
-					postRequestScript: request.postRequestScript,
-					/*
-					 * The copy takes its source's `order`, which lands it directly
-					 * *after* the source: the tie falls to `createdAt` and the copy is
-					 * newer (see `compareTreeOrder`, pinned to the engine's SQL). An
-					 * omitted order would append it to the end of the collection, and
-					 * inserting it at `order + 1` would need every following sibling
-					 * renumbered - a multi-row write that belongs to the atomic batch
-					 * reorder endpoint, not to a duplicate.
-					 */
-					order: request.order,
 				});
 				openTab({ type: "request", entityId: copy.id });
 			} catch (error) {
