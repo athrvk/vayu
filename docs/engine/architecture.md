@@ -171,6 +171,10 @@ are different reasons:
 - The **management API** has no route authentication and answers `Access-Control-Allow-Origin: *`
   (`server.cpp`), so anything that can reach it can read every stored request, every credential the
   database holds, and start runs against arbitrary targets.
+- Every response from that same listener also carries `Cache-Control: no-store` (#1507, `server.cpp`):
+  every route answers a live read of state that changes under the client, so nothing here is valid to
+  replay from a browser's disk cache. The mock server and inbox routes inherit it the same way they
+  already inherit the CORS headers above.
 - A **mock issuer** hands out bearer tokens, and the **OAuth callback** carries an authorization
   code; publishing either would publish a credential.
 - An **inbox** serves none of that - it accepts a request, stores it, and replies with what the user

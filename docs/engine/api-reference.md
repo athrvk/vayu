@@ -7,7 +7,9 @@ description: >-
 
 **Base URL:** `http://127.0.0.1:9876` (default, configurable via `--port`)
 
-All endpoints return JSON. **Every** error response has one shape - an `error`
+All endpoints return JSON. Every response also carries `Cache-Control: no-store`
+(#1507) - see [Listeners](architecture.md#listeners) for why. **Every** error
+response has one shape - an `error`
 object carrying a machine-readable `code` and a human-readable `message`:
 
 ```json

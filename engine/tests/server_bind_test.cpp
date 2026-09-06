@@ -111,4 +111,23 @@ TEST_F (ServerBindTest, AFreePortStartsAndServesWithNoRecordedError) {
     server.stop ();
 }
 
+TEST_F (ServerBindTest, EveryResponseCarriesNoStoreCacheControl) {
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port, false);
+    ASSERT_TRUE (server.start ());
+
+    httplib::Client client ("127.0.0.1", port);
+    auto response = client.Get ("/health");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->get_header_value ("Cache-Control"), "no-store");
+
+    server.stop ();
+}
+
 } // namespace

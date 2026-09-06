@@ -64,6 +64,7 @@ import {
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
+import { clearResponseCacheOnUpgrade } from "./response-cache-clear.js";
 import { reportStartupIfRequested } from "./startup-probe.js";
 import { revealWhenReady } from "./window-reveal.js";
 /*
@@ -1354,6 +1355,12 @@ app.whenReady().then(async () => {
 		},
 		app.getVersion()
 	);
+
+	// Recover the disk space Chromium spent caching engine responses before
+	// the engine answered `Cache-Control: no-store` (#1507). Once per version,
+	// fire and forget: a skipped clear costs disk space, not correctness, and
+	// the session already exists here because `app.whenReady` has resolved.
+	void clearResponseCacheOnUpgrade(session.defaultSession, app.getVersion());
 
 	// Populate the native About panel (used by Help → About Vayu on
 	// Windows/Linux, and the macOS app menu's About item).
