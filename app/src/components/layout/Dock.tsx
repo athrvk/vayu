@@ -166,6 +166,43 @@ function EngineStatus() {
 }
 
 /**
+ * The app's own build version, with the running engine's worker-thread count
+ * on hover (issue #1508) - the one place that number was computed and never
+ * read anywhere in the app.
+ *
+ * `workers` is `null` until the first health poll answers, which is also true
+ * of a disconnected engine that has never connected this session; either way
+ * there is nothing to report yet, so the version renders as a plain span with
+ * no hover affordance, matching `EngineStatus`'s "nothing to hover for, so
+ * nothing pretends there is" rule above.
+ */
+function EngineVersion() {
+	const workers = useEngineStore((s) => s.workers);
+	const label = <span className="text-xs text-muted-foreground">v{__VAYU_VERSION__}</span>;
+
+	if (workers === null) {
+		return label;
+	}
+
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<span
+					// eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- TooltipTrigger (Radix) wires focus and blur to reveal and dismiss this tooltip, which is the only keyboard path to the worker count
+					tabIndex={0}
+					className="cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+				>
+					{label}
+				</span>
+			</TooltipTrigger>
+			<TooltipContent side="top">
+				<p>{workers === 1 ? "1 worker thread" : `${workers} worker threads`}</p>
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
+/**
  * A saved setting the running engine has not picked up yet.
  *
  * Every other setting in the app confirms itself: the value is written, the
@@ -411,7 +448,7 @@ export function Dock() {
 					 * under AA for 12px text. A version string is information, not
 					 * decoration, so it gets a passing colour.
 					 */}
-					<span className="text-xs text-muted-foreground">v{__VAYU_VERSION__}</span>
+					<EngineVersion />
 				</div>
 
 				{/* Right - toggles */}

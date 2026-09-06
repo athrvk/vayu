@@ -38,7 +38,7 @@
 
 namespace vayu::http::routes {
 // Declared in health.cpp; the body of GET /health.
-nlohmann::json build_health_response (const vayu::db::Database& db);
+nlohmann::json build_health_response (vayu::db::Database& db);
 } // namespace vayu::http::routes
 
 namespace {

@@ -476,6 +476,7 @@ add_library(vayu_core STATIC
     src/core/threshold_eval.cpp
     src/core/capacity_controller.cpp
     src/core/monitor.cpp
+    src/core/worker_count.cpp
     # The only TU that sees VAYU_VERSION_STRING for the User-Agent - keep it
     # that way, or a version bump invalidates the whole compile cache (#659).
     src/core/user_agent.cpp

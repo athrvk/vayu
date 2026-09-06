@@ -68,6 +68,7 @@ beforeEach(() => {
 		engineStatus: "starting",
 		engineError: null,
 		recovery: null,
+		workers: null,
 		engineStartWindow: null,
 	});
 });
@@ -97,6 +98,17 @@ describe("useHealthQuery", () => {
 
 		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("connected"));
 		expect(useEngineStore.getState().recovery).toBeNull();
+	});
+
+	it("carries the reported worker count into the engine store", async () => {
+		// #1508: `/health`'s `workers` field had no reader anywhere in the app.
+		// Mutation check: dropping `setWorkers` from the success branch leaves
+		// this `null` forever.
+		getHealth.mockResolvedValue({ status: "ok", version: "1.0.0", workers: 3 });
+
+		renderHook(() => useHealthQuery(), { wrapper });
+
+		await waitFor(() => expect(useEngineStore.getState().workers).toBe(3));
 	});
 });
 
