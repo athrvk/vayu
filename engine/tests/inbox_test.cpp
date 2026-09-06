@@ -27,6 +27,7 @@ using nlohmann::json;
 using vayu::http::InboxCannedResponse;
 using vayu::http::InboxManager;
 using vayu::http::InboxStartRequest;
+using vayu::tests::CompetingWriter;
 
 namespace vayu::http::routes {
 // Defined in inbox.cpp; returns {http_status, json_body}.
@@ -424,7 +425,7 @@ TEST_F (InboxListenerTest, AConcurrentInboxUpdateWaitsAndKeepsBothFieldsWritten)
 
     int other_status = 0;
     json other_body;
-    vayu::tests::CompetingWriter other ([&] {
+    CompetingWriter other ([&] {
         auto result = vayu::http::routes::update_inbox_response (
         *db_, *manager_, started.info.inbox_id, json{ { "status", 202 } });
         other_status = result.first;
