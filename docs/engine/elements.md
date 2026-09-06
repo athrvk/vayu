@@ -58,15 +58,22 @@ only where one is worth writing by hand.
 
 ## Kinds
 
-Phase 0 registers no *behaviour* kind - only `inherit.disable` (validated, never run; consumed
-directly by `POST /compose`'s chain resolution) and, in the test binary only, a `test.echo` kind
-proving the registration path itself. The table below is the single reference for every kind that
-exists once the rest of the epic lands, generated from or checked against the registry so a kind
-added on one side and forgotten on another fails a test rather than shipping silently mismatched.
+Phase 0 registers `inherit.disable` and `script.pre` / `script.post` validate-only - each has no
+`compile`, so nothing constructs an `Element` from one and nothing runs. `script.pre` / `script.post`
+exist so `Database::fold_scripts_into_elements`'s own output (a migrated request's or collection's
+scripts, folded in at startup) round-trips through `Registry::validate` rather than being rejected
+by the very migration that produced it; `pre_request_script` / `post_request_script` still drive
+every execution path unchanged until #1514's pipeline reads `elements` instead. The test binary also
+registers a `test.echo` kind, proving the registration path itself - never in a production build.
+The table below is the single reference for every kind that exists once the rest of the epic lands,
+generated from or checked against the registry so a kind added on one side and forgotten on another
+fails a test rather than shipping silently mismatched.
 
 | Kind | Category | Phases | Runs since |
 |------|----------|--------|------------|
 | `inherit.disable` | inherit | (consumed at compose time, not a phase) | #1513 |
+| `script.pre` | script | (validate-only; #1514 assigns the real phase) | #1513 |
+| `script.post` | script | (validate-only; #1514 assigns the real phase) | #1513 |
 
 ## Related issues
 

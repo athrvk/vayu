@@ -19,6 +19,8 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -91,6 +93,8 @@ TEST_F (ElementsRegistryTest, TheCatalogueListsInheritDisableAndTheTestOnlyKind)
 
     bool saw_inherit_disable = false;
     bool saw_test_echo       = false;
+    bool saw_script_pre      = false;
+    bool saw_script_post     = false;
     for (const auto& kind : catalogue) {
         if (kind["kind"] == "inherit.disable") {
             saw_inherit_disable = true;
@@ -101,9 +105,20 @@ TEST_F (ElementsRegistryTest, TheCatalogueListsInheritDisableAndTheTestOnlyKind)
             saw_test_echo = true;
             EXPECT_EQ (kind["category"], "test");
         }
+        if (kind["kind"] == "script.pre") {
+            saw_script_pre = true;
+        }
+        if (kind["kind"] == "script.post") {
+            saw_script_post = true;
+        }
     }
     EXPECT_TRUE (saw_inherit_disable);
     EXPECT_TRUE (saw_test_echo);
+    // Validate-only (issue #1513 registers no behaviour yet), so
+    // `fold_scripts_into_elements`'s own output round-trips through
+    // `Registry::validate` rather than being rejected by its own migration.
+    EXPECT_TRUE (saw_script_pre);
+    EXPECT_TRUE (saw_script_post);
 }
 
 TEST_F (ElementsRegistryTest, AnUnknownKindNamesItselfAndTheKnownList) {
@@ -194,6 +209,21 @@ TEST_F (ElementsRouteTest, PutWithAValidListStoresAndListsItThroughBothSerialize
     update_request_response (*db_, id, json{ { "elements", nullptr } });
     ASSERT_EQ (updated_status, 200);
     EXPECT_EQ (updated["elements"], json::array ());
+}
+
+TEST_F (ElementsRouteTest, AnElementWithNoIdGetsOneAssignedRatherThanRefused) {
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.test" },
+             { "elements",
+             json::array ({ json{ { "kind", "inherit.disable" },
+             { "config", { { "elementId", "el_ancestor" } } } } }) } });
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["elements"].size (), 1u);
+    const auto id = body["elements"][0].value ("id", "");
+    EXPECT_TRUE (id.rfind ("el_", 0) == 0)
+    << "expected an 'el_'-prefixed id, got: " << id;
 }
 
 TEST_F (ElementsRouteTest, PutWithAnUnknownKindReturns400NamingIt) {
@@ -299,9 +329,10 @@ TEST_F (ScriptsFoldedIntoElementsTest, AScriptedRowGainsElementsAndKeepsItsScrip
     EXPECT_EQ (elements[0]["config"]["script"], "pm.environment.set('x', 1);");
     EXPECT_EQ (elements[1]["kind"], "script.post");
     EXPECT_EQ (elements[1]["config"]["script"], "pm.test('ok', () => {});");
-    EXPECT_TRUE (Registry::instance ().find ("script.pre") == nullptr)
-    << "phase 0 registers no script kind - only the migration's shape is under "
-       "test";
+    // Validate-only (no `compile`): the fold's own output must round-trip
+    // through the same validator every write route runs, or a client that
+    // reads a migrated row back could never PUT it as-is.
+    EXPECT_FALSE (Registry::instance ().validate (elements).has_value ());
 
     auto untouched = db_->get_request ("req_plain");
     ASSERT_HAS_VALUE (untouched);
@@ -346,4 +377,39 @@ TEST_F (ScriptsFoldedIntoElementsTest, ASecondStartupSkipsTheScanOnceMarkedDone)
     EXPECT_EQ (still_unfolded->elements, "[]");
 }
 
+/**
+ * Writes the registry's catalogue to `tests/fixtures/element-kinds.json` on
+ * every run (issue #1513's scope item 4), so the app's and MCP's future
+ * conformance tests (#1516, #1517) have it without a running engine - the
+ * same role `variable-resolution-conformance.json` plays for composition.
+ *
+ * A global `Environment`'s `SetUp` runs before any test suite's, in
+ * particular before `ElementsRegistryTest::SetUpTestSuite` registers
+ * `test.echo` - deliberately, since the fixture is a claim about what a real
+ * build serves, not what this test binary adds to prove the registration
+ * path.
+ */
+class ElementKindsFixtureWriter : public ::testing::Environment {
+    public:
+    void SetUp () override {
+        const std::filesystem::path path =
+        std::filesystem::path (__FILE__).parent_path () / "fixtures" / "element-kinds.json";
+        std::ofstream out (path);
+        out << vayu::core::elements_catalogue ().dump (2);
+    }
+};
+
 } // namespace
+
+// Called from main() before `RUN_ALL_TESTS` rather than as a namespace-scope
+// static initialiser: `AddGlobalTestEnvironment(new ...)` running before
+// `main` has no frame to catch an allocation failure in, which is exactly
+// `engine/CLAUDE.md`'s "nothing at namespace scope is built at run time" rule
+// (`cert-err58-cpp`).
+void register_element_kinds_fixture_writer () {
+    // gtest owns and deletes what `AddGlobalTestEnvironment` is handed - its
+    // signature takes a raw pointer by contract, the same shape
+    // `tests/task_queue.hpp`'s `pooled_task_queue` silences once for httplib's.
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+    ::testing::AddGlobalTestEnvironment (new ElementKindsFixtureWriter ());
+}

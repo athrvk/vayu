@@ -1433,11 +1433,14 @@ from, and what `docs/engine/elements.md`'s kind table is checked against.
 ]
 ```
 
-Phase 0 registers exactly this one kind (validated, never run - it is consumed
-directly by `POST /compose`'s chain resolution) plus, in the test build only,
-a `test.echo` kind proving the registration path. No behaviour kind
-(extractors, assertions, timers, controllers, scripts, metrics) is registered
-yet; those land with #1514 onward.
+Phase 0 also registers `script.pre` and `script.post`, validate-only like
+`inherit.disable` - so a request or collection the startup fold migrated
+(`docs/engine/db-schema.md`) can be read back and written as-is without its
+own `elements` failing the registry that produced them - plus, in the test
+build only, a `test.echo` kind proving the registration path. No kind that
+actually *runs* (extractors, assertions, timers, controllers, metrics, and
+`script.*` executing for real) is registered yet; those land with #1514
+onward. See [Elements](elements.md) for the full kind table.
 
 ## Trash
 

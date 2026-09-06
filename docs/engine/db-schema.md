@@ -183,9 +183,11 @@ the destructive sense the callout above describes - `pre_request_script` and `po
 stay mapped and keep driving every execution path (design send, sequential run) exactly as before,
 because nothing runs an *element* yet; the pipeline that does is issue #1514. Same shape as the
 header-strip pass: a candidate scan (`get_all` filtered to non-empty script columns, so an
-already-migrated workspace costs one query), one transaction for the whole rewrite, and a
-`scriptsFoldedIntoElements` config-entry marker so a later start never re-scans. `updated_at` is
-left alone, on the same precedent.
+already-migrated workspace costs one query), a `<db>.pre-elements-fold.bak` snapshot written once
+immediately before the first row this pass ever rewrites (its own name, so a start that also runs
+the header-strip pass does not have one pass's snapshot overwrite the other's), one transaction for
+the whole rewrite, and a `scriptsFoldedIntoElements` config-entry marker so a later start never
+re-scans. `updated_at` is left alone, on the same precedent.
 
 ---
 

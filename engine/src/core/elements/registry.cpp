@@ -21,6 +21,8 @@ namespace vayu::core {
 // Declared here rather than in a public header: each kind's factory is used
 // exactly once, by registry.cpp's own explicit call list below.
 ElementKind make_inherit_disable_kind ();
+ElementKind make_script_pre_kind ();
+ElementKind make_script_post_kind ();
 
 namespace {
 
@@ -113,6 +115,8 @@ Registry& Registry::instance () {
     // return by value.
     static const bool registered = [] {
         registry.register_kind (make_inherit_disable_kind ());
+        registry.register_kind (make_script_pre_kind ());
+        registry.register_kind (make_script_post_kind ());
         return true;
     }();
     (void)registered;

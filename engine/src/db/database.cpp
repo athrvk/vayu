@@ -2234,6 +2234,15 @@ int64_t Database::fold_scripts_into_elements () {
         return 0;
     }
 
+    // Written once, immediately before the first row this pass ever rewrites -
+    // the `.pre-upgrade.bak` precedent (issue #1487), under its own name so a
+    // start that also runs `strip_stored_managed_headers` does not have this
+    // pass's snapshot overwrite that one's (or the reverse).
+    const fs::path db_file (impl_->opened_file);
+    fs::path pre_fold_backup = db_file;
+    pre_fold_backup += ".pre-elements-fold.bak";
+    copy_db_files (db_file, pre_fold_backup);
+
     auto fold_transaction = impl_->storage.transaction_guard ();
 
     int64_t folded = 0;

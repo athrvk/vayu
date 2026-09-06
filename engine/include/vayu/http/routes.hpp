@@ -35,6 +35,7 @@
 // see it. Included here so route TUs keep naming it through routes.hpp.
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/run_summary_cache.hpp"
+#include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -379,10 +380,24 @@ apply_elements_field (const nlohmann::json& json, const char* key, std::string& 
         out = "[]";
         return {};
     }
-    if (auto reason = vayu::core::Registry::instance ().validate (value)) {
+    // The engine assigns an `el_` id when the caller sends none (issue #1513's
+    // storage contract), validated *after* - a client that names no id at all
+    // gets one rather than a 400 asking it to invent one itself. A non-array
+    // `value` is left alone; `validate` below is what names that refusal.
+    nlohmann::json with_ids = value;
+    if (with_ids.is_array ()) {
+        for (auto& entry : with_ids) {
+            if (entry.is_object () &&
+            (!entry.contains ("id") || !entry["id"].is_string () ||
+            entry["id"].get<std::string> ().empty ())) {
+                entry["id"] = vayu::utils::generate_id ("el_");
+            }
+        }
+    }
+    if (auto reason = vayu::core::Registry::instance ().validate (with_ids)) {
         return route_error (400, *reason);
     }
-    out = value.dump ();
+    out = with_ids.dump ();
     return {};
 }
 
