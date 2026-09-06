@@ -700,7 +700,8 @@ const {
   registerContext, unregisterContext, updateContext,
   setActiveContext, getActiveContext,
   triggerSave,       // Ctrl/Cmd+S - saves active or first dirty context
-  flushAll           // Save all dirty contexts (used before app quit)
+  flushAll           // Save all dirty contexts (used before app quit); resolves
+                      // to { saved, failed, pending } - see below
 } = useSaveStore();
 ```
 
@@ -2557,9 +2558,11 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 8. Save status updates in `useSaveStore()`, and the Dock shows "Saving..." then "Saved" for `TIMING.SAVED_STATUS_DURATION_MS`
 9. **A save is only allowed to call the entity clean for the generation it sent** (#1381). `onSave(request, changedFields)` serialises the state - and the set of touched fields - as they were when the save started, so a keystroke landing during the round trip is not in that payload. The generation also moves on a foreign write the per-field merge adopts or conflicts, not only on the user's own edits (#1436): a save in flight when that happens must not clear `hasUnsavedChanges` over a value the merge just changed underneath its response. The provider records the generation beside the snapshot and clears `hasUnsavedChanges` - and the fields the snapshot named - only if the token has not moved when the write lands; the hook applies the same check to the "Saved" indicator. Clearing unconditionally marked that keystroke saved, left nothing dirty for the next timer to fire on, and lost the edit
 10. **The request builder's `onSave` sends only `changedFields`** (#1436, see [the draft adopts an external write per field](#the-request-builders-draft-adopts-an-external-write-per-field) above) - an untouched field is omitted from the `PUT` rather than resent unchanged
-11. On **tab switch or unmount**, any pending save is flushed before the context is unregistered - unless the entity is confirmed gone (`useSaveManager`'s `enabled: false`), which the request builder sets once its request is deleted elsewhere, so the flush never fires a doomed PUT
+11. On **tab switch or unmount**, any pending save is flushed before the context is unregistered - unless the entity is confirmed gone (`useSaveManager`'s `enabled: false`), which the request builder sets once its request is deleted elsewhere, so the flush never fires a doomed PUT. If that flush fails, the context is re-registered under the same id rather than left unreachable - `flushAll`'s reconnect trigger (below) and a later quit both walk the registry, not the pane that just unmounted (#1489)
 12. On **app quit** (Electron `before-quit`) *and* on **window close** (the X
-    button), `useSaveStore().flushAll()` saves all dirty contexts
+    button), `useSaveStore().flushAll()` saves all dirty contexts and resolves
+    to `{ saved, failed, pending }` - what actually landed, not just that the
+    round trip finished
 
 **Both window-destroying paths flush, through one coordinator.** `before-quit`
 always did; `close` did not, and `close` is what the X button fires - it
@@ -2578,6 +2581,22 @@ for an answer first, and Cancel leaves the window, the renderer and every
 pending save exactly as they were - a flush run ahead of the question would have
 told the renderer its work was ending. Confirm, and the flush runs as it always
 did on the way out.
+
+**The flush settling is not the same as the flush landing** (#1489). Before,
+both paths closed the window the moment the round trip finished - the ACK, or
+the 2s ceiling if the renderer never answered - whether or not anything had
+actually been saved: a refused write, a hung engine, or a save still running
+when the ceiling gave up all looked identical to a clean quit. The renderer's
+`flushAll` now carries its outcome back over the `before-quit-flushed` ACK
+(`FlushResult`, `electron/save-flush.ts`), and a settle with no ACK at all (the
+ceiling won) is treated the same as a failure - nothing is known to have
+landed. Either case holds the close behind one native dialog,
+`confirmDiscardOnFailedFlush`: "N edits could not be saved - the engine is not
+responding", **Quit/Close anyway** or **Keep working**. A clean flush still
+closes with no dialog, exactly as before. `useTabsStore.closeTab` asks the same
+question one tab early: closing a single dirty tab while the engine is not
+`connected` keeps the tab and toasts instead of letting the unmount flush fail
+into a pane that no longer exists.
 
 ### Variable Resolution Priority
 
@@ -2600,13 +2619,13 @@ did on the way out.
 
 4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that holds a draft instead - committing it on blur or on an explicit button - use `useEntityDraft()` **plus `useDraftSaveContext()`** - the first owns the draft, the second puts it in the registry - and do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
 
-5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed.
+5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed. `flushAll` reports what happened (`{ saved, failed, pending }`), and `main.ts` asks before discarding anything it did not save (#1489) rather than closing on faith.
 
     Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `failSave` (toast + status) or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - the context bar's variables section did neither, so a rejected edit sat on screen looking committed.
 
 6. **Leaving an editor saves or asks; it does not drop.** A settings category switch, an unmount, a tab switch - each used to discard dirty state silently in at least one place. Settings flushes its valid edits on the way out (engine config writes are cheap merge-patches); the collection tabs keep their panels mounted so there is nothing to discard.
 
-7. **Tab LRU and dirty state:** The tab store reads the save registry and refuses to evict a dirty tab (`isTabDirty`, matched by tab *type* - the registry is keyed by editor and the two do not line up). Nothing is flushed during eviction, because the predicate has already declined to take unsaved work; over the cap with every candidate dirty, no tab closes at all.
+7. **Tab LRU and dirty state:** The tab store reads the save registry and refuses to evict a dirty tab (`isTabDirty`, matched by tab *type* - the registry is keyed by editor and the two do not line up). Nothing is flushed during eviction, because the predicate has already declined to take unsaved work; over the cap with every candidate dirty, no tab closes at all. An *explicit* close (`closeTab`) is not eviction and used to have no such guard; it now applies the same `isTabDirty` check but only refuses when the engine is not `connected` (#1489) - a dirty tab closes and flushes as usual once the engine can actually take the write.
 
 8. **Response persistence:** Responses are stored in memory (not localStorage) so they survive tab switches but are cleared on page reload. This balances UX (quick switch back) with memory (responses can be large).
 

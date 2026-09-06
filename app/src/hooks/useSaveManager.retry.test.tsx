@@ -212,6 +212,29 @@ describe("retrying a failed auto-save", () => {
 		expect(onSaveB).not.toHaveBeenCalled();
 	});
 
+	it("re-registers a context whose entity-switch flush failed, so a later flush can retry it (#1489)", async () => {
+		const onSaveA = vi.fn().mockRejectedValue(new Error("engine unreachable"));
+		const onSaveB = vi.fn().mockResolvedValue(undefined);
+		const { rerender } = mountManager({ entityId: "req_a", onSave: onSaveA });
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		expect(onSaveA).toHaveBeenCalledTimes(1);
+
+		// The register/unregister effect has already dropped "request-req_a" for
+		// the switch by the time the cleanup's own flush fails against onSaveA a
+		// moment later - the context has to be put back for `flushAll` (a
+		// reconnect, or a later quit) to find it at all.
+		await act(async () => {
+			rerender({ entityId: "req_b", onSave: onSaveB, hasChanges: false });
+			await vi.advanceTimersByTimeAsync(0);
+		});
+
+		const context = useSaveStore.getState().contexts.get("request-req_a");
+		expect(context?.hasPendingChanges).toBe(true);
+	});
+
 	it("pokes the health query on a network failure, not on a 4xx the engine rejected outright", async () => {
 		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 		const onSave = vi

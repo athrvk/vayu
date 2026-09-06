@@ -425,8 +425,11 @@ interface ElectronAPI {
 		callback: (event: SystemNotificationActivation) => void
 	) => () => void;
 
-	// Before quit flush handler
-	onBeforeQuit: (callback: () => void | Promise<void>) => () => void;
+	// Before quit flush handler. The callback reports how the flush went, so
+	// main can ask before discarding a save that did not land (#1489).
+	onBeforeQuit: (
+		callback: () => Promise<{ saved: number; failed: number; pending: number }>
+	) => () => void;
 }
 
 declare global {

@@ -55,7 +55,12 @@ import {
 	type ContextCommand,
 } from "./context-menu.js";
 import { showApplicationMenu } from "./app-menu.js";
-import { createSaveFlusher } from "./save-flush.js";
+import {
+	createSaveFlusher,
+	confirmDiscardOnFailedFlush,
+	type FlushResult,
+	type FlushFailurePrompt,
+} from "./save-flush.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
@@ -257,6 +262,20 @@ async function askOnWindow(options: Electron.MessageBoxOptions): Promise<number>
 	return response;
 }
 
+// The dialog `confirmDiscardOnFailedFlush` shows when a flush did not land
+// cleanly (#1489). "Proceed" is the default button, matching the running-
+// services confirm below - Enter takes the destructive option, Esc/close
+// keeps working, which is what leaves the draft exactly as it was.
+const askFlushFailure = (prompt: FlushFailurePrompt): Promise<boolean> =>
+	askOnWindow({
+		type: "warning",
+		message: prompt.message,
+		detail: prompt.detail,
+		buttons: [...prompt.buttons],
+		defaultId: 0,
+		cancelId: 1,
+	}).then((choice) => choice === 0);
+
 // Shared by the quit path and the window-close path - see save-flush.ts for why
 // there is only one of these.
 const saveFlusher = createSaveFlusher({
@@ -271,8 +290,9 @@ const saveFlusher = createSaveFlusher({
 		return true;
 	},
 	onFlushed: (listener) => {
-		ipcMain.once("before-quit-flushed", listener);
-		return () => ipcMain.removeListener("before-quit-flushed", listener);
+		const handler = (_event: Electron.IpcMainEvent, result: FlushResult) => listener(result);
+		ipcMain.once("before-quit-flushed", handler);
+		return () => ipcMain.removeListener("before-quit-flushed", handler);
 	},
 	schedule: (listener, ms) => {
 		setTimeout(listener, ms);
@@ -531,9 +551,17 @@ function createWindow() {
 
 		if (saveFlusher.hasSettled()) return;
 		event.preventDefault();
-		saveFlusher.flush(() => {
-			if (!closingWindow.isDestroyed()) closingWindow.close();
-		});
+		// Named rather than inline so the flush's own outcome decides whether the
+		// window actually closes (#1489): a failed or unanswered flush asks
+		// before discarding it, instead of closing unconditionally once settled.
+		const closeAfterFlush = (result: FlushResult | null) => {
+			void confirmDiscardOnFailedFlush(askFlushFailure, "window-close", result).then(
+				(proceed) => {
+					if (proceed && !closingWindow.isDestroyed()) closingWindow.close();
+				}
+			);
+		};
+		saveFlusher.flush(closeAfterFlush);
 	});
 
 	// The mouse's back/forward buttons as the OS reports them, and the macOS
@@ -1428,6 +1456,17 @@ app.on("window-all-closed", () => {
 // second pass once rather than starting two engine shutdowns.
 const resumeQuit = () => app.quit();
 
+// The flush settled; whether the quit actually resumes is the dialog's answer
+// when it did not land cleanly (#1489). Re-entering through `app.quit()` on a
+// yes is deliberate: the second pass finds the flush already settled and
+// falls straight through to `quitShutdown.handleQuit`, so the question is
+// never asked twice.
+const resumeQuitAfterFlush = (result: FlushResult | null) => {
+	void confirmDiscardOnFailedFlush(askFlushFailure, "quit", result).then((proceed) => {
+		if (proceed) resumeQuit();
+	});
+};
+
 // Second pass of the quit: stop the children exactly once. See quit-shutdown.ts
 // for why "has a shutdown started" is the guard rather than "is the engine
 // still running" - the latter only clears after the awaits, so a quit landing
@@ -1459,7 +1498,7 @@ app.on("before-quit", (event) => {
 	// engine is never stopped out from under saves still being written.
 	if (!saveFlusher.hasSettled()) {
 		event.preventDefault();
-		saveFlusher.flush(resumeQuit);
+		saveFlusher.flush(resumeQuitAfterFlush);
 		return;
 	}
 

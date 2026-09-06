@@ -130,7 +130,9 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		// A dirty draft's own auto-save retry backs off well past this poll, so
 		// the reconnect is what has to reach it - the same reasoning that made
 		// this transition invalidate every other query.
-		const flushAll = vi.spyOn(useSaveStore.getState(), "flushAll").mockResolvedValue(undefined);
+		const flushAll = vi
+			.spyOn(useSaveStore.getState(), "flushAll")
+			.mockResolvedValue({ saved: 0, failed: 0, pending: 0 });
 		// Twice: the hook sets `retry: 1`, so one rejection is absorbed by the
 		// retry and never reaches an error state.
 		getHealth
@@ -164,7 +166,9 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		// position, since nothing about its save has failed.
 		const client = makeClient();
 		const invalidate = vi.spyOn(client, "invalidateQueries");
-		const flushAll = vi.spyOn(useSaveStore.getState(), "flushAll").mockResolvedValue(undefined);
+		const flushAll = vi
+			.spyOn(useSaveStore.getState(), "flushAll")
+			.mockResolvedValue({ saved: 0, failed: 0, pending: 0 });
 		getHealth.mockResolvedValue({ status: "ok", version: "1.0.0", workers: 8 });
 
 		const { result } = renderHook(() => useHealthQuery(), { wrapper: wrapperFor(client) });

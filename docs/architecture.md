@@ -355,6 +355,22 @@ one app instance may drive it:
   `docs/app/state-management.md`'s `save-store.ts` section for the retry and
   the Dock's persistent "Not saved" state a failure short of that leaves on
   screen.
+- **A quit or window-close asks before discarding a flush that did not land**
+  (issue #1489). `save-flush.ts`'s coordinator still waits out its round trip
+  unconditionally (the renderer's ACK, or a 2 s ceiling if it never comes) -
+  what changed is what happens once it settles. The renderer's `flushAll`
+  resolves to how many contexts actually saved versus failed; a ceiling with
+  no ACK at all is read the same as a failure, since nothing is known to have
+  landed. Either case holds the quit or close behind one native dialog - "N
+  edits could not be saved - the engine is not responding", Quit/Close anyway
+  or Keep working - built by `confirmDiscardOnFailedFlush` in `save-flush.ts`
+  and shown through the same `dialog.showMessageBox` primitive the crash and
+  unresponsive-window prompts already use. A clean flush proceeds exactly as
+  before, with no dialog. Closing one dirty tab (not the whole window) is the
+  same question asked earlier: `useTabsStore.closeTab` keeps the tab and
+  toasts instead of unmounting it when the tab is dirty and the engine is not
+  `connected`, rather than letting `useSaveManager`'s unmount flush fail into
+  a pane that is already gone.
 - **Local services are window-scoped, and the close says so.** Everything the
   Services drawer starts - webhook inboxes, mock servers, mock issuers - runs
   inside the engine, so quitting stops all of it. On Windows and Linux closing

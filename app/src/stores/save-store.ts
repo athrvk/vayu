@@ -118,8 +118,13 @@ interface SaveState {
 	// App-wide save trigger
 	triggerSave: () => Promise<void>;
 
-	/** Flush every registered context that has pending changes. Used before quit / on tab close. */
-	flushAll: () => Promise<void>;
+	/**
+	 * Flush every registered context that has pending changes, and report what
+	 * happened. Used before quit / on tab close - the caller (`main.ts`, #1489)
+	 * decides whether a failure or a still-pending edit is worth asking about
+	 * before the window goes away, so this counts rather than swallows them.
+	 */
+	flushAll: () => Promise<{ saved: number; failed: number; pending: number }>;
 }
 
 export const useSaveStore = create<SaveState>((set, get) => {
@@ -138,9 +143,10 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			(context) => context.id !== exceptId && context.hasPendingChanges
 		);
 
-	// Internal helper - runs a save for the given context and updates store state.
-	// Caller must own the in-progress guard if needed.
-	const runSave = async (context: SaveContext) => {
+	// Internal helper - runs a save for the given context, updates store state,
+	// and reports whether it actually landed. Caller must own the in-progress
+	// guard if needed.
+	const runSave = async (context: SaveContext): Promise<"saved" | "failed"> => {
 		set({ status: "saving" });
 		try {
 			await context.save();
@@ -148,22 +154,17 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			// its own failure through `failSave` and then resolves rather than
 			// rejecting (`useSaveManager`, `SettingsMain`, `VariableTableEditor`
 			// all do), so overwriting unconditionally turned a failed Cmd+S into
-			// "Saved" - with the failure toast still on screen next to it.
-			//
-			// Nor is it proof of completeness (#1381). A context that saw an edit
-			// land while its write was in flight publishes `pending`, because the
-			// payload that went out does not hold that edit; overwriting *that*
-			// put "Saved" on the Dock over an edit nobody had persisted, on the
-			// two paths that come through here - Cmd+S and the quit flush.
-			//
-			// Both cases are the same rule: a status the context published for
-			// itself is the truthful one, and this wrapper only fills in the
-			// silence.
+			// "Saved" - with the failure toast still on screen next to it. A
+			// status the context published for itself is the truthful one; this
+			// wrapper only fills in the silence when nothing else has.
 			const published = get().status;
-			if (published === "error" || published === "pending") return;
+			if (published === "error") return "failed";
+			if (published === "pending") return "saved";
 			get().completeSaveThenIdle(context.id);
+			return "saved";
 		} catch (error) {
 			get().failSave(error instanceof Error ? error.message : "Save failed");
+			return "failed";
 		}
 	};
 
@@ -285,10 +286,16 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		},
 
 		flushAll: async () => {
-			const saves = [...get().contexts.values()]
-				.filter((c) => c.hasPendingChanges)
-				.map((c) => runSave(c));
-			await Promise.all(saves);
+			const dirty = [...get().contexts.values()].filter((c) => c.hasPendingChanges);
+			const outcomes = await Promise.all(dirty.map((c) => runSave(c)));
+			const failed = outcomes.filter((outcome) => outcome === "failed").length;
+			// `pending` is always 0 here: every dirty context this call started is
+			// attempted and settled (saved or failed) before `flushAll` resolves.
+			// It stays part of the shape because the caller (`main.ts`, #1489) also
+			// sees the case a completed flush cannot represent - the 2s ceiling
+			// firing before the renderer even answers, where nothing is known to
+			// have landed at all.
+			return { saved: outcomes.length - failed, failed, pending: 0 };
 		},
 	};
 });

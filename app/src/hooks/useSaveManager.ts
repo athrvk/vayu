@@ -322,11 +322,28 @@ export function useSaveManager({
 			// so a failure here reports once and does not arm a new one - there
 			// is no pane left to retry into once this cleanup has run.
 			clearRetry();
-			if (enabledRef.current && hasChangesRef.current) {
-				performSave();
+			if (entityId && enabledRef.current && hasChangesRef.current) {
+				// The sibling registration effect has already unregistered this
+				// context by the time this runs, so a failure here has nowhere left
+				// to be retried from (#1489) - `flushAll`'s reconnect trigger (#1479)
+				// and the quit flush both walk the registry, not the unmounted pane.
+				// Re-registering under the same id puts the draft back where either
+				// can find it; a clean save needs nothing put back.
+				const contextId = saveContextId(entityId);
+				const save = onSaveRef.current;
+				void performSave().then(() => {
+					if (useSaveStore.getState().status === "error") {
+						registerContext({
+							id: contextId,
+							name: contextName || "Request",
+							save,
+							hasPendingChanges: true,
+						});
+					}
+				});
 			}
 		};
-	}, [entityId, reset, performSave, clearRetry]);
+	}, [entityId, reset, performSave, clearRetry, contextName, registerContext]);
 
 	// Force save (for manual triggers)
 	const forceSave = useCallback(async () => {

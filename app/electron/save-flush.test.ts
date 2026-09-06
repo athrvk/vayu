@@ -22,7 +22,17 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { createSaveFlusher, FLUSH_TIMEOUT_MS, type FlushTransport } from "./save-flush";
+import {
+	createSaveFlusher,
+	buildFlushFailurePrompt,
+	confirmDiscardOnFailedFlush,
+	flushNeedsConfirmation,
+	FLUSH_TIMEOUT_MS,
+	type FlushResult,
+	type FlushTransport,
+} from "./save-flush";
+
+const CLEAN: FlushResult = { saved: 1, failed: 0, pending: 0 };
 
 // main.ts creates windows and starts the engine at import time, so the wiring
 // itself can only be read. Everything above this line would still pass with the
@@ -32,7 +42,7 @@ const main = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "main.ts
 /** A renderer that ACKs when told to, plus the timer main would have armed. */
 function fakeTransport(options: { hasRenderer?: boolean } = {}) {
 	const { hasRenderer = true } = options;
-	const listeners = new Set<() => void>();
+	const listeners = new Set<(result: FlushResult) => void>();
 	let timer: { fire: () => void; ms: number } | null = null;
 
 	const transport: FlushTransport = {
@@ -48,8 +58,8 @@ function fakeTransport(options: { hasRenderer?: boolean } = {}) {
 
 	return {
 		transport,
-		/** The renderer finished flushing and ACKed. */
-		ack: () => [...listeners].forEach((l) => l()),
+		/** The renderer finished flushing and ACKed with `result`. */
+		ack: (result: FlushResult = CLEAN) => [...listeners].forEach((l) => l(result)),
 		/** The fallback timer expired. */
 		expire: () => timer?.fire(),
 		/**
@@ -274,6 +284,55 @@ describe("a second gesture inside the flush window", () => {
 	});
 });
 
+describe("asking before a failed flush is discarded (#1489)", () => {
+	it("needs no confirmation for a clean settle", () => {
+		expect(flushNeedsConfirmation({ saved: 3, failed: 0, pending: 0 })).toBe(false);
+	});
+
+	it("needs confirmation for a failure, a still-pending edit, or an unanswered ceiling", () => {
+		expect(flushNeedsConfirmation({ saved: 0, failed: 1, pending: 0 })).toBe(true);
+		expect(flushNeedsConfirmation({ saved: 1, failed: 0, pending: 1 })).toBe(true);
+		expect(flushNeedsConfirmation(null)).toBe(true);
+	});
+
+	it("names the count and phrases the buttons for the gesture", () => {
+		const quitPrompt = buildFlushFailurePrompt("quit", { saved: 0, failed: 2, pending: 0 });
+		expect(quitPrompt.message).toContain("2 edits");
+		expect(quitPrompt.buttons).toEqual(["Quit anyway", "Keep working"]);
+
+		const closePrompt = buildFlushFailurePrompt("window-close", {
+			saved: 0,
+			failed: 1,
+			pending: 0,
+		});
+		expect(closePrompt.message).toContain("One edit");
+		expect(closePrompt.buttons).toEqual(["Close anyway", "Keep working"]);
+	});
+
+	it("does not ask, and proceeds, when the flush landed clean", async () => {
+		const ask = vi.fn();
+		const proceed = await confirmDiscardOnFailedFlush(ask, "quit", CLEAN);
+		expect(proceed).toBe(true);
+		expect(ask).not.toHaveBeenCalled();
+	});
+
+	it("asks, and proceeds only on the answer, when the flush did not land clean", async () => {
+		const keepWorking = vi.fn().mockResolvedValue(false);
+		const failed: FlushResult = { saved: 0, failed: 1, pending: 0 };
+		expect(await confirmDiscardOnFailedFlush(keepWorking, "quit", failed)).toBe(false);
+		expect(keepWorking).toHaveBeenCalledWith(buildFlushFailurePrompt("quit", failed));
+
+		const quitAnyway = vi.fn().mockResolvedValue(true);
+		expect(await confirmDiscardOnFailedFlush(quitAnyway, "quit", failed)).toBe(true);
+	});
+
+	it("asks on an unanswered ceiling, not only on a reported failure", async () => {
+		const ask = vi.fn().mockResolvedValue(false);
+		await confirmDiscardOnFailedFlush(ask, "window-close", null);
+		expect(ask).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe("main.ts wiring", () => {
 	it("read the real main.ts", () => {
 		// A guard that scanned an empty string would pass every assertion below.
@@ -293,7 +352,24 @@ describe("main.ts wiring", () => {
 	it("routes the quit path through the same flusher, gated on settled", () => {
 		const quitHandler = main.slice(main.indexOf('app.on("before-quit"'));
 		expect(quitHandler).toContain("saveFlusher.hasSettled()");
-		expect(quitHandler).toContain("saveFlusher.flush(resumeQuit)");
+		expect(quitHandler).toContain("saveFlusher.flush(resumeQuitAfterFlush)");
+	});
+
+	it("gates the actual quit on the flush's outcome, not just its settling (#1489)", () => {
+		expect(main).toContain("const resumeQuitAfterFlush = (result: FlushResult | null) => {");
+		const resumeHandler = main.slice(main.indexOf("const resumeQuitAfterFlush"));
+		expect(resumeHandler).toContain(
+			'confirmDiscardOnFailedFlush(askFlushFailure, "quit", result)'
+		);
+	});
+
+	it("gates the window's close on the flush's outcome, not just its settling (#1489)", () => {
+		const closeHandler = main.slice(main.indexOf('.on("close"'));
+		expect(closeHandler).toContain("const closeAfterFlush = (result: FlushResult | null) => {");
+		expect(closeHandler).toContain(
+			'confirmDiscardOnFailedFlush(askFlushFailure, "window-close", result)'
+		);
+		expect(closeHandler).toContain("saveFlusher.flush(closeAfterFlush)");
 	});
 
 	it("gates both consumers on settled, never on requested", () => {

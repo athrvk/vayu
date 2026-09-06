@@ -413,15 +413,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("notify:activated", handler);
 	},
 
-	// Before quit flush handler. ACKs main once the callback settles so quit
-	// can resume immediately instead of waiting out the fallback timeout.
-	onBeforeQuit: (callback: () => void | Promise<void>) => {
+	// Before quit flush handler. ACKs main once the callback settles, with the
+	// outcome the callback reports, so quit can resume immediately instead of
+	// waiting out the fallback timeout - and so a failed or incomplete flush is
+	// not read as a clean one (#1489). The shape mirrors `FlushResult` in
+	// electron/save-flush.ts, inlined because this file is a CommonJS script
+	// and must not grow imports.
+	onBeforeQuit: (callback: () => Promise<{ saved: number; failed: number; pending: number }>) => {
 		const handler = async () => {
+			let result: { saved: number; failed: number; pending: number };
 			try {
-				await callback();
-			} finally {
-				ipcRenderer.send("before-quit-flushed");
+				result = await callback();
+			} catch {
+				// An uncaught rejection is not proof nothing was lost - the more
+				// cautious reading is that it was, so main still asks rather than
+				// closing on a failure this side could not measure.
+				result = { saved: 0, failed: 1, pending: 0 };
 			}
+			ipcRenderer.send("before-quit-flushed", result);
 		};
 		ipcRenderer.on("before-quit", handler);
 		return () => ipcRenderer.removeListener("before-quit", handler);
