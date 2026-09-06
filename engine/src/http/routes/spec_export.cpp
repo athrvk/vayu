@@ -298,7 +298,7 @@ const std::string& folder_collection_id) {
         entry.examples.push_back ({ example.name, example.status, example.body,
         example.content_type, example.body_truncated,
         example.origin == vayu::core::constants::request_example::ORIGIN_IMPORT,
-        example_has_extra_headers (example.headers) });
+        example_has_extra_headers (example.headers), example.spec_example_key });
     }
     return entry;
 }

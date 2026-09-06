@@ -24,11 +24,12 @@
 import { useCallback } from "react";
 
 import { Input, MarkdownEditor } from "@/components/ui";
+import { ExternalChangeCallout } from "@/components/shared";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { reportBlankNameRefused } from "@/lib/blank-name";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
-import { ExternalChangeCallout, Field, SaveFailed, Stat } from "./shared";
+import { Field, SaveFailed, Stat } from "./shared";
 import { formatRelative } from "./format";
 
 interface InfoTabProps {

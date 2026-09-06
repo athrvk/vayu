@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -236,10 +237,41 @@ class InboxManager {
     /// they belong to rather than whatever the config says at that moment.
     std::optional<InboxLimits> limits (const std::string& inbox_id);
 
-    /// nullopt when no such inbox exists. Applies to a stopped inbox too - it
-    /// is the configuration a restart would use, not the listener's state.
-    std::optional<InboxInfo> update_response (const std::string& inbox_id,
-    const InboxCannedResponse& response);
+    /// A merge step for `update_response`: given the currently-stored
+    /// response, returns the merged one, or refuses.
+    using ResponseMergeFn =
+    std::function<std::expected<InboxCannedResponse, InboxParseError> (const InboxCannedResponse&)>;
+
+    /**
+     * `found == false` when no such inbox exists, in which case @p merge is
+     * never called. Otherwise `error` carries a refusal from @p merge (the
+     * stored response is left untouched) or `info` carries the inbox after
+     * the merged response was written.
+     *
+     * Applies to a stopped inbox too - it is the configuration a restart
+     * would use, not the listener's state.
+     */
+    struct UpdateResponseResult {
+        bool found = false;
+        std::optional<InboxParseError> error;
+        std::optional<InboxInfo> info;
+    };
+
+    /**
+     * Read the current response, run @p merge against it, and write the
+     * result back, all under one acquisition of the manager's locks - the
+     * same read-merge-write-in-one-lock-scope `Database::with_lock` gives the
+     * database-backed resources (issue #1440), closed here for the one
+     * canned response that lives in memory rather than a row (issue #1454).
+     *
+     * @param before_write Test seam, invoked with the merged response staged
+     *        and immediately before it is written, still inside the lock
+     *        scope; see `update_collection_response` in collections.cpp for
+     *        why it exists.
+     */
+    UpdateResponseResult update_response (const std::string& inbox_id,
+    const ResponseMergeFn& merge,
+    const std::function<void ()>& before_write = nullptr);
 
     /**
      * Claim the single live-stream slot for an inbox.

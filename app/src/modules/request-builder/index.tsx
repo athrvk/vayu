@@ -22,7 +22,7 @@
 
 import { useCallback, useMemo, useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { RequestBuilderProvider } from "./context";
+import { RequestBuilderProvider, useRequestBuilderContext } from "./context";
 import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
 import LoadTestCommandSurface from "./components/LoadTestCommandSurface";
@@ -40,8 +40,14 @@ import { Button } from "@/components/ui";
 import { useEngine, useVariableResolver } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
-import type { RequestState, ResponseState, StreamStartResult } from "./types";
-import { resolveAuthSource } from "./utils/auth-resolution";
+import { generateCurl } from "@/services/codegen";
+import type {
+	RequestState,
+	ResponseState,
+	StreamStartResult,
+	MergeableRequestField,
+} from "./types";
+import { resolveAuthSource, resolveAuthForSend } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
 import { toFlatHeaders } from "./utils/key-value";
@@ -60,7 +66,151 @@ import type {
 	RequestBody,
 	RequestAuth,
 	OAuth2Config,
+	UpdateRequestRequest,
 } from "@/types";
+
+/**
+ * The flattened editor body as the wire's discriminated `RequestBody` - shared
+ * between a real save and the "gone" pane's cURL snippet (issue #1436), which
+ * has no fetched request to save against but still needs the same mapping.
+ */
+function toBodyPayload(request: RequestState): RequestBody {
+	if (request.bodyMode === "form-data") {
+		return { mode: "form-data", fields: toKeyValueEntries(request.formData) };
+	}
+	if (request.bodyMode === "x-www-form-urlencoded") {
+		return { mode: "x-www-form-urlencoded", fields: toKeyValueEntries(request.urlEncoded) };
+	}
+	if (request.bodyMode !== "none" && request.body) {
+		return {
+			mode: request.bodyMode as "json" | "text" | "graphql" | "jsonrpc" | "xml",
+			content: request.body,
+		};
+	}
+	return { mode: "none" };
+}
+
+/**
+ * The PUT payload for exactly the fields the user changed (issue #1436) - an
+ * untouched field is omitted, which the engine's partial-update merge (see
+ * `apply_request_fields`) reads as "leave the stored value alone", not as "clear
+ * it". `changedFields` groups the four body-shaping fields under one write,
+ * since the wire's `body`/`bodyType` are one value split across them in the
+ * editor's flattened state.
+ */
+function buildUpdatePayload(
+	requestId: string,
+	request: RequestState,
+	changedFields: ReadonlySet<MergeableRequestField>
+): UpdateRequestRequest {
+	const payload: UpdateRequestRequest = { id: requestId };
+
+	if (changedFields.has("name")) {
+		/*
+		 * A blank name is refused rather than saved - see the Info tab's
+		 * blank-name guard, which restores the stored name on blur. The
+		 * debounced autosave can still fire while the field is briefly empty,
+		 * so the guard has to be here too: omitting the key leaves the stored
+		 * name untouched, where sending `""` would blank it everywhere the
+		 * request is listed.
+		 */
+		const name = request.name.trim();
+		if (name) payload.name = name;
+	}
+	if (changedFields.has("description")) payload.description = request.description;
+	if (changedFields.has("method")) payload.method = request.method as HttpMethod;
+	if (changedFields.has("url")) payload.url = request.url;
+	if (changedFields.has("params")) payload.params = toKeyValueEntries(request.params);
+	// Only the user's rows: nothing in editor state is Vayu's own any more
+	// (issue #1229), so this needs no filter to stay clean.
+	// `disabledDefaultHeaders` is deliberately never sent - none of the
+	// opt-outs is persisted; they belong to a send, and the defaults they
+	// refuse are re-resolved from engine config on every one.
+	if (changedFields.has("headers")) payload.headers = toKeyValueEntries(request.headers);
+	if (
+		changedFields.has("bodyMode") ||
+		changedFields.has("body") ||
+		changedFields.has("formData") ||
+		changedFields.has("urlEncoded")
+	) {
+		const bodyPayload = toBodyPayload(request);
+		payload.body = bodyPayload;
+		payload.bodyType = bodyPayload.mode;
+	}
+	if (changedFields.has("auth")) payload.auth = request.auth;
+	/*
+	 * Both scripts are sent as they are when touched, empty string included.
+	 * `undefined` serialises the key out of the body, and an absent key on a
+	 * `PUT` means "leave the stored value alone" - so a script cleared to ""
+	 * has to be *sent*, not omitted, which is exactly what "touched" already
+	 * distinguishes from "never edited".
+	 */
+	if (changedFields.has("preRequestScript")) payload.preRequestScript = request.preRequestScript;
+	if (changedFields.has("testScript")) payload.postRequestScript = request.testScript;
+	if (changedFields.has("followRedirects")) payload.followRedirects = request.followRedirects;
+	if (changedFields.has("maxRedirects")) payload.maxRedirects = request.maxRedirects;
+	if (changedFields.has("httpVersion")) payload.httpVersion = request.httpVersion;
+	if (changedFields.has("verifySSL")) payload.verifySSL = request.verifySSL;
+	if (changedFields.has("stream")) payload.stream = request.stream;
+
+	return payload;
+}
+
+/**
+ * The pane a dirty tab falls back to when its request is deleted elsewhere
+ * (issue #1436). `index.tsx` keeps `RequestBuilderProvider` mounted for this
+ * case specifically so the draft is still reachable through context - a copy
+ * of what the user had, rather than a 404 toast from a doomed autosave.
+ */
+function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
+	const { request } = useRequestBuilderContext();
+	const showToast = useToastStore((s) => s.showToast);
+
+	const handleCopyCurl = useCallback(async () => {
+		try {
+			const snippet = generateCurl({
+				method: request.method,
+				url: request.url,
+				headers: toFlatHeaders(request.headers),
+				body: toBodyPayload(request),
+				/*
+				 * The collection this request might have inherited auth from
+				 * cannot be looked up any more, so `inherit` resolves to nothing
+				 * here rather than guessing - the same answer an empty ancestor
+				 * chain gives a request that was never deleted.
+				 */
+				auth: resolveAuthForSend(request.auth, []),
+				stream: request.stream,
+				verifySSL: request.verifySSL,
+				followRedirects: request.followRedirects,
+			});
+			await navigator.clipboard.writeText(snippet.code);
+			showToast("Copied as curl", "success");
+		} catch (error) {
+			console.error("Failed to copy the request as curl:", error);
+			showToast("Couldn't copy to the clipboard", "error");
+		}
+	}, [request, showToast]);
+
+	return (
+		<ErrorState
+			title="This request no longer exists"
+			detail="It was deleted, or the collection it lived in was. Your edits are still here - copy them out before closing the tab."
+			action={
+				<div className="flex gap-2">
+					<Button variant="outline" size="sm" onClick={handleCopyCurl}>
+						Copy as curl
+					</Button>
+					{onCloseTab && (
+						<Button variant="outline" size="sm" onClick={onCloseTab}>
+							Close tab
+						</Button>
+					)}
+				</div>
+			}
+		/>
+	);
+}
 
 /**
  * RequestBuilder - Main entry point
@@ -102,6 +252,25 @@ export default function RequestBuilder() {
 	useEffect(() => {
 		if (fetchedRequest?.collectionId) setLastCollectionId(fetchedRequest.collectionId);
 	}, [fetchedRequest?.collectionId, setLastCollectionId]);
+
+	/*
+	 * Whether this tab ever saw its request load, across the tab's whole life
+	 * rather than just this render (issue #1436). A 404 that follows a real
+	 * load is a deletion with a draft worth offering; a 404 on the very first
+	 * fetch (a bad id, a tab restored after the row is long gone) has no draft
+	 * to preserve and gets the plain "no longer exists" pane instead.
+	 *
+	 * Adjusted during render, like `RequestBuilderProvider`'s own reset gates:
+	 * this is state derived from the query, and a ref read here would run
+	 * afoul of the same rule those gates exist to satisfy (a render can be
+	 * discarded or replayed, a ref cannot).
+	 */
+	const [hadRequestFor, setHadRequestFor] = useState({ id: selectedRequestId, had: false });
+	if (hadRequestFor.id !== selectedRequestId) {
+		setHadRequestFor({ id: selectedRequestId, had: !!fetchedRequest });
+	} else if (fetchedRequest && !hadRequestFor.had) {
+		setHadRequestFor((prev) => ({ ...prev, had: true }));
+	}
 
 	// Ancestor chain for the current request's collection (root-first)
 	const collectionAncestors = useCollectionAncestors(fetchedRequest?.collectionId);
@@ -469,88 +638,14 @@ export default function RequestBuilder() {
 		[fetchedRequest, composeForSend, activeEnvironmentId, queryClient, showToast]
 	);
 
-	// Save request callback
+	// Save request callback: only the fields the user actually changed since
+	// the draft's last known-good value (issue #1436) - see `buildUpdatePayload`.
 	const handleSave = useCallback(
-		async (request: RequestState) => {
-			if (!fetchedRequest) return;
-
-			// Build RequestBody discriminated union from flat UI state
-			let bodyPayload: RequestBody;
-			if (request.bodyMode === "form-data") {
-				bodyPayload = { mode: "form-data", fields: toKeyValueEntries(request.formData) };
-			} else if (request.bodyMode === "x-www-form-urlencoded") {
-				bodyPayload = {
-					mode: "x-www-form-urlencoded",
-					fields: toKeyValueEntries(request.urlEncoded),
-				};
-			} else if (request.bodyMode !== "none" && request.body) {
-				bodyPayload = {
-					mode: request.bodyMode as "json" | "text" | "graphql" | "jsonrpc" | "xml",
-					content: request.body,
-				};
-			} else {
-				bodyPayload = { mode: "none" };
-			}
-
-			const authPayload: RequestAuth = request.auth;
-
-			/*
-			 * A blank name is refused rather than saved.
-			 *
-			 * The Info tab restores the stored name on blur and says so, but the
-			 * debounced auto-save can fire while the field is still empty and
-			 * focused - so the guard has to be here too, where every save path
-			 * passes. Omitting the key leaves the stored name untouched (the
-			 * engine does a partial update on an existing id); sending `""` would
-			 * make a request nameless everywhere it is listed.
-			 *
-			 * `name` was omitted unconditionally until the Info tab gained a name
-			 * field. The reason was staleness, not ownership: the builder's copy
-			 * was a snapshot taken when the tab opened, so an auto-save fired
-			 * minutes after a sidebar rename carried the pre-rename name and
-			 * clobbered it. The provider now adopts a name that changes
-			 * underneath it, so the copy sent here is never stale.
-			 */
-			const name = request.name.trim();
-
-			await updateRequestMutation.mutateAsync({
-				id: fetchedRequest.id,
-				...(name ? { name } : {}),
-				description: request.description,
-				method: request.method as HttpMethod,
-				url: request.url,
-				params: toKeyValueEntries(request.params),
-				// Only the user's rows: nothing in editor state is Vayu's own any
-				// more (issue #1229), so this needs no filter to stay clean.
-				// `disabledDefaultHeaders` is deliberately absent - none of the
-				// opt-outs is persisted; they belong to a send, and the defaults
-				// they refuse are re-resolved from engine config on every one.
-				headers: toKeyValueEntries(request.headers),
-				body: bodyPayload,
-				bodyType: bodyPayload.mode,
-				auth: authPayload,
-				/*
-				 * Both scripts are sent as they are, empty string included.
-				 *
-				 * They used to be `|| undefined`, the only two fields in this
-				 * payload that were. `undefined` serialises the key out of the
-				 * body, and an absent key on a `PUT` means "leave the stored
-				 * value alone" (`apply_string_field` in the engine's routes) -
-				 * so deleting a whole script saved nothing while the Dock
-				 * reported "Saved", and the old script came back on the next
-				 * open. `""` is a value the engine stores, which is what
-				 * clearing a script means. Both fields are always strings here:
-				 * `createDefaultRequestState` seeds them `""` and the memo above
-				 * keeps them strings.
-				 */
-				preRequestScript: request.preRequestScript,
-				postRequestScript: request.testScript,
-				followRedirects: request.followRedirects,
-				maxRedirects: request.maxRedirects,
-				httpVersion: request.httpVersion,
-				verifySSL: request.verifySSL,
-				stream: request.stream,
-			});
+		async (request: RequestState, changedFields: ReadonlySet<MergeableRequestField>) => {
+			if (!fetchedRequest || changedFields.size === 0) return;
+			await updateRequestMutation.mutateAsync(
+				buildUpdatePayload(fetchedRequest.id, request, changedFields)
+			);
 		},
 		[fetchedRequest, updateRequestMutation]
 	);
@@ -811,7 +906,15 @@ export default function RequestBuilder() {
 	 */
 	const requestWasDeleted =
 		isRequestNotFound(requestLookupError) || (!isError && !fetchedRequest);
-	if (isError || !fetchedRequest) {
+	/*
+	 * A deletion this tab was open for has a draft worth keeping (issue #1436):
+	 * `RequestBuilderProvider` stays mounted below instead of being replaced by
+	 * the plain not-found pane, so `request` survives in context for
+	 * `DeletedRequestBanner` to offer. A first-load 404, or any non-deletion
+	 * error, still gets the full-pane swap - there is no draft yet either way.
+	 */
+	const deletedWithDraft = requestWasDeleted && hadRequestFor.had;
+	if ((isError || !fetchedRequest) && !deletedWithDraft) {
 		const closeTabAction = activeTab ? (
 			<Button variant="outline" size="sm" onClick={() => closeTab(activeTab.id)}>
 				Close tab
@@ -838,19 +941,27 @@ export default function RequestBuilder() {
 		<>
 			<RequestBuilderProvider
 				initialRequest={initialRequest}
-				collectionId={fetchedRequest.collectionId}
+				collectionId={fetchedRequest?.collectionId ?? null}
 				onExecute={handleExecute}
 				onExecuteStream={handleExecuteStream}
 				onSave={handleSave}
 				onStartLoadTest={handleStartLoadTest}
 			>
-				<RequestBuilderLayout />
-				{/* Render nothing. They publish this builder's live draft to the
-				    command registry, so the palette's "Load test …" and "Send …"
-				    act on the request as currently edited rather than as last
-				    saved. */}
-				<LoadTestCommandSurface />
-				<SendRequestCommandSurface />
+				{deletedWithDraft ? (
+					<DeletedRequestBanner
+						onCloseTab={activeTab ? () => closeTab(activeTab.id) : undefined}
+					/>
+				) : (
+					<>
+						<RequestBuilderLayout />
+						{/* Render nothing. They publish this builder's live draft to the
+						    command registry, so the palette's "Load test …" and "Send …"
+						    act on the request as currently edited rather than as last
+						    saved. */}
+						<LoadTestCommandSurface />
+						<SendRequestCommandSurface />
+					</>
+				)}
 			</RequestBuilderProvider>
 
 			{/* Load Test Configuration Dialog */}

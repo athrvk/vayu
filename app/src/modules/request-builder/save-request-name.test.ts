@@ -26,6 +26,12 @@
  * A scan, not a render, for the reason `redirect-policy-plumbing.test.ts` gives:
  * the save lives inside a `useCallback` wired to TanStack Query, several zustand
  * stores and the engine service, and standing that up would test the mocks.
+ *
+ * Updated for issue #1436: the payload is no longer built inline at the
+ * `mutateAsync` call site - it comes from `buildUpdatePayload`, a named
+ * function that includes each field only when the caller says it was touched,
+ * so a save carries just what the user changed. The scan below reads that
+ * function's body instead of the call site's object literal.
  */
 
 import { describe, it, expect } from "vitest";
@@ -38,9 +44,9 @@ const sources = import.meta.glob("/src/modules/request-builder/index.tsx", {
 
 const source = (Object.values(sources)[0] as string | undefined) ?? "";
 
-/** The object literal passed to `updateRequestMutation.mutateAsync(...)`. */
-function savePayload(src: string): string | null {
-	const start = src.indexOf("updateRequestMutation.mutateAsync(");
+/** The body of `buildUpdatePayload`, where the save payload is actually built. */
+function updatePayloadBody(src: string): string | null {
+	const start = src.indexOf("function buildUpdatePayload(");
 	if (start === -1) return null;
 	const open = src.indexOf("{", start);
 	if (open === -1) return null;
@@ -76,18 +82,20 @@ describe("the request builder save and the request name", () => {
 	});
 
 	it("sends the trimmed name, and omits the key when it is blank", () => {
-		const payload = savePayload(source);
-		expect(payload).not.toBeNull();
-		// Right block, non-empty: these builder-owned fields are still saved.
-		expect(payload).toContain("description: request.description");
-		expect(payload).toContain("url: request.url");
+		const body = updatePayloadBody(source);
+		expect(body).not.toBeNull();
+		// Right block, non-empty: these builder-owned fields are still saved
+		// when the caller says they were touched (issue #1436).
+		expect(body).toContain("payload.description = request.description");
+		expect(body).toContain("payload.url = request.url");
 		/*
-		 * The conditional spread is the whole guard. `name: name` would write an
-		 * empty string on a cleared field and leave the request nameless in the
-		 * sidebar, the tab strip and the breadcrumb; the engine does a partial
-		 * update, so an absent key keeps the stored name instead.
+		 * The `if (name)` guard is the whole rule. `payload.name = name`
+		 * unconditionally would write an empty string on a cleared field and
+		 * leave the request nameless in the sidebar, the tab strip and the
+		 * breadcrumb; the engine does a partial update, so an absent key keeps
+		 * the stored name instead.
 		 */
-		expect(payload).toMatch(/\.\.\.\(name \? \{ name \} : \{\}\)/);
-		expect(payload).not.toMatch(/\bname:\s*request\.name\b/);
+		expect(body).toMatch(/if \(name\) payload\.name = name;/);
+		expect(body).not.toMatch(/\bpayload\.name\s*=\s*request\.name\b/);
 	});
 });

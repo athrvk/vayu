@@ -116,3 +116,57 @@ describe("the request lookup failed", () => {
 		expect(screen.getByText(/no longer exists/i)).toBeTruthy();
 	});
 });
+
+/**
+ * A request the tab had already loaded, then lost (issue #1436): the plain
+ * "no longer exists" pane above discards the whole builder, including any
+ * unsaved edit. When there was something open first, the draft is worth
+ * keeping - `RequestBuilderProvider` stays mounted and a banner with a "Copy
+ * as curl" action replaces the layout instead of replacing the provider too.
+ */
+describe("a request that was open before it was deleted", () => {
+	const LOADED_REQUEST = {
+		id: "r1",
+		collectionId: "c1",
+		name: "Get user",
+		description: "",
+		method: "GET",
+		url: "https://api.test/u",
+		params: [],
+		headers: [],
+		body: { mode: "none" },
+		bodyType: "none",
+		auth: { mode: "none" },
+		preRequestScript: "",
+		postRequestScript: "",
+		followRedirects: true,
+		maxRedirects: 10,
+		httpVersion: "auto",
+		verifySSL: true,
+		stream: false,
+		order: 0,
+		createdAt: "2026-01-01T00:00:00.000Z",
+		updatedAt: "2026-01-01T00:00:00.000Z",
+	};
+
+	it("keeps the builder mounted and offers the draft instead of a plain 404", () => {
+		requestQuery.data = LOADED_REQUEST;
+		requestQuery.isError = false;
+		requestQuery.error = null;
+		const { rerender } = renderPane();
+
+		// Loaded fine: the ordinary layout is on screen.
+		expect(screen.getByTestId("builder-layout")).toBeTruthy();
+
+		// The request is deleted elsewhere - the query settles empty, same as a
+		// first-load 404, but this tab had it open.
+		requestQuery.data = undefined;
+		requestQuery.error = new RequestNotFoundError("r1");
+		rerender(<RequestBuilder />);
+
+		expect(screen.getByText(/no longer exists/i)).toBeTruthy();
+		expect(screen.queryByTestId("builder-layout")).toBeNull();
+		expect(screen.getByRole("button", { name: /copy as curl/i })).toBeTruthy();
+		expect(screen.getByRole("button", { name: /close tab/i })).toBeTruthy();
+	});
+});

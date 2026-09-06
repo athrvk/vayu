@@ -2244,20 +2244,98 @@ json scheme_to_auth_v2 (const json* scheme) {
     return json{ { "mode", "none" } };
 }
 
-/// The scheme a collection's auth is built from: the one the document's
-/// top-level `security` requires, else the first one it defines.
-const json* primary_scheme (const json* schemes, const json* security) {
+/// The scheme name and node a collection's auth is built from: the one the
+/// document's top-level `security` requires, else the first one it defines.
+/// Carrying the name too (not only the node) is what lets a per-operation
+/// `security` entry recognise "this names the same scheme the collection
+/// already took" and answer `inherit` rather than a redundant explicit mode.
+struct PrimaryScheme {
+    std::string name;
+    const json* node = nullptr;
+};
+
+PrimaryScheme primary_scheme (const json* schemes, const json* security) {
     const json* required = as_record (array_at (security, 0));
     if (required != nullptr && !required->empty () && schemes != nullptr) {
-        const json* named = prop (schemes, required->begin ().key ());
-        if (truthy (named)) {
-            return named;
+        const std::string key = required->begin ().key ();
+        if (const json* named = prop (schemes, key); truthy (named)) {
+            return { key, named };
         }
     }
     if (schemes == nullptr || !schemes->is_object () || schemes->empty ()) {
-        return nullptr;
+        return {};
     }
-    return &schemes->begin ().value ();
+    return { schemes->begin ().key (), &schemes->begin ().value () };
+}
+
+/**
+ * A per-operation `security` requirement as an override onto the collection's
+ * auth (issue #1444), or `nullopt` when the operation names no override and
+ * the request should keep today's answer, `inherit`.
+ *
+ * `security: []` is OpenAPI's explicit "this operation takes no auth" and is
+ * the one case that must never fall back to `inherit` - that is exactly the
+ * defect this issue fixes. A requirement naming the scheme the collection
+ * already took is answered as `inherit` too, since the two modes would be
+ * identical and `inherit` keeps following the collection if its auth is later
+ * edited. Anything Vayu cannot resolve to one concrete mode - more than one
+ * requirement (an OR of alternatives), a requirement naming more than one
+ * scheme (an AND), or a scheme type Vayu has no mode for (`mutualTLS`,
+ * `openIdConnect`, an unrecognised `type`) - is counted as `security_unmapped`
+ * and left on `inherit`, the safe default that sends what the collection
+ * already sends rather than guessing.
+ *
+ * Every non-`nullopt` return is `std::make_optional`, never a bare `json`:
+ * copy-initializing an `optional<json>` from a `json` puts nlohmann's
+ * `operator ValueType()` up against `optional`'s converting constructor,
+ * which GCC's release build reports as an ambiguity under `-Werror` (the same
+ * reason `scalar_stub` in `openapi_drafts.cpp` does).
+ */
+std::optional<json> operation_auth_override (const json* op_security,
+const json* schemes,
+const PrimaryScheme& collection_scheme,
+bool v3,
+ImportTally& tally) {
+    if (op_security == nullptr || !op_security->is_array ()) {
+        return std::nullopt;
+    }
+    if (op_security->empty ()) {
+        return std::make_optional (json{ { "mode", "none" } });
+    }
+    if (op_security->size () > 1) {
+        // An OR of alternative schemes - Vayu sends one mode per request and
+        // has no way to pick which alternative the caller meant.
+        tally.add ("security_unmapped");
+        return std::nullopt;
+    }
+    const json* requirement = as_record (&op_security->front ());
+    if (requirement == nullptr || requirement->empty ()) {
+        // `[{}]` - OpenAPI's spelling for "security is optional here". Vayu
+        // has no optional mode; sending none is the closer of the two guesses.
+        return std::make_optional (json{ { "mode", "none" } });
+    }
+    if (requirement->size () > 1) {
+        // An AND of multiple schemes at once - Vayu has no combined mode.
+        tally.add ("security_unmapped");
+        return std::nullopt;
+    }
+    const std::string scheme_name = requirement->begin ().key ();
+    if (scheme_name == collection_scheme.name) {
+        return std::nullopt;
+    }
+    const json* named = prop (schemes, scheme_name);
+    if (!truthy (named)) {
+        tally.add ("security_unmapped");
+        return std::nullopt;
+    }
+    json mapped = v3 ? scheme_to_auth_v3 (named) : scheme_to_auth_v2 (named);
+    if (mapped.at ("mode") == "none") {
+        // A declared scheme of a type `scheme_to_auth_*` has no mode for
+        // (`mutualTLS`, `openIdConnect`, an `apiKey` outside header/query).
+        tally.add ("security_unmapped");
+        return std::nullopt;
+    }
+    return std::make_optional (std::move (mapped));
 }
 
 /// One draft table row as a request stores it.
@@ -2308,9 +2386,16 @@ json draft_request (const SpecRequestDraft& entry) {
             rows.push_back ({ { "key", "Content-Type" },
             { "value", example.content_type }, { "enabled", true } });
         }
-        examples.push_back ({ { "name", example.name },
-        { "status", example.status }, { "headers", std::move (rows) },
-        { "body", example.body }, { "contentType", example.content_type } });
+        json row = { { "name", example.name }, { "status", example.status },
+            { "headers", std::move (rows) }, { "body", example.body },
+            { "contentType", example.content_type } };
+        // Engine-side provenance only (issue #1457): the renderer never reads
+        // it, but `POST /import/apply` must carry it through to the stored
+        // row so the bound export can find its way back to this entry.
+        if (example.spec_example_key) {
+            row["specExampleKey"] = *example.spec_example_key;
+        }
+        examples.push_back (std::move (row));
     }
 
     json request;
@@ -2445,8 +2530,13 @@ walk::Dialect dialect) {
     std::string base_url;
     const json* schemes = nullptr;
     if (v3) {
-        base_url = resolve_server_url (
-        array_at (prop (&document, "servers"), 0), source.source_url, tally);
+        const json* servers = prop (&document, "servers");
+        if (servers != nullptr && servers->is_array () && servers->size () > 1) {
+            // Only `servers[0]` becomes `{{baseUrl}}`; the rest name no
+            // environment an import can create (issue #1444).
+            tally.add ("servers_dropped", static_cast<int> (servers->size () - 1));
+        }
+        base_url = resolve_server_url (array_at (servers, 0), source.source_url, tally);
         schemes = as_record (
         prop (as_record (prop (&document, "components")), "securitySchemes"));
     } else {
@@ -2469,16 +2559,26 @@ walk::Dialect dialect) {
         schemes = as_record (prop (&document, "securityDefinitions"));
     }
 
+    const PrimaryScheme scheme = primary_scheme (schemes, prop (&document, "security"));
+
     OperationFolders folders (prop (&document, "tags"));
     const std::vector<SpecRequestDraft> drafts = import_drafts_of (document, tally);
     for (const SpecRequestDraft& entry : drafts) {
-        folders.place (draft_request (entry), entry.folder, entry.folder_from_tag);
+        json request = draft_request (entry);
+        if (std::optional<json> auth = operation_auth_override (
+            entry.security.has_value () ? &*entry.security : nullptr, schemes,
+            scheme, v3, tally);
+        auth.has_value ()) {
+            // Overrides `draft_request`'s default `inherit` - the request's
+            // own `security` named something the collection's does not.
+            request["auth"] = std::move (*auth);
+        }
+        folders.place (std::move (request), entry.folder, entry.folder_from_tag);
     }
 
     const json* info         = as_record (prop (&document, "info"));
     const std::string* title = as_str (prop (info, "title"));
     const std::string* about = as_str (prop (info, "description"));
-    const json* scheme = primary_scheme (schemes, prop (&document, "security"));
 
     json root;
     root["name"]        = title == nullptr ? "Imported API" : *title;
@@ -2486,7 +2586,8 @@ walk::Dialect dialect) {
     root["variables"]   = base_url.empty () ?
       json::object () :
       json{ { "baseUrl", { { "value", base_url }, { "enabled", true } } } };
-    root["auth"] = v3 ? scheme_to_auth_v3 (scheme) : scheme_to_auth_v2 (scheme);
+    root["auth"] =
+    v3 ? scheme_to_auth_v3 (scheme.node) : scheme_to_auth_v2 (scheme.node);
     root["preRequestScript"]  = "";
     root["postRequestScript"] = "";
     root["children"]          = folders.children ();
@@ -2502,7 +2603,7 @@ walk::Dialect dialect) {
     collections.push_back (std::move (root));
 
     json meta;
-    meta["format"]       = v3 ? "OpenAPI 3.0" : "OpenAPI 2.0 (Swagger)";
+    meta["format"]       = walk::dialect_format_name (document, dialect);
     meta["requestCount"] = static_cast<int> (drafts.size ());
     meta["folderCount"]  = static_cast<int> (folders.count ());
     if (const std::string strategy = folders.strategy (); !strategy.empty ()) {

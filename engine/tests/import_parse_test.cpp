@@ -374,6 +374,172 @@ TEST (ImportParse, TrustsAnExplicitEnabledMarkerOverTheValuePresenceHeuristic) {
 }
 
 /**
+ * An operation declared `security: []` is OpenAPI's explicit "this operation
+ * takes no auth" (issue #1444) - before this fix every operation imported as
+ * `inherit` regardless, so a request the document says takes none would have
+ * sent the collection's bearer token. Mutation check: dropping the empty-array
+ * branch in `operation_auth_override` reds this back to `inherit`.
+ */
+TEST (ImportParse, OperationSecurityEmptyArrayImportsWithNoAuth) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}}},
+        "security":[{"bearerAuth":[]}],
+        "paths":{"/public":{"get":{"security":[],"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& auth =
+    first_request (parsed.result.at ("collections")[0]).at ("auth");
+    EXPECT_EQ (auth.at ("mode"), "none");
+}
+
+/// The optional-security spelling `[{}]` is answered the same as `[]`.
+TEST (ImportParse, OperationSecurityEmptyRequirementImportsWithNoAuth) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}}},
+        "security":[{"bearerAuth":[]}],
+        "paths":{"/public":{"get":{"security":[{}],"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& auth =
+    first_request (parsed.result.at ("collections")[0]).at ("auth");
+    EXPECT_EQ (auth.at ("mode"), "none");
+}
+
+/**
+ * An operation naming a scheme other than the collection's own gets that
+ * scheme's mapped mode, not the collection's (issue #1444).
+ */
+TEST (ImportParse, OperationSecurityNamingADifferentSchemeGetsThatSchemesMode) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{
+            "bearerAuth":{"type":"http","scheme":"bearer"},
+            "basicAuth":{"type":"http","scheme":"basic"}
+        }},
+        "security":[{"bearerAuth":[]}],
+        "paths":{"/admin":{"delete":{"security":[{"basicAuth":[]}],"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& auth =
+    first_request (parsed.result.at ("collections")[0]).at ("auth");
+    EXPECT_EQ (auth.at ("mode"), "basic");
+}
+
+/**
+ * An operation naming exactly the scheme the collection already took is
+ * redundant with `inherit` and answered as `inherit` rather than as a
+ * duplicate, explicit mode (issue #1444). Mutation check: removing the
+ * `scheme_name == collection_scheme.name` guard in `operation_auth_override`
+ * reds this to `bearer` instead.
+ */
+TEST (ImportParse, OperationSecurityNamingTheCollectionsOwnSchemeStaysInherited) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}}},
+        "security":[{"bearerAuth":[]}],
+        "paths":{"/orders":{"get":{"security":[{"bearerAuth":[]}],"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& auth =
+    first_request (parsed.result.at ("collections")[0]).at ("auth");
+    EXPECT_EQ (auth.at ("mode"), "inherit");
+}
+
+/**
+ * A scheme type Vayu has no mode for (`mutualTLS`), an OR of alternatives, and
+ * an AND of multiple schemes all stay `inherit` - the safe default - and are
+ * counted as `security_unmapped` rather than guessed at (issue #1444).
+ */
+TEST (ImportParse, OperationSecurityItCannotMapStaysInheritedAndIsCounted) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{
+            "bearerAuth":{"type":"http","scheme":"bearer"},
+            "basicAuth":{"type":"http","scheme":"basic"},
+            "mtls":{"type":"mutualTLS"}
+        }},
+        "security":[{"bearerAuth":[]}],
+        "paths":{
+            "/mtls-only":{"get":{"tags":["ops"],"security":[{"mtls":[]}],"responses":{}}},
+            "/either":{"get":{"tags":["ops"],
+                "security":[{"bearerAuth":[]},{"basicAuth":[]}],"responses":{}}},
+            "/both":{"get":{"tags":["ops"],
+                "security":[{"bearerAuth":[],"basicAuth":[]}],"responses":{}}}
+        }})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    // All three share the `ops` tag, so all three land in one folder rather
+    // than at root (issue #710) - grouped deliberately, so the loop below sees
+    // every one of them.
+    const nlohmann::ordered_json& folder =
+    parsed.result.at ("collections")[0].at ("children")[0];
+    ASSERT_EQ (folder.at ("requests").size (), 3u);
+    for (const nlohmann::ordered_json& request : folder.at ("requests")) {
+        EXPECT_EQ (request.at ("auth").at ("mode"), "inherit") << request.at ("url");
+    }
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("security_unmapped"), 3);
+}
+
+/// An operation with no `security` key at all keeps today's answer.
+TEST (ImportParse, OperationWithNoSecurityKeyInheritsAndCountsNothing) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}}},
+        "security":[{"bearerAuth":[]}],
+        "paths":{"/pets":{"get":{"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& auth =
+    first_request (parsed.result.at ("collections")[0]).at ("auth");
+    EXPECT_EQ (auth.at ("mode"), "inherit");
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("security_unmapped"));
+}
+
+/// The same per-operation `security` rule applies to Swagger 2.0's
+/// `securityDefinitions`, not only to 3.x's `securitySchemes`.
+TEST (ImportParse, OperationSecurityIsReadForSwagger20Too) {
+    const ImportParse parsed = parse_import (R"({"swagger":"2.0","info":{"title":"T"},
+        "host":"api.example.com",
+        "securityDefinitions":{"basicAuth":{"type":"basic"}},
+        "security":[{"basicAuth":[]}],
+        "paths":{"/public":{"get":{"security":[],"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& auth =
+    first_request (parsed.result.at ("collections")[0]).at ("auth");
+    EXPECT_EQ (auth.at ("mode"), "none");
+}
+
+/**
+ * A `servers` array past the first entry names no environment an import
+ * creates; it is counted as `servers_dropped` rather than silently ignored
+ * (issue #1444).
+ */
+TEST (ImportParse, CountsEveryServerPastTheFirstAsDropped) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "servers":[
+            {"url":"https://api.example.com"},
+            {"url":"https://staging.example.com"},
+            {"url":"https://dev.example.com"}
+        ],
+        "paths":{}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("servers_dropped"), 2);
+}
+
+TEST (ImportParse, ReportsA31DocumentApartFrom30) {
+    const ImportParse v30 =
+    parse_import (R"({"openapi":"3.0.3","info":{"title":"T"},"paths":{}})", {}, {});
+    ASSERT_TRUE (v30.ok ()) << v30.error;
+    EXPECT_EQ (v30.result.at ("meta").at ("format"), "OpenAPI 3.0");
+
+    const ImportParse v31 =
+    parse_import (R"({"openapi":"3.1.0","info":{"title":"T"},"paths":{}})", {}, {});
+    ASSERT_TRUE (v31.ok ()) << v31.error;
+    EXPECT_EQ (v31.result.at ("meta").at ("format"), "OpenAPI 3.1");
+}
+
+/**
  * The Postman fields that used to be dropped with no counter (issue #1443):
  * a custom HTTP verb, an auth scheme Vayu cannot execute, a path variable, a
  * `raw`-less URL, `strictSSL`, and variable metadata. Each case is a mutation

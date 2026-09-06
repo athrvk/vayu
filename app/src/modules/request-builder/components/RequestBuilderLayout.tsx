@@ -31,6 +31,7 @@ import UrlBar from "./UrlBar";
 import RequestTabs from "./RequestTabs";
 import ResponseAnnouncer from "./ResponseAnnouncer";
 import ResponseViewer from "./ResponseViewer";
+import ExternalChangeNotice from "./ExternalChangeNotice";
 
 export default function RequestBuilderLayout() {
 	const { request, isExecuting, isStreaming, executeRequest, startLoadTest, canStartLoadTest } =
@@ -126,6 +127,10 @@ export default function RequestBuilderLayout() {
 			    description band made here before it became the Info tab. */}
 			<RequestBreadcrumb />
 			<UrlBar />
+
+			{/* A field the user is editing that an external write (typically an
+			    MCP agent) has changed to a different value (issue #1436). */}
+			<ExternalChangeNotice />
 
 			{/* Main content area with resizable panels */}
 			<ResizablePanelGroup

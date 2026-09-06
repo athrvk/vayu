@@ -1592,7 +1592,7 @@ export interface SpecDescribeRequest {
  * nothing.
  */
 export interface SpecDescribeResponse {
-	/** `"OpenAPI 3.0"` or `"OpenAPI 2.0 (Swagger)"`. */
+	/** `"OpenAPI 3.0"`, `"OpenAPI 3.1"` or `"OpenAPI 2.0 (Swagger)"`. */
 	format: string;
 	/** `info.title`, and `""` for a document that states none. */
 	title: string;
@@ -1890,6 +1890,8 @@ export interface ExportNotes {
 	settingsDropped: number;
 	/** Stored examples carrying a header besides `Content-Type`. */
 	exampleHeadersDropped: number;
+	/** Params or Headers rows sharing a key and location with an earlier row - only the first is written. */
+	duplicateParameterRowsDropped: number;
 }
 
 export interface SpecExportResponse {

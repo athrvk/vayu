@@ -67,6 +67,7 @@ function notes(overrides: Partial<ExportNotes> = {}): ExportNotes {
 		formValuesDropped: 0,
 		settingsDropped: 0,
 		exampleHeadersDropped: 0,
+		duplicateParameterRowsDropped: 0,
 		...overrides,
 	};
 }
@@ -262,6 +263,7 @@ describe("ExportSpecDialog", () => {
 					formValuesDropped: 1,
 					settingsDropped: 1,
 					exampleHeadersDropped: 2,
+					duplicateParameterRowsDropped: 1,
 				}),
 			})
 		);
@@ -269,6 +271,9 @@ describe("ExportSpecDialog", () => {
 
 		expect(await screen.findByText(/A skeleton document/)).toBeTruthy();
 		const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+		expect(lines).toContain(
+			"1 row sharing a key and location with an earlier row - only the first is declared"
+		);
 		expect(lines).toContain(
 			"1 request whose auth OpenAPI has no securityScheme for - not written"
 		);
@@ -350,10 +355,12 @@ describe("ExportSpecDialog", () => {
 		const placeholder = screen.getByRole("status", { name: "Assembling the document" });
 		expect(placeholder.className).toContain("surface-sunken");
 		// A heading bar, two for the paragraph that wraps under it, and a row per
-		// count: fourteen, the same for both directions since issue #1441. jsdom
-		// measures no heights, so the row counts those heights come from are what
-		// a test can hold.
-		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(17);
+		// count. The skeleton direction lists one more row than the bound
+		// direction since issue #1465 (fifteen vs fourteen), and the placeholder
+		// holds the larger of the two so neither answer grows the dialog when it
+		// lands. jsdom measures no heights, so the row counts those heights come
+		// from are what a test can hold.
+		expect(placeholder.querySelectorAll('[data-slot="skeleton"]').length).toBe(18);
 
 		first.settle(answer());
 		expect(await screen.findByText(/own document, updated/)).toBeTruthy();

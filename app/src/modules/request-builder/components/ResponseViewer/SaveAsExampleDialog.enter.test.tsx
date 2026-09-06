@@ -46,6 +46,7 @@ vi.mock("../../context", () => ({
 
 vi.mock("../RequestBreadcrumb", () => ({ default: () => <div /> }));
 vi.mock("../UrlBar", () => ({ default: () => <div /> }));
+vi.mock("../ExternalChangeNotice", () => ({ default: () => null }));
 vi.mock("../RequestTabs", () => ({ default: () => <div /> }));
 vi.mock("../ResponseAnnouncer", () => ({ default: () => <div /> }));
 vi.mock("../ResponseViewer", () => ({ default: () => <div /> }));

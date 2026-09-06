@@ -950,6 +950,13 @@ range, nothing is applied and the response is `400` with the specific reason(s):
 **Success response:** `200` - the full updated entries array (same shape as
 `GET /config`) plus `"success": true`.
 
+**The validation and the write are one lock scope, and the write is one
+transaction** (issue #1453): a reader (`GET /config`, or an internal reader
+like the proxy policy resolver that reads `proxyMode` and `proxyUrl` as two
+separate calls) can never observe some of a batch's keys applied and the rest
+still stale, and a failure partway through the write leaves every row
+unchanged rather than the ones written before it.
+
 ## Workspace
 
 ### POST /workspace/backup
@@ -2251,7 +2258,8 @@ of the export, because its requests describe the very operations being patched.
     "bodiesDropped": 0,
     "formValuesDropped": 0,
     "settingsDropped": 0,
-    "exampleHeadersDropped": 0
+    "exampleHeadersDropped": 0,
+    "duplicateParameterRowsDropped": 0
   }
 }
 ```
@@ -2339,6 +2347,10 @@ this direction has no media type for - GraphQL today), `formValuesDropped` (a
 form body's field values, its names still declared), `settingsDropped` (a
 non-default redirect, TLS, HTTP-version or streaming setting), and
 `exampleHeadersDropped` (a stored example's header besides `Content-Type`).
+A Params or Headers row sharing a key and location with an earlier row would
+produce two Parameter Objects for the same name+location, which OpenAPI
+forbids - only the first is written and the rest are counted as
+`duplicateParameterRowsDropped`.
 
 **Errors:** `400` for a missing or empty `collectionId`, or a `format` other
 than `json`/`yaml`. `404` when the collection does not exist. `409` when the
@@ -3518,6 +3530,13 @@ Update the canned response, live - the next caller receives the new one, with no
 restart and no captures lost. Merge-patch: an absent field keeps what the inbox
 is serving. The body may be the response object itself or `{"response": {...}}`,
 so a client can send back what `start` handed it. `404` for an unknown id.
+
+**Atomic against a concurrent update**, the same guarantee the resource `PUT`s
+above give (issue #1454): the read, the merge and the write are one acquisition
+of the inbox's own lock, not the database's - the canned response lives in
+memory - so two clients patching one inbox at the same moment each merge onto
+what the other just committed rather than onto the response as both of them
+found it.
 
 ### POST /inbox/:inboxId/stop
 

@@ -33,7 +33,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import type * as Monaco from "monaco-editor";
 import { Badge, Button, CodeEditor } from "@/components/ui";
-import { ScriptSnippets } from "@/components/shared";
+import { ExternalChangeCallout, ScriptSnippets } from "@/components/shared";
 import { insertSnippetAtCursor } from "@/lib/editor-snippet";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
@@ -49,7 +49,7 @@ import { isDataVariableName } from "@/lib/variable-resolution";
 import { useDataContract, useVariableResolver } from "@/hooks";
 import { cn } from "@/lib/utils";
 import type { Collection } from "@/types";
-import { ExternalChangeCallout, InfoBanner, SaveFailed } from "./shared";
+import { InfoBanner, SaveFailed } from "./shared";
 
 type ScriptKind = "pre" | "post";
 

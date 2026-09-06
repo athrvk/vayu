@@ -14,6 +14,7 @@
 #include <chrono>
 #include <expected>
 #include <format>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -315,17 +316,15 @@ const std::unordered_map<std::string, std::string>& updates) {
 } // namespace
 
 /**
- * @brief Parse, validate, and apply a POST /config request body.
+ * The parse-validate-write of POST /config, run under the caller's lock.
  *
- * Split out of the route handler so the validation path (and the specific
- * failure reason it now returns) is unit-testable without a live server.
- *
- * @return {http_status, json_body}. On validation failure the body carries the
- *         specific reason(s) - which key, and why (bad type / out of range) -
- *         so the app can show it instead of a generic "check the logs".
+ * @param before_write Test seam, invoked inside the lock scope immediately
+ *        before the batch is written - the only way to drive a competing
+ *        client into the window this closes (`tests/competing_writer.hpp`).
  */
-std::pair<int, nlohmann::json>
-apply_config_update (vayu::db::Database& db, const std::string& body) {
+static std::pair<int, nlohmann::json> apply_config_update_locked (vayu::db::Database& db,
+const std::string& body,
+const std::function<void ()>& before_write) {
     nlohmann::json json;
     try {
         json = nlohmann::json::parse (body);
@@ -341,6 +340,11 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
     }
 
     // Validate every key first; apply nothing unless all pass (all-or-nothing).
+    // True on both halves since #1453: the caller's lock (see
+    // apply_config_update below) holds this validation and the write below to
+    // one scope, so no reader can observe the keys that passed applied one at
+    // a time, and the write itself is one transaction (Database::with_lock is
+    // a mutex, not a transaction, so the write still needs its own atomicity).
     std::vector<vayu::db::ConfigEntry> to_update;
     std::vector<std::string> errors;
 
@@ -383,9 +387,10 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
         return { 400, config_error (joined) };
     }
 
-    for (const auto& entry : to_update) {
-        db.save_config_entry (entry);
+    if (before_write) {
+        before_write ();
     }
+    db.save_config_entries (to_update);
 
     vayu::utils::log_info ("POST /config - Updated " +
     std::to_string (to_update.size ()) + " config entries");
@@ -399,6 +404,41 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
     response["entries"] = entries_array;
     response["success"] = true;
     return { 200, response };
+}
+
+/**
+ * @brief Parse, validate, and apply a POST /config request body.
+ *
+ * Split out of the route handler so the validation path (and the specific
+ * failure reason it now returns) is unit-testable without a live server.
+ *
+ * **The validation and the write are one lock scope** (#1453). A batch that
+ * wrote each row under its own separate acquisition of the database mutex let
+ * a concurrent reader - `GET /config`, or an internal reader like
+ * `resolve_transport_policy` that reads `proxyMode` and `proxyUrl` as two
+ * separate calls - land between two of the batch's writes and see one key
+ * updated and the other stale, and let a mid-batch failure leave the rows
+ * before it applied. Holding the lock across the whole composite closes the
+ * reader window the same way `update_request_response` closes it for a
+ * merge-patch (#1440); `Database::save_config_entries` closes the failure
+ * window by writing every row in one transaction rather than one per call.
+ *
+ * @return {http_status, json_body}. On validation failure the body carries the
+ *         specific reason(s) - which key, and why (bad type / out of range) -
+ *         so the app can show it instead of a generic "check the logs".
+ */
+std::pair<int, nlohmann::json> apply_config_update (vayu::db::Database& db,
+const std::string& body,
+const std::function<void ()>& before_write) {
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock (
+    [&] { result = apply_config_update_locked (db, body, before_write); });
+    return result;
+}
+
+std::pair<int, nlohmann::json>
+apply_config_update (vayu::db::Database& db, const std::string& body) {
+    return apply_config_update (db, body, nullptr);
 }
 
 /**

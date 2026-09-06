@@ -424,12 +424,17 @@ Vayu has something to say, and otherwise left exactly as it was:
   or from a response you kept. One example for a status and media type is written
   as `example`; where the response already answers with a named `examples` map,
   the kept response is added to it as another entry and every entry the document
-  had stays. This is where work done in Vayu flows back into the contract. An
-  example Vayu only kept **part** of - the Examples panel marks those, and a big
-  response is capped as it is saved - is the one kind that does not: the status
-  is documented, the body is not, and the dialog counts it. Half a payload
-  written as the payload would be indistinguishable from a complete one to
-  everyone downstream, including the mock server.
+  had stays - unless it is an *edited* import, in which case it is written into
+  the entry it was imported from instead: Vayu remembers which one that was
+  (issue #1457), so the map keeps the same entries it had and only that one's
+  value changes. If the document has since dropped or renamed that entry, it is
+  added beside the rest, same as an example with no such history. This is where
+  work done in Vayu flows back into the contract. An example Vayu only kept
+  **part** of - the Examples panel marks those, and a big response is capped as
+  it is saved - is the one kind that does not: the status is documented, the
+  body is not, and the dialog counts it. Half a payload written as the payload
+  would be indistinguishable from a complete one to everyone downstream,
+  including the mock server.
 - **An example the document already documents is written nowhere**, and neither
   is one the *import* produced for a response that declares no example: the
   import sampled that value off the response's schema, and writing it back would
@@ -522,7 +527,9 @@ Everything in it is something the collection actually holds:
   toggle itself is stated explicitly as `x-vayu-enabled`, since neither a value
   nor its absence says so on its own: a disabled row can carry a value and an
   enabled one can carry none. `Authorization` and `Content-Type` are left out,
-  the two an import also drops.
+  the two an import also drops. OpenAPI allows only one Parameter Object per
+  name and location, so two rows sharing both write only the first - the rest
+  are counted, never a second entry the specification forbids.
 - **No schema Vayu did not see.** A request or response body is described only
   where there is a body to read a shape off, and what is written is the shape of
   that one example - types, nothing more - carrying a `description` that says so.
@@ -547,7 +554,7 @@ sampled off a schema when the document was imported), the `$ref` responses and
 to express - a request body, a row the operation declares no parameter for, and
 a request whose method or path is no longer the operation it is stamped as.
 
-A free-form export states eight things of its own, because a collection holds
+A free-form export states nine things of its own, because a collection holds
 more than OpenAPI has names for: the auth it could not turn into a
 `securityScheme`, a request carrying a pre- or post-request script (OpenAPI has
 no operation-scoped hook for one), a collection variable besides `baseUrl` (a
@@ -555,8 +562,9 @@ document has nowhere else to declare one), a folder nested more than one level
 (flattened to a single tag), a body in a mode this direction has no media type
 for (GraphQL today), a form body's field values (only the names are declared),
 a request holding a non-default execution setting (redirects, TLS verification,
-HTTP version, streaming - OpenAPI describes an API, not how to send to it), and
-an example's header besides `Content-Type`.
+HTTP version, streaming - OpenAPI describes an API, not how to send to it), an
+example's header besides `Content-Type`, and a Params or Headers row sharing a
+key and location with one already declared (only the first is written).
 
 A large document takes a moment to put together, and the dialog says so without
 moving anything: on the first read it holds the summary's shape until the

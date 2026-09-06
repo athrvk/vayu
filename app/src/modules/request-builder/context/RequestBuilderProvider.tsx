@@ -23,6 +23,7 @@ import { useAutoRecordSlot, UNSAVED_AUTO_KEY } from "./auto-record-slot";
 import { retainKeys } from "./retain-keys";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
+import { mergeExternalWrite } from "@/lib/field-merge";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
 import {
 	useCollectionAncestors,
@@ -57,6 +58,8 @@ import type {
 	VariableInfo,
 	VariableScope,
 	RequestBuilderContextValue,
+	MergeableRequestField,
+	RequestFieldConflicts,
 } from "../types";
 import { resolveAuthForSend } from "../utils/auth-resolution";
 import { createDefaultRequestState } from "../utils/request-state";
@@ -64,6 +67,32 @@ import { responseFromRunResult } from "../utils/restore-response";
 import { useExecutionEvents } from "../hooks/useExecutionEvents";
 import { useSendWithRow } from "../hooks/useSendWithRow";
 import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
+
+/**
+ * Every `RequestState` field the per-field merge below watches - everything
+ * `MergeableRequestField` allows, spelled out because `mergeExternalWrite`
+ * needs the list to iterate, not just the type.
+ */
+const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
+	"name",
+	"description",
+	"method",
+	"url",
+	"params",
+	"headers",
+	"bodyMode",
+	"body",
+	"formData",
+	"urlEncoded",
+	"auth",
+	"preRequestScript",
+	"testScript",
+	"followRedirects",
+	"maxRedirects",
+	"httpVersion",
+	"verifySSL",
+	"stream",
+];
 
 interface RequestBuilderProviderProps {
 	children: ReactNode;
@@ -127,7 +156,16 @@ interface RequestBuilderProviderProps {
 		request: RequestState,
 		dataRow?: Record<string, unknown>
 	) => Promise<StreamStartResult | null>;
-	onSave?: (request: RequestState) => Promise<void>;
+	/**
+	 * Save the request. `changedFields` is exactly what the user has touched
+	 * since the draft last agreed with the server (issue #1436) - a field
+	 * silently adopted from an external write is never in it, so the payload
+	 * `onSave` builds does not write that field back.
+	 */
+	onSave?: (
+		request: RequestState,
+		changedFields: ReadonlySet<MergeableRequestField>
+	) => Promise<void>;
 	onStartLoadTest?: (request: RequestState) => void;
 }
 
@@ -290,11 +328,87 @@ export default function RequestBuilderProvider({
 	 */
 	const changeTokenRef = useRef(0);
 	const [changeToken, setChangeToken] = useState(0);
-	const markDirty = useCallback(() => {
+	/**
+	 * Bump the generation without claiming an unsaved change of our own.
+	 *
+	 * `markDirty` below is for the user's edits, which need `hasUnsavedChanges`
+	 * too. A foreign write landing mid-save (issue #1436) is not an edit - most
+	 * of the time it is adopted with nothing left to save - but it still has to
+	 * move the generation, or `handleSave`'s in-flight check cannot tell "the
+	 * save's response is exactly what went out" from "something happened while
+	 * it was in the air" and would clear `hasUnsavedChanges` over a field the
+	 * merge just changed underneath the response.
+	 *
+	 * Called only from effects and event handlers, never from the render body:
+	 * `changeTokenRef` has to update synchronously, ahead of the next render,
+	 * for `handleSave`'s in-flight check to read the true latest value across
+	 * an `await` - and a ref write during render is exactly what React's rules
+	 * (and this repo's `react-hooks/refs` lint) forbid, since a render can be
+	 * discarded or replayed. The per-field merge below flags a foreign write by
+	 * changing `baseline`; the effect right after it is what turns that into a
+	 * generation bump, entirely outside the render phase.
+	 */
+	const bumpGeneration = useCallback(() => {
 		changeTokenRef.current += 1;
 		setChangeToken(changeTokenRef.current);
-		setHasUnsavedChanges(true);
 	}, []);
+	const markDirty = useCallback(() => {
+		bumpGeneration();
+		setHasUnsavedChanges(true);
+	}, [bumpGeneration]);
+
+	/*
+	 * The per-field merge state for issue #1436 - all of it `useState`, not a
+	 * ref, so the merge below can read and adjust it during render the same
+	 * way `lastReset` above does: this is state derived from props, and an
+	 * effect would paint the previous request's fields for a frame before
+	 * correcting them.
+	 *
+	 * `baseline` is the value the draft last agreed with the server on - not
+	 * necessarily `request`, which is whatever the user has typed.
+	 *
+	 * `touchedFields` is which top-level fields the user has edited since that
+	 * baseline - what `setRequest` adds to and a successful save clears. It is
+	 * what tells the merge "adopt silently" from "this is a conflict", and what
+	 * `handleSave` reads to send only what changed.
+	 */
+	const [baseline, setBaseline] = useState<RequestState>(request);
+	const [touchedFields, setTouchedFields] = useState<ReadonlySet<MergeableRequestField>>(
+		() => new Set()
+	);
+	const [fieldConflicts, setFieldConflicts] = useState<RequestFieldConflicts>({});
+	/**
+	 * The request this builder was showing has been deleted elsewhere, while
+	 * this tab still has it open (issue #1436). Sets `useSaveManager`'s
+	 * `enabled` to false, so a dirty draft's autosave timer - already armed, or
+	 * about to be - never fires a PUT against an id that now 404s.
+	 */
+	const [requestGone, setRequestGone] = useState(false);
+	/**
+	 * Which `initialRequest` object the merge below has already processed.
+	 * `index.tsx` only produces a new one when `fetchedRequest` itself changes
+	 * (its `useMemo` dep), so this reference check is what keeps the merge -
+	 * a JSON-comparing diff over every mergeable field - from running on every
+	 * keystroke instead of only on an actual refetch.
+	 */
+	const [lastProcessedInitialRequest, setLastProcessedInitialRequest] = useState<
+		Partial<RequestState> | undefined
+	>(undefined);
+
+	/*
+	 * The generation bump a foreign write earns (see `bumpGeneration` above),
+	 * done from an effect rather than from the merge block itself. Skips its
+	 * first run: `baseline`'s own mount is not a foreign write, and bumping the
+	 * generation before anything has been edited would just be noise.
+	 */
+	const isFirstBaselineEffectRef = useRef(true);
+	useEffect(() => {
+		if (isFirstBaselineEffectRef.current) {
+			isFirstBaselineEffectRef.current = false;
+			return;
+		}
+		bumpGeneration();
+	}, [baseline, bumpGeneration]);
 
 	/*
 	 * What the body modes you are not looking at were holding. It lives here
@@ -588,10 +702,14 @@ export default function RequestBuilderProvider({
 	 *
 	 * Adjusted during render rather than from an effect: this is state derived
 	 * from props, so an effect would first paint the previous request's state
-	 * and then correct it. The trigger is `id` / `collectionId` /
-	 * `initialResponse` - never the `initialRequest` object itself, which a
-	 * parent re-render replaces by reference and which would discard unsaved
-	 * edits (the reason this carried an `exhaustive-deps` suppression).
+	 * and then correct it. The trigger is `id` / `initialResponse` - never the
+	 * `initialRequest` object itself, which a parent re-render replaces by
+	 * reference and which would discard unsaved edits (the reason this carried
+	 * an `exhaustive-deps` suppression).
+	 *
+	 * `collectionId` alone is not a full reset (issue #1436): the same request
+	 * moved to a different collection is not a different request, and the
+	 * block below this one updates just that field in place.
 	 *
 	 * The mount pass is covered by the `useState` initialisers above, which set
 	 * exactly what this block would.
@@ -603,20 +721,26 @@ export default function RequestBuilderProvider({
 	});
 	if (
 		initialRequest &&
-		(lastReset.id !== initialRequest.id ||
-			lastReset.collectionId !== collectionId ||
-			lastReset.initialResponse !== initialResponse)
+		(lastReset.id !== initialRequest.id || lastReset.initialResponse !== initialResponse)
 	) {
 		setLastReset({ id: initialRequest.id, collectionId, initialResponse });
 		// Let the backend restore run again for whatever request is now on screen.
 		setRestoredFor(null);
 		setRestoredResponse(null);
-		setRequestState({
+		const seeded: RequestState = {
 			...createDefaultRequestState(),
 			...initialRequest,
 			collectionId: collectionId || null,
-		});
+		};
+		setRequestState(seeded);
 		setHasUnsavedChanges(false);
+		// A different request: the merge state below starts over from what it
+		// was just handed, not from the request we left (issue #1436).
+		setBaseline(seeded);
+		setTouchedFields(new Set());
+		setFieldConflicts({});
+		setRequestGone(false);
+		setLastProcessedInitialRequest(initialRequest);
 		// Clear any executing state carried over from the request we just left.
 		// It belongs to that request's in-flight run, not this one; without this
 		// the switched-to request shows a "Sending" spinner it never triggered.
@@ -636,50 +760,118 @@ export default function RequestBuilderProvider({
 			 */
 			setLocalResponse(initialResponse ?? null);
 		}
+	} else if (initialRequest && lastReset.collectionId !== collectionId) {
+		/*
+		 * The same request, moved to a different collection underneath us
+		 * (issue #1436, the `move_item` case). The reset above used to treat
+		 * this exactly like a different request and discard the whole draft;
+		 * now only `collectionId` moves; a dirty body or headers survive.
+		 */
+		setLastReset((prev) => ({ ...prev, collectionId }));
+		const nextCollectionId = collectionId || null;
+		setRequestState((prev) => ({ ...prev, collectionId: nextCollectionId }));
+		setBaseline((prev) => ({ ...prev, collectionId: nextCollectionId }));
 	}
 
 	/*
-	 * Adopt a name that changed underneath us.
-	 *
-	 * The reset above only fires on a change of `id`, and a rename does not
-	 * change the id - so the name the builder holds was, until this block, a
-	 * snapshot taken when the tab opened. That staleness is why the save payload
-	 * used to omit `name` entirely: an edit made minutes after a sidebar rename
-	 * fired a debounced auto-save carrying the pre-rename name and clobbered it.
-	 *
-	 * Keyed on the incoming *value*, not on the render: while the user types in
-	 * the Info tab the prop is unchanged, so nothing overwrites the local edit.
-	 * When their save lands the mutation writes the detail cache, the prop
-	 * changes, and this adopts the stored (trimmed) name - which also settles
-	 * the post-trim divergence rather than leaving the field permanently dirty
-	 * against its own saved value.
-	 *
-	 * `setRequestState`, not `setRequest`: adopting someone else's write is not
-	 * an unsaved change of ours, and marking it dirty would schedule a save that
-	 * writes back what we just read.
+	 * The request this builder is showing has been deleted elsewhere (issue
+	 * #1436): `index.tsx` keeps this provider mounted so the draft survives to
+	 * be offered, but stops handing it an `initialRequest` once the fetch 404s.
+	 * `request.id` is the guard against a brand-new, id-less builder (the
+	 * History run view's detached copy), which never has an `initialRequest`
+	 * either and is not "gone".
 	 */
-	const [lastKnownName, setLastKnownName] = useState(initialRequest?.name);
-	if (initialRequest?.name !== undefined && initialRequest.name !== lastKnownName) {
-		const adopted = initialRequest.name;
-		setLastKnownName(adopted);
-		setRequestState((prev) => ({ ...prev, name: adopted }));
+	if (!initialRequest && request.id && !requestGone) {
+		setRequestGone(true);
+	} else if (initialRequest && requestGone) {
+		setRequestGone(false);
 	}
 
 	/*
-	 * The other half of that: hand the stored name back when an edit is refused.
+	 * The per-field three-way merge (issue #1436), generalizing what used to be
+	 * a name-only special case (`useEntityDraft` and #1437's `InfoTab` proved
+	 * the shape first, for the collection tabs).
 	 *
-	 * `lastKnownName` is the last value the request query delivered, which is
-	 * the only copy of it here - `request.name` is whatever the user has typed.
-	 * Undefined only for a request the provider was handed without one, where
-	 * there is nothing to restore and leaving the field alone is the honest
-	 * answer.
+	 * A field the user has not touched since the last known-good value adopts
+	 * an external change silently - `setRequestState`, never `setRequest`,
+	 * because adopting someone else's write is not an edit of ours and marking
+	 * it dirty would schedule a save that writes back what we just read. A
+	 * field the user has touched, to a value the fetch now disagrees with, is
+	 * left alone and surfaced in `fieldConflicts` for the caller to show and
+	 * let the user resolve. `mergeExternalWrite` does the diffing; this block
+	 * only applies its outcome.
+	 *
+	 * Gated on `initialRequest`'s own identity, not on every render: it is a
+	 * JSON-comparing diff over every mergeable field, and `index.tsx` only
+	 * produces a new object when the underlying fetch actually changes.
+	 */
+	if (initialRequest && initialRequest !== lastProcessedInitialRequest) {
+		setLastProcessedInitialRequest(initialRequest);
+		const incoming: RequestState = { ...baseline, ...initialRequest };
+		const outcome = mergeExternalWrite(
+			MERGEABLE_FIELDS,
+			request,
+			baseline,
+			incoming,
+			touchedFields
+		);
+		if (outcome.changed) {
+			if (Object.keys(outcome.patch).length > 0) {
+				const patch = outcome.patch;
+				setRequestState((prev) => ({ ...prev, ...patch }));
+			}
+			// The generation bump this earns happens in the effect above, keyed
+			// on `baseline` changing - not here, so nothing during render writes
+			// the ref `handleSave`'s in-flight check reads.
+			setBaseline(outcome.nextBaseline);
+		}
+		if (JSON.stringify(outcome.conflicts) !== JSON.stringify(fieldConflicts)) {
+			setFieldConflicts(outcome.conflicts);
+		}
+	}
+
+	/**
+	 * Adopt the incoming value for one conflicted field (issue #1436's "Take
+	 * theirs"), the per-field sibling of #1437's `InfoTab.takeTheirName`.
+	 */
+	const takeExternalField = useCallback(
+		(field: MergeableRequestField) => {
+			const value = fieldConflicts[field];
+			if (value === undefined) return;
+			// Same cast `updateField` uses below: `field` and `value` are a
+			// matched pair by construction, which a plain computed property
+			// cannot tell TypeScript on its own.
+			const patch = { [field]: value } as Partial<RequestState>;
+			setRequestState((current) => ({ ...current, ...patch }));
+			setBaseline((prev) => ({ ...prev, ...patch }));
+			setTouchedFields((prev) => {
+				if (!prev.has(field)) return prev;
+				const next = new Set(prev);
+				next.delete(field);
+				return next;
+			});
+			setFieldConflicts((prev) => {
+				const next = { ...prev };
+				delete next[field];
+				return next;
+			});
+		},
+		[fieldConflicts]
+	);
+
+	/*
+	 * Hand the stored name back when an edit is refused.
+	 *
+	 * `baseline` holds the last value the request query delivered for every
+	 * mergeable field, `name` included - `request.name` is whatever the user
+	 * has typed. There is always a baseline once a request is loaded, so
+	 * nothing here is conditional the way the old `lastKnownName` state was.
 	 */
 	const restoreStoredName = useCallback(() => {
-		if (lastKnownName === undefined) return;
 		setRequestState((prev) =>
-			prev.name === lastKnownName ? prev : { ...prev, name: lastKnownName }
+			prev.name === baseline.name ? prev : { ...prev, name: baseline.name }
 		);
-	}, [lastKnownName]);
+	}, [baseline.name]);
 
 	// Centralized save manager - handles auto-save, keyboard shortcut, and status
 	const handleSave = useCallback(async () => {
@@ -689,13 +881,36 @@ export default function RequestBuilderProvider({
 		// it. The ref holds whatever the newest edit made it, which is the thing
 		// we are comparing against.
 		const savedGeneration = changeToken;
-		await onSave(request);
-		// An edit landed while this save was in flight: it is not in the payload
-		// that went out, so the request is still dirty and `useSaveManager` has
-		// to keep its debounce running for it.
+		// Snapshotting the set (state is already immutable per update, but the
+		// name says what matters): a `setRequest` that lands during the await
+		// cannot silently add to what this save already claims to have sent.
+		const changedFields = touchedFields;
+		await onSave(request, changedFields);
+		// An edit landed, or a foreign write arrived, while this save was in
+		// flight: either way `changeTokenRef` moved and the payload that went
+		// out is not the whole story any more, so the request is still dirty
+		// and `useSaveManager` has to keep its debounce running for it. Nothing
+		// below is safe to do in that case - not clearing the fields this save
+		// carried, since a fresh edit to one of them since the snapshot above
+		// would be forgotten, and not moving the baseline, since `request` no
+		// longer describes what was actually sent.
 		if (changeTokenRef.current !== savedGeneration) return;
+		if (changedFields.size > 0) {
+			setTouchedFields((prev) => {
+				const next = new Set(prev);
+				for (const field of changedFields) next.delete(field);
+				return next;
+			});
+			// `Record<string, unknown>`, not `Partial<RequestState>`: `field` is a
+			// plain union member here, not a generic correlated with `request[field]`,
+			// so TypeScript cannot verify the pair matches per assignment - the same
+			// reason `updateField` below casts at the call site instead.
+			const savedPatch: Record<string, unknown> = {};
+			for (const field of changedFields) savedPatch[field] = request[field];
+			setBaseline((prev) => ({ ...prev, ...(savedPatch as Partial<RequestState>) }));
+		}
 		setHasUnsavedChanges(false);
-	}, [request, changeToken, onSave]);
+	}, [request, changeToken, touchedFields, onSave]);
 
 	const {
 		forceSave,
@@ -706,13 +921,26 @@ export default function RequestBuilderProvider({
 		onSave: handleSave,
 		hasChanges: hasUnsavedChanges,
 		changeToken,
-		enabled: !!onSave,
+		// Not just `!!onSave`: a request deleted elsewhere (issue #1436) must
+		// not have its dirty draft's autosave timer - already armed, or about
+		// to be - fire a PUT against an id that now 404s.
+		enabled: !!onSave && !requestGone,
 	});
 
 	// Set request with change tracking
 	const setRequest = useCallback(
 		(updates: Partial<RequestState>) => {
 			setRequestState((prev) => ({ ...prev, ...updates }));
+			const editedFields = (Object.keys(updates) as (keyof RequestState)[]).filter((field) =>
+				MERGEABLE_FIELDS.includes(field as MergeableRequestField)
+			) as MergeableRequestField[];
+			if (editedFields.length > 0) {
+				setTouchedFields((prev) => {
+					const next = new Set(prev);
+					for (const field of editedFields) next.add(field);
+					return next;
+				});
+			}
 			markDirty();
 		},
 		[markDirty]
@@ -1065,6 +1293,8 @@ export default function RequestBuilderProvider({
 			updateField,
 			setDisabledDefaultHeaders,
 			restoreStoredName,
+			fieldConflicts,
+			takeExternalField,
 			getBodyDrafts,
 			setBodyDrafts,
 			getVariablesDraft,
@@ -1112,6 +1342,8 @@ export default function RequestBuilderProvider({
 			updateField,
 			setDisabledDefaultHeaders,
 			restoreStoredName,
+			fieldConflicts,
+			takeExternalField,
 			getBodyDrafts,
 			setBodyDrafts,
 			getVariablesDraft,

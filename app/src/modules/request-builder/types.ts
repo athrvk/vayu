@@ -376,11 +376,37 @@ export type StreamStartResult =
 // Context Types
 // ============================================================================
 
+/**
+ * The `RequestState` fields a fetch can report and the draft can therefore
+ * diverge from underneath the user (issue #1436) - every field except `id`
+ * and `collectionId` (the reset and move gates own those) and
+ * `disabledDefaultHeaders` (never persisted, so nothing external ever
+ * changes it).
+ */
+export type MergeableRequestField = keyof Omit<
+	RequestState,
+	"id" | "collectionId" | "disabledDefaultHeaders"
+>;
+
+/** A conflicted field's incoming value, keyed by field - see `fieldConflicts`. */
+export type RequestFieldConflicts = { [K in MergeableRequestField]?: RequestState[K] };
+
 export interface RequestBuilderContextValue {
 	// Request State
 	request: RequestState;
 	setRequest: (request: Partial<RequestState>) => void;
 	updateField: <K extends keyof RequestState>(field: K, value: RequestState[K]) => void;
+
+	/**
+	 * A field the user has touched that a fetch (typically an MCP write landing
+	 * mid-edit) has since changed to a different value (issue #1436). The
+	 * user's own value is kept in `request` until `takeExternalField` adopts
+	 * the incoming one; an untouched field never appears here; it is adopted
+	 * into `request` silently instead.
+	 */
+	fieldConflicts: RequestFieldConflicts;
+	/** Adopt the incoming value for one conflicted field, clearing the conflict. */
+	takeExternalField: (field: MergeableRequestField) => void;
 
 	/**
 	 * Which of the engine's own default headers this send refuses (issue #1229).

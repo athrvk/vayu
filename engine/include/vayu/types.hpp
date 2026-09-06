@@ -442,6 +442,12 @@ inline const char* to_string (ErrorCode code) {
 /**
  * @brief HTTP Response
  */
+// `optin.performance.Padding` is right that size-ordering these fields would
+// save 32 bytes, and the trade is refused deliberately, on the `ReportExtras`
+// precedent (`http/routes/runs.cpp`): the layout groups each field beside the
+// paragraph documenting what it means, and size order would interleave every
+// one of those groups for a saving smaller than one cache line.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct Response {
     int status_code = 0;
     std::string status_text;
@@ -1170,7 +1176,20 @@ struct RequestExample {
      * `false` for every row that predates the column, which is what they all
      * are - a row a delete had reached was gone.
      */
-    bool suppressed    = false;
+    bool suppressed = false;
+    /**
+     * The key this example was taken from a 3.x response's named `examples`
+     * map, if it was (issue #1457). NULL for every row that predates the
+     * column and for one taken from a single `example` or sampled off a
+     * schema - nullable rather than NOT NULL with a default, on the
+     * `Request::spec_operation` precedent: nothing to backfill it from, and
+     * NULL is the only spelling of "records no key".
+     *
+     * Not a display field, the same as `origin`: it exists so the bound
+     * export can write an edited example back into the document entry it
+     * came from instead of adding a new one beside it.
+     */
+    std::optional<std::string> spec_example_key;
     int64_t created_at = 0;
     int64_t updated_at = 0;
 };

@@ -850,6 +850,85 @@ TEST_F (DatabaseTest, MigratesHttpVersionColumnOntoAPreExistingRequestsTable) {
     sqlite3_close (handle);
 }
 
+// request_examples.spec_example_key (issue #1457) is nullable rather than NOT
+// NULL + default, so there is nothing to backfill: a row from before the
+// column existed simply has no key on it. Simulates the pre-existing table
+// the same way MigratesHttpVersionColumnOntoAPreExistingRequestsTable does.
+TEST_F (DatabaseTest, MigratesSpecExampleKeyColumnOntoAPreExistingExamplesTable) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+
+        Collection col;
+        col.id    = "col_pre_migration";
+        col.name  = "Pre-migration collection";
+        col.order = 0;
+        db.create_collection (col);
+
+        Request r;
+        r.id            = "req_pre_migration";
+        r.collection_id = "col_pre_migration";
+        r.name          = "Pre-migration request";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test/pre-migration";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+
+        RequestExample x;
+        x.id         = "exa_pre_migration";
+        x.request_id = "req_pre_migration";
+        x.name       = "200";
+        x.created_at = 1;
+        x.updated_at = 1;
+        db.save_request_example (x);
+    }
+
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        char* err = nullptr;
+        ASSERT_EQ (sqlite3_exec (handle, "ALTER TABLE request_examples DROP COLUMN spec_example_key",
+                   nullptr, nullptr, &err),
+        SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+        sqlite3_close (handle);
+    }
+
+    // Guard the guard: if the drop silently did nothing, the assertion below
+    // would pass without proving anything.
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        sqlite3_stmt* stmt = nullptr;
+        ASSERT_EQ (sqlite3_prepare_v2 (handle,
+                   "PRAGMA table_info(request_examples)", -1, &stmt, nullptr),
+        SQLITE_OK);
+        bool has_column = false;
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            const auto* col_name = vayu::db::column_text (stmt, 1);
+            if (col_name != nullptr && std::string (col_name) == "spec_example_key") {
+                has_column = true;
+            }
+        }
+        sqlite3_finalize (stmt);
+        sqlite3_close (handle);
+        ASSERT_FALSE (has_column) << "drop did not remove spec_example_key";
+    }
+
+    // The column is back, and the pre-existing row survived with its data
+    // intact and no key to have recorded - not silently dropped and
+    // recreated empty.
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto after = reopened.get_request_example ("exa_pre_migration");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->name, "200");
+    EXPECT_FALSE (after->spec_example_key.has_value ());
+}
+
 // A database written by an engine before issue #177 still carries the legacy
 // EAV `metrics` table and its index. sync_schema() only syncs the tables the
 // storage still declares - it never drops the ones removed from it - so
