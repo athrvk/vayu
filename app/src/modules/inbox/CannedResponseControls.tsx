@@ -33,8 +33,16 @@ import {
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import type { InboxCannedResponse, KeyValueItem } from "@/types";
-import { useToastStore } from "@/stores";
+import { useDraftSaveContext } from "@/hooks";
+import { useSaveStore, useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
+
+/**
+ * One inbox tab exists at a time (see the file this exports into), so one
+ * static id names the reply's save context - there is never a second canned
+ * response registered under it to collide with.
+ */
+const INBOX_REPLY_SAVE_CONTEXT = "inbox-reply";
 
 /**
  * The engine's cap on the artificial delay (`MAX_RESPONSE_DELAY_MS`).
@@ -62,6 +70,28 @@ function toHeaderRows(headers: Record<string, string>): KeyValueItem[] {
 	);
 }
 
+/**
+ * The header rows as a plain object, for comparing a draft against what the
+ * engine last served - not for applying, which is `collect`'s job and
+ * additionally refuses a blank name or a name set twice. A row with either of
+ * those problems still counts toward dirtiness: the point is "does this
+ * differ from what was served", not "is this valid to send".
+ */
+function draftHeaders(rows: KeyValueItem[]): Record<string, string> {
+	const headers: Record<string, string> = {};
+	for (const row of rows) {
+		const name = row.key.trim();
+		if (name === "" && row.value === "") continue;
+		headers[name] = row.value;
+	}
+	return headers;
+}
+
+function headersEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+	const keys = Object.keys(a);
+	return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+}
+
 interface CannedResponseControlsProps {
 	response: InboxCannedResponse;
 	pending: boolean;
@@ -71,7 +101,8 @@ interface CannedResponseControlsProps {
 	 * serve - the panel says so and takes no input rather than lying twice.
 	 */
 	stopped: boolean;
-	onApply: (response: Partial<InboxCannedResponse>) => void;
+	/** Rejecting is how a failed apply is reported - see `persist` below. */
+	onApply: (response: Partial<InboxCannedResponse>) => Promise<void>;
 }
 
 export function CannedResponseControls({
@@ -94,7 +125,22 @@ export function CannedResponseControls({
 		response.body !== "" || Object.keys(response.headers).length > 0
 	);
 
+	const startSaving = useSaveStore((s) => s.startSaving);
+	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
+	const failSave = useSaveStore((s) => s.failSave);
+
 	const disabled = stopped || pending;
+
+	// The visible "applied" state: true the moment any field diverges from what
+	// the engine last served, false once it matches again - which happens on its
+	// own after a successful apply, since the parent remounts this component on
+	// the served response (see the file comment on why that is a remount and not
+	// an effect).
+	const isDirty =
+		statusDraft !== String(response.status) ||
+		delayDraft !== String(response.delayMs) ||
+		bodyDraft !== response.body ||
+		!headersEqual(draftHeaders(headerRows), response.headers);
 
 	/**
 	 * Read the four drafts back, or say which one is wrong.
@@ -144,10 +190,40 @@ export function CannedResponseControls({
 		return { status, delayMs, body: bodyDraft, headers: Object.fromEntries(headers) };
 	};
 
-	const apply = () => {
+	/**
+	 * Reports through the save store rather than a bare toast (issue #1450): a
+	 * refused apply calls `failSave`, which is both the app's one save-failure
+	 * seam and how the Dock's error state gets shown, and a landed one clears
+	 * through `completeSaveThenIdle` the same way every other explicit save
+	 * does. Registered below as this reply's save, so this same function is
+	 * what a quit flush or Ctrl/Cmd+S runs - `useDraftSaveContext` wraps it in
+	 * its own `failSave` catch, which never fires here since this already
+	 * resolves instead of throwing.
+	 */
+	const persist = async () => {
 		const next = collect();
-		if (next) onApply(next);
+		if (!next) return;
+		startSaving();
+		try {
+			await onApply(next);
+			completeSaveThenIdle(INBOX_REPLY_SAVE_CONTEXT);
+		} catch (error) {
+			failSave(error instanceof Error ? error.message : "Could not update the response");
+		}
 	};
+
+	useDraftSaveContext({
+		id: INBOX_REPLY_SAVE_CONTEXT,
+		name: "Inbox reply",
+		isDirty,
+		// The inbox tab's content only mounts while it is the active tab (see
+		// `Shell.tsx`'s `renderTabContent`), so whenever this is mounted it is
+		// the one a quit flush or Ctrl/Cmd+S should reach.
+		isActive: true,
+		save: persist,
+	});
+
+	const applyDisabled = disabled || !isDirty;
 
 	const headerCount = headerRows.filter((row) => row.key.trim() !== "").length;
 
@@ -157,58 +233,68 @@ export function CannedResponseControls({
 			onOpenChange={setDetailsOpen}
 			className="border-b border-border"
 		>
-			<div className="flex flex-wrap items-end gap-3 px-3 py-2">
-				<div className="flex flex-col gap-1">
-					<Label htmlFor="inbox-status" className="text-xs">
-						Reply status
-					</Label>
-					<Input
-						id="inbox-status"
-						className="h-7 w-24 font-mono text-xs"
-						value={statusDraft}
-						disabled={disabled}
-						onChange={(e) => setStatusDraft(e.target.value)}
-					/>
-				</div>
-				<div className="flex flex-col gap-1">
-					<Label htmlFor="inbox-delay" className="text-xs">
-						Reply delay (ms)
-					</Label>
-					<Input
-						id="inbox-delay"
-						className="h-7 w-24 font-mono text-xs"
-						value={delayDraft}
-						disabled={disabled}
-						onChange={(e) => setDelayDraft(e.target.value)}
-					/>
-				</div>
-
-				<CollapsibleTrigger asChild>
-					<Button variant="ghost" size="sm" className="h-7">
-						<ChevronDown
-							className={cn(
-								"mr-2 h-3.5 w-3.5 transition-transform",
-								detailsOpen && "rotate-180"
-							)}
-							aria-hidden="true"
+			<div className="px-3 py-2">
+				<div className="flex flex-wrap items-end gap-3">
+					<div className="flex flex-col gap-1">
+						<Label htmlFor="inbox-status" className="text-xs">
+							Reply status
+						</Label>
+						<Input
+							id="inbox-status"
+							className="h-7 w-24 font-mono text-xs"
+							value={statusDraft}
+							disabled={disabled}
+							onChange={(e) => setStatusDraft(e.target.value)}
 						/>
-						{`Body and headers${headerCount > 0 ? ` (${headerCount})` : ""}`}
+					</div>
+					<div className="flex flex-col gap-1">
+						<Label htmlFor="inbox-delay" className="text-xs">
+							Reply delay (ms)
+						</Label>
+						<Input
+							id="inbox-delay"
+							className="h-7 w-24 font-mono text-xs"
+							value={delayDraft}
+							disabled={disabled}
+							onChange={(e) => setDelayDraft(e.target.value)}
+						/>
+					</div>
+
+					<CollapsibleTrigger asChild>
+						<Button variant="ghost" size="sm" className="h-7">
+							<ChevronDown
+								className={cn(
+									"mr-2 h-3.5 w-3.5 transition-transform",
+									detailsOpen && "rotate-180"
+								)}
+								aria-hidden="true"
+							/>
+							{`Body and headers${headerCount > 0 ? ` (${headerCount})` : ""}`}
+						</Button>
+					</CollapsibleTrigger>
+
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => void persist()}
+						disabled={applyDisabled}
+					>
+						Apply
 					</Button>
-				</CollapsibleTrigger>
+				</div>
 
-				<Button variant="outline" size="sm" onClick={apply} disabled={disabled}>
-					Apply
-				</Button>
-
-				{/* The set exists to test a sender's retry and error handling; saying
-				    so is cheaper than a doc nobody opens mid-debug. On a stopped
-				    inbox it says the other thing - that none of this is being
-				    served - because the controls above would otherwise read as an
-				    inbox waiting for callers it can no longer receive. */}
-				<p className="text-xs text-muted-foreground">
+				{/* Stacked under the row, not sharing it (docs/design-system.md's
+				    hint rule): a wrapping row would hand its width to this text and
+				    pin the shorter control wherever the wrap put it. The set exists
+				    to test a sender's retry and error handling; saying so is cheaper
+				    than a doc nobody opens mid-debug. On a stopped inbox it says the
+				    other thing - that none of this is being served - because the
+				    controls above would otherwise read as an inbox waiting for
+				    callers it can no longer receive. */}
+				<p className="text-xs text-muted-foreground mt-1.5">
 					{stopped
 						? "This inbox is stopped, so nothing is being served. Start a new one to change what callers receive."
-						: "What every caller receives - a 500 with a delay exercises their retries."}
+						: "Every caller to this inbox gets this reply. Apply sends the changes to the engine; the Dock reports the save."}
 				</p>
 			</div>
 

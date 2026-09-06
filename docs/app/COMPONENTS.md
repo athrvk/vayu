@@ -670,7 +670,12 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   `setState` inside an effect. Apply sends the whole response, not a diff: `PUT /inbox/:id` is a
   merge-patch, so an omitted `headers` is how a header the user deleted comes back. On a **stopped**
   inbox every control is disabled and says why - the route still merge-patches a stopped record, so
-  a live-looking panel there is an edit accepted for a reply nothing will ever send. The reply
+  a live-looking panel there is an edit accepted for a reply nothing will ever send. Apply reports
+  through the save store like every other explicit save (issue #1450): it dims once the drafts match
+  what the engine last served, and a press moves the Dock through its Saving/Saved or error states
+  instead of a bare success-free toast; the reply is also a registered `useDraftSaveContext`, so a
+  quit mid-apply or Ctrl/Cmd+S reaches it. The hint under the controls is a full-width line, never a
+  sibling in the controls' own flex row, per `docs/design-system.md`'s hint-stacking rule. The reply
   headers are
   [`KeyValueEditor`](#shared-keyvalue-editor-componentssharedkeyvalueeditor) rows, with no `variables` scope
   passed - a canned reply is echoed verbatim, so there is nothing to resolve. They were local
