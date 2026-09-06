@@ -1447,16 +1447,31 @@ SecuritySchemeRegistry& schemes) {
 
     Json parameters = Json::array ();
     append_path_parameters (templated, parameters);
+    // OpenAPI defines a unique parameter by name+location, so two rows sharing
+    // both would produce an invalid document; only the first is written, the
+    // same row `patch_parameters` matches on the bound direction.
+    std::unordered_set<std::string> declared_parameters;
     for (const ExportKeyValue& row : entry.params) {
-        if (!row.key.empty ()) {
-            parameters.push_back (parameter_object (row, "query"));
+        if (row.key.empty ()) {
+            continue;
         }
+        if (!declared_parameters
+            .insert ("query:" + vayu::utils::ascii_lower (row.key))
+            .second) {
+            notes.duplicate_parameter_rows_dropped += 1;
+            continue;
+        }
+        parameters.push_back (parameter_object (row, "query"));
     }
     for (const ExportKeyValue& row : entry.headers) {
         const std::string key = vayu::utils::ascii_lower (row.key);
         if (row.key.empty () ||
         std::find (NON_PARAMETER_HEADERS.begin (), NON_PARAMETER_HEADERS.end (),
         key) != NON_PARAMETER_HEADERS.end ()) {
+            continue;
+        }
+        if (!declared_parameters.insert ("header:" + key).second) {
+            notes.duplicate_parameter_rows_dropped += 1;
             continue;
         }
         parameters.push_back (parameter_object (row, "header"));
@@ -1721,7 +1736,8 @@ nlohmann::json export_notes_json (const ExportNotes& notes) {
         { "bodiesDropped", notes.bodies_dropped },
         { "formValuesDropped", notes.form_values_dropped },
         { "settingsDropped", notes.settings_dropped },
-        { "exampleHeadersDropped", notes.example_headers_dropped } };
+        { "exampleHeadersDropped", notes.example_headers_dropped },
+        { "duplicateParameterRowsDropped", notes.duplicate_parameter_rows_dropped } };
 }
 
 } // namespace vayu::core

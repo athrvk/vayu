@@ -599,6 +599,25 @@ TEST (SkeletonExport, DeclaresTheRowsTheRequestHoldsWithoutClaimingAnyAreRequire
     ])"));
 }
 
+TEST (SkeletonExport, StripsADuplicateParamsOrHeadersRowRatherThanWritingTwoParameterObjects) {
+    // OpenAPI defines a unique parameter by name+location; two rows sharing
+    // both would produce an invalid document. Case differs on purpose - the
+    // bound direction's own row match (`patch_parameters`) is case-insensitive
+    // for both locations, and the skeleton direction keeps that the same.
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    entry.params        = { row ("verbose", "1"), row ("Verbose", "2") };
+    entry.headers = { row ("X-Tenant", "acme"), row ("x-tenant", "acme2") };
+
+    const Exported exported = export_json ({ entry });
+    const json& parameters = operation_of (exported.document, "/pets", "get")["parameters"];
+    ASSERT_EQ (parameters.size (), 2);
+    EXPECT_EQ (parameters[0]["name"], "verbose");
+    EXPECT_EQ (parameters[0]["example"], "1");
+    EXPECT_EQ (parameters[1]["name"], "X-Tenant");
+    EXPECT_EQ (parameters[1]["example"], "acme");
+    EXPECT_EQ (exported.notes.duplicate_parameter_rows_dropped, 2);
+}
+
 TEST (SkeletonExport, WritesADisabledRowsToggleRatherThanGuessingItFromItsValue) {
     ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
     // A disabled row with a value, and an enabled row with none - the two
