@@ -1446,9 +1446,29 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 		"oauth2 detail Vayu has nowhere to store (state, or a pre-fetched token beside a grant)",
 		"oauth2 details Vayu has nowhere to store (state, or a pre-fetched token beside a grant)",
 	],
-	security_unmapped: [
-		"operation's security scheme Vayu cannot map (mutualTLS, openIdConnect, multiple alternatives) - request kept the collection's auth",
-		"operations' security schemes Vayu cannot map (mutualTLS, openIdConnect, multiple alternatives) - requests kept the collection's auth",
+	security_unmapped_or: [
+		"operation's security offering more than one alternative (an OR) - request kept the collection's auth",
+		"operations' security offering more than one alternative (an OR) - requests kept the collection's auth",
+	],
+	security_unmapped_and: [
+		"operation's security naming more than one scheme at once (an AND) - request kept the collection's auth",
+		"operations' security naming more than one scheme at once (an AND) - requests kept the collection's auth",
+	],
+	security_unmapped_scheme: [
+		"operation's security naming a scheme the document never declares - request kept the collection's auth",
+		"operations' security naming a scheme the document never declares - requests kept the collection's auth",
+	],
+	security_unmapped_mutualtls: [
+		"operation secured with mutualTLS, which Vayu has no mode for - request kept the collection's auth",
+		"operations secured with mutualTLS, which Vayu has no mode for - requests kept the collection's auth",
+	],
+	security_unmapped_openidconnect: [
+		"operation secured with openIdConnect, which Vayu has no mode for - request kept the collection's auth",
+		"operations secured with openIdConnect, which Vayu has no mode for - requests kept the collection's auth",
+	],
+	security_unmapped_type: [
+		"operation's security scheme of a type Vayu cannot map - request kept the collection's auth",
+		"operations' security schemes of a type Vayu cannot map - requests kept the collection's auth",
 	],
 	servers_dropped: [
 		"additional server URL (only the first becomes the collection's baseUrl)",

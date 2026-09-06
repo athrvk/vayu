@@ -386,9 +386,12 @@ request an apply updates or deletes lives beneath that collection, so a sync is
 an operation on one contract's collection and cannot reach anything else -
 including a second collection bound to the same document.
 
-Auth and scripts are not spec-derived and are never written by a sync: an import
-sets auth to `inherit` and the scripts to empty for every operation, so anything
-there is yours.
+Auth and scripts are never written by a sync. An import sets each operation's
+auth from its own `security` when the document declares one - `none` for an
+explicitly unauthenticated operation, the mapped mode for a scheme it names, or
+the collection's own `inherit` otherwise (see [Auth / security](import-collections/openapi-v3.md#auth--security))
+- and leaves every script empty. A sync neither compares nor rewrites either
+field afterward, so anything there is yours from that point on.
 
 ## Export - back out to a document
 

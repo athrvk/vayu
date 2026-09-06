@@ -543,9 +543,11 @@ const SpecComparison& comparison) {
         }
         const vayu::core::SpecRequestDraft& entry = comparison.fetched[diff.added[i]];
         // The same builder the diff reports its `draft` with, so the request an
-        // apply creates is the one the preview described. `auth`, the two scripts
-        // and the rest are left to the create defaults, which are what an OpenAPI
-        // import writes for every operation of every document.
+        // apply creates is the one the preview described. `auth` and the two
+        // scripts are left unset, taking the plain create default (`inherit`,
+        // empty scripts) - a sync never reads an operation's own `security`
+        // the way an import does (issue #1444), because the diff this payload
+        // comes from carries no such field to compare or apply.
         nlohmann::json item = draft_request_fields_json (entry.draft);
         item["tempId"]      = "tmp_req_" + std::to_string (create.size ());
         // Derived here because the engine never derives it from `body`.
