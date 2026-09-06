@@ -1592,7 +1592,7 @@ export interface SpecDescribeRequest {
  * nothing.
  */
 export interface SpecDescribeResponse {
-	/** `"OpenAPI 3.0"` or `"OpenAPI 2.0 (Swagger)"`. */
+	/** `"OpenAPI 3.0"`, `"OpenAPI 3.1"` or `"OpenAPI 2.0 (Swagger)"`. */
 	format: string;
 	/** `info.title`, and `""` for a document that states none. */
 	title: string;

@@ -963,10 +963,9 @@ std::vector<DeclaredOperation> declared_operations_of (const nlohmann::ordered_j
 
 DocumentDescription describe_document (const nlohmann::ordered_json& document) {
     DocumentDescription described;
-    switch (walk::spec_dialect (document)) {
-    case walk::Dialect::V3: described.format = "OpenAPI 3.0"; break;
-    case walk::Dialect::V2: described.format = "OpenAPI 2.0 (Swagger)"; break;
-    case walk::Dialect::None:
+    const walk::Dialect dialect = walk::spec_dialect (document);
+    described.format            = walk::dialect_format_name (document, dialect);
+    if (dialect == walk::Dialect::None) {
         // Readable, and not a contract. Said as an empty format rather than as a
         // failure, because the caller asked what these bytes are and "not an
         // OpenAPI document" is an answer to that question.

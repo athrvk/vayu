@@ -394,6 +394,18 @@ struct SpecRequestDraft {
     DeclaredOperation operation;
     DraftRequest draft;
     /**
+     * The operation's own `security` array, copied verbatim when the
+     * operation declares the key at all; absent when it does not (issue
+     * #1444).
+     *
+     * Deliberately not on @ref DraftRequest: that struct is what the sync
+     * diff compares, whose contract is one auth value for every operation of
+     * a document (see its own comment) - this is import-only, read by
+     * `parse_openapi` to decide whether a request's auth overrides that one
+     * value, and left unread by `spec_request_drafts_of`'s callers.
+     */
+    std::optional<nlohmann::ordered_json> security;
+    /**
      * Whether the `paths` key this hangs off is a path at all - see
      * `import_drafts_of`. Always true for a draft `spec_request_drafts_of`
      * returned, since a diff only ever sees identified operations.
