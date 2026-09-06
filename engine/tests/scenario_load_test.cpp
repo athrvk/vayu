@@ -785,9 +785,44 @@ TEST_F (ScenarioLoadTest, AMixedPassAndFailScriptReportsBothTalliesAndNamesTheFa
     const auto results = db_->get_results ("test-scenario-load");
     ASSERT_FALSE (results.empty ());
     const std::string& trace = results.back ().trace_data;
-    EXPECT_NE (trace.find ("body has a unicorn"), std::string::npos) << trace;
+    EXPECT_NE (trace.find ("body has a unicorn: AssertionError: Expected "
+                           "undefined to equal 'yes'"),
+    std::string::npos)
+    << trace;
     EXPECT_EQ (trace.find ("Script error: "), std::string::npos)
     << "a named assertion failure was reported as an opaque script error: " << trace;
+}
+
+// A script can run a test to completion and still throw afterwards - that is
+// a second, distinct failure and must not vanish just because the test that
+// already ran is tallied (issue #1502).
+TEST_F (ScenarioLoadTest, AScriptThatThrowsAfterAPassingTestStillReportsTheThrow) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].post_script =
+    "pm.test('ok', function () { pm.expect(1).to.equal(1); });"
+    "throw new Error('late boom');";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->passed, 1u)
+    << "the test that ran before the throw was dropped";
+    EXPECT_EQ (first_step->failed, 1u)
+    << "the throw after the test was silently dropped";
+
+    const auto results = db_->get_results ("test-scenario-load");
+    ASSERT_FALSE (results.empty ());
+    const std::string& trace = results.back ().trace_data;
+    EXPECT_NE (trace.find ("Script error: "), std::string::npos) << trace;
+    EXPECT_NE (trace.find ("late boom"), std::string::npos)
+    << "the thrown message was dropped: " << trace;
 }
 
 // A script that throws before ever calling `pm.test` has no tests to tally,
