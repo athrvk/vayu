@@ -349,6 +349,33 @@ describe("parseCommand - curl", () => {
 		expect(imported.request.url).toBe("https://x.com");
 	});
 
+	test("an unknown flag's swallowed value never outraces the URL (issue #1445)", () => {
+		// `--retry-delay` is not in CURL_SKIP_WITH_ARG, so its value (`5`) falls
+		// through as a bare token exactly like the URL does. Before the fix, the
+		// first bare token won regardless of shape, so this imported URL `5`.
+		const imported = importCommand(`curl --retry-delay 5 https://x.com`)!;
+		expect(imported.request.url).toBe("https://x.com");
+		expect(imported.dropped.map((d) => d.flag)).toEqual(
+			expect.arrayContaining(["--retry-delay", "5"])
+		);
+	});
+
+	test("an unknown value-carrying flag anywhere on the line imports the right URL (issue #1445)", () => {
+		const imported = importCommand(`curl --unknown-value-flag bar https://x.com`)!;
+		expect(imported.request.url).toBe("https://x.com");
+		expect(imported.dropped.map((d) => d.flag)).toEqual(
+			expect.arrayContaining(["--unknown-value-flag", "bar"])
+		);
+	});
+
+	test("a command with no recognizable URL falls back to the first bare token", () => {
+		// No positional here looks URL-shaped; the parser cannot know which one,
+		// if any, was meant as the target, so it keeps the previous behaviour
+		// rather than refusing the import outright.
+		const r = parseCommand(`curl foo bar`)!;
+		expect(r.url).toBe("foo");
+	});
+
 	test("--header=value inline form", () => {
 		const r = parseCommand(`curl https://x.com --header='X-A: 1'`)!;
 		expect(r.headers).toEqual(kv([{ key: "X-A", value: "1" }]));
@@ -416,6 +443,14 @@ describe("parseCommand - wget", () => {
 		expect(r.bodyMode).toBe("none");
 		expect(r.method).toBe("GET");
 		expect(r.url).toBe("https://x.com");
+	});
+
+	test("an unknown flag's swallowed value never outraces the URL (issue #1445)", () => {
+		const imported = importCommand(`wget --retry-delay 5 https://x.com`)!;
+		expect(imported.request.url).toBe("https://x.com");
+		expect(imported.dropped.map((d) => d.flag)).toEqual(
+			expect.arrayContaining(["--retry-delay", "5"])
+		);
 	});
 });
 
