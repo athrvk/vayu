@@ -27,10 +27,11 @@ interface HistoryUIState {
 	filterType: FilterType;
 	filterStatus: FilterStatus;
 	/**
-	 * Show only runs pinned as a baseline. Server-side, like the search: it
-	 * drives `GET /runs?baseline=true`, so a pin older than the pages the
-	 * sidebar has loaded is still findable - which a client-side sieve over the
-	 * loaded pages could not do, and finding pins is the whole point.
+	 * Show only pinned runs - of any type, not only load runs' comparison
+	 * baselines. Server-side, like the search: it drives `GET
+	 * /runs?baseline=true`, so a pin older than the pages the sidebar has
+	 * loaded is still findable - which a client-side sieve over the loaded
+	 * pages could not do, and finding pins is the whole point.
 	 */
 	pinnedOnly: boolean;
 	sortBy: SortBy;

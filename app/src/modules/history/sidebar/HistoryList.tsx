@@ -319,7 +319,7 @@ export default function HistoryList() {
 							size="sm"
 							className="h-8 gap-1 ml-auto"
 							aria-pressed={pinnedOnly}
-							title="Show only runs pinned as a baseline"
+							title="Show only pinned runs"
 						>
 							<Pin className="w-3.5 h-3.5 shrink-0" />
 							Pinned
