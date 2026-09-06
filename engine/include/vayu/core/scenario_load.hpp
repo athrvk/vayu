@@ -184,12 +184,17 @@ class StepHistograms {
     /// A completed step: its latency, and whether it counted as an error.
     void record (size_t step, double latency_ms);
     void record_error (size_t step);
+    /// One submission of this step whose bound request still carried a
+    /// `{{token}}` composition never resolved (issue #1503) - counted, not
+    /// refused, because a literal `{{` can be deliberate in a body.
+    void record_unresolved_token (size_t step);
 
     [[nodiscard]] size_t step_count () const {
         return histograms_.size ();
     }
     [[nodiscard]] size_t completed (size_t step) const;
     [[nodiscard]] size_t errors (size_t step) const;
+    [[nodiscard]] size_t unresolved_tokens (size_t step) const;
     [[nodiscard]] MetricsCollector::Percentiles percentiles (size_t step) const;
 
     private:
@@ -199,6 +204,7 @@ class StepHistograms {
     /// the reader has to be able to discount.
     std::vector<std::atomic<size_t>> completed_;
     std::vector<std::atomic<size_t>> errors_;
+    std::vector<std::atomic<size_t>> unresolved_tokens_;
 };
 
 /**

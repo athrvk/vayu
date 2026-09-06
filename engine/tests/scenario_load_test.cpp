@@ -598,6 +598,60 @@ TEST_F (ScenarioLoadTest, TheSummaryCarriesAPerStepBreakdownAndTheSharedScenario
     EXPECT_TRUE (summary["steps"][0]["latency"].contains ("p99"));
 }
 
+// A load run resolves no residual pass over what it binds (issue #1503): a
+// step whose URL still carries `{{missing}}` after composition sends it
+// literally on every iteration, and the run counts rather than refuses it -
+// both per step, in the breakdown, and once for the whole run, in the
+// metrics collector the top-level `warnings` line reads. Mutation check:
+// remove the `unresolved_token_names` scan in `submit_one` and this reds,
+// because nothing else in the load path ever looks for a `{{`.
+TEST_F (ScenarioLoadTest, AStepWithAnUnresolvedTokenCountsAndWarnsWithoutRefusingTheRun) {
+    ScenarioMockServer server;
+    auto execution =
+    plan_over ({ server.url ("/s0") + "?token={{missing}}", server.url ("/s1") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    EXPECT_EQ (summary["steps"][0]["unresolvedTokens"], 2)
+    << "both iterations of step0 carried the unresolved token";
+    EXPECT_EQ (summary["steps"][1]["unresolvedTokens"], 0)
+    << "step1 carries no token and must not be charged for step0's";
+
+    EXPECT_EQ (context_->metrics_collector->unresolved_token_requests (), 2u);
+    const auto names = context_->metrics_collector->unresolved_token_names ();
+    ASSERT_EQ (names.size (), 1u);
+    EXPECT_EQ (names[0], "missing");
+
+    // Never refused: both requests were still sent and completed.
+    EXPECT_EQ (summary["steps_executed"], 4);
+    EXPECT_EQ (summary["errored"], 0);
+}
+
+// A load run never executes a pre-request script at all (see this file's
+// header comment on the executor); the breakdown says so per step instead of
+// leaving the report silent about it, and a step with no script carries no
+// such key. Mutation check: remove the `pre_script.empty()` check in
+// `build_step_breakdown` and step0's entry loses the field.
+TEST_F (ScenarioLoadTest, AStepCarryingAPreRequestScriptReportsItSkippedInTheBreakdown) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].pre_script = "pm.environment.set('x', '1');";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    EXPECT_EQ (summary["steps"][0]["preRequestScript"], "skipped");
+    EXPECT_FALSE (summary["steps"][1].contains ("preRequestScript"))
+    << "a step with no pre-request script must not report one as skipped";
+}
+
 // Scripts stay deferred: a load-mode scenario runs none of them inline, and the
 // run acquires no run-level script to stand in for the steps' own. What it does
 // acquire (issue #450) is a per-step sample store for the steps that carry one,

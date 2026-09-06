@@ -498,6 +498,19 @@ const ScriptVariableScopes& scopes) {
     return std::nullopt;
 }
 
+std::vector<std::string> unresolved_token_names (vayu::Request& request) {
+    std::vector<std::string> names;
+    for (const std::string* text : resolvable_strings (request)) {
+        if (!holds_a_token (*text)) {
+            continue;
+        }
+        const auto split =
+        vayu::http::split_tokens (*text, [] (const std::string&) { return true; });
+        names.insert (names.end (), split.names.begin (), split.names.end ());
+    }
+    return names;
+}
+
 ExchangeOutcome execute_exchange (vayu::runtime::ScriptEngine& engine,
 vayu::http::CookieJar& jar,
 const std::string& cookie_scope,

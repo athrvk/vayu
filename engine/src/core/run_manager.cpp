@@ -1298,6 +1298,58 @@ struct RunTotals {
     MetricsCollector::Percentiles latency;
 };
 
+/**
+ * @brief What this run did not do, as the summary's `warnings` array (issue
+ *        #1503).
+ *
+ * A request sent with a `{{token}}` composition never resolved - no mode
+ * runs a residual pass under load, so this is the whole of what a caller
+ * learns about one - and, for a scenario run, a step whose pre-request
+ * script this mode never executes at all. Neither refuses the run: a
+ * literal `{{` can be deliberate in a body, and a run that already sent
+ * every request must still be reported as finished. Empty for a run with
+ * nothing to say, which is what lets the caller omit the key entirely.
+ */
+nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
+    nlohmann::json warnings = nlohmann::json::array ();
+
+    if (const size_t affected = context->metrics_collector->unresolved_token_requests ();
+    affected > 0) {
+        const auto names = context->metrics_collector->unresolved_token_names ();
+        std::string message = std::to_string (affected) +
+        (affected == 1 ? " request sent with an unresolved variable" :
+                         " requests sent with unresolved variables");
+        if (!names.empty ()) {
+            message += ": ";
+            for (size_t i = 0; i < names.size (); ++i) {
+                message += (i == 0 ? "" : ", ") + names[i];
+            }
+        }
+        warnings.push_back ({ { "code", "unresolved_tokens" },
+        { "message", message }, { "count", affected }, { "names", names } });
+    }
+
+    if (context->scenario) {
+        const auto& steps = context->scenario->plan.steps;
+        const auto skipped =
+        static_cast<size_t> (std::count_if (steps.begin (), steps.end (),
+        [] (const ScenarioStep& step) { return !step.pre_script.empty (); }));
+        if (skipped > 0) {
+            warnings.push_back ({ { "code", "pre_request_script_skipped" },
+            { "message",
+            std::to_string (skipped) +
+            (skipped == 1 ?
+            " step carries a pre-request script that does not run under "
+            "load" :
+            " steps carry a pre-request script that does not run under "
+            "load") },
+            { "steps", skipped } });
+        }
+    }
+
+    return warnings;
+}
+
 /** Everything the stored whole-run summary is built from. */
 RunSummaryInputs collect_summary_inputs (const std::shared_ptr<RunContext>& context,
 const RunTotals& totals,
@@ -1367,6 +1419,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     if (context->auth_refresh) {
         inputs.auth = context->auth_refresh->summary ();
     }
+    inputs.warnings = build_run_warnings (context);
     return inputs;
 }
 
@@ -1834,6 +1887,13 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
              { "p50", stream.events.p50 }, { "p90", stream.events.p90 },
              { "p95", stream.events.p95 }, { "p99", stream.events.p99 },
              { "count", stream.events.count } } } };
+    }
+    // What this run did not do (issue #1503). Omitted entirely for a run
+    // with nothing to report, so the report's `warnings` key reads as "this
+    // run had nothing to say" rather than as an empty array every run would
+    // otherwise carry.
+    if (!inputs.warnings.empty ()) {
+        summary["warnings"] = inputs.warnings;
     }
     return summary;
 }

@@ -905,6 +905,14 @@ struct RunSummaryInputs {
     // ordinary endpoint has no event rate, and a zeroed one would read as a
     // stream that delivered nothing.
     std::optional<MetricsCollector::StreamTotals> stream;
+
+    // What the run did not do, under the summary's `warnings` key (issue
+    // #1503): requests sent with an unresolved `{{token}}`, a pre-request
+    // script that carried a run and never ran. Always an array, empty for
+    // the ordinary run that had nothing to say - `build_run_summary_payload`
+    // omits the key entirely rather than storing `[]`, the same
+    // empty-is-absent rule `coverage` follows.
+    nlohmann::json warnings = nlohmann::json::array ();
 };
 
 /**

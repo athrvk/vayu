@@ -259,6 +259,13 @@ struct ReportExtras {
     // the section out, because a run whose responses were never checked did not
     // pass a contract. Sampled where `coverage` is exact; the block says so.
     nlohmann::json schema_validation = nlohmann::json::object ();
+    // What the run did not do (issue #1503): a request sent with an
+    // unresolved `{{token}}`, a step whose pre-request script this mode
+    // never ran. Verbatim from the summary - the producer already writes the
+    // report's shape. Empty is every run that had nothing to report, which
+    // leaves the key out entirely rather than an empty array every run would
+    // otherwise carry.
+    nlohmann::json warnings = nlohmann::json::array ();
 };
 
 // Read a number out of a JSON object, leaving @p out untouched when the key is
@@ -512,6 +519,14 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
     summary["schemaValidation"]["sampled"].is_number () &&
     summary["schemaValidation"]["sampled"].get<size_t> () > 0) {
         extras.schema_validation = summary["schemaValidation"];
+    }
+
+    // Same pass-through again (issue #1503): the array is the section, so an
+    // empty or absent one is a run that had nothing to report rather than
+    // one shown with a warning nobody wrote.
+    if (summary.contains ("warnings") && summary["warnings"].is_array () &&
+    !summary["warnings"].empty ()) {
+        extras.warnings = summary["warnings"];
     }
 
     if (summary.contains ("thresholds") && summary["thresholds"].is_object ()) {
@@ -1021,6 +1036,15 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
  * credential that was renewed under it.
  */
 void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& json_report) {
+    // What the run did not do (issue #1503) - above the sections it judges,
+    // for the same reason `RunEvents` sits above the status/error totals in
+    // the app's Overview: a green run and one that sent every request with
+    // an unresolved `{{token}}` must not read the same. Absent for a run
+    // with nothing to report.
+    if (!extras.warnings.empty ()) {
+        json_report["warnings"] = extras.warnings;
+    }
+
     // What the sequence did, step by step. `stepsStored` vs `stepsExecuted` is
     // the honest reading of `results[]` below: a run whose store filled reports
     // fewer rows than steps, with every non-passing step among them.

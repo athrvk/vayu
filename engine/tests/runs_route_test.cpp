@@ -907,6 +907,34 @@ TEST_F (RunsRouteTest, ReportOmitsSamplingWhenTheSummaryPredatesIt) {
     EXPECT_FALSE (body.contains ("sampling"));
 }
 
+// Issue #1503: what a run did not do survives the summary -> report round
+// trip, and a run with nothing to report carries no key at all rather than
+// an empty array every run would otherwise show.
+TEST_F (RunsRouteTest, ReportCarriesWarningsWhenTheRunHadAnyAndOmitsThemOtherwise) {
+    auto warned = summary_inputs ();
+    warned.warnings = nlohmann::json::array ({ { { "code", "unresolved_tokens" },
+    { "message", "2 requests sent with unresolved variables: token" },
+    { "count", 2 }, { "names", nlohmann::json::array ({ "token" }) } } });
+    seed ({ .id = "run_warned", .start_time = 1000 });
+    db_->update_run_summary (
+    "run_warned", vayu::core::build_run_summary_payload (warned).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_warned");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("warnings"));
+    ASSERT_EQ (body["warnings"].size (), 1u);
+    EXPECT_EQ (body["warnings"][0]["code"], "unresolved_tokens");
+    EXPECT_EQ (body["warnings"][0]["count"], 2);
+
+    seed ({ .id = "run_clean", .start_time = 1000 });
+    db_->update_run_summary ("run_clean",
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+    auto [clean_status, clean_body] =
+    vayu::http::routes::run_report_response (*db_, "run_clean");
+    ASSERT_EQ (clean_status, 200);
+    EXPECT_FALSE (clean_body.contains ("warnings"));
+}
+
 // Issue #1192: `responseSamplesDropped` counts both bounds on the response
 // sample store, and only one of them costs the tested set its uniformity. The
 // marker is what lets the app say which run it is looking at, so it has to

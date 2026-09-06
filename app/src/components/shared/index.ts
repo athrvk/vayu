@@ -45,6 +45,9 @@ export * from "./TestValidationSummary";
 // "These responses were stored verbatim" - wherever captured samples are shown
 export * from "./CapturedDataWarning";
 
+// "This run sent requests with an unresolved variable" - a load run's report
+export * from "./RunWarnings";
+
 // The same disclosure for a collection run's stored step exchanges
 export * from "./StoredExchangeWarning";
 

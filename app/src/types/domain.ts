@@ -1745,6 +1745,20 @@ export interface RunScenarioStepStat {
 		max: number;
 	};
 	/**
+	 * Executions of this step sent with a `{{token}}` composition never
+	 * resolved (issue #1503) - load mode runs no residual pass, so this is
+	 * counted rather than fixed. Always present on an engine that reports
+	 * this field at all; 0 is an honest "none of them".
+	 */
+	unresolvedTokens?: number;
+	/**
+	 * `"skipped"` when this step carries a pre-request script: load mode
+	 * never executes one (see {@link RunReport.scenario}'s sibling note),
+	 * and the field says so instead of leaving the report silent about it.
+	 * Absent for a step with no pre-request script.
+	 */
+	preRequestScript?: "skipped";
+	/**
 	 * What this step's own post-request script found, replayed after the run
 	 * against the responses *this step* produced (issue #450).
 	 *
@@ -1762,6 +1776,22 @@ export interface RunScenarioStepStat {
 }
 
 export interface RunReport {
+	/**
+	 * What this run did not do (issue #1503): a request sent with an
+	 * unresolved `{{token}}` because load mode runs no residual pass, or a
+	 * step whose pre-request script that mode never executes. Never refuses
+	 * the run - a literal `{{` can be deliberate in a body - only names it,
+	 * so a green run and one that quietly sent every request unauthenticated
+	 * do not read the same. Absent, not empty, for a run with nothing to
+	 * report.
+	 */
+	warnings?: Array<{
+		code: string;
+		message: string;
+		count?: number;
+		names?: string[];
+		steps?: number;
+	}>;
 	metadata?: {
 		runId: string;
 		runType: string;

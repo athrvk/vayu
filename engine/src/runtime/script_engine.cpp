@@ -8167,12 +8167,15 @@ ContextData* execution_context (JSContext* ctx, const char* member) {
         return nullptr;
     }
     if (!data->in_scenario) {
+        // Kept under 256 bytes with the longest member name substituted
+        // (issue #1503): QuickJS formats this into a fixed-size buffer
+        // (`JS_MakeError`, `vendor/quickjs-ng/quickjs.c`) and silently cuts
+        // whatever does not fit, mid-word - a vendored bound this file
+        // cannot raise, so the fix is a message that stays under it.
         JS_ThrowPlainError (ctx,
-        "pm.execution.%s is not available here: it redirects a collection "
-        "run's sequence, and this script is not running inside one. A single "
-        "send has no next request, and a load run's test scripts run after the "
-        "run has finished, against responses already recorded. See "
-        "docs/engine/scripting.md.",
+        "pm.execution.%s is not available here: a single send has no next "
+        "request, and a load run's scripts run after it finishes, against "
+        "recorded responses. See docs/engine/scripting.md.",
         member);
         return nullptr;
     }

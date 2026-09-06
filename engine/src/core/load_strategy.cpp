@@ -20,6 +20,7 @@
 #include "vayu/core/load_pacing.hpp"
 #include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -433,6 +434,17 @@ SubmissionRequest& live) {
         vayu::Error{ vayu::ErrorCode::DataBindingFailed, bound.error }),
         annotations);
         return;
+    }
+
+    // Whatever the bind above left unresolved goes on the wire regardless
+    // (issue #1503): a single-request load run runs no residual pass either,
+    // so the mistake is only counted, never refused. The token-free fast
+    // path above never copies `request` at all (issue #992) and is not
+    // scanned here for that reason - a plain `{{var}}` with no data or
+    // credential behind it is this scan's one remaining gap.
+    if (auto names = vayu::http::routes::unresolved_token_names (request);
+    !names.empty ()) {
+        context->metrics_collector->record_unresolved_token (names);
     }
 
     submit_to_loop (context, db, request, annotations);

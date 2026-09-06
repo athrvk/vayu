@@ -18,6 +18,7 @@ import { formatNumber } from "@/utils";
 import {
 	CapacitySummary,
 	ContractCoverage,
+	RunWarnings,
 	SampledSchemaValidation,
 	TestValidationSummary,
 	ThresholdVerdict,
@@ -47,6 +48,12 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			    always-visible header strip, so no separate "Test Configuration" card here. */}
 			<HeroRow d={derived} />
 			<ModeStatsRow d={derived} />
+
+			{/* Above the verdict it would otherwise hide behind: a run that sent
+			    every request with an unresolved variable, or skipped a
+			    pre-request script, still passes its budgets and still reads
+			    green below. Absent for a run with nothing to report. */}
+			<RunWarnings warnings={report.warnings} />
 
 			{/* Directly under the numbers it judges - the verdict is the first
 			    question a stored run is opened to answer. Absent for a run that
