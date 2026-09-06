@@ -61,6 +61,17 @@ nothing forces it (ninja re-runs CMake itself when `CMakeLists.txt` or
 clean rebuilds and branch switches. Details:
 `docs/engine/building.md#faster-rebuilds`.
 
+**The cloud box has a ceiling.** Two engine builds fit on its 16 GB at once;
+three do not, and the one the OOM killer takes fails with no compiler error.
+`build.py -e -t` also compiles the test suite, so when only the binary is
+wanted run `ninja -C engine/build vayu-engine`, and `-j3` beside another
+build. Writable disk is a per-session allowance: two build trees plus a
+worktree's `node_modules` reach it, and a full disk fails a *link*, not a
+compile. `/opt/vcpkg/buildtrees` and a finished worktree's `node_modules` are
+the safe things to delete. After a `builtin-baseline` bump, objects compiled
+against the old headers still link and then crash at startup (a library type
+gained members); delete `engine/build` rather than bisecting.
+
 **Three build failures that look like walls and are not.** Each has one cure;
 they are listed here, not only in `engine/CLAUDE.md`, because the message
 appears while running `build.py` from the repo root.
@@ -182,6 +193,7 @@ Repo-level docs:
 | `docs/lock-file-handling.md` | Lock / concurrency behaviour |
 | `docs/request-storage-design.md` | How requests are stored |
 | `CONTRIBUTING.md` | PR process or style rules |
+| `docs/compare/*.md` | Any capability claim a comparison page makes: timers, correlation, controllers, import formats, scripting |
 
 **Deferred work is filed as a GitHub issue in the same commit that defers it.**
 There is no backlog file; the tracker is the only backlog. A comment saying
@@ -192,12 +204,20 @@ it does it, or what it can do.** Lint scope, test shape, tooling ergonomics and
 dev-script hygiene are noted in the PR body, not filed. If it would not change
 a user's experience or a measurement, it is not tracked work.
 
+**An issue is written for the session that will implement it without this
+conversation.** Problem with `file:line` anchors at a named master SHA, Fix
+pathway, App changes, Tests with the mutation check named, Docs to update in
+the same commit, Sequencing against the open issues it touches, Acceptance
+criteria a fresh checkout can verify. Phased work is a parent with sub-issues
+and a landing order. A closure is verified against those criteria, not against
+the PR's description; a PARTIAL reopens with exactly what is missing.
+
 **`docs/` is published** to <https://athrvk.github.io/vayu/> via MkDocs, and
 `mkdocs build --strict` gates every docs-touching PR: a broken relative link or
 a missing heading anchor is a build failure. Before adding, moving or renaming a
 page, load the **`docs-site`** skill.
 
-## Subagents in worktrees - check the base first
+## Subagents in worktrees - check the base, own the worktree
 
 Worktree provisioning cuts from **`master`**, not the branch you are on, and
 not always from its tip. An agent that does not check produces findings against
@@ -214,6 +234,15 @@ git merge-base --is-ancestor HEAD <expected>   # ok to fast-forward if clean
 A strict ancestor with a clean tree can be repaired losslessly
 (`git reset --hard <expected>`); anything else should stop and report. Have the
 agent state which case applied, so a silent misfire still shows up.
+
+**One worktree per agent, never a shared one**, cut by the orchestrator
+(`git -C /home/user/vayu worktree add <scratch>/<name> <sha>`) and removed by
+the agent at the end (`git worktree remove --force`, then `git worktree list`
+to confirm). A shared tree mixes one agent's mutation check or stray test file
+into another's findings. Each agent picks its own engine and vite ports, kills
+what it started by saved PID (never `pkill -f`: another agent's engine has the
+same name), reverts every mutation check with `git checkout -- <file>`, and
+ends with `git status --short` empty.
 
 ## Where the rest lives
 

@@ -175,6 +175,29 @@ a change touches (#946), so nothing else holds an untouched file at zero.
 - **A fixture that opens a scratch `Database` cleans up with
   `vayu::tests::remove_database_files`** (`engine/tests/temp_database.hpp`),
   never a hand-written suffix list: an opened database writes six files (#413).
+- **A startup repair pass is scoped, transactional, marked done, and backed up
+  first** (#1487, `Database::strip_stored_managed_headers`, the repair section
+  of `docs/engine/db-schema.md`). `/health` does not answer until `init ()`
+  returns, so a pass that loads every row is a startup hang on a large
+  workspace: select candidates with a SQL predicate, rewrite them inside one
+  `transaction_guard` (the `seed_default_config` shape), record a done marker
+  so the next start skips the scan, and write `<db>.pre-upgrade.bak`
+  immediately before the first rewrite. `<db>.bak` is not that copy: the next
+  clean start refreshes it from a file the repair has already rewritten.
+- **Removing a column from a `make_table` mapping is `ALTER TABLE DROP COLUMN`
+  at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or
+  later; the bundled one is 3.53), which runs before `init ()` and therefore
+  before any repair pass can read the column. Read the data out in a step
+  that runs ahead of the probe (the `PRAGMA user_version`-gated migration
+  #1513 introduces) or keep the column mapped; a pass that runs after the
+  probe reads a column that is already gone.
+- **The logger has two switches, and the request log is not yet one of them.**
+  `vayu::utils::Logger` has a console verbosity (`-v 0|1|2`: warnings and
+  errors, info, debug) and a separate file level (`logLevel`, default debug,
+  with rotation under `maxLogFileBytes`). A route's request line is
+  hand-written per route today and about half the routes have none, `GET
+  /inbox` and the mock listings among them, so an absent log line is not
+  evidence a route did not run; #1510 centralises one line per call.
 - **vcpkg manages every C++ dependency**: add one in `engine/vcpkg.json`. In
   the cloud dev environment a port fetched by `vcpkg_from_github` fails on a
   cold cache with `curl operation failed with response code 403` (the egress
@@ -185,6 +208,11 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `ryml`) fetches three `vcpkg_download_distfile` sub-archives the fixer leaves
   alone; rewrite those to `vcpkg_from_git` in the overlay. Only this
   environment needs it; CI reaches the archives.
+  The same environment ships `/opt/vcpkg-overlay-ports`, pinned to the
+  manifest's current versions, so a checkout at an older tag (a migration or
+  upgrade sweep) wants older ports: copy the overlay and run
+  `VAYU_ENGINE_DIR=<checkout>/engine VCPKG_OVERLAY_PORTS=<copy> vcpkg-fix-port
+  <ports>`, then `touch engine/vcpkg.json` so ninja re-runs the configure.
 - **The git pre-commit hook installs itself** with `python build.py --setup`,
   which `.claude/hooks/session-start.sh` also runs - `.git/hooks` is not tracked,
   so every clone and every cloud session would otherwise start without the one
@@ -303,6 +331,23 @@ logged as a warning: it means a client skipped composition.
   per-resource appliers (`apply_collection_fields` / `apply_request_fields` /
   `apply_environment_fields`, declared in `routes.hpp`) back both paths, so a
   field added there reaches bulk import too.
+- **A core that reads, decides and writes holds one lock** (#386, #1440,
+  #1453, #1454, #1455). `Database::with_lock` scopes the mutex around the
+  whole composite; a merge-patch is `update_<resource>_locked` called inside
+  it, with a `before_write` seam that `tests/competing_writer.hpp` uses to
+  drive a second writer into the window. The manager-backed resources (an
+  inbox's reply, a mock issuer) hold their own mutex across merge and write
+  the same way. A PUT that reads under one acquisition and writes under
+  another loses the other writer's fields with no error on either side.
+  `docs/engine/architecture.md` names the two shapes that need it.
+- **A behaviour attached to a request or collection at a phase of a step is
+  an element kind, not a column** (#1512): extractors, assertions, timers,
+  controllers, scripts and metrics each register once under
+  `engine/src/core/elements/`, are validated against that registry, served by
+  `GET /elements/kinds`, and run by one pipeline in every execution path.
+  #1513 lands the registry, the `elements` column and the migration of the two
+  script columns; until it does, do not add another behaviour column beside
+  `pre_request_script` / `post_request_script`.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the
@@ -585,7 +630,9 @@ before the send, in the same words and with the same code compose uses for the
 (#1095): the empty-name rule reads every header name, the collision rule only
 the names that still held a token. A data row whose header-name column is
 blank is refused at bind time (`core/scenario_data.cpp`), because the load
-path runs no residual pass over what it binds.
+path runs no residual pass over what it binds - which is also why a value a
+script sets on step 1 never reaches step 2's `{{token}}` under load (#1495 adds
+the pass, with per-user scopes).
 
 **The renderer's resolver is preview-only.** `useVariableResolver` /
 `app/src/lib/variable-resolution.ts` back tab titles, previews, unresolved-token
