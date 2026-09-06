@@ -542,6 +542,30 @@ ExportNotes& notes) {
     }
 }
 
+/**
+ * The description an undeclared response's Response Object is written with.
+ *
+ * The example's own name is what the user (or the import) called it, which
+ * beats a generated line - and `response_example` always names a described
+ * response "<status> - <description>", so a single leading copy of that
+ * prefix is the normal, first-generation shape and stays. Only a *doubled*
+ * prefix is rewritten: reimporting a prior export's own generated
+ * description prepends the prefix again on top of the one it already carries,
+ * and writing that back verbatim would accrete another copy every further
+ * export/reimport cycle. One copy of the doubled pair is stripped so the text
+ * a fresh export produces stays the same across repeated cycles.
+ */
+std::string undeclared_response_description (const std::string& status,
+const std::string& example_name) {
+    const std::string self_prefix    = status + " - ";
+    const std::string doubled_prefix = self_prefix + self_prefix;
+    const std::string description =
+    example_name.compare (0, doubled_prefix.size (), doubled_prefix) == 0 ?
+    example_name.substr (self_prefix.size ()) :
+    example_name;
+    return description.empty () ? status + " response" : description;
+}
+
 void write_response_examples (Json& responses,
 const std::vector<ExportExample>& examples,
 ExportNotes& notes,
@@ -594,13 +618,10 @@ ExportDirection direction) {
         }
         if (!declared_here) {
             // A Response Object's `description` is required, so one has to be
-            // written for a status the document does not already document. The
-            // example's own name is what the user (or the import) called it,
-            // which beats a generated line - and an existing description is
-            // never replaced.
+            // written for a status the document does not already document, and
+            // an existing description is never replaced.
             responses[status] = Json{ { "description",
-            group.front ()->name.empty () ? status + " response" :
-                                            group.front ()->name } };
+            undeclared_response_description (status, group.front ()->name) } };
         }
         Json& response = responses[status];
         for (const auto& [content_type, write] : planned) {

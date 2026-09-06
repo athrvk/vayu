@@ -836,6 +836,20 @@ TEST (SkeletonExport, WritesResponsesFromStoredExamplesAndNothingElse) {
     EXPECT_EQ (exported.notes.examples_written, 2);
 }
 
+TEST (SkeletonExport, StripsARepeatedStatusPrefixInsteadOfAccretingOneOnEveryReimport) {
+    // "200 - 200 - A user" is what `response_example` derives on import from a
+    // prior export's own generated description "200 - A user" - the reimported
+    // example carries the status prefix twice. Exporting it again must land
+    // back on the single-prefix form, not "200 - 200 - 200 - A user".
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    entry.examples      = { example ("200 - 200 - A user") };
+
+    const Exported exported = export_json ({ entry });
+    const json& responses =
+    operation_of (exported.document, "/pets", "get")["responses"];
+    EXPECT_EQ (responses["200"]["description"], "200 - A user");
+}
+
 TEST (SkeletonExport, DerivesNoSchemaFromABodyItOnlyHasPartOf) {
     ExportExample partial  = example ();
     partial.body           = R"({"id":"p1","na")";
