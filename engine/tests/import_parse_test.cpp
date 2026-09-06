@@ -508,6 +508,100 @@ TEST (PostmanImport, CountsVariableMetadataDroppedFromCollectionAndEnvironmentVa
     1);
 }
 
+/**
+ * Three more Postman fields measured lossy after #1443 and left out of it
+ * deliberately (issue #1460): an oauth2 block's `state` and `tokenName`, a
+ * pre-fetched `accessToken` beside an explicit grant config, and a query
+ * value whose invalid `%` escape changes when rejoined into the URL. Each
+ * case is a mutation check on its own counter or stored field.
+ */
+TEST (PostmanImport, CountsAPreFetchedOAuth2TokenDroppedAlongsideAGrantConfig) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://api.example.com/x",
+            "auth":{"type":"oauth2","oauth2":[
+                {"key":"grant_type","value":"client_credentials"},
+                {"key":"accessTokenUrl","value":"https://auth.example.com/token"},
+                {"key":"clientId","value":"abc"},
+                {"key":"accessToken","value":"seed-token"}
+            ]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& auth = parsed.result.at ("collections")[0].at ("requests")[0].at ("auth");
+    EXPECT_EQ (auth.at ("mode"), "oauth2");
+    // The pre-fetched token has nowhere to ride alongside an explicit grant -
+    // the general shape always fetches through `accessTokenUrl` instead.
+    EXPECT_FALSE (auth.at ("config").contains ("accessToken"));
+    EXPECT_FALSE (auth.at ("config").contains ("token"));
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("oauth2_dropped_field"), 1);
+}
+
+TEST (PostmanImport, CountsAnOAuth2StateThatVayuNeverStores) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://api.example.com/x",
+            "auth":{"type":"oauth2","oauth2":[
+                {"key":"grant_type","value":"authorization_code"},
+                {"key":"authUrl","value":"https://auth.example.com/authorize"},
+                {"key":"accessTokenUrl","value":"https://auth.example.com/token"},
+                {"key":"state","value":"csrf-nonce"}
+            ]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& config =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("auth").at (
+    "config");
+    // Vayu generates and validates its own CSRF state per authorization
+    // attempt; a fixed imported value has no field to sit in.
+    EXPECT_FALSE (config.contains ("state"));
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("oauth2_dropped_field"), 1);
+}
+
+TEST (PostmanImport, StoresOAuth2TokenNameAsCredentialsId) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://api.example.com/x",
+            "auth":{"type":"oauth2","oauth2":[
+                {"key":"grant_type","value":"client_credentials"},
+                {"key":"accessTokenUrl","value":"https://auth.example.com/token"},
+                {"key":"tokenName","value":"Saved Prod Token"}
+            ]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& config =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("auth").at (
+    "config");
+    // `credentialsId` is Vayu's field for keeping otherwise-identical token
+    // cache entries apart - the real home `tokenName` maps onto.
+    EXPECT_EQ (config.at ("credentialsId"), "Saved Prod Token");
+    // Stored, not dropped: `tokenName` alone must not tally as a loss.
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("oauth2_dropped_field"));
+}
+
+TEST (PostmanImport, CountsAnInvalidPercentEscapeThatChangesOnRejoin) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) +
+    R"("},"item":[{"name":"R","request":{"method":"GET",
+        "url":"https://api.example.com/search?q=%ZZ"}}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
+    // The params table keeps exactly what the source wrote - `safeDecode`
+    // gives back an invalid escape unchanged rather than raising.
+    EXPECT_EQ (request.at ("params")[0].at ("value"), "%ZZ");
+    // Rejoining it into the URL still percent-encodes the literal `%`
+    // (the residual defect issue #1460 leaves counted rather than fixed).
+    EXPECT_EQ (request.at ("url"), "https://api.example.com/search?q=%25ZZ");
+    EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("invalid_percent_encoding"),
+    1);
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";
