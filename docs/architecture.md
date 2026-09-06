@@ -347,6 +347,14 @@ one app instance may drive it:
   refuses to start an engine, and a restart already in flight is waited out
   rather than raced - otherwise a freshly spawned engine outlives the process
   that was supposed to kill it.
+- **A dirty editor flushes itself the moment the engine comes back**, on an
+  automatic reconnect (`useHealthQuery`) or a manual restart
+  (`useEngineRestart`) alike - both invalidate every query and then flush
+  every registered save context. A failed auto-save's own retry can be backed
+  off up to a minute behind either, and nothing else pokes it sooner; see
+  `docs/app/state-management.md`'s `save-store.ts` section for the retry and
+  the Dock's persistent "Not saved" state a failure short of that leaves on
+  screen.
 - **Local services are window-scoped, and the close says so.** Everything the
   Services drawer starts - webhook inboxes, mock servers, mock issuers - runs
   inside the engine, so quitting stops all of it. On Windows and Linux closing

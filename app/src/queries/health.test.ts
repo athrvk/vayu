@@ -41,7 +41,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { useHealthQuery, healthPollIntervalMs, engineStatusAfterFailedPoll } from "./health";
-import { useEngineStore } from "@/stores";
+import { useEngineStore, useSaveStore } from "@/stores";
 import { NOTIFY_KINDS } from "@/services/notify";
 import { TIMING } from "@/config/timing";
 import type { EngineRecovery } from "@/types/domain";
@@ -124,9 +124,13 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		};
 	}
 
-	it("refetches everything once the engine answers after a failed poll", async () => {
+	it("refetches everything once the engine answers after a failed poll, and flushes any dirty draft", async () => {
 		const client = makeClient();
 		const invalidate = vi.spyOn(client, "invalidateQueries");
+		// A dirty draft's own auto-save retry backs off well past this poll, so
+		// the reconnect is what has to reach it - the same reasoning that made
+		// this transition invalidate every other query.
+		const flushAll = vi.spyOn(useSaveStore.getState(), "flushAll").mockResolvedValue(undefined);
 		// Twice: the hook sets `retry: 1`, so one rejection is absorbed by the
 		// retry and never reaches an error state.
 		getHealth
@@ -142,6 +146,7 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		// it records no reason, and the case below is where the reason appears.
 		expect(useEngineStore.getState().engineStatus).toBe("starting");
 		expect(invalidate).not.toHaveBeenCalled();
+		expect(flushAll).not.toHaveBeenCalled();
 
 		await act(async () => {
 			await result.current.refetch();
@@ -149,14 +154,17 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 
 		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("connected"));
 		expect(invalidate).toHaveBeenCalledTimes(1);
+		expect(flushAll).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not refetch on a launch where no poll ever failed", async () => {
+	it("does not refetch or flush on a launch where no poll ever failed", async () => {
 		// The engine coming up is not by itself news: on an ordinary launch every
 		// query is already in flight, and invalidating here would be a second
-		// boot's worth of requests for nothing.
+		// boot's worth of requests for nothing - a dirty draft is in the same
+		// position, since nothing about its save has failed.
 		const client = makeClient();
 		const invalidate = vi.spyOn(client, "invalidateQueries");
+		const flushAll = vi.spyOn(useSaveStore.getState(), "flushAll").mockResolvedValue(undefined);
 		getHealth.mockResolvedValue({ status: "ok", version: "1.0.0", workers: 8 });
 
 		const { result } = renderHook(() => useHealthQuery(), { wrapper: wrapperFor(client) });
@@ -167,6 +175,7 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		});
 
 		expect(invalidate).not.toHaveBeenCalled();
+		expect(flushAll).not.toHaveBeenCalled();
 	});
 
 	it("polls hard while disconnected and cheaply once connected", () => {

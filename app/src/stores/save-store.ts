@@ -49,10 +49,13 @@ export interface SaveContext {
  * Doing it here rather than at the call sites is deliberate: there were eight of
  * them, and a missed one is a failure that reports nowhere at all.
  *
- * This also removes the `errorMessage` field the store used to hold. Its only
- * reader was the Dock's error line, which this replaces; the copy re-exported
- * from `useSaveManager` already had no reader. Keeping a field nothing reads is
- * the defect this codebase hits most often, so it goes.
+ * This also removed the `errorMessage` field the store used to hold, back when
+ * its only reader was the Dock's error line: the toast replaced that line, and
+ * a field nothing reads is the defect this codebase hits most often. It is
+ * back (as `lastErrorMessage`) because the toast turned out not to be the
+ * whole answer - it clears itself after ten seconds, and nothing on screen
+ * says "still not saved" after that. The Dock's persistent status line reads
+ * it now, so the field has the reader it lacked before.
  *
  * `lastSavedAt` and `pendingSaveId` went the same way, for the same reason:
  * every match on either name was a write inside this file. `status` now has a
@@ -64,6 +67,13 @@ export interface SaveContext {
 interface SaveState {
 	// Save status
 	status: SaveStatus;
+
+	/**
+	 * The reason the last `failSave` gave, for the Dock's persistent "Not
+	 * saved" tooltip. Stale once `status` moves off `"error"` - nothing reads
+	 * it in any other state - so no caller needs to clear it on success.
+	 */
+	lastErrorMessage: string | null;
 
 	// Active save context - the context that's currently focused/active
 	activeContextId: string | null;
@@ -159,6 +169,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 
 	return {
 		status: "idle",
+		lastErrorMessage: null,
 		activeContextId: null,
 		contexts: new Map(),
 
@@ -219,11 +230,11 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		},
 
 		failSave: (error) => {
-			set({ status: "error" });
+			set({ status: "error", lastErrorMessage: error });
 			useToastStore.getState().showToast(error, "error");
 		},
 
-		reset: () => set({ status: "idle" }),
+		reset: () => set({ status: "idle", lastErrorMessage: null }),
 
 		// Context management
 		registerContext: (context) => {

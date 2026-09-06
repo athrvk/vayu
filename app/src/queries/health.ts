@@ -14,7 +14,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
-import { useEngineStore } from "@/stores";
+import { useEngineStore, useSaveStore } from "@/stores";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { useEffect, useRef } from "react";
 import { TIMING } from "@/config/timing";
@@ -145,6 +145,14 @@ export function useHealthQuery() {
 			if (sawDisconnect.current) {
 				sawDisconnect.current = false;
 				void queryClient.invalidateQueries();
+				// The same gap one layer down: a dirty editor's own auto-save
+				// retry backs off up to SAVE_RETRY_MAX_DELAY_MS, and an engine
+				// that came back sooner than that should not wait for it. Every
+				// dirty registered context is safe to flush here - unlike the
+				// quit flush, nothing about a reconnect implies urgency for a
+				// context that has never failed, and `flushAll` on one with
+				// nothing pending is a no-op.
+				void useSaveStore.getState().flushAll();
 			}
 		} else if (query.isError) {
 			sawDisconnect.current = true;
