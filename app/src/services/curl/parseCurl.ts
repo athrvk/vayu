@@ -251,6 +251,12 @@ interface Builder {
 	insecure: boolean; // curl -k / --insecure, wget --no-check-certificate
 	followRedirects: boolean; // curl -L / --location
 	maxRedirects: number; // curl --max-redirs
+	/**
+	 * Bare tokens the command line carried, in order - the URL is one of
+	 * these, but which one is not known until every token has been read
+	 * (issue #1445): an unknown flag's swallowed value is a bare token too.
+	 */
+	positionals: string[];
 	/** Flags carrying a value that this parser skipped - see `DroppedFlag`. */
 	dropped: DroppedFlag[];
 }
@@ -258,6 +264,7 @@ interface Builder {
 function newBuilder(): Builder {
 	return {
 		url: "",
+		positionals: [],
 		method: null,
 		headers: [],
 		dataParts: [],
@@ -309,6 +316,43 @@ function recordDropped(
 /** Is the value a file reference whose *contents* we cannot read (`@path`)? */
 function isFileRef(value: string): boolean {
 	return value.startsWith("@");
+}
+
+/** An explicit scheme, e.g. `https://` - curl's own URL syntax, not just ours. */
+const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+/**
+ * A bare `host[:port][/path]` with no scheme - curl accepts one (it assumes
+ * `http://`), so a hostname shape counts too. Requires a dotted, letter-ending
+ * label (`example.com`) or `localhost`: a lone digit or word is syntactically
+ * a valid `new URL()` host once a scheme is assumed, which would make an
+ * unrelated flag value such as `5` or `bar` look like a URL too.
+ */
+const BARE_HOST_RE =
+	/^(localhost|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})(:\d+)?(\/\S*)?$/i;
+
+function looksLikeUrl(token: string): boolean {
+	return URL_SCHEME_RE.test(token) || BARE_HOST_RE.test(token);
+}
+
+/**
+ * Choose the URL among the command's bare positional tokens, and ledger every
+ * other one as an ignored argument.
+ *
+ * Before issue #1445's fix, the first bare token simply won, so an unknown
+ * flag whose value this parser has no case for consuming (`--retry-delay 5`)
+ * left that value as the next bare token, which then beat the real URL into
+ * the slot. Preferring the first URL-shaped token means a swallowed value
+ * loses that race wherever it lands, and is disclosed instead of imported.
+ * Falls back to the first token when none look URL-shaped, matching the
+ * previous behaviour for a command with no recognizable URL at all.
+ */
+function pickUrl(b: Builder): string {
+	const urlIndex = b.positionals.findIndex(looksLikeUrl);
+	const chosenIndex = urlIndex === -1 ? 0 : urlIndex;
+	b.positionals.forEach((token, i) => {
+		if (i !== chosenIndex) recordDropped(b, token, { what: "was ignored as an argument" });
+	});
+	return b.positionals[chosenIndex] ?? "";
 }
 
 function addHeader(b: Builder, raw: string): void {
@@ -404,7 +448,7 @@ function findHeader(b: Builder, name: string): string | undefined {
 
 function resolve(b: Builder): CommandImport {
 	// --- URL + params -------------------------------------------------------
-	let url = b.url;
+	let url = b.url || pickUrl(b);
 	const dataJoined = b.dataParts.join("&");
 
 	// -G moves data onto the query string as params.
@@ -798,8 +842,10 @@ function parseCurl(args: string[]): CommandImport {
 				} else if (CURL_NOARG.has(flag)) {
 					// no value
 				} else if (!flag.startsWith("-")) {
-					// Positional argument → URL (first one wins).
-					if (!b.url) b.url = arg;
+					// A bare token - the URL, or a value an unknown flag swallowed.
+					// Which one is not decided here; `pickUrl` sorts it out once
+					// every token on the line has been read (issue #1445).
+					b.positionals.push(arg);
 				} else {
 					// A flag this parser has never seen. It may take a value the
 					// next token would otherwise become the URL for (issue #1445) -
@@ -915,7 +961,9 @@ function parseWget(args: string[]): CommandImport {
 				} else if (WGET_NOARG.has(flag)) {
 					// no value
 				} else if (!flag.startsWith("-")) {
-					if (!b.url) b.url = arg;
+					// See the curl branch: which bare token is the URL is decided
+					// once every token has been read (issue #1445).
+					b.positionals.push(arg);
 				} else {
 					// See the curl branch: an option this parser has never seen is
 					// disclosed rather than silently eaten (issue #1445).
