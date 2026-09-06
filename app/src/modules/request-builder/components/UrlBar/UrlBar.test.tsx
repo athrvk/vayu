@@ -46,6 +46,8 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		updateField: vi.fn(),
 		setDisabledDefaultHeaders: vi.fn(),
 		restoreStoredName: vi.fn(),
+		fieldConflicts: {},
+		takeExternalField: vi.fn(),
 		// Body drafts belong to the Body panel; the URL bar never reads them. This
 		// is the one context in the suite built without a cast, so it has to be
 		// complete.

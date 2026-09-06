@@ -36,7 +36,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useTabsStore, useSessionStore, useDashboardStore } from "@/stores";
 import type { KeyValueEntry, LoadTestConfig } from "@/types";
-import type { RequestState } from "./types";
+import type { RequestState, MergeableRequestField } from "./types";
 
 const composeRequest = vi.fn();
 const executeRequest = vi.fn();
@@ -166,9 +166,21 @@ beforeEach(() => {
 });
 
 describe("saving a request loaded from rows an older build wrote", () => {
+	/**
+	 * `headers` throughout: the save payload now carries only what the draft
+	 * has touched since its last known-good value (issue #1436), so a helper
+	 * calling `onSave` the way the real provider would has to say what changed -
+	 * these cases are all about the headers row, never about triggering a save
+	 * of the whole record.
+	 */
 	async function save(state: RequestState) {
 		await act(async () => {
-			await (providerProps.onSave as (r: RequestState) => Promise<void>)(state);
+			await (
+				providerProps.onSave as (
+					r: RequestState,
+					changed: ReadonlySet<MergeableRequestField>
+				) => Promise<void>
+			)(state, new Set(["headers"]));
 		});
 		return updateRequest.mock.calls[0][0] as Record<string, unknown>;
 	}

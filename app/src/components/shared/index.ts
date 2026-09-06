@@ -24,6 +24,10 @@ export * from "./AuthFields";
 export * from "./Callout";
 export * from "./callout-severity";
 
+// "Someone else changed this while you were editing" - collection tabs and
+// the request builder's per-field merge (#1436, #1437)
+export * from "./ExternalChangeCallout";
+
 // "These 100 samples are 100 of 30,000" - wherever a sampled set is displayed
 export * from "./SampleRetentionNote";
 

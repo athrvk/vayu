@@ -398,8 +398,28 @@ export function useUpdateRequestMutation() {
 					queryKey: queryKeys.requests.listByCollection(collectionId),
 				});
 			}
-			// Update detail cache
-			queryClient.setQueryData(queryKeys.requests.detail(updatedRequest.id), updatedRequest);
+			/*
+			 * A foreign write's own refetch can land in this cache while this
+			 * save's response is still in flight (issue #1436) - an MCP agent's
+			 * `update_request` racing this one. `previous` is whichever won that
+			 * race; if it is newer than what this save is about to write, it is
+			 * the row to keep, not the now-stale response this mutation is
+			 * holding. `updatedAt` is a `toISOString()` string end to end
+			 * (`request-transformer.ts`), so lexical and chronological order
+			 * agree - guarded on both sides carrying one, since a row missing it
+			 * cannot be a participant in the race this compares.
+			 */
+			if (
+				!previous ||
+				!previous.updatedAt ||
+				!updatedRequest.updatedAt ||
+				previous.updatedAt <= updatedRequest.updatedAt
+			) {
+				queryClient.setQueryData(
+					queryKeys.requests.detail(updatedRequest.id),
+					updatedRequest
+				);
+			}
 		},
 	});
 }

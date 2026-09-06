@@ -43,7 +43,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui";
-import { AuthFields, Callout } from "@/components/shared";
+import { AuthFields, Callout, ExternalChangeCallout } from "@/components/shared";
 import {
 	AUTH_MODE_LABELS,
 	COLLECTION_AUTH_MODES,
@@ -54,7 +54,7 @@ import {
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import type { Collection } from "@/types";
-import { ExternalChangeCallout, InfoBanner, SaveFailed, SectionLabel } from "./shared";
+import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import InheritanceChain from "./InheritanceChain";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
 

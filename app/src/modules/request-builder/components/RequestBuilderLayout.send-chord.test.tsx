@@ -43,6 +43,7 @@ vi.mock("../context", () => ({
 
 vi.mock("./RequestBreadcrumb", () => ({ default: () => <div data-testid="breadcrumb" /> }));
 vi.mock("./UrlBar", () => ({ default: () => <div data-testid="url-bar" /> }));
+vi.mock("./ExternalChangeNotice", () => ({ default: () => null }));
 vi.mock("./RequestTabs", () => ({ default: () => <div data-testid="request-tabs" /> }));
 vi.mock("./ResponseAnnouncer", () => ({ default: () => <div data-testid="announcer" /> }));
 vi.mock("./ResponseViewer", () => ({ default: () => <div data-testid="response-viewer" /> }));

@@ -86,14 +86,26 @@ describe("every send site composes engine-side and never resolves client-side", 
 
 	it("no send site resolves variables or inherit auth client-side anymore", () => {
 		for (const src of [builder ?? "", runView ?? ""]) {
-			// `resolveString` was the execution-time interpolation; `resolveObject`
-			// survives in the builder only for the load dialog's OAuth expiry
-			// *preview* (pendingOAuth2Config), which sends nothing.
+			// `resolveString` was the execution-time interpolation.
 			expect(src).not.toContain("resolveString");
-			expect(src).not.toContain("resolveAuthForSend");
 		}
+		// `resolveObject` survives in the builder only for the load dialog's
+		// OAuth expiry *preview* (pendingOAuth2Config), which sends nothing.
 		const previewUses = (builder ?? "").match(/resolveObject\(/g) ?? [];
 		expect(previewUses.length).toBeLessThanOrEqual(1);
+		// `resolveAuthForSend` is a send-path regression in the run view, which
+		// has no other reason to touch it - unchanged.
+		expect(runView ?? "").not.toContain("resolveAuthForSend");
+		/*
+		 * The builder gets one exception since issue #1436: `DeletedRequestBanner`
+		 * calls `resolveAuthForSend(request.auth, [])` to build a "Copy as curl"
+		 * snippet for a request that was deleted elsewhere - never sent to the
+		 * engine, and with no ancestor chain left to walk (the collection may be
+		 * gone too), so an empty chain is the honest answer rather than a guess.
+		 * A second occurrence would mean it crept into an actual send site.
+		 */
+		const authResolveUses = (builder ?? "").match(/resolveAuthForSend\(/g) ?? [];
+		expect(authResolveUses).toHaveLength(1);
 	});
 
 	it("raw editor state goes into compose - buildExecBody with the identity resolver", () => {
