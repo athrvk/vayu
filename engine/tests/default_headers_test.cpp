@@ -273,6 +273,31 @@ class DefaultHeaderConfigTest : public ::testing::Test {
     static void cleanup () {
         vayu::tests::remove_database_files (DB_PATH);
     }
+    // `SetUp` calls `init ()` on a database with no requests yet, which is
+    // itself enough for `strip_stored_managed_headers` to find nothing and
+    // mark the cleanup done (issue #1487) - correct for a real fresh install,
+    // which can never write the legacy headers again, but it means a test
+    // that adds pre-#1229-shaped data *after* `SetUp` must undo that marker
+    // first, or every direct call below sees it already set and skips.
+    void reset_managed_headers_marker () {
+        db_->save_config_entry (vayu::db::ConfigEntry{
+        .key              = "managedHeadersStripped",
+        .value            = "false",
+        .type             = "boolean",
+        .label            = "Legacy managed headers stripped",
+        .description      = "",
+        .category         = "general_engine",
+        .default_value    = "false",
+        .min_value        = std::nullopt,
+        .max_value        = std::nullopt,
+        .options          = std::nullopt,
+        .updated_at       = 0,
+        .requires_restart = false,
+        .advanced         = true,
+        .keywords         = "[]",
+        .unit             = std::nullopt,
+        });
+    }
     std::unique_ptr<vayu::db::Database> db_;
 };
 
@@ -443,6 +468,7 @@ TEST_F (DefaultHeaderConfigTest, StartupStripsTheStoredRowsAndLeavesTheUsersAlon
     untouched.headers = R"([{"key":"User-Agent","value":"Mozilla/5.0","enabled":true}])";
     db_->save_request (untouched);
 
+    reset_managed_headers_marker ();
     EXPECT_EQ (db_->strip_stored_managed_headers (), 1);
 
     auto stripped = db_->get_request ("req_managed");
@@ -458,6 +484,82 @@ TEST_F (DefaultHeaderConfigTest, StartupStripsTheStoredRowsAndLeavesTheUsersAlon
     // Idempotent: the pass runs at every startup, and a second one must find
     // nothing left to do rather than rewriting rows again.
     EXPECT_EQ (db_->strip_stored_managed_headers (), 0);
+}
+
+// A repair that runs once is a migration and gets a migration's bookkeeping
+// (issue #1487): once nothing is left to strip, the pass records that and
+// trusts it on every later call rather than re-scanning to confirm.
+TEST_F (DefaultHeaderConfigTest, ASecondStartupSkipsTheScanOnceEverythingIsMarkedStripped) {
+    vayu::db::Collection collection;
+    collection.id   = "col_marker";
+    collection.name = "Marker";
+    db_->create_collection (collection);
+
+    vayu::db::Request managed;
+    managed.id            = "req_marker_managed";
+    managed.collection_id = "col_marker";
+    managed.name          = "Managed";
+    managed.url           = "https://example.com/";
+    managed.headers = R"([{"key":"X-Vayu-Version","value":"0.1.1","enabled":true}])";
+    db_->save_request (managed);
+
+    reset_managed_headers_marker ();
+    EXPECT_EQ (db_->strip_stored_managed_headers (), 1);
+    EXPECT_TRUE (db_->get_config_bool ("managedHeadersStripped", false));
+
+    // Added after the marker was set: a real scan would find and strip it,
+    // but the marker means the pass never looks.
+    vayu::db::Request late;
+    late.id            = "req_marker_late";
+    late.collection_id = "col_marker";
+    late.name          = "Late";
+    late.url           = "https://example.com/";
+    late.headers = R"([{"key":"X-Vayu-Version","value":"0.1.1","enabled":true}])";
+    db_->save_request (late);
+
+    EXPECT_EQ (db_->strip_stored_managed_headers (), 0)
+    << "the marker should have skipped the scan outright";
+
+    auto still_has_it = db_->get_request ("req_marker_late");
+    ASSERT_HAS_VALUE (still_has_it);
+    EXPECT_NE (still_has_it->headers.find ("X-Vayu-Version"), std::string::npos);
+}
+
+// Issue #1487, point 3: `<db>.bak` is refreshed from the *current* file on
+// every clean start, including the one that just stripped these rows, so by
+// the next launch it no longer holds them. `<db>.pre-upgrade.bak` is written
+// once, before the first rewrite, and nothing after that touches it again.
+TEST_F (DefaultHeaderConfigTest, ThePreUpgradeBackupPreservesTheRowsBeforeTheFirstRewrite) {
+    vayu::db::Collection collection;
+    collection.id   = "col_backup";
+    collection.name = "Backup";
+    db_->create_collection (collection);
+
+    vayu::db::Request managed;
+    managed.id            = "req_backup_managed";
+    managed.collection_id = "col_backup";
+    managed.name          = "Managed";
+    managed.url           = "https://example.com/";
+    managed.headers = R"([{"key":"X-Vayu-Version","value":"0.1.1","enabled":true}])";
+    db_->save_request (managed);
+
+    const std::string backup_path = std::string (DB_PATH) + ".pre-upgrade.bak";
+    ASSERT_FALSE (std::filesystem::exists (backup_path))
+    << "nothing should exist before the pass has ever rewritten a row";
+
+    reset_managed_headers_marker ();
+    EXPECT_EQ (db_->strip_stored_managed_headers (), 1);
+
+    ASSERT_TRUE (std::filesystem::exists (backup_path))
+    << "the pre-rewrite snapshot was not written";
+
+    vayu::db::Database backup (backup_path);
+    auto pre_rewrite = backup.get_request ("req_backup_managed");
+    ASSERT_HAS_VALUE (pre_rewrite);
+    EXPECT_NE (pre_rewrite->headers.find ("X-Vayu-Version"), std::string::npos)
+    << "the snapshot should hold the row as it was before the strip touched it";
+
+    vayu::tests::remove_database_files (backup_path);
 }
 
 } // namespace

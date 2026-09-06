@@ -131,8 +131,12 @@ inline void remove_database_files (const std::string& path) {
     // The backup is a full copy, sidecars included, so the set is the SQLite
     // trio twice over - `path` and `path.bak`. The hand-copied lists this
     // replaced all stopped at a bare `.bak`, which leaves `.bak-wal` /
-    // `.bak-shm` behind whenever a WAL exists at open time.
-    for (const std::string& base : { path, path + ".bak" }) {
+    // `.bak-shm` behind whenever a WAL exists at open time. `path.pre-upgrade.bak`
+    // is a third copy of the trio, written once by `strip_stored_managed_headers`
+    // the first time it finds a row to rewrite (issue #1487) - most fixtures
+    // never provoke it, but one that does must not leak it into the next test's
+    // scratch directory.
+    for (const std::string& base : { path, path + ".bak", path + ".pre-upgrade.bak" }) {
         for (const char* suffix : { "", "-wal", "-shm" }) {
             std::error_code ec;
             std::filesystem::remove (base + suffix, ec);

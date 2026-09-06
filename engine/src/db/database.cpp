@@ -2028,10 +2028,81 @@ int64_t Database::stamp_hashless_spec_bindings () {
     return stamped;
 }
 
+namespace {
+// A repair that runs once is a migration and gets a migration's bookkeeping
+// (issue #1487). #1492 will give this kind of marker a proper home; until
+// then a `config_entries` row - `advanced`, no everyday user story - is where
+// this file's other internal-only flags already live.
+constexpr std::string_view MANAGED_HEADERS_STRIPPED_KEY =
+"managedHeadersStripped";
+} // namespace
+
 int64_t Database::strip_stored_managed_headers () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+    if (get_config_bool (std::string (MANAGED_HEADERS_STRIPPED_KEY), false)) {
+        return 0;
+    }
+
+    // Only rows whose `headers` text could contain one of the three legacy
+    // names are worth loading and JSON-parsing. `LIKE` is ASCII
+    // case-insensitive by default, the same fold `legacy_managed_row` applies
+    // to a matched key, so a workspace with nothing left to strip costs one
+    // scan of this column rather than a materialisation of every request's
+    // body and script (issue #1487).
+    auto candidates = impl_->storage.get_all<Request> (
+    where (like (&Request::headers, "%x-vayu-version%") or
+    like (&Request::headers, "%x-request-id%") or like (&Request::headers, "%user-agent%")));
+
+    auto mark_done = [&] {
+        save_config_entry (ConfigEntry{
+        .key   = std::string (MANAGED_HEADERS_STRIPPED_KEY),
+        .value = "true",
+        .type  = "boolean",
+        .label = "Legacy managed headers stripped",
+        .description =
+        "Whether requests saved before 0.26.0 have had the "
+        "engine's own X-Vayu-Version, X-Request-ID and User-Agent headers "
+        "removed from storage. Internal bookkeeping for a one-time cleanup; "
+        "turning it off re-runs the cleanup on the next start.",
+        .category      = "general_engine",
+        .default_value = "false",
+        .min_value     = std::nullopt,
+        .max_value     = std::nullopt,
+        .options       = std::nullopt,
+        .updated_at    = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+        .count (),
+        .requires_restart = false,
+        .advanced         = true,
+        .keywords         = "[]",
+        .unit             = std::nullopt,
+        });
+    };
+
+    if (candidates.empty ()) {
+        mark_done ();
+        return 0;
+    }
+
+    // `<db>.pre-upgrade.bak` is written once, right before the first row this
+    // pass ever rewrites, and nothing after this call touches it again -
+    // unlike `<db>.bak`, which the *next* clean start refreshes from whatever
+    // the live file holds by then (issue #1487). It is the one place the
+    // pre-strip rows survive more than a single restart.
+    const fs::path db_file (impl_->opened_file);
+    fs::path pre_upgrade_backup = db_file;
+    pre_upgrade_backup += ".pre-upgrade.bak";
+    copy_db_files (db_file, pre_upgrade_backup);
+
+    // One transaction for the whole rewrite, not one implicit commit per row -
+    // the same shape `seed_default_config` uses and for the same reason:
+    // `/health` cannot answer until `init ()` returns, and a workspace with
+    // thousands of candidate rows made every one of them its own commit.
+    auto strip_transaction = impl_->storage.transaction_guard ();
+
     int64_t stripped = 0;
-    for (auto& request : impl_->storage.get_all<Request> ()) {
+    for (auto& request : candidates) {
         auto rewritten = vayu::http::strip_legacy_managed_headers (request.headers);
         if (!rewritten) {
             continue;
@@ -2044,6 +2115,9 @@ int64_t Database::strip_stored_managed_headers () {
         impl_->storage.replace (request);
         ++stripped;
     }
+
+    mark_done ();
+    strip_transaction.commit ();
     return stripped;
 }
 

@@ -41,6 +41,12 @@ up looking like a fresh install.
 > `POST /workspace/backup` / `vayu-cli backup`, described in
 > [architecture.md](architecture.md#workspace-backups).
 
+> **`<db>.pre-upgrade.bak` is different: it is written once.** A one-time
+> repair pass (below) takes it immediately before its first rewrite, and
+> nothing after that touches it again - unlike `<db>.bak`, which the *next*
+> clean start would refresh from a file the repair has already rewritten. It
+> is the one place the pre-repair rows survive more than a single restart.
+
 ### The quarantine (issue #984)
 
 A database that fails validation is **moved, not deleted**: `<db>` becomes
@@ -141,6 +147,29 @@ rewrite slow enough to matter is one this line explains.
 Best-effort like the sweeps before it: a failure is a warning, never a daemon that will not start.
 `auto_vacuum` was rejected as the alternative - switching an existing database's mode requires a
 full `VACUUM` anyway, and it changes page bookkeeping for every write thereafter.
+
+### The header-strip pass (issue #1487)
+
+`Database::strip_stored_managed_headers()`, called from `init()`, removes the `X-Vayu-Version`,
+`X-Request-ID` and `User-Agent` rows a pre-#1229 renderer wrote into a saved request's `headers`
+column on the app's own behalf - default headers are applied per transfer now and never stored.
+Like the passes above it runs before `/health` can answer, but it is scoped so a workspace with
+nothing left to strip pays close to nothing for it:
+
+- **A SQL `LIKE` over `headers` first.** Only rows whose header text could contain one of the
+  three names are loaded into a `Request` and JSON-parsed; `LIKE` is ASCII case-insensitive by
+  default, the same fold the exact predicate applies to a matched key. A workspace already
+  stripped costs one scan of the column, not a materialisation of every request's body and
+  script.
+- **One transaction for the rewrite**, not one implicit commit per candidate row - the same shape
+  `seed_default_config` uses.
+- **A one-time marker.** Once a pass finds nothing left to strip, it records a
+  `managedHeadersStripped` config entry (`advanced`, no everyday user story) and every later start
+  skips the scan outright rather than re-running it to confirm nothing changed. #1492 will give
+  this kind of migration bookkeeping a proper home; until then a config entry is where this
+  file's other internal-only flags already live.
+- **`<db>.pre-upgrade.bak`** is written once, immediately before the first row this pass ever
+  rewrites - see the backup note above.
 
 ---
 
