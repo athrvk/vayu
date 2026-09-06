@@ -81,10 +81,10 @@ function toBodyPayload(request: RequestState): RequestBody {
 	if (request.bodyMode === "x-www-form-urlencoded") {
 		return { mode: "x-www-form-urlencoded", fields: toKeyValueEntries(request.urlEncoded) };
 	}
-	if (request.bodyMode !== "none" && request.body) {
+	if (request.bodyMode !== "none") {
 		return {
 			mode: request.bodyMode as "json" | "text" | "graphql" | "jsonrpc" | "xml",
-			content: request.body,
+			content: request.body ?? "",
 		};
 	}
 	return { mode: "none" };
