@@ -49,7 +49,6 @@ import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries";
 import type { ScriptPart, VariableValue } from "@/types";
 import type {
-	AutoHeader,
 	AutoMethod,
 	RequestState,
 	ResponseState,
@@ -443,7 +442,7 @@ export default function RequestBuilderProvider({
 
 	/*
 	 * The one identity every per-builder map here is read and written under: the
-	 * three records below and the picker's row index further down. One
+	 * method record below and the picker's row index further down. One
 	 * `RequestBuilderProvider` serves every tab, so a slot holding a single
 	 * record held whichever request was in a mode last, and the request before
 	 * it kept what the app had changed for it (issue #1269).
@@ -452,47 +451,24 @@ export default function RequestBuilderProvider({
 	 * `memoryKey`, because two id-less builders are not one builder (issue
 	 * #1272). Spelled once rather than per map - the maps share a sweep, and two
 	 * spellings of one rule are how they drift apart.
+	 *
+	 * The Content-Type row a body mode adds, and the `Accept: text/event-stream`
+	 * row the Event stream toggle adds, used to be tracked the same way - and
+	 * that in-memory record could not survive a reload, leaving a stale
+	 * auto-written row indistinguishable from one the user typed (issue #1481).
+	 * Both now carry their own ownership on the row itself (`source`, see
+	 * `utils/auto-header.ts`) and need no slot here.
 	 */
 	const memoryKey = declaredMemoryKey ?? request.id ?? UNSAVED_AUTO_KEY;
 
 	/*
-	 * The Content-Type row a body mode added on its way in, so leaving the mode
-	 * can remove it again. Here rather than in `BodyPanel` for the drafts' reason
-	 * and one of its own: the panel is unmounted whenever another tab is on
-	 * screen, so a panel-local record is gone by the next mode change - and then
-	 * the header outlives the mode that needed it, which is the bug the record
-	 * exists to fix.
-	 *
-	 * Not reset by the request-change effect below, for the same reason as the
-	 * drafts: the record names its own request and `switchContentType` drops one
-	 * belonging to another.
-	 */
-	const {
-		get: getAutoContentType,
-		set: setAutoContentType,
-		retain: retainAutoContentTypes,
-	} = useAutoRecordSlot<AutoHeader>(memoryKey);
-
-	/*
-	 * The `Accept: text/event-stream` row the Event stream toggle added, so
-	 * turning the toggle off can take it back (issue #574). Here rather than in
-	 * `SettingsPanel` for the reason above it: Radix unmounts an inactive
-	 * `TabsContent`, so a panel-local record is gone the moment you look at
-	 * another tab - and then the header outlives the setting that needed it,
-	 * which is exactly the bug the record exists to prevent.
-	 */
-	const {
-		get: getAutoAccept,
-		set: setAutoAccept,
-		retain: retainAutoAccepts,
-	} = useAutoRecordSlot<AutoHeader>(memoryKey);
-
-	/*
 	 * The method the GraphQL body mode set, so leaving the mode can put back
-	 * the one it replaced (issue #1228). Here for the same reason as the two
-	 * above - the panel that writes it is unmounted whenever another tab is on
-	 * screen, and a record that does not outlive the panel leaves the method
-	 * changed with nothing left to change it back.
+	 * the one it replaced (issue #1228). Here because the panel that writes it
+	 * is unmounted whenever another tab is on screen, and a record that does
+	 * not outlive the panel leaves the method changed with nothing left to
+	 * change it back. Unlike the two header rows above, there is no row to mark:
+	 * `method` is a scalar field on the request, not a `KeyValueEntry` - see
+	 * `AutoMethod`'s doc comment for the follow-up this leaves open.
 	 */
 	const {
 		get: getAutoMethod,
@@ -500,9 +476,9 @@ export default function RequestBuilderProvider({
 		retain: retainAutoMethods,
 	} = useAutoRecordSlot<AutoMethod>(memoryKey);
 
-	// What bounds these three is stated with the row memory below, which the
-	// same sweep bounds (issue #1271): one rule over every per-builder map the
-	// provider holds, rather than one rule each.
+	// What bounds it is stated with the row memory below, which the same sweep
+	// bounds (issue #1271): one rule over every per-builder map the provider
+	// holds, rather than one rule each.
 
 	const { data: collections = [] } = useCollectionsQuery();
 
@@ -617,13 +593,11 @@ export default function RequestBuilderProvider({
 				if (tab.entityId === null) continue;
 				if (tab.type === "request" || tab.type === "run") live.add(tab.entityId);
 			}
-			retainAutoContentTypes(live);
-			retainAutoAccepts(live);
 			retainAutoMethods(live);
 			retainRowIndexes(live);
 		};
 		return useTabsStore.subscribe((s) => retainOpen(s.openTabs));
-	}, [retainAutoContentTypes, retainAutoAccepts, retainAutoMethods, retainRowIndexes]);
+	}, [retainAutoMethods, retainRowIndexes]);
 
 	/**
 	 * The row the preview resolves against - the picked one, once the file it
@@ -1299,10 +1273,6 @@ export default function RequestBuilderProvider({
 			setBodyDrafts,
 			getVariablesDraft,
 			setVariablesDraft,
-			getAutoContentType,
-			setAutoContentType,
-			getAutoAccept,
-			setAutoAccept,
 			getAutoMethod,
 			setAutoMethod,
 			response,
@@ -1348,10 +1318,6 @@ export default function RequestBuilderProvider({
 			setBodyDrafts,
 			getVariablesDraft,
 			setVariablesDraft,
-			getAutoContentType,
-			setAutoContentType,
-			getAutoAccept,
-			setAutoAccept,
 			getAutoMethod,
 			setAutoMethod,
 			response,

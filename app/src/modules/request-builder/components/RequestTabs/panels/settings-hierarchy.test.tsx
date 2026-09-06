@@ -46,8 +46,6 @@ const ctx = {
 	request: { ...createDefaultRequestState(), id: "req_1" },
 	setRequest: vi.fn(),
 	updateField: vi.fn(),
-	getAutoAccept: () => null,
-	setAutoAccept: vi.fn(),
 } as unknown as RequestBuilderContextValue;
 
 const { default: SettingsPanel } = await import("./SettingsPanel");

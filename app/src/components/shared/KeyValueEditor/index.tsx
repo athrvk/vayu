@@ -81,9 +81,18 @@ export default function KeyValueEditor({
 			if (!canEdit(itemToUpdate, field)) return;
 			if (field === "enabled" && value === false && !canDisable(itemToUpdate)) return;
 
-			const newItems = items.map((item) =>
-				item.id === id ? { ...item, [field]: value } : item
-			);
+			/*
+			 * Retyping a row a setting auto-wrote (`source`, issue #1481) hands it
+			 * to the user - disabling it does not, so only key/value edits clear the
+			 * marker. Harmless on a row with no `source` to begin with, which is
+			 * every row outside the request builder's Headers tab.
+			 */
+			const newItems = items.map((item) => {
+				if (item.id !== id) return item;
+				const updated = { ...item, [field]: value };
+				if (field === "key" || field === "value") delete updated.source;
+				return updated;
+			});
 			onChange(withTrailingBlank(newItems));
 		},
 		[items, onChange, canEdit, canDisable]

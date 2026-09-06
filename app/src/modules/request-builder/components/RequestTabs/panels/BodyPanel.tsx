@@ -109,8 +109,6 @@ export default function BodyPanel() {
 		setBodyDrafts,
 		getVariablesDraft,
 		setVariablesDraft,
-		getAutoContentType,
-		setAutoContentType,
 		getAutoMethod,
 		setAutoMethod,
 		resolvedAuth,
@@ -136,9 +134,9 @@ export default function BodyPanel() {
 	 *
 	 * Null once dismissed, undone, or the mode changes again - the notice is
 	 * about the edit that just happened, not a standing state. *Which row* was
-	 * added is remembered separately and durably (`getAutoContentType`), because
-	 * removing it again must survive dismissing the notice and unmounting the
-	 * panel.
+	 * added is not remembered here at all: it is marked on the row itself
+	 * (`source: "body-mode"`, see `utils/auto-header.ts`), so it survives
+	 * dismissing the notice, unmounting the panel, and a reload.
 	 */
 	const [addedContentType, setAddedContentType] = useState<string | null>(null);
 
@@ -208,14 +206,8 @@ export default function BodyPanel() {
 		 * back to None, which sends no body at all. Both halves happen in one call
 		 * because they read and write the same array.
 		 */
-		const contentType = switchContentType(
-			mode,
-			request.headers,
-			request.id,
-			getAutoContentType()
-		);
+		const contentType = switchContentType(mode, request.headers);
 		if (contentType.headers !== request.headers) updateField("headers", contentType.headers);
-		setAutoContentType(contentType.auto);
 		setAddedContentType(contentType.added);
 
 		/*
@@ -240,10 +232,7 @@ export default function BodyPanel() {
 	};
 
 	const undoContentType = () => {
-		const auto = getAutoContentType();
-		if (!auto) return;
-		updateField("headers", withoutContentType(request.headers, auto));
-		setAutoContentType(null);
+		updateField("headers", withoutContentType(request.headers));
 		setAddedContentType(null);
 	};
 

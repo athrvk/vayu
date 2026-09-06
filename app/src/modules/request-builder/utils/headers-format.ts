@@ -64,6 +64,11 @@ const splitHeaderLine = (line: string): { key: string; value: string } | null =>
  * Parse text format to headers array
  * Format: "Header-Name: value" (one per line); "Header-Name=value" also accepted
  *
+ * Every row is rebuilt fresh, so a `source` marker (issue #1481) on a row that
+ * passes through Bulk Edit is dropped, matched or not: the text form is the
+ * user restating every row by hand, which is not different from retyping one
+ * in the table.
+ *
  * @param text - Headers in text format
  * @returns Array of KeyValueItem
  */

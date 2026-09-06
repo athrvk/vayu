@@ -68,8 +68,7 @@ const STREAM_LABEL = "Event stream";
 const VERIFY_LABEL = "Verify TLS certificate";
 
 export default function SettingsPanel() {
-	const { request, setRequest, updateField, getAutoAccept, setAutoAccept } =
-		useRequestBuilderContext();
+	const { request, setRequest, updateField } = useRequestBuilderContext();
 	const followRedirects = request.followRedirects;
 
 	const handleProtocolChange = (value: string) => {
@@ -85,18 +84,16 @@ export default function SettingsPanel() {
 	 * headers are one change, and the rule computes the new header list from the
 	 * current one - a second call would compute against the array it had before
 	 * the first. A request that already declares an `Accept` keeps it; see
-	 * `utils/auto-header.ts` for why ownership is by row id.
+	 * `utils/auto-header.ts` for why ownership is by marker, not by row id.
 	 */
 	const handleStreamChange = (checked: boolean) => {
 		const next = switchAutoHeader(
 			ACCEPT_HEADER,
 			checked ? SSE_ACCEPT : null,
 			request.headers,
-			request.id,
-			getAutoAccept()
+			"stream"
 		);
 		setRequest({ stream: checked, headers: next.headers });
-		setAutoAccept(next.auto);
 	};
 
 	/** Keep the stored value inside the range the engine clamps to. */

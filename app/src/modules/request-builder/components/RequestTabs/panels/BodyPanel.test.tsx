@@ -61,9 +61,6 @@ function renderPanel(overrides: Partial<RequestState> = {}) {
 		// BodyPanel stashes through these on a mode change.
 		getBodyDrafts: () => emptyDrafts(request.id),
 		setBodyDrafts: () => {},
-		// And remembers the Content-Type row it wrote through these.
-		getAutoContentType: () => null,
-		setAutoContentType: () => {},
 		// The GraphQL pane's Variables text outlives the panel in the provider,
 		// so the graphql mode reads these on its first render.
 		getVariablesDraft: () => null,

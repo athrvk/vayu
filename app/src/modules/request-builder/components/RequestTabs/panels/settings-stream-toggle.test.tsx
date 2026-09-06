@@ -15,8 +15,7 @@
  * *pairing*: the flag and the `Accept` row are one change, and a panel doing
  * them as two `updateField` calls would compute the header list against the
  * array it had before the first. `switchAutoHeader` has its own unit tests -
- * what these prove is that this panel calls it, with this request's id, and
- * writes both halves at once.
+ * what these prove is that this panel calls it and writes both halves at once.
  *
  * A Radix `Switch` is a real button under jsdom, unlike the Select beside it,
  * so this is drivable end to end.
@@ -27,17 +26,17 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import type { RequestBuilderContextValue } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
-import type { AutoHeader, RequestState } from "../../../types";
+import type { RequestState } from "../../../types";
 import type { KeyValueItem } from "@/types";
 
 /**
  * A live-enough context: the panel reads `request` and writes through
- * `setRequest` plus the auto-Accept accessors, and the record has to survive
- * between renders the way the provider's ref does.
+ * `setRequest`. Ownership of the row it arms now lives on the row itself
+ * (`source`, issue #1481), so there is no separate record to hold here any
+ * more.
  */
 function harness(initial: Partial<RequestState> = {}) {
 	let request: RequestState = { ...createDefaultRequestState(), id: "req_1", ...initial };
-	let auto: AutoHeader | null = null;
 
 	const ctx = {
 		request,
@@ -46,10 +45,6 @@ function harness(initial: Partial<RequestState> = {}) {
 			ctx.request = request;
 		},
 		updateField: vi.fn(),
-		getAutoAccept: () => auto,
-		setAutoAccept: (next: AutoHeader | null) => {
-			auto = next;
-		},
 	} as unknown as RequestBuilderContextValue;
 
 	return {
@@ -120,6 +115,28 @@ describe("the Event stream toggle", () => {
 		expect(h.request.stream).toBe(false);
 		// The bug this rule exists for: nothing removed the header, so one visit
 		// left it on the request for good.
+		expect(h.accepts).toHaveLength(0);
+	});
+
+	it("takes back a row it wrote in an earlier session, with no in-memory record at all", () => {
+		// The bug this replaced (issue #1481): the record of which row was ours
+		// lived in a ref that a reload could not carry, so a stale row survived
+		// as though the user had typed it. Simulate a fresh mount by handing the
+		// harness a request whose header already carries the marker, rather than
+		// arming it through a first toggle.
+		const marked: KeyValueItem = {
+			id: "row_1",
+			key: "Accept",
+			value: SSE_ACCEPT,
+			enabled: true,
+			source: "stream",
+		};
+		const h = harness({ stream: true, headers: [marked] });
+		const ui = mount(h);
+
+		fireEvent.click(ui.toggle());
+
+		expect(h.request.stream).toBe(false);
 		expect(h.accepts).toHaveLength(0);
 	});
 

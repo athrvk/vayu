@@ -24,8 +24,7 @@
  * that is not a header row. Only from `GET`, only to `POST`, and only back to
  * what it replaced: a method the user chose is never overridden, and a method
  * they have chosen *since* is never reverted, which is the same rule
- * `switchAutoHeader` states as "a row whose value has been edited is no longer
- * ours".
+ * `switchAutoHeader` states as "a row edited by hand is no longer ours".
  *
  * The rule lives here rather than in the click handler for the reason
  * `content-type.ts` gives: the only way to exercise a rule inside that handler
