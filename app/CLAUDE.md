@@ -60,6 +60,20 @@ everything.
   editable-target check is `isTextEntryTarget`, which is `ownsEnterKey` plus a
   plain input. One list, not two.
 - State: Zustand for UI state, TanStack Query for server state.
+- **A save that fails is retried, and the failure stays on screen until it
+  lands** (#1479): `useSaveManager` backs off up to `SAVE_RETRY_MAX_DELAY_MS`,
+  the health poll's reconnect branch flushes every dirty registered context
+  (`queries/health.ts`), and the Dock renders `error` as **Not saved**. **A
+  quit or close never discards a save silently** (#1489): `save-flush.ts`
+  answers `{ saved, failed, pending }` and `flushNeedsConfirmation` decides
+  whether the main process asks before the window goes. An editor takes part
+  by registering a save context; one that saves on its own is outside all of
+  it, which is the defect #1450 was.
+- **The builder's PUT is a merge-patch of changed fields** (`buildUpdatePayload`,
+  #1436), never the whole record. The converse rule for a copy: spread the
+  record, never a hand-written field list, because the list drops every field
+  added after it was written (`useTreeCrud.ts`'s Duplicate omits the execution
+  settings, #1519).
 - Styling: Tailwind CSS v4; all colours via CSS custom properties.
 - **Design system: `docs/design-system.md`**: tokens, elevation, typography,
   component patterns, accessibility. **Read it before touching any UI file.**
@@ -206,6 +220,20 @@ use across the tree; a new surface declares one rather than picking a token.
 On an element whose primitive already sets a background utility
 (`DialogContent`'s `bg-background`), `surface-card` alone loses the cascade:
 write the pair `bg-card surface-card` (see `docs/design-system.md`).
+
+## Driving the renderer without Electron
+
+A sweep or a probe runs the renderer under vite and drives it with
+playwright-core, no Electron: `pnpm exec vite --port <N> --strictPort`, the
+engine on a port of its own, and `ENGINE_PORT` in `src/config/network.ts`
+patched in a worktree only (it is a compile-time constant). Chromium is
+pre-installed at `/opt/pw-browsers/chromium` and needs `--no-sandbox`.
+`window.electronAPI` is absent there, so every preload-only path (file parts,
+the quit flush, system notifications, the OS proxy) is off and its fallback is
+what you measure. Every root poll is a TanStack `refetchInterval` with the
+background default, so a hidden window measures the paused case; an idle
+figure needs the window visible and untouched, and the health log's 30 s
+cadence is the proxy that proves it was.
 
 ## Docs to keep in step
 
