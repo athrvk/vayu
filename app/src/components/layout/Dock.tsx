@@ -241,6 +241,44 @@ function RunningServices() {
 	);
 }
 
+/**
+ * The Dock's answer to "is my edit still unsaved", once the failure toast
+ * that first reported it has expired.
+ *
+ * `--destructive-text` for the word, not the general `-text` a status dot
+ * would use: this is not an engine connection state, it is the same failed
+ * class of thing a destructive action warns about. The rest of the line stays
+ * `--muted-foreground` like its three siblings, so only the word that means
+ * trouble is coloured.
+ */
+function SaveError() {
+	const message = useSaveStore((s) => s.lastErrorMessage);
+
+	const label = <span className="text-destructive-text">Not saved</span>;
+
+	if (!message) {
+		return <span className="text-xs text-muted-foreground">{label}</span>;
+	}
+
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<span
+					// eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- TooltipTrigger (Radix) wires focus and blur to reveal and dismiss this tooltip, which is the only keyboard path to the save error text
+					tabIndex={0}
+					className="flex items-center gap-1 text-xs text-muted-foreground cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+				>
+					{label}
+					<Info className="w-3 h-3" aria-hidden="true" />
+				</span>
+			</TooltipTrigger>
+			<TooltipContent side="top">
+				<p className="max-w-64 whitespace-normal break-words">{message}</p>
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
 function PendingRestartButton() {
 	const { restart, isRestarting } = useEngineRestart();
 
@@ -352,19 +390,18 @@ export function Dock() {
 						<span className="text-xs text-muted-foreground">Saved</span>
 					)}
 					{/*
-					 * No error line here any more, on purpose.
-					 *
-					 * This strip used to render `save-store`'s `errorMessage`,
-					 * added because a bare "Save failed" never said *why*. The
-					 * reason still has to reach the user; it now arrives as a
-					 * toast, which is where every other failure in the app is
-					 * reported, and which - unlike a 60-character truncated span
-					 * with the rest in a `title` - has room for an engine message
-					 * like "database is locked".
-					 *
-					 * Guarded by `Dock.save-error.test.tsx`: same requirement, a
-					 * failure says why, asserted against the toast instead.
+					 * The toast still carries the reason, first - it is the one
+					 * channel every failure in the app reports through, and it has
+					 * room for a message like "database is locked" that a 60-char
+					 * span cannot. But it clears itself after ten seconds, and a
+					 * failed save leaves the draft unsaved for as long as the
+					 * engine stays down, not for ten seconds. This line is the
+					 * part that outlives the toast: the same tooltip-on-hover
+					 * shape `EngineStatus` above uses for its own error, so the
+					 * strip has one pattern for "there is a reason, hover for it"
+					 * rather than two.
 					 */}
+					{saveStatus === "error" && <SaveError />}
 
 					{/*
 					 * Full muted-foreground, not /50. At half opacity the version

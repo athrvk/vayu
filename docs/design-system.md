@@ -1503,7 +1503,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **15 directives across 11 files**, listed
+file that provides the missing half. **16 directives across 11 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1519,9 +1519,10 @@ not rule names - two of these lines silence two rules at once.
   `jsx-a11y/click-events-have-key-events` on the close affordance, which is
   Delete or Backspace on the focused row and a `tabIndex={-1}` pointer target
   here.
-- `components/layout/Dock.tsx` (1) - `jsx-a11y/no-noninteractive-tabindex`: the
-  Radix `TooltipTrigger` wires focus and blur to the tooltip holding the engine
-  error text, which is the only keyboard path to it.
+- `components/layout/Dock.tsx` (2) - `jsx-a11y/no-noninteractive-tabindex`
+  twice: the Radix `TooltipTrigger` wires focus and blur to the tooltip
+  holding the engine error text, and the same shape again on the save-error
+  tooltip, each the only keyboard path to its text.
 - `components/layout/PanelResizeHandle.tsx` (1) -
   `jsx-a11y/no-noninteractive-element-interactions`: the window splitter, with
   its arrow/Page/Home/End handling in the `onKeyDown` beside it.

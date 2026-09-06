@@ -24,7 +24,7 @@
 
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEngineStore, useToastStore } from "@/stores";
+import { useEngineStore, useSaveStore, useToastStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { TIMING } from "@/config/timing";
@@ -96,6 +96,10 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 			// gave, since the new one may disagree with all of them.
 			await new Promise((resolve) => setTimeout(resolve, TIMING.ENGINE_RESTART_WAIT_MS));
 			await queryClient.invalidateQueries();
+			// Same move `useHealthQuery` makes on an automatic reconnect: a
+			// dirty editor's own retry backs off well past this restart, so a
+			// manual restart should not make the user wait for it either.
+			void useSaveStore.getState().flushAll();
 			// Last, and only on the success path: the pending signal is the
 			// user's evidence that a saved value has not taken effect yet, so a
 			// failed restart must leave it standing.

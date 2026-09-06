@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { shouldRetryQuery } from "./query-client";
+import { shouldRetryQuery, shouldRetryMutation } from "./query-client";
 import { QUERY_CACHE } from "@/config/cache";
 import { ApiError } from "@/services/http-client";
 
@@ -52,5 +52,34 @@ describe("shouldRetryQuery", () => {
 
 	it("keeps the budget it always had for retryable errors", () => {
 		expect(QUERY_CACHE.DEFAULT_QUERY_RETRY).toBe(2);
+	});
+});
+
+/**
+ * The mutation default used to be a bare count with no error-type awareness -
+ * a 413 whose body the engine refused, or a 400, was retried once, re-sending
+ * the same oversized or malformed payload for the same rejection.
+ */
+describe("shouldRetryMutation", () => {
+	it("does not retry a 413 - re-sending the same oversized body changes nothing", () => {
+		expect(shouldRetryMutation(0, apiError(413))).toBe(false);
+	});
+
+	it("does not retry any other 4xx", () => {
+		for (const status of [400, 401, 403, 409, 422]) {
+			expect(shouldRetryMutation(0, apiError(status))).toBe(false);
+		}
+	});
+
+	it("retries a transport failure once, the same as before", () => {
+		expect(shouldRetryMutation(0, new Error("Network error: fetch failed"))).toBe(true);
+		expect(shouldRetryMutation(QUERY_CACHE.DEFAULT_MUTATION_RETRY, new Error("timeout"))).toBe(
+			false
+		);
+	});
+
+	it("retries a 5xx up to the mutation budget", () => {
+		expect(shouldRetryMutation(0, apiError(500))).toBe(true);
+		expect(shouldRetryMutation(QUERY_CACHE.DEFAULT_MUTATION_RETRY, apiError(500))).toBe(false);
 	});
 });

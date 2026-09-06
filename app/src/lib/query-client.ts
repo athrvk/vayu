@@ -20,14 +20,26 @@ import { ApiError } from "@/services/http-client";
  * answers the same way three times in a row, and retrying it only delays the
  * error the caller is waiting for. Anything else - a 5xx, a timeout, an
  * unreachable engine - keeps the default budget, because those do recover.
- *
+ */
+function isFinalError(error: unknown): boolean {
+	return error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500;
+}
+
+/**
  * Exported so a query with its own retry rule can be checked against this one.
  */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
-	if (error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500) {
-		return false;
-	}
-	return failureCount < QUERY_CACHE.DEFAULT_QUERY_RETRY;
+	return !isFinalError(error) && failureCount < QUERY_CACHE.DEFAULT_QUERY_RETRY;
+}
+
+/**
+ * The mutation default used to be a bare count with no error-type awareness,
+ * unlike `shouldRetryQuery` - so a 413 (a save whose body the engine refused)
+ * or a 400 was retried once, re-sending the same oversized or malformed
+ * payload for the same rejection. A 4xx is as final for a write as for a read.
+ */
+export function shouldRetryMutation(failureCount: number, error: unknown): boolean {
+	return !isFinalError(error) && failureCount < QUERY_CACHE.DEFAULT_MUTATION_RETRY;
 }
 
 export const queryClient = new QueryClient({
@@ -42,7 +54,7 @@ export const queryClient = new QueryClient({
 			refetchOnReconnect: true,
 		},
 		mutations: {
-			retry: QUERY_CACHE.DEFAULT_MUTATION_RETRY,
+			retry: shouldRetryMutation,
 		},
 	},
 });

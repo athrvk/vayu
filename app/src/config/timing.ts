@@ -39,6 +39,14 @@ export const TIMING = {
 	 */
 	SAVED_STATUS_DURATION_MS: 3000,
 
+	/**
+	 * Ceiling on the backoff `useSaveManager` doubles through after a failed
+	 * auto-save. Read in exactly one place - the retry scheduled from
+	 * `performSave`'s catch - so a save that keeps failing settles into a fixed
+	 * cadence instead of backing off forever.
+	 */
+	SAVE_RETRY_MAX_DELAY_MS: 60_000,
+
 	/** Transient in-component status feedback (the response viewer's copy tick). */
 	STATUS_RESET_MS: 2000,
 
