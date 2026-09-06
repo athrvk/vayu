@@ -92,6 +92,42 @@ struct ScriptReplay {
 };
 
 /**
+ * @brief Tally one replayed script's verdict into @p totals.
+ *
+ * `result.tests` is populated whether or not the script went on to throw, so
+ * it is read first: a mixed pass/fail script must not collapse into one
+ * opaque failure (issue #1502). A throw after tests already ran (or a failed
+ * `pm.request` writeback) is a second, distinct failure and is recorded
+ * alongside them, never dropped just because the tests that did run are
+ * counted - the same distinction `script_errored` draws in the design path.
+ */
+template <typename RecordFailure>
+void tally_replay_result (const vayu::ScriptResult& result,
+ScriptValidationTotals& totals,
+RecordFailure&& record_failure) {
+    if (!result.tests.empty ()) {
+        for (const auto& test : result.tests) {
+            if (test.passed) {
+                totals.passed++;
+            } else {
+                totals.failed++;
+                record_failure (test.name + ": " + test.error_message);
+            }
+        }
+        if (!result.success && !result.error_message.empty ()) {
+            totals.failed++;
+            record_failure ("Script error: " + result.error_message);
+        }
+    } else if (result.success) {
+        // Script ran but had no pm.test() calls - count as passed
+        totals.passed++;
+    } else {
+        totals.failed++;
+        record_failure ("Script error: " + result.error_message);
+    }
+}
+
+/**
  * @brief Replay one script against one set of samples, tallying the results.
  *
  * @param scopes The run's stored variable scopes, shared by every replay of the
@@ -171,25 +207,7 @@ std::vector<std::string>& failure_messages) {
                 script_ctx.response_events = &stream_events;
             }
             auto result = engine.execute (*replay.script, script_ctx);
-
-            if (result.success) {
-                // Check individual test results
-                for (const auto& test : result.tests) {
-                    if (test.passed) {
-                        totals.passed++;
-                    } else {
-                        totals.failed++;
-                        record_failure (test.name + ": " + test.error_message);
-                    }
-                }
-                if (result.tests.empty ()) {
-                    // Script ran but had no pm.test() calls - count as passed
-                    totals.passed++;
-                }
-            } else {
-                totals.failed++;
-                record_failure ("Script error: " + result.error_message);
-            }
+            tally_replay_result (result, totals, record_failure);
         } catch (const std::exception& e) {
             totals.failed++;
             record_failure ("Exception: " + std::string (e.what ()));
