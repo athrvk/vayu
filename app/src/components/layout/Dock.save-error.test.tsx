@@ -9,19 +9,25 @@
  */
 
 /**
- * A save failure should say why. Same requirement as before, different surface.
+ * A save failure should say why, for as long as it stays unsaved. The surface
+ * has moved twice now.
  *
  * `save-store` used to record an `errorMessage` that nothing read, so the status
  * strip showed a bare "Save failed" for every cause. That was fixed by rendering
- * the reason in the Dock. Failures are now reported by a toast instead - one
- * channel for every failure in the app, and room for an engine message like
+ * the reason in the Dock, then that line was removed in favour of a toast - one
+ * channel for every failure in the app, with room for an engine message like
  * "database is locked" without truncating it into a `title` attribute.
  *
- * The requirement outlived the mechanism, so this file did too. What it guards
- * now is the seam: `failSave` is what eight call sites reach, and it is the only
- * thing that turns them into a toast. If that link breaks, every one of those
- * failures goes unreported - which is exactly the state the original fix
- * existed to end.
+ * The toast turned out not to be the whole answer: it clears itself after ten
+ * seconds, and a failed save can leave the draft unsaved for as long as the
+ * engine stays down. Nothing said so once the toast was gone. The Dock now
+ * carries a persistent "Not saved" line for exactly that gap, with the reason
+ * back in a tooltip (`lastErrorMessage`) rather than truncated inline - so the
+ * toast is still the first word on a failure, and the Dock is the standing one.
+ *
+ * What this file guards: `failSave` is what eight call sites reach, and it is
+ * the only thing that turns them into both a toast and the Dock's line. If that
+ * link breaks, every one of those failures goes unreported.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -51,19 +57,22 @@ describe("save failure reporting", () => {
 		expect(useSaveStore.getState().status).toBe("error");
 	});
 
-	it("does not truncate an engine message the way the strip had to", () => {
-		// The old surface was a 60-character span with the remainder hidden in a
-		// `title`. The reason a toast is the better home for this text.
+	it("does not truncate an engine message the way the strip once had to", () => {
+		// The removed surface was a 60-character span with the remainder hidden
+		// in a `title`. Both the toast and the Dock's tooltip have room for the
+		// whole thing.
 		const long = "database is locked: attempt 3 of 3 failed after 5000ms, giving up";
 		useSaveStore.getState().failSave(long);
 		expect(useToastStore.getState().toasts[0]?.message).toBe(long);
+		expect(useSaveStore.getState().lastErrorMessage).toBe(long);
 	});
 
-	it("no longer renders a competing error line in the Dock", () => {
-		// Two surfaces for one failure was the thing being removed; if a Dock
-		// error line comes back, the unification has quietly been undone.
-		expect(code).not.toMatch(/saveError/);
-		expect(code).not.toMatch(/Save failed/);
+	it("renders a persistent Not saved line once the toast has expired", () => {
+		// The gap the toast alone left open: it clears itself after
+		// TIMING.TOAST_DURATION_MS.error, and nothing said "still unsaved"
+		// after that. This line is what a failure looks like once it has.
+		expect(code).toMatch(/saveStatus === "error"/);
+		expect(code).toMatch(/Not saved/);
 	});
 
 	it("keeps the Dock reporting the states that are not failures", () => {

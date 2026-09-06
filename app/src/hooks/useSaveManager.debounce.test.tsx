@@ -27,10 +27,17 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 
 import { useClientSettingsStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
 import { useSaveManager } from "./useSaveManager";
+
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function wrapper({ children }: { children: ReactNode }) {
+	return createElement(QueryClientProvider, { client: queryClient }, children);
+}
 
 function mountManager(onSave: () => Promise<void>) {
 	return renderHook(
@@ -44,7 +51,7 @@ function mountManager(onSave: () => Promise<void>) {
 				hasChanges: true,
 				changeToken: token,
 			}),
-		{ initialProps: { token: 1 } }
+		{ initialProps: { token: 1 }, wrapper }
 	);
 }
 

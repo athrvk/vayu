@@ -45,7 +45,7 @@ const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
  * suppressed. Raising it means adding a site to the doc too, which is where the
  * reason has to convince the next reader.
  */
-const CEILING = 15;
+const CEILING = 16;
 
 /** The reason marker eslint itself understands, and this repository writes. */
 const REASON = " -- ";

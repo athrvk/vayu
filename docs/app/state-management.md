@@ -547,6 +547,7 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 ```typescript
 {
   status: "idle" | "pending" | "saving" | "saved" | "error"
+  lastErrorMessage: string | null
   activeContextId: string | null
   contexts: Map<string, SaveContext>  // Saveable entities
 }
@@ -603,17 +604,49 @@ non-draft commit path - left "Saved" in the Dock until something else happened t
 change it. The indicator's lifetime is `TIMING.SAVED_STATUS_DURATION_MS`, in one
 place, for every surface that saves.
 
-There is no `errorMessage` field. The reason travels in the toast; the store
-holds only the status the Dock renders. The field used to exist and its sole
-reader was the Dock's error line, which the toast replaced.
+**`lastErrorMessage` is the reason behind an `"error"` status**, for the Dock's
+persistent line - see below. It went through the same fate as `errorMessage`
+once: the field existed for the Dock's error line, that line was removed in
+favour of the toast, and the field went with it as one nothing read any more.
+It is back because the toast turned out not to be the whole answer (next
+paragraph), and this time it has a second reader.
 
-There is no `lastSavedAt` or `pendingSaveId` either, for the same reason - every
-match on either name was a write inside `save-store.ts`. `status` is the store's
-whole public surface, and all five of its values now have a reader: the Dock
-renders `pending` as **"Unsaved changes"**, which is the only place in the app
-that says so. That matters because auto-save is a setting the user can turn off,
-and with it off nothing was written back and nothing said as much (the tab strip
-carries no unsaved-dot on purpose).
+There is no `lastSavedAt` or `pendingSaveId`, for the same reason that field
+almost went a second time - every match on either name was a write inside
+`save-store.ts`. `status` is still the store's main public surface, and all
+five of its values have a reader: the Dock renders `pending` as **"Unsaved
+changes"**, which is the only place in the app that says so. That matters
+because auto-save is a setting the user can turn off, and with it off nothing
+was written back and nothing said as much (the tab strip carries no
+unsaved-dot on purpose).
+
+**`"error"` has two readers now, not one.** The toast `failSave` raises expires
+after `TIMING.TOAST_DURATION_MS.error` (10s), and a failed save can leave a
+draft unsaved for as long as the engine stays down - far longer than that. The
+Dock's ambient status line (`Dock.tsx`) renders an `"error"` status as **"Not
+saved"**, coloured with `--destructive-text`, with `lastErrorMessage` in a
+tooltip on hover - the same shape `EngineStatus` uses for its own error, rather
+than a second way of saying "hover for the reason." It stays until the next
+save transition, so it outlives the toast for exactly as long as the draft
+stays unsaved.
+
+**A failed auto-save now retries itself.** `useSaveManager`'s debounced timer
+is the only caller that does: on a failure it re-arms with the auto-save
+delay, doubling on each further failure and capped at
+`TIMING.SAVE_RETRY_MAX_DELAY_MS` (one minute), cancelled on unmount, on an
+entity switch, and by the next ordinary edit. Cmd/Ctrl+S and the
+entity-switch/quit goodbye flush still call `performSave` directly and report
+their own outcome once - retrying either would save into a pane the user has
+already left, or double a save they just asked for by hand.
+
+**A reconnect flushes every dirty context, not just the one that failed.**
+`useHealthQuery`'s automatic-reconnect branch and `useEngineRestart`'s manual
+one both call `flushAll()` right after `invalidateQueries()` - the same move,
+for the same reason: a dirty editor's own retry can be backed off up to a
+minute behind an engine that just came back, and nothing else pokes it sooner.
+Every registered context is safe to flush here, unlike the quit flush's
+urgency: a context with nothing pending is a no-op, and one that has never
+failed loses nothing by saving now instead of on its own schedule.
 
 **`triggerSave` will not report a success the context did not have.** Registered
 contexts report their own failures through `failSave` and then *resolve* rather

@@ -20,6 +20,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 
 import { TIMING } from "@/config/timing";
 import { useClientSettingsStore } from "@/stores";
@@ -27,17 +29,24 @@ import { useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import { useSaveManager } from "./useSaveManager";
 
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function wrapper({ children }: { children: ReactNode }) {
+	return createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
 function mountManager(onSave: () => Promise<void>) {
-	return renderHook(() =>
-		useSaveManager({
-			entityId: "req_1",
-			contextName: "Request",
-			onSave,
-			hasChanges: true,
-			// One edit, never revised: these cases are about the save, not the
-			// debounce. `useSaveManager.debounce.test.tsx` varies the token.
-			changeToken: 1,
-		})
+	return renderHook(
+		() =>
+			useSaveManager({
+				entityId: "req_1",
+				contextName: "Request",
+				onSave,
+				hasChanges: true,
+				// One edit, never revised: these cases are about the save, not the
+				// debounce. `useSaveManager.debounce.test.tsx` varies the token.
+				changeToken: 1,
+			}),
+		{ wrapper }
 	);
 }
 

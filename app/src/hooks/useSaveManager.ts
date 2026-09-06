@@ -16,8 +16,12 @@
  */
 
 import { useEffect, useRef, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSaveStore } from "@/stores/save-store";
 import { useClientSettingsStore } from "@/stores";
+import { queryKeys } from "@/queries/keys";
+import { ApiError } from "@/services/http-client";
+import { TIMING } from "@/config/timing";
 
 /**
  * The registry id this hook saves under. Three places in this file need it -
@@ -83,6 +87,7 @@ export function useSaveManager({
 
 	const autoSaveEnabled = useClientSettingsStore((s) => s.autoSave.enabled);
 	const autoSaveDelayMs = useClientSettingsStore((s) => s.autoSave.delayMs);
+	const queryClient = useQueryClient();
 
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 	// Saves are queued, never dropped - see performSave.
@@ -91,6 +96,33 @@ export function useSaveManager({
 	const hasChangesRef = useRef(hasChanges);
 	const changeTokenRef = useRef(changeToken);
 	const enabledRef = useRef(enabled);
+	// Read from `attemptAutoSave`, not closed over directly: closing over
+	// `autoSaveDelayMs` would give `attemptAutoSave` a new identity on every
+	// settings change, and that identity is a dependency of the entity-switch
+	// effect below, which flushes a save from its cleanup on *any* identity
+	// change - not only an entity switch.
+	const autoSaveDelayMsRef = useRef(autoSaveDelayMs);
+
+	// A failed auto-save's own retry timer, separate from `timeoutRef` (the
+	// ordinary debounce): a save that failed has nothing new to debounce, so it
+	// needs a timer the normal edit-driven effect never arms. `retryAttemptRef`
+	// is the consecutive-failure count behind the doubling backoff below - reset
+	// on the next success, not on every edit, so a failure that outlives a
+	// keystroke keeps backing off rather than restarting at the base delay.
+	const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+	const retryAttemptRef = useRef(0);
+	// `attemptAutoSave` schedules its own retry via this ref rather than
+	// calling itself by name: a `useCallback` cannot close over its own
+	// binding before it is declared, and reading a `let` assigned after the
+	// fact only defers the same self-reference into the callback body.
+	const attemptAutoSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+	const clearRetry = useCallback(() => {
+		if (retryTimeoutRef.current) {
+			clearTimeout(retryTimeoutRef.current);
+			retryTimeoutRef.current = null;
+		}
+	}, []);
 
 	// Keep onSave ref updated to avoid stale closures
 	useEffect(() => {
@@ -112,6 +144,11 @@ export function useSaveManager({
 		enabledRef.current = enabled;
 	}, [enabled]);
 
+	// Keep the retry delay ref updated
+	useEffect(() => {
+		autoSaveDelayMsRef.current = autoSaveDelayMs;
+	}, [autoSaveDelayMs]);
+
 	// Clear the pending auto-save on unmount. The "saved" indicator's own reset
 	// is the store's now, and deliberately survives this component: the Dock
 	// outlives the request pane, so the status it is showing has to be cleared by
@@ -122,8 +159,9 @@ export function useSaveManager({
 				clearTimeout(timeoutRef.current);
 				timeoutRef.current = null;
 			}
+			clearRetry();
 		};
-	}, []);
+	}, [clearRetry]);
 
 	// Perform the actual save.
 	//
@@ -170,11 +208,65 @@ export function useSaveManager({
 			} catch (error) {
 				console.error("Save failed:", error);
 				failSave(error instanceof Error ? error.message : "Save failed");
+
+				// A 4xx is the engine's verdict on this payload, not a hiccup - a
+				// timed-out or refused connection is the shape a dead engine
+				// actually takes, and that is the only failure worth reacting to
+				// here. `shouldRetryQuery` already draws this line for queries;
+				// mutations reach `ApiError` the same way.
+				if (!(error instanceof ApiError)) {
+					// The health poll can be up to HEALTH_CHECK_INTERVAL_MS behind
+					// an engine that just died - a failed save is evidence sooner
+					// than the next tick would be, so nudge it now instead of
+					// waiting.
+					void queryClient.invalidateQueries({ queryKey: queryKeys.health.status() });
+				}
 			}
 		});
 		saveQueueRef.current = run;
 		return run;
-	}, [entityId, startSaving, completeSaveThenIdle, markPendingSave, failSave]);
+	}, [entityId, startSaving, completeSaveThenIdle, markPendingSave, failSave, queryClient]);
+
+	/**
+	 * The auto-save path specifically, not every `performSave` caller.
+	 *
+	 * Cmd+S and the entity-switch/unmount goodbye flush call `performSave`
+	 * directly and report their own outcome once - retrying either would save
+	 * into a pane the user has already left, or double a save they just asked
+	 * for by hand. Only the debounced timer below needs a failure to try
+	 * again, so only it (and the retry this schedules for itself) goes through
+	 * this wrapper.
+	 *
+	 * `performSave` swallows its own errors and always resolves, so the
+	 * outcome is read back from the store status it just published rather than
+	 * from a rejection.
+	 */
+	const attemptAutoSave = useCallback(async () => {
+		await performSave();
+		if (useSaveStore.getState().status !== "error") {
+			retryAttemptRef.current = 0;
+			clearRetry();
+			return;
+		}
+		if (!enabledRef.current) return;
+
+		// Doubling from the user's own delay, capped so a save that keeps
+		// failing settles into a fixed cadence instead of backing off forever.
+		const attempt = retryAttemptRef.current;
+		retryAttemptRef.current = attempt + 1;
+		const delay = Math.min(
+			autoSaveDelayMsRef.current * 2 ** attempt,
+			TIMING.SAVE_RETRY_MAX_DELAY_MS
+		);
+		clearRetry();
+		retryTimeoutRef.current = setTimeout(() => {
+			void attemptAutoSaveRef.current();
+		}, delay);
+	}, [performSave, clearRetry]);
+
+	useEffect(() => {
+		attemptAutoSaveRef.current = attemptAutoSave;
+	}, [attemptAutoSave]);
 
 	// Register/unregister with centralized save context
 	useEffect(() => {
@@ -225,11 +317,16 @@ export function useSaveManager({
 				clearTimeout(timeoutRef.current);
 				timeoutRef.current = null;
 			}
+			// Cancels a retry a prior failure armed for *this* entity. The flush
+			// below goes through `performSave` directly, never `attemptAutoSave`,
+			// so a failure here reports once and does not arm a new one - there
+			// is no pane left to retry into once this cleanup has run.
+			clearRetry();
 			if (enabledRef.current && hasChangesRef.current) {
 				performSave();
 			}
 		};
-	}, [entityId, reset, performSave]);
+	}, [entityId, reset, performSave, clearRetry]);
 
 	// Force save (for manual triggers)
 	const forceSave = useCallback(async () => {
@@ -260,6 +357,13 @@ export function useSaveManager({
 		// save via Cmd+S) still applies even when auto-save is turned off.
 		markPendingSave();
 
+		// A new edit supersedes a retry a prior failure scheduled: the timer
+		// armed below covers saving it, so the stale one would only race a
+		// second attempt against the first. The backoff count survives this -
+		// it resets on success, not on every keystroke - so typing through an
+		// outage does not reset a save back to retrying every few seconds.
+		clearRetry();
+
 		// Respect the global auto-save preference: when disabled, leave the entity
 		// marked dirty but never schedule an automatic save.
 		if (!autoSaveEnabled) {
@@ -273,7 +377,7 @@ export function useSaveManager({
 
 		// Set new timeout for auto-save (user-configurable delay)
 		timeoutRef.current = setTimeout(() => {
-			performSave();
+			void attemptAutoSave();
 		}, autoSaveDelayMs);
 
 		return () => {
@@ -287,9 +391,10 @@ export function useSaveManager({
 		changeToken,
 		entityId,
 		markPendingSave,
-		performSave,
+		attemptAutoSave,
 		autoSaveEnabled,
 		autoSaveDelayMs,
+		clearRetry,
 	]);
 
 	return {

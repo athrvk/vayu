@@ -31,9 +31,16 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { useSaveManager } from "./useSaveManager";
 import { useClientSettingsStore } from "@/stores";
 import { useSaveStore } from "@/stores/save-store";
+
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function wrapper({ children }: { children: ReactNode }) {
+	return createElement(QueryClientProvider, { client: queryClient }, children);
+}
 
 /** What the Settings panel writes when the user picks a delay. */
 function chooseInSettings(patch: { enabled?: boolean; delayMs?: number }) {
@@ -43,16 +50,18 @@ function chooseInSettings(patch: { enabled?: boolean; delayMs?: number }) {
 }
 
 function mountManager(onSave: () => Promise<void>) {
-	return renderHook(() =>
-		useSaveManager({
-			entityId: "req_1",
-			contextName: "Request",
-			onSave,
-			hasChanges: true,
-			// One edit, never revised: these cases are about the save, not the
-			// debounce. `useSaveManager.debounce.test.tsx` varies the token.
-			changeToken: 1,
-		})
+	return renderHook(
+		() =>
+			useSaveManager({
+				entityId: "req_1",
+				contextName: "Request",
+				onSave,
+				hasChanges: true,
+				// One edit, never revised: these cases are about the save, not the
+				// debounce. `useSaveManager.debounce.test.tsx` varies the token.
+				changeToken: 1,
+			}),
+		{ wrapper }
 	);
 }
 
