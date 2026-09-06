@@ -121,6 +121,15 @@ Two shapes need it, and both are in the code today:
   both, in a `create_*_locked` core of the same shape as the merge-patch
   update's.
 
+The same shape holds where the state being merged is not a `Database` row at
+all: **`PUT /inbox/:id`** (issue #1454) merge-patches an inbox's canned
+response, which lives in `InboxManager`'s own map, guarded by its own mutex.
+`InboxManager::update_response` takes a merge function and runs the read, the
+merge and the write under one acquisition of that lock - `Database::with_lock`
+has nothing to scope here, since no database call is involved - mirroring
+`MockIssuerManager::update`, which already held its equivalent composite this
+way.
+
 Both wrappers take an optional `before_write` seam, invoked inside the scope
 immediately before the commit. It is what lets a test drive a genuinely
 concurrent writer into the window rather than asserting the absence of a race by

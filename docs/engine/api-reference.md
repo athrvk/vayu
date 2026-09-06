@@ -3524,6 +3524,13 @@ restart and no captures lost. Merge-patch: an absent field keeps what the inbox
 is serving. The body may be the response object itself or `{"response": {...}}`,
 so a client can send back what `start` handed it. `404` for an unknown id.
 
+**Atomic against a concurrent update**, the same guarantee the resource `PUT`s
+above give (issue #1454): the read, the merge and the write are one acquisition
+of the inbox's own lock, not the database's - the canned response lives in
+memory - so two clients patching one inbox at the same moment each merge onto
+what the other just committed rather than onto the response as both of them
+found it.
+
 ### POST /inbox/:inboxId/stop
 
 Stop the listener. Returns the inbox with `running: false`. Captures survive;
