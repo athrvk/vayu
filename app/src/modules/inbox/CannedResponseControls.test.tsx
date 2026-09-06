@@ -234,6 +234,24 @@ describe("the key/value table it borrows", () => {
 		expect(headerName(0)).toHaveValue("X-Trace");
 	});
 
+	it("completes header names, the same list the request builder offers", () => {
+		// #1449: this table is the one `KeyValueEditor` header mount without
+		// `keySuggestions` - a hand-rolled copy of the primitive that missed the
+		// fix `HeadersPanel` already carries.
+		render(
+			<CannedResponseControls
+				response={response({ body: "hi" })}
+				pending={false}
+				stopped={false}
+				onApply={vi.fn()}
+			/>
+		);
+
+		fireEvent.focus(headerName(0));
+		fireEvent.change(headerName(0), { target: { value: "Cont" } });
+		expect(screen.getByText("Content-Type")).toBeInTheDocument();
+	});
+
 	it("offers no variable affordances, because a canned reply has no scope", () => {
 		// `{{trace}}` is sent verbatim by the engine. A token here would colour
 		// it "not defined" and open an editor with nowhere to write.

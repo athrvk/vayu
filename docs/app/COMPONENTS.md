@@ -675,7 +675,9 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   [`KeyValueEditor`](#shared-keyvalue-editor-componentssharedkeyvalueeditor) rows, with no `variables` scope
   passed - a canned reply is echoed verbatim, so there is nothing to resolve. They were local
   `Input` pairs until #564 made the primitive mountable outside `RequestBuilderProvider`; the
-  table's trailing blank row replaced the panel's own "Add header" button.
+  table's trailing blank row replaced the panel's own "Add header" button. Header names complete
+  from the same `STANDARD_HEADERS` list as the request builder's Headers tab (#1449) - the mount
+  had reused the primitive without its header-specific suggestion prop.
 - `capture-notifier.ts` - the OS notification a capture raises while Vayu is in the background
   (issue #1388), and the two gates it passes first: the global opt-in, read by `services/notify.ts`
   for every kind, and this inbox's own `Notify` toggle in the header, read here and off by default.

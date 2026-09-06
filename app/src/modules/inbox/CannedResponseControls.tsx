@@ -35,6 +35,7 @@ import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import type { InboxCannedResponse, KeyValueItem } from "@/types";
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
+import { STANDARD_HEADERS } from "@/constants/http";
 
 /**
  * The engine's cap on the artificial delay (`MAX_RESPONSE_DELAY_MS`).
@@ -243,6 +244,7 @@ export function CannedResponseControls({
 							valuePlaceholder="Value"
 							allowDisable={false}
 							readOnly={disabled}
+							keySuggestions={STANDARD_HEADERS}
 						/>
 					</div>
 				</div>
