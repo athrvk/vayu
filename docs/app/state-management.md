@@ -555,13 +555,19 @@ Orchestrates auto-save across the app with a registry of saveable contexts (e.g.
 **`failSave` is the app's single failure seam.** It sets `status: "error"` *and*
 raises an error toast carrying the reason. Its call sites are the collection
 tree's create / delete / duplicate / rename, `useSaveManager`, `SettingsMain`,
-`VariableTableEditor`, `useDraftSaveContext` and the context bar's
-`VariablesSection` - and doing the reporting here rather than at each of them
-means a new caller cannot forget to report. The last two were added because both
-could fail in complete silence: the variables section fired three mutations with
-no `onError` at all, and the
+`VariableTableEditor`, `useDraftSaveContext`, the context bar's
+`VariablesSection` and the inbox's `CannedResponseControls` - and doing the
+reporting here rather than at each of them means a new caller cannot forget to
+report. The last two were added because both could fail in complete silence:
+the variables section fired three mutations with no `onError` at all, and the
 manual-draft editors rendered an inline callout that a quit flush has no screen
-to show.
+to show. `CannedResponseControls` (#1450) is a direct writer like
+`SettingsMain`: pressing Apply calls `startSaving`/`completeSaveThenIdle`/
+`failSave` itself around the PUT, rather than only through the
+`useDraftSaveContext`-registered `save` those two functions also serve to
+Ctrl/Cmd+S and the quit flush - the registration alone would report nothing
+for a direct click, since only `triggerSave`/`flushAll` route a registered
+context's `save` through the store's own status wrapper.
 
 `VariablesSection` also **registers a context** (`context-bar-variables`),
 because `failSave` alone only covers the failure. A variable commit is a plain
