@@ -2324,7 +2324,11 @@ The **language** is current; what is missing is the **host environment**:
 - Can access `pm.environment`, `pm.collectionVariables` and `pm.globals`
 - Cannot access `pm.response` (request hasn't been sent yet)
 - `pm.info.eventName` is `"prerequest"` here
-- Run in Design Mode / Send only, not in load tests
+- Run in Design Mode / Send only, not in load tests. Since issue #1503 this is
+  no longer silent: a load run reports each affected step as
+  `preRequestScript: "skipped"` in its `scenario.steps` breakdown, and the
+  run's `warnings` array carries one line naming how many steps did (see
+  [api-reference.md](api-reference.md#the-scenario-block-collection-runs)).
 
 ### Test Scripts (Post-request)
 
@@ -2376,6 +2380,13 @@ The **language** is current; what is missing is the **host environment**:
   well as the request's own, composed the same way as `POST /execute` (see
   [Script Parts](#script-parts) below) - a collection-level assertion is now
   checked under load, not only in design mode
+- A value a pre-request script would have set - a token fetched and written
+  with `pm.environment.set` - never reaches a later step or request under
+  load, because the script that would set it never runs. The `{{token}}` it
+  was meant to fill goes on the wire literally instead of being refused, and
+  since issue #1503 the run counts it: `unresolvedTokens` per step, and one
+  line in the run's `warnings` array naming a few of the affected variables
+  (see [api-reference.md](api-reference.md#the-scenario-block-collection-runs))
 
 **All three variable scopes are readable, and none of them is written back.** A
 deferred replay reads the run's own environment (the `environmentId` the run was

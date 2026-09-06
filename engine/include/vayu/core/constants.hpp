@@ -903,6 +903,21 @@ constexpr size_t MAX_SCHEMA_NODES = 20000;
 } // namespace schema_validation
 
 /**
+ * @brief What a run's `warnings` array bounds (issue #1503).
+ *
+ * A run is not refused for carrying a mistake it can still finish measuring -
+ * an unresolved `{{token}}`, a script that never ran - only told about it, so
+ * these bound what the telling costs rather than what the run does.
+ */
+namespace warnings {
+/// Distinct unresolved-token names one warning line names. The count beside
+/// them already says how many requests were affected; this only bounds how
+/// long the list of names grows, the same "bounded list that says what it is
+/// a list of" discipline `schema_validation::MAX_FAILURES` follows.
+constexpr size_t MAX_UNRESOLVED_TOKEN_NAMES = 5;
+} // namespace warnings
+
+/**
  * @brief Local mock server bounds (issue #481 phase 2)
  *
  * Rails rather than preferences, the same split the inbox and the issuer draw:

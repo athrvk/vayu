@@ -703,6 +703,29 @@ void MetricsCollector::record_drop_batch (size_t count) {
     dropped_requests_.fetch_add (count, std::memory_order_relaxed);
 }
 
+void MetricsCollector::record_unresolved_token (const std::vector<std::string>& names) {
+    unresolved_token_requests_.fetch_add (1, std::memory_order_relaxed);
+    if (names.empty ()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock (unresolved_token_names_mutex_);
+    for (const auto& name : names) {
+        if (unresolved_token_names_.size () >=
+        vayu::core::constants::warnings::MAX_UNRESOLVED_TOKEN_NAMES) {
+            return;
+        }
+        if (std::find (unresolved_token_names_.begin (),
+            unresolved_token_names_.end (), name) == unresolved_token_names_.end ()) {
+            unresolved_token_names_.push_back (name);
+        }
+    }
+}
+
+std::vector<std::string> MetricsCollector::unresolved_token_names () const {
+    std::lock_guard<std::mutex> lock (unresolved_token_names_mutex_);
+    return unresolved_token_names_;
+}
+
 MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {
     Percentiles result;
 

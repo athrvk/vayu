@@ -19,6 +19,7 @@
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -94,7 +95,8 @@ std::optional<std::string> validate_scenario_load_config (const nlohmann::json& 
 // ============================================================================
 
 StepHistograms::StepHistograms (size_t step_count)
-: histograms_ (step_count, nullptr), completed_ (step_count), errors_ (step_count) {
+: histograms_ (step_count, nullptr), completed_ (step_count),
+  errors_ (step_count), unresolved_tokens_ (step_count) {
     for (size_t i = 0; i < step_count; ++i) {
         // Same range and precision as the run's aggregate histogram, so a step's
         // p99 and the whole run's are comparable rather than two resolutions.
@@ -111,6 +113,7 @@ StepHistograms::StepHistograms (size_t step_count)
         }
         completed_[i].store (0, std::memory_order_relaxed);
         errors_[i].store (0, std::memory_order_relaxed);
+        unresolved_tokens_[i].store (0, std::memory_order_relaxed);
     }
 }
 
@@ -142,8 +145,21 @@ void StepHistograms::record_error (size_t step) {
     errors_[step].fetch_add (1, std::memory_order_relaxed);
 }
 
+void StepHistograms::record_unresolved_token (size_t step) {
+    if (step >= unresolved_tokens_.size ()) {
+        return;
+    }
+    unresolved_tokens_[step].fetch_add (1, std::memory_order_relaxed);
+}
+
 size_t StepHistograms::completed (size_t step) const {
     return step < completed_.size () ? completed_[step].load (std::memory_order_relaxed) : 0;
+}
+
+size_t StepHistograms::unresolved_tokens (size_t step) const {
+    return step < unresolved_tokens_.size () ?
+    unresolved_tokens_[step].load (std::memory_order_relaxed) :
+    0;
 }
 
 size_t StepHistograms::errors (size_t step) const {
@@ -175,16 +191,27 @@ nlohmann::json build_step_breakdown (const ScenarioPlan& plan, const StepHistogr
     const size_t count   = std::min (plan.steps.size (), steps.step_count ());
     for (size_t i = 0; i < count; ++i) {
         const auto percentiles = steps.percentiles (i);
-        array.push_back ({ { "index", plan.steps[i].index },
-        // Identity beside the numbers: a breakdown indexed only by position
-        // is unreadable next to a 40-step sequence.
-        { "name", plan.steps[i].name }, { "requestId", plan.steps[i].request_id },
-        { "method", vayu::to_string (plan.steps[i].request.method) },
-        { "executed", steps.completed (i) }, { "errors", steps.errors (i) },
-        { "latency",
-        { { "min", percentiles.min }, { "p50", percentiles.p50 },
-        { "p95", percentiles.p95 }, { "p99", percentiles.p99 },
-        { "max", percentiles.max } } } });
+        nlohmann::json entry   = { { "index", plan.steps[i].index },
+              // Identity beside the numbers: a breakdown indexed only by position
+              // is unreadable next to a 40-step sequence.
+              { "name", plan.steps[i].name }, { "requestId", plan.steps[i].request_id },
+              { "method", vayu::to_string (plan.steps[i].request.method) },
+              { "executed", steps.completed (i) }, { "errors", steps.errors (i) },
+              // Requests this step sent with a `{{token}}` composition never
+              // resolved (issue #1503) - counted, not refused, so a literal
+              // brace a caller meant to send still goes out.
+              { "unresolvedTokens", steps.unresolved_tokens (i) },
+              { "latency",
+              { { "min", percentiles.min }, { "p50", percentiles.p50 },
+              { "p95", percentiles.p95 }, { "p99", percentiles.p99 },
+              { "max", percentiles.max } } } };
+        // A load run never executes a pre-request script (see this file's
+        // header comment); a step that carries one always reports it skipped
+        // rather than leaving the report silent about it.
+        if (!plan.steps[i].pre_script.empty ()) {
+            entry["preRequestScript"] = "skipped";
+        }
+        array.push_back (std::move (entry));
     }
     return array;
 }
@@ -292,6 +319,16 @@ class ScenarioLoadDriver {
                 ResultAnnotations{ row, step_index, iteration, vu_index });
                 return;
             }
+        }
+
+        // Whatever composition and the bind above left unresolved goes on the
+        // wire regardless (issue #1503): this mode runs no residual pass, so
+        // the request is sent as it stands and the mistake is only counted,
+        // never refused - a literal `{{` can be deliberate in a body.
+        if (auto names = vayu::http::routes::unresolved_token_names (request);
+        !names.empty ()) {
+            state_->steps.record_unresolved_token (step_index);
+            context_->metrics_collector->record_unresolved_token (names);
         }
 
         context_->event_loop->submit (request,

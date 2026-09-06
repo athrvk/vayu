@@ -622,6 +622,25 @@ class MetricsCollector {
         http_version_downgraded_.fetch_add (1, std::memory_order_relaxed);
     }
 
+    /**
+     * @brief Count one request sent with a `{{token}}` composition never
+     *        resolved (issue #1503), and remember a few of the names.
+     *
+     * Never refused - a literal `{{` can be deliberate in a body - only
+     * counted, so a load run that sent it is still a green run with a
+     * warning rather than a report that looks the same as a run that got it
+     * right. @p names may be empty when the caller already knows a request
+     * held a token but has not extracted which; the count still advances.
+     */
+    void record_unresolved_token (const std::vector<std::string>& names);
+
+    [[nodiscard]] size_t unresolved_token_requests () const {
+        return unresolved_token_requests_.load (std::memory_order_relaxed);
+    }
+
+    /** A capped, deduplicated sample of the names @ref record_unresolved_token saw. */
+    [[nodiscard]] std::vector<std::string> unresolved_token_names () const;
+
     [[nodiscard]] size_t http_version_downgraded () const {
         return http_version_downgraded_.load (std::memory_order_relaxed);
     }
@@ -1049,6 +1068,13 @@ class MetricsCollector {
     // takes, so it adds no contention to the hot path.
     mutable std::mutex status_overflow_mutex_;
     std::map<int, size_t> status_overflow_;
+
+    // A request sent with a residual token (issue #1503). Dead path for the
+    // ordinary run, same as the overflow map above: guarded by a mutex only
+    // the mistake takes, so it adds no contention to the hot path.
+    std::atomic<size_t> unresolved_token_requests_{ 0 };
+    mutable std::mutex unresolved_token_names_mutex_;
+    std::vector<std::string> unresolved_token_names_;
 
     // Whole-run capture budget, spent in `max_sample_body_bytes`-bounded
     // chunks by the copies below.

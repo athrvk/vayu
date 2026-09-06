@@ -347,6 +347,20 @@ struct ResidualRefusal {
 resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes);
 
 /**
+ * Every `{{name}}` still on @p request, without attempting to resolve any of
+ * them (issue #1503).
+ *
+ * The load path's cheaper question: not "what do these resolve to" (which
+ * needs the scopes `resolve_residual_tokens` reads) but "were any left" -
+ * asked over the same fields that pass walks, so a load run that never
+ * spends the residual pass can still say what it did not fix. A request
+ * holding no `{{` at all pays one search per field and nothing else, exactly
+ * as the residual pass does; @p request is taken by reference only because
+ * @ref resolvable_strings is, not because this reads anything mutable.
+ */
+[[nodiscard]] std::vector<std::string> unresolved_token_names (vayu::Request& request);
+
+/**
  * Run one exchange: pre-request script, send, test script.
  *
  * @param engine     Reused across calls; contexts are pooled, so a scenario run

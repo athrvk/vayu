@@ -5053,6 +5053,7 @@ as a smaller one:
 | A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the transport's own body cap would drop the connection instead of explaining itself. |
 | A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. The step's credential fields are scanned as well as its request. |
 | A step with a `{{data.*}}` token in its `oauth2` config | The token is acquired once, when the plan is resolved, so no iteration exists for a row to reach it. Refused with or without a data set. |
+| A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |
 
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather
 than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
@@ -5511,7 +5512,8 @@ knob.
   "stepsExecuted": 1422, "errored": 6, "virtualUsers": 50,
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
-      "executed": 480, "errors": 0,
+      "executed": 480, "errors": 0, "unresolvedTokens": 0,
+      "preRequestScript": "skipped",
       "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 },
       "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
   ]
@@ -5524,6 +5526,16 @@ One histogram is allocated per plan step at run start, which is the other thing
 `tests` is the step's deferred validation, and is **absent** for a step that
 asserted nothing or whose script drew no sample - "no assertions" and "no
 failures" are different answers.
+
+`unresolvedTokens` (issue #1503) counts, per step, how many of its executions
+sent a `{{token}}` composition never resolved - no residual pass runs under
+load, so a value composed at plan time and never bound (a script's
+`pm.environment.set` included, since that script never runs here either) goes
+on the wire literally rather than being refused. `preRequestScript` is
+`"skipped"` for a step whose request carries one and absent otherwise - see
+[scripting.md](scripting.md#pre-request-scripts) for why the mode never runs
+one at all. Neither ever fails the run by itself; both also feed the
+top-level `warnings` array below.
 
 **Response:**
 ```json
@@ -5555,7 +5567,10 @@ knew only its own spelling and silently dropped the other.
 **There is no pre-request hook on this endpoint.** `preRequestScript(s)` in a
 run payload is not an error, but nothing runs it - only `POST /execute` executes
 a pre-request script. A request that signs itself in one is sent unsigned under
-load.
+load. Since issue #1503 this is no longer silent: a scenario step whose request
+carries a pre-request script reports `preRequestScript: "skipped"` on its
+`scenario.steps` entry, and the run's `warnings` array carries one line naming
+how many steps did.
 
 **Accepted ranges.** The numeric config is range-checked **before the run row is
 created**, so a rejected request leaves no `pending` row behind. A violation is
@@ -6655,6 +6670,14 @@ named it.
     }
   },
   "slowRequests": { "count": 12, "thresholdMs": 1000, "percentage": 0.2 },
+  "warnings": [
+    { "code": "unresolved_tokens",
+      "message": "12 requests sent with unresolved variables: token",
+      "count": 12, "names": ["token"] },
+    { "code": "pre_request_script_skipped",
+      "message": "1 step carries a pre-request script that does not run under load",
+      "steps": 1 }
+  ],
   "stream": { "...": "streaming runs only - see below" },
   "sampling": {
     "errorsDropped": 0, "successTracesDropped": 29000,
@@ -6709,6 +6732,19 @@ A `tls.p50` of 0 beside a large `tls.p99` is a run re-handshaking under load -
 most requests reused a connection, a minority did not - which the average over
 both flattens into a number that looks merely mediocre. `count` is the number of
 completions behind each distribution and is identical across the five.
+
+**`warnings` (issue #1503) is what the run did not do**, even though it
+finished and its other numbers may look fine: a request sent with a
+`{{token}}` composition never resolved (no mode runs a residual pass under
+load, so a value a pre-request script would have set goes on the wire
+literally), or a step whose pre-request script this mode never executes at
+all. Neither refuses the run - a literal `{{` can be deliberate in a body -
+they are counted, not fixed. Each entry carries `code` and a human-readable
+`message`; `unresolved_tokens` also carries `count` (requests affected) and
+`names` (a few of the unresolved names, capped); `pre_request_script_skipped`
+carries `steps` (how many carried one). Absent, not an empty array, for a run
+with nothing to report - which is every run before this field existed and
+every run that genuinely had nothing to say.
 
 **A streaming run adds a `stream` section** and no other run carries one:
 

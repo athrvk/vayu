@@ -5411,6 +5411,21 @@ TEST_F (ScriptEngineTest, SkipRequestThrowsInASingleSend) {
     EXPECT_EQ (result.control.kind, ScriptControl::Kind::None);
 }
 
+// QuickJS formats a thrown error into a fixed-size buffer (`JS_MakeError`,
+// vendor/quickjs-ng/quickjs.c) and silently cuts whatever does not fit,
+// mid-word - the longest `pm.execution` member name substituted into this
+// message used to produce exactly that (issue #1503). Mutation check: widen
+// the message text back out and this reds, on the truncated tail rather
+// than the missing sentence.
+TEST_F (ScriptEngineTest, SetNextRequestsRefusalIsNeverTruncatedMidWord) {
+    auto result = engine.execute_prerequest (
+    "pm.execution.setNextRequest('checkout');", request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("docs/engine/scripting.md."), std::string::npos)
+    << "the message's own last sentence must survive whole: " << result.error_message;
+}
+
 // The load-mode contract, and it is a decision rather than an omission: a
 // deferred `tests` script has already run against a recorded response and
 // cannot redirect a sequence that already happened. `validate_scripts` builds

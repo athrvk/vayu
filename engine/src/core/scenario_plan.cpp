@@ -265,6 +265,22 @@ std::vector<nlohmann::json>& rows_out) {
         return reason;
     }
 
+    // Refused rather than ignored (issue #1503): a key this block does not
+    // read - a typo, or a knob from a version of the client ahead of this
+    // engine - used to change nothing and answer 202 anyway, which is a
+    // silence every future scenario field would inherit.
+    static const std::unordered_set<std::string> known_scenario_keys = {
+        "source", "collectionId", "recursive", "data", "iterations"
+    };
+    for (const auto& [key, value] : scenario.items ()) {
+        (void)value;
+        if (!known_scenario_keys.contains (key)) {
+            return "'scenario." + key +
+            "' is not a known field - expected one of source, collectionId, "
+            "recursive, data, iterations";
+        }
+    }
+
     return std::nullopt;
 }
 

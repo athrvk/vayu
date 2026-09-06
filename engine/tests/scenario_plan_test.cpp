@@ -1179,6 +1179,25 @@ TEST_F (ScenarioPlanTest, MalformedBlockFieldsAreRejected) {
     }
 }
 
+// A key this block does not read used to change nothing and still answer
+// 202 (issue #1503) - every future scenario field would have inherited the
+// same silence. Mutation check: remove the unknown-key scan in
+// `parse_scenario_request` and this reds, since every other check here
+// leaves an unrecognised key untouched.
+TEST_F (ScenarioPlanTest, AnUnknownScenarioKeyIsRejectedByName) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    json scenario       = block ("col");
+    scenario["delayMs"] = 100;
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+
+    EXPECT_FALSE (resolved.ok);
+    EXPECT_NE (resolved.error.find ("scenario.delayMs"), std::string::npos)
+    << resolved.error;
+    EXPECT_TRUE (resolved.plan.steps.empty ());
+}
+
 TEST_F (ScenarioPlanTest, ResolutionNeverWritesARunRow) {
     // The route returns before `create_run`, and resolution itself must have no
     // way to strand a row - a rejected scenario leaves nothing behind, and so
