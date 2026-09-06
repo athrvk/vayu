@@ -943,6 +943,13 @@ entries, its `min`/`max` range; `boolean` entries must be `"true"` or `"false"`;
 `options` values. Validation is all-or-nothing: if any key is unknown or out of
 range, nothing is applied and the response is `400` with the specific reason(s):
 
+**The validation and the write are one lock scope, and the write is one
+transaction** (issue #1453): a reader (`GET /config`, or an internal reader
+like the proxy policy resolver that reads `proxyMode` and `proxyUrl` as two
+separate calls) can never observe some of a batch's keys applied and the rest
+still stale, and a failure partway through the write leaves every row
+unchanged rather than the ones written before it.
+
 ```json
 { "error": { "code": "invalid_config", "message": "'workers' must be at most 128 (got 9999)" } }
 ```

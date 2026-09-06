@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -19,6 +20,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "competing_writer.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
@@ -31,6 +33,10 @@ namespace vayu::http::routes {
 // Declared in config.cpp; returns {http_status, json_body}.
 std::pair<int, nlohmann::json>
 apply_config_update (vayu::db::Database& db, const std::string& body);
+// The `before_write` overload, the seam a CompetingWriter drives (#1453).
+std::pair<int, nlohmann::json> apply_config_update (vayu::db::Database& db,
+const std::string& body,
+const std::function<void ()>& before_write);
 } // namespace vayu::http::routes
 
 namespace {
@@ -895,6 +901,45 @@ TEST_F (ConfigRouteTest, UnknownProxyModeIs400) {
     auto [status, body] = vayu::http::routes::apply_config_update (
     *db_, R"({"entries":{"proxyMode":"sometimes"}})");
     EXPECT_EQ (status, 400) << body.dump ();
+}
+
+// ---------------------------------------------------------------------------
+// Batch atomicity (issue #1453): validation and the write are one lock scope,
+// so a second POST /config's own cross-field validation - which reads whatever
+// key it did not name off the database, the same fallback `proxy_batch_rejection`
+// uses - never reads a key the first batch already decided to change but has
+// not yet written.
+// ---------------------------------------------------------------------------
+
+using vayu::tests::CompetingWriter;
+
+TEST_F (ConfigRouteTest, AConcurrentValidationNeverReadsAStaleProxyModeMidBatch) {
+    ASSERT_EQ (vayu::http::routes::apply_config_update (*db_,
+               R"({"entries":{"proxyMode":"manual","proxyUrl":"http://old.example:8080"}})")
+               .first,
+    200);
+
+    // Started from inside the first batch's own lock scope, right before it
+    // writes: with the fix, this cannot run until that batch has fully
+    // committed `proxyMode: "off"`, so its own validation reads the *new*
+    // mode and clearing an already-empty proxyUrl is fine under "off". With
+    // the lock removed, this runs immediately against the still-stored
+    // "manual" and is refused for a mode the batch it raced is about to undo.
+    int other_status = 0;
+    json other_body;
+    CompetingWriter other ([&] {
+        auto result = vayu::http::routes::apply_config_update (
+        *db_, R"({"entries":{"proxyUrl":""}})");
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyMode":"off","proxyUrl":""}})", other.probe ());
+    ASSERT_EQ (status, 200) << body.dump ();
+    other.join ();
+
+    EXPECT_EQ (other_status, 200) << other_body.dump ();
 }
 
 // ---------------------------------------------------------------------------

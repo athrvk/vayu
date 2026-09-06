@@ -106,8 +106,13 @@ lambda calls the same public `get_*` / `save_*` methods everything else does.
 Two shapes need it, and both are in the code today:
 
 - **The validate-then-commit batch** - `POST /reorder`, `POST /import/apply`,
-  `POST /specs/sync`, `POST /specs/bind`. The validation the write is based on
-  has to still be true when the write lands.
+  `POST /specs/sync`, `POST /specs/bind`, `POST /config` (issue #1453). The
+  validation the write is based on has to still be true when the write lands.
+  `POST /config`'s batch also needs its own transaction
+  (`Database::save_config_entries`) rather than one `save_config_entry` call
+  per row: the mutex stops a reader from landing mid-batch, but only a
+  transaction stops a mid-batch failure from leaving the rows before it
+  written.
 - **The merge-patch update** - every `PUT /<resource>/:id` (issue #1440). The
   write carries each field the body did not name, read a moment earlier, so a
   read not held to its write loses whichever of two concurrent updates read

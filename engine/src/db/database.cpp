@@ -3210,6 +3210,27 @@ void Database::save_config_entry (const ConfigEntry& entry) {
     impl_->storage.replace (entry);
 }
 
+// Same shape as apply_reorder and spec_sync_apply: retry_on_busy holds the
+// recursive mutex while the transaction runs, so a row an earlier call in the
+// batch just wrote is visible to the check or write after it. Unlike those two
+// there is no existence check - config entries are seeded once at startup and
+// never deleted through any route - so a mid-batch failure here is a genuine
+// SQLITE_BUSY-past-retry or disk error, which `impl_->storage.transaction`
+// rolls back in full rather than leaving the rows written before it landed.
+void Database::save_config_entries (const std::vector<ConfigEntry>& entries) {
+    if (entries.empty ()) {
+        return;
+    }
+    retry_on_busy ("apply config batch", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            for (const auto& entry : entries) {
+                impl_->storage.replace (entry);
+            }
+            return true; // Commit
+        });
+    });
+}
+
 std::optional<ConfigEntry> Database::get_config_entry (const std::string& key) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     auto entries =
