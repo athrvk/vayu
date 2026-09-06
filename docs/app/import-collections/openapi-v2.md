@@ -282,7 +282,7 @@ There is no per-value expansion, no separator joining, and no `multi` handling. 
 
 ## Auth / security
 
-Auth is applied **only at the root collection**; every request is `{ mode: "inherit" }`, so the user configures credentials once.
+Collection auth is built the same way it always was, and every request still defaults to `{ mode: "inherit" }` so the common case - one scheme for the whole document - configures credentials once.
 
 Primary-scheme selection in `parse`:
 
@@ -304,6 +304,8 @@ const primaryScheme = (reqName && defs[reqName]) || Object.values(defs)[0];
 | `type: "oauth2"` | `{ mode: "oauth2", config: OAuth2Config }` via `map_swagger_oauth2` - maps the Swagger `flow` (`application` → client-credentials, `accessCode` → auth-code+PKCE, `password`, `implicit`→auth-code+PKCE), fills `tokenUrl`/`authorizationUrl`/`scope`, seeds `clientId`/`clientSecret` as `{{variables}}` |
 | missing scheme / missing `type` / any other type | `{ mode: "none" }` |
 
+**A per-operation `security` overrides that default** the same way it does for OpenAPI 3.0 (issue #1444) - absent stays `inherit`, `[]`/`[{}]` becomes `{ mode: "none" }`, a requirement naming the collection's own scheme stays `inherit`, one naming a different `securityDefinitions` entry gets that entry's mapped mode, and anything Vayu cannot resolve to one mode (multiple requirements, a requirement naming multiple schemes, a scheme `swaggerSchemeToAuth` maps to `none`) stays `inherit` and is counted as `security_unmapped`. See [OpenAPI 3.0's table](openapi-v3.md#auth--security) for the shared rule; only the scheme source (`securityDefinitions` instead of `components.securitySchemes`) differs.
+
 **`nonExecutableAuth`:** always `0` - `oauth2` now maps to an executable config (as do bearer/basic/apikey).
 
 ## Options & lossy behavior
@@ -322,7 +324,7 @@ Dropped / not represented:
 - **Multi-tag grouping:** only the first tag groups an operation.
 - **A path item, or a `parameters` list, whose shape the spec does not allow:** stepped over and counted as `malformed_spec` so the rest of the file still imports.
 
-`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of folders (`folders.count()`), `folderStrategy` = which rule produced them, `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `count_examples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattached_file_parts` = file parts imported with no file attached (`unattached_file_parts`, read off the finished drafts), and `skipped` from the shared `ImportTally` - `malformed_spec`, `example_no_status`, `default_response` and `duplicate_operation_id` are the only kinds this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). The three kinds issue #719 added are v3-only for the same kind of reason: Swagger 2.0 has no `in: "cookie"` parameter, no Server Object to template or leave relative - `host` is a host - and every declared body maps to one, so `cookie_param`, `unresolved_base_url` and `unmapped_body` have no case here either. Nothing to report still yields `[]`.
+`meta` population: `format = "OpenAPI 2.0 (Swagger)"`, `requestCount` = total operations built, `folderCount` = number of folders (`folders.count()`), `folderStrategy` = which rule produced them, `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `count_examples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattached_file_parts` = file parts imported with no file attached (`unattached_file_parts`, read off the finished drafts), and `skipped` from the shared `ImportTally` - `malformed_spec`, `example_no_status`, `default_response`, `duplicate_operation_id` and `security_unmapped` (issue #1444) are the only kinds this parser can emit (Swagger 2.0's Path Item Object has no `trace`, so there is no `unsupported_method` case here). The three kinds issue #719 added, and `servers_dropped` (issue #1444), are v3-only for the same kind of reason: Swagger 2.0 has no `in: "cookie"` parameter, no Server Object to template, leave relative or declare more than one of - `host` is a single host - and every declared body maps to one, so `cookie_param`, `unresolved_base_url`, `unmapped_body` and `servers_dropped` have no case here either. Nothing to report still yields `[]`.
 
 ## Differences from OpenAPI 3.0
 

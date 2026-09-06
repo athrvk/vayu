@@ -21,6 +21,7 @@
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/id.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -717,16 +718,28 @@ std::optional<InboxLimits> InboxManager::limits (const std::string& inbox_id) {
     return it->second->limits;
 }
 
-std::optional<InboxInfo> InboxManager::update_response (const std::string& inbox_id,
-const InboxCannedResponse& response) {
+InboxManager::UpdateResponseResult InboxManager::update_response (const std::string& inbox_id,
+const ResponseMergeFn& merge,
+const std::function<void ()>& before_write) {
+    UpdateResponseResult out;
     std::lock_guard<std::mutex> lock (mutex_);
     auto it = inboxes_.find (inbox_id);
     if (it == inboxes_.end ()) {
-        return std::nullopt;
+        return out;
     }
+    out.found = true;
     std::lock_guard<std::mutex> response_lock (it->second->response_mutex);
-    it->second->response = response;
-    return it->second->info_locked ();
+    auto merged = merge (it->second->response);
+    if (!merged) {
+        out.error = merged.error ();
+        return out;
+    }
+    if (before_write) {
+        before_write ();
+    }
+    it->second->response = std::move (*merged);
+    out.info             = it->second->info_locked ();
+    return out;
 }
 
 namespace {
@@ -848,6 +861,53 @@ int64_t offset) {
     return { 200, out };
 }
 
+/**
+ * Testable core of `PUT /inbox/:id`: the read, the merge and the write are one
+ * lock scope inside `InboxManager::update_response`, the same window issue
+ * #1440 closed for the database-backed resources - closed here in the manager
+ * rather than through `Database::with_lock`, because a canned response lives
+ * in memory, not a row (issue #1454). Extracted so the wiring is covered
+ * without an in-process HTTP server (inbox_test.cpp).
+ *
+ * @param before_write Test seam, invoked with the merged response staged and
+ *        immediately before it is written, still inside the manager's lock;
+ *        see `update_collection_response` in collections.cpp for why it
+ *        exists.
+ */
+std::pair<int, nlohmann::json> update_inbox_response (vayu::db::Database& db,
+InboxManager& manager,
+const std::string& inbox_id,
+const nlohmann::json& body,
+const std::function<void ()>& before_write) {
+    const auto result = manager.update_response (
+    inbox_id,
+    [&body] (const InboxCannedResponse& current) {
+        return parse_inbox_response_update (body, current);
+    },
+    before_write);
+    if (!result.found) {
+        return { 404, error_body (404, "Inbox not found") };
+    }
+    if (result.error) {
+        vayu::utils::log_warning ("PUT /inbox/:id - " + result.error->message);
+        return { result.error->http_status,
+            error_body (result.error->http_status, result.error->message,
+            result.error->code) };
+    }
+    // InboxManager::update_response sets `info` on every path that sets neither
+    // `found = false` nor `error` - the two already handled above.
+    const auto& info = vayu::utils::invariant_value (
+    result.info, "update_response found no error but no info");
+    return { 200, inbox_json (db, info) };
+}
+
+std::pair<int, nlohmann::json> update_inbox_response (vayu::db::Database& db,
+InboxManager& manager,
+const std::string& inbox_id,
+const nlohmann::json& body) {
+    return update_inbox_response (db, manager, inbox_id, body, nullptr);
+}
+
 namespace {
 
 /// limit: default DEFAULT_PAGE_LIMIT, invalid/<=0 -> default, capped at
@@ -947,11 +1007,6 @@ void handle_list_inboxes (RouteContext& ctx, const httplib::Request&, httplib::R
 
 void handle_update_inbox (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     const std::string inbox_id = req.matches[1];
-    auto current               = ctx.inbox_manager.get (inbox_id);
-    if (!current) {
-        send_error (res, 404, "Inbox not found");
-        return;
-    }
     nlohmann::json body;
     if (!read_json_body (req, res, body)) {
         return;
@@ -959,18 +1014,10 @@ void handle_update_inbox (RouteContext& ctx, const httplib::Request& req, httpli
     if (body.is_null ()) {
         body = nlohmann::json::object ();
     }
-    const auto updated = parse_inbox_response_update (body, current->response);
-    if (!updated) {
-        vayu::utils::log_warning ("PUT /inbox/:id - " + updated.error ().message);
-        send_parse_error (res, updated.error ());
-        return;
-    }
-    auto info = ctx.inbox_manager.update_response (inbox_id, *updated);
-    if (!info) {
-        send_error (res, 404, "Inbox not found");
-        return;
-    }
-    send_json (res, inbox_json (ctx.db, *info));
+    auto [status, response_body] =
+    update_inbox_response (ctx.db, ctx.inbox_manager, inbox_id, body);
+    res.status = status;
+    res.set_content (response_body.dump (), "application/json");
 }
 
 void handle_list_inbox_requests (RouteContext& ctx,

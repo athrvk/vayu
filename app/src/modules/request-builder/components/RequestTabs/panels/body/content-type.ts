@@ -52,9 +52,10 @@ export const CONTENT_TYPE = "Content-Type";
  * when the request says it is, and without this the document goes out under
  * libcurl's default `application/x-www-form-urlencoded`.
  *
- * `json` and `text` are deliberately absent. They are the modes a user reaches
- * for when they are writing the header themselves, and adding one on their
- * behalf would take a choice away rather than complete one.
+ * `json` is the Body panel's most common mode, so it earns the same auto-write
+ * rather than staying silent about what the engine already implies for it.
+ * `text` is deliberately absent: it is the mode a user reaches for precisely
+ * to write the header themselves, and it implies nothing on the engine side.
  *
  * This table is the app-side half of the engine's `implied_content_type`
  * (`engine/src/http/form_body.cpp`); the two must name the same type per mode.
@@ -62,6 +63,7 @@ export const CONTENT_TYPE = "Content-Type";
  * row the panel writes, so the user can see and edit what will be sent.
  */
 const REQUIRED_CONTENT_TYPE: Partial<Record<BodyMode, string>> = {
+	json: "application/json",
 	graphql: "application/json",
 	jsonrpc: "application/json",
 	xml: "application/xml",

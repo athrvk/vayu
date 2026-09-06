@@ -130,6 +130,17 @@ struct ExportExample {
     /// endpoint always sends, and a header saved off one captured response is
     /// a sample, not a claim about every response this operation returns.
     bool has_extra_headers = false;
+    /**
+     * The map key the import took this example from, if any
+     * (`request_examples.spec_example_key`, issue #1457).
+     *
+     * A value comparison alone cannot tell an edited example from a new one:
+     * once the body has changed it no longer equals the entry it came from,
+     * so it read as news to the document and was added beside that entry
+     * rather than replacing it. This key, when the document still names it,
+     * says which entry to write into instead of adding a new one.
+     */
+    std::optional<std::string> spec_example_key = std::nullopt;
 };
 
 /** The identity a request carries, when it carries one (`spec_operation`). */
@@ -338,6 +349,11 @@ struct ExportNotes {
     int settings_dropped = 0;
     /// Stored examples carrying a header besides `Content-Type` - not written.
     int example_headers_dropped = 0;
+    /// Params or Headers rows sharing a key and location with an earlier row -
+    /// OpenAPI allows only one Parameter Object per name+location, so only the
+    /// first is written and the rest are dropped rather than producing an
+    /// invalid document with two entries for the same name.
+    int duplicate_parameter_rows_dropped = 0;
 };
 
 /**

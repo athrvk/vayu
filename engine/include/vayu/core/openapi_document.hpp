@@ -65,6 +65,7 @@
 
 #include <cstddef>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -308,6 +309,16 @@ struct DraftExample {
     /// The payload as text - a documented string verbatim, anything else as
     /// `JSON.stringify(value, null, 2)` writes it.
     std::string body;
+    /**
+     * The key this payload was taken from a 3.x response's `examples` map
+     * (issue #1457), absent when it came from a single `example` or was
+     * sampled off a schema.
+     *
+     * Carried so the bound export can write an edited example back into the
+     * entry it came from rather than adding a new one beside it - the export
+     * cannot ask a value comparison which entry an edited body used to be.
+     */
+    std::optional<std::string> spec_example_key;
 };
 
 /// A draft request's body, in the shape `requests.body` stores.
@@ -382,6 +393,18 @@ class ImportTally {
 struct SpecRequestDraft {
     DeclaredOperation operation;
     DraftRequest draft;
+    /**
+     * The operation's own `security` array, copied verbatim when the
+     * operation declares the key at all; absent when it does not (issue
+     * #1444).
+     *
+     * Deliberately not on @ref DraftRequest: that struct is what the sync
+     * diff compares, whose contract is one auth value for every operation of
+     * a document (see its own comment) - this is import-only, read by
+     * `parse_openapi` to decide whether a request's auth overrides that one
+     * value, and left unread by `spec_request_drafts_of`'s callers.
+     */
+    std::optional<nlohmann::ordered_json> security;
     /**
      * Whether the `paths` key this hangs off is a path at all - see
      * `import_drafts_of`. Always true for a draft `spec_request_drafts_of`

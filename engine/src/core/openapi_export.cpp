@@ -258,6 +258,37 @@ const std::vector<Json>& values) {
 }
 
 /**
+ * Several examples of one status and media type, written into an `examples`
+ * map by the entry each was imported from (issue #1457), falling back to
+ * `add_named_examples` for the rest.
+ *
+ * A value comparison alone cannot tell an edited example from a new one, so
+ * an example that named a key when it was imported and whose value has since
+ * changed is written into that map entry - keeping its `summary` and
+ * `description` - rather than beside it. An example naming no key, or one the
+ * document no longer declares (the spec was re-fetched and the entry
+ * renamed), takes today's answer: added under a free key of its own.
+ */
+void write_named_examples (Json& map,
+const std::vector<const ExportExample*>& examples,
+const std::vector<Json>& values) {
+    std::vector<const ExportExample*> unmatched_examples;
+    std::vector<Json> unmatched_values;
+    for (size_t index = 0; index < examples.size (); ++index) {
+        const ExportExample& example = *examples[index];
+        const auto entry =
+        example.spec_example_key ? map.find (*example.spec_example_key) : map.end ();
+        if (entry != map.end () && entry->is_object ()) {
+            (*entry)["value"] = values[index];
+            continue;
+        }
+        unmatched_examples.push_back (examples[index]);
+        unmatched_values.push_back (values[index]);
+    }
+    add_named_examples (map, unmatched_examples, unmatched_values);
+}
+
+/**
  * Stored examples as an operation's `responses`, for both export directions.
  *
  * One implementation, because it is one decision made twice: a bound document
@@ -488,7 +519,7 @@ void write_media_examples (Json& media, const MediaWrite& write, ExportNotes& no
         media["example"] = values.front ();
     } else {
         Json map = examples_map_of (media);
-        add_named_examples (map, writing, values);
+        write_named_examples (map, writing, values);
         media["examples"] = std::move (map);
     }
     notes.examples_written += static_cast<int> (writing.size ());
@@ -509,6 +540,30 @@ ExportNotes& notes) {
             notes.example_headers_dropped += 1;
         }
     }
+}
+
+/**
+ * The description an undeclared response's Response Object is written with.
+ *
+ * The example's own name is what the user (or the import) called it, which
+ * beats a generated line - and `response_example` always names a described
+ * response "<status> - <description>", so a single leading copy of that
+ * prefix is the normal, first-generation shape and stays. Only a *doubled*
+ * prefix is rewritten: reimporting a prior export's own generated
+ * description prepends the prefix again on top of the one it already carries,
+ * and writing that back verbatim would accrete another copy every further
+ * export/reimport cycle. One copy of the doubled pair is stripped so the text
+ * a fresh export produces stays the same across repeated cycles.
+ */
+std::string undeclared_response_description (const std::string& status,
+const std::string& example_name) {
+    const std::string self_prefix    = status + " - ";
+    const std::string doubled_prefix = self_prefix + self_prefix;
+    const std::string description =
+    example_name.compare (0, doubled_prefix.size (), doubled_prefix) == 0 ?
+    example_name.substr (self_prefix.size ()) :
+    example_name;
+    return description.empty () ? status + " response" : description;
 }
 
 void write_response_examples (Json& responses,
@@ -563,13 +618,10 @@ ExportDirection direction) {
         }
         if (!declared_here) {
             // A Response Object's `description` is required, so one has to be
-            // written for a status the document does not already document. The
-            // example's own name is what the user (or the import) called it,
-            // which beats a generated line - and an existing description is
-            // never replaced.
+            // written for a status the document does not already document, and
+            // an existing description is never replaced.
             responses[status] = Json{ { "description",
-            group.front ()->name.empty () ? status + " response" :
-                                            group.front ()->name } };
+            undeclared_response_description (status, group.front ()->name) } };
         }
         Json& response = responses[status];
         for (const auto& [content_type, write] : planned) {
@@ -1447,16 +1499,31 @@ SecuritySchemeRegistry& schemes) {
 
     Json parameters = Json::array ();
     append_path_parameters (templated, parameters);
+    // OpenAPI defines a unique parameter by name+location, so two rows sharing
+    // both would produce an invalid document; only the first is written, the
+    // same row `patch_parameters` matches on the bound direction.
+    std::unordered_set<std::string> declared_parameters;
     for (const ExportKeyValue& row : entry.params) {
-        if (!row.key.empty ()) {
-            parameters.push_back (parameter_object (row, "query"));
+        if (row.key.empty ()) {
+            continue;
         }
+        if (!declared_parameters
+            .insert ("query:" + vayu::utils::ascii_lower (row.key))
+            .second) {
+            notes.duplicate_parameter_rows_dropped += 1;
+            continue;
+        }
+        parameters.push_back (parameter_object (row, "query"));
     }
     for (const ExportKeyValue& row : entry.headers) {
         const std::string key = vayu::utils::ascii_lower (row.key);
         if (row.key.empty () ||
         std::find (NON_PARAMETER_HEADERS.begin (), NON_PARAMETER_HEADERS.end (),
         key) != NON_PARAMETER_HEADERS.end ()) {
+            continue;
+        }
+        if (!declared_parameters.insert ("header:" + key).second) {
+            notes.duplicate_parameter_rows_dropped += 1;
             continue;
         }
         parameters.push_back (parameter_object (row, "header"));
@@ -1721,7 +1788,8 @@ nlohmann::json export_notes_json (const ExportNotes& notes) {
         { "bodiesDropped", notes.bodies_dropped },
         { "formValuesDropped", notes.form_values_dropped },
         { "settingsDropped", notes.settings_dropped },
-        { "exampleHeadersDropped", notes.example_headers_dropped } };
+        { "exampleHeadersDropped", notes.example_headers_dropped },
+        { "duplicateParameterRowsDropped", notes.duplicate_parameter_rows_dropped } };
 }
 
 } // namespace vayu::core

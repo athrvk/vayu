@@ -208,14 +208,16 @@ function errorText(error: unknown): string {
  * moves the top edge as well as the bottom, and the whole window reads as
  * flickering.
  *
- * Which direction ran is not known until the answer lands, but the two shapes
- * agree on their length since issue #1441 gave the free-form direction its own
- * eight counts: both list fourteen rows, so the card that arrives moves the
- * dialog's edge by nothing regardless of which one ran. The paragraph above
- * them is two bars because the sentence it stands for wraps at this width in
- * both directions.
+ * Which direction ran is not known until the answer lands. Issue #1441 gave
+ * the free-form direction its own eight counts, matching the bound
+ * direction's fourteen rows; issue #1465 added a ninth skeleton-only count
+ * (a duplicated Params/Headers row), so the skeleton direction now lists
+ * fifteen. The placeholder holds the larger of the two, so a bound answer
+ * settling in never grows the dialog and a skeleton answer never does either.
+ * The paragraph above them is two bars because the sentence it stands for
+ * wraps at this width in both directions.
  */
-const PLACEHOLDER_ROWS = 14;
+const PLACEHOLDER_ROWS = 15;
 
 function SummarySkeleton() {
 	return (
@@ -319,6 +321,11 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 							count={notes.duplicateOperations}
 							label="request"
 							suffix="on a method and path another request already claimed - left out"
+						/>
+						<Line
+							count={notes.duplicateParameterRowsDropped}
+							label="row"
+							suffix="sharing a key and location with an earlier row - only the first is declared"
 						/>
 						<Line
 							count={notes.authDropped}

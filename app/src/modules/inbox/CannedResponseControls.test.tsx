@@ -21,8 +21,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useToastStore } from "@/stores";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useSaveStore, useToastStore } from "@/stores";
 import type { InboxCannedResponse } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
 
@@ -48,6 +48,7 @@ function lastToastMessage(): string | undefined {
 beforeEach(() => {
 	cleanup();
 	useToastStore.setState({ toasts: [] });
+	useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
 });
 
 describe("every field the engine serves", () => {
@@ -234,6 +235,24 @@ describe("the key/value table it borrows", () => {
 		expect(headerName(0)).toHaveValue("X-Trace");
 	});
 
+	it("completes header names, the same list the request builder offers", () => {
+		// #1449: this table is the one `KeyValueEditor` header mount without
+		// `keySuggestions` - a hand-rolled copy of the primitive that missed the
+		// fix `HeadersPanel` already carries.
+		render(
+			<CannedResponseControls
+				response={response({ body: "hi" })}
+				pending={false}
+				stopped={false}
+				onApply={vi.fn()}
+			/>
+		);
+
+		fireEvent.focus(headerName(0));
+		fireEvent.change(headerName(0), { target: { value: "Cont" } });
+		expect(screen.getByText("Content-Type")).toBeInTheDocument();
+	});
+
 	it("offers no variable affordances, because a canned reply has no scope", () => {
 		// `{{trace}}` is sent verbatim by the engine. A token here would colour
 		// it "not defined" and open an editor with nowhere to write.
@@ -248,5 +267,131 @@ describe("the key/value table it borrows", () => {
 		expect(headerValue(0)).toHaveValue("{{trace}}");
 		expect(container.querySelector("[data-variable-token]")).toBeNull();
 		expect(container.querySelector('[aria-label^="Resolved value of"]')).toBeNull();
+	});
+});
+
+describe("Apply reports through the save store (#1450)", () => {
+	/*
+	 * Mutation check: comment out the `startSaving()`/`completeSaveThenIdle()`
+	 * pair in `persist` and this reds - the status never leaves "idle".
+	 */
+	it("moves the Dock's status from saving to saved on a successful apply", async () => {
+		const onApply = vi.fn().mockResolvedValue(undefined);
+		render(
+			<CannedResponseControls
+				response={response()}
+				pending={false}
+				stopped={false}
+				onApply={onApply}
+			/>
+		);
+
+		fireEvent.change(screen.getByLabelText("Reply status"), { target: { value: "503" } });
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+		await waitFor(() => expect(useSaveStore.getState().status).toBe("saved"));
+		expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ status: 503 }));
+		expect(useToastStore.getState().toasts).toHaveLength(0);
+	});
+
+	/*
+	 * Mutation check: swallow the rejection in `persist` instead of calling
+	 * `failSave` and this reds - the status stays "saved"/"idle" with no toast.
+	 */
+	it("reports a refused apply through failSave, not a bare toast", async () => {
+		const onApply = vi.fn().mockRejectedValue(new Error("Engine refused the update"));
+		render(
+			<CannedResponseControls
+				response={response()}
+				pending={false}
+				stopped={false}
+				onApply={onApply}
+			/>
+		);
+
+		fireEvent.change(screen.getByLabelText("Reply status"), { target: { value: "503" } });
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
+		expect(useToastStore.getState().toasts).toHaveLength(1);
+		expect(useToastStore.getState().toasts[0]).toMatchObject({
+			message: "Engine refused the update",
+			variant: "error",
+		});
+	});
+
+	it("registers the reply as a save context, so a quit flush would reach it", () => {
+		render(
+			<CannedResponseControls
+				response={response()}
+				pending={false}
+				stopped={false}
+				onApply={vi.fn().mockResolvedValue(undefined)}
+			/>
+		);
+
+		fireEvent.change(screen.getByLabelText("Reply status"), { target: { value: "503" } });
+		expect(useSaveStore.getState().contexts.get("inbox-reply")).toMatchObject({
+			hasPendingChanges: true,
+		});
+	});
+});
+
+describe("Apply dims once there is nothing new to send", () => {
+	/*
+	 * Mutation check: drop the `!isDirty` term from `applyDisabled` and the
+	 * first assertion reds - Apply stays enabled on an untouched draft.
+	 */
+	it("starts disabled and enables after an edit", () => {
+		render(
+			<CannedResponseControls
+				response={response()}
+				pending={false}
+				stopped={false}
+				onApply={vi.fn().mockResolvedValue(undefined)}
+			/>
+		);
+
+		expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+
+		fireEvent.change(screen.getByLabelText("Reply delay (ms)"), { target: { value: "10" } });
+		expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled();
+	});
+});
+
+describe("the hint stacks under the controls, never sharing their row", () => {
+	/*
+	 * Mutation check: move the hint `<p>` back inside the row it was extracted
+	 * from and this reds - the row's closest flex container would contain it.
+	 */
+	it("renders the hint as a sibling of the controls row, not a child of it", () => {
+		render(
+			<CannedResponseControls
+				response={response()}
+				pending={false}
+				stopped={false}
+				onApply={vi.fn()}
+			/>
+		);
+
+		const hint = screen.getByText(/Every caller to this inbox gets this reply/);
+		const row = screen.getByLabelText("Reply status").closest(".flex-wrap");
+		expect(row).not.toBeNull();
+		expect(row?.contains(hint)).toBe(false);
+	});
+
+	it("keeps the stopped-inbox hint on the same full-width line", () => {
+		render(
+			<CannedResponseControls
+				response={response()}
+				pending={false}
+				stopped
+				onApply={vi.fn()}
+			/>
+		);
+
+		const hint = screen.getByText(/stopped, so nothing is being served/);
+		const row = screen.getByLabelText("Reply status").closest(".flex-wrap");
+		expect(row?.contains(hint)).toBe(false);
 	});
 });

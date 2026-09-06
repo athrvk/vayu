@@ -301,6 +301,12 @@ inline auto make_storage (const std::string& path) {
     // precedent as the two columns above, and `false` is right for every
     // pre-existing row: before this column a delete removed the row outright.
     make_column ("suppressed", &RequestExample::suppressed, default_value (false)),
+    // The key of the 3.x response `examples` map entry this example was
+    // imported from (issue #1457). Nullable rather than NOT NULL with a
+    // default, on the `requests.spec_operation` precedent above: nothing to
+    // backfill a pre-existing row from, and NULL is the only spelling of "no
+    // key".
+    make_column ("spec_example_key", &RequestExample::spec_example_key),
     make_column ("created_at", &RequestExample::created_at),
     make_column ("updated_at", &RequestExample::updated_at)),
 
@@ -3208,6 +3214,27 @@ const std::function<void ()>& fn) {
 void Database::save_config_entry (const ConfigEntry& entry) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     impl_->storage.replace (entry);
+}
+
+// Same shape as apply_reorder and spec_sync_apply: retry_on_busy holds the
+// recursive mutex while the transaction runs, so a row an earlier call in the
+// batch just wrote is visible to the check or write after it. Unlike those two
+// there is no existence check - config entries are seeded once at startup and
+// never deleted through any route - so a mid-batch failure here is a genuine
+// SQLITE_BUSY-past-retry or disk error, which `impl_->storage.transaction`
+// rolls back in full rather than leaving the rows written before it landed.
+void Database::save_config_entries (const std::vector<ConfigEntry>& entries) {
+    if (entries.empty ()) {
+        return;
+    }
+    retry_on_busy ("apply config batch", 5, std::chrono::milliseconds (100), [&] {
+        impl_->storage.transaction ([&] {
+            for (const auto& entry : entries) {
+                impl_->storage.replace (entry);
+            }
+            return true; // Commit
+        });
+    });
 }
 
 std::optional<ConfigEntry> Database::get_config_entry (const std::string& key) {

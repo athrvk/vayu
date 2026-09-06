@@ -110,6 +110,22 @@ export interface SkippedItem {
 		 */
 		| "unsupported_auth"
 		/**
+		 * An OpenAPI operation's own `security` that cannot be resolved to one
+		 * concrete auth mode (issue #1444) - more than one requirement (an OR of
+		 * alternatives Vayu cannot pick between), a requirement naming more than
+		 * one scheme (an AND), or a scheme type Vayu has no mode for
+		 * (`mutualTLS`, `openIdConnect`, an unrecognised `type`). The request
+		 * keeps `{ mode: "inherit" }`, the collection's own auth, rather than the
+		 * mode its own document declared and Vayu could not carry out.
+		 */
+		| "security_unmapped"
+		/**
+		 * An OpenAPI document declaring more than one `servers` entry (issue
+		 * #1444). Only `servers[0]` becomes the collection's `baseUrl`; each
+		 * further entry names an environment the import does not create.
+		 */
+		| "servers_dropped"
+		/**
 		 * A Postman request whose URL carried `url.variable[]` (issue #1443).
 		 * Every `:key` segment the variable named is turned into a `{{key}}`
 		 * template and the value is recorded as a collection variable, so this is

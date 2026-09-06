@@ -129,7 +129,7 @@ Both lists go through the walk's `parameters` guard (`openapi_drafts.cpp`) first
 | the JSON media type's `example` → first `examples[*].value` → `sampleSchema(schema)` | `body` | the same precedence `buildBody` uses for a request body; a string is stored as-is, anything else is `JSON.stringify(value, null, 2)` |
 | the JSON media type key | `contentType`, and a single `Content-Type` header | `application/json`, an `application/json;…` variant or a `+json` suffix, by the same rule request bodies use |
 
-A response `$ref` is resolved (single hop, like the parser's other refs). An `examples` entry is unwrapped from its Example Object - the payload is in `value`, and storing the wrapper would put a body on disk no server would send; an `externalValue` names a URL rather than carrying a payload, so it yields nothing (an import must not fetch).
+A response `$ref` is resolved (single hop, like the parser's other refs). An `examples` entry is unwrapped from its Example Object - the payload is in `value`, and storing the wrapper would put a body on disk no server would send; an `externalValue` names a URL rather than carrying a payload, so it yields nothing (an import must not fetch). The map key the entry was taken from is remembered too (`spec_example_key`, issue #1457, engine-side only - no surface here displays it): the bound export needs it to write an edited example back into that same entry rather than adding a new one beside it.
 
 A response that documents **no body** still imports: `204 No Content` is a real answer and a mock server has to be able to give it.
 
@@ -256,14 +256,14 @@ JSON is preferred: `findJsonMedia` is checked first and takes precedence over te
 
 ## Auth / security
 
-Auth is applied **only at the root collection**; every request is `{ mode: "inherit" }`, so the user configures credentials once.
+Collection auth is built the same way it always was, and every request still defaults to `{ mode: "inherit" }` so the common case - one scheme for the whole document - configures credentials once.
 
-`pickPrimaryScheme(spec)` chooses one scheme:
+`pickPrimaryScheme(spec)` chooses the collection's scheme:
 
 1. If `spec.security[0]` exists, take its first key (`Object.keys(security[0])[0]`) and use the matching `components.securitySchemes[name]`.
 2. Otherwise fall back to the **first** entry of `components.securitySchemes`.
 
-`schemeToAuth(scheme)` maps that scheme to a concrete collection auth (always with empty secrets - the spec has no real credentials):
+`schemeToAuth(scheme)` maps that scheme to a concrete auth (always with empty secrets - the spec has no real credentials):
 
 | `securityScheme` | Vayu `RequestAuth` |
 |------------------|--------------------|
@@ -272,6 +272,16 @@ Auth is applied **only at the root collection**; every request is `{ mode: "inhe
 | `type: "apiKey"` | `{ mode: "apikey", key: scheme.name ?? "", value: "", in: scheme.in === "query" ? "query" : "header" }` |
 | `type: "oauth2"` | `{ mode: "oauth2", config: OAuth2Config }` via `map_openapi_v3_oauth2` - picks the first usable flow (`clientCredentials` → `authorizationCode`+PKCE → `password` → `implicit`→auth-code+PKCE), fills its `tokenUrl`/`authorizationUrl`/`scope`, and seeds `clientId`/`clientSecret` as `{{clientId}}`/`{{clientSecret}}` placeholders |
 | missing / any other type (incl. `openIdConnect`, `http` with other schemes) | `{ mode: "none" }` |
+
+**A per-operation `security` overrides that default** (issue #1444), because inheriting unconditionally sent a collection's bearer token to an endpoint the document declared unauthenticated:
+
+| Operation's `security` | Imported request's auth |
+|-------------------------|--------------------------|
+| absent (the key is not on the operation at all) | `{ mode: "inherit" }` - unchanged |
+| `[]`, or `[{}]` (OpenAPI's "security is optional here" shape) | `{ mode: "none" }` |
+| one requirement naming the same scheme the collection already took | `{ mode: "inherit" }` - identical either way, and `inherit` keeps following the collection if its auth is edited later |
+| one requirement naming a different scheme `schemeToAuth` can map | that scheme's mode, mapped the same way the collection-level scheme is |
+| anything else Vayu cannot resolve to one concrete mode - more than one requirement (an OR of alternatives), a requirement naming more than one scheme (an AND), or a scheme type `schemeToAuth` has no mode for | `{ mode: "inherit" }`, counted as `security_unmapped` |
 
 **`nonExecutableAuth`:** always `0` - `oauth2` now maps to an executable config, and the other mapped schemes (bearer/basic/apikey) are executable too.
 
@@ -283,8 +293,8 @@ Dropped / not represented:
 
 - **Scripts:** all `preRequestScript` / `postRequestScript` are `""` (OpenAPI has no scripts; `importScripts` has no effect here).
 - **Environments:** none produced (`environments: []`, `meta.environmentCount: 0`). OpenAPI has no environment concept; `servers[0]` becomes a single `baseUrl` collection variable.
-- **Additional servers:** only `servers[0]` is used; other entries and per-operation `servers` overrides are dropped.
-- **Callbacks, links, security scopes:** not consumed. (Response schemas and examples *are*, since issue #481 - see [Documented responses](#documented-responses).)
+- **Additional servers:** only `servers[0]` is used; other entries and per-operation `servers` overrides are dropped and counted as `servers_dropped` (issue #1444).
+- **Callbacks, links, security scopes:** not consumed. (Response schemas and examples *are*, since issue #481 - see [Documented responses](#documented-responses).) An operation's `security` itself **is** consumed since issue #1444 - see [Auth / security](#auth--security) - but the scopes a requirement names within it are not: only which scheme is used is mapped.
 - **Response headers** (`responses[code].headers`): not imported. An example's headers carry only the media type it was stored under.
 - **Cookie parameters** and **path parameters as params**: not emitted (path params live in the URL only).
 - **`authorization` / `content-type` header parameters:** dropped (Vayu manages them).
@@ -296,7 +306,7 @@ Dropped / not represented:
 - **A whole-body binary** (`application/octet-stream` and other non-form, non-JSON, non-text media types): no body is produced (`{ mode: "none" }`) and the operation is counted as `unmapped_body` (issue #719) - unlike a multipart file part, which imports (see [File parts](#file-parts)). An operation that declares no `requestBody` at all is **not** counted: it lost nothing, and the two used to be indistinguishable.
 - **Cookie parameters** (`in: "cookie"`): dropped and counted as `cookie_param` (issue #719). Vayu has no cookie-parameter row - a request's cookies come from the jar - and mapping them onto a `Cookie` header is a recorded non-goal: the header is one joined value while a spec declares these one at a time, so building it would mean inventing a merge the document never wrote. `in: "path"` is neither dropped nor counted; it is already carried, as the `{{param}}` the URL template holds.
 
-`meta` population: `format = "OpenAPI 3.0"`, `requestCount` = total operations built (TRACE excluded), `folderCount` = number of folders (`folders.count()`), `folderStrategy` = which rule produced them (`"tags"` / `"paths"` / `"mixed"`, absent when there are no folders), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `count_examples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattached_file_parts` = file parts imported with no file attached (`unattached_file_parts`, read off the finished drafts), and `skipped` from the `ImportTally`:
+`meta` population: `format = "OpenAPI 3.0"` or `"OpenAPI 3.1"`, read off the document's own `openapi` string rather than assumed (issue #1444 - every 3.x document used to report `"OpenAPI 3.0"`), `requestCount` = total operations built (TRACE excluded), `folderCount` = number of folders (`folders.count()`), `folderStrategy` = which rule produced them (`"tags"` / `"paths"` / `"mixed"`, absent when there are no folders), `environmentCount = 0`, `exampleCount` = example responses imported (read off the finished drafts by `count_examples`), `nonExecutableAuth = 0` (oauth2 is now executable), `unattached_file_parts` = file parts imported with no file attached (`unattached_file_parts`, read off the finished drafts), and `skipped` from the `ImportTally`:
 
 | `SkippedItem.kind` | Counted when |
 |--------------------|--------------|
@@ -308,6 +318,8 @@ Dropped / not represented:
 | `cookie_param` | a parameter declared `in: "cookie"` - one per distinct cookie parameter per operation |
 | `unmapped_body` | a `requestBody` declaring only media types with no Vayu mode - one per operation, however many such media types it listed |
 | `unresolved_base_url` | `servers[0].url` still carries a `{variable}` with no declared default, or is relative in a document with no source URL (see [The base URL](#the-base-url)) |
+| `servers_dropped` | the document declares more than one `servers` entry - counted per entry past the first (issue #1444) |
+| `security_unmapped` | an operation's `security` cannot be resolved to one concrete auth mode - see [Auth / security](#auth--security) (issue #1444) |
 
 An import with nothing to report still yields `skipped: []` - only non-zero kinds are emitted.
 

@@ -122,6 +122,13 @@ ExportExample imported (ExportExample stored) {
     return stored;
 }
 
+/** The same example, with the `examples` map key the import took it from
+ * recorded (`request_examples.spec_example_key`, issue #1457). */
+ExportExample with_key (ExportExample stored, std::string key) {
+    stored.spec_example_key = std::move (key);
+    return stored;
+}
+
 ExportKeyValue row (std::string key, std::string value) {
     return { std::move (key), std::move (value), {} };
 }
@@ -313,6 +320,43 @@ TEST (BoundExport, AddsAKeptResponseBesideTheDocumentsExamplesRatherThanOverThem
     EXPECT_EQ (media["examples"]["none"]["summary"], "No pets");
     EXPECT_EQ (media["examples"]["Rex alone"]["value"], json::parse (R"([{"id":"p9"}])"));
     EXPECT_FALSE (media.contains ("example"));
+    EXPECT_EQ (exported.notes.examples_written, 1);
+}
+
+TEST (BoundExport, RewritesAnEditedImportedExampleIntoTheKeyItCameFromRatherThanBesideIt) {
+    std::vector<ExportRequest> requests = refs_requests ();
+    // Imported from `examples.two`, then edited: the value no longer equals
+    // what the document declares there, so a value comparison alone would
+    // read this as news and add it as a third entry (issue #1457).
+    requests[0].examples = { with_key (
+    imported (example ("200 - A list of pets", 200, R"([{"id":"p9","name":"Rex"}])")), "two") };
+
+    const Exported exported = export_json (requests, refs_fixture ());
+    const json& media       = operation_of (exported.document, "/pets",
+          "get")["responses"]["200"]["content"]["application/json"];
+    // The entry it was imported from, not a new one beside it: both original
+    // keys survive, `two`'s summary is untouched, and only its value changed.
+    EXPECT_EQ (keys_of (media["examples"]), (std::vector<std::string>{ "two", "none" }));
+    EXPECT_EQ (media["examples"]["two"]["summary"], "Two pets");
+    EXPECT_EQ (media["examples"]["two"]["value"],
+    json::parse (R"([{"id":"p9","name":"Rex"}])"));
+    EXPECT_EQ (media["examples"]["none"]["summary"], "No pets");
+    EXPECT_EQ (exported.notes.examples_written, 1);
+}
+
+TEST (BoundExport, AddsANewEntryWhenItsRecordedKeyIsNoLongerInTheDocument) {
+    std::vector<ExportRequest> requests = refs_requests ();
+    // The spec was re-fetched and the entry renamed since this was imported:
+    // the recorded key is gone, so this falls back to today's add-beside
+    // behaviour rather than being dropped.
+    requests[0].examples = { with_key (
+    imported (example ("Rex alone", 200, R"([{"id":"p9"}])")), "renamed") };
+
+    const Exported exported = export_json (requests, refs_fixture ());
+    const json& media       = operation_of (exported.document, "/pets",
+          "get")["responses"]["200"]["content"]["application/json"];
+    EXPECT_EQ (keys_of (media["examples"]),
+    (std::vector<std::string>{ "two", "none", "Rex alone" }));
     EXPECT_EQ (exported.notes.examples_written, 1);
 }
 
@@ -599,6 +643,25 @@ TEST (SkeletonExport, DeclaresTheRowsTheRequestHoldsWithoutClaimingAnyAreRequire
     ])"));
 }
 
+TEST (SkeletonExport, StripsADuplicateParamsOrHeadersRowRatherThanWritingTwoParameterObjects) {
+    // OpenAPI defines a unique parameter by name+location; two rows sharing
+    // both would produce an invalid document. Case differs on purpose - the
+    // bound direction's own row match (`patch_parameters`) is case-insensitive
+    // for both locations, and the skeleton direction keeps that the same.
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    entry.params        = { row ("verbose", "1"), row ("Verbose", "2") };
+    entry.headers = { row ("X-Tenant", "acme"), row ("x-tenant", "acme2") };
+
+    const Exported exported = export_json ({ entry });
+    const json& parameters = operation_of (exported.document, "/pets", "get")["parameters"];
+    ASSERT_EQ (parameters.size (), 2);
+    EXPECT_EQ (parameters[0]["name"], "verbose");
+    EXPECT_EQ (parameters[0]["example"], "1");
+    EXPECT_EQ (parameters[1]["name"], "X-Tenant");
+    EXPECT_EQ (parameters[1]["example"], "acme");
+    EXPECT_EQ (exported.notes.duplicate_parameter_rows_dropped, 2);
+}
+
 TEST (SkeletonExport, WritesADisabledRowsToggleRatherThanGuessingItFromItsValue) {
     ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
     // A disabled row with a value, and an enabled row with none - the two
@@ -790,6 +853,20 @@ TEST (SkeletonExport, WritesResponsesFromStoredExamplesAndNothingElse) {
     // A body that is not JSON is the text it is, never dropped.
     EXPECT_EQ (responses["500"]["content"]["text/plain"]["example"], "boom");
     EXPECT_EQ (exported.notes.examples_written, 2);
+}
+
+TEST (SkeletonExport, StripsARepeatedStatusPrefixInsteadOfAccretingOneOnEveryReimport) {
+    // "200 - 200 - A user" is what `response_example` derives on import from a
+    // prior export's own generated description "200 - A user" - the reimported
+    // example carries the status prefix twice. Exporting it again must land
+    // back on the single-prefix form, not "200 - 200 - 200 - A user".
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    entry.examples      = { example ("200 - 200 - A user") };
+
+    const Exported exported = export_json ({ entry });
+    const json& responses =
+    operation_of (exported.document, "/pets", "get")["responses"];
+    EXPECT_EQ (responses["200"]["description"], "200 - A user");
 }
 
 TEST (SkeletonExport, DerivesNoSchemaFromABodyItOnlyHasPartOf) {

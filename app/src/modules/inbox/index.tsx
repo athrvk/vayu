@@ -258,13 +258,13 @@ export default function InboxView() {
 		);
 	};
 
-	const applyResponse = (response: Partial<InboxCannedResponse>) => {
-		if (!inbox) return;
-		updateResponse.mutate(
-			{ inboxId: inbox.inboxId, response },
-			{ onError: reportFailure("Could not update the response") }
-		);
-	};
+	// A rejection is how `CannedResponseControls` learns the apply failed - it
+	// reports through the save store (`persist`'s `failSave`), which replaced
+	// this call's own toast (issue #1450).
+	const applyResponse = (response: Partial<InboxCannedResponse>): Promise<void> =>
+		inbox
+			? updateResponse.mutateAsync({ inboxId: inbox.inboxId, response }).then(() => undefined)
+			: Promise.resolve();
 
 	if (!inbox) {
 		return (
