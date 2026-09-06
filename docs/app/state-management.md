@@ -2315,7 +2315,7 @@ const {
 ```
 
 **Behaviour:**
-- **Seeds and resyncs while clean:** a clean draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`. The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the name it holds is adopted, not captured](#the-request-name-the-builder-holds-is-adopted-not-captured).
+- **Seeds and resyncs while clean:** a clean draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`. The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the draft adopts an external write per field](#the-request-builders-draft-adopts-an-external-write-per-field).
 - **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ScriptTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose.
 - **Tracks by JSON value, not identity:** `value` may be a fresh object literal every render (`InfoTab` builds `{ name, description }` inline); callers do not have to memoize it.
 - **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`, discarding any pending `externalValue` too. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ScriptTab` passes `${collection.id}:${fieldKey}`, since pre- and post-request scripts are two different things to edit under one collection id.
@@ -2380,29 +2380,109 @@ useDraftSaveContext({
   (`lib/blank-name.ts`), which restores the stored name and reports through
   `failSave`.
 
-### The request name the builder holds is adopted, not captured
+### The request builder's draft adopts an external write per field
 
-`RequestBuilderProvider` resets its state when the request **id** changes, and a
-rename does not change the id. So the name it held was a snapshot taken when the
-tab opened, and the save payload omitted `name` entirely to keep a debounced
-auto-save from writing that snapshot back over a rename made in the sidebar
-minutes earlier.
+`RequestBuilderProvider` resets its whole draft when the request **id**
+changes, and neither a rename, an MCP agent's `update_request`, nor a move to
+another collection changes the id. Before issue #1436, only `name` adopted a
+change that arrived this way - every other field held a snapshot taken when the
+tab opened, so a debounced auto-save could write that snapshot back over
+whatever an agent had just changed, a delete under a dirty tab flushed a doomed
+PUT into a 404, and a move discarded the whole draft along with the id-based
+reset it was routed through.
 
-The Info tab's name field needs the payload to carry `name`, so the staleness is
-removed rather than routed around: the provider watches the incoming
-`initialRequest.name` (the request query's copy) and adopts it whenever that
-*value* changes, via `setRequestState` - not `setRequest`, because adopting
-someone else's write is not an unsaved change and marking it dirty would schedule
-a save that writes back what it just read. A name the user is typing is untouched,
-because the prop is not what changed.
+The fix generalizes the name's adoption into a per-field three-way merge, the
+same shape `useEntityDraft` (below) already uses for the collection tabs:
 
-`restoreStoredName()` on the context is the other half: the Info tab's blank-name
-refusal needs the stored name back, and the provider holds the only copy of it.
-The payload additionally drops a blank `name` key, since the debounced save can
-fire while the field is still empty and the engine does a partial update.
+- **`baseline`** is the value the draft last agreed with the server on - not
+  necessarily `request`, which is whatever the user has typed, and not
+  necessarily what a stray refetch just reported either, if that report
+  conflicts with an edit (see below).
+- **`touchedFields`** is which top-level `RequestState` keys `setRequest` /
+  `updateField` have written since that baseline. A successful save clears
+  exactly the fields it sent; `takeExternalField` (below) clears one.
+- On every `initialRequest` change (the request query's copy, gated on its
+  object identity so the diff runs once per refetch and not once per
+  keystroke), `mergeExternalWrite` (`app/src/lib/field-merge.ts`) diffs
+  `initialRequest` against `baseline` over every mergeable field
+  (`MergeableRequestField` - every `RequestState` key except `id`,
+  `collectionId` and `disabledDefaultHeaders`, which have their own rules
+  below):
+  - a field the fetch did not change is left alone;
+  - a field the fetch changed and the user has **not** touched adopts the new
+    value into the draft, via `setRequestState` (never `setRequest` - adopting
+    someone else's write is not an edit of ours, and marking it dirty would
+    schedule a save that writes back what was just read) and `baseline` moves
+    to match;
+  - a field the fetch changed and the user **has** touched, to a *different*
+    value than the fetch reports, is a conflict: the draft keeps the user's
+    value, `baseline` is deliberately left where it was (so the conflict keeps
+    being detected until it is resolved), and the incoming value is exposed on
+    `fieldConflicts[field]`;
+  - a touched field the fetch now agrees with (the save's own echo, or a
+    coincidence) resolves quietly - `baseline` moves, nothing is shown.
+  `mergeExternalWrite` compares by JSON content, not by reference: `headers`,
+  `params` and `auth` are rebuilt into fresh arrays/objects on every fetch
+  regardless of content, and `===` there would read every refetch as an
+  external change - the same reason `useEntityDraft` compares by
+  `JSON.stringify`.
+- **`fieldConflicts`** and **`takeExternalField(field)`** are on
+  `RequestBuilderContextValue`. `ExternalChangeNotice`
+  (`request-builder/components/`) renders one `ExternalChangeCallout` per
+  logical group - the four fields the editor splits a request's body across
+  (`bodyMode`/`body`/`formData`/`urlEncoded`) count as one "body" group, so a
+  body conflict does not paint four callouts - and its "Take theirs" resolves
+  every field in the group.
+- **`collectionId`** is not a mergeable field: a `collectionId`-only change
+  with the same id (the `move_item` case) updates just that field in place,
+  leaving the rest of a dirty draft untouched, in a dedicated branch beside the
+  id-keyed full reset.
+- **A request deleted elsewhere** stops `index.tsx` handing the provider an
+  `initialRequest` at all, while keeping `RequestBuilderProvider` mounted (see
+  below) so the draft is not lost. The provider notices `initialRequest` went
+  missing while `request.id` is still set and flips `requestGone`, which feeds
+  `useSaveManager`'s `enabled` - so a dirty draft's autosave timer, already
+  armed or about to be, never fires a PUT against an id that now 404s.
+- **The generation** `handleSave` checks (`changeTokenRef`, see the save-manager
+  walkthrough below) bumps on a foreign write too, not only on the user's own
+  edits - an effect keyed on `baseline`'s identity, not a direct write inside
+  the merge itself: a ref write during the render phase is unsafe under React's
+  rules (a render can be discarded or replayed) and is what this repo's
+  `react-hooks/refs` lint rejects. Without the bump, a save already in flight
+  when the merge adopts or conflicts a field could still clear
+  `hasUnsavedChanges` over a value the merge just changed underneath its
+  response.
+- **`restoreStoredName()`** is unchanged in spirit but now reads `baseline.name`
+  rather than a name-only ref: the Info tab's blank-name refusal needs the
+  stored name back, and the baseline already holds it for every field, not
+  just this one.
 
-Guarded by `RequestBuilderProvider.name-sync.test.tsx` (adoption, dirtiness, and
-restore) and `save-request-name.test.ts` (the payload).
+**The save payload only ever carries what `touchedFields` names**
+(`buildUpdatePayload` in `request-builder/index.tsx`): `onSave` receives
+`(request, changedFields)`, and an untouched field is omitted from the
+`PUT /requests/:id` body entirely - which the engine's merge-patch already
+reads as "leave the stored value alone" - rather than being resent unchanged.
+The four body fields collapse into the wire's `body`/`bodyType` pair if any one
+of them was touched. `name` keeps its own rule inside that: touched-but-blank
+still omits the key (a blank name is refused, not saved), for the reason the
+old comment gave - the debounced auto-save can fire while the field is briefly
+empty.
+
+**`useUpdateRequestMutation`'s cache write also learned to lose a race**
+(`queries/collections.ts`): a foreign write's own refetch can land in the
+detail cache while this client's save is still in flight, and writing the
+save's response into the cache unconditionally could then overwrite the
+*newer* row with a stale one purely because the older write's round trip
+finished second. The `onSuccess` handler now compares `updatedAt`
+(a `toISOString()` string end to end, so lexical and chronological order
+agree) and keeps whichever row is actually newer.
+
+Guarded by `RequestBuilderProvider.name-sync.test.tsx` (the name-only case that
+started this), `RequestBuilderProvider.external-write-merge.test.tsx` (the
+general per-field merge, the move, the delete, and the generation bump),
+`field-merge.test.ts` (`mergeExternalWrite` itself), `save-request-name.test.ts`
+and `request-builder.script-clearing.test.tsx` (the partial payload), and
+`collections.update-request-race.test.ts` (the cache race).
 
 ## State Flow Examples
 
@@ -2440,9 +2520,10 @@ restore) and `save-request-name.test.ts` (the payload).
 6. A further change within that window bumps the token again, which tears the pending timer down and arms a new one, so the delay measures from the last edit
 7. After the delay elapses with no edit, `performSave()` is called, which calls the `onSave` callback
 8. Save status updates in `useSaveStore()`, and the Dock shows "Saving..." then "Saved" for `TIMING.SAVED_STATUS_DURATION_MS`
-9. **A save is only allowed to call the entity clean for the generation it sent** (#1381). `onSave(request)` serialises the state as it was when the save started, so a keystroke landing during the round trip is not in that payload. The provider records the generation beside the snapshot and clears `hasUnsavedChanges` only if the token has not moved when the write lands; the hook applies the same check to the "Saved" indicator. Clearing unconditionally marked that keystroke saved, left nothing dirty for the next timer to fire on, and lost the edit
-10. On **tab switch or unmount**, any pending save is flushed before the context is unregistered
-11. On **app quit** (Electron `before-quit`) *and* on **window close** (the X
+9. **A save is only allowed to call the entity clean for the generation it sent** (#1381). `onSave(request, changedFields)` serialises the state - and the set of touched fields - as they were when the save started, so a keystroke landing during the round trip is not in that payload. The generation also moves on a foreign write the per-field merge adopts or conflicts, not only on the user's own edits (#1436): a save in flight when that happens must not clear `hasUnsavedChanges` over a value the merge just changed underneath its response. The provider records the generation beside the snapshot and clears `hasUnsavedChanges` - and the fields the snapshot named - only if the token has not moved when the write lands; the hook applies the same check to the "Saved" indicator. Clearing unconditionally marked that keystroke saved, left nothing dirty for the next timer to fire on, and lost the edit
+10. **The request builder's `onSave` sends only `changedFields`** (#1436, see [the draft adopts an external write per field](#the-request-builders-draft-adopts-an-external-write-per-field) above) - an untouched field is omitted from the `PUT` rather than resent unchanged
+11. On **tab switch or unmount**, any pending save is flushed before the context is unregistered - unless the entity is confirmed gone (`useSaveManager`'s `enabled: false`), which the request builder sets once its request is deleted elsewhere, so the flush never fires a doomed PUT
+12. On **app quit** (Electron `before-quit`) *and* on **window close** (the X
     button), `useSaveStore().flushAll()` saves all dirty contexts
 
 **Both window-destroying paths flush, through one coordinator.** `before-quit`

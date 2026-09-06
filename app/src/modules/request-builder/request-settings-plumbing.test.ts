@@ -59,9 +59,15 @@ const sources = import.meta.glob("/src/modules/request-builder/index.tsx", {
 
 const source = Object.values(sources)[0] as string | undefined;
 
-/** Occurrences of `field: <expr>.<field>` in the payload object literals. */
+/**
+ * Occurrences of `field: <expr>.<field>` (an object literal property) or
+ * `holder.field = <expr>.<field>` (a plain assignment, the shape
+ * `buildUpdatePayload`'s conditional fields use since issue #1436's partial
+ * save) - either is a hop that carries the field through, and a scan that
+ * only knew one spelling would go blind the moment a hop changed style.
+ */
 function hops(src: string, holder: string, field: string): number {
-	const re = new RegExp(`\\b${field}:\\s*${holder}\\.${field}\\b`, "g");
+	const re = new RegExp(`\\b${field}\\s*[:=]\\s*${holder}\\.${field}\\b`, "g");
 	return (src.match(re) ?? []).length;
 }
 
@@ -74,14 +80,30 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		expect(source).toContain("engineExecuteRequest");
 	});
 
+	/**
+	 * `followRedirects` and `verifySSL` gained a third hop with issue #1436's
+	 * "gone" pane: `DeletedRequestBanner`'s cURL recovery snippet reads them off
+	 * the same `request`, so a draft copied out as curl after its request is
+	 * deleted still says `-L`/`-k` correctly rather than silently defaulting.
+	 * `maxRedirects` and `httpVersion` have no curl hop - `SnippetRequest` has no
+	 * field for either - so they stay at the original two.
+	 */
+	const EXECUTE_AND_SAVE_HOPS: Record<string, number> = {
+		followRedirects: 3,
+		maxRedirects: 2,
+		httpVersion: 2,
+		verifySSL: 3,
+	};
+
 	for (const field of ["followRedirects", "maxRedirects", "httpVersion", "verifySSL"] as const) {
 		it(`loads ${field} from the saved request into the editor state`, () => {
 			expect(hops(source ?? "", "fetchedRequest", field)).toBe(1);
 		});
 
 		it(`sends ${field} on execute and persists it on save`, () => {
-			// One for the `engineExecuteRequest` body, one for the update mutation.
-			expect(hops(source ?? "", "request", field)).toBe(2);
+			// One for the `engineExecuteRequest` body, one for the update mutation,
+			// and for the two fields the cURL recovery snippet also reads, one more.
+			expect(hops(source ?? "", "request", field)).toBe(EXECUTE_AND_SAVE_HOPS[field]);
 		});
 	}
 
@@ -106,7 +128,9 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 	 */
 	it("loads the event-stream flag from the saved request and persists it on save", () => {
 		expect(hops(source ?? "", "fetchedRequest", "stream")).toBe(1);
-		expect(hops(source ?? "", "request", "stream")).toBe(1);
+		// One for the update mutation, one for the cURL recovery snippet's `-N` -
+		// see the `EXECUTE_AND_SAVE_HOPS` comment above.
+		expect(hops(source ?? "", "request", "stream")).toBe(2);
 	});
 
 	it("declares stream on the buffered execute rather than letting it default", () => {
