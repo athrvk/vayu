@@ -9,12 +9,14 @@
 #include <httplib.h>
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
 
 #include <nlohmann/json.hpp>
 
+#include "competing_writer.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
@@ -35,6 +37,20 @@ int64_t limit,
 int64_t offset);
 // Defined in inbox.cpp; the wire shape every inbox route answers with.
 nlohmann::json inbox_json (vayu::db::Database& db, vayu::http::InboxInfo info);
+// Defined in inbox.cpp; the testable core of PUT /inbox/:id (issue #1454).
+std::pair<int, nlohmann::json> update_inbox_response (vayu::db::Database& db,
+InboxManager& manager,
+const std::string& inbox_id,
+const nlohmann::json& body);
+// The `before_write` overload - invoked with the merged response staged and
+// immediately before it is written, still inside the manager's lock. A
+// separate overload rather than a defaulted parameter, matching the
+// resource-route cores' own convention (resource_write_route_test.cpp).
+std::pair<int, nlohmann::json> update_inbox_response (vayu::db::Database& db,
+InboxManager& manager,
+const std::string& inbox_id,
+const nlohmann::json& body,
+const std::function<void ()>& before_write);
 } // namespace vayu::http::routes
 
 namespace {
@@ -370,9 +386,12 @@ TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
     ASSERT_TRUE (client.Post ("/hook", "", "text/plain"));
 
     InboxCannedResponse updated;
-    updated.status = 202;
-    updated.body   = "queued";
-    ASSERT_HAS_VALUE (manager_->update_response (started.info.inbox_id, updated));
+    updated.status    = 202;
+    updated.body      = "queued";
+    const auto result = manager_->update_response (started.info.inbox_id,
+    [&updated] (const InboxCannedResponse&) { return updated; });
+    ASSERT_TRUE (result.found);
+    ASSERT_FALSE (result.error.has_value ());
 
     auto response = client.Post ("/hook", "", "text/plain");
     ASSERT_TRUE (response);
@@ -380,6 +399,49 @@ TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
     EXPECT_EQ (response->body, "queued");
     // A live update never costs the history.
     EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 2);
+}
+
+/**
+ * The same experiment `resource_write_route_test.cpp` runs against the
+ * database-backed resources for issue #1440: two clients PUT one inbox's
+ * canned response at the same moment, each naming a field the other does
+ * not, and both fields must survive. Merge-patch is what makes that a real
+ * risk - the write carries the whole response, including the fields the body
+ * never named - so the loser of an unheld read has its change overwritten
+ * with a value nobody sent.
+ *
+ * The second writer is started from inside the first one's lock scope,
+ * through the `before_write` seam, and given a window to finish (see
+ * `competing_writer.hpp`). Holding the read to the write makes it block, so
+ * it merges against the committed response and both fields survive; without
+ * `InboxManager::update_response`'s single lock scope it merges against the
+ * response as it was before either write and the first writer's field is
+ * gone. Mutation check: split the read and the write back into two
+ * acquisitions and the case reds on the second field.
+ */
+TEST_F (InboxListenerTest, AConcurrentInboxUpdateWaitsAndKeepsBothFieldsWritten) {
+    auto started = start ();
+
+    int other_status = 0;
+    json other_body;
+    vayu::tests::CompetingWriter other ([&] {
+        auto result = vayu::http::routes::update_inbox_response (
+        *db_, *manager_, started.info.inbox_id, json{ { "status", 202 } });
+        other_status = result.first;
+        other_body   = result.second;
+    });
+
+    auto [status, body] = vayu::http::routes::update_inbox_response (*db_, *manager_,
+    started.info.inbox_id, json{ { "body", "queued" } }, other.probe ());
+    ASSERT_EQ (status, 200) << body.dump ();
+    other.join ();
+    ASSERT_EQ (other_status, 200) << other_body.dump ();
+
+    const auto info = manager_->get (started.info.inbox_id);
+    ASSERT_HAS_VALUE (info);
+    EXPECT_EQ (info->response.status, 202);
+    EXPECT_EQ (info->response.body, "queued")
+    << "the body merged against the response this write had already staged";
 }
 
 TEST_F (InboxListenerTest, ABodyPastTheCapIsStoredTruncatedAndSaysSo) {
