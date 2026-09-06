@@ -10,6 +10,8 @@ import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { useSaveStore, type SaveContext } from "./save-store";
 import { useResponseStore } from "./response-store";
+import { useEngineStore } from "./engine-store";
+import { useToastStore } from "./toast-store";
 
 export type TabType =
 	"welcome" | "request" | "collection" | "dashboard" | "run" | "variables" | "settings" | "inbox";
@@ -625,7 +627,23 @@ export const useTabsStore = create<TabsState>()(
 
 			clearDataRowTarget: () => set({ dataRowTarget: null }),
 
+			// A dirty tab with nowhere for its unmount flush to land is a silent
+			// loss (#1489): `useSaveManager`'s cleanup fires the save anyway, its
+			// failure toast lands in a pane that no longer exists, and the eviction
+			// guard above only ever protected LRU, not an explicit close. Held here
+			// instead, before the tab (and the editor holding the draft) is gone.
 			closeTab: (tabId) => {
+				const tab = get().openTabs.find((t) => t.id === tabId);
+				if (
+					tab &&
+					isTabDirty(tab, useSaveStore.getState().contexts) &&
+					useEngineStore.getState().engineStatus !== "connected"
+				) {
+					useToastStore
+						.getState()
+						.showToast("Not saved - the engine is unreachable", "error");
+					return;
+				}
 				const next = closeTabs(get(), new Set([tabId]));
 				if (next) set(next);
 			},

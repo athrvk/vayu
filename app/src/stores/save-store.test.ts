@@ -171,3 +171,57 @@ describe("completeSaveThenIdle with other unsaved work on screen", () => {
 		expect(useSaveStore.getState().status).toBe("pending");
 	});
 });
+
+/**
+ * `flushAll` is what the quit/window-close path (#1489) and a tab close read
+ * to decide whether closing would discard something - it used to resolve to
+ * `undefined` regardless of what happened, so a down or hung engine at quit
+ * looked identical to a clean save.
+ */
+describe("flushAll", () => {
+	beforeEach(() => {
+		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		useToastStore.setState({ toasts: [] });
+	});
+
+	it("reports nothing when nothing is dirty", async () => {
+		registerContext("request-1", false);
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 0,
+			failed: 0,
+			pending: 0,
+		});
+	});
+
+	it("counts every dirty context that saved clean", async () => {
+		registerContext("request-1", true);
+		registerContext("settings", true);
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 2,
+			failed: 0,
+			pending: 0,
+		});
+	});
+
+	it("counts a rejecting save as failed, not saved", async () => {
+		registerContext("request-1", true);
+		useSaveStore.getState().registerContext({
+			id: "settings",
+			name: "settings",
+			save: () => Promise.reject(new Error("network error")),
+			hasPendingChanges: true,
+		});
+
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 1,
+			failed: 1,
+			pending: 0,
+		});
+	});
+
+	it("reports 0 pending - every dirty context is attempted and settled before this resolves", async () => {
+		registerContext("request-1", true);
+		const result = await useSaveStore.getState().flushAll();
+		expect(result.pending).toBe(0);
+	});
+});

@@ -134,12 +134,12 @@ function App() {
 	// what it is about to stop instead of taking it silently (#1363).
 	useRunningServicesPublisher();
 
-	// Register Electron before-quit handler to flush pending saves
+	// Register Electron before-quit handler to flush pending saves. The result
+	// rides the ACK back to main, which asks before discarding anything that
+	// did not land (#1489).
 	useEffect(() => {
 		if (!window.electronAPI?.onBeforeQuit) return;
-		return window.electronAPI.onBeforeQuit(async () => {
-			await useSaveStore.getState().flushAll();
-		});
+		return window.electronAPI.onBeforeQuit(() => useSaveStore.getState().flushAll());
 	}, []);
 
 	return (

@@ -211,7 +211,7 @@ describe("what a returning save is allowed to call itself", () => {
 		const onSave = vi.fn().mockReturnValue(held.promise);
 		const { rerender } = mountManager(onSave);
 
-		let flushed!: Promise<void>;
+		let flushed!: Promise<{ saved: number; failed: number; pending: number }>;
 		act(() => {
 			flushed = useSaveStore.getState().flushAll();
 		});

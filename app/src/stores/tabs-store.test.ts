@@ -9,10 +9,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useTabsStore } from "./tabs-store";
 import { useSaveStore, type SaveContext } from "./save-store";
 import { useResponseStore } from "./response-store";
+import { useEngineStore } from "./engine-store";
+import { useToastStore } from "./toast-store";
 
 beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	useSaveStore.setState({ contexts: new Map() });
+	useEngineStore.setState({ engineStatus: "connected" });
 });
 
 describe("closeTabsForEntities", () => {
@@ -252,6 +255,53 @@ describe("LRU eviction never takes a dirty tab", () => {
 		// which carries no edits yet. Every tab holding work survives.
 		const ids = useTabsStore.getState().openTabs.map((t) => t.entityId);
 		for (let i = 0; i < 12; i++) expect(ids).toContain(`req_${i}`);
+	});
+});
+
+/**
+ * An explicit close on a dirty tab, unlike LRU eviction, had no guard at all
+ * (#1489): the pane unmounts, `useSaveManager`'s cleanup flush fires into a
+ * component that is already gone, and with the engine down that flush fails
+ * with nowhere left to show the failure.
+ */
+describe("closeTab keeps a dirty tab the engine cannot save", () => {
+	beforeEach(() => {
+		useToastStore.setState({ toasts: [] });
+	});
+
+	it("keeps the tab and toasts when dirty and the engine is unreachable", () => {
+		useTabsStore.getState().openTab({ type: "request", entityId: "dirty" });
+		markDirty("request-dirty");
+		useEngineStore.setState({ engineStatus: "unreachable" });
+		const tabId = useTabsStore.getState().openTabs[0].id;
+
+		useTabsStore.getState().closeTab(tabId);
+
+		expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toContain("dirty");
+		expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+			"Not saved - the engine is unreachable"
+		);
+	});
+
+	it("closes as usual when dirty and the engine is connected", () => {
+		useTabsStore.getState().openTab({ type: "request", entityId: "dirty" });
+		markDirty("request-dirty");
+		useEngineStore.setState({ engineStatus: "connected" });
+		const tabId = useTabsStore.getState().openTabs[0].id;
+
+		useTabsStore.getState().closeTab(tabId);
+
+		expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).not.toContain("dirty");
+	});
+
+	it("closes as usual when the engine is unreachable but the tab is clean", () => {
+		useTabsStore.getState().openTab({ type: "request", entityId: "clean" });
+		useEngineStore.setState({ engineStatus: "unreachable" });
+		const tabId = useTabsStore.getState().openTabs[0].id;
+
+		useTabsStore.getState().closeTab(tabId);
+
+		expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).not.toContain("clean");
 	});
 });
 
