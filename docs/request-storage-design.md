@@ -59,6 +59,16 @@ user happened to edit the Params table once. Imports now restore the invariant a
 parse time (`parseImport`, see
 [app/import-collections/README.md](app/import-collections/README.md)).
 
+#### An empty body keeps its mode
+
+A content-based body (`json`, `text`, `graphql`, `jsonrpc`, `xml`) is stored as
+`{ "mode": "<mode>", "content": "<string>" }`, and an empty `content` is still a
+body of that mode - clearing the editor to retype it is not the same action as
+picking **None**. The save path tests `bodyMode` alone rather than falling back
+to `mode: "none"` when the content is an empty (falsy) string, which used to
+collapse a cleared JSON/text/XML/GraphQL/JSON-RPC body to `none` on save (issue
+#1490) while the mode selector kept showing the old mode until the next reload.
+
 ### 2. Request Execution
 
 **Process**:
