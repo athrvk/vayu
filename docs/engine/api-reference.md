@@ -950,6 +950,13 @@ range, nothing is applied and the response is `400` with the specific reason(s):
 **Success response:** `200` - the full updated entries array (same shape as
 `GET /config`) plus `"success": true`.
 
+**The validation and the write are one lock scope, and the write is one
+transaction** (issue #1453): a reader (`GET /config`, or an internal reader
+like the proxy policy resolver that reads `proxyMode` and `proxyUrl` as two
+separate calls) can never observe some of a batch's keys applied and the rest
+still stale, and a failure partway through the write leaves every row
+unchanged rather than the ones written before it.
+
 ## Workspace
 
 ### POST /workspace/backup

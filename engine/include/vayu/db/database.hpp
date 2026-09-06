@@ -824,6 +824,16 @@ class Database {
 
     // Config Entries - Structured configuration with metadata
     void save_config_entry (const ConfigEntry& entry);
+    /**
+     * @brief Write a batch of config entries in one sqlite transaction (#1453).
+     *
+     * `POST /config`'s own comment claims the batch is all-or-nothing; a loop
+     * of `save_config_entry` calls only made that true for validation, not for
+     * the write, since each call was its own transaction. This is the write
+     * half: every row lands or none does, the same shape `apply_reorder` and
+     * `spec_sync_apply` use for their own batches.
+     */
+    void save_config_entries (const std::vector<ConfigEntry>& entries);
     std::optional<ConfigEntry> get_config_entry (const std::string& key);
     std::vector<ConfigEntry> get_all_config_entries ();
     void seed_default_config (); // Initialize default config values if empty
