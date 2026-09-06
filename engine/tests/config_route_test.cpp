@@ -443,7 +443,12 @@ TEST_F (ConfigRouteTest, AdvancedFlagsExactlyTheRecordedInternals) {
         "monitorScrapeTimeoutMs", "liveMaxRetainedTicks", "scriptStackSize",
         // A per-start log file plus the retention count is the bound a user
         // reaches for; this one is the backstop under it (#985).
-        "maxLogFileBytes" };
+        "maxLogFileBytes",
+        // The one-time header-strip migration's "already ran" marker (#1487) -
+        // written by `strip_stored_managed_headers` itself rather than seeded,
+        // but every `init ()` sets it on first run, so it is as reliably
+        // present as the rest of this list.
+        "managedHeadersStripped" };
 
     auto entries = db_->get_all_config_entries ();
     ASSERT_FALSE (entries.empty ()) << "catalogue empty - nothing was scanned";
