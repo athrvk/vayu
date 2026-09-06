@@ -184,7 +184,7 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 | Section (`id`) | What it shows |
 |---|---|
 | Variables in this collection (`collection-variables`) | `CollectionVariablesSection.tsx` - the definitions this collection owns (not a resolved set), editable through the same commit path as the request tab's list. A disabled definition is shown and marked `off` rather than hidden. |
-| Auth (`collection-auth`) | `CollectionAuthSection.tsx` - the mode this collection is set to, and what a descendant set to Inherit would pick up: the same `resolveAuthSource` walk, so a collection set to plain No Auth names the ancestor that answers instead. |
+| Auth (`collection-auth`) | `CollectionAuthSection.tsx` - the mode this collection is set to, and what a descendant set to Inherit would pick up: the same `resolveAuthSource` walk, so a collection set to plain No Auth names the ancestor that answers instead. While the Auth tab is open and dirty, this reads the tab's unsaved pick (`useCollectionAuthDraft`, #1483) rather than the last-saved mode, so the two panes agree. |
 | Contents (`collection-contents`) | `CollectionContentsSection.tsx` - direct child counts (requests, sub-collections), matching what the tree shows under the folder. |
 | Last run (`collection-last-run`) | `CollectionLastRunSection.tsx` - how this collection's most recent run went: the outcome word in its status colour, the plan's size (`3 steps`, `× 2` only when more than one pass ran), and the age, opening that run in a History tab. One `GET /runs?collectionId=&limit=1` call and no report fetch - the server's `start_time DESC` makes the single row the answer. A run still going reads "Running" rather than an outcome, and a run stored before the engine sent the `scenario` descriptor shows no size rather than "0 steps". |
 
@@ -405,7 +405,7 @@ greet the next open. Neither knob is mutable on a running mock: they are read pe
 - the same reason the route table is frozen - so there is no `PUT /mock/:id` and the stop tooltip
 names all three as start-time.
 
-`InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain); `format.ts` holds the relative-timestamp helper, kept out of `shared.tsx` so a file of components exports nothing else (fast refresh).
+`InheritanceChain.tsx` and `shared.tsx` are helpers used by these tabs (e.g. visualizing the auth/variable inheritance chain); `format.ts` holds the relative-timestamp helper, kept out of `shared.tsx` so a file of components exports nothing else (fast refresh). `AuthTab` passes it the tab's own live draft (`draftAuth`), so the chain shows the picked-but-unsaved mode instead of the stored one while the picker is dirty (#1483) - the same draft `CollectionAuthSection` above reads through `useCollectionAuthDraft`.
 
 All five tabs hold their edits in a draft; four of them commit it without being asked. Info commits on blur (name) and on `onCommit` (description); both Script tabs commit when focus leaves the editor; Variables autosaves through `VariableTableEditor`. Info and the Script tabs take the draft, the resync and the mutation reset from [`useEntityDraft()`](./state-management.md#useentitydraft---manual-draftsave-model) and render no Save button at all - the hook owns the mutation reset on a collection switch, which had been hand-rolled per tab with one tab omitting it.
 
