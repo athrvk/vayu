@@ -190,6 +190,7 @@ add_executable(vayu_tests
     ../src/http/routes/inbox.cpp
     ../src/http/routes/events.cpp
     ../src/http/routes/mock_server.cpp
+    ../src/http/routes/elements.cpp
     ../src/http/managed_listener.cpp
     # The daemon's own Server, so its shutdown ordering is testable rather
     # than only reachable by running the daemon (#646). It registers every
