@@ -20,7 +20,11 @@ import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { BulkEditor } from "../../../shared/BulkEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import type { KeyValueItem } from "@/types";
-import { formatParamsToText, parseParamsFromText } from "../../../utils/params-format";
+import {
+	formatParamsToText,
+	parseParamsFromText,
+	isNoOpParamsEdit,
+} from "../../../utils/params-format";
 import { buildUrlWithParams } from "../../../utils/url";
 import { EmptyTableHint } from "./EmptyTableHint";
 
@@ -51,8 +55,13 @@ export default function ParamsPanel() {
 			label="Query Parameters"
 			format={() => formatParamsToText(request.params)}
 			// Parsed here rather than in BulkEditor, because applying params also
-			// means rewriting the URL - a params rule, not a bulk-edit one.
-			onCommit={(text) => handleParamsChange(parseParamsFromText(text))}
+			// means rewriting the URL - a params rule, not a bulk-edit one. A commit
+			// that changes nothing is skipped outright, so opening the editor and
+			// switching straight back cannot re-enable a disabled row (issue #1480).
+			onCommit={(text) => {
+				if (isNoOpParamsEdit(text, request.params)) return;
+				handleParamsChange(parseParamsFromText(text));
+			}}
 			placeholder={"page=1\nlimit=10\nsort=name"}
 			hint={
 				/* Params keep `=` alone - a query string is written `k=v`, and a
@@ -64,7 +73,9 @@ export default function ParamsPanel() {
 					<code className="bg-muted px-1 rounded-md">key=value</code>, one per line. A
 					line with no <code className="bg-muted px-1 rounded-md">=</code> splits at{" "}
 					<code className="bg-muted px-1 rounded-md">:</code>, and a bare key sends a
-					valueless parameter. Repeated keys are kept and all sent.
+					valueless parameter. Repeated keys are kept and all sent. A leading{" "}
+					<code className="bg-muted px-1 rounded-md">// </code> disables the row;
+					everything after the separator's first space is sent exactly as typed.
 				</>
 			}
 			tableHeader={

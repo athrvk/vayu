@@ -13,11 +13,12 @@
 
 import type { KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
-import { splitKeyValueLine, PARAM_SEPARATORS } from "./kv-line";
+import { splitKeyValueLine, stripDisabledMarker, PARAM_SEPARATORS } from "./kv-line";
 
 /**
  * Format params array to text format for bulk edit
- * Format: "key=value" (one per line)
+ * Format: "key=value" (one per line); a disabled row is prefixed `// `
+ * (issue #1480), the same marker the Headers tab uses.
  */
 export const formatParamsToText = (params: KeyValueItem[]): string => {
 	return (
@@ -30,7 +31,7 @@ export const formatParamsToText = (params: KeyValueItem[]): string => {
 			// A valueless param writes as a bare key, matching how it is sent:
 			// `buildUrlWithParams` emits `?page`, not `?page=`. Writing `page=` here
 			// round-tripped, but told the user something the request does not do.
-			.map((p) => (p.value ? `${p.key}=${p.value}` : p.key))
+			.map((p) => `${p.enabled ? "" : "// "}${p.value ? `${p.key}=${p.value}` : p.key}`)
 			.join("\n")
 	);
 };
@@ -39,6 +40,7 @@ export const formatParamsToText = (params: KeyValueItem[]): string => {
  * Parse text format to params array
  * Format: "key=value" (one per line); "key: value" is accepted when the line
  * carries no `=`, so a header block pasted here parses instead of vanishing.
+ * A leading `// ` disables the row (issue #1480).
  *
  * Two kinds of line used to be dropped in silence. `Authorization: Bearer abc`
  * has no `=`, so pasting a header block returned an empty array - which the
@@ -54,16 +56,31 @@ export const parseParamsFromText = (text: string): KeyValueItem[] => {
 	const params: KeyValueItem[] = [];
 
 	lines.forEach((line) => {
-		const parsed = splitKeyValueLine(line, PARAM_SEPARATORS, { allowBareKey: true });
+		const { enabled, rest } = stripDisabledMarker(line);
+		const parsed = splitKeyValueLine(rest, PARAM_SEPARATORS, { allowBareKey: true });
 		if (!parsed) return;
 
 		params.push({
 			id: generateId(),
 			key: parsed.key,
 			value: parsed.value,
-			enabled: true,
+			enabled,
 		});
 	});
 
 	return params;
+};
+
+/**
+ * Whether committing `text` would change nothing about the enabled, non-system
+ * `params` (issue #1480) - see `isNoOpHeadersEdit`, same rule.
+ */
+export const isNoOpParamsEdit = (text: string, params: KeyValueItem[]): boolean => {
+	const normalize = (list: KeyValueItem[]) =>
+		list
+			.filter((p) => (p.key.trim() || p.value.trim()) && !p.system)
+			.map(({ key, value, enabled }) => ({ key, value, enabled }));
+	return (
+		JSON.stringify(normalize(parseParamsFromText(text))) === JSON.stringify(normalize(params))
+	);
 };
