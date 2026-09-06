@@ -1442,6 +1442,10 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 		"auth scheme Vayu cannot execute (hawk, oauth1, edgegrid) - imported with no auth",
 		"auth schemes Vayu cannot execute (hawk, oauth1, edgegrid) - imported with no auth",
 	],
+	oauth2_dropped_field: [
+		"oauth2 detail Vayu has nowhere to store (state, or a pre-fetched token beside a grant)",
+		"oauth2 details Vayu has nowhere to store (state, or a pre-fetched token beside a grant)",
+	],
 	security_unmapped: [
 		"operation's security scheme Vayu cannot map (mutualTLS, openIdConnect, multiple alternatives) - request kept the collection's auth",
 		"operations' security schemes Vayu cannot map (mutualTLS, openIdConnect, multiple alternatives) - requests kept the collection's auth",
@@ -1463,6 +1467,10 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 	variable_metadata: [
 		"variable's description or type, which Vayu does not store",
 		"variables' descriptions or types, which Vayu does not store",
+	],
+	invalid_percent_encoding: [
+		"query value with an invalid % escape, changed when rejoined into the URL",
+		"query values with an invalid % escape, changed when rejoined into the URL",
 	],
 };
 

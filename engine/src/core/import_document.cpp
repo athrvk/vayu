@@ -406,17 +406,33 @@ std::string detail_text (const std::map<std::string, std::string>& detail, const
  * `mapPostmanOAuth2(d)`: a Postman v2.1 `oauth2` block.
  *
  * A minimal export carrying only a pre-fetched `accessToken` imports as a
- * bearer token, which is immediately executable.
+ * bearer token, which is immediately executable. @p dropped_field counts an
+ * oauth2 detail Vayu has nowhere to carry (issue #1460): `state`, which Vayu
+ * always generates and validates itself per authorization attempt rather than
+ * storing (`app/src/types/domain.ts`'s `OAuth2Config`, where a fixed imported
+ * value would undermine the CSRF check it exists for), and a pre-fetched
+ * `accessToken` that arrives *alongside* an explicit grant config, where the
+ * general shape below always drives a fresh fetch through that grant and a
+ * seed token has no field to ride in. `tokenName` is not counted here - it
+ * lands in `credentialsId` below, the field Vayu's own token cache already
+ * reads to keep otherwise-identical configs apart.
  */
-json map_postman_oauth2 (const std::map<std::string, std::string>& detail) {
+json map_postman_oauth2 (const std::map<std::string, std::string>& detail, int& dropped_field) {
     // Truthiness on all four, so a key present and empty is as good as absent.
     const auto stated = [&detail] (const char* key) {
         const std::string* value = detail_of (detail, key);
         return value != nullptr && !value->empty ();
     };
-    if (!stated ("grant_type") && !stated ("accessTokenUrl") &&
-    !stated ("authUrl") && stated ("accessToken")) {
+    const bool has_grant_config =
+    stated ("grant_type") || stated ("accessTokenUrl") || stated ("authUrl");
+    if (!has_grant_config && stated ("accessToken")) {
         return json{ { "mode", "bearer" }, { "token", detail_text (detail, "accessToken") } };
+    }
+    if (has_grant_config && stated ("accessToken")) {
+        dropped_field += 1;
+    }
+    if (stated ("state")) {
+        dropped_field += 1;
     }
 
     std::string grant_type = "client_credentials";
@@ -461,6 +477,12 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail) {
     // Postman's "useBrowser" is authorize-via-system-browser; embedded is the
     // inverse of it.
     config["useEmbeddedBrowser"] = detail_is (detail, "useBrowser", "false");
+    if (stated ("tokenName")) {
+        // Postman's `tokenName` labels a saved token; `credentialsId` is
+        // Vayu's analogous field, already read by the token cache key to
+        // keep otherwise-identical configs apart (issue #1460).
+        config["credentialsId"] = detail_text (detail, "tokenName");
+    }
     return oauth2_auth (std::move (config));
 }
 
@@ -602,8 +624,9 @@ json map_swagger_oauth2 (const json* scheme) {
 /// request) as a Vayu auth. @p skipped_unsupported_auth counts a scheme Vayu
 /// cannot execute and has no config shape for (`hawk`, `oauth1`, `edgegrid`,
 /// or a non-string `type`) - not `noauth`, whose `{mode: "none"}` answer is
-/// the correct mapping rather than a loss.
-json map_postman_auth (const json* auth, int& skipped_unsupported_auth) {
+/// the correct mapping rather than a loss. @p oauth2_dropped_field is
+/// `map_postman_oauth2`'s counter, threaded through (issue #1460).
+json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oauth2_dropped_field) {
     const json* node = as_record (auth);
     if (node == nullptr || !truthy (prop (node, "type"))) {
         return json{ { "mode", "inherit" } };
@@ -629,7 +652,7 @@ json map_postman_auth (const json* auth, int& skipped_unsupported_auth) {
             { "in", detail_is (detail, "in", "query") ? "query" : "header" } };
     }
     if (*type == "oauth2") {
-        return map_postman_oauth2 (detail);
+        return map_postman_oauth2 (detail, oauth2_dropped_field);
     }
     // AWS Signature is `awsv4` on the wire (the v2.1.0/v2.0.0 schema's enum) and
     // `aws` internally; the two names diverge, so matching on `"aws"` here is
@@ -689,6 +712,15 @@ struct PostmanCounts {
     int skipped_path_variables     = 0;
     int skipped_url_without_raw    = 0;
     int skipped_variable_metadata  = 0;
+    // A Postman oauth2 detail carrying `state` (never stored) or a pre-fetched
+    // `accessToken` alongside an explicit grant config (nowhere to seed it) -
+    // see `map_postman_oauth2` (issue #1460).
+    int oauth2_dropped_field = 0;
+    // A query key or value where `safeDecode` gave back the original text
+    // because one of its `%` escapes was invalid - re-encoding that text on
+    // rejoin (`joinParamsIntoUrls`) percent-encodes the literal `%` too,
+    // changing the stored URL from what the source wrote (issue #1460).
+    int invalid_percent_encoding = 0;
     // `{key: {value, enabled}}` collected from every request's `url.variable[]`,
     // merged into the root collection's variables once the walk finishes - see
     // `substitutePathVariables`.
@@ -892,8 +924,16 @@ std::string safe_decode (const std::string& text) {
     return is_valid_utf8 (out) ? out : text;
 }
 
+/// A `safeDecode` result that gave back its input unchanged because one of
+/// its `%` escapes was invalid, rather than because the input held no escape
+/// at all - the case `joinParamsIntoUrls` later re-encodes into a different
+/// value (issue #1460).
+bool decode_kept_raw (const std::string& original, const std::string& decoded) {
+    return original.find ('%') != std::string::npos && original == decoded;
+}
+
 /// `queryEntries(query)`: a `k=v&k2=v2` string as rows, decoded and normalized.
-json query_entries (const std::string& query) {
+json query_entries (const std::string& query, PostmanCounts& counts) {
     json out     = json::array ();
     size_t start = 0;
     while (start <= query.size ()) {
@@ -909,8 +949,13 @@ json query_entries (const std::string& query) {
         equals == std::string::npos ? pair : pair.substr (0, equals);
         const std::string value =
         equals == std::string::npos ? std::string () : pair.substr (equals + 1);
-        out.push_back ({ { "key", safe_decode (key) },
-        { "value", normalize_vars (safe_decode (value)) }, { "enabled", true } });
+        const std::string decoded_key   = safe_decode (key);
+        const std::string decoded_value = safe_decode (value);
+        if (decode_kept_raw (key, decoded_key) || decode_kept_raw (value, decoded_value)) {
+            counts.invalid_percent_encoding += 1;
+        }
+        out.push_back ({ { "key", decoded_key },
+        { "value", normalize_vars (decoded_value) }, { "enabled", true } });
     }
     return out;
 }
@@ -1038,7 +1083,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
             return { normalize_vars (text), json::array () };
         }
         return { normalize_vars (text.substr (0, question)),
-            query_entries (text.substr (question + 1)) };
+            query_entries (text.substr (question + 1), counts) };
     }
     const std::string* declared = as_str (prop (url, "raw"));
     std::string raw;
@@ -1059,7 +1104,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     // hand-written or script-generated collections that populate only `raw`.
     json params = (!structured.empty () || question == std::string::npos) ?
     std::move (structured) :
-    query_entries (raw.substr (question + 1));
+    query_entries (raw.substr (question + 1), counts);
     return { normalize_vars (base), std::move (params) };
 }
 
@@ -1178,11 +1223,12 @@ std::string pm_description_text (const std::string* text, const std::string* nes
 }
 
 json pm_request (const json* item, PostmanCounts& counts) {
-    const json* declared = as_record (prop (item, "request"));
-    const json empty     = json::object ();
-    const json* rq       = declared == nullptr ? &empty : declared;
-    auto [url, params]   = pm_url (prop (rq, "url"), counts);
-    json auth = map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth);
+    const json* declared   = as_record (prop (item, "request"));
+    const json empty       = json::object ();
+    const json* rq         = declared == nullptr ? &empty : declared;
+    auto [url, params]     = pm_url (prop (rq, "url"), counts);
+    json auth              = map_postman_auth (prop (rq, "auth"),
+                 counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
     const std::string mode = auth.at ("mode").get<std::string> ();
     if (mode == "digest" || mode == "aws" || mode == "ntlm") {
         counts.non_executable += 1;
@@ -1227,11 +1273,11 @@ json pm_request (const json* item, PostmanCounts& counts) {
  * must not collapse into `none`, which a descendant's `inherit` walks past.
  * Collections never inherit, so `inherit` and absent both become `none`.
  */
-json collection_auth (const json* auth, int& skipped_unsupported_auth) {
+json collection_auth (const json* auth, int& skipped_unsupported_auth, int& oauth2_dropped_field) {
     if (const json* type = prop (auth, "type"); type != nullptr && *type == "noauth") {
         return json{ { "mode", "noauth" } };
     }
-    json mapped = map_postman_auth (auth, skipped_unsupported_auth);
+    json mapped = map_postman_auth (auth, skipped_unsupported_auth, oauth2_dropped_field);
     return mapped.at ("mode") == "inherit" ? json{ { "mode", "none" } } : mapped;
 }
 
@@ -1278,8 +1324,8 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     collection["description"] = pm_description_text (text, nested);
     collection["variables"] =
     to_var_record (prop (node, "variable"), counts.skipped_variable_metadata);
-    collection["auth"] =
-    collection_auth (prop (node, "auth"), counts.skipped_unsupported_auth);
+    collection["auth"] = collection_auth (prop (node, "auth"),
+    counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
     collection["preRequestScript"] =
     counts.options.import_scripts ? join_exec (pm_event (events, "prerequest")) : "";
     collection["postRequestScript"] =
@@ -1312,8 +1358,10 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("malformed_item", counts.skipped_malformed);
     tally.add ("unsupported_method", counts.skipped_unsupported_method);
     tally.add ("unsupported_auth", counts.skipped_unsupported_auth);
+    tally.add ("oauth2_dropped_field", counts.oauth2_dropped_field);
     tally.add ("path_variables", counts.skipped_path_variables);
     tally.add ("url_without_raw", counts.skipped_url_without_raw);
+    tally.add ("invalid_percent_encoding", counts.invalid_percent_encoding);
     tally.add ("variable_metadata", counts.skipped_variable_metadata);
 
     json meta;
