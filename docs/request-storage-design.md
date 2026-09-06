@@ -46,6 +46,12 @@ run, load run - sends it verbatim, and no engine path reads `params[]` at all
 the invariant on the app's side by rewriting `url` on every edit, keeping
 disabled rows in `params[]` only.
 
+The URL bar keeps the same invariant the other way: typing into it **merges**
+the parsed query into `params[]` rather than replacing the list, so a disabled
+row (invisible in the query by design) survives, and a key removed from the URL
+is removed from `params[]` too, rather than left behind as a row the URL no
+longer carries (`mergeParamsFromUrl`, issue #1482).
+
 A writer that stores the query *only* in `params[]` therefore stores a request
 that sends nothing of it. That was issue #590: every importer split the query
 out of the URL, so an imported request dropped its query on every send until the

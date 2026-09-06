@@ -96,6 +96,40 @@ export function parseQueryParams(url: string): KeyValueItem[] {
 	}
 }
 
+/**
+ * Merge the URL's query into the existing params rows, in place of replacing
+ * them outright.
+ *
+ * A disabled row is invisible in the URL by design (`toQueryString` skips it),
+ * so a wholesale replace with `parseQueryParams(url)` deletes every disabled
+ * row on the next keystroke, and typing the query away leaves nothing to
+ * remove the enabled rows it used to carry (issue #1482). Existing rows keep
+ * their position, id, description and `source`; a key the URL no longer
+ * carries is dropped, and a key new to the URL is appended at the end.
+ */
+export function mergeParamsFromUrl(existing: readonly KeyValueItem[], url: string): KeyValueItem[] {
+	const fromUrl = parseQueryParams(url);
+	const consumed = new Array(fromUrl.length).fill(false);
+
+	const merged: KeyValueItem[] = [];
+	for (const row of existing) {
+		if (!row.enabled) {
+			merged.push(row);
+			continue;
+		}
+		const matchIndex = fromUrl.findIndex((p, i) => !consumed[i] && p.key === row.key);
+		if (matchIndex === -1) continue; // the URL no longer carries this key
+		consumed[matchIndex] = true;
+		merged.push({ ...row, value: fromUrl[matchIndex].value });
+	}
+
+	fromUrl.forEach((p, i) => {
+		if (!consumed[i]) merged.push(p);
+	});
+
+	return merged;
+}
+
 /** decodeURIComponent that leaves `{{var}}` tokens (and malformed input) untouched. */
 export function safeDecode(part: string): string {
 	if (part.includes("{{")) return part;
