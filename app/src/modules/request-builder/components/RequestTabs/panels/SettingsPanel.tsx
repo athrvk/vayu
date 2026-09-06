@@ -84,7 +84,7 @@ export default function SettingsPanel() {
 	 * headers are one change, and the rule computes the new header list from the
 	 * current one - a second call would compute against the array it had before
 	 * the first. A request that already declares an `Accept` keeps it; see
-	 * `utils/auto-header.ts` for why ownership is by row id.
+	 * `utils/auto-header.ts` for why ownership is by marker, not by row id.
 	 */
 	const handleStreamChange = (checked: boolean) => {
 		const next = switchAutoHeader(
