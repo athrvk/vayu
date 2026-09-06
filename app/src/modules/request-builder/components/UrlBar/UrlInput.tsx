@@ -20,7 +20,7 @@ import { useRequestBuilderContext } from "../../context";
 import VariableInput from "@/components/shared/VariableInput";
 import { REQUEST_URL_INPUT_ID } from "@/constants/dom-ids";
 import { useVariableSupport } from "../../hooks/useVariableSupport";
-import { parseQueryParams } from "../../utils/url";
+import { mergeParamsFromUrl } from "../../utils/url";
 
 interface UrlInputProps {
 	className?: string;
@@ -38,13 +38,12 @@ export default function UrlInput({ className }: UrlInputProps) {
 			const trimmedUrl = newUrl.trim();
 			updateField("url", trimmedUrl);
 
-			// Extract and sync params
-			const newParams = parseQueryParams(trimmedUrl);
-			if (newParams.length > 0) {
-				updateField("params", newParams);
-			}
+			// Merge, never replace: a disabled row is invisible in the URL by
+			// design and must survive a URL edit, and clearing the query must
+			// clear the enabled rows it used to carry (issue #1482).
+			updateField("params", mergeParamsFromUrl(request.params, trimmedUrl));
 		},
-		[updateField]
+		[request.params, updateField]
 	);
 
 	/** Replace the request with what a curl/wget command describes. */

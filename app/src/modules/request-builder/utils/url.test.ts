@@ -16,13 +16,27 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { appendParamsToUrl, buildUrlWithParams, parseQueryParams } from "./url";
-import type { KeyValueEntry } from "@/types";
+import { appendParamsToUrl, buildUrlWithParams, mergeParamsFromUrl, parseQueryParams } from "./url";
+import type { KeyValueEntry, KeyValueItem } from "@/types";
 
 const kv = (key: string, value: string, enabled = true): KeyValueEntry => ({
 	key,
 	value,
 	enabled,
+});
+
+const item = (
+	id: string,
+	key: string,
+	value: string,
+	enabled = true,
+	extra: Partial<KeyValueItem> = {}
+): KeyValueItem => ({
+	id,
+	key,
+	value,
+	enabled,
+	...extra,
 });
 
 describe("buildUrlWithParams", () => {
@@ -81,5 +95,53 @@ describe("appendParamsToUrl", () => {
 			{ key: "q", value: "a b" },
 			{ key: "id", value: "{{userId}}" },
 		]);
+	});
+});
+
+describe("mergeParamsFromUrl", () => {
+	it("keeps a disabled row when the URL gains a new enabled param", () => {
+		// Mutation check: replacing wholesale with parseQueryParams(url) instead
+		// of merging drops the disabled row here.
+		const existing = [item("1", "a", "1", true), item("2", "b", "2", false)];
+		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1&c=3");
+		expect(merged.map(({ key, value, enabled }) => ({ key, value, enabled }))).toEqual([
+			{ key: "a", value: "1", enabled: true },
+			{ key: "b", value: "2", enabled: false },
+			{ key: "c", value: "3", enabled: true },
+		]);
+	});
+
+	it("clearing the query drops enabled rows and keeps disabled ones", () => {
+		// Mutation check: restoring the `newParams.length > 0` guard leaves the
+		// stale enabled row in place here.
+		const existing = [item("1", "a", "1", true), item("2", "b", "2", false)];
+		const merged = mergeParamsFromUrl(existing, "https://x/y");
+		expect(merged.map(({ key, value, enabled }) => ({ key, value, enabled }))).toEqual([
+			{ key: "b", value: "2", enabled: false },
+		]);
+	});
+
+	it("preserves id, description and source for a row whose key survives", () => {
+		const existing = [
+			item("keep-me", "a", "1", true, { description: "note", source: "body-mode" }),
+		];
+		const merged = mergeParamsFromUrl(existing, "https://x/y?a=9");
+		expect(merged).toEqual([
+			item("keep-me", "a", "9", true, { description: "note", source: "body-mode" }),
+		]);
+	});
+
+	it("appends a brand-new key at the end with a fresh id", () => {
+		const existing = [item("1", "a", "1", true)];
+		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1&z=9");
+		expect(merged[0].id).toBe("1");
+		expect(merged[1]).toMatchObject({ key: "z", value: "9", enabled: true });
+		expect(merged[1].id).not.toBe("1");
+	});
+
+	it("never lists an enabled row the URL does not carry", () => {
+		const existing = [item("1", "a", "1", true), item("2", "gone", "x", true)];
+		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1");
+		expect(merged.map((p) => p.key)).toEqual(["a"]);
 	});
 });
