@@ -324,7 +324,9 @@ Stores individual HTTP request definitions.
 [{"key":"Content-Type","value":"application/json","enabled":true,"description":""}]
 ```
 Disabled rows (`"enabled":false`) are preserved in storage and filtered at HTTP-execution time only.
-Duplicate keys are allowed.
+Duplicate keys are allowed. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
+`X-Request-ID` and `User-Agent` rows here; [the header-strip pass](#the-header-strip-pass-issue-1487)
+removes them once, at startup.
 
 **body** - discriminated union:
 ```json
