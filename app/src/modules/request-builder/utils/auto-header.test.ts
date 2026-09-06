@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { switchAutoHeader, autoHeaderToAdd, withoutAutoHeader } from "./auto-header";
+import { switchAutoHeader, autoHeaderToAdd, withoutAutoHeader, autoHeaderRow } from "./auto-header";
 import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import type { KeyValueItem } from "@/types";
 
@@ -31,79 +31,87 @@ const row = (id: string, key: string, value: string, enabled = true): KeyValueIt
 	enabled,
 });
 
-const REQ = "req_1";
-
 describe("switchAutoHeader on Accept", () => {
 	it("adds the header when the setting turns on", () => {
-		const result = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, [], REQ, null);
+		const result = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, [], "stream");
 
 		expect(result.added).toBe(SSE_ACCEPT);
 		expect(result.headers).toHaveLength(1);
+		// The marker is what makes the add reversible; without it the header
+		// outlives the setting, which is the whole bug this rule exists for.
 		expect(result.headers[0]).toMatchObject({
 			key: ACCEPT_HEADER,
 			value: SSE_ACCEPT,
 			enabled: true,
+			source: "stream",
 		});
-		// The record is what makes the add reversible; without it the header
-		// outlives the setting, which is the whole bug this rule exists for.
-		expect(result.auto).toMatchObject({ requestId: REQ, value: SSE_ACCEPT });
-		expect(result.auto?.rowId).toBe(result.headers[0].id);
 	});
 
 	it("takes the header back when the setting turns off", () => {
-		const on = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, [], REQ, null);
-		const off = switchAutoHeader(ACCEPT_HEADER, null, on.headers, REQ, on.auto);
+		const on = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, [], "stream");
+		const off = switchAutoHeader(ACCEPT_HEADER, null, on.headers, "stream");
 
 		expect(off.headers).toHaveLength(0);
-		expect(off.auto).toBeNull();
 		expect(off.added).toBeNull();
 	});
 
 	it("never overrides an Accept the user declared, even a different one", () => {
 		const mine = [row("r1", "Accept", "application/json")];
-		const result = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, mine, REQ, null);
+		const result = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, mine, "stream");
 
 		expect(result.added).toBeNull();
-		expect(result.auto).toBeNull();
 		expect(result.headers).toEqual(mine);
 	});
 
 	it("adds one anyway when the declared Accept is disabled - it is not sent", () => {
 		const disabled = [row("r1", "Accept", "application/json", false)];
-		const result = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, disabled, REQ, null);
+		const result = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, disabled, "stream");
 
 		expect(result.added).toBe(SSE_ACCEPT);
 		expect(result.headers).toHaveLength(2);
 	});
 
-	it("leaves a row the user has since retyped alone", () => {
-		const on = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, [], REQ, null);
-		// Same row id, different value: theirs now.
-		const edited = on.headers.map((h) => ({ ...h, value: "application/json" }));
+	it("leaves a row alone once its marker has been cleared", () => {
+		// KeyValueEditor clears `source` the moment a user retypes a marked row's
+		// key or value; simulate that here rather than through the component,
+		// since the boundary belongs to this rule, not to the editor.
+		const on = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, [], "stream");
+		const edited = on.headers.map((h) => {
+			const { source: _source, ...rest } = h;
+			return { ...rest, value: "application/json" };
+		});
 
-		const off = switchAutoHeader(ACCEPT_HEADER, null, edited, REQ, on.auto);
+		const off = switchAutoHeader(ACCEPT_HEADER, null, edited, "stream");
 
 		expect(off.headers).toEqual(edited);
 	});
 
-	it("drops a record belonging to another request rather than applying it", () => {
-		// Row ids are not unique across a duplicated request, so a stale record
-		// could otherwise delete a header the current request owns.
-		const theirs = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, [], "req_other", null);
-		const off = switchAutoHeader(ACCEPT_HEADER, null, theirs.headers, REQ, theirs.auto);
+	it("recognises its own row with no earlier record at all", () => {
+		// The bug this rule replaced (issue #1481): an in-memory ref recorded
+		// which row a setting wrote, and could not survive a reload - a stale
+		// auto-written row was then indistinguishable from the user's own.
+		// `switchAutoHeader` takes no such record any more; a marked row is
+		// recognised purely from the headers array itself.
+		const afterReload = [autoHeaderRow(ACCEPT_HEADER, SSE_ACCEPT, "stream")];
 
-		expect(off.headers).toEqual(theirs.headers);
-		expect(off.auto).toBeNull();
+		const off = switchAutoHeader(ACCEPT_HEADER, null, afterReload, "stream");
+
+		expect(off.headers).toEqual([]);
+	});
+
+	it("does not touch a row a different setting marked", () => {
+		const theirs = [autoHeaderRow(ACCEPT_HEADER, SSE_ACCEPT, "body-mode")];
+		const off = switchAutoHeader(ACCEPT_HEADER, null, theirs, "stream");
+		expect(off.headers).toEqual(theirs);
 	});
 
 	it("keeps the existing row when the required value has not changed", () => {
-		const on = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, [], REQ, null);
-		const again = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, on.headers, REQ, on.auto);
+		const on = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, [], "stream");
+		const again = switchAutoHeader(ACCEPT_HEADER, SSE_ACCEPT, on.headers, "stream");
 
-		// Same array and same record: re-adding would churn the Headers tab and
-		// move the row to the end.
+		// Same array: re-adding would churn the Headers tab and move the row to
+		// the end.
 		expect(again.headers).toBe(on.headers);
-		expect(again.auto).toBe(on.auto);
 		expect(again.added).toBeNull();
 	});
 
@@ -112,9 +120,8 @@ describe("switchAutoHeader on Accept", () => {
 		expect(autoHeaderToAdd(ACCEPT_HEADER, SSE_ACCEPT, lower)).toBeNull();
 	});
 
-	it("removes nothing when the record names a row that is gone", () => {
+	it("removes nothing when no row carries the marker", () => {
 		const headers = [row("r1", "Accept", SSE_ACCEPT)];
-		const stale = { requestId: REQ, rowId: "r-gone", value: SSE_ACCEPT };
-		expect(withoutAutoHeader(headers, ACCEPT_HEADER, stale)).toEqual(headers);
+		expect(withoutAutoHeader(headers, ACCEPT_HEADER, "stream")).toEqual(headers);
 	});
 });

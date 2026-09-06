@@ -30,7 +30,7 @@
  */
 
 import type { KeyValueEntry, KeyValueItem } from "@/types";
-import type { AutoHeader, BodyMode } from "../../../../types";
+import type { BodyMode } from "../../../../types";
 import {
 	autoHeaderRow,
 	autoHeaderToAdd,
@@ -38,6 +38,9 @@ import {
 	withoutAutoHeader,
 	type AutoHeaderSwitch,
 } from "../../../../utils/auto-header";
+
+/** The marker this panel writes on the row it owns - see `utils/auto-header.ts`. */
+const SOURCE = "body-mode" as const;
 
 export const CONTENT_TYPE = "Content-Type";
 
@@ -96,29 +99,18 @@ export function contentTypeToAdd(mode: BodyMode, headers: KeyValueEntry[]): stri
 }
 
 /** The header list with the row this panel added taken back out. */
-export function withoutContentType(headers: KeyValueItem[], auto: AutoHeader): KeyValueItem[] {
-	return withoutAutoHeader(headers, CONTENT_TYPE, auto);
+export function withoutContentType(headers: KeyValueItem[]): KeyValueItem[] {
+	return withoutAutoHeader(headers, CONTENT_TYPE, SOURCE);
 }
 
 /** The header row to append, ready for `updateField("headers", …)`. */
 export function contentTypeRow(value: string): KeyValueItem {
-	return autoHeaderRow(CONTENT_TYPE, value);
+	return autoHeaderRow(CONTENT_TYPE, value, SOURCE);
 }
 
 export type ContentTypeSwitch = AutoHeaderSwitch;
 
-/**
- * Remove the header the old mode needed, add the one the new mode does.
- *
- * `requestId` is the request being edited *now*; see `switchAutoHeader` for
- * why a record belonging to another request is dropped rather than applied,
- * and why both halves happen in one pass over one array.
- */
-export function switchContentType(
-	mode: BodyMode,
-	headers: KeyValueItem[],
-	requestId: string | null,
-	auto: AutoHeader | null
-): ContentTypeSwitch {
-	return switchAutoHeader(CONTENT_TYPE, requiredContentType(mode), headers, requestId, auto);
+/** Remove the header the old mode needed, add the one the new mode does. */
+export function switchContentType(mode: BodyMode, headers: KeyValueItem[]): ContentTypeSwitch {
+	return switchAutoHeader(CONTENT_TYPE, requiredContentType(mode), headers, SOURCE);
 }

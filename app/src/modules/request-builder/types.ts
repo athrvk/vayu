@@ -99,42 +99,25 @@ export interface BodyConfig {
 }
 
 /**
- * A header row a *setting* added on its way in, so leaving that setting can
- * take it back. Two settings own one each: the body mode's `Content-Type`
- * (written by `BodyPanel`) and the Event stream toggle's `Accept` (written by
- * `SettingsPanel`). Both go through the context accessors; the rule that reads
- * them is in `utils/auto-header.ts`.
- *
- * By **row id**, not by value: `Content-Type: application/json` typed by the
- * user and the identical row a panel wrote look the same and must not be
- * treated the same. `value` is kept beside it so a row the user has since
- * retyped is recognised as no longer ours. The header *name* is not stored -
- * each record lives in a slot dedicated to one header, and the rule is told
- * which name it is working on.
- *
- * Ephemeral, like the body drafts - `requestId` says whose row it is, and a
- * record belonging to another request is dropped rather than applied. The
- * provider keeps one record per request (issue #1269), so the rule reading this
- * one is normally handed the record it owns; the check stays because the rule
- * is a pure function that cannot know that.
- */
-export interface AutoHeader {
-	requestId: string | null;
-	rowId: string;
-	value: string;
-}
-
-/**
  * The method a body mode set, and what it was before (issue #1228).
  *
- * The same reversible-side-effect rule as {@link AutoHeader}, on the one field
- * that is not a header row: GraphQL over `GET` is sent as query parameters and
- * cannot carry a mutation at all, so choosing the mode on a request still
- * holding the default `GET` sets `POST` - and leaving the mode puts `GET` back.
+ * GraphQL over `GET` is sent as query parameters and cannot carry a mutation at
+ * all, so choosing the mode on a request still holding the default `GET` sets
+ * `POST` - and leaving the mode puts `GET` back. `method` is what this record
+ * set, and it is re-checked before the revert: a method the user has picked
+ * since is theirs, and reverting it would take a choice away rather than
+ * complete one.
  *
- * `method` is what this record set, and it is re-checked before the revert for
- * the reason `AutoHeader` keeps `value`: a method the user has picked since is
- * theirs, and reverting it would take a choice away rather than complete one.
+ * The body mode's `Content-Type` row and the Event stream toggle's `Accept`
+ * row used to carry the identical shape (`AutoHeader`), tracked the same
+ * ephemeral, per-request way. That could not survive a reload - a stale
+ * auto-written row was then indistinguishable from one the user typed (issue
+ * #1481) - so both now mark ownership on the row itself (`KeyValueEntry.source`,
+ * see `utils/auto-header.ts`) instead of in a provider-held record. `method`
+ * cannot follow: it is a scalar field on the request, not a `KeyValueEntry`,
+ * so it has nowhere to carry a marker of its own, and stays on the ref-based
+ * per-request record here. It has the same reload gap #1481 fixed for the two
+ * header rows; see issue #1505 for giving it a persisted marker.
  */
 export interface AutoMethod {
 	requestId: string | null;
@@ -451,35 +434,11 @@ export interface RequestBuilderContextValue {
 	setVariablesDraft: (draft: VariablesDraft) => void;
 
 	/**
-	 * The Content-Type row `BodyPanel` wrote when a mode required one, so that
-	 * leaving the mode can take it back. Behind accessors and living in the
-	 * provider for the same reasons as the drafts above - and for one more: the
-	 * record has to outlive the panel, or the header outlives the mode that
-	 * needed it, which is the bug it exists to fix.
-	 *
-	 * These accessors answer for the request on screen, and each slot holds one
-	 * record per request (issue #1269) - one provider serves every request tab,
-	 * so a slot holding a single record stranded the header the app had added to
-	 * whichever request entered the mode first.
-	 */
-	getAutoContentType: () => AutoHeader | null;
-	setAutoContentType: (auto: AutoHeader | null) => void;
-
-	/**
-	 * The same, for the `Accept: text/event-stream` row the Event stream toggle
-	 * writes (issue #574). A second slot rather than one keyed by header name:
-	 * there are exactly two settings that own a header, each owns a different
-	 * one, and a map would let a caller read the wrong record by passing the
-	 * wrong string.
-	 */
-	getAutoAccept: () => AutoHeader | null;
-	setAutoAccept: (auto: AutoHeader | null) => void;
-
-	/**
 	 * The method the GraphQL body mode set, so leaving the mode can put back
-	 * the one it replaced (issue #1228). A third slot beside the two above,
-	 * and deliberately not one of them: what it owns is a scalar field rather
-	 * than a header row, so it records the value it wrote instead of a row id.
+	 * the one it replaced (issue #1228). The Content-Type and Accept rows this
+	 * used to sit beside are gone from the context - they mark ownership on the
+	 * row itself now (`KeyValueEntry.source`) - but `method` is a scalar field,
+	 * not a row, so it still needs a provider-held record. See {@link AutoMethod}.
 	 */
 	getAutoMethod: () => AutoMethod | null;
 	setAutoMethod: (auto: AutoMethod | null) => void;

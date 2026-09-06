@@ -2096,80 +2096,82 @@ in the provider - is what drops one belonging to another request.
 ### `RequestBuilderContext` - the headers a setting added
 
 ```typescript
-getAutoContentType: () => AutoHeader | null
-setAutoContentType: (auto: AutoHeader | null) => void
-getAutoAccept: () => AutoHeader | null
-setAutoAccept: (auto: AutoHeader | null) => void
 getAutoMethod: () => AutoMethod | null
 setAutoMethod: (auto: AutoMethod | null) => void
 ```
 
-Which header row - or, for the third slot, which method - a *setting* added on
-its way in, so that leaving the setting can take it back. Two settings own a
-header row each: the body mode's `Content-Type` (written by `BodyPanel`) and
-the Event stream toggle's `Accept: text/event-stream` (written by
-`SettingsPanel`, issue #574). Named slots rather than one map keyed by header
-name - each owns a different field, and a map would let a caller read the
-wrong record by passing the wrong string.
+Two settings each own a header row: the body mode's `Content-Type` (written by
+`BodyPanel`) and the Event stream toggle's `Accept: text/event-stream` (written
+by `SettingsPanel`, issue #574). GraphQL is sent as a JSON envelope and
+genuinely needs `Content-Type: application/json`, so `BodyPanel` appends one -
+but nothing removed it, so a single visit to GraphQL left the header on the
+request for good, including after switching back to `none`, which sends no
+body at all.
 
-GraphQL is sent as a JSON envelope and genuinely needs
-`Content-Type: application/json`, so `BodyPanel` appends one - but nothing
-removed it, so a single visit to GraphQL left the header on the request for
-good, including after switching back to `none`, which sends no body at all.
+Ownership of the row used to be a context-level record, `{ requestId, rowId,
+value }`, held in a ref the provider owned. That could not survive a reload: a
+fresh mount started with an empty ref, so a stale auto-written row was then
+indistinguishable from one the user typed, and neither `withoutContentType`
+(nothing to remove) nor a later mode switch (an "existing" row, so nothing to
+add) could tell the difference (issue #1481). Ownership now lives on the row
+itself - `KeyValueEntry.source?: "body-mode" | "stream"` - so there is no
+context accessor for either setting any more; `switchAutoHeader` in
+`modules/request-builder/utils/auto-header.ts` reads and writes the marker
+directly on the headers array it is handed, once per change: it removes the
+marked row when the new setting does not need that same header, then adds
+whatever the new setting does need - both halves in one pass over one array,
+because two `updateField("headers", …)` calls would compute the second against
+the array they had before the first. `panels/body/content-type.ts` is now just
+the body-mode half: which `Content-Type` a mode requires, plus the delegation.
 
-The record is `{ requestId, rowId, value }` and the rule that reads it is
-`switchAutoHeader` in `modules/request-builder/utils/auto-header.ts`, called
-once per change: it removes the remembered row when the new setting does not
-need that same header, then adds whatever the new setting does need - both
-halves in one pass over one array, because two `updateField("headers", …)`
-calls would compute the second against the array they had before the first.
-`panels/body/content-type.ts` is now just the body-mode half: which
-`Content-Type` a mode requires, plus the delegation.
+Two things it is deliberate about:
 
-Three things it is deliberate about:
+- **By marker, not by value.** A `Content-Type` the user typed and the row a
+  setting wrote are identical apart from the marker, and only a marked row may
+  be removed. `KeyValueEditor`'s `handleUpdate` clears the marker the moment a
+  user retypes a row's key or value - once retyped, it is theirs, whatever the
+  new value happens to be. Merely disabling a marked row does not clear it: the
+  row is not sent while disabled, so there is nothing to have adopted.
+- **A row already declaring the header - even a different value - is never
+  overridden.** Silently replacing it would be a worse version of the bug this
+  exists to fix. A disabled declaration does not count: it is not sent, so the
+  header the mode needs is still missing.
 
-- **By row id, not by value.** A `Content-Type` the user typed and the row the
-  panel wrote are identical apart from their id, and only ours may be removed.
-- **A row whose value has been edited is no longer ours** - retyping it is a
-  decision, so it stays and the record is dropped. Merely disabling it is not.
-- **A record naming another request is dropped, not applied.** Row ids are not
-  unique across a duplicated request, so the rule asks whose record it has been
-  handed rather than trusting the caller. Since issue #1269 the provider cannot
-  hand it the wrong one (see below); the check stays because the rule is a pure
-  function, and the storage is not the only thing that could ever call it.
+The one slot left, `AutoMethod`, is not a header row at all (issue #1228). A
+new request is a GET, and GraphQL over GET is a different transport - the
+document travels as query parameters and a mutation cannot be sent that way -
+so picking the GraphQL body mode on a request still holding that default used
+to build one the server answered with a bare `400`. The mode now sets `POST`
+the same reversible way it sets the `Content-Type` header above, and leaving
+the mode puts the method back - but what it owns is a scalar field on the
+request, not a row in an array, so it has nowhere to carry a marker of its own:
+`AutoMethod` stays `{ requestId, method, previous }` - the value it wrote and
+the value it replaced - held in the provider the way the two header slots used
+to be. `switchGraphQLMethod` in `panels/body/graphql-method.ts` is the rule
+that reads it, called from `BodyPanel.handleModeChange` beside
+`switchAutoHeader`. It keeps the same two guarantees stated as bullets above,
+read against a scalar instead of a row: a method the user has since chosen -
+the field's value no longer matching what this record wrote - is no longer
+ours to revert, and a record naming another request is dropped rather than
+applied. A GET still reaches GraphQL through the door this side effect does not
+touch - the user picks GET back, or an import wrote one - which is when the
+Query pane header's `BadgeText` names the transport that will be used. It has
+the same reload gap issue #1481 fixed for the two header rows - a fresh mount
+loses the record just as before - tracked as issue #1505, since `method` has
+no row to mark.
 
-The third slot, `AutoMethod`, is not a fourth `AutoHeader` (issue #1228). A new
-request is a GET, and GraphQL over GET is a different transport - the document
-travels as query parameters and a mutation cannot be sent that way - so picking
-the GraphQL body mode on a request still holding that default used to build one
-the server answered with a bare `400`. The mode now sets `POST` the same
-reversible way it sets the `Content-Type` header above, and leaving the mode
-puts the method back - but what it owns is a scalar field on the request, not a
-row in an array, so `AutoMethod` is `{ requestId, method, previous }`: the value
-it wrote and the value it replaced, rather than a row id. `switchGraphQLMethod`
-in `panels/body/graphql-method.ts` is the rule that reads it, called from
-`BodyPanel.handleModeChange` beside `switchAutoHeader`. It keeps the same two
-guarantees stated as bullets above, read against a scalar instead of a row: a
-method the user has since chosen - the field's value no longer matching what
-this record wrote - is no longer ours to revert, and a record naming another
-request is dropped rather than applied. A GET still reaches GraphQL through the
-door this side effect does not touch - the user picks GET back, or an import
-wrote one - which is when the Query pane header's `BadgeText` names the
-transport that will be used.
-
-**Each slot holds one record per request, bounded by the open tabs** (issue
-#1269). One provider serves every request tab, and a slot holding a single
-record held whichever request entered the mode last: the request before it kept
-the `Content-Type` row, or the `POST`, that the app had added for it, with
-nothing left that knew it was the app's - the very bug the records exist to
-prevent, one request removed. So a slot is a map from request id to record
-(`context/auto-record-slot.ts`), keyed the way the record already named itself,
-and the accessors keep their argument-free shape: the provider knows which
-request is on screen, and a caller that had to pass the id could pass the wrong
-one. Resetting the records when the active request changes was the smaller
-alternative and is wrong in the same direction as the bug - it strands the first
-request's header at the moment of the switch rather than at the second request's
-mode change.
+**The method slot holds one record per request, bounded by the open tabs**
+(issue #1269). One provider serves every request tab, and a slot holding a
+single record held whichever request entered the mode last: the request before
+it kept the `POST` the app had set for it, with nothing left that knew it was
+the app's - the very bug the record exists to prevent, one request removed. So
+the slot is a map from request id to record (`context/auto-record-slot.ts`),
+keyed the way the record already named itself, and the accessors keep their
+argument-free shape: the provider knows which request is on screen, and a
+caller that had to pass the id could pass the wrong one. Resetting the record
+when the active request changes was the smaller alternative and is wrong in the
+same direction as the bug - it strands the first request's method at the moment
+of the switch rather than at the second request's mode change.
 
 What bounds the maps is the open tabs. A record can only ever be read by the
 builder it names, so once that builder has no tab it is unreachable, and a
@@ -2183,7 +2185,7 @@ all (a load test, a scenario) only ever keeps a key nothing wrote.
 
 **Which identity a builder files under is one value, resolved once** (issue
 #1272): `memoryKey ?? request.id ?? UNSAVED_AUTO_KEY`, read by every per-builder
-map the provider holds - the three slots above and the picker's row memory
+map the provider holds - the method slot above and the picker's row memory
 below. A request tab is its request and passes nothing. The editable copy
 History renders for a stored run passes the run id, because `design-run-seed.ts`
 gives that copy `id: null` on purpose - a null id is one of the two gates that

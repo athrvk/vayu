@@ -68,8 +68,7 @@ const STREAM_LABEL = "Event stream";
 const VERIFY_LABEL = "Verify TLS certificate";
 
 export default function SettingsPanel() {
-	const { request, setRequest, updateField, getAutoAccept, setAutoAccept } =
-		useRequestBuilderContext();
+	const { request, setRequest, updateField } = useRequestBuilderContext();
 	const followRedirects = request.followRedirects;
 
 	const handleProtocolChange = (value: string) => {
@@ -92,11 +91,9 @@ export default function SettingsPanel() {
 			ACCEPT_HEADER,
 			checked ? SSE_ACCEPT : null,
 			request.headers,
-			request.id,
-			getAutoAccept()
+			"stream"
 		);
 		setRequest({ stream: checked, headers: next.headers });
-		setAutoAccept(next.auto);
 	};
 
 	/** Keep the stored value inside the range the engine clamps to. */

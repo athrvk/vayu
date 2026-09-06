@@ -9,22 +9,35 @@
  */
 
 /**
- * One provider serves every request tab, so what the three reversible-setting
- * records are keyed by is a property of the provider, not of the rules that
- * read them (issue #1269).
+ * One provider serves every request tab, so what a reversible-setting record
+ * is keyed by is a property of the provider, not of the rule that reads it
+ * (issue #1269).
  *
- * The rules themselves are tested as logic - `utils/auto-header.test.ts`,
- * `panels/body/graphql-method.test.ts` - and cannot see this: each is handed a
- * record and answers for it. What could not be seen from there is that a second
- * request entering the same mode used to overwrite the first request's record,
- * leaving the first with a header row, or a method, the app had changed for it
- * and nothing left that knew it was the app's.
+ * That used to be three records: the body mode's `Content-Type` row, the
+ * Event stream toggle's `Accept` row, and the GraphQL mode's method. The first
+ * two now mark ownership on the row itself (`KeyValueEntry.source`, see
+ * `utils/auto-header.ts`) instead of in a provider-held ref - the ref could
+ * not survive a reload, so a stale auto-written row was then indistinguishable
+ * from one the user typed (issue #1481). There is nothing left for *this* file
+ * to say about them: a marked row cannot leak between requests because it is
+ * never held anywhere but the request's own headers, which
+ * `utils/auto-header.test.ts` and `content-type.test.tsx` already cover as
+ * pure logic.
  *
- * The panels are stood in for rather than driven, as in
+ * What is left here is the method record, which still needs one: `method` is a
+ * scalar field, not a `KeyValueEntry`, so it has nowhere to carry a marker of
+ * its own and stays on the provider's per-request map. Before issue #1269, a
+ * second request entering GraphQL overwrote the first request's record,
+ * leaving the first with a method the app had changed for it and nothing left
+ * that knew it was the app's - the failure mode this file guards.
+ *
+ * The panel is stood in for rather than driven, as in
  * `body-drafts-lifetime.test.tsx`: `BodyPanel` only writes when a Radix
  * `Select` commits, and a Select does not commit in jsdom. `applyModeChange`
- * and `applyStreamToggle` below make exactly the calls the panels make, in the
- * same order, through the real rules.
+ * below makes exactly the calls the panel makes, in the same order, through
+ * the real rules. The Event stream toggle's `Accept` row needs no such stand-in
+ * any more - it has no provider-held record left to exercise - so its own
+ * rule is tested directly in `utils/auto-header.test.ts`.
  *
  * A builder that is not a saved request has no id to be keyed by and declares
  * one instead (issue #1272) - the History run copy, which passes its run id.
@@ -44,7 +57,6 @@ import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
 import { switchContentType } from "../components/RequestTabs/panels/body/content-type";
 import { switchGraphQLMethod } from "../components/RequestTabs/panels/body/graphql-method";
-import { switchAutoHeader } from "../utils/auto-header";
 import { retainKeys } from "./retain-keys";
 import { useTabsStore, type Tab } from "@/stores";
 import type { BodyMode, HttpMethod, KeyValueItem } from "@/types";
@@ -115,33 +127,18 @@ interface Draft {
 	id: string | null;
 	headers: KeyValueItem[];
 	method: HttpMethod;
-	stream: boolean;
 }
 
-const fresh = (id: string | null): Draft => ({ id, headers: [], method: "GET", stream: false });
+const fresh = (id: string | null): Draft => ({ id, headers: [], method: "GET" });
 
 /** The two writes `BodyPanel.handleModeChange` makes, in its order. */
 function applyModeChange(draft: Draft, mode: BodyMode): Draft {
-	const contentType = switchContentType(mode, draft.headers, draft.id, ctx.getAutoContentType());
-	ctx.setAutoContentType(contentType.auto);
+	const contentType = switchContentType(mode, draft.headers);
 
 	const graphqlMethod = switchGraphQLMethod(mode, draft.method, draft.id, ctx.getAutoMethod());
 	ctx.setAutoMethod(graphqlMethod.auto);
 
 	return { ...draft, headers: contentType.headers, method: graphqlMethod.method };
-}
-
-/** The write `SettingsPanel.handleStreamChange` makes for the Event stream toggle. */
-function applyStreamToggle(draft: Draft, stream: boolean): Draft {
-	const next = switchAutoHeader(
-		"Accept",
-		stream ? "text/event-stream" : null,
-		draft.headers,
-		draft.id,
-		ctx.getAutoAccept()
-	);
-	ctx.setAutoAccept(next.auto);
-	return { ...draft, headers: next.headers, stream };
 }
 
 const headerNames = (draft: Draft) => draft.headers.map((row) => row.key);
@@ -159,7 +156,8 @@ describe("a record per request, not per setting", () => {
 		expect(a.method).toBe("POST");
 
 		// The user switches to request B and picks GraphQL there too. One provider
-		// serves both tabs, so B's records land in the same three slots.
+		// serves both tabs, so B's method record lands in the same slot - the
+		// Content-Type row has no such slot to collide in any more (issue #1481).
 		await act(async () => rerender(tree("req_b")));
 		const b = applyModeChange(fresh("req_b"), "graphql");
 		expect(headerNames(b)).toEqual(["Content-Type"]);
@@ -172,61 +170,43 @@ describe("a record per request, not per setting", () => {
 		expect(a.method).toBe("GET");
 	});
 
-	it("keeps the Event stream toggle's Accept row reversible on the request that armed it", async () => {
-		const { rerender } = render(tree("req_a"));
-
-		let a = applyStreamToggle(fresh("req_a"), true);
-		expect(headerNames(a)).toEqual(["Accept"]);
-
-		await act(async () => rerender(tree("req_b")));
-		applyStreamToggle(fresh("req_b"), true);
-
-		await act(async () => rerender(tree("req_a")));
-		a = applyStreamToggle(a, false);
-		expect(headerNames(a)).toEqual([]);
-	});
-
 	it("answers with nothing for a request that has entered no mode", async () => {
-		// Guards the two cases above: they would also pass if every request read
-		// one shared record back.
+		// Guards the case above: it would also pass if every request read one
+		// shared method record back.
 		const { rerender } = render(tree("req_a"));
 		applyModeChange(fresh("req_a"), "graphql");
 
 		await act(async () => rerender(tree("req_b")));
-		expect(ctx.getAutoContentType()).toBeNull();
 		expect(ctx.getAutoMethod()).toBeNull();
 	});
 });
 
-describe("what bounds the records", () => {
-	it("forgets a request's records when its tab closes", async () => {
+describe("what bounds the method record", () => {
+	it("forgets a request's method record when its tab closes", async () => {
 		const { rerender } = render(tree("req_a"));
 		applyModeChange(fresh("req_a"), "graphql");
-		applyStreamToggle(fresh("req_a"), true);
 
 		await act(async () => useTabsStore.getState().closeTab("tab_a"));
 
 		await act(async () => rerender(tree("req_a")));
-		expect(ctx.getAutoContentType()).toBeNull();
-		expect(ctx.getAutoAccept()).toBeNull();
 		expect(ctx.getAutoMethod()).toBeNull();
 	});
 
-	it("keeps the records of the tabs that are still open", async () => {
+	it("keeps the method record of the tabs that are still open", async () => {
 		const { rerender } = render(tree("req_a"));
-		const a = applyModeChange(fresh("req_a"), "graphql");
+		applyModeChange(fresh("req_a"), "graphql");
 
 		await act(async () => useTabsStore.getState().closeTab("tab_b"));
 
 		await act(async () => rerender(tree("req_a")));
-		expect(ctx.getAutoContentType()).toEqual({
+		expect(ctx.getAutoMethod()).toEqual({
 			requestId: "req_a",
-			rowId: a.headers[0].id,
-			value: "application/json",
+			method: "POST",
+			previous: "GET",
 		});
 	});
 
-	it("keeps the records of a builder that has no request id", async () => {
+	it("keeps the method record of a builder that has no request id", async () => {
 		// The History run copy is read-only-ish but still mounts the panels, and it
 		// names no tab - so the open-tab bound is not what can decide its records.
 		const { rerender } = render(tree(null));
@@ -235,7 +215,7 @@ describe("what bounds the records", () => {
 		await act(async () => useTabsStore.getState().closeTab("tab_a"));
 
 		await act(async () => rerender(tree(null)));
-		expect(ctx.getAutoContentType()).not.toBeNull();
+		expect(ctx.getAutoMethod()).not.toBeNull();
 	});
 });
 
@@ -289,26 +269,22 @@ describe("a builder that is not a saved request says which one it is", () => {
 		applyModeChange(fresh(null), "graphql");
 
 		await act(async () => rerender(runTree("run_b")));
-		expect(ctx.getAutoContentType()).toBeNull();
 		expect(ctx.getAutoMethod()).toBeNull();
 	});
 
-	it("forgets a run copy's records when its tab closes", async () => {
+	it("forgets a run copy's method record when its tab closes", async () => {
 		// A declared identity names a tab, so it joins the sweep rather than
 		// being exempt from it the way the id-less key has to be.
 		const { rerender } = render(runTree("run_a"));
 		applyModeChange(fresh(null), "graphql");
-		applyStreamToggle(fresh(null), true);
 
 		await act(async () => useTabsStore.getState().closeTab("tab_run_a"));
 
 		await act(async () => rerender(runTree("run_a")));
-		expect(ctx.getAutoContentType()).toBeNull();
-		expect(ctx.getAutoAccept()).toBeNull();
 		expect(ctx.getAutoMethod()).toBeNull();
 	});
 
-	it("keeps the records of the run tab that is still open", async () => {
+	it("keeps the method record of the run tab that is still open", async () => {
 		const { rerender } = render(runTree("run_a"));
 		applyModeChange(fresh(null), "graphql");
 

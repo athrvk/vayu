@@ -55,13 +55,6 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		setBodyDrafts: vi.fn(),
 		getVariablesDraft: () => null,
 		setVariablesDraft: vi.fn(),
-		// Likewise the Content-Type row a body mode added: the Body panel's record.
-		getAutoContentType: () => null,
-		setAutoContentType: vi.fn(),
-		// Likewise the Accept row the Event stream toggle added: the Settings
-		// panel's record (issue #574).
-		getAutoAccept: () => null,
-		setAutoAccept: vi.fn(),
 		getAutoMethod: () => null,
 		setAutoMethod: vi.fn(),
 		response: null,

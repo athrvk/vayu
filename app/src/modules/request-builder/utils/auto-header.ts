@@ -18,8 +18,12 @@
  * receive the primitive's fixes, and this one has three parts that are easy to
  * get subtly different:
  *
- * - **ownership by row id**, never by value. A header the *user* typed must
+ * - **ownership by marker, never by value.** A header the *user* typed must
  *   survive the setting changing, and it is indistinguishable by value.
+ *   Ownership used to live in a ref the provider held, keyed by row id and
+ *   value - which meant nothing survived a reload, and a stale auto-written
+ *   row was then indistinguishable from the user's own (issue #1481). The
+ *   `source` field on the row itself is the fact, stored where the row is.
  * - **never override a declaration**. A request that already declares the
  *   header - even with a *different* value - keeps what it has; silently
  *   replacing it would be a worse version of the bug this exists to fix.
@@ -28,12 +32,13 @@
  *   calls would compute the second against the headers it had before the first.
  *
  * A disabled row does not count as declaring the header - it is not sent, so
- * the request would go out without it.
+ * the request would go out without it. Editing a marked row's key or value by
+ * hand clears the marker (`KeyValueEditor`'s `handleUpdate`) - once retyped, it
+ * is the user's, and stays even if the new value happens to match.
  */
 
-import type { KeyValueEntry, KeyValueItem } from "@/types";
+import type { AutoHeaderSource, KeyValueEntry, KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
-import type { AutoHeader } from "../types";
 
 /** Case-insensitive header-name match, on the trimmed key. */
 const isNamed = (item: KeyValueEntry, name: string) =>
@@ -58,35 +63,27 @@ export function autoHeaderToAdd(
 	return headers.some((h) => isNamed(h, name) && h.enabled) ? null : required;
 }
 
-/**
- * Is this the row we wrote, unchanged?
- *
- * A row the user has since retyped - a different value, or a different header
- * name - is theirs now, and stays. Being switched off does not hand it over:
- * disabling our row is not the same as adopting it.
- */
-const isOurs = (item: KeyValueItem, name: string, auto: AutoHeader) =>
-	item.id === auto.rowId && isNamed(item, name) && item.value === auto.value;
+/** Is this the row the given setting owns? */
+const isOurs = (item: KeyValueEntry, name: string, source: AutoHeaderSource) =>
+	item.source === source && isNamed(item, name);
 
-/** The header list with the row this setting added taken back out. */
+/** The header list with the row this setting owns taken back out. */
 export function withoutAutoHeader(
 	headers: KeyValueItem[],
 	name: string,
-	auto: AutoHeader
+	source: AutoHeaderSource
 ): KeyValueItem[] {
-	return headers.filter((h) => !isOurs(h, name, auto));
+	return headers.filter((h) => !isOurs(h, name, source));
 }
 
 /** The header row to append, ready for `updateField("headers", …)`. */
-export function autoHeaderRow(name: string, value: string): KeyValueItem {
-	return { id: generateId(), key: name, value, enabled: true };
+export function autoHeaderRow(name: string, value: string, source: AutoHeaderSource): KeyValueItem {
+	return { id: generateId(), key: name, value, enabled: true, source };
 }
 
 export interface AutoHeaderSwitch {
 	/** Headers for the new setting. The same array when nothing changed. */
 	headers: KeyValueItem[];
-	/** The row this setting now owns, or null if it owns none. */
-	auto: AutoHeader | null;
 	/** The value just added, for a notice, or null if nothing was added. */
 	added: string | null;
 }
@@ -97,38 +94,24 @@ export interface AutoHeaderSwitch {
  * @param name     Header name this record owns a row for (`Content-Type`, `Accept`).
  * @param required The value the setting now needs, or null when it needs none.
  * @param headers  The request's current header rows.
- * @param requestId The request being edited *now*. A record belonging to
- *   another request is dropped rather than applied - the provider's ref
- *   outlives the request that filled it, and row ids are not unique across a
- *   duplicated request.
- * @param auto     The row this setting owned before the change.
+ * @param source   Which setting is asking - the marker it writes and reads.
  *
- * Switching between two settings that need the *same* header keeps the row (and
- * the record with it) rather than removing and re-adding it, which would churn
- * the Headers tab and lose the row's position.
+ * Switching between two settings that need the *same* header keeps the row
+ * rather than removing and re-adding it, which would churn the Headers tab and
+ * lose the row's position.
  */
 export function switchAutoHeader(
 	name: string,
 	required: string | null,
 	headers: KeyValueItem[],
-	requestId: string | null,
-	auto: AutoHeader | null
+	source: AutoHeaderSource
 ): AutoHeaderSwitch {
-	let next = headers;
-	let ours = auto?.requestId === requestId ? auto : null;
+	const owned = headers.find((h) => isOurs(h, name, source));
+	if (owned && owned.value === required) return { headers, added: null };
 
-	if (ours && required !== ours.value) {
-		next = withoutAutoHeader(next, name, ours);
-		ours = null;
-	}
-
+	const next = owned ? withoutAutoHeader(headers, name, source) : headers;
 	const toAdd = autoHeaderToAdd(name, required, next);
-	if (!toAdd) return { headers: next, auto: ours, added: null };
+	if (!toAdd) return { headers: next, added: null };
 
-	const row = autoHeaderRow(name, toAdd);
-	return {
-		headers: [...next, row],
-		auto: { requestId, rowId: row.id, value: toAdd },
-		added: toAdd,
-	};
+	return { headers: [...next, autoHeaderRow(name, toAdd, source)], added: toAdd };
 }

@@ -45,11 +45,22 @@ export type AuthMode =
  * `enabled: false` rows are preserved in storage and excluded only at HTTP-execution time.
  * Duplicates are allowed (useful for multiple `Accept` headers etc.).
  */
+/**
+ * A header row a *setting* wrote on its way in - the body mode's
+ * `Content-Type`, the Event stream toggle's `Accept` - so the setting can tell
+ * its own row apart from one the user typed, including across a reload (issue
+ * #1481). An in-memory record of "which row did I write" cannot survive that;
+ * the fact has to live with the row it describes.
+ */
+export type AutoHeaderSource = "body-mode" | "stream";
+
 export interface KeyValueEntry {
 	key: string;
 	value: string;
 	enabled: boolean;
 	description?: string;
+	/** Present only on a row an app setting wrote; absent on one the user typed. */
+	source?: AutoHeaderSource;
 }
 
 /**
