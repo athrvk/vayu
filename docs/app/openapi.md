@@ -527,7 +527,9 @@ Everything in it is something the collection actually holds:
   toggle itself is stated explicitly as `x-vayu-enabled`, since neither a value
   nor its absence says so on its own: a disabled row can carry a value and an
   enabled one can carry none. `Authorization` and `Content-Type` are left out,
-  the two an import also drops.
+  the two an import also drops. OpenAPI allows only one Parameter Object per
+  name and location, so two rows sharing both write only the first - the rest
+  are counted, never a second entry the specification forbids.
 - **No schema Vayu did not see.** A request or response body is described only
   where there is a body to read a shape off, and what is written is the shape of
   that one example - types, nothing more - carrying a `description` that says so.
@@ -552,7 +554,7 @@ sampled off a schema when the document was imported), the `$ref` responses and
 to express - a request body, a row the operation declares no parameter for, and
 a request whose method or path is no longer the operation it is stamped as.
 
-A free-form export states eight things of its own, because a collection holds
+A free-form export states nine things of its own, because a collection holds
 more than OpenAPI has names for: the auth it could not turn into a
 `securityScheme`, a request carrying a pre- or post-request script (OpenAPI has
 no operation-scoped hook for one), a collection variable besides `baseUrl` (a
@@ -560,8 +562,9 @@ document has nowhere else to declare one), a folder nested more than one level
 (flattened to a single tag), a body in a mode this direction has no media type
 for (GraphQL today), a form body's field values (only the names are declared),
 a request holding a non-default execution setting (redirects, TLS verification,
-HTTP version, streaming - OpenAPI describes an API, not how to send to it), and
-an example's header besides `Content-Type`.
+HTTP version, streaming - OpenAPI describes an API, not how to send to it), an
+example's header besides `Content-Type`, and a Params or Headers row sharing a
+key and location with one already declared (only the first is written).
 
 A large document takes a moment to put together, and the dialog says so without
 moving anything: on the first read it holds the summary's shape until the

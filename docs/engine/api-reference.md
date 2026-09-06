@@ -2251,7 +2251,8 @@ of the export, because its requests describe the very operations being patched.
     "bodiesDropped": 0,
     "formValuesDropped": 0,
     "settingsDropped": 0,
-    "exampleHeadersDropped": 0
+    "exampleHeadersDropped": 0,
+    "duplicateParameterRowsDropped": 0
   }
 }
 ```
@@ -2339,6 +2340,10 @@ this direction has no media type for - GraphQL today), `formValuesDropped` (a
 form body's field values, its names still declared), `settingsDropped` (a
 non-default redirect, TLS, HTTP-version or streaming setting), and
 `exampleHeadersDropped` (a stored example's header besides `Content-Type`).
+A Params or Headers row sharing a key and location with an earlier row would
+produce two Parameter Objects for the same name+location, which OpenAPI
+forbids - only the first is written and the rest are counted as
+`duplicateParameterRowsDropped`.
 
 **Errors:** `400` for a missing or empty `collectionId`, or a `format` other
 than `json`/`yaml`. `404` when the collection does not exist. `409` when the

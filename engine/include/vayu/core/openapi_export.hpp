@@ -349,6 +349,11 @@ struct ExportNotes {
     int settings_dropped = 0;
     /// Stored examples carrying a header besides `Content-Type` - not written.
     int example_headers_dropped = 0;
+    /// Params or Headers rows sharing a key and location with an earlier row -
+    /// OpenAPI allows only one Parameter Object per name+location, so only the
+    /// first is written and the rest are dropped rather than producing an
+    /// invalid document with two entries for the same name.
+    int duplicate_parameter_rows_dropped = 0;
 };
 
 /**

@@ -1890,6 +1890,8 @@ export interface ExportNotes {
 	settingsDropped: number;
 	/** Stored examples carrying a header besides `Content-Type`. */
 	exampleHeadersDropped: number;
+	/** Params or Headers rows sharing a key and location with an earlier row - only the first is written. */
+	duplicateParameterRowsDropped: number;
 }
 
 export interface SpecExportResponse {
