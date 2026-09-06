@@ -172,8 +172,11 @@ std::vector<std::string>& failure_messages) {
             }
             auto result = engine.execute (*replay.script, script_ctx);
 
-            if (result.success) {
-                // Check individual test results
+            // Tally every test the script actually ran before falling back to
+            // a script-level verdict - `result.tests` is populated whether or
+            // not the script went on to throw (issue #1502), so a mixed
+            // pass/fail script must not be collapsed to one opaque failure.
+            if (!result.tests.empty ()) {
                 for (const auto& test : result.tests) {
                     if (test.passed) {
                         totals.passed++;
@@ -182,10 +185,9 @@ std::vector<std::string>& failure_messages) {
                         record_failure (test.name + ": " + test.error_message);
                     }
                 }
-                if (result.tests.empty ()) {
-                    // Script ran but had no pm.test() calls - count as passed
-                    totals.passed++;
-                }
+            } else if (result.success) {
+                // Script ran but had no pm.test() calls - count as passed
+                totals.passed++;
             } else {
                 totals.failed++;
                 record_failure ("Script error: " + result.error_message);

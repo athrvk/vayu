@@ -757,6 +757,67 @@ TEST_F (ScenarioLoadTest, AFailingAssertionIsAttributedToItsOwnStep) {
     EXPECT_EQ (validation.run->passed, 2u);
 }
 
+// A script whose `pm.test` calls are a mix of passing and failing must not
+// collapse to one opaque failure (issue #1502): every test result is tallied
+// and every failure is named.
+TEST_F (ScenarioLoadTest, AMixedPassAndFailScriptReportsBothTalliesAndNamesTheFailure) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].post_script =
+    "pm.test('status is 200', function () { "
+    "pm.expect(pm.response.code).to.equal(200); });"
+    "pm.test('body has a unicorn', function () { "
+    "pm.expect(undefined).to.equal('yes'); });";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->passed, 1u)
+    << "the passing assertion was discarded once a sibling assertion failed";
+    EXPECT_EQ (first_step->failed, 1u);
+
+    const auto results = db_->get_results ("test-scenario-load");
+    ASSERT_FALSE (results.empty ());
+    const std::string& trace = results.back ().trace_data;
+    EXPECT_NE (trace.find ("body has a unicorn"), std::string::npos) << trace;
+    EXPECT_EQ (trace.find ("Script error: "), std::string::npos)
+    << "a named assertion failure was reported as an opaque script error: " << trace;
+}
+
+// A script that throws before ever calling `pm.test` has no tests to tally,
+// so it still takes the script-error path - but with the real thrown message,
+// never an empty one (issue #1502).
+TEST_F (ScenarioLoadTest, AThrowingScriptWithNoTestsNamesTheThrownMessage) {
+    ScenarioMockServer server;
+    auto execution                      = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].post_script = "throw new Error('boom');";
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "response_sample_rate", 1 } };
+    run (config, execution);
+
+    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->passed, 0u);
+    EXPECT_EQ (first_step->failed, 1u);
+
+    const auto results = db_->get_results ("test-scenario-load");
+    ASSERT_FALSE (results.empty ());
+    const std::string& trace = results.back ().trace_data;
+    EXPECT_NE (trace.find ("Script error: "), std::string::npos) << trace;
+    EXPECT_NE (trace.find ("boom"), std::string::npos)
+    << "the thrown message was dropped, leaving an empty \"Script error: \": " << trace;
+}
+
 // The replayed script reads the iteration it actually ran in and the data row
 // that iteration was bound to - a real index, not a reservoir position.
 TEST_F (ScenarioLoadTest, ADeferredStepScriptReadsItsIterationAndDataRow) {

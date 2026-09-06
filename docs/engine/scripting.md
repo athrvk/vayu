@@ -2360,7 +2360,13 @@ The **language** is current; what is missing is the **host environment**:
 - `samplesTested` in the report (`TestsSampled`) is the **size of that sample**,
   not the run's request count, and `sampling.responseSamplesDropped` beside it
   says how many responses the bound thinned away
-- Results are aggregated and reported in the final report
+- Results are aggregated and reported in the final report: `testsPassed` /
+  `testsFailed` tally every `pm.test` call across every sampled response, so a
+  script whose assertions are a mix of passing and failing reports both counts
+  and names each failing assertion (`name: message`) rather than collapsing
+  the sample to one opaque failure. Only a script that threw before any
+  `pm.test` ran reports a single script-level failure, carrying the thrown
+  message (issue #1502)
 - `pm.info` reports the same identity a Send does: `eventName` is `"test"`, and
   `requestId` / `requestName` are the run's linked request when it has one. It
   also reports `iteration` - the index the sampled submission claimed before it
