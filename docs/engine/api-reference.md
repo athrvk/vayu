@@ -7135,10 +7135,10 @@ a **404** in the shared error shape.
 
 ### PUT /runs/:runId/baseline
 
-Pin (or unpin) a run as a **baseline** - the known-good run later runs of the
-same request are compared against. `PUT` rather than `POST` per the
-[create vs update](#resource-writes-create-vs-update) split: the run already
-exists, and this updates it. There is no deprecated alias; the endpoint is new.
+Pin (or unpin) any run - design, load or scenario alike. `PUT` rather than
+`POST` per the [create vs update](#resource-writes-create-vs-update) split: the
+run already exists, and this updates it. There is no deprecated alias; the
+endpoint is new.
 
 Two things follow from a pin, and both are the point of it:
 
@@ -7147,6 +7147,14 @@ Two things follow from a pin, and both are the point of it:
   `maxRunsRetained` either - a pin the cap could expire is not a pin, and pins
   crowding the cap would evict the recent history the cap exists to keep.
 - **Clients can find it**: `GET /runs?baseline=true&requestId=<id>&limit=1`.
+
+The engine's own meaning of the flag stops there - it holds no opinion about
+*why* a run is kept. A client's vs-baseline comparison is a narrower, load-only
+reading of the same flag: only a load run has the percentiles and throughput a
+diff needs, so a comparison lists `type=load` alongside `baseline=true`
+(`GET /runs?baseline=true&type=load&requestId=<id>&limit=1`) rather than
+treating any pinned row as its baseline - otherwise a more-recently-pinned
+design or scenario run of the same request would shadow it.
 
 Several runs may be pinned at once (one per request is the expected use). The
 engine records the pin and holds no opinion about which baseline applies to

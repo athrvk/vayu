@@ -43,6 +43,7 @@ import {
 	useInvalidateRuns,
 	RunNotFoundError,
 	isRunNotFound,
+	useBaselineRunQuery,
 } from "./runs";
 import { queryKeys } from "./keys";
 import { ApiError } from "@/services";
@@ -133,6 +134,45 @@ describe("useLastDesignRunQuery", () => {
 	it("does not fetch when there is no request id", () => {
 		renderHook(() => useLastDesignRunQuery(null), { wrapper: wrapper(makeClient()) });
 		expect(listRuns).not.toHaveBeenCalled();
+	});
+});
+
+describe("useBaselineRunQuery", () => {
+	/**
+	 * #1509: a design or scenario run can be pinned too, but only a load run
+	 * has the percentiles and throughput a baseline comparison diffs. Without
+	 * `type: "load"` a more-recently-pinned non-load run of the same request
+	 * would shadow the load baseline this resolves - mutation check: drop the
+	 * `type: "load"` filter from either branch below and these red.
+	 */
+	it("scopes the requestId lookup to load runs", async () => {
+		listRuns.mockResolvedValue(page([runRow("run_load")]));
+
+		const { result } = renderHook(() => useBaselineRunQuery({ requestId: "req_1" }), {
+			wrapper: wrapper(makeClient()),
+		});
+
+		await waitFor(() => expect(result.current.data?.id).toBe("run_load"));
+		expect(listRuns).toHaveBeenCalledWith({
+			baseline: true,
+			type: "load",
+			requestId: "req_1",
+			limit: 1,
+		});
+	});
+
+	it("scopes the unsaved-request url/method fallback to load runs", async () => {
+		listRuns.mockResolvedValue(page([]));
+
+		renderHook(
+			() => useBaselineRunQuery({ url: "https://api.example.com/users", method: "GET" }),
+			{ wrapper: wrapper(makeClient()) }
+		);
+
+		await waitFor(() => expect(listRuns).toHaveBeenCalledTimes(1));
+		expect(listRuns).toHaveBeenCalledWith(
+			expect.objectContaining({ baseline: true, type: "load" })
+		);
 	});
 });
 

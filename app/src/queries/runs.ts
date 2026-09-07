@@ -465,14 +465,19 @@ function baselineCacheKey(target: BaselineTarget): string | null {
 }
 
 /**
- * The run pinned as baseline for the same request as @p target, or `null` when
- * nothing is pinned.
+ * The load run pinned as baseline for the same request as @p target, or
+ * `null` when nothing is pinned.
  *
  * `GET /runs?baseline=true` is ordered newest-first, so "the baseline" is the
  * first row - the engine allows several pins (one per request is the expected
  * use) and deliberately holds no opinion about which applies where, so choosing
  * is the client's job and this is the one place the renderer does it. The MCP
  * `compare_runs` tool resolves it the same way, against the same endpoint.
+ *
+ * `type: "load"` because a pin is not load-specific (#1509) - a design or
+ * scenario run of the same request can be pinned too - but this comparison
+ * is: only a load run has the percentiles and throughput it diffs, so a
+ * more-recently-pinned non-load run must never shadow the load baseline.
  *
  * `null` and "still loading" are different answers and stay different: the
  * caller renders nothing until this settles, rather than flashing a
@@ -488,6 +493,7 @@ export function useBaselineRunQuery(target: BaselineTarget | null) {
 			if (target?.requestId) {
 				const page = await apiService.listRuns({
 					baseline: true,
+					type: "load",
 					requestId: target.requestId,
 					limit: 1,
 				});
@@ -498,6 +504,7 @@ export function useBaselineRunQuery(target: BaselineTarget | null) {
 			// not mistaken for it.
 			const page = await apiService.listRuns({
 				baseline: true,
+				type: "load",
 				q: target!.url!,
 				limit: BASELINE_SCAN_LIMIT,
 			});

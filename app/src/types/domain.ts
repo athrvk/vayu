@@ -1364,9 +1364,13 @@ export interface Run {
 	 */
 	resultSummary?: RunResultSummary;
 	/**
-	 * Whether this run is pinned as a baseline - the known-good run later runs
-	 * of the same request are measured against, and the one run the engine's
-	 * retention never expires. Toggled through `PUT /runs/:id/baseline`.
+	 * Whether this run is pinned - kept past the engine's retention and
+	 * findable through `GET /runs?baseline=true`. Toggled through
+	 * `PUT /runs/:id/baseline`, and any run type can carry it: a design run is
+	 * pinned to keep a known-good response, not to be compared. Only a load
+	 * run's pin is also read as *the* baseline the vs-baseline comparison
+	 * diffs (`useBaselineRunQuery`, `listBaselineRuns`) - it is the only type
+	 * with percentiles and throughput to diff.
 	 *
 	 * Optional because a run row from an engine older than this field has none;
 	 * absent reads the same as `false` everywhere.
