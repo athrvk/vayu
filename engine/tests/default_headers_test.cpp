@@ -34,6 +34,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/diagnostics.hpp"
 
 namespace vayu::http::routes {
 // Declared in config.cpp, the body of GET /request-defaults.
@@ -205,11 +206,27 @@ TEST (DefaultHeadersTest, AdvertisesOnlyWhatThisLibcurlCanDecode) {
 // The rows a pre-#1229 client saved into a request
 // ---------------------------------------------------------------------------
 
+// A release build's `-O3` inlines nlohmann's `value ()` deep enough that GCC
+// loses track of the `basic_json` these tests just parsed and reports a null
+// dereference inside nlohmann's own internals - the traced-into-a-library
+// family `VAYU_IGNORE_FALSE_NULL_DEREFERENCE` exists for (see
+// utils/diagnostics.hpp), not a real path through this file. Read every row's
+// `enabled` / `source` through these two, so the suppression lives in one
+// place rather than at every call site below.
+VAYU_IGNORE_FALSE_NULL_DEREFERENCE
+bool row_enabled (const nlohmann::json& row) {
+    return row.value ("enabled", true);
+}
+std::string row_source (const nlohmann::json& row) {
+    return row.value ("source", std::string ());
+}
+VAYU_DIAGNOSTIC_POP
+
 // A row the pass matched should be present, disabled, and marked - never
 // absent. Written once so every case below states only what it adds.
 void expect_disabled_and_marked (const nlohmann::json& row) {
-    EXPECT_FALSE (row.value ("enabled", true)) << row.dump ();
-    EXPECT_EQ (row.value ("source", std::string ()), "legacy-default") << row.dump ();
+    EXPECT_FALSE (row_enabled (row)) << row.dump ();
+    EXPECT_EQ (row_source (row), "legacy-default") << row.dump ();
 }
 
 TEST (DefaultHeadersTest, DisablesAndMarksTheRowsTheRendererUsedToSaveRatherThanDeletingThem) {
@@ -231,8 +248,7 @@ TEST (DefaultHeadersTest, DisablesAndMarksTheRowsTheRendererUsedToSaveRatherThan
     expect_disabled_and_marked (rows[0]);
     expect_disabled_and_marked (rows[1]);
     expect_disabled_and_marked (rows[2]);
-    EXPECT_TRUE (rows[3].value ("enabled", true))
-    << "the user's own row is untouched";
+    EXPECT_TRUE (row_enabled (rows[3])) << "the user's own row is untouched";
     EXPECT_FALSE (rows[3].contains ("source"));
 }
 
@@ -518,11 +534,11 @@ TEST_F (DefaultHeaderConfigTest, StartupDisablesTheStoredRowsAndLeavesTheUsersAl
     ASSERT_HAS_VALUE (disabled);
     const auto rows = nlohmann::json::parse (disabled->headers);
     ASSERT_EQ (rows.size (), 3U) << "rows are disabled, not removed";
-    EXPECT_FALSE (rows[0].value ("enabled", true));
-    EXPECT_EQ (rows[0].value ("source", std::string ()), "legacy-default");
-    EXPECT_FALSE (rows[1].value ("enabled", true));
-    EXPECT_EQ (rows[1].value ("source", std::string ()), "legacy-default");
-    EXPECT_TRUE (rows[2].value ("enabled", true)) << "X-Team is the user's own";
+    EXPECT_FALSE (row_enabled (rows[0]));
+    EXPECT_EQ (row_source (rows[0]), "legacy-default");
+    EXPECT_FALSE (row_enabled (rows[1]));
+    EXPECT_EQ (row_source (rows[1]), "legacy-default");
+    EXPECT_TRUE (row_enabled (rows[2])) << "X-Team is the user's own";
     EXPECT_FALSE (rows[2].contains ("source"));
 
     auto kept = db_->get_request ("req_untouched");
@@ -560,8 +576,8 @@ TEST_F (DefaultHeaderConfigTest, StartupLeavesATrashedRequestByteIdenticalUntilI
     const auto rows = nlohmann::json::parse (after_restore->headers);
     ASSERT_EQ (rows.size (), 1U)
     << "still disabled in place, not removed, on restore";
-    EXPECT_FALSE (rows[0].value ("enabled", true));
-    EXPECT_EQ (rows[0].value ("source", std::string ()), "legacy-default");
+    EXPECT_FALSE (row_enabled (rows[0]));
+    EXPECT_EQ (row_source (rows[0]), "legacy-default");
 }
 
 // A repair that runs once is a migration and gets a migration's bookkeeping
