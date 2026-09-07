@@ -415,17 +415,16 @@ struct RunContext {
 
     /**
      * A *single-request* load run's unresolved `{{token}}` names (issue #1540),
-     * scanned once off the built request before @ref load_template is derived
-     * from it - the token-free fast path (`submit_one_request`,
-     * `load_strategy.cpp`) never copies the request per submission, so this is
-     * how it still reports what every submission sent unresolved without
-     * re-scanning.
+     * scanned once off the built request beside @ref load_template - the
+     * token-free fast path (`submit_one_request`, `load_strategy.cpp`) never
+     * copies the request per submission, so this is how it still reports what
+     * every submission sent unresolved without re-scanning.
      *
      * **Empty for every run whose request resolved cleanly**, the same
      * structural guard @ref load_template is. Written once by `build_load_request`
      * before the first submission, read on the run's worker thread afterwards.
      */
-    std::vector<std::string> template_unresolved_tokens;
+    std::vector<std::string> load_unresolved_tokens;
 
     /**
      * How a *single-request* load run's credentials resolve (issue #1055) - the

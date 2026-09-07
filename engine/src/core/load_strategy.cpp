@@ -413,9 +413,8 @@ SubmissionRequest& live) {
     // template, and skipping the bind here would send it unauthenticated.
     if (data == nullptr && context->load_template.empty () &&
     context->load_auth.credentials.empty ()) {
-        if (!context->template_unresolved_tokens.empty ()) {
-            context->metrics_collector->record_unresolved_token (
-            context->template_unresolved_tokens);
+        if (!context->load_unresolved_tokens.empty ()) {
+            context->metrics_collector->record_unresolved_token (context->load_unresolved_tokens);
         }
         submit_to_loop (context, db, live.current (), annotations);
         return;
@@ -444,7 +443,7 @@ SubmissionRequest& live) {
     // (issue #1503): a single-request load run runs no residual pass either,
     // so the mistake is only counted, never refused. The token-free fast
     // path above never copies `request` at all (issue #992) and is not
-    // scanned here for that reason - it records `context->template_unresolved_tokens`,
+    // scanned here for that reason - it records `context->load_unresolved_tokens`,
     // scanned once by `start_run` before this loop began (issue #1540).
     if (auto names = vayu::http::routes::unresolved_token_names (request);
     !names.empty ()) {

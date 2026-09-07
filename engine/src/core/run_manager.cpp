@@ -1264,8 +1264,7 @@ vayu::Request& request) {
     // in `submit_one_request` never copies the request to scan it itself. The
     // scan is one-time because the fast path's bytes never change between
     // submissions.
-    context->template_unresolved_tokens =
-    vayu::http::routes::unresolved_token_names (request);
+    context->load_unresolved_tokens = vayu::http::routes::unresolved_token_names (request);
 
     // A streaming run's caps ride on the request itself, because the
     // event loop is what enforces them and the request is all it sees.
