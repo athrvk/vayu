@@ -43,6 +43,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/core/elements.hpp"
@@ -122,6 +123,24 @@ struct ScenarioStep {
 struct ScenarioPlan {
     std::vector<ScenarioStep> steps;
 };
+
+/**
+ * The first and last plan position every scope-spanning element's `id`
+ * occupies (issue #1515), for `control.loop` and `control.transaction`: both
+ * compile once per member of the folder they are inherited into, and each
+ * member's own instance has to recognise its folder's boundary independently
+ * rather than being told it.
+ *
+ * A folder's whole subtree is a contiguous run of plan positions
+ * (`resolve_scenario`'s depth-first, subtree-before-own-requests walk), so
+ * one pass over `plan.steps` recording each such element id's minimum and
+ * maximum position is the whole answer - no separate folder identity is
+ * read or needed. Empty for a plan that resolved no `needs_span` kind, which
+ * is what leaves `ElementContext::element_spans` null for every run that
+ * carries none.
+ */
+[[nodiscard]] std::unordered_map<std::string, vayu::core::ElementSpan>
+compute_element_spans (const ScenarioPlan& plan);
 
 /**
  * Whether @p step carries a `script.pre` / `script.post` element (issue

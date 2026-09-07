@@ -32,6 +32,12 @@ ElementKind make_assert_contains_kind ();
 ElementKind make_assert_duration_kind ();
 ElementKind make_assert_size_kind ();
 ElementKind make_timer_think_kind ();
+ElementKind make_control_if_kind ();
+ElementKind make_control_once_kind ();
+ElementKind make_control_switch_kind ();
+ElementKind make_control_throughput_kind ();
+ElementKind make_control_loop_kind ();
+ElementKind make_control_transaction_kind ();
 
 namespace {
 
@@ -135,6 +141,12 @@ Registry& Registry::instance () {
         registry.register_kind (make_assert_duration_kind ());
         registry.register_kind (make_assert_size_kind ());
         registry.register_kind (make_timer_think_kind ());
+        registry.register_kind (make_control_if_kind ());
+        registry.register_kind (make_control_once_kind ());
+        registry.register_kind (make_control_switch_kind ());
+        registry.register_kind (make_control_throughput_kind ());
+        registry.register_kind (make_control_loop_kind ());
+        registry.register_kind (make_control_transaction_kind ());
         return true;
     }();
     (void)registered;

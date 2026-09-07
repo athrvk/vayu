@@ -336,6 +336,11 @@ struct ScenarioSummaryInputs {
      * there - and the payload says which rather than leaving it to the mode.
      */
     SampledValidationTotals validation;
+    /// `control.transaction`'s own percentiles (issue #1515), already in
+    /// the report's shape (`TransactionHistograms::build`). Empty for a run
+    /// that declared no transaction, which leaves the section out of the
+    /// summary entirely - the same convention `coverage` follows.
+    nlohmann::json transactions = nlohmann::json::array ();
     /// Whether this run asked a schema failure to fail its step. Recorded
     /// beside the tally because the same counts mean two different things
     /// depending on it: with the flag off, `failed` steps and schema failures

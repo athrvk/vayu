@@ -64,6 +64,25 @@ bool is_scenario_load_run (const nlohmann::json& config) {
     !mode->get<std::string> ().empty ();
 }
 
+std::optional<std::string> find_load_incompatible_controller (const ScenarioPlan& plan) {
+    const auto& registry = Registry::instance ();
+    for (const auto& step : plan.steps) {
+        if (!step.elements) {
+            continue;
+        }
+        for (const auto& element : *step.elements) {
+            // Read through the registry's own `jumps_or_repeats`, never a
+            // `kind ==` comparison outside `core/elements` (#1512's
+            // extensibility contract, rule 1).
+            const auto* kind = registry.find (element.kind);
+            if (kind != nullptr && kind->jumps_or_repeats) {
+                return element.kind;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string> validate_scenario_load_config (const nlohmann::json& config) {
     const std::string mode = config.value ("mode", std::string{});
     const auto type        = parse_load_test_type (mode);
@@ -336,17 +355,24 @@ const ScenarioPlan& plan) {
     const size_t completed = state.iterations_completed.load (std::memory_order_relaxed);
     const size_t executed = state.steps_executed.load (std::memory_order_relaxed);
     const size_t errored = state.steps_errored.load (std::memory_order_relaxed);
-    return { // The keys `apply_run_summary` already reads for a scenario run, so
-        // one report shape covers both executors.
+    const size_t skipped = state.steps_skipped.load (std::memory_order_relaxed);
+    nlohmann::json summary = { // The keys `apply_run_summary` already reads for a
+        // scenario run, so one report shape covers both executors.
         { "iterations", state.iterations_started },
         { "iterations_completed", completed }, { "steps_executed", executed },
         { "passed", executed > errored ? executed - errored : 0 },
-        { "failed", size_t{ 0 } }, { "skipped", size_t{ 0 } }, { "errored", errored },
+        { "failed", size_t{ 0 } }, { "skipped", skipped }, { "errored", errored },
         // This mode's own.
         { "virtual_users", state.virtual_users },
         { "iterations_abandoned", state.iterations_abandoned.load (std::memory_order_relaxed) },
         { "steps", build_step_breakdown (plan, state.steps, state.element_tallies) }
     };
+    // `control.transaction`'s own percentiles (issue #1515), absent for a
+    // run that declared none.
+    if (auto transactions = state.transactions.build (); !transactions.empty ()) {
+        summary["transactions"] = std::move (transactions);
+    }
+    return summary;
 }
 
 nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state) {
@@ -406,18 +432,23 @@ size_t vu_index) {
     ctx.vu        = vu_index;
 }
 
+/// `run_step_before`'s answer: elapsed pipeline time on `includeScriptTime`'s
+/// terms, and whether a controller kind (`control.if` / `control.once` /
+/// `control.throughput`, issue #1515) asked to skip this occurrence - the
+/// load path's own `pm.execution.skipRequest()`, which nothing before #1515
+/// could ask for here.
+struct StepBeforeResult {
+    int64_t elapsed_ms = 0;
+    bool skip          = false;
+};
+
 /**
  * Runs this step's `step.before` elements - the residual-token pass is the
  * caller's, since it is not gated on whether the step carries any elements at
  * all - for one VU's submission, mutating @p request with whatever an inline
  * `extract.*` or `script.pre` wrote and tallying every outcome.
- *
- * @return elapsed milliseconds spent in the pipeline, or 0 when the run does
- *         not ask to fold that time back into the recorded latency
- *         (`elements.includeScriptTime`) - the ordinary case, where this is
- *         one branch and a clock read cheaper than paid.
  */
-int64_t run_step_before (const std::shared_ptr<RunContext>& context,
+StepBeforeResult run_step_before (const std::shared_ptr<RunContext>& context,
 ScenarioLoadState& state,
 VirtualUser& vu,
 const ScenarioStep& step,
@@ -426,7 +457,7 @@ size_t iteration,
 size_t vu_index,
 vayu::Request& request) {
     if (!step.elements || step.elements->empty ()) {
-        return 0;
+        return {};
     }
     const auto start = context->include_script_time ?
     std::optional (std::chrono::steady_clock::now ()) :
@@ -459,6 +490,16 @@ vayu::Request& request) {
         [&] (std::string_view scope, const std::string& name,
         const std::string& value) { vu.scope_overlay.set (scope, name, value); },
         .should_stop = nullptr,
+        .resolve_template =
+        [&] (const std::string& text) {
+            vayu::http::VariableValues vars = state.base_vars;
+            vu.scope_overlay.apply_onto (vars);
+            return vayu::http::resolve_template (text, vars);
+        },
+        .iteration        = iteration,
+        .step_position    = step_index,
+        .element_spans    = &state.element_spans,
+        .controller_state = &vu.controller_state,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore, ctx,
@@ -468,6 +509,9 @@ vayu::Request& request) {
     for (const auto& outcome : outcomes) {
         state.element_tallies.record (step_index, outcome.id, outcome.status);
     }
+    // A controller kind's skip (issue #1515) - the load path's own
+    // `pm.execution.skipRequest()`.
+    const bool skip = pre_result.control.kind == vayu::ScriptControl::Kind::Skip;
     // `pre_result.tests` is populated only when `script.pre` actually ran
     // above (a deferred one never invokes `run_pre_script`, so it stays
     // empty) - the inline half of issue #1497's assertion tally.
@@ -480,11 +524,14 @@ vayu::Request& request) {
     }
 
     if (!start) {
-        return 0;
+        return StepBeforeResult{ 0, skip };
     }
-    return std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now () - *start)
-    .count ();
+    return StepBeforeResult{
+        std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::steady_clock::now () - *start)
+        .count (),
+        skip,
+    };
 }
 
 /**
@@ -540,6 +587,16 @@ const vayu::Response& response) {
         [&] (std::string_view scope, const std::string& name,
         const std::string& value) { vu.scope_overlay.set (scope, name, value); },
         .should_stop = nullptr,
+        .resolve_template =
+        [&] (const std::string& text) {
+            vayu::http::VariableValues vars = state.base_vars;
+            vu.scope_overlay.apply_onto (vars);
+            return vayu::http::resolve_template (text, vars);
+        },
+        .iteration        = vu.iteration,
+        .step_position    = step_index,
+        .element_spans    = &state.element_spans,
+        .controller_state = &vu.controller_state,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx, *step.elements,
@@ -548,6 +605,15 @@ const vayu::Response& response) {
     });
     for (const auto& outcome : outcomes) {
         state.element_tallies.record (step_index, outcome.id, outcome.status);
+    }
+    // A `control.transaction` closing occurrence (issue #1515) - see
+    // `scenario_runner.cpp`'s identical fold for why `waited_ms` alone
+    // tells a close from an accumulating pass.
+    for (const auto& outcome : outcomes) {
+        if (outcome.waited_ms && outcome.message) {
+            state.transactions.record (
+            *outcome.message, *outcome.waited_ms, outcome.status == "failed");
+        }
     }
     // Same rule as `run_step_before`: empty unless `script.post` ran inline.
     for (const auto& test : post_result.tests) {
@@ -647,8 +713,22 @@ class ScenarioLoadDriver {
         // name still unanswered, or a header-name collision the attempt
         // itself produced, is exactly as survivable as one composition alone
         // left behind.
-        const int64_t pipeline_before_ms = run_step_before (
+        const StepBeforeResult before_result = run_step_before (
         context_, *state_, *vu, step, step_index, iteration, vu_index, request);
+        if (before_result.skip) {
+            // `control.if` / `control.once` / `control.throughput` asked to
+            // skip this occurrence (issue #1515) - nothing goes out, on the
+            // same "never blocks a worker thread" terms every other
+            // controller decision here holds to. The VU still advances
+            // exactly as a sent step would; there is simply no `Result` to
+            // store and no coverage to record, matching a design send's own
+            // skip (`execute_exchange`'s `outcome.sent = false` branch).
+            state_->steps_skipped.fetch_add (1, std::memory_order_relaxed);
+            finish_step (state_, execution_.plan.steps.size (), vu, step_index,
+            /*errored=*/false, nullptr);
+            return;
+        }
+        const int64_t pipeline_before_ms = before_result.elapsed_ms;
         {
             vayu::http::VariableValues vars = state_->base_vars;
             vu->scope_overlay.apply_onto (vars);

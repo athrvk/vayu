@@ -80,13 +80,19 @@ are things Vayu plans to catch up on:
   test from many machines. Vayu runs from one.
 - **You have existing `.jmx` test plans**, or a team fluent in them. There is no
   importer for them here.
-- **Your load model is elaborate** - think time and pacing timers, logic
-  controllers (loops, conditionals, transactions). Vayu runs closed-loop
-  constant concurrency and a linear scenario. Correlation across a scenario's
-  steps - a login's token reaching the next step's header, per virtual user -
-  does work under load now: mark the extracting element or script `inline`
-  (or set the run's `elements.scripts` override), or let it stay in the
-  post-run replay by default.
+- **Your load model needs think time or pacing timers.** Vayu has neither yet
+  (#1498). Vayu runs closed-loop constant concurrency and a linear scenario.
+  Logic controllers - conditionals, once-only, throughput, loops and named
+  transactions - are elements (`control.if` / `.once` / `.switch` /
+  `.throughput` / `.loop` / `.transaction`) that run fully in a sequential
+  collection run; under load, `control.if`, `.once`, `.throughput` and
+  `.transaction` run too, but `.switch` and `.loop` need a load run's virtual
+  users to jump, which they cannot do yet (#1569) - a load run carrying
+  either is refused rather than silently run once through. Correlation
+  across a scenario's steps - a login's token reaching the next step's
+  header, per virtual user - does work under load now: mark the extracting
+  element or script `inline` (or set the run's `elements.scripts` override),
+  or let it stay in the post-run replay by default.
 - **It has to be JVM-native** for your infrastructure, monitoring, or compliance
   reasons.
 

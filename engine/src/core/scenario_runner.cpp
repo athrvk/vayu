@@ -13,10 +13,12 @@
 #include <deque>
 #include <optional>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/transaction_histograms.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/status.hpp"
@@ -448,6 +450,12 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
         { "failed", inputs.failed }, { "skipped", inputs.skipped },
         { "errored", inputs.errored }, { "steps_stored", inputs.steps_stored },
         { "steps_dropped", inputs.steps_dropped } };
+    // `control.transaction`'s own percentiles (issue #1515) - absent for a
+    // run that declared none, matching `coverage`'s own absent-when-inactive
+    // rule above.
+    if (!inputs.transactions.empty ()) {
+        summary["scenario"]["transactions"] = inputs.transactions;
+    }
     // Its own top-level section rather than a member of `scenario`: coverage is
     // about the contract, not about the sequence, and the report route surfaces
     // it beside `thresholdValidation` for the same reason. Absent - never an
@@ -499,6 +507,17 @@ struct StepContext {
     size_t max_trace_body_bytes = 0;
     /// `maxDesignResponseBodyBytes`, read once for the run (issue #1157).
     size_t max_response_bytes = 0;
+    /// The plan-wide first/last position of every scope-spanning element
+    /// (issue #1515's `control.loop` / `control.transaction`), computed
+    /// once before the run's first iteration.
+    const std::unordered_map<std::string, vayu::core::ElementSpan>& element_spans;
+    /// Every controller kind's own state (issue #1515's `control.once`,
+    /// `control.throughput`, `control.transaction`) - one map for the
+    /// run's whole life, since a sequential run is #1512's single implicit
+    /// user. A reference member, not a value: every iteration's
+    /// `StepContext` shares the one map a controller must keep counting
+    /// into across iterations, not a fresh one each time.
+    std::unordered_map<std::string, int64_t>& controller_state;
 };
 
 /**
@@ -524,11 +543,14 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     // A copy, not a move: the pre-request script writes back into
     // this request, and the next iteration must start from the
     // composed one rather than from whatever the last pass left.
-    inputs.request      = step.request;
-    inputs.elements     = step.elements;
-    inputs.request_id   = step.request_id;
-    inputs.request_name = step.name;
-    inputs.iteration    = ctx.iteration;
+    inputs.request          = step.request;
+    inputs.elements         = step.elements;
+    inputs.request_id       = step.request_id;
+    inputs.request_name     = step.name;
+    inputs.iteration        = ctx.iteration;
+    inputs.step_position    = step.index;
+    inputs.element_spans    = &ctx.element_spans;
+    inputs.controller_state = &ctx.controller_state;
     // One user walking the sequence, which is what a collection run in design
     // mode is - the same number `{{$vu}}` binds into its requests (issue #994).
     inputs.vu                 = SOLE_VIRTUAL_USER;
@@ -826,7 +848,8 @@ const ScenarioStepIndex& step_index,
 size_t max_steps_per_iteration,
 CoverageTally& coverage,
 ScenarioSummaryInputs& summary,
-ScenarioStepStore& store) {
+ScenarioStepStore& store,
+TransactionHistograms& transactions) {
     size_t position             = 0;
     size_t steps_this_iteration = 0;
     std::deque<std::string> recent_steps;
@@ -854,6 +877,17 @@ ScenarioStepStore& store) {
         StepRecord record =
         record_step (step_ctx, step, exchange, data_bind_error, summary);
 
+        // A `control.transaction` closing occurrence (issue #1515) carries
+        // its transaction's whole elapsed time in `waitedMs` and its
+        // declared name in `message` - every accumulating occurrence
+        // leaves `waitedMs` unset, which is what tells the two apart.
+        for (const auto& outcome : record.elements) {
+            if (outcome.waited_ms && outcome.message) {
+                transactions.record (*outcome.message, *outcome.waited_ms,
+                outcome.status == "failed");
+            }
+        }
+
         // `step.between` (issue #1514): `timer.think` and anything else
         // phased here run after this step's own outcome is decided - so a
         // wait never counts against the step's own latency - and before flow
@@ -862,7 +896,13 @@ ScenarioStepStore& store) {
         // could not bind (no exchange ran) or that already errored.
         if (data_bind_error.empty () &&
         record.outcome != StepOutcome::Errored && step.elements) {
-            vayu::ScriptResult unread_pre;
+            // `between_control` is read below, not discarded: `control.loop`
+            // (issue #1515) is the one `step.between` kind that can decide
+            // where the iteration goes next, and it says so exactly as a
+            // script's own `pm.execution.setNextRequest` would - through
+            // `ScriptControl`, chronologically the latest decision of the
+            // step and so the one "last call wins" already gives priority to.
+            vayu::ScriptResult between_control;
             vayu::ScriptResult unread_post;
             vayu::core::ElementContext between_ctx{
                 .request  = exchange.request,
@@ -871,14 +911,21 @@ ScenarioStepStore& store) {
                 [] (const std::string&) { return vayu::ScriptResult{}; },
                 .run_post_script =
                 [] (const std::string&) { return vayu::ScriptResult{}; },
-                .pre_script_result  = unread_pre,
+                .pre_script_result  = between_control,
                 .post_script_result = unread_post,
                 .set_variable       = [] (std::string_view, const std::string&,
                                 const std::string&) {},
                 .should_stop = [&] { return base.context->should_stop.load (); },
+                .iteration        = base.iteration,
+                .step_position    = step.index,
+                .element_spans    = &base.element_spans,
+                .controller_state = &base.controller_state,
             };
             vayu::core::ElementPipeline::run (vayu::core::Phase::StepBetween,
             between_ctx, *step.elements, record.elements);
+            if (between_control.control.kind != vayu::ScriptControl::Kind::None) {
+                exchange.post_script_result.control = between_control.control;
+            }
         }
 
         bool end_iteration = record.outcome == StepOutcome::Errored;
@@ -1013,6 +1060,17 @@ RunManager& manager) {
         // ordinary case and keeps `pm.iterationData` undefined throughout.
         const auto& data_rows = execution->data_rows;
 
+        // `control.loop` / `control.transaction`'s own supports (issue
+        // #1515): the plan-wide span every scope-spanning kind reads to
+        // recognise its folder's first or last member, one controller-state
+        // map for the run's whole life (#1512's single implicit user, so
+        // never cleared between iterations - `control.once` must survive
+        // every one of them), and one histogram per declared transaction
+        // name, allocated up front so recording it takes no lock.
+        const auto element_spans = compute_element_spans (plan);
+        std::unordered_map<std::string, int64_t> controller_state;
+        TransactionHistograms transactions (plan);
+
         // The run's resolved size, ahead of the first step and once (issue
         // #1398). This run publishes no `metrics` ticks to carry it the way a
         // load run carries `requestsExpected`, so the frame is where the
@@ -1038,12 +1096,13 @@ RunManager& manager) {
             // it: a script may send it backwards, forwards or out early, so the
             // position is a variable and the loop is bounded by the budget
             // above rather than by the plan's length.
-            const StepContext step_ctx{ context, execution, schema_index,
-                transport, default_headers, cookie_scope, data_rows,
-                data_row_index, iteration, asked.iterations,
-                fail_on_schema_error, max_trace_body_bytes, max_response_bytes };
-            run_iteration (script_engine, cookie_jar, cookie_scope, scopes, step_ctx,
-            plan, step_index, max_steps_per_iteration, coverage, summary, store);
+            const StepContext step_ctx{ context, execution, schema_index, transport,
+                default_headers, cookie_scope, data_rows, data_row_index, iteration,
+                asked.iterations, fail_on_schema_error, max_trace_body_bytes,
+                max_response_bytes, element_spans, controller_state };
+            run_iteration (script_engine, cookie_jar, cookie_scope, scopes,
+            step_ctx, plan, step_index, max_steps_per_iteration, coverage,
+            summary, store, transactions);
 
             if (!context->should_stop) {
                 ++summary.iterations_completed;
@@ -1057,6 +1116,7 @@ RunManager& manager) {
         asked.collection_id, scopes.environment, scopes.globals, scopes.collection);
 
         summary.steps_dropped = store.dropped ();
+        summary.transactions  = transactions.build ();
         auto rows             = store.take ();
         summary.steps_stored  = rows.size ();
         try {

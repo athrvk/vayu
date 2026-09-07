@@ -36,11 +36,32 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/types.hpp"
 
 namespace vayu::core {
+
+/**
+ * One scope-spanning kind's first and last position in the plan (issue
+ * #1515's `control.loop` / `control.transaction`): an element inherited from
+ * a folder compiles once per member request, so each member's own instance
+ * has to recognise "I am the folder's first member" or "I am its last"
+ * independently. Keyed by the element's own `id` in `compute_element_spans`
+ * (`scenario_plan.cpp`) - the same `id` string every one of a folder's
+ * inherited members carries, since `compile_elements` compiles the same
+ * source entry's `id` verbatim at each occurrence.
+ */
+struct ElementSpan {
+    size_t first = 0;
+    size_t last  = 0;
+    /// `ScenarioStep::name` of `first` - what `control.loop` jumps back to
+    /// through the same `resolve_next_step` a script's own `setNextRequest`
+    /// resolves against, so a loop-back is an ordinary `Next` decision to
+    /// every reader of the step list, not a second flow-control mechanism.
+    std::string first_step_name;
+};
 
 /**
  * Everything a compiled element's `apply` reads and writes (issue #1514).
@@ -84,6 +105,55 @@ struct ElementContext {
     /// design send has none - a single exchange has nothing to stop mid-wait -
     /// so only the sequential run's plan walk binds this).
     std::function<bool ()> should_stop;
+
+    /// Resolves `{{name}}` tokens in @p text against this step's current
+    /// variables - the same scopes and, under a data-driven run, the same
+    /// row the request itself was bound against - through the caller's own
+    /// `vayu::http::resolve_template`, never a copy of it here (issue
+    /// #1515's `control.if` / `control.switch`, which read a condition or a
+    /// dispatch variable that lives in config text rather than the request
+    /// composition already resolved). Unset only where nothing needs it.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::function<std::string (const std::string& text)> resolve_template{};
+
+    /// This element's own `id`, set by `ElementPipeline::run` before every
+    /// `apply` call - never by a kind itself (issue #1515). A controller
+    /// that needs to recognise its own occurrence (`control.once`'s
+    /// fire-once flag, `control.transaction`'s span lookup) reads this
+    /// rather than being handed its id as a constructor argument, so
+    /// `Element::apply` keeps one signature for every kind.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string element_id{};
+    /// 0-based, as `pm.info.iteration` reports it - unset (0) for a design
+    /// send, which has no iteration to report. Read only by a kind whose
+    /// state must reset every iteration (`control.transaction`'s
+    /// per-iteration accumulator, `control.loop`'s per-iteration pass
+    /// count), through a key this iteration number is folded into rather
+    /// than a value `controller_state` is cleared for - clearing on an
+    /// iteration boundary would erase `control.once`'s fire-once flag too,
+    /// which must survive every iteration of a run.
+    size_t iteration = 0;
+    /// This step's position in the plan, unset for a design send (which
+    /// resolves no plan at all). A scope-spanning kind reads it against
+    /// `element_spans` to tell its folder's first member from its last;
+    /// every other kind ignores it.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<size_t> step_position{};
+    /// The plan-wide first/last position of every scope-spanning element's
+    /// id (issue #1515), computed once by `compute_element_spans` and
+    /// shared read-only for the run's life. Null for a design send and for
+    /// any plan that resolved no scope-spanning kind - neither needs one.
+    const std::unordered_map<std::string, ElementSpan>* element_spans = nullptr;
+    /// Where a kind's state must outlive one `apply` call and must not be
+    /// shared between an inherited element's several independent
+    /// occurrences (`control.once`'s fire-once flag, `control.throughput`'s
+    /// producer-side counter, `control.transaction`'s running sum) - a
+    /// fresh, empty map for a design send, one map for the whole sequential
+    /// run (issue #1515's single implicit user), one map per virtual user
+    /// under load, so one VU's count is never another's. Keyed by
+    /// `element_id`, optionally folded with `iteration`. Null only where a
+    /// caller resolves no element that reads it.
+    std::unordered_map<std::string, int64_t>* controller_state = nullptr;
 
     /// One JSON parse of the response body, shared by every `extract.*` /
     /// `assert.jsonpath` on the same step rather than paid per kind.
@@ -170,6 +240,23 @@ struct ElementKind {
     std::string description;
     std::string category;
     HotPathClass hot_path = HotPathClass::Declarative;
+    /// Whether this kind needs to know its own first/last occurrence across
+    /// the folder it is inherited into (issue #1515's `control.loop` /
+    /// `control.transaction`, which each compile once per member request and
+    /// must recognise their own folder's boundary independently). Read by
+    /// `compute_element_spans` through the registry, never a `kind ==`
+    /// comparison outside `core/elements` (#1512's extensibility contract,
+    /// rule 1).
+    bool needs_span = false;
+    /// Whether this kind can redirect the plan walk to a step other than
+    /// the next one (issue #1515's `control.loop` / `control.switch`). A
+    /// scenario load run's virtual users only ever advance forward
+    /// (`VirtualUser::step`), so `find_load_incompatible_controller`
+    /// (`scenario_load.cpp`) reads this - through the registry, never a
+    /// `kind ==` comparison outside `core/elements` (#1512's extensibility
+    /// contract, rule 1) - to refuse a load run carrying one rather than
+    /// silently running it once and ignoring what it asked for.
+    bool jumps_or_repeats = false;
     // Absent for a kind that only validates (phase 0's `inherit.disable`);
     // present once a kind actually runs (#1514 onward).
     std::function<std::unique_ptr<Element> (const nlohmann::json& config)> compile;

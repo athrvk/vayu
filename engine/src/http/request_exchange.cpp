@@ -671,6 +671,17 @@ ExchangeInputs inputs) {
             set_scope_variable (scopes, scope, name, value);
         },
         .should_stop = nullptr, // A single exchange has nothing to interrupt.
+        // `values_from_scopes` is what `resolve_residual_tokens` above
+        // already reads @p scopes through; a controller kind's condition or
+        // dispatch variable resolves against the same view (issue #1515).
+        .resolve_template =
+        [&] (const std::string& text) {
+            return vayu::http::resolve_template (text, values_from_scopes (scopes));
+        },
+        .iteration        = inputs.iteration.value_or (0),
+        .step_position    = inputs.step_position,
+        .element_spans    = inputs.element_spans,
+        .controller_state = inputs.controller_state,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,

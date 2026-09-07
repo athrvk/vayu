@@ -31,6 +31,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -350,6 +351,19 @@ struct ExchangeInputs {
     /// row is that one user's row 0.
     std::optional<size_t> vu;
     std::optional<size_t> iteration_count;
+    /// This step's position in the plan (issue #1515's `control.loop` /
+    /// `control.transaction`), null for a design send, which resolves no
+    /// plan. Forwarded verbatim into `ElementContext::step_position`.
+    std::optional<size_t> step_position;
+    /// The plan-wide element spans a scope-spanning kind reads against
+    /// @ref step_position (issue #1515), and the run-scoped (sequential) or
+    /// per-VU (load - not this path) map its controller kinds keep their
+    /// own count in. Both null for a design send, which has neither a plan
+    /// nor a run to keep state across exchanges - see the element-pipeline
+    /// bullet in `engine/CLAUDE.md` for why a controller degrades safely
+    /// with nothing to remember.
+    const std::unordered_map<std::string, vayu::core::ElementSpan>* element_spans = nullptr;
+    std::unordered_map<std::string, int64_t>* controller_state = nullptr;
     /// Whether the scripts may redirect the sequence around this exchange -
     /// the scenario runner's alone, exactly as `iteration` is (issue #355).
     bool in_scenario = false;
