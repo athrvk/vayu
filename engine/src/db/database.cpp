@@ -213,15 +213,11 @@ inline auto make_storage (const std::string& path) {
     make_column ("description", &Collection::description), // NEW: collection description
     make_column ("variables", &Collection::variables), // JSON: collection-scoped vars
     make_column ("auth", &Collection::auth),           // NEW: JSON auth config
-    make_column ("pre_request_script", &Collection::pre_request_script), // NEW: JS
-    make_column ("post_request_script", &Collection::post_request_script), // NEW: JS
-    // The element list (issue #1513), additive beside the two script columns
-    // above rather than replacing them: `Database::fold_scripts_into_elements`
-    // backfills a `script.pre`/`script.post` entry per non-blank script once,
-    // but the columns stay mapped and keep driving every *execution* path
-    // (design send, sequential run) unchanged, because nothing runs an
-    // element yet - that pipeline is #1514. Retiring the two columns for real
-    // is that issue's to do, once execution reads `elements` instead.
+    // The element list (issue #1513, run by issue #1514's pipeline): the two
+    // script columns this replaced are gone from this mapping.
+    // `migrate_before_sync` folds a pre-cutover row's scripts in here, ahead
+    // of the `sync_schema` call that would otherwise `DROP COLUMN` them
+    // first - see the note there.
     make_column ("elements", &Collection::elements, default_value (std::string ("[]"))),
     // The declared data contract (issue #599). NOT NULL with a default_value on
     // the `keywords` precedent, so sync_schema can ALTER TABLE ADD COLUMN it
@@ -251,10 +247,9 @@ inline auto make_storage (const std::string& path) {
     make_column ("headers", &Request::headers), // JSON array of KeyValueEntry
     make_column ("body", &Request::body),       // JSON discriminated union
     make_column ("body_type", &Request::body_type), make_column ("auth", &Request::auth), // JSON
-    make_column ("pre_request_script", &Request::pre_request_script),   // JS
-    make_column ("post_request_script", &Request::post_request_script), // JS
-    // The element list (issue #1513) - see the `collections` table above for
-    // why it lands beside the two script columns rather than replacing them.
+    // The element list (issue #1513, run by issue #1514's pipeline) - see the
+    // `collections` table above for why the two script columns this replaced
+    // are gone from this mapping.
     make_column ("elements", &Request::elements, default_value (std::string ("[]"))),
     make_column ("order", &Request::order), // NEW: position within collection
     // Redirect policy. NOT NULL, so the default_value is what lets sync_schema
@@ -1034,9 +1029,250 @@ void log_reclaim_outcome (const ReclaimOutcome& outcome) {
     " KB -> " + std::to_string (outcome.after_bytes / 1024) + " KB)");
 }
 
+/// The schema version this engine understands (issue #1514). `PRAGMA
+/// user_version` starts at 0 on every pre-cutover database; this build's
+/// first successful start on one bumps it to 1, after folding any script
+/// this file predates the fold ever adding.
+constexpr int SCHEMA_VERSION = 1;
+
+bool is_blank_script_text (const std::string& text) {
+    return text.find_first_not_of (" \t\r\n") == std::string::npos;
+}
+
+/// Whether @p table's schema still carries `pre_request_script` (issue
+/// #1514's cut-over target). False for a fresh install (the table does not
+/// exist yet) and for a database this or an earlier engine build already
+/// migrated by some other means.
+bool table_has_script_columns (sqlite3* connection, const char* table) {
+    const std::string sql   = std::string ("PRAGMA table_info(") + table + ");";
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2 (connection, sql.c_str (), -1, &statement, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    bool found = false;
+    while (sqlite3_step (statement) == SQLITE_ROW) {
+        const auto* name = column_text (statement, 1);
+        if (name != nullptr && std::string_view (name) == "pre_request_script") {
+            found = true;
+            break;
+        }
+    }
+    sqlite3_finalize (statement);
+    return found;
+}
+
+/**
+ * A row's `elements` with a `script.pre` / `script.post` entry appended for
+ * each of @p pre / @p post that is non-blank and not already represented -
+ * the "already folded" case a database that ran #1513's additive repair pass
+ * before upgrading to this engine can carry. `std::nullopt` when nothing
+ * needs adding, so the caller can skip the row's `UPDATE` entirely.
+ */
+std::optional<std::string> fold_row_scripts_if_missing (const std::string& existing_elements,
+const std::string& pre,
+const std::string& post) {
+    nlohmann::json elements =
+    nlohmann::json::parse (existing_elements, nullptr, /*allow_exceptions=*/false);
+    if (!elements.is_array ()) {
+        elements = nlohmann::json::array ();
+    }
+    const auto has_kind = [&] (const char* kind) {
+        for (const auto& entry : elements) {
+            if (entry.is_object () && entry.value ("kind", "") == kind) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    bool changed = false;
+    if (!is_blank_script_text (pre) && !has_kind ("script.pre")) {
+        elements.push_back (
+        { { "id", vayu::utils::generate_id ("el_") }, { "kind", "script.pre" },
+        { "enabled", true }, { "config", { { "script", pre } } } });
+        changed = true;
+    }
+    if (!is_blank_script_text (post) && !has_kind ("script.post")) {
+        elements.push_back (
+        { { "id", vayu::utils::generate_id ("el_") }, { "kind", "script.post" },
+        { "enabled", true }, { "config", { { "script", post } } } });
+        changed = true;
+    }
+    return changed ? std::optional<std::string> (elements.dump ()) : std::nullopt;
+}
+
+/**
+ * Fold @p table's `pre_request_script` / `post_request_script` into
+ * `elements`, row by row, on the still-open @p connection. Returns false on
+ * the first SQLite error, which aborts the whole migration (the caller rolls
+ * the transaction back) rather than leaving some rows folded and others not.
+ */
+bool fold_table_scripts_into_elements (sqlite3* connection, const char* table) {
+    const std::string select_sql =
+    std::string (
+    "SELECT id, pre_request_script, post_request_script, elements FROM ") +
+    table + ";";
+    sqlite3_stmt* select_statement = nullptr;
+    if (sqlite3_prepare_v2 (connection, select_sql.c_str (), -1,
+        &select_statement, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    const std::string update_sql =
+    std::string ("UPDATE ") + table + " SET elements = ?1 WHERE id = ?2;";
+    sqlite3_stmt* update_statement = nullptr;
+    if (sqlite3_prepare_v2 (connection, update_sql.c_str (), -1,
+        &update_statement, nullptr) != SQLITE_OK) {
+        sqlite3_finalize (select_statement);
+        return false;
+    }
+
+    const auto select_column_text = [&] (int index) {
+        const auto* text = column_text (select_statement, index);
+        return text != nullptr ? std::string (text) : std::string ();
+    };
+
+    bool ok = true;
+    while (ok) {
+        const int step = sqlite3_step (select_statement);
+        if (step == SQLITE_DONE) {
+            break;
+        }
+        if (step != SQLITE_ROW) {
+            ok = false;
+            break;
+        }
+        const std::string id       = select_column_text (0);
+        const std::string pre      = select_column_text (1);
+        const std::string post     = select_column_text (2);
+        const std::string existing = select_column_text (3);
+
+        auto updated = fold_row_scripts_if_missing (existing, pre, post);
+        if (!updated) {
+            continue;
+        }
+
+        sqlite3_reset (update_statement);
+        sqlite3_bind_text (update_statement, 1, updated->c_str (), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text (update_statement, 2, id.c_str (), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step (update_statement) != SQLITE_DONE) {
+            ok = false;
+        }
+    }
+
+    sqlite3_finalize (select_statement);
+    sqlite3_finalize (update_statement);
+    return ok;
+}
+
+/**
+ * The one-shot migration issue #1514's cut-over describes, run on the raw
+ * file with its own `sqlite3` connection, strictly ahead of the constructor's
+ * `sync_schema ()` calls (`Impl`'s constructor already opens a connection and
+ * sets `journal_mode`, so this must run *before* any `Impl` exists on
+ * @p path, never after - see `engine/CLAUDE.md`'s "Removing a column" rule).
+ *
+ * `PRAGMA user_version` is the marker: 0 means pre-cutover (folds any
+ * unrepresented script into `elements`, then sets it to 1); already at
+ * `SCHEMA_VERSION` is a fast no-op; newer than `SCHEMA_VERSION` refuses to
+ * start rather than silently serving - and possibly writing - settings this
+ * build does not understand.
+ *
+ * Once this returns having bumped the version, `sync_schema ()` sees a
+ * mapping with no `pre_request_script` / `post_request_script` columns and
+ * `DROP COLUMN`s them; that is what makes the fold's timing load-bearing
+ * rather than cosmetic.
+ *
+ * @throws std::runtime_error naming both versions if @p path was written by
+ *         a newer engine, or if the fold itself failed partway (the
+ *         transaction is rolled back first, so a throw here never leaves a
+ *         half-migrated file).
+ */
+void migrate_before_sync (const std::string& path) {
+    if (!fs::exists (path)) {
+        return; // A fresh install: sync_schema creates the new mapping outright.
+    }
+    // `has_sqlite_header`'s own comment measured this: opening a file SQLite
+    // does not even recognise deletes the `-wal` / `-shm` beside it before
+    // the open call reports failure - destroying exactly the evidence
+    // `quarantine_db_files` (below, in `recover_database`) exists to
+    // preserve. This function runs *ahead* of that recovery path (it is the
+    // constructor's very first statement), so it must not be the thing that
+    // opens a corrupt file first; a file with no valid header is corruption's
+    // question, not a migration's, so it is left untouched here.
+    if (!has_sqlite_header (path)) {
+        return;
+    }
+
+    std::string error;
+    sqlite3* raw_connection = open_workspace_connection (path, error);
+    if (raw_connection == nullptr) {
+        // Not this pass's question to answer - the probe this runs ahead of
+        // is what decides whether the file is usable at all.
+        return;
+    }
+    std::unique_ptr<sqlite3, decltype (&sqlite3_close)> connection (
+    raw_connection, &sqlite3_close);
+
+    const auto version =
+    read_pragma_int (connection.get (), "PRAGMA user_version;", error);
+    if (!version || *version == SCHEMA_VERSION) {
+        return;
+    }
+    if (*version > SCHEMA_VERSION) {
+        throw std::runtime_error ("The database at " + path + " was written by schema version " +
+        std::to_string (*version) + ", newer than this engine's (version " +
+        std::to_string (SCHEMA_VERSION) + "). Upgrade Vayu to open it.");
+    }
+
+    const bool requests_need_fold = table_has_script_columns (connection.get (), "requests");
+    const bool collections_need_fold =
+    table_has_script_columns (connection.get (), "collections");
+    if (!requests_need_fold && !collections_need_fold) {
+        // Nothing to fold - either a fresh schema with no rows yet, or a
+        // database some other path already brought to this shape.
+        sqlite3_exec (connection.get (), "PRAGMA user_version = 1;", nullptr, nullptr, nullptr);
+        return;
+    }
+
+    // Kept until the next successful start (issue #1487's rule) - the one
+    // copy of a pre-cutover row's exact script text if the fold below were
+    // ever found to have gone wrong.
+    const fs::path db_file (path);
+    fs::path pre_migration_backup = db_file;
+    pre_migration_backup += ".pre-migration.bak";
+    copy_db_files (db_file, pre_migration_backup);
+
+    sqlite3_exec (connection.get (), "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr);
+    bool ok = true;
+    if (requests_need_fold) {
+        ok = ok && fold_table_scripts_into_elements (connection.get (), "requests");
+    }
+    if (collections_need_fold) {
+        ok = ok && fold_table_scripts_into_elements (connection.get (), "collections");
+    }
+    if (ok) {
+        sqlite3_exec (connection.get (), "PRAGMA user_version = 1;", nullptr, nullptr, nullptr);
+        sqlite3_exec (connection.get (), "COMMIT;", nullptr, nullptr, nullptr);
+    } else {
+        sqlite3_exec (connection.get (), "ROLLBACK;", nullptr, nullptr, nullptr);
+        throw std::runtime_error (
+        "Vayu could not migrate stored scripts into elements for " + path);
+    }
+}
+
 } // namespace
 
 Database::Database (const std::string& db_path) {
+    // Refused outright, before anything else - a database written by a newer
+    // engine is not corrupt, and letting it fall into the recovery branch
+    // below would quarantine a perfectly good (newer) file and silently start
+    // a fresh, empty one in its place: exactly the data loss issue #1514's
+    // version gate exists to prevent. This call is deliberately not inside
+    // `probe_database`'s try/catch: the exception must reach the daemon's own
+    // startup failure path, naming both versions, rather than being read here
+    // as "will not open" and handed to recovery.
+    migrate_before_sync (db_path);
+
     fs::path db_file (db_path);
     fs::path backup_file = db_file;
     backup_file += ".bak";
@@ -1052,6 +1288,12 @@ Database::Database (const std::string& db_path) {
     // *this engine* can open the file it is about to commit to.
     auto probe_database = [] (const std::string& path) {
         try {
+            // Ahead of `Impl`'s own construction, never after: `Impl`'s
+            // constructor already opens a connection and sets
+            // `journal_mode`, and `sync_schema ()` below is what would
+            // `DROP COLUMN` the pre-cutover script columns before this
+            // migration ever got to read them (issue #1514).
+            migrate_before_sync (path);
             Impl probe (path);
             probe.storage.sync_schema ();
             return true;
@@ -1076,6 +1318,10 @@ Database::Database (const std::string& db_path) {
 
     // 3. Final Initialization
     // At this point, we either have a valid original, a restored backup, or a fresh/corrupted file we must attempt to use.
+    // Idempotent by this point in every reachable case (the branch above
+    // already migrated whichever file `db_path` now holds), kept here too as
+    // the same defence in depth every `sync_schema ()` call gets.
+    migrate_before_sync (db_path);
     impl_ = std::make_unique<Impl> (db_path);
     // sync_schema might throw if restore failed or backup was also bad
     impl_->storage.sync_schema ();
@@ -1192,18 +1438,6 @@ void Database::init () {
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
         "Startup managed-header cleanup failed: " + std::string (e.what ()));
-    }
-
-    // A 0.26 request or collection's scripts, as `script.pre` / `script.post`
-    // elements (issue #1513). Best-effort, like the passes around it.
-    try {
-        if (const int64_t folded = fold_scripts_into_elements (); folded > 0) {
-            vayu::utils::log_info ("Folded " + std::to_string (folded) +
-            " stored script(s) into element entries");
-        }
-    } catch (const std::exception& e) {
-        vayu::utils::log_warning (
-        "Startup script-to-element migration failed: " + std::string (e.what ()));
     }
 
     // No webhook inbox survives the process that opened it, so any capture row
@@ -2072,42 +2306,6 @@ namespace {
 // this file's other internal-only flags already live.
 constexpr std::string_view MANAGED_HEADERS_STRIPPED_KEY =
 "managedHeadersStripped";
-
-// Same bookkeeping shape, for the one-time script-to-element fold (#1513).
-constexpr std::string_view SCRIPTS_FOLDED_INTO_ELEMENTS_KEY =
-"scriptsFoldedIntoElements";
-
-bool is_blank_script (const std::string& s) {
-    return s.find_first_not_of (" \t\r\n") == std::string::npos;
-}
-
-/**
- * A row's `pre_request_script` / `post_request_script` as the `elements`
- * array `Registry::validate` accepts, appended after whatever the row already
- * carries there - a row created after #1513 shipped may already hold elements
- * of its own by the time this pass reaches it (unlikely on a first start, but
- * this runs once and stays correct if it is ever re-run by hand).
- */
-std::string elements_with_folded_scripts (const std::string& existing,
-const std::string& pre,
-const std::string& post) {
-    nlohmann::json elements =
-    nlohmann::json::parse (existing, nullptr, /*allow_exceptions=*/false);
-    if (!elements.is_array ()) {
-        elements = nlohmann::json::array ();
-    }
-    if (!is_blank_script (pre)) {
-        elements.push_back (
-        { { "id", vayu::utils::generate_id ("el_") }, { "kind", "script.pre" },
-        { "enabled", true }, { "config", { { "script", pre } } } });
-    }
-    if (!is_blank_script (post)) {
-        elements.push_back (
-        { { "id", vayu::utils::generate_id ("el_") }, { "kind", "script.post" },
-        { "enabled", true }, { "config", { { "script", post } } } });
-    }
-    return elements.dump ();
-}
 } // namespace
 
 int64_t Database::strip_stored_managed_headers () {
@@ -2200,90 +2398,6 @@ int64_t Database::strip_stored_managed_headers () {
     return stripped;
 }
 
-/**
- * A 0.26 request or collection's scripts, folded into `elements` as
- * `script.pre` / `script.post` entries (issue #1513). Additive: the two
- * script columns stay mapped and keep driving every execution path
- * unchanged, because nothing runs an element until #1514's pipeline exists -
- * this pass only gives migrated data an `elements` list to have, the same
- * `GET /elements/kinds` catalogue and `Registry::validate` shape a client
- * using the new field from a fresh install already gets.
- */
-int64_t Database::fold_scripts_into_elements () {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-
-    if (get_config_bool (std::string (SCRIPTS_FOLDED_INTO_ELEMENTS_KEY), false)) {
-        return 0;
-    }
-
-    auto request_candidates = impl_->storage.get_all<Request> (
-    where (is_not_equal (&Request::pre_request_script, "") or
-    is_not_equal (&Request::post_request_script, "")));
-    auto collection_candidates = impl_->storage.get_all<Collection> (
-    where (is_not_equal (&Collection::pre_request_script, "") or
-    is_not_equal (&Collection::post_request_script, "")));
-
-    auto mark_done = [&] {
-        save_config_entry (ConfigEntry{
-        .key   = std::string (SCRIPTS_FOLDED_INTO_ELEMENTS_KEY),
-        .value = "true",
-        .type  = "boolean",
-        .label = "Scripts folded into elements",
-        .description =
-        "Whether requests and collections saved before 0.27.0 have had "
-        "their pre/post-request scripts copied into the new `elements` "
-        "list as `script.pre` / `script.post` entries. Internal "
-        "bookkeeping for a one-time migration; turning it off re-runs it "
-        "on the next start.",
-        .category      = "general_engine",
-        .default_value = "false",
-        .min_value     = std::nullopt,
-        .max_value     = std::nullopt,
-        .options       = std::nullopt,
-        .updated_at    = std::chrono::duration_cast<std::chrono::milliseconds> (
-        std::chrono::system_clock::now ().time_since_epoch ())
-        .count (),
-        .requires_restart = false,
-        .advanced         = true,
-        .keywords         = "[]",
-        .unit             = std::nullopt,
-        });
-    };
-
-    if (request_candidates.empty () && collection_candidates.empty ()) {
-        mark_done ();
-        return 0;
-    }
-
-    // Written once, immediately before the first row this pass ever rewrites -
-    // the `.pre-upgrade.bak` precedent (issue #1487), under its own name so a
-    // start that also runs `strip_stored_managed_headers` does not have this
-    // pass's snapshot overwrite that one's (or the reverse).
-    const fs::path db_file (impl_->opened_file);
-    fs::path pre_fold_backup = db_file;
-    pre_fold_backup += ".pre-elements-fold.bak";
-    copy_db_files (db_file, pre_fold_backup);
-
-    auto fold_transaction = impl_->storage.transaction_guard ();
-
-    int64_t folded = 0;
-    for (auto& request : request_candidates) {
-        request.elements = elements_with_folded_scripts (request.elements,
-        request.pre_request_script, request.post_request_script);
-        impl_->storage.replace (request);
-        ++folded;
-    }
-    for (auto& collection : collection_candidates) {
-        collection.elements = elements_with_folded_scripts (collection.elements,
-        collection.pre_request_script, collection.post_request_script);
-        impl_->storage.replace (collection);
-        ++folded;
-    }
-
-    mark_done ();
-    fold_transaction.commit ();
-    return folded;
-}
 
 // ============================================================================
 // Bulk import - collections + requests + environments in one transaction

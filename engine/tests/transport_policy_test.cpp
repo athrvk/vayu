@@ -45,6 +45,7 @@
 
 #include "optional_assert.hpp"
 #include "proxy_server.hpp"
+#include "step_elements_test_helper.hpp"
 #include "temp_database.hpp"
 #include "tls_backend.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -893,9 +894,10 @@ TEST_F (LoadRunScriptTransportTest, ADeferredStepScriptTraversesTheRunsProxy) {
     execution->request.iterations    = 1;
 
     vayu::core::ScenarioStep step;
-    step.index          = 0;
-    step.name           = "Fetch";
-    step.post_script    = fetch_script (upstream.url ("/hello"));
+    step.index    = 0;
+    step.name     = "Fetch";
+    step.elements = vayu::tests::step_elements_with_post_script (
+    fetch_script (upstream.url ("/hello")));
     step.request.method = HttpMethod::GET;
     step.request.url    = upstream.url ("/hello");
     execution->plan.steps.push_back (step);

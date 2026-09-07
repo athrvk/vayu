@@ -567,16 +567,19 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateAbsentKeepsNullResets) {
     ASSERT_EQ (
     update_request_response (*db_, id,
     json{ { "headers", json::array ({ { { "key", "X" }, { "value", "1" }, { "enabled", true } } }) },
-    { "postRequestScript", "pm.test('x', () => {});" },
+    { "elements",
+    json::array ({ json{ { "kind", "script.post" },
+    { "config", { { "script", "pm.test('x', () => {});" } } } } }) },
     { "followRedirects", false }, { "maxRedirects", 3 } })
     .first,
     200);
 
-    // Absent -> keep. Renaming must not clear the headers or the script.
+    // Absent -> keep. Renaming must not clear the headers or the elements.
     auto [keep_status, keep] =
     update_request_response (*db_, id, json{ { "name", "Renamed" } });
     ASSERT_EQ (keep_status, 200);
     EXPECT_EQ (keep["headers"].size (), 1u);
+    EXPECT_EQ (keep["elements"].size (), 1u);
     EXPECT_FALSE (keep["followRedirects"].get<bool> ());
     EXPECT_EQ (keep["maxRedirects"], 3);
     EXPECT_EQ (keep["method"], "GET")
@@ -584,42 +587,37 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateAbsentKeepsNullResets) {
 
     // Null -> reset to the default.
     auto [reset_status, reset] = update_request_response (*db_, id,
-    json{ { "headers", nullptr }, { "postRequestScript", nullptr },
+    json{ { "headers", nullptr }, { "elements", nullptr },
     { "followRedirects", nullptr }, { "maxRedirects", nullptr } });
     ASSERT_EQ (reset_status, 200);
     EXPECT_TRUE (reset["headers"].empty ());
-    EXPECT_EQ (reset["postRequestScript"], "");
+    EXPECT_TRUE (reset["elements"].empty ());
     EXPECT_TRUE (reset["followRedirects"].get<bool> ())
     << "the engine default is true";
     EXPECT_EQ (reset["maxRedirects"], 10);
 }
 
-// The server-side witness for the client contract in issue #1381: an empty
-// script is a value a client sends to clear one, and it is a different thing
-// from omitting the key. The app used to collapse the two - it wrote
-// `script || undefined`, which serialises the key out of the body - so
-// deleting a whole script saved nothing and reported success. Both fields,
-// because only `postRequestScript` had a case here at all.
-TEST_F (ResourceWriteRouteTest, RequestUpdateEmptyScriptStringClears) {
+// Issue #1514's cut-over: scripts are elements now, and the two legacy
+// fields are refused outright rather than accepted as a no-op or silently
+// ignored - a caller still sending them needs to be told, not left believing
+// the script it thinks it wrote landed somewhere.
+TEST_F (ResourceWriteRouteTest, RequestUpdateLegacyScriptFieldsAreRefused) {
     const std::string collection = make_collection ();
     const std::string id         = make_request (collection);
-    ASSERT_EQ (update_request_response (*db_, id,
-               json{ { "preRequestScript", "pm.environment.set('t', 1);" },
-               { "postRequestScript", "pm.test('x', () => {});" } })
-               .first,
-    200);
 
-    auto [status, cleared] = update_request_response (
-    *db_, id, json{ { "preRequestScript", "" }, { "postRequestScript", "" } });
-    ASSERT_EQ (status, 200);
-    EXPECT_EQ (cleared["preRequestScript"], "");
-    EXPECT_EQ (cleared["postRequestScript"], "");
+    for (const auto& key : { "preRequestScript", "postRequestScript", "tests" }) {
+        auto [status, body] = update_request_response (
+        *db_, id, json{ { key, "pm.test('x', () => {});" } });
+        EXPECT_EQ (status, 400) << "key: " << key;
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("elements"), std::string::npos)
+        << "key: " << key;
+    }
 
-    // Stored, not merely echoed back.
+    // Refused before anything is written - the request is untouched.
     const auto stored = db_->get_request (id);
     ASSERT_HAS_VALUE (stored);
-    EXPECT_EQ (stored->pre_request_script, "");
-    EXPECT_EQ (stored->post_request_script, "");
+    EXPECT_EQ (stored->elements, "[]");
 }
 
 // `requests.stream` (issue #574). It follows the redirect policy's contract

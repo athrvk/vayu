@@ -25,12 +25,14 @@
  * never receives this one's fixes.
  */
 
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/elements.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/default_headers.hpp"
@@ -202,6 +204,20 @@ const std::string& cookie_scope,
 std::vector<vayu::http::CookieWrite>* writes);
 
 /**
+ * `extract.*`'s write target (issue #1514), addressed by the schema's
+ * `scope` value (`"env"` | `"collection"` | `"globals"`). Unrecognised or
+ * absent falls back to `"collection"`, the leaf scope a script's own
+ * `pm.environment.set` already writes. Non-static: both `execute_exchange`
+ * and the streaming send (`execution.cpp`, which runs its own pipeline calls
+ * around the transfer rather than through `execute_exchange`) bind
+ * `ElementContext::set_variable` to this.
+ */
+void set_scope_variable (ScriptVariableScopes& scopes,
+std::string_view scope,
+const std::string& name,
+const std::string& value);
+
+/**
  * One exchange's inputs: a composed, auth-resolved request and the scripts
  * that bracket it.
  *
@@ -214,8 +230,12 @@ std::vector<vayu::http::CookieWrite>* writes);
  */
 struct ExchangeInputs {
     vayu::Request request;
-    std::string pre_script;
-    std::string post_script;
+    /// This exchange's resolved, compiled element list (issue #1514) - what
+    /// `request_composer.cpp`'s `compose_elements` resolved, compiled once by
+    /// the caller. Null or empty runs nothing; a design send compiles its own
+    /// (one exchange, nothing to reuse), the sequential runner reuses
+    /// `ScenarioStep::elements`, compiled once when the plan resolved.
+    std::shared_ptr<const std::vector<vayu::core::CompiledElement>> elements;
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
     std::optional<size_t> iteration;
@@ -272,6 +292,12 @@ struct ExchangeOutcome {
     vayu::Response response;
     vayu::ScriptResult pre_script_result;
     vayu::ScriptResult post_script_result;
+    /// One entry per compiled element the pipeline ran on this exchange - in
+    /// `step.before` then `step.after` order, `script.pre` / `script.post`
+    /// included beside `extract.*` / `assert.*` (issue #1514). Empty for an
+    /// exchange with no elements at all, and for one the pre-request script
+    /// skipped before `step.after` ran.
+    std::vector<vayu::core::ElementOutcome> element_outcomes;
     /**
      * Whether the request was actually sent.
      *

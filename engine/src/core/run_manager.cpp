@@ -283,6 +283,30 @@ std::optional<vayu::db::Request>& linked_request) {
 }
 
 /**
+ * A step's `script.post` element's script text, or null if it has none
+ * (issue #1514's cut-over: `ScenarioStep::post_script` is gone, so the
+ * deferred replay below reads the same `elements` list the sequential runner
+ * does). The pointer is into `step.elements`' own storage, which outlives
+ * this call - the plan owns it for the run's whole life - so a `const
+ * std::string*` needs no copy.
+ */
+const std::string* find_step_post_script (const ScenarioStep& step) {
+    if (!step.elements) {
+        return nullptr;
+    }
+    for (const auto& element : *step.elements) {
+        if (element.kind != "script.post") {
+            continue;
+        }
+        if (auto found = element.config.find ("script");
+        found != element.config.end () && found->is_string ()) {
+            return &found->get_ref<const std::string&> ();
+        }
+    }
+    return nullptr;
+}
+
+/**
  * The per-step replays of a scenario load run.
  *
  * A step with no script, or one whose script never got a sample to run against,
@@ -308,10 +332,11 @@ std::vector<std::string>& failure_messages) {
     for (size_t i = 0; i < steps; ++i) {
         const auto& step = plan.steps[i];
         const auto& samples = context->metrics_collector->step_response_samples (i);
+        const std::string* post_script = find_step_post_script (step);
         // A step with no script, or one whose script never got a sample to
         // run against, reports nothing rather than a row of zeros - the
         // same distinction the whole-run section has always kept.
-        if (step.post_script.empty () || samples.empty ()) {
+        if (post_script == nullptr || samples.empty ()) {
             continue;
         }
 
@@ -322,7 +347,7 @@ std::vector<std::string>& failure_messages) {
         }
 
         ScriptReplay replay;
-        replay.script = &step.post_script;
+        replay.script = post_script;
         // The step's own request, so `pm.request` describes the step the
         // script is asserting on rather than a run-level request a
         // scenario payload does not have.
@@ -1338,10 +1363,11 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     }
 
     if (context->scenario) {
-        const auto& steps = context->scenario->plan.steps;
-        const auto skipped =
-        static_cast<size_t> (std::count_if (steps.begin (), steps.end (),
-        [] (const ScenarioStep& step) { return !step.pre_script.empty (); }));
+        const auto& steps  = context->scenario->plan.steps;
+        const auto skipped = static_cast<size_t> (
+        std::count_if (steps.begin (), steps.end (), [] (const ScenarioStep& step) {
+            return step_has_script (step, "script.pre");
+        }));
         if (skipped > 0) {
             warnings.push_back ({ { "code", "pre_request_script_skipped" },
             { "message",

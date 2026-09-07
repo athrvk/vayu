@@ -49,6 +49,25 @@ using vayu::http::routes::read_stream_flag;
 
 namespace sse_constants = vayu::core::constants::sse;
 
+/**
+ * A `POST /execute` payload's `elements` array carrying @p pre and/or @p post
+ * as `script.pre` / `script.post` entries (issue #1514's cut-over -
+ * `preRequestScript` / `postRequestScript` are refused on the wire now).
+ * Either may be empty to omit that half.
+ */
+json script_elements (const std::string& pre, const std::string& post = "") {
+    json elements = json::array ();
+    if (!pre.empty ()) {
+        elements.push_back ({ { "id", "el_pre" }, { "kind", "script.pre" },
+        { "config", { { "script", pre } } } });
+    }
+    if (!post.empty ()) {
+        elements.push_back ({ { "id", "el_post" }, { "kind", "script.post" },
+        { "config", { { "script", post } } } });
+    }
+    return elements;
+}
+
 // ---------------------------------------------------------------------------
 // The fixture: a server that streams on demand
 // ---------------------------------------------------------------------------
@@ -1051,7 +1070,7 @@ class StreamExecuteTest : public ::testing::Test {
 // and the entries carry the shape the surface promises.
 TEST_F (StreamExecuteTest, TheStreamsPostRequestScriptSeesItsEvents) {
     serve (3);
-    const auto run_id = start (json{ { "postRequestScript", R"JS(
+    const auto run_id = start (json{ { "elements", script_elements ("", R"JS(
         pm.test('three events', function () {
             pm.expect(pm.response.events.length).to.equal(3);
         });
@@ -1064,7 +1083,7 @@ TEST_F (StreamExecuteTest, TheStreamsPostRequestScriptSeesItsEvents) {
             pm.expect(pm.response.totalEvents).to.equal(3);
             pm.expect(pm.response.eventsTruncated).to.equal(false);
         });
-    )JS" } });
+    )JS") } });
     ASSERT_FALSE (run_id.empty ());
 
     const auto trace = trace_for (run_id);
@@ -1084,13 +1103,13 @@ TEST_F (StreamExecuteTest, TheStreamsPostRequestScriptSeesItsEvents) {
 TEST_F (StreamExecuteTest, TruncationIsVisibleToTheScriptAndMatchesTheTrace) {
     set_config ("sseMaxStoredEvents", "2");
     serve (5);
-    const auto run_id = start (json{ { "postRequestScript", R"JS(
+    const auto run_id = start (json{ { "elements", script_elements ("", R"JS(
         pm.test('the list is a prefix and says so', function () {
             pm.expect(pm.response.eventsTruncated).to.equal(true);
             pm.expect(pm.response.events.length).to.equal(2);
             pm.expect(pm.response.totalEvents).to.equal(5);
         });
-    )JS" } });
+    )JS") } });
     ASSERT_FALSE (run_id.empty ());
 
     const auto trace = trace_for (run_id);
@@ -1111,12 +1130,11 @@ TEST_F (StreamExecuteTest, TruncationIsVisibleToTheScriptAndMatchesTheTrace) {
 TEST_F (StreamExecuteTest, ThePreRequestScriptsEditReachesTheWire) {
     serve (1);
     const auto run_id = start (
-    json{ { "preRequestScript", "pm.request.headers.add({ key: 'X-From-Script', value: 'yes' });" },
-    { "postRequestScript", R"JS(
+    json{ { "elements", script_elements ("pm.request.headers.add({ key: 'X-From-Script', value: 'yes' });", R"JS(
         pm.test('the stream still ran', function () {
             pm.expect(pm.response.events.length).to.equal(1);
         });
-    )JS" } });
+    )JS") } });
     ASSERT_FALSE (run_id.empty ());
 
     const auto trace = trace_for (run_id);
@@ -1148,7 +1166,8 @@ TEST_F (StreamExecuteTest, AStreamsScriptMaySendWhenTheCallerAskedForIt) {
     "  var seen = err ? 'error' : String(res.json().ok); "
     "  pm.request.headers.add({ key: 'X-Aside', value: seen }); "
     "});";
-    const json payload = { { "preRequestScript", script }, { "allowScriptRequests", true } };
+    const json payload = { { "elements", script_elements (script) },
+        { "allowScriptRequests", true } };
 
     const auto buffered = send_buffered (payload);
     EXPECT_FALSE (buffered.contains ("preScriptError")) << buffered.dump (2);
@@ -1169,7 +1188,7 @@ TEST_F (StreamExecuteTest, AStreamsScriptIsRefusedWhenTheCallerDidNotAsk) {
     serve (1);
     const std::string script =
     "pm.sendRequest('" + origin_->url ("/aside") + "', function () {});";
-    const json payload = { { "preRequestScript", script } };
+    const json payload = { { "elements", script_elements (script) } };
 
     const auto buffered = send_buffered (payload);
     ASSERT_TRUE (buffered.contains ("preScriptError")) << buffered.dump (2);
@@ -1198,13 +1217,13 @@ TEST_F (StreamExecuteTest, AnOrdinarySendHasNoEventsSurfaceAtAll) {
     httplib::Client client ("127.0.0.1", port_);
     client.set_read_timeout (20, 0);
     const json payload = { { "method", "GET" },
-        { "url", origin_->url ("/scripted") }, { "postRequestScript", R"JS(
+        { "url", origin_->url ("/scripted") }, { "elements", script_elements ("", R"JS(
         pm.test('not a stream', function () {
             pm.expect(typeof pm.response.events).to.equal('undefined');
             pm.expect(typeof pm.response.totalEvents).to.equal('undefined');
             pm.expect(typeof pm.response.eventsTruncated).to.equal('undefined');
         });
-    )JS" } };
+    )JS") } };
 
     auto response = client.Post ("/execute", payload.dump (), "application/json");
     ASSERT_TRUE (response);
@@ -1234,13 +1253,13 @@ TEST_F (StreamExecuteTest, MalformedFramesAreDroppedAndTheRunStillCompletes) {
     origin_ = std::make_unique<StreamServer> (std::vector<std::string>{
     ": a comment line, dispatched to nobody\n\n", "event: no-data-so-never-dispatched\n\n",
     "data: kept\n\n", "retry: notanumber\ndata: also kept\n\n" });
-    const auto run_id = start (json{ { "postRequestScript", R"JS(
+    const auto run_id = start (json{ { "elements", script_elements ("", R"JS(
         pm.test('only the frames that carried data arrived', function () {
             pm.expect(pm.response.totalEvents).to.equal(2);
             pm.expect(pm.response.events[0].data).to.equal('kept');
             pm.expect(pm.response.events[1].data).to.equal('also kept');
         });
-    )JS" } });
+    )JS") } });
     ASSERT_FALSE (run_id.empty ());
 
     const auto trace = trace_for (run_id);
@@ -1262,7 +1281,7 @@ TEST_F (StreamExecuteTest, MalformedFramesAreDroppedAndTheRunStillCompletes) {
 
 TEST_F (StreamExecuteTest, ABufferedSendStoresTheScriptResultsItAlsoReturns) {
     serve (1);
-    const auto body = send_buffered (json{ { "postRequestScript", R"JS(
+    const auto body = send_buffered (json{ { "elements", script_elements ("", R"JS(
         console.log('asserted');
         pm.test('the origin answered', function () {
             pm.expect(pm.response.code).to.equal(200);
@@ -1270,7 +1289,7 @@ TEST_F (StreamExecuteTest, ABufferedSendStoresTheScriptResultsItAlsoReturns) {
         pm.test('and this one does not hold', function () {
             pm.expect(pm.response.code).to.equal(418);
         });
-    )JS" } });
+    )JS") } });
     ASSERT_TRUE (body.contains ("testResults")) << body.dump (2);
 
     const auto trace = latest_design_trace ();

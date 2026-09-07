@@ -208,7 +208,7 @@ nlohmann::json build_step_breakdown (const ScenarioPlan& plan, const StepHistogr
         // A load run never executes a pre-request script (see this file's
         // header comment); a step that carries one always reports it skipped
         // rather than leaving the report silent about it.
-        if (!plan.steps[i].pre_script.empty ()) {
+        if (step_has_script (plan.steps[i], "script.pre")) {
             entry["preRequestScript"] = "skipped";
         }
         array.push_back (std::move (entry));
@@ -530,7 +530,7 @@ const ScenarioExecution& execution) {
         const bool validating = !execution.spec.response_schemas.empty ();
         std::vector<bool> sampled (step_count, false);
         for (size_t i = 0; i < step_count; ++i) {
-            sampled[i] = !plan.steps[i].post_script.empty () ||
+            sampled[i] = step_has_script (plan.steps[i], "script.post") ||
             (validating && !plan.steps[i].spec_operation.empty ());
         }
         context->metrics_collector->configure_step_samples (sampled);

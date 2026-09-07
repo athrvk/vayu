@@ -910,50 +910,13 @@ const std::string& origin_name) {
     }
 }
 
-// Append one script part, skipping blanks - the same rule the clients'
-// scriptParts helpers and the engine's read_script apply.
-void push_script_part (nlohmann::json& parts,
-const char* origin,
-const std::string& id,
-const std::string& name,
-const std::string& script) {
-    if (script.find_first_not_of (" \t\r\n") == std::string::npos) {
-        return;
-    }
-    nlohmann::json part = { { "origin", origin }, { "script", script } };
-    if (!id.empty ()) {
-        part["id"] = id;
-    }
-    if (!name.empty ()) {
-        part["name"] = name;
-    }
-    parts.push_back (part);
-}
-
-// The ordered script-part list for a saved request: the collection chain's
-// scripts root->leaf, then the request's own - the order the renderer sends,
-// so parent-collection setup runs before the request's script. Still what
-// drives execution (design send, sequential run): #1513 adds `elements`
-// beside this, it does not replace it - that is #1514's pipeline.
-nlohmann::json compose_script_parts (const std::vector<vayu::db::Collection>& chain,
-const vayu::db::Request& request,
-bool pre) {
-    nlohmann::json parts = nlohmann::json::array ();
-    for (const auto& col : chain) {
-        push_script_part (parts, "collection", col.id, col.name,
-        pre ? col.pre_request_script : col.post_request_script);
-    }
-    push_script_part (parts, "request", request.id, "",
-    pre ? request.pre_request_script : request.post_request_script);
-    return parts;
-}
-
 /**
  * The resolved element list for a saved request (issue #1513): the collection
  * chain's elements root->leaf, then the request's own, minus disabled and
  * `inherit.disable` targets from *either* level - each stamped with where it
- * came from. Additive beside `compose_script_parts` above: nothing here
- * executes an element (#1514), it only resolves which ones apply.
+ * came from. The only script source since issue #1514's cut-over: scripts
+ * fold into this list as `script.pre` / `script.post` entries, and the
+ * pipeline (`core/elements/pipeline.cpp`) is what runs them.
  */
 nlohmann::json compose_elements (const std::vector<vayu::db::Collection>& chain,
 const vayu::db::Request& request) {
@@ -1044,17 +1007,8 @@ const std::vector<vayu::db::Collection>& chain) {
     nlohmann::json auth = parse_auth_blob (request.auth);
     payload["auth"] = auth.is_object () ? auth : nlohmann::json{ { "mode", "inherit" } };
 
-    nlohmann::json pre = compose_script_parts (chain, request, /*pre=*/true);
-    if (!pre.empty ()) {
-        payload["preRequestScripts"] = pre;
-    }
-    nlohmann::json post = compose_script_parts (chain, request, /*pre=*/false);
-    if (!post.empty ()) {
-        payload["postRequestScripts"] = post;
-    }
-    // Elements (issue #1513), additive beside the two script-part lists
-    // above: nothing consumes this yet (#1514), but a composed payload
-    // already reflects a request's resolved list.
+    // The only script source (issue #1514's cut-over) - `preRequestScripts` /
+    // `postRequestScripts` retired with `compose_script_parts`.
     nlohmann::json elements = compose_elements (chain, request);
     if (!elements.empty ()) {
         payload["elements"] = elements;

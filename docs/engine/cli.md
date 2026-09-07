@@ -92,8 +92,10 @@ is a manual copy with the engine stopped, described in
     "content": "{\"name\":\"John\"}"
   },
   "environmentId": "env_1234567890",
-  "preRequestScript": "",
-  "postRequestScript": "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));"
+  "elements": [
+    { "kind": "script.post", "config": { "script":
+      "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));" } }
+  ]
 }
 ```
 

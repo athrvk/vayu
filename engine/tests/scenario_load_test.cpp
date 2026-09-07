@@ -12,6 +12,7 @@
  */
 
 #include "optional_assert.hpp"
+#include "step_elements_test_helper.hpp"
 #include "vayu/core/scenario_load.hpp"
 
 #include <gtest/gtest.h>
@@ -639,7 +640,8 @@ TEST_F (ScenarioLoadTest, AStepWithAnUnresolvedTokenCountsAndWarnsWithoutRefusin
 TEST_F (ScenarioLoadTest, AStepCarryingAPreRequestScriptReportsItSkippedInTheBreakdown) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
-    execution.plan.steps[0].pre_script = "pm.environment.set('x', '1');";
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_pre_script (
+    "pm.environment.set('x', '1');");
 
     const json config = { { "mode", "iterations" }, { "iterations", 1 },
         { "concurrency", 1 } };
@@ -661,8 +663,8 @@ TEST_F (ScenarioLoadTest, AScenarioLoadRunRunsNoInlineScriptsAndSamplesOnlyScrip
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
     // A step that carries scripts, so "none ran inline" is a property of the
     // executor rather than of an empty plan.
-    execution.plan.steps[0].pre_script  = "pm.environment.set('x', '1');";
-    execution.plan.steps[0].post_script = "pm.test('t', function () { });";
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_scripts (
+    "pm.environment.set('x', '1');", "pm.test('t', function () { });");
 
     const json config = { { "mode", "iterations" }, { "iterations", 2 },
         { "concurrency", 1 } };
@@ -716,7 +718,8 @@ TEST_F (ScenarioLoadTest, EveryScriptedStepIsSampledIncludingTheLast) {
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1"),
     server.url ("/s2"), server.url ("/echo") });
     for (auto& step : execution.plan.steps) {
-        step.post_script = "pm.test('ok', function () { });";
+        step.elements = vayu::tests::step_elements_with_post_script (
+        "pm.test('ok', function () { });");
     }
 
     // A budget of exactly one slot per scripted step, so the split is what
@@ -748,9 +751,9 @@ TEST_F (ScenarioLoadTest, EveryScriptedStepIsSampledIncludingTheLast) {
 TEST_F (ScenarioLoadTest, EachStepsScriptIsReplayedAgainstItsOwnSamples) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
-    execution.plan.steps[0].post_script =
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
     "pm.test('ok', function () { pm.expect(pm.response.code).to.equal(200); "
-    "});";
+    "});");
 
     const json config = { { "mode", "iterations" }, { "iterations", 3 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
@@ -780,12 +783,12 @@ TEST_F (ScenarioLoadTest, AFailingAssertionIsAttributedToItsOwnStep) {
     ScenarioMockServer server;
     auto execution =
     plan_over ({ server.url ("/s0"), server.url ("/s1"), server.url ("/s2") });
-    execution.plan.steps[0].post_script =
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
     "pm.test('ok', function () { pm.expect(pm.response.code).to.equal(200); "
-    "});";
-    execution.plan.steps[1].post_script =
+    "});");
+    execution.plan.steps[1].elements = vayu::tests::step_elements_with_post_script (
     "pm.test('wrong', function () { pm.expect(pm.response.code).to.equal(500); "
-    "});";
+    "});");
 
     const json config = { { "mode", "iterations" }, { "iterations", 2 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
@@ -817,11 +820,11 @@ TEST_F (ScenarioLoadTest, AFailingAssertionIsAttributedToItsOwnStep) {
 TEST_F (ScenarioLoadTest, AMixedPassAndFailScriptReportsBothTalliesAndNamesTheFailure) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0") });
-    execution.plan.steps[0].post_script =
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
     "pm.test('status is 200', function () { "
     "pm.expect(pm.response.code).to.equal(200); });"
     "pm.test('body has a unicorn', function () { "
-    "pm.expect(undefined).to.equal('yes'); });";
+    "pm.expect(undefined).to.equal('yes'); });");
 
     const json config = { { "mode", "iterations" }, { "iterations", 1 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
@@ -853,9 +856,9 @@ TEST_F (ScenarioLoadTest, AMixedPassAndFailScriptReportsBothTalliesAndNamesTheFa
 TEST_F (ScenarioLoadTest, AScriptThatThrowsAfterAPassingTestStillReportsTheThrow) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0") });
-    execution.plan.steps[0].post_script =
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
     "pm.test('ok', function () { pm.expect(1).to.equal(1); });"
-    "throw new Error('late boom');";
+    "throw new Error('late boom');");
 
     const json config = { { "mode", "iterations" }, { "iterations", 1 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
@@ -884,8 +887,9 @@ TEST_F (ScenarioLoadTest, AScriptThatThrowsAfterAPassingTestStillReportsTheThrow
 // never an empty one (issue #1502).
 TEST_F (ScenarioLoadTest, AThrowingScriptWithNoTestsNamesTheThrownMessage) {
     ScenarioMockServer server;
-    auto execution                      = plan_over ({ server.url ("/s0") });
-    execution.plan.steps[0].post_script = "throw new Error('boom');";
+    auto execution = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].elements =
+    vayu::tests::step_elements_with_post_script ("throw new Error('boom');");
 
     const json config = { { "mode", "iterations" }, { "iterations", 1 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
@@ -915,14 +919,14 @@ TEST_F (ScenarioLoadTest, ADeferredStepScriptReadsItsIterationAndDataRow) {
     with_data (execution, { json{ { "id", "a" } }, json{ { "id", "b" } } });
     // Two iterations bind rows 0 and 1, so a script that pairs the iteration
     // with its row passes only if both bindings are the real ones.
-    execution.plan.steps[0].post_script =
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
     "pm.test('bound', function () {"
     "  var expected = pm.info.iteration === 0 ? 'a' : 'b';"
     "  if (pm.iterationData.get('id') !== expected) {"
     "    throw new Error('iteration ' + pm.info.iteration + ' saw ' +"
     "      pm.iterationData.get('id'));"
     "  }"
-    "});";
+    "});");
 
     const json config = { { "mode", "iterations" }, { "iterations", 2 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
@@ -944,7 +948,7 @@ TEST_F (ScenarioLoadTest, PmExecutionStillThrowsInADeferredStepScript) {
     // The assertion passes only if the call threw *and* the sentence named the
     // method - so a silently accepted call fails this test rather than reading
     // as a pass.
-    execution.plan.steps[0].post_script =
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
     "pm.test('refused', function () {"
     "  var message = '';"
     "  try { pm.execution.setNextRequest('somewhere'); }"
@@ -952,7 +956,7 @@ TEST_F (ScenarioLoadTest, PmExecutionStillThrowsInADeferredStepScript) {
     "  if (message.indexOf('setNextRequest') === -1) {"
     "    throw new Error('not refused by name: ' + message);"
     "  }"
-    "});";
+    "});");
 
     const json config = { { "mode", "iterations" }, { "iterations", 1 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
@@ -971,7 +975,8 @@ TEST_F (ScenarioLoadTest, PmExecutionStillThrowsInADeferredStepScript) {
 TEST_F (ScenarioLoadTest, PerStepTalliesAreAttachedToTheStoredBreakdown) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
-    execution.plan.steps[0].post_script = "pm.test('ok', function () { });";
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
+    "pm.test('ok', function () { });");
 
     const json config = { { "mode", "iterations" }, { "iterations", 2 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
@@ -1492,7 +1497,8 @@ TEST_F (ScenarioLoadTest, ABoundStepIsSampledWithNoScriptOfItsOwn) {
 TEST_F (ScenarioLoadTest, AnUnboundPlanStillSamplesOnlyItsScriptedSteps) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
-    execution.plan.steps[0].post_script = "pm.test('t', function () { });";
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
+    "pm.test('t', function () { });");
 
     const json config = { { "mode", "iterations" }, { "iterations", 2 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
@@ -1536,7 +1542,8 @@ TEST_F (ScenarioLoadTest, ABoundRunReportsTalliesOverItsSampledResponses) {
 TEST_F (ScenarioLoadTest, AnUnboundRunValidatesNothingAtAll) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
-    execution.plan.steps[0].post_script = "pm.test('t', function () { });";
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
+    "pm.test('t', function () { });");
 
     const json config = { { "mode", "iterations" }, { "iterations", 2 },
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
