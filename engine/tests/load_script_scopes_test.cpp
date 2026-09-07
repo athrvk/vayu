@@ -334,4 +334,64 @@ TEST_F (LoadScriptScopesTest, ARunWithNoEnvironmentStillBindsTheOtherScopes) {
     EXPECT_EQ (validation.run->failed, 0u);
 }
 
+/// The failure text `validate_scripts` stored for @p run_id, or empty if it
+/// stored none - `store_validation_failures`' one JSON row, read back rather
+/// than duplicated as a second copy of what it wrote.
+std::string stored_failure_text (vayu::db::Database& db, const std::string& run_id) {
+    for (const auto& result : db.get_results (run_id)) {
+        if (result.trace_data.empty ()) {
+            continue;
+        }
+        auto trace = json::parse (result.trace_data, nullptr, /*allow_exceptions=*/false);
+        if (!trace.contains ("failures")) {
+            continue;
+        }
+        const auto& failures = trace.at ("failures");
+        if (failures.is_array () && !failures.empty ()) {
+            return failures.front ().get<std::string> ();
+        }
+    }
+    return {};
+}
+
+// A single-request load run has no scenario and so no per-user cookie state
+// to read (issue #1501) - a different, truer reason than the design-mode
+// sentence design-mode contexts throw. Mutation check: have `run_replay`
+// leave `cookie_read_refusal` unset and this reds, reporting the default
+// "design-mode feature" text instead.
+TEST_F (LoadScriptScopesTest, ASingleRequestReplayNamesWhyThereIsNoCookieState) {
+    auto context = single_request_run ("pm.cookies.get('session');");
+    context->metrics_collector->record_response_sample (response_with ("{}"));
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 1u);
+    const auto failure = stored_failure_text (*db_, "run-scopes");
+    EXPECT_NE (failure.find ("no scenario and so no per-user cookie state"), std::string::npos)
+    << "unexpected failure text: " << failure;
+    EXPECT_EQ (failure.find ("design-mode"), std::string::npos)
+    << "the default design-mode sentence leaked through instead: " << failure;
+}
+
+// A scenario step's deferred replay once had this VU's cookies during the
+// run; by the time it replays, only the recorded response is left, and the
+// message says so rather than repeating "no jar" (issue #1501).
+TEST_F (LoadScriptScopesTest, AScenarioStepReplayNamesWhyItsCookiesWereNotRecorded) {
+    auto context = scenario_run ("pm.cookies.get('session');");
+    context->metrics_collector->record_step_response_sample (
+    response_with ("{}"), 0,
+    vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1, /*data_row_index=*/std::nullopt });
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->failed, 1u);
+    const auto failure = stored_failure_text (*db_, "run-scenario-scopes");
+    EXPECT_NE (failure.find ("not recorded"), std::string::npos)
+    << "unexpected failure text: " << failure;
+}
+
 } // namespace

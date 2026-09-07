@@ -1618,11 +1618,17 @@ would read and act on.
 - **`pm.sendRequest` shares the jar** of the request it runs inside. A
   pre-request script that logs in through it leaves the session where the real
   request will find it.
-- **Load runs have no jar.** Every one of these reads throws there rather than
-  answering `undefined`, which would read as "the cookie is gone". The jar is
-  deliberately off the load path: sharing one across the event loop's workers
-  would put a lock on the hot path, and a load run repeats a single request
-  anyway.
+- **Load runs mostly have no jar.** The jar is deliberately off the load path:
+  sharing one across the event loop's workers would put a lock on the hot
+  path. One exception (issue #1501): a scenario load run's own inline
+  `script.*` element reads that one virtual user's own cookies through the
+  flat surface above - the same per-user state the run already carries step
+  to step outside any script (`docs/engine/architecture.md`'s Cookie Jar
+  section, "Not on the load path"), with no lock, because that user's own
+  completion is the only reader. A single-request run (no scenario, no
+  virtual user) and a scenario step's deferred replay (a recorded response,
+  not the user that fetched it) still throw there, each naming its own
+  reason rather than the one sentence above.
 - **Writing goes through `jar()`**, below. There is deliberately no flat
   `pm.cookies.set(name, value)`: a written cookie needs a URL to take its
   domain and path from, which is exactly why Postman's write half hangs off
@@ -1737,7 +1743,9 @@ happens to match nothing: `clear` is destructive, so "cleared no cookies" and
 "that was not a URL" must not read the same to the script. Pass no argument at
 all for the whole-jar form.
 
-Load runs have no jar, so these throw there exactly as the read half does.
+Load runs have no jar for writes; `jar()` and every method on it throw there
+under every load-run script, including a scenario's inline ones - only the
+flat reads above have the one per-user exception described above.
 
 ## Flow control (`pm.execution`)
 

@@ -455,6 +455,43 @@ TEST_F (ScenarioLoadTest, TwoVirtualUsersDoNotShareCookieState) {
        "between VUs rather than private to each";
 }
 
+// An inline script reads the cookie the step before it established for its
+// own virtual user, not the other VU's (issue #1501). `pm.cookies` used to
+// throw unconditionally under load; step 1's inline `script.pre` here reads
+// what step 0's `/login` set for that same VU and stamps it onto the
+// request, so the assertion is on the wire, the same way the correlation
+// tests above prove per-VU state rather than trusting an in-process read.
+//
+// Mutation check: drop `script_ctx.cookie_read_lines = &vu.cookies;` in
+// `run_step_before`, and the inline script throws instead of reading a
+// value, so `echo.authorization` never gets set and this reds.
+TEST_F (ScenarioLoadTest, AnInlineScriptReadsThisVirtualUsersOwnCookieFromTheStepBeforeIt) {
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    auto execution = plan_over ({ server.url ("/login"), server.url ("/echo") });
+    execution.plan.steps[1].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_pre",
+    "script.pre", "pm.request.headers.upsert('Authorization', 'Bearer ' + pm.cookies.get('sid'));",
+    /*inline_script=*/true) });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 } };
+    run (config, execution, /*pool_size=*/2);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 2u);
+    EXPECT_NE (echoes[0].authorization, echoes[1].authorization)
+    << "both virtual users read the same cookie value - the per-VU view is "
+       "shared rather than private to each";
+    for (const auto& echo : echoes) {
+        ASSERT_TRUE (echo.cookie.rfind ("sid=", 0) == 0)
+        << "no session reached step 1";
+        const std::string session_id = echo.cookie.substr (4);
+        EXPECT_EQ (echo.authorization, "Bearer " + session_id)
+        << "pm.cookies.get did not read this VU's own cookie from the step "
+           "before it";
+    }
+}
+
 // An errored step ends its iteration and the VU starts the next one. A VU that
 // stranded instead would send step 0 once and then nothing, permanently
 // shrinking effective concurrency.

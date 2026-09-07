@@ -573,6 +573,92 @@ TEST (CookieJarScript, PmCookiesSaysWhyWhenThereIsNoJar) {
     << "the error does not say why there is no jar: " << result.error_message;
 }
 
+// The read-only per-VU view an inline load-run script gets instead of a jar
+// (issue #1501): no CookieJar object, just the lines a virtual user is
+// carrying. Mutation check: stop reading `cookie_read_lines` in
+// `jar_cookies_from_context` and this reds with the "design-mode" refusal
+// `PmCookiesSaysWhyWhenThereIsNoJar` asserts above.
+TEST (CookieJarScript, PmCookiesReadsAPerVuViewWithNoJarObject) {
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request = get_request ("http://example.com/users");
+    vayu::Response response;
+    vayu::Environment env;
+
+    JarCookie cookie;
+    cookie.name   = "session";
+    cookie.value  = "abc123";
+    cookie.domain = "example.com";
+    cookie.path   = "/";
+    const std::vector<std::string> lines{ vayu::http::format_cookie_line (cookie) };
+
+    vayu::runtime::ScriptContext ctx;
+    ctx.request           = &request;
+    ctx.response          = &response;
+    ctx.environment       = &env;
+    ctx.cookie_read_lines = &lines;
+
+    auto result = engine.execute (
+    "pm.environment.set('got', pm.cookies.get('session'));"
+    "pm.environment.set('has', String(pm.cookies.has('session')));",
+    ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["got"].value, "abc123");
+    EXPECT_EQ (env["has"].value, "true");
+}
+
+// The per-VU view is read-only: `pm.cookies.jar()` still needs a real jar,
+// exactly as with no cookie access at all - a load run's cookie state
+// advances through the VU itself, never through a script.
+TEST (CookieJarScript, PmCookiesJarStillRefusesWritesWithAPerVuView) {
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request = get_request ("http://example.com/users");
+    vayu::Response response;
+    vayu::Environment env;
+    const std::vector<std::string> lines;
+
+    vayu::runtime::ScriptContext ctx;
+    ctx.request           = &request;
+    ctx.response          = &response;
+    ctx.environment       = &env;
+    ctx.cookie_read_lines = &lines;
+
+    auto result = engine.execute (
+    "pm.cookies.jar().set('http://example.com/', { name: 'n', value: 'v' });", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("design-mode"), std::string::npos)
+    << "a per-VU read view must not also unlock jar() writes: " << result.error_message;
+}
+
+// The single-request load run and the deferred replay each have a truer
+// reason than "design-mode feature" (issue #1501); `run_manager.cpp` sets
+// this per context. Asserted here as the plumbing that carries whatever
+// message a caller sets, rather than pinned to run_manager's exact wording,
+// so the two do not have to be kept in lockstep by hand.
+TEST (CookieJarScript, PmCookiesReadRefusalIsWhateverTheContextSays) {
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request = get_request ("http://example.com/users");
+    vayu::Response response;
+    vayu::Environment env;
+
+    vayu::runtime::ScriptContext ctx;
+    ctx.request     = &request;
+    ctx.response    = &response;
+    ctx.environment = &env;
+    ctx.cookie_read_refusal =
+    "pm.cookies.%s is not available here: a "
+    "replayed script runs after the run, against a recorded response; the "
+    "user's cookies at that moment are not recorded.";
+
+    auto result = engine.execute ("pm.cookies.get('session');", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("not recorded"), std::string::npos)
+    << "the context's own refusal text did not reach the thrown message: "
+    << result.error_message;
+    EXPECT_EQ (result.error_message.find ("design-mode"), std::string::npos)
+    << "the default message leaked through instead of the context's own: "
+    << result.error_message;
+}
+
 TEST (CookieJarScript, SendRequestSharesTheJarWithTheRequestAroundIt) {
     // The flow the jar exists for: log in from a pre-request script, then let
     // the request that follows carry the session. An isolated auxiliary jar
