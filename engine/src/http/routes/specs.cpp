@@ -571,8 +571,6 @@ void register_spec_routes (RouteContext& ctx) {
             if (status != 200) {
                 vayu::utils::log_warning ("DELETE /specs/:id - " + std::to_string (status) +
                 " for id=" + spec_id + ": " + error_message_of (body));
-            } else {
-                vayu::utils::log_info ("DELETE /specs/:id - Deleted spec: id=" + spec_id);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");

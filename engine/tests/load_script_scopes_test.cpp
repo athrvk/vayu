@@ -195,7 +195,7 @@ TEST_F (LoadScriptScopesTest, ATestPassingOnSendPassesUnderLoad) {
     )");
     context->metrics_collector->record_response_sample (response_with (R"({"region":"EU"})"));
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->sampled, 1u);
@@ -223,7 +223,7 @@ TEST_F (LoadScriptScopesTest, GlobalsAndTheWholeCollectionChainAreBoundToo) {
     )");
     context->metrics_collector->record_response_sample (response_with ("{}"));
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->passed, 3u);
@@ -247,7 +247,7 @@ TEST_F (LoadScriptScopesTest, AScenarioStepReplayReadsTheRunningCollectionsScope
     response_with ("{}"), 0,
     vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1, /*data_row_index=*/std::nullopt });
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
 
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
@@ -272,7 +272,7 @@ TEST_F (LoadScriptScopesTest, AReplayWriteIsNeverPersisted) {
     )");
     context->metrics_collector->record_response_sample (response_with ("{}"));
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->passed, 1u)
     << "the write was not even visible in-memory";
@@ -304,7 +304,7 @@ TEST_F (LoadScriptScopesTest, AWriteIsVisibleToTheSamplesReplayedAfterIt) {
     context->metrics_collector->record_response_sample (response_with ("{}"));
     context->metrics_collector->record_response_sample (response_with ("{}"));
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->sampled, 2u);
@@ -327,7 +327,7 @@ TEST_F (LoadScriptScopesTest, ARunWithNoEnvironmentStillBindsTheOtherScopes) {
     /*with_environment=*/false);
     context->metrics_collector->record_response_sample (response_with ("{}"));
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->passed, 2u);

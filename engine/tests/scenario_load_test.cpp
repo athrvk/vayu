@@ -700,7 +700,7 @@ TEST_F (ScenarioLoadTest, APlanWithNoScriptsSamplesNothing) {
     EXPECT_EQ (mc.response_samples_dropped (), 0u)
     << "a step nothing will validate must not be counted as a thinned sample";
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     EXPECT_FALSE (validation.run.has_value ())
     << "a run that validated nothing must omit the section, not report zeros";
 }
@@ -759,7 +759,7 @@ TEST_F (ScenarioLoadTest, EachStepsScriptIsReplayedAgainstItsOwnSamples) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 2u);
     const auto& first_step = validation.steps[0];
@@ -794,7 +794,7 @@ TEST_F (ScenarioLoadTest, AFailingAssertionIsAttributedToItsOwnStep) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 3u);
     const auto& first_step = validation.steps[0];
@@ -830,7 +830,7 @@ TEST_F (ScenarioLoadTest, AMixedPassAndFailScriptReportsBothTalliesAndNamesTheFa
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
@@ -864,7 +864,7 @@ TEST_F (ScenarioLoadTest, AScriptThatThrowsAfterAPassingTestStillReportsTheThrow
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
@@ -895,7 +895,7 @@ TEST_F (ScenarioLoadTest, AThrowingScriptWithNoTestsNamesTheThrownMessage) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
@@ -932,7 +932,7 @@ TEST_F (ScenarioLoadTest, ADeferredStepScriptReadsItsIterationAndDataRow) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
     ASSERT_HAS_VALUE (first_step);
@@ -962,7 +962,7 @@ TEST_F (ScenarioLoadTest, PmExecutionStillThrowsInADeferredStepScript) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
     ASSERT_HAS_VALUE (first_step);
@@ -982,7 +982,7 @@ TEST_F (ScenarioLoadTest, PerStepTalliesAreAttachedToTheStoredBreakdown) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     auto state        = run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     auto summary =
     vayu::core::build_scenario_load_summary (*state, context_->scenario->plan);
     vayu::core::attach_step_test_totals (summary, validation.steps);
@@ -1522,7 +1522,7 @@ TEST_F (ScenarioLoadTest, ABoundRunReportsTalliesOverItsSampledResponses) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    const auto totals = vayu::core::validate_sampled_responses (context_);
 
     EXPECT_EQ (totals.sampled, 6u);
     EXPECT_EQ (totals.checked, 6u);
@@ -1549,7 +1549,7 @@ TEST_F (ScenarioLoadTest, AnUnboundRunValidatesNothingAtAll) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    const auto totals = vayu::core::validate_sampled_responses (context_);
     EXPECT_EQ (totals.sampled, 0u);
     EXPECT_TRUE (vayu::core::build_sampled_validation_payload (totals).empty ())
     << "an unbound run must carry no block at all, never one saying nothing "
@@ -1568,7 +1568,7 @@ TEST_F (ScenarioLoadTest, ABindingWithNoSchemaIndexValidatesNothing) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    EXPECT_EQ (vayu::core::validate_sampled_responses (context_, false).sampled, 0u);
+    EXPECT_EQ (vayu::core::validate_sampled_responses (context_).sampled, 0u);
 }
 
 // A step the document does not declare is checked and named, rather than
@@ -1586,7 +1586,7 @@ TEST_F (ScenarioLoadTest, AStepTheDocumentDoesNotDeclareIsCountedByReason) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    const auto totals = vayu::core::validate_sampled_responses (context_);
     EXPECT_EQ (totals.checked, 2u);
     EXPECT_EQ (totals.failed, 0u)
     << "an undeclared operation is not a response that broke its contract";
@@ -1606,7 +1606,7 @@ TEST_F (ScenarioLoadTest, ARunWhoseSamplesWereThinnedStillReportsHonestly) {
         { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    const auto totals = vayu::core::validate_sampled_responses (context_);
     EXPECT_GT (totals.sampled, 0u);
     EXPECT_LE (totals.sampled, 4u)
     << "the pass validated more than the reservoirs could hold";

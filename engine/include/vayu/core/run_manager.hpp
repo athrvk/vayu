@@ -758,13 +758,11 @@ struct ScriptValidation {
  *
  * Declared here rather than kept file-local so the per-step behaviour can be
  * tested directly against a drained run; the production caller is
- * `execute_load_test`.
- *
- * @param verbose Log the tallies, as the run's own logging does.
+ * `execute_load_test`. Logs its tallies at DEBUG unconditionally - the
+ * console shows them at `-v 2`, as the run's own logging does.
  */
-[[nodiscard]] ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
-vayu::db::Database& db,
-bool verbose);
+[[nodiscard]] ScriptValidation
+validate_scripts (const std::shared_ptr<RunContext>& context, vayu::db::Database& db);
 
 /**
  * @brief Check a drained load run's sampled responses against the contract it
@@ -785,12 +783,11 @@ bool verbose);
  *
  * Declared here rather than kept file-local so the pass can be driven against a
  * hand-seeded collector in tests; the production caller is `execute_load_test`,
- * beside `validate_scripts`.
- *
- * @param verbose Log the tallies, as the run's own logging does.
+ * beside `validate_scripts`. Logs its tallies at DEBUG unconditionally, as
+ * `validate_scripts` does.
  */
-[[nodiscard]] SampledValidationTotals
-validate_sampled_responses (const std::shared_ptr<RunContext>& context, bool verbose);
+[[nodiscard]] SampledValidationTotals validate_sampled_responses (
+const std::shared_ptr<RunContext>& context);
 
 /**
  * @brief Hang each step's deferred-validation tallies off its entry in a
@@ -1076,7 +1073,6 @@ class RunManager {
     bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
-    bool verbose,
     std::shared_ptr<const ScenarioExecution> scenario = nullptr,
     std::unique_ptr<LoadDataSet> data                 = nullptr,
     LoadAuthPlan auth_plan                            = {});
@@ -1100,8 +1096,7 @@ class RunManager {
     const nlohmann::json& config,
     std::shared_ptr<const ScenarioExecution> execution,
     vayu::db::Database& db,
-    vayu::http::CookieJar& cookie_jar,
-    bool verbose);
+    vayu::http::CookieJar& cookie_jar);
 
     /**
      * @brief Stop every active run and join its worker thread.
@@ -1132,7 +1127,6 @@ class RunManager {
 // Worker functions
 void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
-bool verbose,
 RunManager& manager);
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr);
 

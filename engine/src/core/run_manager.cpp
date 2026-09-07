@@ -319,7 +319,6 @@ const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
 size_t max_response_bytes,
 const vayu::http::TransportPolicy& transport,
-bool verbose,
 ScriptValidation& validation,
 std::vector<std::string>& failure_messages) {
     ScriptValidationTotals run_totals;
@@ -340,11 +339,8 @@ std::vector<std::string>& failure_messages) {
             continue;
         }
 
-        if (verbose) {
-            vayu::utils::log_info ("Validating " +
-            std::to_string (samples.size ()) + " response samples for step " +
-            std::to_string (i + 1) + " (" + step.name + ")...");
-        }
+        vayu::utils::log_debug ("Validating " + std::to_string (samples.size ()) +
+        " response samples for step " + std::to_string (i + 1) + " (" + step.name + ")...");
 
         ScriptReplay replay;
         replay.script = post_script;
@@ -408,8 +404,7 @@ size_t failed) {
 }
 
 ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
-vayu::db::Database& db,
-bool verbose) {
+vayu::db::Database& db) {
     ScriptValidation validation;
 
     // Which shape this run is. A scenario load run's scripts hang off its plan
@@ -424,10 +419,8 @@ bool verbose) {
     }
 
     if (!per_step && context->metrics_collector->response_samples ().empty ()) {
-        if (verbose) {
-            vayu::utils::log_info (
-            "No response samples collected for script validation");
-        }
+        vayu::utils::log_debug (
+        "No response samples collected for script validation");
         return validation;
     }
 
@@ -528,22 +521,20 @@ bool verbose) {
     std::vector<std::string> failure_messages;
 
     if (per_step) {
-        const ScriptValidationTotals totals = replay_scenario_steps (engine,
-        scopes, context, sse_limits, script_response_bound, script_transport,
-        verbose, validation, failure_messages);
-        sampled                             = totals.sampled;
-        passed                              = totals.passed;
-        failed                              = totals.failed;
+        const ScriptValidationTotals totals =
+        replay_scenario_steps (engine, scopes, context, sse_limits,
+        script_response_bound, script_transport, validation, failure_messages);
+        sampled = totals.sampled;
+        passed  = totals.passed;
+        failed  = totals.failed;
         // Every scripted step drew a blank, so the run validated nothing.
         if (sampled == 0) {
             return validation;
         }
     } else {
         const auto& samples = context->metrics_collector->response_samples ();
-        if (verbose) {
-            vayu::utils::log_info ("Validating " + std::to_string (samples.size ()) +
-            " response samples with test script...");
-        }
+        vayu::utils::log_debug ("Validating " + std::to_string (samples.size ()) +
+        " response samples with test script...");
 
         ScriptReplay replay;
         replay.script  = &context->test_script;
@@ -570,17 +561,15 @@ bool verbose) {
 
     store_validation_failures (db, context->run_id, failure_messages, passed, failed);
 
-    if (verbose) {
-        vayu::utils::log_info ("  Script validation: " + std::to_string (passed) +
-        " passed, " + std::to_string (failed) + " failed");
-    }
+    vayu::utils::log_debug ("  Script validation: " + std::to_string (passed) +
+    " passed, " + std::to_string (failed) + " failed");
 
     validation.run = ScriptValidationTotals{ sampled, passed, failed };
     return validation;
 }
 
-SampledValidationTotals
-validate_sampled_responses (const std::shared_ptr<RunContext>& context, bool verbose) {
+SampledValidationTotals validate_sampled_responses (
+const std::shared_ptr<RunContext>& context) {
     SampledValidationTotals totals;
 
     // Scenario load runs only. A single-request load run resolves no collection
@@ -639,8 +628,8 @@ validate_sampled_responses (const std::shared_ptr<RunContext>& context, bool ver
         }
     }
 
-    if (verbose && totals.sampled > 0) {
-        vayu::utils::log_info ("  Schema validation: " + std::to_string (totals.checked) +
+    if (totals.sampled > 0) {
+        vayu::utils::log_debug ("  Schema validation: " + std::to_string (totals.checked) +
         " of " + std::to_string (totals.sampled) + " samples checked, " +
         std::to_string (totals.valid) + " valid, " +
         std::to_string (totals.failed) + " failed");
@@ -1094,7 +1083,6 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
 bool RunManager::start_run (const std::string& run_id,
 const nlohmann::json& config,
 vayu::db::Database& db,
-bool verbose,
 std::shared_ptr<const ScenarioExecution> scenario,
 std::unique_ptr<LoadDataSet> data,
 LoadAuthPlan auth_plan) {
@@ -1126,9 +1114,8 @@ LoadAuthPlan auth_plan) {
                 collect_monitor (context, &db, cfg);
             });
         }
-        return std::thread ([context, &db, verbose, this] () {
-            execute_load_test (context, &db, verbose, *this);
-        });
+        return std::thread (
+        [context, &db, this] () { execute_load_test (context, &db, *this); });
     });
 }
 
@@ -1136,12 +1123,11 @@ bool RunManager::start_scenario_run (const std::string& run_id,
 const nlohmann::json& config,
 std::shared_ptr<const ScenarioExecution> execution,
 vayu::db::Database& db,
-vayu::http::CookieJar& cookie_jar,
-bool verbose) {
+vayu::http::CookieJar& cookie_jar) {
     return spawn_run (run_id, config, db,
     [&, execution = std::move (execution)] (const std::shared_ptr<RunContext>& context) {
-        return std::thread ([context, execution, &db, &cookie_jar, verbose, this] () {
-            execute_scenario_run (context, execution, &db, &cookie_jar, verbose, *this);
+        return std::thread ([context, execution, &db, &cookie_jar, this] () {
+            execute_scenario_run (context, execution, &db, &cookie_jar, *this);
         });
     });
 }
@@ -1467,7 +1453,6 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
  */
 void finish_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
-bool verbose,
 double total_duration_s,
 double setup_overhead_s,
 double target_rps,
@@ -1485,8 +1470,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     // Batch flush all results to database (errors and sampled successes)
     try {
         size_t flushed = context->metrics_collector->flush_to_database (db);
-        if (verbose && flushed > 0) {
-            vayu::utils::log_info (
+        if (flushed > 0) {
+            vayu::utils::log_debug (
             "  Flushed " + std::to_string (flushed) + " results to database");
         }
     } catch (const std::exception& e) {
@@ -1498,7 +1483,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     // go into the summary below, so it has to run before the summary write.
     ScriptValidation validation;
     try {
-        validation = validate_scripts (context, db, verbose);
+        validation = validate_scripts (context, db);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("Script validation failed: " + std::string (e.what ()));
     }
@@ -1509,7 +1494,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     // refills concurrency, and neither pass may be on it.
     SampledValidationTotals schema_totals;
     try {
-        schema_totals = validate_sampled_responses (context, verbose);
+        schema_totals = validate_sampled_responses (context);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("Schema validation failed: " + std::string (e.what ()));
     }
@@ -1540,26 +1525,22 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
     }
 
-    if (verbose) {
-        vayu::utils::log_info (
-        "Load test " + context->run_id + " " + vayu::to_string (final_status));
-        vayu::utils::log_info ("  Total requests: " + std::to_string (completed));
-        vayu::utils::log_info ("  Errors: " + std::to_string (errors) + " (" +
-        std::to_string (error_rate) + "%)");
-        vayu::utils::log_info ("  Duration: " + std::to_string (total_duration_s) + " s");
-        vayu::utils::log_info ("  Target RPS: " +
-        (target_rps > 0 ? std::to_string (target_rps) : "unlimited"));
-        vayu::utils::log_info ("  Actual RPS: " + std::to_string (actual_rps));
-        vayu::utils::log_info ("  Avg latency: " + std::to_string (avg_latency) + " ms");
-        vayu::utils::log_info ("  P50/P95/P99: " + std::to_string (percentiles.p50) +
-        "/" + std::to_string (percentiles.p95) + "/" +
-        std::to_string (percentiles.p99) + " ms");
-    }
+    vayu::utils::log_debug (
+    "Load test " + context->run_id + " " + vayu::to_string (final_status));
+    vayu::utils::log_debug ("  Total requests: " + std::to_string (completed));
+    vayu::utils::log_debug ("  Errors: " + std::to_string (errors) + " (" +
+    std::to_string (error_rate) + "%)");
+    vayu::utils::log_debug ("  Duration: " + std::to_string (total_duration_s) + " s");
+    vayu::utils::log_debug ("  Target RPS: " +
+    (target_rps > 0 ? std::to_string (target_rps) : "unlimited"));
+    vayu::utils::log_debug ("  Actual RPS: " + std::to_string (actual_rps));
+    vayu::utils::log_debug ("  Avg latency: " + std::to_string (avg_latency) + " ms");
+    vayu::utils::log_debug ("  P50/P95/P99: " + std::to_string (percentiles.p50) + "/" +
+    std::to_string (percentiles.p95) + "/" + std::to_string (percentiles.p99) + " ms");
 }
 
 void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
-bool verbose,
 RunManager& manager) {
     // Note: is_running and both start stamps are set in start_run() before
     // threads spawn to avoid race condition with metrics_thread
@@ -1670,8 +1651,8 @@ RunManager& manager) {
         const double setup_overhead_s =
         std::chrono::duration<double> (cleanup_end - test_end).count ();
 
-        finish_load_test (context, db, verbose, total_duration_s,
-        setup_overhead_s, target_rps, scenario_state);
+        finish_load_test (context, db, total_duration_s, setup_overhead_s,
+        target_rps, scenario_state);
     } catch (const std::exception& e) {
         // Stop background metrics collection and join it, like the two inner
         // failure paths do. Deferring the join to ~RunContext instead would run

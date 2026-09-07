@@ -177,8 +177,7 @@ class ScriptSendRequestCapDesignTest : public ::testing::Test {
         inputs.elements = vayu::tests::step_elements_with_pre_script (
         fetch_expecting (server_->url (), expected));
         inputs.max_response_bytes = bound;
-        return execute_exchange (engine, jar, "", scopes, std::move (inputs), false)
-        .pre_script_result;
+        return execute_exchange (engine, jar, "", scopes, std::move (inputs)).pre_script_result;
     }
 
     std::unique_ptr<BigBodyServer> server_;
@@ -317,8 +316,8 @@ class ScriptSendRequestCapLoadTest : public ::testing::Test {
 TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptTakesTheRunsLoadBound) {
     set_load_bound (READ_BOUND);
 
-    const auto validation = vayu::core::validate_scripts (
-    run_expecting (refusal_of (READ_BOUND)), *db_, false);
+    const auto validation =
+    vayu::core::validate_scripts (run_expecting (refusal_of (READ_BOUND)), *db_);
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->sampled, 1u);
@@ -331,8 +330,8 @@ TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptTakesTheRunsLoadBound) {
 TEST_F (ScriptSendRequestCapLoadTest, AReplayedStepScriptTakesTheRunsLoadBound) {
     set_load_bound (READ_BOUND);
 
-    const auto validation = vayu::core::validate_scripts (
-    step_run_expecting (refusal_of (READ_BOUND)), *db_, false);
+    const auto validation =
+    vayu::core::validate_scripts (step_run_expecting (refusal_of (READ_BOUND)), *db_);
 
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& step = validation.steps[0];
@@ -344,8 +343,8 @@ TEST_F (ScriptSendRequestCapLoadTest, AReplayedStepScriptTakesTheRunsLoadBound) 
 TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptUnderTheBoundReadsTheWholeBody) {
     set_load_bound (SERVED_BYTES * 2);
 
-    const auto validation = vayu::core::validate_scripts (
-    run_expecting (whole_read_of (SERVED_BYTES)), *db_, false);
+    const auto validation =
+    vayu::core::validate_scripts (run_expecting (whole_read_of (SERVED_BYTES)), *db_);
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u) << recorded_failure ();

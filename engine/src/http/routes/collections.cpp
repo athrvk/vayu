@@ -441,14 +441,13 @@ void register_collection_routes (RouteContext& ctx) {
      * Returns: Array of collection objects with id, name, parentId, order, and timestamps.
      */
     ctx.server.Get ("/collections", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_info ("GET /collections - Fetching all collections");
         auto collections        = ctx.db.get_collections ();
         nlohmann::json response = nlohmann::json::array ();
         for (const auto& c : collections) {
             response.push_back (vayu::json::serialize (c));
         }
-        vayu::utils::log_debug ("GET /collections - Returning " +
-        std::to_string (collections.size ()) + " collections");
+        vayu::utils::log_debug (
+        "Returning " + std::to_string (collections.size ()) + " collections");
         res.set_content (response.dump (), "application/json");
     });
 

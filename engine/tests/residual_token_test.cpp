@@ -481,7 +481,7 @@ class ResidualTokenExchangeTest : public ::testing::Test {
         inputs.request     = std::move (request);
         inputs.elements    = vayu::tests::step_elements_with_pre_script (pre);
         inputs.in_scenario = in_scenario;
-        return execute_exchange (engine, jar, "", scopes, std::move (inputs), false);
+        return execute_exchange (engine, jar, "", scopes, std::move (inputs));
     }
 
     std::unique_ptr<vayu::tests::EchoServer> server_;

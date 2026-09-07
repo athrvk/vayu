@@ -381,8 +381,10 @@ void handle_run_stats (RouteContext& ctx, const httplib::Request& req, httplib::
         return;
     }
 
-    // SSE streaming mode (existing behavior)
-    vayu::utils::log_info ("GET /stats/:id - Starting SSE stream for run: " + run_id);
+    // SSE streaming mode (existing behavior). Debug, not info: which mode a
+    // poll took is internal detail the centralised request line (issue
+    // #1510) does not carry, not a state change worth `-v 1`.
+    vayu::utils::log_debug ("Starting SSE stream for run: " + run_id);
 
     try {
         auto run = ctx.db.get_run (run_id);

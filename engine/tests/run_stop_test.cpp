@@ -280,7 +280,7 @@ TEST_F (RunStopAccountingTest, StoppedRunReachesTerminalStatusPromptly) {
         { "method", "GET" }, { "timeout", 120000 }, { "workers", 1 } };
 
     vayu::core::RunManager manager;
-    manager.start_run (run_id, config, *db, false);
+    manager.start_run (run_id, config, *db);
 
     auto context = manager.get_run (run_id);
     ASSERT_NE (context, nullptr);

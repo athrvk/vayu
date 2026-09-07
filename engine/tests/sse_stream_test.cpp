@@ -745,9 +745,9 @@ class RelayTest : public ::testing::Test {
         db_->init ();
         manager_ = std::make_unique<SseStreamManager> ();
         ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
-        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, false,
-        nullptr, authorize_manager_, cookie_jar_, mock_issuer_manager_,
-        inbox_manager_, mock_server_manager_, *manager_, run_summary_cache_ });
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr,
+        authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
+        mock_server_manager_, *manager_, run_summary_cache_ });
         vayu::http::routes::register_event_stream_routes (*ctx_);
         svr_.set_write_timeout (60, 0);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -932,9 +932,9 @@ class StreamExecuteTest : public ::testing::Test {
         db_->init ();
         manager_ = std::make_unique<SseStreamManager> ();
         ctx_     = std::make_unique<vayu::http::routes::RouteContext> (
-        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, false,
-        nullptr, authorize_manager_, cookie_jar_, mock_issuer_manager_,
-        inbox_manager_, mock_server_manager_, *manager_, run_summary_cache_ });
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr,
+        authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
+        mock_server_manager_, *manager_, run_summary_cache_ });
         vayu::http::routes::register_execution_routes (*ctx_);
         vayu::http::routes::register_event_stream_routes (*ctx_);
         svr_.set_write_timeout (60, 0);
@@ -1364,7 +1364,7 @@ TEST (SseServerShutdownTest, StoppingTheServerDrainsALiveStream) {
 
     const int port = free_port ();
     {
-        vayu::http::Server server (*db, run_manager, port, false);
+        vayu::http::Server server (*db, run_manager, port);
         ASSERT_TRUE (server.start ());
 
         httplib::Client client ("127.0.0.1", port);

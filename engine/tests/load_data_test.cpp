@@ -495,7 +495,7 @@ TEST_F (LoadDataTest, TheDeferredScriptReadsTheRowItsSampleBound) {
     std::sort (sampled_rows.begin (), sampled_rows.end ());
     EXPECT_EQ (sampled_rows, (std::vector<size_t>{ 0, 1 }));
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
     EXPECT_EQ (validation.run->passed, 2u)
@@ -518,7 +518,7 @@ TEST_F (LoadDataTest, WithoutRowsTheDeferredScriptSeesNoIterationData) {
 
     run (payload);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
     EXPECT_EQ (validation.run->passed, 1u);

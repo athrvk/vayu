@@ -193,7 +193,6 @@ void register_diagnostics_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/diagnostics/connection",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info ("POST /diagnostics/connection");
         auto [status, body] =
         connection_test (req.body, vayu::http::resolve_transport_policy (ctx.db));
         res.status = status;

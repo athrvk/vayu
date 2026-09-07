@@ -1364,8 +1364,8 @@ void handle_import_apply (RouteContext& ctx, const httplib::Request& req, httpli
             vayu::utils::log_warning ("POST /import/apply - " +
             std::to_string (status) + ": " + error_message_of (response));
         } else {
-            vayu::utils::log_info ("POST /import/apply - applied " +
-            std::to_string (response["idMap"].size ()) + " items");
+            vayu::utils::log_info (
+            "applied " + std::to_string (response["idMap"].size ()) + " items");
         }
         res.status = status;
         res.set_content (response.dump (), "application/json");
@@ -1391,8 +1391,7 @@ void handle_import_parse (RouteContext& ctx, const httplib::Request& req, httpli
             vayu::utils::log_warning ("POST /import/parse - " +
             std::to_string (status) + ": " + error_message_of (response));
         } else {
-            vayu::utils::log_info ("POST /import/parse - " +
-            response["meta"]["format"].get<std::string> () + ", " +
+            vayu::utils::log_info (response["meta"]["format"].get<std::string> () + ", " +
             std::to_string (response["meta"]["requestCount"].get<int> ()) + " request(s)");
         }
         res.status = status;
@@ -1450,7 +1449,7 @@ void handle_import_preview (RouteContext& ctx, const httplib::Request& req, http
             vayu::utils::log_warning ("POST /import - " +
             std::to_string (status) + ": " + error_message_of (response));
         } else {
-            vayu::utils::log_info ("POST /import - imported " +
+            vayu::utils::log_info ("imported " +
             std::to_string (response["requests"].get<size_t> ()) +
             " request(s) from " + response["meta"]["format"].get<std::string> ());
         }

@@ -1698,7 +1698,7 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
         inputs.iteration_count = 1;
     }
     auto exchange = execute_exchange (script_engine, ctx.cookie_jar,
-    send.cookie_scope, scopes, std::move (inputs), ctx.verbose);
+    send.cookie_scope, scopes, std::move (inputs));
 
     // What the contract says this response should have been (#628).
     // Resolved from the *stored* request: an unsaved editor request is not
@@ -1957,13 +1957,13 @@ const vayu::core::ScenarioExecution* scenario_execution) {
     }
 
     if (scenario_execution != nullptr) {
-        vayu::utils::log_info ("POST /runs - Collection run: run_id=" + run_id +
+        vayu::utils::log_info ("Collection run started: run_id=" + run_id +
         ", collection=" + scenario_execution->request.collection_id +
         ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
         ", iterations=" + std::to_string (scenario_execution->request.iterations) +
         ", environment_id=" + run.environment_id.value_or ("none"));
     } else {
-        vayu::utils::log_info ("POST /runs - Load Test: run_id=" + run_id +
+        vayu::utils::log_info ("Load test started: run_id=" + run_id +
         ", mode=" + json.value ("mode", "unspecified") +
         ", method=" + json.value ("method", "UNKNOWN") +
         ", url=" + json.value ("url", "UNKNOWN") + ", duration=" + duration_str +
@@ -2089,8 +2089,8 @@ httplib::Response& res) {
     // handed one.
     const bool started = (is_scenario && !is_scenario_load) ?
     ctx.run_manager.start_scenario_run (
-    run_id, json, scenario_execution, ctx.db, ctx.cookie_jar, ctx.verbose) :
-    ctx.run_manager.start_run (run_id, json, ctx.db, ctx.verbose,
+    run_id, json, scenario_execution, ctx.db, ctx.cookie_jar) :
+    ctx.run_manager.start_run (run_id, json, ctx.db,
     is_scenario_load ? scenario_execution : nullptr, std::move (load_data.set),
     std::move (load_data.auth));
     if (!started) {

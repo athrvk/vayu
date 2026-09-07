@@ -260,7 +260,7 @@ TEST_F (LoadReplayEventsTest, AStreamedSampleReplaysWithItsEvents) {
     context->metrics_collector->record_response_sample (
     streamed_response (THREE_EVENTS, 3));
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u);
     EXPECT_EQ (validation.run->passed, 1u);
@@ -281,7 +281,7 @@ TEST_F (LoadReplayEventsTest, ANonStreamSampleLeavesTheFieldUndefined) {
     plain.headers["Content-Type"] = "application/json";
     context->metrics_collector->record_response_sample (plain);
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->passed, 1u);
     EXPECT_EQ (validation.run->failed, 0u);
@@ -302,7 +302,7 @@ TEST_F (LoadReplayEventsTest, TheStoredEventsSettingBoundsWhatAReplayedScriptSee
     context->metrics_collector->record_response_sample (
     streamed_response (event_body (6), 6));
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u);
     EXPECT_EQ (validation.run->passed, 1u);

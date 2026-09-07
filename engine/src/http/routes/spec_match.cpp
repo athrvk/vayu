@@ -164,7 +164,7 @@ void register_spec_match_routes (RouteContext& ctx) {
                 vayu::utils::log_warning ("POST /specs/match - " +
                 std::to_string (status) + ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info ("POST /specs/match - Matched " +
+                vayu::utils::log_info ("Matched " +
                 std::to_string (body["matched"].size ()) + " request(s), " +
                 std::to_string (body["unmatchedRequests"].size ()) + " unmatched, " +
                 std::to_string (body["unmatchedOperations"].size ()) + " operation(s) unclaimed");

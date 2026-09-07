@@ -86,7 +86,6 @@ void register_cookie_routes (RouteContext& ctx) {
      * The jar's contents, one entry per scope that holds anything.
      */
     ctx.server.Get ("/cookies", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_debug ("GET /cookies - Reading the cookie jar");
         res.set_content (cookies_response (ctx.cookie_jar).dump (), "application/json");
     });
 
@@ -110,7 +109,7 @@ void register_cookie_routes (RouteContext& ctx) {
         } else {
             scope_label = *scope;
         }
-        vayu::utils::log_info ("DELETE /cookies - scope=" + scope_label +
+        vayu::utils::log_info ("scope=" + scope_label +
         ", cleared=" + std::to_string (response["cleared"].get<size_t> ()));
         res.set_content (response.dump (), "application/json");
     });

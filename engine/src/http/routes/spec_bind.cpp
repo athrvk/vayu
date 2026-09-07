@@ -343,7 +343,7 @@ void register_spec_bind_routes (RouteContext& ctx) {
                 vayu::utils::log_warning ("POST /specs/bind - " +
                 std::to_string (status) + ": " + error_message_of (response));
             } else {
-                vayu::utils::log_info ("POST /specs/bind - Bound to spec " +
+                vayu::utils::log_info ("Bound to spec " +
                 response["specId"].get<std::string> () + ": " +
                 std::to_string (response["stamped"].get<size_t> ()) + " stamped, " +
                 std::to_string (response["cleared"].get<size_t> ()) + " cleared");

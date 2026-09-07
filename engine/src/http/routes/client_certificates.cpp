@@ -390,8 +390,7 @@ void register_client_certificate_routes (RouteContext& ctx) {
         for (const auto& row : rows) {
             response.push_back (vayu::json::serialize (row));
         }
-        vayu::utils::log_debug ("GET /client-certificates - Returning " +
-        std::to_string (rows.size ()) + " entries");
+        vayu::utils::log_debug ("Returning " + std::to_string (rows.size ()) + " entries");
         res.set_content (response.dump (), "application/json");
     });
 
@@ -462,7 +461,6 @@ void register_client_certificate_routes (RouteContext& ctx) {
     ctx.server.Delete (R"(/client-certificates/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
-        vayu::utils::log_info ("DELETE /client-certificates/" + id);
 
         if (!ctx.db.get_client_certificate (id)) {
             send_error (res, 404, "Client certificate not found");

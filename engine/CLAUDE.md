@@ -205,13 +205,29 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `script.*` element before #1514's pipeline existed; now that it does, the
   two columns are dead data and this is the real cut-over the #1513 comment
   above once deferred.
-- **The logger has two switches, and the request log is not yet one of them.**
+- **One request line per HTTP call, from one place** (#1510).
   `vayu::utils::Logger` has a console verbosity (`-v 0|1|2`: warnings and
   errors, info, debug) and a separate file level (`logLevel`, default debug,
-  with rotation under `maxLogFileBytes`). A route's request line is
-  hand-written per route today and about half the routes have none, `GET
-  /inbox` and the mock listings among them, so an absent log line is not
-  evidence a route did not run; #1510 centralises one line per call.
+  with rotation under `maxLogFileBytes`). `vayu::http::install_request_logger`
+  (`http/request_log.hpp`) wires a `set_pre_routing_handler` timestamp and a
+  `set_logger` hook onto both `httplib::Server` instances the engine owns (the
+  management API in `Server::setup_routes`, the inbox listener in
+  `routes/inbox.cpp`) so every call gets one line - `"GET /inbox 200 1.3ms
+  412B"`, method, path, status, duration and response bytes, never the query
+  string, headers or body - at the level its status calls for: 2xx at DEBUG,
+  3xx/4xx at INFO, 5xx at WARNING. A hand-written per-route line is now only
+  for what that hook cannot know (a run starting or stopping, a count a
+  handler computed); `tests/request_log_test.cpp`'s source scan fails if a
+  route file brings the old per-route "METHOD /path" shape back. The daemon's
+  legacy `bool verbose` (threaded through `Server`, `RouteContext`,
+  `execute_exchange` and every load-run worker function down to
+  `client.cpp`'s curl transfer-debug frames) is retired in the same issue:
+  everything that gated on it now reads `Logger::instance ()` directly - an
+  unconditional DEBUG line for what used to be "log the tallies if verbose",
+  `get_verbosity () >= 2` for the curl frames. The per-run JSON `"verbose"`
+  key (`run_manager.cpp`'s `configure_event_loop`, a caller opting one load
+  run into curl debug frames on the event-loop path) is a different switch
+  and is untouched.
 - **vcpkg manages every C++ dependency**: add one in `engine/vcpkg.json`. In
   the cloud dev environment a port fetched by `vcpkg_from_github` fails on a
   cold cache with `curl operation failed with response code 403` (the egress
