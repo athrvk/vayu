@@ -169,7 +169,12 @@ export function ElementList({ elements, onChange, kinds, emptyLabel }: ElementLi
 	const groups = groupedByCategory(kinds);
 
 	function addElement(kind: ElementKindSchema) {
-		const next: ElementDef = { id: `el_${generateId()}`, kind: kind.kind, enabled: true, config: {} };
+		const next: ElementDef = {
+			id: `el_${generateId()}`,
+			kind: kind.kind,
+			enabled: true,
+			config: {},
+		};
 		onChange([...elements, next]);
 	}
 

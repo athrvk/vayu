@@ -956,7 +956,9 @@ export default function RequestBuilder() {
 					onClose={handleCloseLoadTestDialog}
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
-					hasPreRequestScript={!!scriptTextFor(pendingLoadTestRequest?.elements ?? [], "script.pre")}
+					hasPreRequestScript={
+						!!scriptTextFor(pendingLoadTestRequest?.elements ?? [], "script.pre")
+					}
 					oauth2Config={pendingOAuth2Config ?? undefined}
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
 					collectionId={fetchedRequest?.collectionId}

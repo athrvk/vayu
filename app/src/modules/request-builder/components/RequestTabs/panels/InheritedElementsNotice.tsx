@@ -43,7 +43,10 @@ interface InheritedElementsNoticeProps {
 
 function entriesFromChain(chain: Collection[]): ResolvedElement[] {
 	return chain.flatMap((c) =>
-		c.elements.map((el) => ({ ...el, origin: { kind: "collection" as const, id: c.id, name: c.name } }))
+		c.elements.map((el) => ({
+			...el,
+			origin: { kind: "collection" as const, id: c.id, name: c.name },
+		}))
 	);
 }
 
@@ -110,10 +113,7 @@ export default function InheritedElementsNotice({
 			{source.map((entry) => {
 				const isDisabled = disabled.has(entry.id);
 				return (
-					<span
-						key={entry.id}
-						className="flex items-center gap-2 flex-1 min-w-0"
-					>
+					<span key={entry.id} className="flex items-center gap-2 flex-1 min-w-0">
 						<Folder className="w-3 h-3 shrink-0 text-primary" />
 						<span className="text-[11px] font-mono truncate text-foreground font-semibold">
 							{entry.origin?.name}

@@ -51,7 +51,10 @@ import type { KeyValueEntry, Request, RequestAuth, RequestBody } from "@/types";
  * Required, and typed to exclude `inherit`, so a caller holding raw rows has to
  * resolve rather than accidentally hand over an `inherit` that walks nothing.
  */
-export type RequestReferenceSource = Pick<Request, "url" | "params" | "headers" | "body" | "elements"> & {
+export type RequestReferenceSource = Pick<
+	Request,
+	"url" | "params" | "headers" | "body" | "elements"
+> & {
 	resolvedAuth: Exclude<RequestAuth, { mode: "inherit" }>;
 };
 

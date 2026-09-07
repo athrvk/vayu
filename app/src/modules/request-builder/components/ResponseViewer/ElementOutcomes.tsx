@@ -64,7 +64,10 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 					return (
 						<div
 							key={`${outcome.id}-${i}`}
-							className={cn("p-2.5 rounded-md border", OUTCOME_CARD_CLASS[outcome.outcome])}
+							className={cn(
+								"p-2.5 rounded-md border",
+								OUTCOME_CARD_CLASS[outcome.outcome]
+							)}
 							title={outcome.message}
 						>
 							<div className="flex items-center gap-2">

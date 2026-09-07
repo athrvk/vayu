@@ -36,10 +36,10 @@ const CODE_CLASS = "bg-muted px-1 rounded-md";
 
 const PRE_INTRO = (
 	<>
-		Execute JavaScript before sending the request. Use the <code className={CODE_CLASS}>pm</code>{" "}
-		API. Edits to <code className={CODE_CLASS}>pm.request</code> change what is actually sent.
-		Load tests do not run pre-request scripts at all - this one runs on Send and in a collection
-		run.
+		Execute JavaScript before sending the request. Use the{" "}
+		<code className={CODE_CLASS}>pm</code> API. Edits to{" "}
+		<code className={CODE_CLASS}>pm.request</code> change what is actually sent. Load tests do
+		not run pre-request scripts at all - this one runs on Send and in a collection run.
 	</>
 );
 

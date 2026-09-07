@@ -15,11 +15,16 @@
  * and no ceiling.
  *
  * The rendered classes are asserted where the component is rendered
- * (`BodyPanel.test.tsx`, `script-panels.test.tsx`, `ScriptTab.chips.test.tsx`);
- * a class arriving in a variable is invisible to a scan. What a scan *can* see
- * is the constant coming back, which is the regression this guards: a fourth
- * editor added with `height="400px"` reads as ordinary until someone opens it
- * in a tall window.
+ * (`BodyPanel.test.tsx`, `ElementList.test.tsx`); a class arriving in a
+ * variable is invisible to a scan. What a scan *can* see is the constant
+ * coming back, which is the regression this guards: a fourth editor added
+ * with `height="400px"` reads as ordinary until someone opens it in a tall
+ * window.
+ *
+ * `ScriptPanel` and the collection's `ScriptTab` are gone (issue #1512): a
+ * script is a `script.pre` / `script.post` element now, and its editor lives
+ * in `ScriptElementForm` (`components/shared/ElementList/`), the third tree
+ * below.
  */
 
 import { describe, it, expect } from "vitest";
@@ -30,10 +35,11 @@ import { dirname, join } from "node:path";
 /** `app/src`, from this file's home three levels of components below it. */
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..");
 
-/** The two trees whose panels sit inside a full-height tab panel. */
+/** The trees whose panels sit inside a full-height tab panel. */
 const TREES = [
 	"modules/request-builder/components/RequestTabs/panels",
 	"modules/collections/CollectionDetail",
+	"components/shared/ElementList",
 ];
 
 /** `height="320px"`, `height={320}`, `height="20rem"` - a fixed box either way. */
@@ -51,12 +57,12 @@ const files = TREES.flatMap((tree) =>
 describe("editors in a tab panel fill it", () => {
 	it("scanned the files it is guarding", () => {
 		// Vitest stubs a CSS import to "", and a glob that matches nothing reads
-		// the same as a tree that is clean. BodyPanel, ScriptPanel and ScriptTab
-		// are the three that mount an editor.
+		// the same as a tree that is clean. BodyPanel and ScriptElementForm are
+		// the two that mount an editor now.
 		expect(files.map((f) => f.path).sort()).toContain(
-			"modules/collections/CollectionDetail/ScriptTab.tsx"
+			"components/shared/ElementList/ScriptElementForm.tsx"
 		);
-		expect(files.length).toBeGreaterThanOrEqual(3);
+		expect(files.length).toBeGreaterThanOrEqual(2);
 		for (const file of files) expect(file.source.length).toBeGreaterThan(200);
 	});
 

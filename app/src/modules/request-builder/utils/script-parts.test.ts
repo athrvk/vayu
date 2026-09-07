@@ -95,12 +95,20 @@ describe("scriptParts", () => {
 			collection({
 				id: "c1",
 				name: "C1",
-				elements: [scriptElement("script.pre", "pre"), scriptElement("script.post", "post")],
+				elements: [
+					scriptElement("script.pre", "pre"),
+					scriptElement("script.post", "post"),
+				],
 			}),
 		];
 
 		expect(
-			scriptParts(chain, (c) => scriptTextFor(c.elements, "script.post"), undefined, undefined)
+			scriptParts(
+				chain,
+				(c) => scriptTextFor(c.elements, "script.post"),
+				undefined,
+				undefined
+			)
 		).toEqual([{ origin: "collection", id: "c1", name: "C1", script: "post" }]);
 	});
 });
