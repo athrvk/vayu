@@ -13,6 +13,7 @@
  */
 
 import type { ElementDef } from "@/types";
+import { generateId } from "@/lib/id";
 
 /**
  * The joined text of every enabled element of one script kind (`script.pre`
@@ -35,4 +36,21 @@ export function scriptTextFor(
 		.map((el) => el.config.script)
 		.filter((s): s is string => typeof s === "string" && s.trim().length > 0);
 	return scripts.length > 0 ? scripts.join("\n\n") : undefined;
+}
+
+/**
+ * The `script.pre`/`script.post` pair every new request and collection is
+ * created with, empty and enabled. The two script tabs this feature replaced
+ * were always present, running only once given a non-blank body; a fresh
+ * `elements: []` loses that visible slot; a fresh user has to know the
+ * "Add element" menu exists before they can find where a pre-request or test
+ * script goes. An empty `config.script` still passes the kind's own schema -
+ * it requires the property present, not non-empty - and `scriptTextFor`
+ * already treats a blank script as absent everywhere it's read.
+ */
+export function defaultScriptElements(): ElementDef[] {
+	return [
+		{ id: `el_${generateId()}`, kind: "script.pre", enabled: true, config: { script: "" } },
+		{ id: `el_${generateId()}`, kind: "script.post", enabled: true, config: { script: "" } },
+	];
 }

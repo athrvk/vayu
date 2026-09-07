@@ -1596,6 +1596,19 @@ so a kind the engine adds needs no change here; `inherit.disable` is excluded
 from it, since a user never adds one by hand - it is written by the
 inheritance notice's Disable toggle.
 
+**A new request or collection is seeded with an empty `script.pre`/
+`script.post` pair** (`lib/elements.ts`'s `defaultScriptElements`), enabled
+with `config.script: ""`. The two tabs this feature replaced were always
+present and ran only once given a non-blank body; `elements: []` on a fresh
+entity would hide that slot behind the Add menu for a user with no reason yet
+to know it exists. An empty script still passes the kind's own schema (only
+the property's presence is required, not its length), and `scriptTextFor`
+already treats a blank script as absent everywhere it is read, so the pair is
+inert until someone types into it. Seeded at every creation path -
+`useTreeCrud.ts`'s New Collection / Add Folder / Add Request, and
+`useNewRequest.ts`'s command-palette flow - not in `createDefaultRequestState`,
+which only fills transient local state and is never sent as a create payload.
+
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 
 Response-rendering primitives reused outside the request builder (e.g. history detail):
