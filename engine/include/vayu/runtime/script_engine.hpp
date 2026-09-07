@@ -260,6 +260,37 @@ struct ScriptContext {
     std::vector<vayu::http::CookieWrite>* cookie_writes = nullptr;
 
     /**
+     * @brief A read-only view of the cookies one virtual user carries into
+     *        this step of a scenario load run, or null (issue #1501).
+     *
+     * Set only by the inline `step.before`/`step.after` hooks a scenario load
+     * run's own producer and completion callbacks run for a `script.*`
+     * element marked to run inline (#1495): `scenario_load.cpp` points this
+     * at `VirtualUser::cookies` - lines already materialized on the VU, with
+     * that VU's own completion the only reader, so no lock and no `CookieJar`
+     * object are needed. `pm.cookies`'s flat reads answer from this when
+     * `cookie_jar` above is null; `pm.cookies.jar()` (staging a *write*)
+     * stays gated on `cookie_jar` alone, unchanged - a load run's cookie
+     * state advances through `VirtualUser::cookies` itself, never through a
+     * script.
+     */
+    const std::vector<std::string>* cookie_read_lines = nullptr;
+
+    /**
+     * @brief What a flat `pm.cookies` read throws when neither `cookie_jar`
+     *        nor `cookie_read_lines` is set, or null for the default
+     *        design-mode-feature sentence (issue #1501).
+     *
+     * Two load-path contexts have a truer thing to say than the default: a
+     * deferred script replay once had a per-user cookie view during the run,
+     * but runs afterward against a recorded sample with that state gone; a
+     * single-request load run never had one, because it has no scenario and
+     * no virtual user. `%s` is the member name, exactly as the default
+     * message takes it.
+     */
+    const char* cookie_read_refusal = nullptr;
+
+    /**
      * @brief How `pm.sendRequest` reaches the network (issue #705).
      *
      * The same policy the enclosing exchange's own send uses, for the same

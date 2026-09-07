@@ -436,7 +436,10 @@ makes a session survive from one design-mode request to the next.
   virtual user owns a private list seeded onto its own transfer and cleared at
   each iteration boundary, and the environment jar is untouched (see "Scenario
   load runs" under Load Test Strategies). One session shared between 1,000
-  virtual users is not the thing being measured.
+  virtual users is not the thing being measured. An inline `script.*`
+  element's `pm.cookies` reads that one VU's own list directly, with no lock
+  and no `CookieJar` object (issue #1501); it stays read-only there, and
+  `pm.cookies.jar()`'s writes still throw under every load-run script.
 - **Threading:** one mutex around the scope map; every accessor copies out, so
   no reference into the storage escapes to a caller.
 - **Shown as sent.** Because libcurl attaches the matching cookies itself, the

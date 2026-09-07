@@ -157,6 +157,14 @@ struct ContextData {
     /// hands them to the auxiliary transfer.
     std::vector<vayu::http::CookieWrite>* cookie_writes = nullptr;
 
+    /// A read-only per-VU cookie view for an inline load-run script - see
+    /// `ScriptContext::cookie_read_lines`, which owns the rationale.
+    const std::vector<std::string>* cookie_read_lines = nullptr;
+
+    /// What a flat `pm.cookies` read throws with neither a jar nor a
+    /// per-VU view - see `ScriptContext::cookie_read_refusal`.
+    const char* cookie_read_refusal = nullptr;
+
     /// How `pm.sendRequest` reaches the network - see
     /// `ScriptContext::transport`, which owns the rationale.
     vayu::http::TransportPolicy transport;
@@ -7448,9 +7456,12 @@ std::vector<std::string> staged_jar_lines (const ContextData& data) {
     return vayu::http::apply_cookie_writes (std::move (lines), *data.cookie_writes);
 }
 
-// The jar's cookies that would be sent to the request this script belongs to.
-// Returns nullopt having thrown: either there is no jar, or there is no request
-// to match against, and both deserve a sentence rather than an empty answer.
+// The cookies that would be sent to the request this script belongs to -
+// from the jar when there is one (design mode), from the read-only per-VU
+// view an inline load-run script carries (issue #1501) otherwise. Returns
+// nullopt having thrown: no context or request to match against, or neither
+// source of cookies exists here, and each deserves its own sentence rather
+// than an empty answer.
 std::optional<std::vector<vayu::http::JarCookie>>
 jar_cookies_from_context (JSContext* ctx, const char* member) {
     auto* data = get_context_data (ctx);
@@ -7458,10 +7469,21 @@ jar_cookies_from_context (JSContext* ctx, const char* member) {
         JS_ThrowInternalError (ctx, "No request available");
         return std::nullopt;
     }
-    if (!jar_context (ctx, member)) {
-        return std::nullopt;
+    if (data->cookie_jar) {
+        return vayu::http::matching_in (staged_jar_lines (*data), data->request->url);
     }
-    return vayu::http::matching_in (staged_jar_lines (*data), data->request->url);
+    if (data->cookie_read_lines) {
+        return vayu::http::matching_in (*data->cookie_read_lines, data->request->url);
+    }
+    JS_ThrowPlainError (ctx,
+    data->cookie_read_refusal != nullptr ?
+    data->cookie_read_refusal :
+    "pm.cookies.%s is not available here: the cookie jar is a design-mode "
+    "feature, and this execution has no jar to read. Use "
+    "pm.response.cookies for the Set-Cookie of the response in hand. See "
+    "docs/engine/scripting.md.",
+    member);
+    return std::nullopt;
 }
 
 // Which cookie answers for a name when the jar holds it more than once - the
@@ -8681,15 +8703,17 @@ class ScriptEngine::Impl {
         // Both per-execution: the capability is this caller's, and the request
         // budget starts full for every script rather than carrying over
         // through a pooled context.
-        ctx_data.allow_send_request = config.allow_send_request;
-        ctx_data.send_request_count = 0;
-        ctx_data.cookie_jar         = ctx.cookie_jar;
-        ctx_data.cookie_scope       = ctx.cookie_scope;
-        ctx_data.cookie_writes      = ctx.cookie_writes;
-        ctx_data.transport          = ctx.transport;
-        ctx_data.default_headers    = ctx.default_headers;
-        ctx_data.max_response_bytes = ctx.max_response_bytes;
-        ctx_data.in_scenario        = ctx.in_scenario;
+        ctx_data.allow_send_request  = config.allow_send_request;
+        ctx_data.send_request_count  = 0;
+        ctx_data.cookie_jar          = ctx.cookie_jar;
+        ctx_data.cookie_scope        = ctx.cookie_scope;
+        ctx_data.cookie_writes       = ctx.cookie_writes;
+        ctx_data.cookie_read_lines   = ctx.cookie_read_lines;
+        ctx_data.cookie_read_refusal = ctx.cookie_read_refusal;
+        ctx_data.transport           = ctx.transport;
+        ctx_data.default_headers     = ctx.default_headers;
+        ctx_data.max_response_bytes  = ctx.max_response_bytes;
+        ctx_data.in_scenario         = ctx.in_scenario;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response, pm.info and pm.iterationData with

@@ -90,6 +90,13 @@ struct ScriptReplay {
     /// went through, or presents the client certificate they presented, is the
     /// case #705 exists for; the load path was the one caller that never set it.
     vayu::http::TransportPolicy transport;
+    /// Whether this is a scenario step's replay rather than a single-request
+    /// run's (issue #1501): the two have different true things to say about
+    /// why `pm.cookies` still has nothing to read here. A scenario step *did*
+    /// carry per-VU cookies during the run, just not into this replay, which
+    /// runs after the fact against a recorded sample; a single-request run
+    /// never had a virtual user or a cookie state to begin with.
+    bool is_scenario_replay = false;
 };
 
 /**
@@ -168,8 +175,17 @@ std::vector<std::string>& failure_messages) {
             // here - and an empty one at that - is what made the same test
             // script pass on Send and fail on every replay.
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
-            script_ctx.request_id   = replay.request_id;
-            script_ctx.request_name = replay.request_name;
+            script_ctx.cookie_read_refusal = replay.is_scenario_replay ?
+            "pm.cookies.%s is not available here: a replayed script runs "
+            "after the run, against a recorded response; the user's "
+            "cookies at that moment are not recorded. See "
+            "docs/engine/scripting.md." :
+            "pm.cookies.%s is not available here: a single-request load "
+            "run has no scenario and so no per-user cookie state to read. "
+            "Use pm.response.cookies for the Set-Cookie of the response "
+            "in hand. See docs/engine/scripting.md.";
+            script_ctx.request_id          = replay.request_id;
+            script_ctx.request_name        = replay.request_name;
             // The iteration this response was actually sent in and the virtual
             // user that sent it, both claimed on the submission path before the
             // send (issue #994) - which is what keeps issue #300's ruling
@@ -350,7 +366,8 @@ std::vector<std::string>& failure_messages) {
         " response samples for step " + std::to_string (i + 1) + " (" + step.name + ")...");
 
         ScriptReplay replay;
-        replay.script = post_script;
+        replay.script             = post_script;
+        replay.is_scenario_replay = true;
         // The step's own request, so `pm.request` describes the step the
         // script is asserting on rather than a run-level request a
         // scenario payload does not have.

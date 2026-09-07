@@ -418,6 +418,7 @@ vayu::Request& request) {
             auto scopes = vu.scope_overlay.materialize (state.base_scopes);
             auto script_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            script_ctx.cookie_read_lines = &vu.cookies;
             bind_step_identity (script_ctx, step, iteration, vu_index);
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Pre-request");
@@ -489,6 +490,7 @@ const vayu::Response& response) {
             auto scopes = vu.scope_overlay.materialize (state.base_scopes);
             auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            script_ctx.cookie_read_lines = &vu.cookies;
             bind_step_identity (script_ctx, step, vu.iteration, vu.index);
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Post-request");
