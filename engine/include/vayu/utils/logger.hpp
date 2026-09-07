@@ -77,14 +77,6 @@ class Logger {
     // Force flush log file
     void flush ();
 
-    // Legacy support
-    void set_verbose (bool verbose) {
-        verbosity_level_ = verbose ? 1 : 0;
-    }
-    bool is_verbose () const {
-        return verbosity_level_ > 0;
-    }
-
     private:
     Logger () = default;
     ~Logger ();

@@ -89,8 +89,7 @@ function collection(): Collection {
 		order: 0,
 		variables: {},
 		auth: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
 	};

@@ -532,7 +532,7 @@ class MidRunRefreshTest : public ::testing::Test {
     json execute (const std::string& run_id, const json& config) {
         create_run_row (run_id);
         vayu::core::RunManager manager;
-        EXPECT_TRUE (manager.start_run (run_id, config, *db, false));
+        EXPECT_TRUE (manager.start_run (run_id, config, *db));
         await_completion (run_id);
         manager.shutdown (std::chrono::milliseconds (15000));
 
@@ -589,8 +589,8 @@ TEST_F (MidRunRefreshTest, AFailedRefreshIsRecordedAndTheRunStillCompletes) {
 
     create_run_row ("run-auth-refresh-fails");
     vayu::core::RunManager manager;
-    ASSERT_TRUE (manager.start_run ("run-auth-refresh-fails",
-    run_config (target.api_url (), oauth2), *db, false));
+    ASSERT_TRUE (manager.start_run (
+    "run-auth-refresh-fails", run_config (target.api_url (), oauth2), *db));
 
     // Only once the run is on the wire has it resolved its first token - auth
     // is resolved on the worker, after start_run has returned. Breaking the

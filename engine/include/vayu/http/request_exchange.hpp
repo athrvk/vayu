@@ -25,10 +25,12 @@
  * never receives this one's fixes.
  */
 
+#include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -36,6 +38,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
@@ -165,6 +168,22 @@ vayu::runtime::ScriptContext& ctx,
 const std::string& script_type);
 
 /**
+ * The `ScriptEngine` this OS thread uses for a load run's inline scripts
+ * (issue #1495), constructed once per thread on first use rather than shared
+ * behind one pool mutex - each event-loop worker and the strategy thread run
+ * their own inline scripts locally.
+ *
+ * Safe as a thread-local: a load run's worker threads - the strategy thread
+ * and every event-loop worker - are spawned fresh for that run and joined
+ * before it retains (`RunContext::release_execution_resources`), the same
+ * lifetime `docs/engine/architecture.md` already documents for the event loop
+ * itself, so the first call on a thread this run, this config, and no other
+ * run's config is ever observed here.
+ */
+[[nodiscard]] vayu::runtime::ScriptEngine& script_engine_for_this_thread (
+const vayu::runtime::ScriptConfig& config);
+
+/**
  * Point @p ctx's four variable scopes at @p scopes, and nothing else.
  *
  * The leaf collection scope is handed over writable while its ancestors are
@@ -202,6 +221,91 @@ ScriptVariableScopes& scopes,
 vayu::http::CookieJar& jar,
 const std::string& cookie_scope,
 std::vector<vayu::http::CookieWrite>* writes);
+
+/**
+ * A per-virtual-user write layer over a run's shared @ref ScriptVariableScopes
+ * (issue #1495).
+ *
+ * A load run's `script.*` and `extract.*` elements write through
+ * `ElementContext::set_variable` exactly as a design send's do, but the target
+ * they must land in cannot be the run-wide scopes a design send and the
+ * sequential runner mutate directly: a scenario load run's virtual users share
+ * one event loop, and two users writing the same variable name into one
+ * `ScriptVariableScopes` is the cross-contamination this issue exists to stop
+ * (`docs/engine/architecture.md`'s "a VU is a small value" note - cookies are
+ * per-VU for the identical reason). Each VU instead holds one of these: a
+ * handful of overridden names, not a copy of the run's whole variable set -
+ * about 200 bytes per written name, so 1,000 users cost kilobytes, never the
+ * size of the scopes themselves.
+ *
+ * `apply_onto` layers the overlay onto an already-flattened base map (built
+ * once per run by @ref flatten_variable_scopes, never per submission) in the
+ * same precedence `values_from_scopes` gives the run's own scopes -
+ * environment over the collection chain over globals - so a name this VU wrote
+ * reads back exactly as `pm.variables.get` would report it, and a name it
+ * never touched still falls through to the run's shared value.
+ */
+class ScopeOverlay {
+    public:
+    /// Mirrors `set_scope_variable`'s own target selection, so an `extract.*`
+    /// element's `ElementContext::set_variable` call lands in the same slot
+    /// here it would in a design send's shared scopes.
+    void set (std::string_view scope, const std::string& name, const std::string& value);
+
+    /**
+     * After an inline `script.pre` / `script.post` ran against a
+     * `materialize`d copy, replace this VU's overlay wholesale with what the
+     * script left the three writable scopes as.
+     *
+     * A whole-scope replace rather than a diff, and still correct: the copy
+     * the script mutated already started as the run's base scopes with this
+     * VU's *prior* overlay applied, so "what came out" already **is** "base
+     * plus every override this VU has ever made" - storing it back is the
+     * same operation a diff-then-merge would perform, without needing
+     * `Variable`'s equality to find what changed.
+     */
+    void replace_from (const ScriptVariableScopes& scopes);
+
+    [[nodiscard]] bool empty () const {
+        return environment_.empty () && collection_.empty () && globals_.empty ();
+    }
+
+    /// A new iteration is a new user, not the same one logging in twice - the
+    /// same rule `VirtualUser::cookies` follows, cleared at the same boundary.
+    void clear ();
+
+    /// Applied lowest precedence first, so the highest-precedence overlay
+    /// entry a VU wrote is what survives on @p vars - the same order
+    /// `values_from_scopes` built @p vars in to begin with.
+    void apply_onto (vayu::http::VariableValues& vars) const;
+
+    /**
+     * A full `ScriptVariableScopes` an inline script can run against: @p
+     * base's read-only ancestor chain verbatim, and its environment /
+     * collection / globals with this VU's overlay layered on top - the one
+     * place this issue pays a real copy, and only for a step whose
+     * `script.*` element actually opted into running inline.
+     */
+    [[nodiscard]] ScriptVariableScopes materialize (const ScriptVariableScopes& base) const;
+
+    private:
+    vayu::Environment environment_;
+    vayu::Environment collection_;
+    vayu::Environment globals_;
+};
+
+/**
+ * The scopes as one map, with composition's precedence - environment over the
+ * collection chain over globals - so a name resolves in a script exactly as
+ * `pm.variables.get` answers it.
+ *
+ * Exposed for a load run (issue #1495): computed once per run from the base
+ * scopes (never per submission - the ancestor chain walk this performs is not
+ * a cost every virtual user should pay), then merged per-VU with a small
+ * @ref ScopeOverlay by the residual-token overload below.
+ */
+[[nodiscard]] vayu::http::VariableValues flatten_variable_scopes (
+const ScriptVariableScopes& scopes);
 
 /**
  * `extract.*`'s write target (issue #1514), addressed by the schema's
@@ -373,6 +477,21 @@ struct ResidualRefusal {
 resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& scopes);
 
 /**
+ * The same pass, over an already-flattened variable map rather than a
+ * @ref ScriptVariableScopes (issue #1495).
+ *
+ * A load run's per-VU resolution reads this overload directly: the run's base
+ * map is flattened once (@ref flatten_variable_scopes) and a VU's small
+ * @ref ScopeOverlay is merged onto a copy of it per submission, which costs
+ * proportional to what that VU actually wrote rather than to the run's whole
+ * variable set or its collection-ancestor chain. The @p scopes overload above
+ * is now a thin wrapper over this one, so the two can never disagree about
+ * what "resolve" means.
+ */
+[[nodiscard]] std::optional<ResidualRefusal>
+resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValues& vars);
+
+/**
  * Every `{{name}}` still on @p request, without attempting to resolve any of
  * them (issue #1503).
  *
@@ -410,8 +529,7 @@ ExchangeOutcome execute_exchange (vayu::runtime::ScriptEngine& engine,
 vayu::http::CookieJar& jar,
 const std::string& cookie_scope,
 ScriptVariableScopes& scopes,
-ExchangeInputs inputs,
-bool verbose);
+ExchangeInputs inputs);
 
 /**
  * What this database is configured to let a design-mode send read

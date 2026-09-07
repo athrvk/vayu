@@ -61,6 +61,7 @@
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { dataColumnName } from "@/lib/variable-resolution";
+import { scriptTextFor } from "@/lib/elements";
 import { bindableStrings, type RequestReferenceSource } from "@/lib/request-references";
 
 /**
@@ -159,8 +160,11 @@ export function auditDataColumns(
 				else if (!undeclared.includes(column)) undeclared.push(column);
 			}
 		}
-		for (const script of [request.preRequestScript, request.postRequestScript]) {
-			for (const column of scriptColumnsIn(script)) scriptSet.add(column);
+		for (const script of [
+			scriptTextFor(request.elements, "script.pre"),
+			scriptTextFor(request.elements, "script.post"),
+		]) {
+			for (const column of scriptColumnsIn(script ?? "")) scriptSet.add(column);
 		}
 	}
 

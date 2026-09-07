@@ -246,12 +246,17 @@ describe("ScriptSnippets", () => {
 	});
 });
 
-describe("the two surfaces it replaced", () => {
-	const SOURCES = [
-		"app/src/modules/request-builder/components/RequestTabs/panels/script/ScriptPanel.tsx",
-		"app/src/modules/request-builder/components/RequestTabs/panels/script/script-variants.tsx",
-		"app/src/modules/collections/CollectionDetail/ScriptTab.tsx",
-	];
+describe("the surfaces it replaced", () => {
+	/*
+	 * Issue #1223 unified two script panels - the request builder's `ScriptPanel`
+	 * and the collection's `ScriptTab` - into one `ScriptSnippets` both mounted.
+	 * Issue #1512 retired both of those in turn: a script is a `script.pre` /
+	 * `script.post` element now, edited through `ScriptElementForm`
+	 * (`components/shared/ElementList/`), which both the request builder's
+	 * Elements tab and the collection's now render - one file, one mount point,
+	 * where there used to be two.
+	 */
+	const SOURCES = ["app/src/components/shared/ElementList/ScriptElementForm.tsx"];
 
 	it("left no second copy of the reference data behind", () => {
 		let scanned = 0;
@@ -265,12 +270,12 @@ describe("the two surfaces it replaced", () => {
 			expect(source, path).not.toMatch(/\bnotes: \[/);
 		}
 
-		// The floor: three files that exist and hold code, not three empty reads.
-		expect(scanned).toBeGreaterThan(10_000);
+		// The floor: a file that exists and holds code, not an empty read.
+		expect(scanned).toBeGreaterThan(500);
 	});
 
-	it("has both hosts mount the one component", () => {
-		for (const path of SOURCES.filter((p) => !p.endsWith("script-variants.tsx"))) {
+	it("mounts the one component", () => {
+		for (const path of SOURCES) {
 			expect(readFileSync(fromRepoRoot(path), "utf-8"), path).toContain("<ScriptSnippets");
 		}
 	});

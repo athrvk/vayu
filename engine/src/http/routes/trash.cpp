@@ -130,7 +130,6 @@ void register_trash_routes (RouteContext& ctx) {
     ctx.server.Post (R"(/trash/([^/]+)/restore)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
-        vayu::utils::log_info ("POST /trash/:id/restore - Restoring: " + id);
         try {
             auto [status, body] = trash_restore_response (ctx.db, id);
             if (status != 200) {
@@ -155,7 +154,6 @@ void register_trash_routes (RouteContext& ctx) {
     ctx.server.Delete (R"(/trash/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
-        vayu::utils::log_info ("DELETE /trash/:id - Purging: " + id);
         try {
             auto [status, body] = trash_purge_response (ctx.db, id);
             if (status != 200) {

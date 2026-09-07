@@ -334,6 +334,13 @@ const std::string& script_type) {
     return result;
 }
 
+vayu::runtime::ScriptEngine& script_engine_for_this_thread (
+const vayu::runtime::ScriptConfig& config) {
+    thread_local std::unique_ptr<vayu::runtime::ScriptEngine> engine =
+    std::make_unique<vayu::runtime::ScriptEngine> (config);
+    return *engine;
+}
+
 void bind_variable_scopes (vayu::runtime::ScriptContext& ctx, ScriptVariableScopes& scopes) {
     ctx.environment         = &scopes.environment;
     ctx.globals             = &scopes.globals;
@@ -484,8 +491,12 @@ vayu::http::VariableValues values_from_scopes (const ScriptVariableScopes& scope
 
 } // namespace
 
+vayu::http::VariableValues flatten_variable_scopes (const ScriptVariableScopes& scopes) {
+    return values_from_scopes (scopes);
+}
+
 std::optional<ResidualRefusal> resolve_residual_tokens (vayu::Request& request,
-const ScriptVariableScopes& scopes) {
+const vayu::http::VariableValues& vars) {
     auto targets             = resolvable_strings (request);
     const bool anything_left = a_header_name_needs_reading (request.headers) ||
     std::any_of (targets.begin (), targets.end (),
@@ -494,7 +505,6 @@ const ScriptVariableScopes& scopes) {
         return std::nullopt; // composition answered everything - the ordinary case
     }
 
-    const auto vars = values_from_scopes (scopes);
     for (std::string* text : targets) {
         if (holds_a_token (*text)) {
             *text = vayu::http::resolve_template (*text, vars);
@@ -511,6 +521,67 @@ const ScriptVariableScopes& scopes) {
         return refusal;
     }
     return std::nullopt;
+}
+
+std::optional<ResidualRefusal> resolve_residual_tokens (vayu::Request& request,
+const ScriptVariableScopes& scopes) {
+    return resolve_residual_tokens (request, values_from_scopes (scopes));
+}
+
+void ScopeOverlay::set (std::string_view scope, const std::string& name, const std::string& value) {
+    vayu::Environment* target = &collection_;
+    if (scope == "env") {
+        target = &environment_;
+    } else if (scope == "globals") {
+        target = &globals_;
+    }
+    vayu::Variable variable;
+    variable.value  = value;
+    (*target)[name] = variable;
+}
+
+void ScopeOverlay::replace_from (const ScriptVariableScopes& scopes) {
+    environment_ = scopes.environment;
+    collection_  = scopes.collection;
+    globals_     = scopes.globals;
+}
+
+void ScopeOverlay::clear () {
+    environment_.clear ();
+    collection_.clear ();
+    globals_.clear ();
+}
+
+void ScopeOverlay::apply_onto (vayu::http::VariableValues& vars) const {
+    // Lowest precedence first, so environment - highest, matching
+    // `values_from_scopes`'s own order - is applied last and wins.
+    for (const auto& [name, variable] : globals_) {
+        vars[name] = variable.value;
+    }
+    for (const auto& [name, variable] : collection_) {
+        vars[name] = variable.value;
+    }
+    for (const auto& [name, variable] : environment_) {
+        vars[name] = variable.value;
+    }
+}
+
+ScriptVariableScopes ScopeOverlay::materialize (const ScriptVariableScopes& base) const {
+    ScriptVariableScopes scopes;
+    scopes.collection_ancestors = base.collection_ancestors; // read-only, never overlaid
+    scopes.environment = base.environment;
+    scopes.collection  = base.collection;
+    scopes.globals     = base.globals;
+    for (const auto& [name, variable] : environment_) {
+        scopes.environment[name] = variable;
+    }
+    for (const auto& [name, variable] : collection_) {
+        scopes.collection[name] = variable;
+    }
+    for (const auto& [name, variable] : globals_) {
+        scopes.globals[name] = variable;
+    }
+    return scopes;
 }
 
 std::vector<std::string> unresolved_token_names (vayu::Request& request) {
@@ -530,8 +601,7 @@ ExchangeOutcome execute_exchange (vayu::runtime::ScriptEngine& engine,
 vayu::http::CookieJar& jar,
 const std::string& cookie_scope,
 ScriptVariableScopes& scopes,
-ExchangeInputs inputs,
-bool verbose) {
+ExchangeInputs inputs) {
     ExchangeOutcome outcome;
     outcome.request = std::move (inputs.request);
 
@@ -635,7 +705,6 @@ bool verbose) {
     } else {
         vayu::http::ClientConfig config;
         config.default_headers = inputs.default_headers;
-        config.verbose         = verbose;
         config.cookie_jar      = &jar;
         config.cookie_scope    = cookie_scope;
         config.cookie_writes   = std::move (pre_cookie_writes);

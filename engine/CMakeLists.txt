@@ -640,6 +640,7 @@ if(VAYU_BUILD_ENGINE)
         src/daemon.cpp
         src/http/server.cpp
         src/http/managed_listener.cpp
+        src/http/request_log.cpp
         src/http/routes/health.cpp
         src/http/routes/config.cpp
         src/http/routes/workspace.cpp

@@ -8,6 +8,7 @@
 #include "vayu/core/scenario_load.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -15,11 +16,13 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/elements.hpp"
 #include "vayu/core/load_pacing.hpp"
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/script_parts.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -35,6 +38,15 @@ double requested_rps (const nlohmann::json& config) {
         rps = config.value ("targetRps", 0.0);
     }
     return rps;
+}
+
+/// Steady-clock milliseconds, the same clock `take_ready_vu`'s `ready_at_ms`
+/// check and `timer.think`'s own wait are measured against - never
+/// `system_clock`, which can step backwards under a load run's wall time.
+int64_t steady_now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+    .count ();
 }
 
 } // namespace
@@ -186,7 +198,68 @@ MetricsCollector::Percentiles StepHistograms::percentiles (size_t step) const {
     return p;
 }
 
-nlohmann::json build_step_breakdown (const ScenarioPlan& plan, const StepHistograms& steps) {
+StepElementTallies::StepElementTallies (const ScenarioPlan& plan) {
+    counts_by_step_.reserve (plan.steps.size ());
+    index_of_id_by_step_.reserve (plan.steps.size ());
+    for (const auto& step : plan.steps) {
+        std::unordered_map<std::string, size_t> index_of_id;
+        size_t element_count = 0;
+        if (step.elements) {
+            element_count = step.elements->size ();
+            index_of_id.reserve (element_count);
+            for (size_t i = 0; i < element_count; ++i) {
+                index_of_id[(*step.elements)[i].id] = i;
+            }
+        }
+        counts_by_step_.emplace_back (element_count);
+        index_of_id_by_step_.push_back (std::move (index_of_id));
+    }
+}
+
+void StepElementTallies::record (size_t step,
+const std::string& element_id,
+const std::string& status) {
+    if (step >= index_of_id_by_step_.size ()) {
+        return;
+    }
+    const auto found = index_of_id_by_step_[step].find (element_id);
+    if (found == index_of_id_by_step_[step].end ()) {
+        return;
+    }
+    Counts& counts = counts_by_step_[step][found->second];
+    if (status == "ok") {
+        counts.passed.fetch_add (1, std::memory_order_relaxed);
+    } else if (status == "failed" || status == "error") {
+        counts.failed.fetch_add (1, std::memory_order_relaxed);
+    } else { // "skipped" | "missing"
+        counts.skipped.fetch_add (1, std::memory_order_relaxed);
+    }
+}
+
+nlohmann::json StepElementTallies::build (const ScenarioPlan& plan, size_t step) const {
+    nlohmann::json array = nlohmann::json::array ();
+    if (step >= counts_by_step_.size () || !plan.steps[step].elements) {
+        return array;
+    }
+    const auto& elements = *plan.steps[step].elements;
+    const auto& counts   = counts_by_step_[step];
+    const size_t count   = std::min (elements.size (), counts.size ());
+    for (size_t i = 0; i < count; ++i) {
+        const size_t passed = counts[i].passed.load (std::memory_order_relaxed);
+        const size_t failed = counts[i].failed.load (std::memory_order_relaxed);
+        const size_t skipped = counts[i].skipped.load (std::memory_order_relaxed);
+        if (passed + failed + skipped == 0) {
+            continue; // never ran under this run - omitted, not a row of zeros
+        }
+        array.push_back ({ { "id", elements[i].id }, { "kind", elements[i].kind },
+        { "passed", passed }, { "failed", failed }, { "skipped", skipped } });
+    }
+    return array;
+}
+
+nlohmann::json build_step_breakdown (const ScenarioPlan& plan,
+const StepHistograms& steps,
+const StepElementTallies& elements) {
     nlohmann::json array = nlohmann::json::array ();
     const size_t count   = std::min (plan.steps.size (), steps.step_count ());
     for (size_t i = 0; i < count; ++i) {
@@ -205,11 +278,26 @@ nlohmann::json build_step_breakdown (const ScenarioPlan& plan, const StepHistogr
               { { "min", percentiles.min }, { "p50", percentiles.p50 },
               { "p95", percentiles.p95 }, { "p99", percentiles.p99 },
               { "max", percentiles.max } } } };
-        // A load run never executes a pre-request script (see this file's
-        // header comment); a step that carries one always reports it skipped
-        // rather than leaving the report silent about it.
-        if (step_has_script (plan.steps[i], "script.pre")) {
+        auto element_outcomes  = elements.build (plan, i);
+        // Whether this step's `script.pre` actually ran this run - inline,
+        // through the hook below - rather than being left to the deferred
+        // replay: a real outcome in `elements` above, not just the pipeline's
+        // own "skipped, deferred" tally. Kept as the field's pre-#1495
+        // meaning for a step that is still deferred, so a reader who only
+        // knew this key keeps reading the same thing; a step that ran inline
+        // reports its real outcome in `elements` instead of this fixed
+        // string, which would otherwise contradict it.
+        const bool pre_script_ran_inline = std::any_of (element_outcomes.begin (),
+        element_outcomes.end (), [] (const nlohmann::json& outcome) {
+            return outcome.value ("kind", "") == "script.pre" &&
+            (outcome.value ("passed", size_t{ 0 }) > 0 ||
+            outcome.value ("failed", size_t{ 0 }) > 0);
+        });
+        if (step_has_script (plan.steps[i], "script.pre") && !pre_script_ran_inline) {
             entry["preRequestScript"] = "skipped";
+        }
+        if (!element_outcomes.empty ()) {
+            entry["elements"] = std::move (element_outcomes);
         }
         array.push_back (std::move (entry));
     }
@@ -230,7 +318,7 @@ const ScenarioPlan& plan) {
         // This mode's own.
         { "virtual_users", state.virtual_users },
         { "iterations_abandoned", state.iterations_abandoned.load (std::memory_order_relaxed) },
-        { "steps", build_step_breakdown (plan, state.steps) }
+        { "steps", build_step_breakdown (plan, state.steps, state.element_tallies) }
     };
 }
 
@@ -251,6 +339,188 @@ nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state) {
  * `busy` edge - and the ownership rules are only statable where they sit
  * together.
  */
+namespace {
+
+/**
+ * Skip a compiled element under a load run's inline-vs-deferred rule (#1495):
+ * a declarative kind always runs; a `script.*` kind runs only when its own
+ * `config.inline` is set or the run's `elements.scripts` override forces it.
+ * Read through `HotPathClass`, never a `kind ==` comparison, so #1512's
+ * extensibility contract (rule 1) holds outside `core/elements`.
+ */
+std::optional<std::string> load_pipeline_skip_reason (const vayu::core::CompiledElement& element,
+RunContext::ScriptsOverrideMode scripts_mode) {
+    const auto* kind = vayu::core::Registry::instance ().find (element.kind);
+    if (kind == nullptr || kind->hot_path != vayu::core::HotPathClass::Script) {
+        return std::nullopt; // declarative - always runs here
+    }
+    if (scripts_mode == RunContext::ScriptsOverrideMode::AllInline) {
+        return std::nullopt;
+    }
+    if (scripts_mode == RunContext::ScriptsOverrideMode::AllDeferred ||
+    !element.config.value ("inline", false)) {
+        return "deferred to the run's post-run replay";
+    }
+    return std::nullopt;
+}
+
+/// This step's `id`-less request identity, for `pm.info` inside an inline
+/// script - the same fields `execute_exchange`'s own `bind` lambda sets.
+void bind_step_identity (vayu::runtime::ScriptContext& ctx,
+const ScenarioStep& step,
+size_t iteration,
+size_t vu_index) {
+    ctx.request_id = step.request_id.empty () ?
+    std::nullopt :
+    std::optional<std::string> (step.request_id);
+    ctx.request_name =
+    step.name.empty () ? std::nullopt : std::optional<std::string> (step.name);
+    ctx.iteration = iteration;
+    ctx.vu        = vu_index;
+}
+
+/**
+ * Runs this step's `step.before` elements - the residual-token pass is the
+ * caller's, since it is not gated on whether the step carries any elements at
+ * all - for one VU's submission, mutating @p request with whatever an inline
+ * `extract.*` or `script.pre` wrote and tallying every outcome.
+ *
+ * @return elapsed milliseconds spent in the pipeline, or 0 when the run does
+ *         not ask to fold that time back into the recorded latency
+ *         (`elements.includeScriptTime`) - the ordinary case, where this is
+ *         one branch and a clock read cheaper than paid.
+ */
+int64_t run_step_before (const std::shared_ptr<RunContext>& context,
+ScenarioLoadState& state,
+VirtualUser& vu,
+const ScenarioStep& step,
+size_t step_index,
+size_t iteration,
+size_t vu_index,
+vayu::Request& request) {
+    if (!step.elements || step.elements->empty ()) {
+        return 0;
+    }
+    const auto start = context->include_script_time ?
+    std::optional (std::chrono::steady_clock::now ()) :
+    std::nullopt;
+
+    std::vector<vayu::core::ElementOutcome> outcomes;
+    vayu::ScriptResult pre_result;
+    vayu::ScriptResult unused_post_result;
+    vayu::core::ElementContext ctx{
+        .request  = request,
+        .response = nullptr,
+        .run_pre_script =
+        [&] (const std::string& script) {
+            auto& engine =
+            vayu::http::routes::script_engine_for_this_thread (state.script_config);
+            auto scopes = vu.scope_overlay.materialize (state.base_scopes);
+            auto script_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
+            vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            bind_step_identity (script_ctx, step, iteration, vu_index);
+            auto result = vayu::http::routes::execute_script (
+            engine, script, script_ctx, "Pre-request");
+            vu.scope_overlay.replace_from (scopes);
+            return result;
+        },
+        .run_post_script    = nullptr,
+        .pre_script_result  = pre_result,
+        .post_script_result = unused_post_result,
+        .set_variable =
+        [&] (std::string_view scope, const std::string& name,
+        const std::string& value) { vu.scope_overlay.set (scope, name, value); },
+        .should_stop = nullptr,
+    };
+
+    vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore, ctx,
+    *step.elements, outcomes, [&context] (const vayu::core::CompiledElement& element) {
+        return load_pipeline_skip_reason (element, context->scripts_override);
+    });
+    for (const auto& outcome : outcomes) {
+        state.element_tallies.record (step_index, outcome.id, outcome.status);
+    }
+
+    if (!start) {
+        return 0;
+    }
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - *start)
+    .count ();
+}
+
+/**
+ * Runs this step's `step.after` elements for one VU's completed submission,
+ * writing anything an inline `extract.*` or `script.post` produced into
+ * @p vu's overlay before the caller retires or advances it.
+ *
+ * @param response Read-only by contract (see `ElementContext::response`'s own
+ *        comment); the `const_cast` exists because the completion callback
+ *        only ever holds a `const Response&` off `Result::value()`, and
+ *        copying a response to avoid it would pay for the body twice.
+ * @return elapsed milliseconds, on the same terms @ref run_step_before returns
+ *         them.
+ */
+int64_t run_step_after (const std::shared_ptr<RunContext>& context,
+ScenarioLoadState& state,
+VirtualUser& vu,
+const ScenarioStep& step,
+size_t step_index,
+vayu::Request& request,
+const vayu::Response& response) {
+    if (!step.elements || step.elements->empty ()) {
+        return 0;
+    }
+    const auto start = context->include_script_time ?
+    std::optional (std::chrono::steady_clock::now ()) :
+    std::nullopt;
+
+    std::vector<vayu::core::ElementOutcome> outcomes;
+    vayu::ScriptResult unused_pre_result;
+    vayu::ScriptResult post_result;
+    vayu::core::ElementContext ctx{
+        .request = request,
+        .response = const_cast<vayu::Response*> (&response), // NOLINT(cppcoreguidelines-pro-type-const-cast)
+        .run_pre_script = nullptr,
+        .run_post_script =
+        [&] (const std::string& script) {
+            auto& engine =
+            vayu::http::routes::script_engine_for_this_thread (state.script_config);
+            auto scopes = vu.scope_overlay.materialize (state.base_scopes);
+            auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
+            vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            bind_step_identity (script_ctx, step, vu.iteration, vu.index);
+            auto result = vayu::http::routes::execute_script (
+            engine, script, script_ctx, "Post-request");
+            vu.scope_overlay.replace_from (scopes);
+            return result;
+        },
+        .pre_script_result  = unused_pre_result,
+        .post_script_result = post_result,
+        .set_variable =
+        [&] (std::string_view scope, const std::string& name,
+        const std::string& value) { vu.scope_overlay.set (scope, name, value); },
+        .should_stop = nullptr,
+    };
+
+    vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx, *step.elements,
+    outcomes, [&context] (const vayu::core::CompiledElement& element) {
+        return load_pipeline_skip_reason (element, context->scripts_override);
+    });
+    for (const auto& outcome : outcomes) {
+        state.element_tallies.record (step_index, outcome.id, outcome.status);
+    }
+
+    if (!start) {
+        return 0;
+    }
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - *start)
+    .count ();
+}
+
+} // namespace
+
 class ScenarioLoadDriver {
     public:
     ScenarioLoadDriver (const std::shared_ptr<RunContext>& context,
@@ -321,34 +591,85 @@ class ScenarioLoadDriver {
             }
         }
 
-        // Whatever composition and the bind above left unresolved goes on the
-        // wire regardless (issue #1503): this mode runs no residual pass, so
-        // the request is sent as it stands and the mistake is only counted,
-        // never refused - a literal `{{` can be deliberate in a body.
-        if (auto names = vayu::http::routes::unresolved_token_names (request);
-        !names.empty ()) {
-            state_->steps.record_unresolved_token (step_index);
-            context_->metrics_collector->record_unresolved_token (names);
+        // The element pipeline's `step.before` phase, then the residual pass
+        // over what it (and the bind above) left unresolved (issue #1495) -
+        // against this VU's own scope, so a token an earlier step's inline
+        // `extract.*` wrote for this VU resolves here. Never refused, only
+        // counted: the load path's rule since #1503 is "send it regardless",
+        // which this keeps - a real resolution attempt now runs first, but a
+        // name still unanswered, or a header-name collision the attempt
+        // itself produced, is exactly as survivable as one composition alone
+        // left behind.
+        const int64_t pipeline_before_ms = run_step_before (
+        context_, *state_, *vu, step, step_index, iteration, vu_index, request);
+        {
+            vayu::http::VariableValues vars = state_->base_vars;
+            vu->scope_overlay.apply_onto (vars);
+            const auto refusal =
+            vayu::http::routes::resolve_residual_tokens (request, vars);
+            auto still_unresolved = vayu::http::routes::unresolved_token_names (request);
+            if (refusal || !still_unresolved.empty ()) {
+                state_->steps.record_unresolved_token (step_index);
+                context_->metrics_collector->record_unresolved_token (refusal ?
+                std::vector<std::string>{ refusal->error.message } :
+                std::move (still_unresolved));
+            }
         }
 
+        // `step.after` needs the sent request back (declarative kinds may
+        // read `ctx.request`, e.g. a URL a `metric.record` names), which the
+        // event loop's own copy is not - `EventLoop::submit` copies @p request
+        // for the transfer but does not hand that copy back to the completion.
+        // Held only for a step that actually carries elements, so a
+        // token-free, element-free plan still pays no copy per iteration.
+        std::shared_ptr<vayu::Request> sent_request =
+        step.elements && !step.elements->empty () ?
+        std::make_shared<vayu::Request> (request) :
+        nullptr;
+
+        // `step`'s address is stable for the run's whole life: the plan is
+        // immutable, const data shared by the run's context.
+        const ScenarioStep* step_ptr = &step;
         context_->event_loop->submit (request,
-        [context = context_, &db = db_, state = state_,
+        [context = context_, &db = db_, state = state_, step_ptr,
         step_count = execution_.plan.steps.size (), vu, step_index, iteration,
-        vu_index, row] (size_t, const vayu::Result<vayu::Response>& result) {
-            const bool errored = result.is_error () || result.value ().has_error ();
+        vu_index, row, pipeline_before_ms,
+        sent_request] (size_t, const vayu::Result<vayu::Response>& result) {
+            if (result.is_error ()) {
+                // No `Response` object exists at all - nothing for `step.after`
+                // to run against, exactly as before #1495. Coverage still
+                // counts it: a transport error is a request this operation
+                // was sent and did not answer, reported as status 0 rather
+                // than a status the server never sent (issue #629).
+                state->coverage.record (step_index, 0);
+                finish_step (state, step_count, vu, step_index, /*errored=*/true, nullptr);
+                handle_result (context, db, result,
+                ResultAnnotations{ row, step_index, iteration, vu_index });
+                return;
+            }
+
+            const vayu::Response& response = result.value ();
+            int64_t pipeline_after_ms      = 0;
+            if (sent_request) {
+                pipeline_after_ms = run_step_after (context, *state, *vu,
+                *step_ptr, step_index, *sent_request, response);
+            }
+
+            const bool errored = response.has_error ();
             if (!errored) {
-                state->steps.record (step_index, result.value ().timing.total_ms);
+                const double latency_ms = context->include_script_time ?
+                response.timing.total_ms +
+                static_cast<double> (pipeline_before_ms + pipeline_after_ms) :
+                response.timing.total_ms;
+                state->steps.record (step_index, latency_ms);
             }
             // Every completion, including the failed ones: a transport error is
             // a request this operation was sent and did not answer, and coverage
             // that counted only successes would report the send as if it never
-            // happened. `is_error()` is the no-response case, which records as
-            // status 0 and is reported as a transport error rather than a
-            // status the server never sent (issue #629).
-            state->coverage.record (
-            step_index, result.is_error () ? 0 : result.value ().status_code);
+            // happened.
+            state->coverage.record (step_index, response.status_code);
             finish_step (state, step_count, vu, step_index, errored,
-            errored ? nullptr : &result.value ().cookie_lines);
+            errored ? nullptr : &response.cookie_lines);
             handle_result (context, db, result,
             ResultAnnotations{ row, step_index, iteration, vu_index });
         });
@@ -371,8 +692,16 @@ class ScenarioLoadDriver {
                 continue;
             }
             // Acquire pairs with the completion's release store, so the step,
-            // iteration and cookies this VU was left with are visible here.
+            // iteration, cookies and scope overlay this VU was left with are
+            // visible here.
             if (vu.busy.load (std::memory_order_acquire)) {
+                continue;
+            }
+            // Plumbing for a scheduled wait (#1498's `timer.pacing` / gaussian
+            // `timer.think`) - nothing writes past 0 yet, so this is a no-op
+            // for every run today. Read after the acquire above for the same
+            // reason `step` and `iteration` are.
+            if (vu.ready_at_ms > 0 && vu.ready_at_ms > steady_now_ms ()) {
                 continue;
             }
             if (vu.step == 0) {
@@ -436,6 +765,7 @@ class ScenarioLoadDriver {
             // Empty at the start of each iteration: a new iteration is a
             // new user, not the same one logging in twice.
             vu->cookies.clear ();
+            vu->scope_overlay.clear ();
         } else {
             vu->step = step_index + 1;
             // Replace, never merge - the captured list is the whole jar the
@@ -499,8 +829,31 @@ const ScenarioExecution& execution) {
     std::max<size_t> (1, static_cast<size_t> (config.value ("iterations", 1000))) :
     0;
 
-    auto state = std::make_shared<ScenarioLoadState> (
-    step_count, vu_count, make_coverage_tally (execution));
+    // The run's shared variable scopes (issue #1495), loaded once here on the
+    // same terms `validate_scripts`' replay already loads them for this same
+    // run: the collection being run, since a scenario has no single request
+    // row to derive one from.
+    std::optional<std::string> environment_id;
+    if (auto it = config.find ("environmentId");
+    it != config.end () && it->is_string () && !it->get<std::string> ().empty ()) {
+        environment_id = it->get<std::string> ();
+    }
+    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
+    db, environment_id, execution.request.collection_id);
+
+    vayu::runtime::ScriptConfig script_config;
+    script_config.timeout_ms = static_cast<uint64_t> (
+    db.get_config_int ("scriptTimeout", constants::script_engine::TIMEOUT_MS));
+    script_config.memory_limit = static_cast<size_t> (
+    db.get_config_int ("scriptMemoryLimit", constants::script_engine::MEMORY_LIMIT));
+    script_config.stack_size = static_cast<size_t> (
+    db.get_config_int ("scriptStackSize", constants::script_engine::STACK_SIZE));
+    script_config.enable_console = db.get_config_bool (
+    "scriptEnableConsole", constants::script_engine::ENABLE_CONSOLE);
+    script_config.allow_send_request = vayu::http::read_allow_script_requests (config);
+
+    auto state            = std::make_shared<ScenarioLoadState> (plan, vu_count,
+               make_coverage_tally (execution), std::move (base_scopes), script_config);
     state->data_row_count = execution.data_rows.size ();
     state->vus.reserve (vu_count);
     for (size_t i = 0; i < vu_count; ++i) {

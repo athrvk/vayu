@@ -29,6 +29,7 @@ import { useSessionStore, useTabsStore, useToastStore } from "@/stores";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME } from "@/constants/collection";
 import { resolveNewRequestTarget } from "@/modules/welcome/targetCollection";
+import { defaultScriptElements } from "@/lib/elements";
 import type { Collection } from "@/types";
 
 const CREATE_FAILED = "Could not create the request. Check that the engine is running.";
@@ -64,6 +65,7 @@ export function useNewRequest(): UseNewRequestReturn {
 					name: DEFAULT_REQUEST_NAME,
 					method: "GET",
 					url: "",
+					elements: defaultScriptElements(),
 				});
 				openTab({ type: "request", entityId: newRequest.id });
 			} catch (error) {
@@ -90,6 +92,7 @@ export function useNewRequest(): UseNewRequestReturn {
 			try {
 				const newCollection = await createCollectionMutation.mutateAsync({
 					name: DEFAULT_COLLECTION_NAME,
+					elements: defaultScriptElements(),
 				});
 				await createRequestIn(newCollection.id);
 			} catch (error) {

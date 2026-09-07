@@ -392,8 +392,7 @@ const std::function<void ()>& before_write) {
     }
     db.save_config_entries (to_update);
 
-    vayu::utils::log_info ("POST /config - Updated " +
-    std::to_string (to_update.size ()) + " config entries");
+    vayu::utils::log_info ("Updated " + std::to_string (to_update.size ()) + " config entries");
 
     nlohmann::json entries_array = nlohmann::json::array ();
     for (const auto& entry : db.get_all_config_entries ()) {
@@ -543,7 +542,6 @@ void register_config_routes (RouteContext& ctx) {
      * Retrieves all configuration entries with metadata for UI display.
      */
     ctx.server.Get ("/config", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_info ("GET /config - Fetching configuration entries");
         try {
             nlohmann::json entries_array = nlohmann::json::array ();
             for (const auto& entry : ctx.db.get_all_config_entries ()) {
@@ -566,7 +564,6 @@ void register_config_routes (RouteContext& ctx) {
      * Or: { "key": "key1", "value": "value1" } for single update
      */
     ctx.server.Post ("/config", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info ("POST /config - Updating configuration");
         try {
             auto [status, response_body] = apply_config_update (ctx.db, req.body);
             res.status = status;

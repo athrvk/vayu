@@ -704,7 +704,7 @@ TEST_F (MockServerTest, ALoadRunCanTargetAMockEndToEnd) {
         { "method", "GET" }, { "timeout", 5000 }, { "workers", 1 } };
 
     vayu::core::RunManager run_manager;
-    ASSERT_TRUE (run_manager.start_run (row.id, config, *db_, false));
+    ASSERT_TRUE (run_manager.start_run (row.id, config, *db_));
 
     const auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (30);
     while (std::chrono::steady_clock::now () < deadline) {

@@ -458,7 +458,7 @@ TEST_F (MonitorRunTest, AConfiguredRunRecordsSamplesForItsWholeDuration) {
     ASSERT_TRUE (manager.start_run (run_id,
     run_config (json{ { "url", server->vitals_url () }, { "intervalMs", 250 },
     { "series", json::array ({ "vayu_test_cpu", "vayu_test_rss_bytes" }) } }),
-    *db, false));
+    *db));
     wait_for_terminal (run_id, 20000);
     manager.shutdown (std::chrono::milliseconds (15000));
 
@@ -506,7 +506,7 @@ TEST_F (MonitorRunTest, AJsonEndpointIsReadWithTheSamePipeline) {
     ASSERT_TRUE (manager.start_run (run_id,
     run_config (json{ { "url", server->vitals_json_url () }, { "intervalMs", 250 },
     { "format", "json" }, { "series", json::array ({ "vayu_test_cpu" }) } }),
-    *db, false));
+    *db));
     wait_for_terminal (run_id, 20000);
     manager.shutdown (std::chrono::milliseconds (15000));
 
@@ -529,7 +529,7 @@ TEST_F (MonitorRunTest, AHangingEndpointStallsNeitherTheRunNorTheTicks) {
     ASSERT_TRUE (manager.start_run (run_id,
     run_config (json{ { "url", server->hang_url () }, { "intervalMs", 500 },
     { "series", json::array ({ "vayu_test_cpu" }) } }),
-    *db, false));
+    *db));
     wait_for_terminal (run_id, 25000);
     manager.shutdown (std::chrono::milliseconds (20000));
     auto elapsed =
@@ -573,7 +573,7 @@ TEST_F (MonitorRunTest, ASlowExpositionScrapesOnceTheBudgetIsRaisedAtTheSameCade
     create_run_row (derived_run);
     {
         vayu::core::RunManager manager;
-        ASSERT_TRUE (manager.start_run (derived_run, run_config (monitor), *db, false));
+        ASSERT_TRUE (manager.start_run (derived_run, run_config (monitor), *db));
         wait_for_terminal (derived_run, 25000);
         manager.shutdown (std::chrono::milliseconds (20000));
     }
@@ -589,7 +589,7 @@ TEST_F (MonitorRunTest, ASlowExpositionScrapesOnceTheBudgetIsRaisedAtTheSameCade
     create_run_row (raised_run);
     {
         vayu::core::RunManager manager;
-        ASSERT_TRUE (manager.start_run (raised_run, run_config (monitor), *db, false));
+        ASSERT_TRUE (manager.start_run (raised_run, run_config (monitor), *db));
         wait_for_terminal (raised_run, 25000);
         manager.shutdown (std::chrono::milliseconds (20000));
     }
@@ -619,7 +619,7 @@ TEST_F (MonitorRunTest, ARunWithoutAMonitorScrapesNothingAndReportsNoSection) {
         { "method", "GET" }, { "timeout", 5000 }, { "workers", 1 } };
 
     vayu::core::RunManager manager;
-    ASSERT_TRUE (manager.start_run (run_id, config, *db, false));
+    ASSERT_TRUE (manager.start_run (run_id, config, *db));
     wait_for_terminal (run_id, 20000);
     manager.shutdown (std::chrono::milliseconds (15000));
 

@@ -25,14 +25,16 @@ import type {
 	BodyMode,
 	ConsoleLogEntry,
 	DataContractScope,
+	ElementDef,
+	ElementOutcome,
 	HttpMethod,
 	HttpVersion,
 	KeyValueItem,
 	MethodSource,
 	RequestAuth,
+	ResolvedElement,
 	ResolvedVariable,
 	ResponseTiming,
-	ScriptPart,
 	TestResult,
 	StreamEndReason,
 	StreamEvent,
@@ -52,8 +54,12 @@ export type RequestTab =
 	| "headers"
 	| "body"
 	| "auth"
-	| "pre-script"
-	| "test-script"
+	/**
+	 * Extractors, assertions, timers and scripts (issue #1512) - replaces the
+	 * separate Pre-request and Tests tabs. A script is a `script.pre` /
+	 * `script.post` element like any other kind now.
+	 */
+	| "elements"
 	/** Saved example responses (issue #481). Read-only, populated by import. */
 	| "examples"
 	| "settings";
@@ -143,9 +149,12 @@ export interface RequestState {
 	// Auth
 	auth: RequestAuth;
 
-	// Scripts
-	preRequestScript: string;
-	testScript: string;
+	/**
+	 * Extractors, assertions, timers and scripts (issue #1512), in list order.
+	 * Replaces `preRequestScript` / `testScript` - a script is now a
+	 * `script.pre` / `script.post` element like any other kind.
+	 */
+	elements: ElementDef[];
 
 	// Execution settings (Settings tab)
 	followRedirects: boolean;
@@ -300,6 +309,12 @@ export interface ResponseState {
 	preScriptError?: string;
 	postScriptError?: string;
 	/**
+	 * What each of this send's non-script elements did (issue #1512) -
+	 * extractors, assertions and timers, beside `testResults` above (which
+	 * stays the script kinds' `pm.test` outcomes, unchanged shape).
+	 */
+	elements?: ElementOutcome[];
+	/**
 	 * The events a streaming request received (issue #574), bounded by the
 	 * engine's `sseMaxStoredEvents`. Set only by `restore-response.ts`, from the
 	 * stored trace's `events` node - a live stream's rows arrive over the relay
@@ -418,13 +433,12 @@ export interface RequestBuilderContextValue {
 	setResponse: (response: ResponseState | null) => void;
 
 	/**
-	 * Collection script parts to list as "runs before your own", overriding the
-	 * live collection chain. Set only by the History run view, which shows what
-	 * a stored run recorded; undefined everywhere else, where the script panels
-	 * walk the chain themselves.
+	 * Collection elements to list as "runs before your own" (issue #1512),
+	 * overriding the live collection chain. Set only by the History run view,
+	 * which shows what a stored run recorded; undefined everywhere else, where
+	 * `InheritedElementsNotice` walks the chain itself.
 	 */
-	inheritedPreScripts?: ScriptPart[];
-	inheritedPostScripts?: ScriptPart[];
+	inheritedElements?: ResolvedElement[];
 
 	/**
 	 * The whole glued script a pre-script-parts run recorded. Set only by the

@@ -805,7 +805,6 @@ namespace routes {
 void register_mock_issuer_routes (RouteContext& ctx) {
     ctx.server.Post ("/mock-issuer/start",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info ("POST /mock-issuer/start");
         nlohmann::json body = nlohmann::json::object ();
         if (!req.body.empty ()) {
             try {

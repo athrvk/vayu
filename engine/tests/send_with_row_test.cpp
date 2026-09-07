@@ -344,7 +344,7 @@ class SendWithRowTest : public ::testing::Test {
             inputs.iteration       = 0;
             inputs.iteration_count = 1;
         }
-        return execute_exchange (engine, jar, "", scopes, std::move (inputs), false);
+        return execute_exchange (engine, jar, "", scopes, std::move (inputs));
     }
 
     /// What the route's pre-send sequence produced for a payload carrying a

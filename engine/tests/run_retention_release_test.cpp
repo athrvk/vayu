@@ -93,7 +93,7 @@ TEST_F (RunRetentionReleaseTest, RetainedRunHoldsNoConnectionToTheTarget) {
         { "timeout", 5000 }, { "workers", 1 }, { "concurrency", 4 } };
 
     vayu::core::RunManager manager;
-    manager.start_run (run_id, config, *db, false);
+    manager.start_run (run_id, config, *db);
 
     auto context = manager.get_run (run_id);
     ASSERT_NE (context, nullptr);

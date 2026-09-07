@@ -57,4 +57,44 @@ step_elements_with_post_script (const std::string& script) {
     return step_elements_with_scripts ("", script);
 }
 
+/**
+ * One `element` array entry, for a test building a step with more than the
+ * two-script shape above covers (issue #1495: an `extract.*` beside a
+ * `script.*` marked `inline`, several elements on one step, and so on).
+ * Combine with @ref compiled_elements.
+ */
+inline nlohmann::json extract_json_element_json (const std::string& id,
+const std::string& path,
+const std::string& variable,
+const std::string& scope = "collection") {
+    return { { "id", id }, { "kind", "extract.json" }, { "enabled", true },
+        { "config", { { "path", path }, { "variable", variable }, { "scope", scope } } } };
+}
+
+/// @copydoc extract_json_element_json, a `script.pre` / `script.post` entry.
+/// @p inline_script matches `config.inline` - the load path's own opt-in
+/// (issue #1495); design mode and the sequential run ignore it.
+inline nlohmann::json script_element_json (const std::string& id,
+const std::string& kind,
+const std::string& script,
+bool inline_script = false) {
+    nlohmann::json config = { { "script", script } };
+    if (inline_script) {
+        config["inline"] = true;
+    }
+    return { { "id", id }, { "kind", kind }, { "enabled", true }, { "config", config } };
+}
+
+/// Compile an arbitrary list of element JSON entries (@ref extract_json_element_json,
+/// @ref script_element_json) the same way plan resolution does.
+inline std::shared_ptr<const std::vector<vayu::core::CompiledElement>>
+compiled_elements (std::vector<nlohmann::json> entries) {
+    nlohmann::json array = nlohmann::json::array ();
+    for (auto& entry : entries) {
+        array.push_back (std::move (entry));
+    }
+    return std::make_shared<const std::vector<vayu::core::CompiledElement>> (
+    vayu::core::compile_elements (array));
+}
+
 } // namespace vayu::tests

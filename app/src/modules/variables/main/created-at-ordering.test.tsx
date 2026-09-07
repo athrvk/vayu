@@ -85,8 +85,7 @@ const collection: Collection = {
 		kept: { value: "b", enabled: true, secret: false, type: "string", createdAt: 2000 },
 	},
 	auth: { mode: "none" },
-	preRequestScript: "",
-	postRequestScript: "",
+	elements: [],
 	createdAt: new Date(0).toISOString(),
 	updatedAt: new Date(0).toISOString(),
 };

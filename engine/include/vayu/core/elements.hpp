@@ -294,10 +294,25 @@ struct CompiledElement {
  */
 class ElementPipeline {
     public:
+    /**
+     * @param skip_reason Consulted for an otherwise-runnable (enabled,
+     *        phase-matching) element, before `apply` - `nullopt` from it means
+     *        run as usual, a string means report `"skipped"` with that message
+     *        instead of calling `apply` at all. Null (the default, both callers
+     *        before #1495) runs every enabled element unconditionally, exactly
+     *        as before this parameter existed.
+     *
+     *        This is a load run's one hook for "declarative kinds always run
+     *        here; a `script.*` kind runs here only when it opted in" (#1495):
+     *        the load path reads `HotPathClass` off the registry and a
+     *        `script.*` element's own `config.inline`, never a `kind ==`
+     *        comparison, which stays the extensibility contract's rule.
+     */
     static void run (Phase phase,
     ElementContext& ctx,
     const std::vector<CompiledElement>& elements,
-    std::vector<ElementOutcome>& sink);
+    std::vector<ElementOutcome>& sink,
+    const std::function<std::optional<std::string> (const CompiledElement&)>& skip_reason = nullptr);
 };
 
 } // namespace vayu::core

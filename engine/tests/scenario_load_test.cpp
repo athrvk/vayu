@@ -80,7 +80,11 @@ class ScenarioMockServer {
             }
             const size_t id = ++session_counter_;
             res.set_header ("Set-Cookie", "sid=" + std::to_string (id) + "; Path=/");
-            res.set_content ("{}", "application/json");
+            // A per-session token, distinct per login, so a test can prove
+            // step 2 saw *this* VU's own extracted value rather than
+            // whichever login happened to run last (issue #1495).
+            res.set_content (R"({"token": "tok-)" + std::to_string (id) + R"("})",
+            "application/json");
         });
 
         for (const char* path : { "/echo", "/s0", "/s1", "/s2" }) {
@@ -257,6 +261,20 @@ class ScenarioLoadTest : public ::testing::Test {
     const std::vector<json>& rows) {
         split_steps (execution);
         execution.data_rows = rows;
+    }
+
+    /// A two-step plan (issue #1495): `/login` (step 0) then @p url with an
+    /// `Authorization: Bearer {{token}}` header (step 1) - the shape every
+    /// inline-element test below correlates a step-0 extraction through.
+    /// `{{token}}` is neither a data nor an identity token, so it reaches
+    /// this file's new residual-token pass untouched by `bind_step_iteration`
+    /// - exactly the gap issue #1495 closes.
+    static vayu::core::ScenarioExecution
+    plan_login_then_bearer (ScenarioMockServer& server, const std::string& url) {
+        auto execution = plan_over ({ server.url ("/login"), url });
+        execution.plan.steps[1].request.headers["Authorization"] =
+        "Bearer {{token}}";
+        return execution;
     }
 
     /// Give every step the deferred auth `resolve_scenario` leaves behind for
@@ -700,7 +718,7 @@ TEST_F (ScenarioLoadTest, APlanWithNoScriptsSamplesNothing) {
     EXPECT_EQ (mc.response_samples_dropped (), 0u)
     << "a step nothing will validate must not be counted as a thinned sample";
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     EXPECT_FALSE (validation.run.has_value ())
     << "a run that validated nothing must omit the section, not report zeros";
 }
@@ -759,7 +777,7 @@ TEST_F (ScenarioLoadTest, EachStepsScriptIsReplayedAgainstItsOwnSamples) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 2u);
     const auto& first_step = validation.steps[0];
@@ -794,7 +812,7 @@ TEST_F (ScenarioLoadTest, AFailingAssertionIsAttributedToItsOwnStep) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 3u);
     const auto& first_step = validation.steps[0];
@@ -830,7 +848,7 @@ TEST_F (ScenarioLoadTest, AMixedPassAndFailScriptReportsBothTalliesAndNamesTheFa
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
@@ -864,7 +882,7 @@ TEST_F (ScenarioLoadTest, AScriptThatThrowsAfterAPassingTestStillReportsTheThrow
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
@@ -895,7 +913,7 @@ TEST_F (ScenarioLoadTest, AThrowingScriptWithNoTestsNamesTheThrownMessage) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
 
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
@@ -932,7 +950,7 @@ TEST_F (ScenarioLoadTest, ADeferredStepScriptReadsItsIterationAndDataRow) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
     ASSERT_HAS_VALUE (first_step);
@@ -962,7 +980,7 @@ TEST_F (ScenarioLoadTest, PmExecutionStillThrowsInADeferredStepScript) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& first_step = validation.steps[0];
     ASSERT_HAS_VALUE (first_step);
@@ -982,7 +1000,7 @@ TEST_F (ScenarioLoadTest, PerStepTalliesAreAttachedToTheStoredBreakdown) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     auto state        = run (config, execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     auto summary =
     vayu::core::build_scenario_load_summary (*state, context_->scenario->plan);
     vayu::core::attach_step_test_totals (summary, validation.steps);
@@ -995,6 +1013,229 @@ TEST_F (ScenarioLoadTest, PerStepTalliesAreAttachedToTheStoredBreakdown) {
     EXPECT_EQ (summary["steps"][0]["tests"]["failed"], 0);
     EXPECT_FALSE (summary["steps"][1].contains ("tests"))
     << "a step that asserted nothing must carry no tests object at all";
+}
+
+// ============================================================================
+// The element pipeline on the load paths (issue #1495)
+// ============================================================================
+
+// A declarative element (extract.json) always runs inline under load - no
+// `inline` mark needed, only a `script.*` element opts in explicitly. Two VUs
+// held inside `/login` at the same time must each carry their *own* login's
+// token on their own step 1, never the other's - the correlation bug this
+// issue exists to fix, proven the same way cookie isolation is proven above.
+//
+// Mutation check: remove the residual-token-pass call in `submit_one`, and
+// step 1 sends the literal `{{token}}` for both VUs instead of either one's
+// real value.
+TEST_F (ScenarioLoadTest, AnInlineExtractCorrelatesPerVirtualUserAcrossSteps) {
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    auto execution = plan_login_then_bearer (server, server.url ("/echo"));
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::extract_json_element_json ("el_token", "$.token", "token") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 } };
+    run (config, execution, /*pool_size=*/2);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 2u);
+    EXPECT_NE (echoes[0].authorization, echoes[1].authorization)
+    << "both virtual users sent the same token - the extraction is shared "
+       "rather than per-VU";
+    for (const auto& echo : echoes) {
+        ASSERT_TRUE (echo.cookie.rfind ("sid=", 0) == 0)
+        << "no session reached step 1";
+        const std::string session_id = echo.cookie.substr (4);
+        EXPECT_EQ (echo.authorization, "Bearer tok-" + session_id)
+        << "step 1 carried a token that does not match this VU's own login "
+           "session - the two are not being bound to the same VU";
+    }
+}
+
+// The same correlation, through an inline `script.post` instead of a
+// declarative `extract.json` - proving the opt-in itself works, not just the
+// overlay it writes through.
+TEST_F (ScenarioLoadTest, AScriptPostMarkedInlineCorrelatesPerVirtualUserTheSameWayExtractDoes) {
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    auto execution = plan_login_then_bearer (server, server.url ("/echo"));
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_post", "script.post",
+    "pm.environment.set('token', pm.response.json().token);", /*inline_script=*/true) });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 } };
+    run (config, execution, /*pool_size=*/2);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 2u);
+    EXPECT_NE (echoes[0].authorization, echoes[1].authorization);
+    for (const auto& echo : echoes) {
+        ASSERT_TRUE (echo.cookie.rfind ("sid=", 0) == 0);
+        EXPECT_EQ (echo.authorization, "Bearer tok-" + echo.cookie.substr (4));
+    }
+}
+
+// Without the `inline` mark, a `script.post` element stays exactly where it
+// always was - deferred to the post-run replay - and the run's wire traffic
+// is byte-for-byte what it was before issue #1495: `{{token}}` reaches the
+// wire literally, and it counts as an unresolved token rather than silently
+// vanishing.
+//
+// Mutation check: mark the element `inline` (as the test above does) and this
+// assertion reds - the literal token would resolve instead.
+TEST_F (ScenarioLoadTest, WithoutTheInlineMarkAScriptPostStaysDeferredAndTheWireIsUnchanged) {
+    ScenarioMockServer server;
+    auto execution = plan_login_then_bearer (server, server.url ("/echo"));
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_post", "script.post",
+    "pm.environment.set('token', pm.response.json().token);") }); // no inline mark
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 1u);
+    EXPECT_EQ (echoes[0].authorization, "Bearer {{token}}")
+    << "an un-inlined script must not affect this run's wire traffic at all";
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    EXPECT_EQ (summary["steps"][1]["unresolvedTokens"], 1)
+    << "the literal token must still be counted, exactly as an unresolved "
+       "token always has been";
+}
+
+// A `script.pre` marked `inline` reaches the wire on *every* submission, not
+// only the first - proving the hook runs from the producer's own steady-state
+// loop rather than once at setup.
+TEST_F (ScenarioLoadTest, AScriptPreMarkedInlineReachesTheWireOnEverySubmission) {
+    ScenarioMockServer server;
+    auto execution                   = plan_over ({ server.url ("/echo") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_pre", "script.pre",
+    "pm.request.headers.upsert('Authorization', 'Bearer injected');",
+    /*inline_script=*/true) });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 3u);
+    for (const auto& echo : echoes) {
+        EXPECT_EQ (echo.authorization, "Bearer injected");
+    }
+}
+
+// A step's recorded latency is its transfer alone by default - an inline
+// element's own time is not folded in - and `elements.includeScriptTime`
+// opts a run into folding it back. Asserted as a *relative* difference
+// between two otherwise-identical runs, one with the override and one
+// without, rather than against an absolute millisecond floor: a shared CI
+// machine's baseline transfer latency is itself noisy, but the gap this
+// deliberately slow inline script (a bounded busy loop - a sandboxed script
+// cannot sleep) opens between the two runs is not - tens of milliseconds of
+// real interpreted work, well past any jitter one more request on the same
+// mock could introduce.
+TEST_F (ScenarioLoadTest, IncludeScriptTimeFoldsThePipelinesTimeIntoTheRecordedLatency) {
+    ScenarioMockServer server;
+    const std::string slow_script =
+    "let s = 0; for (let i = 0; i < 8000000; i++) { s += i; }";
+
+    auto excluded_execution = plan_over ({ server.url ("/echo") });
+    excluded_execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ vayu::tests::script_element_json (
+    "el_post", "script.post", slow_script, /*inline_script=*/true) });
+    const json excluded_config    = { { "mode", "iterations" },
+           { "iterations", 1 }, { "concurrency", 1 } };
+    auto excluded_state           = run (excluded_config, excluded_execution);
+    const double excluded_latency = vayu::core::build_scenario_load_summary (
+    *excluded_state, excluded_execution.plan)["steps"][0]["latency"]["min"];
+
+    auto included_execution = plan_over ({ server.url ("/echo") });
+    included_execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ vayu::tests::script_element_json (
+    "el_post", "script.post", slow_script, /*inline_script=*/true) });
+    const json included_config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "elements", { { "includeScriptTime", true } } } };
+    auto included_state           = run (included_config, included_execution);
+    const double included_latency = vayu::core::build_scenario_load_summary (
+    *included_state, included_execution.plan)["steps"][0]["latency"]["min"];
+
+    EXPECT_GT (included_latency - excluded_latency, 15.0)
+    << "excluded=" << excluded_latency << "ms included=" << included_latency
+    << "ms - `elements.includeScriptTime` must fold the slow script's own "
+       "time into the recorded latency, which this margin should show "
+       "however noisy the machine's own baseline transfer latency is";
+}
+
+// `elements.scripts: "allInline"` forces every `script.*` element inline
+// regardless of its own `config.inline` - the override, not the per-element
+// mark, decides.
+TEST_F (ScenarioLoadTest, ElementsScriptsAllInlineForcesAnUnmarkedScriptInline) {
+    ScenarioMockServer server;
+    auto execution = plan_login_then_bearer (server, server.url ("/echo"));
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_post", "script.post",
+    "pm.environment.set('token', pm.response.json().token);") }); // no inline mark
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "elements", { { "scripts", "allInline" } } } };
+    run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 1u);
+    EXPECT_NE (echoes[0].authorization, "Bearer {{token}}")
+    << "the run override must force the unmarked script inline";
+}
+
+// `elements.scripts: "allDeferred"` forces every `script.*` element deferred
+// regardless of its own `inline` mark.
+TEST_F (ScenarioLoadTest, ElementsScriptsAllDeferredIgnoresAPerElementInlineMark) {
+    ScenarioMockServer server;
+    auto execution = plan_login_then_bearer (server, server.url ("/echo"));
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_post", "script.post",
+    "pm.environment.set('token', pm.response.json().token);", /*inline_script=*/true) });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "elements", { { "scripts", "allDeferred" } } } };
+    run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 1u);
+    EXPECT_EQ (echoes[0].authorization, "Bearer {{token}}")
+    << "the run override must defer the marked script regardless of its own "
+       "mark";
+}
+
+// Per-step, per-element pass/fail/skip tallies (issue #1495): an inline
+// element that ran reports its outcome under `elements`, and a step with no
+// elements carries no such key at all.
+TEST_F (ScenarioLoadTest, PerStepElementTalliesAreAttachedToTheBreakdown) {
+    ScenarioMockServer server;
+    auto execution = plan_login_then_bearer (server, server.url ("/echo"));
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::extract_json_element_json ("el_token", "$.token", "token") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    ASSERT_TRUE (summary["steps"][0].contains ("elements"));
+    const auto& elements = summary["steps"][0]["elements"];
+    ASSERT_EQ (elements.size (), 1u);
+    EXPECT_EQ (elements[0]["id"], "el_token");
+    EXPECT_EQ (elements[0]["kind"], "extract.json");
+    EXPECT_EQ (elements[0]["passed"], 2);
+    EXPECT_EQ (elements[0]["failed"], 0);
+    EXPECT_EQ (elements[0]["skipped"], 0);
+    EXPECT_FALSE (summary["steps"][1].contains ("elements"))
+    << "a step with no elements at all must carry no such key";
 }
 
 // ============================================================================
@@ -1522,7 +1763,7 @@ TEST_F (ScenarioLoadTest, ABoundRunReportsTalliesOverItsSampledResponses) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    const auto totals = vayu::core::validate_sampled_responses (context_);
 
     EXPECT_EQ (totals.sampled, 6u);
     EXPECT_EQ (totals.checked, 6u);
@@ -1549,7 +1790,7 @@ TEST_F (ScenarioLoadTest, AnUnboundRunValidatesNothingAtAll) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    const auto totals = vayu::core::validate_sampled_responses (context_);
     EXPECT_EQ (totals.sampled, 0u);
     EXPECT_TRUE (vayu::core::build_sampled_validation_payload (totals).empty ())
     << "an unbound run must carry no block at all, never one saying nothing "
@@ -1568,7 +1809,7 @@ TEST_F (ScenarioLoadTest, ABindingWithNoSchemaIndexValidatesNothing) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    EXPECT_EQ (vayu::core::validate_sampled_responses (context_, false).sampled, 0u);
+    EXPECT_EQ (vayu::core::validate_sampled_responses (context_).sampled, 0u);
 }
 
 // A step the document does not declare is checked and named, rather than
@@ -1586,7 +1827,7 @@ TEST_F (ScenarioLoadTest, AStepTheDocumentDoesNotDeclareIsCountedByReason) {
         { "concurrency", 1 }, { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    const auto totals = vayu::core::validate_sampled_responses (context_);
     EXPECT_EQ (totals.checked, 2u);
     EXPECT_EQ (totals.failed, 0u)
     << "an undeclared operation is not a response that broke its contract";
@@ -1606,7 +1847,7 @@ TEST_F (ScenarioLoadTest, ARunWhoseSamplesWereThinnedStillReportsHonestly) {
         { "response_sample_rate", 1 } };
     run (config, execution);
 
-    const auto totals = vayu::core::validate_sampled_responses (context_, false);
+    const auto totals = vayu::core::validate_sampled_responses (context_);
     EXPECT_GT (totals.sampled, 0u);
     EXPECT_LE (totals.sampled, 4u)
     << "the pass validated more than the reservoirs could hold";

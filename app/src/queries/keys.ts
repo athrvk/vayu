@@ -262,6 +262,12 @@ export const queryKeys = {
 		all: ["scriptCompletions"] as const,
 	},
 
+	// Element kind catalogue (issue #1512). One key: the engine reports the
+	// whole registry in one call and a kind never changes shape at runtime.
+	elementKinds: {
+		all: ["elementKinds"] as const,
+	},
+
 	// `POST /compose` for a stored request - what will actually be sent, with
 	// variables substituted and `inherit` auth walked. Keyed by environment as
 	// well as request: the same request composes differently per environment,

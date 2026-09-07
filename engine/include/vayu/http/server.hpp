@@ -27,7 +27,7 @@ namespace vayu::http {
 
 class Server {
     public:
-    Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port, bool verbose = false);
+    Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port);
     ~Server ();
     Server (const Server&)            = delete;
     Server& operator= (const Server&) = delete;
@@ -72,7 +72,6 @@ class Server {
     vayu::db::Database& db_;
     vayu::core::RunManager& run_manager_;
     int port_;
-    bool verbose_;
     std::string bind_error_;
     // Everything from here down to server_ is declared *before* it so it is
     // destroyed *after* it (reverse member order): the httplib lambdas that

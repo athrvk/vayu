@@ -18,6 +18,7 @@
 #include <string>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/http/request_log.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/logger.hpp"
@@ -25,8 +26,8 @@
 
 namespace vayu::http {
 
-Server::Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port, bool verbose)
-: db_ (db), run_manager_ (run_manager), port_ (port), verbose_ (verbose) {
+Server::Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port)
+: db_ (db), run_manager_ (run_manager), port_ (port) {
     setup_routes ();
 }
 
@@ -48,7 +49,6 @@ bool Server::start () {
     for (const auto& entry : entries) {
         config[entry.key] = entry.value;
     }
-    config["verbose"] = verbose_;
     vayu::utils::log_info ("Configuration: " + config.dump ());
 
     // The engine's port is fixed by contract (docs/architecture.md), so this
@@ -155,6 +155,11 @@ void Server::set_shutdown_callback (routes::ShutdownCallback callback) {
 }
 
 void Server::setup_routes () {
+    // One request line per call (issue #1510), before anything else touches
+    // server_: a route registered below that never logged its own entry now
+    // always does, at the level its status calls for.
+    install_request_logger (server_);
+
     // ==========================================
     // CORS Configuration
     // ==========================================
@@ -178,7 +183,7 @@ void Server::setup_routes () {
     // ==========================================
     // Note: route_ctx_ is a class member, ensuring it outlives the lambdas
     route_ctx_ = std::make_unique<routes::RouteContext> (
-    routes::RouteContext{ server_, db_, run_manager_, verbose_, shutdown_callback_,
+    routes::RouteContext{ server_, db_, run_manager_, shutdown_callback_,
     oauth_authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
     mock_server_manager_, sse_manager_, run_summary_cache_ });
 

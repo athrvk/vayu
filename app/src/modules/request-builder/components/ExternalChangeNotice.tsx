@@ -30,8 +30,7 @@ const FIELD_GROUPS: ReadonlyArray<{ label: string; fields: readonly MergeableReq
 	{ label: "headers", fields: ["headers"] },
 	{ label: "body", fields: ["bodyMode", "body", "formData", "urlEncoded"] },
 	{ label: "auth", fields: ["auth"] },
-	{ label: "the pre-request script", fields: ["preRequestScript"] },
-	{ label: "the test script", fields: ["testScript"] },
+	{ label: "the elements list", fields: ["elements"] },
 	{
 		label: "settings",
 		fields: ["followRedirects", "maxRedirects", "httpVersion", "verifySSL", "stream"],

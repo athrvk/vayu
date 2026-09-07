@@ -57,13 +57,13 @@ import {
 	disabledDefaults,
 	execIdentity,
 	responseFromExecuteResult,
-	scriptsMayWriteVariables,
+	elementsMayWriteVariables,
 } from "@/modules/request-builder/utils/execute-mapping";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
-import { seedFromRun } from "./design-run-seed";
+import { seedFromRun, scriptPartToElement } from "./design-run-seed";
 import SaveRunToRequestDialog from "./SaveRunToRequestDialog";
-import type { Run, ScriptPart } from "@/types";
+import type { Run, ScriptPart, ResolvedElement } from "@/types";
 
 interface DesignRunViewProps {
 	run: Run;
@@ -154,31 +154,59 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	);
 
 	/**
-	 * Replay: the recorded collection parts, then the editor's own part.
+	 * Replay: the recorded collection scripts (as `script.pre` / `script.post`
+	 * elements), then the editor's own current elements (issue #1512).
 	 *
 	 * The collection parts go out exactly as they were stored, which is the
 	 * point of a snapshot - it runs the collection's scripts as they were then,
-	 * not as they read now.
+	 * not as they read now. The editor's own part is live, not historical: it
+	 * was seeded from the run's own recorded script (`seedFromRun`) but can be
+	 * edited like any other request's Elements tab, and any other kind added
+	 * there runs too - something a script-only replay could never do.
 	 *
 	 * A run recorded before script parts existed has no parts at all, only the
 	 * one glued string, and `seedFromRun` cannot fill the editor from it - so
 	 * the editor is empty and the string is the only record of what ran. It is
-	 * replayed as a single request-origin part. Dropping it (which is what
+	 * replayed as a single request-origin element. Dropping it (which is what
 	 * happened while nothing read `legacyPreScript`) meant a resend of any
 	 * pre-existing run silently executed no script at all.
 	 */
-	const replayParts = useCallback(
+	const replayElements = useCallback(
 		(
 			collectionParts: ScriptPart[],
 			legacyScript: string | undefined,
-			ownScript: string
-		): ScriptPart[] | undefined => {
-			const parts = [...collectionParts];
-			if (legacyScript?.trim()) parts.push({ origin: "request", script: legacyScript });
-			if (ownScript.trim()) parts.push({ origin: "request", script: ownScript });
-			return parts.length > 0 ? parts : undefined;
+			kind: "script.pre" | "script.post"
+		): ResolvedElement[] => {
+			const elements: ResolvedElement[] = collectionParts.map((part) => ({
+				...scriptPartToElement(part, kind),
+				origin: { kind: "collection", id: part.id, name: part.name },
+			}));
+			if (legacyScript?.trim()) {
+				elements.push({
+					...scriptPartToElement({ origin: "request", script: legacyScript }, kind),
+					origin: { kind: "request" },
+				});
+			}
+			return elements;
 		},
 		[]
+	);
+
+	/**
+	 * The collection's own elements as the run recorded them (issue #1512),
+	 * for `InheritedElementsNotice` to show in place of the live chain - the
+	 * same "as it was, not as it reads now" rule `replayElements` applies for
+	 * execution above. No legacy element here: `LegacyScriptNotice` already
+	 * shows the glued string via `legacyPreScript`/`legacyPostScript` below,
+	 * and folding it into this list too would show it twice, mislabeled as
+	 * something a collection contributed.
+	 */
+	const inheritedElements = useMemo<ResolvedElement[]>(
+		() => [
+			...replayElements(seed.collectionPreScripts, undefined, "script.pre"),
+			...replayElements(seed.collectionPostScripts, undefined, "script.post"),
+		],
+		[replayElements, seed.collectionPreScripts, seed.collectionPostScripts]
 	);
 
 	const handleExecute = useCallback(
@@ -203,16 +231,22 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				 * `auth: { mode: "none" }` on the copy, so the replay goes out
 				 * exactly as it ran - the engine drops a none-auth at compose.
 				 */
-				const preScriptParts = replayParts(
-					seed.collectionPreScripts,
-					seed.legacyPreScript,
-					request.preRequestScript
-				);
-				const postScriptParts = replayParts(
-					seed.collectionPostScripts,
-					seed.legacyPostScript,
-					request.testScript
-				);
+				const elements: ResolvedElement[] = [
+					...replayElements(
+						seed.collectionPreScripts,
+						seed.legacyPreScript,
+						"script.pre"
+					),
+					...replayElements(
+						seed.collectionPostScripts,
+						seed.legacyPostScript,
+						"script.post"
+					),
+					...request.elements.map((el): ResolvedElement => ({
+						...el,
+						origin: { kind: "request" },
+					})),
+				];
 
 				const composed = await engineComposeRequest({
 					request: {
@@ -221,8 +255,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						headers: headersRecord,
 						body: execBody,
 						auth: { ...request.auth },
-						preRequestScripts: preScriptParts,
-						postRequestScripts: postScriptParts,
+						elements: elements.length > 0 ? elements : undefined,
 						// Always sent, never elided - the engine defaults to
 						// following, so an omitted `false` would follow the
 						// redirect the run was recorded not following.
@@ -289,7 +322,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					});
 				}
 				// Same gate as the builder's send path, from the same helper.
-				if (scriptsMayWriteVariables(preScriptParts, postScriptParts)) {
+				if (elementsMayWriteVariables(elements)) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
@@ -316,7 +349,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 		[
 			seed,
 			run.requestId,
-			replayParts,
+			replayElements,
 			engineComposeRequest,
 			engineExecuteRequest,
 			activeEnvironmentId,
@@ -419,8 +452,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					   bounds it. */
 					memoryKey={run.id}
 					initialResponse={initialResponse}
-					inheritedPreScripts={seed.collectionPreScripts}
-					inheritedPostScripts={seed.collectionPostScripts}
+					inheritedElements={inheritedElements}
 					legacyPreScript={seed.legacyPreScript}
 					legacyPostScript={seed.legacyPostScript}
 					collectionId={null}

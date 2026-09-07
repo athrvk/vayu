@@ -138,6 +138,8 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			name: "Get users",
 			method: "GET",
 			url: "https://api.example.com/users",
+			// Scripts ride here since issue #1514's cut-over; the row carries no
+			// `preRequestScript` / `postRequestScript` column any more.
 			elements: [],
 		}),
 		updateRequest: vi.fn().mockResolvedValue({ id: "req_1", name: "Renamed" }),
@@ -579,15 +581,18 @@ describe("data-write tools", () => {
 			ctxWith(client, { allowWrites: true })
 		);
 		expect(res.isError).toBeFalsy();
-		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
-		// #1514 refuses these as wire fields - the sugar must never forward them.
-		expect(Object.keys(payload)).not.toContain("preRequestScript");
-		expect(Object.keys(payload)).not.toContain("postRequestScript");
-		expect(payload.elements).toEqual([
-			{ kind: "script.pre", config: { script: pre } },
-			{ kind: "script.post", config: { script: post } },
-		]);
+		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// The MCP argument is still named per-phase, but the wire field is
+		// `elements` (issue #1514) - the engine refuses the old keys with a 400.
+		// No `id` is sent: `apply_elements_field` stamps an `el_` one on.
+		expect(payload).toMatchObject({
+			elements: [
+				{ kind: "script.pre", enabled: true, config: { script: pre } },
+				{ kind: "script.post", enabled: true, config: { script: post } },
+			],
+		});
+		expect(Object.keys(payload as object)).not.toContain("preRequestScript");
+		expect(Object.keys(payload as object)).not.toContain("postRequestScript");
 	});
 
 	test("create_request sends no elements key when the caller named none", async () => {
@@ -623,12 +628,31 @@ describe("data-write tools", () => {
 		expect(client.createRequest).not.toHaveBeenCalled();
 	});
 
-	test("update_request folds a new script into the request's stored elements", async () => {
+	/**
+	 * A stored request whose `elements` hold both scripts plus an element this
+	 * tool surface cannot address - the case a naive "write a fresh one-element
+	 * array" translation silently destroys.
+	 */
+	function storedWithElements() {
+		return {
+			id: "req_1",
+			name: "Get users",
+			elements: [
+				{ id: "el_pre", kind: "script.pre", enabled: true, config: { script: "pre();" } },
+				{ id: "el_x", kind: "assert.status", enabled: true, config: { equals: 200 } },
+				{
+					id: "el_post",
+					kind: "script.post",
+					enabled: true,
+					config: { script: "post();" },
+				},
+			],
+		};
+	}
+
+	test("update_request patches one script and keeps the other stored", async () => {
 		const client = fakeClient({
-			getRequest: vi.fn().mockResolvedValue({
-				id: "req_1",
-				elements: [{ id: "el_1", kind: "assert.status", config: { in: [200] } }],
-			}),
+			getRequest: vi.fn().mockResolvedValue(storedWithElements()),
 		});
 		const post = "pm.test('created', () => pm.response.to.have.status(201));";
 		const res = await dispatchTool(
@@ -641,23 +665,27 @@ describe("data-write tools", () => {
 		// without a fetch would drop the request's other stored elements.
 		expect(client.getRequest).toHaveBeenCalledWith("req_1", undefined);
 		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		/*
+		 * `PUT /requests/:id` replaces the whole `elements` list, so the write has
+		 * to carry back everything it did not mean to change: the untouched
+		 * pre-request script, the assertion element MCP has no argument for
+		 * (#1517), and the post script under its *existing* id. Absent keeps - a
+		 * `preRequestScript: ""` filler would blank a signing script the caller
+		 * never mentioned. Also proves a script alone satisfies the empty-patch
+		 * refusal, which counts the payload's keys.
+		 */
 		expect(payload).toEqual({
 			elements: [
-				{ id: "el_1", kind: "assert.status", config: { in: [200] } },
-				{ kind: "script.post", config: { script: post } },
+				{ id: "el_pre", kind: "script.pre", enabled: true, config: { script: "pre();" } },
+				{ id: "el_x", kind: "assert.status", enabled: true, config: { equals: 200 } },
+				{ id: "el_post", kind: "script.post", enabled: true, config: { script: post } },
 			],
 		});
 	});
 
-	test("update_request clears a stored script, keeping the request's other elements", async () => {
+	test("update_request clears a script when passed an empty string", async () => {
 		const client = fakeClient({
-			getRequest: vi.fn().mockResolvedValue({
-				id: "req_1",
-				elements: [
-					{ id: "el_1", kind: "script.pre", config: { script: "old" } },
-					{ id: "el_2", kind: "assert.status", config: { in: [200] } },
-				],
-			}),
+			getRequest: vi.fn().mockResolvedValue(storedWithElements()),
 		});
 		const res = await dispatchTool(
 			"update_request",
@@ -668,8 +696,20 @@ describe("data-write tools", () => {
 		// `""` is a value the merge-patch honours, not an omission - the
 		// difference between "leave my script alone" and "delete it".
 		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		// `""` is a value, not an omission - the difference between "leave my
+		// script alone" and "delete it". Clearing drops the element outright
+		// rather than leaving an enabled one whose script runs nothing, and takes
+		// nothing else with it.
 		expect(payload).toEqual({
-			elements: [{ id: "el_2", kind: "assert.status", config: { in: [200] } }],
+			elements: [
+				{ id: "el_x", kind: "assert.status", enabled: true, config: { equals: 200 } },
+				{
+					id: "el_post",
+					kind: "script.post",
+					enabled: true,
+					config: { script: "post();" },
+				},
+			],
 		});
 	});
 
@@ -702,6 +742,21 @@ describe("data-write tools", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toMatch(/not both/);
 		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
+	test("update_request reads nothing when no script is named", async () => {
+		// The read-merge-write is the script path's alone: a rename must not pay
+		// for a GET, and #1436's merge-patch rule still governs every other field.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", name: "Renamed" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.getRequest).not.toHaveBeenCalled();
+		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(payload).toEqual({ name: "Renamed" });
 	});
 
 	test("the CRUD tools name a stored script once, without the run tools' alias", () => {
@@ -2231,19 +2286,22 @@ describe("document CRUD parity", () => {
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBeFalsy();
-			const payload = callArgs(client.createCollection)[0] as Record<string, unknown>;
-			// #1514 refuses these as wire fields - they must never reach the engine.
-			expect(Object.keys(payload)).not.toContain("preRequestScript");
-			expect(Object.keys(payload)).not.toContain("postRequestScript");
-			expect(payload).toEqual({
+			// Both scripts leave as `elements` (issue #1514); the engine refuses
+			// the per-phase keys outright, and assigns each entry its own `el_` id.
+			expect(callArgs(client.createCollection)[0]).toEqual({
 				name: "API",
 				auth: { mode: "apikey", key: "X-Key", value: "{{token}}" },
 				elements: [
 					{
 						kind: "script.pre",
+						enabled: true,
 						config: { script: "pm.request.headers.add('x-run', '1')" },
 					},
-					{ kind: "script.post", config: { script: "pm.test('ok', () => {})" } },
+					{
+						kind: "script.post",
+						enabled: true,
+						config: { script: "pm.test('ok', () => {})" },
+					},
 				],
 				variables: {
 					baseUrl: { enabled: true, value: "https://api.example.com" },
@@ -2266,6 +2324,55 @@ describe("document CRUD parity", () => {
 			expect(res.isError).toBe(true);
 			expect(firstText(res)).toMatch(/not both/);
 			expect(client.createCollection).not.toHaveBeenCalled();
+		});
+
+		test("update_collection upserts a script into the stored elements list", async () => {
+			const client = fakeClient({
+				getCollection: vi.fn().mockResolvedValue({
+					id: "col_1",
+					name: "API",
+					elements: [
+						{
+							id: "el_a",
+							kind: "script.pre",
+							enabled: true,
+							config: { script: "chain();" },
+						},
+						{
+							id: "el_b",
+							kind: "script.post",
+							enabled: true,
+							config: { script: "old();" },
+						},
+					],
+				}),
+			});
+			const res = await dispatchTool(
+				"update_collection",
+				{ collectionId: "col_1", postRequestScript: "fresh();" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			// A collection's scripts run for every request below it, so dropping a
+			// sibling element on a one-script edit would change what a whole tree
+			// does. The stored list is read and merged, never overwritten.
+			expect(client.getCollection).toHaveBeenCalledWith("col_1", undefined);
+			expect(callArgs(client.updateCollection)[1]).toEqual({
+				elements: [
+					{
+						id: "el_a",
+						kind: "script.pre",
+						enabled: true,
+						config: { script: "chain();" },
+					},
+					{
+						id: "el_b",
+						kind: "script.post",
+						enabled: true,
+						config: { script: "fresh();" },
+					},
+				],
+			});
 		});
 
 		test("update_collection merges variables against the stored blob", async () => {
@@ -2309,6 +2416,7 @@ describe("document CRUD parity", () => {
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(renamed.isError).toBeFalsy();
+			// Only variables and scripts are read-merge-writes; a rename is not.
 			expect(client.getCollection).not.toHaveBeenCalled();
 			expect(callArgs(client.updateCollection)[1]).toEqual({ name: "Renamed" });
 
@@ -2321,13 +2429,24 @@ describe("document CRUD parity", () => {
 			expect(client.updateCollection).toHaveBeenCalledTimes(1);
 		});
 
-		test("clearing a collection script reads the stored elements first, keeping the rest", async () => {
+		test("an empty collection script clears its element, and still satisfies the patch check", async () => {
 			const client = fakeClient({
 				getCollection: vi.fn().mockResolvedValue({
 					id: "col_1",
+					name: "API",
 					elements: [
-						{ id: "el_1", kind: "script.pre", config: { script: "old pre" } },
-						{ id: "el_2", kind: "assert.status", config: { in: [200] } },
+						{
+							id: "el_a",
+							kind: "script.pre",
+							enabled: true,
+							config: { script: "chain();" },
+						},
+						{
+							id: "el_b",
+							kind: "script.post",
+							enabled: true,
+							config: { script: "keep();" },
+						},
 					],
 				}),
 			});
@@ -2337,11 +2456,19 @@ describe("document CRUD parity", () => {
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBeFalsy();
-			// `PUT /collections/:id` replaces `elements` wholesale, so clearing one
-			// script without dropping the collection's other elements needs the read.
+			// An empty string is still a value - how a collection script is cleared -
+			// but clearing is now a removal from `elements`, so it costs the read the
+			// merge needs, and a script alone still passes the empty-patch refusal.
 			expect(client.getCollection).toHaveBeenCalledWith("col_1", undefined);
 			expect(callArgs(client.updateCollection)[1]).toEqual({
-				elements: [{ id: "el_2", kind: "assert.status", config: { in: [200] } }],
+				elements: [
+					{
+						id: "el_b",
+						kind: "script.post",
+						enabled: true,
+						config: { script: "keep();" },
+					},
+				],
 			});
 		});
 
@@ -4684,30 +4811,36 @@ describe("dispatchTool", () => {
 		);
 
 		expect(res.isError).toBeFalsy();
-		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
-		expect(payload).not.toHaveProperty("preRequestScript");
-		expect(payload).not.toHaveProperty("postRequestScript");
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// Both ride as `elements` now (issue #1514): `/compose` copies an inline
+		// request's keys onto the payload verbatim, so sending the retired names
+		// would reach `/execute` and come back a 400. Ids are stated because
+		// nothing assigns one on this path and per-element outcomes key off it.
 		expect(payload.elements).toEqual([
 			{
+				id: "mcp-script-pre",
 				kind: "script.pre",
+				enabled: true,
 				config: { script: "pm.request.headers['X-Signature'] = 'abc';" },
 			},
-			{ kind: "script.post", config: { script: "pm.test('ok', function () {});" } },
+			{
+				id: "mcp-script-post",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('ok', function () {});" },
+			},
 		]);
+		expect(payload.preRequestScript).toBeUndefined();
+		expect(payload.postRequestScript).toBeUndefined();
 	});
 
-	test("run_request appends an ad-hoc `elements` argument to what compose produced", async () => {
-		const client = fakeClient({
-			composeRequest: vi.fn().mockResolvedValue({
-				url: "https://api.example.com/users",
-				elements: [{ id: "el_1", kind: "assert.status", config: { in: [200] } }],
-			}),
-		});
+	test("run_request appends an ad-hoc `elements` argument alongside its own scripts", async () => {
+		const client = fakeClient();
 		const res = await dispatchTool(
 			"run_request",
 			{
 				url: "https://api.example.com/users",
+				postRequestScript: "pm.test('ok', function () {});",
 				elements: [{ kind: "assert.duration", config: { maxMs: 500 } }],
 			},
 			ctxWith(client, { allowlist: ["api.example.com"] })
@@ -4715,11 +4848,16 @@ describe("dispatchTool", () => {
 		expect(res.isError).toBeFalsy();
 		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock
 			.calls[0][0] as Record<string, unknown>;
-		// Appended after the composed request's own elements, never replacing
-		// them - the composed chain's assertion must survive alongside the
-		// ad-hoc one.
+		// The ad-hoc `elements` argument (issue #1517) joins the script, never
+		// replacing it - there is no stored chain for this tool to lose either
+		// way (composition here is always inline).
 		expect(payload.elements).toEqual([
-			{ id: "el_1", kind: "assert.status", config: { in: [200] } },
+			{
+				id: "mcp-script-post",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('ok', function () {});" },
+			},
 			{ kind: "assert.duration", config: { maxMs: 500 } },
 		]);
 	});
@@ -5016,11 +5154,16 @@ describe("dispatchTool", () => {
 		);
 
 		expect(res.isError).toBeFalsy();
-		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
-		expect(payload).not.toHaveProperty("postRequestScript");
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		// The alias resolves to the same `script.post` element the other name
+		// builds - one concept, one wire shape.
 		expect(payload.elements).toEqual([
-			{ kind: "script.post", config: { script: "pm.test('b', () => {});" } },
+			{
+				id: "mcp-script-post",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('b', () => {});" },
+			},
 		]);
 	});
 
@@ -5380,16 +5523,16 @@ describe("dispatchTool", () => {
 	// assertions the same request runs in the app. Composition is engine-side
 	// (`POST /compose`, #226) - the same path run_collection_smoke uses.
 	//
-	// Since issue #1514's cut-over the by-id compose path answers with
-	// `elements` (script.pre/script.post among them), not `preRequestScripts`/
-	// `postRequestScripts` - and `POST /runs` never cut over (engine/CLAUDE.md:
-	// a load run "runs no element yet"), so a saved request's stored elements
-	// ride along on `payload.elements` but do **not** become the run's
-	// validation script; only an ad-hoc `postRequestScript`/`tests` argument
-	// does, exactly as it did before #1512.
+	// Since issue #1514 `/compose` answers with `elements` and nothing else, but
+	// a single-target `POST /runs` still reads only `tests` /
+	// `postRequestScript(s)` (`read_post_request_script`) and never looks at
+	// `elements` - so the tool folds the composed `script.post` entries back
+	// into `tests` itself. Without that fold the composed assertions would be
+	// sent under a key the load path ignores, which is the bug these pin.
 
 	// Canned engine output for composing req_1 by id: what
-	// request_composer_test.cpp proves the engine produces.
+	// request_composer_test.cpp proves the engine produces, `origin` stamps
+	// included (`emit_level`).
 	const composedSavedRequest = {
 		method: "POST",
 		url: "https://api.example.com/users",
@@ -5397,19 +5540,25 @@ describe("dispatchTool", () => {
 		body: { mode: "json", content: '{"a":1}' },
 		elements: [
 			{
-				id: "el_pre",
-				kind: "script.pre",
-				config: { script: "pm.request.headers['X-Sig'] = 'abc';" },
-			},
-			{
-				id: "el_post_col",
+				id: "el_chain",
 				kind: "script.post",
+				enabled: true,
 				config: { script: "pm.test('chain', function () {});" },
+				origin: { kind: "collection", id: "col_1", name: "API" },
 			},
 			{
-				id: "el_post_req",
+				id: "el_sig",
+				kind: "script.pre",
+				enabled: true,
+				config: { script: "pm.request.headers['X-Sig'] = 'abc';" },
+				origin: { kind: "request", id: "req_1" },
+			},
+			{
+				id: "el_own",
 				kind: "script.post",
+				enabled: true,
 				config: { script: "pm.test('own', function () {});" },
+				origin: { kind: "request", id: "req_1" },
 			},
 		],
 		followRedirects: true,
@@ -5438,7 +5587,7 @@ describe("dispatchTool", () => {
 				),
 		});
 
-	test("start_load_run composes a saved request; its elements ride along but do not become the validation script", async () => {
+	test("start_load_run composes a saved request; the chain's assertions fold into `tests`", async () => {
 		const client = savedRequestClient();
 		const res = await dispatchTool(
 			"start_load_run",
@@ -5453,12 +5602,15 @@ describe("dispatchTool", () => {
 		expect(payload.method).toBe("POST");
 		expect(payload.headers).toMatchObject({ "X-Api": "v1" });
 		expect(payload.requestId).toBe("req_1");
-		// The composed elements travel on the payload untouched (the engine
-		// still reads them for its own warnings)...
-		expect(payload.elements).toEqual(composedSavedRequest.elements);
-		// ...but /runs runs no element (#1495 is what teaches it to): with no
-		// ad-hoc script named, there is nothing for it to validate against.
-		expect(payload.tests).toBeUndefined();
+		// The whole point: the collection's assertion and the request's own both
+		// travel, in chain-then-own order, under the key /runs actually reads -
+		// joined the way the engine joins parts (`read_script`'s "\n\n").
+		expect(payload.tests).toBe(
+			"pm.test('chain', function () {});\n\npm.test('own', function () {});"
+		);
+		// And `elements` does not ride along: a single-target run has no element
+		// pipeline, so leaving it would imply one that never runs.
+		expect(payload.elements).toBeUndefined();
 	});
 
 	test("start_load_run reports the pre-request script it cannot run", async () => {
@@ -5474,11 +5626,15 @@ describe("dispatchTool", () => {
 		// pre-request hook, but nothing here strips what the engine's own
 		// warnings read)...
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(payload.elements).toContainEqual(expect.objectContaining({ kind: "script.pre" }));
-		// ...and the agent still has to be told it will not run, or a request
-		// that signs itself goes out unsigned with nothing saying so.
+		// POST /runs has no pre-request hook, so the script must not be sent
+		// pretending it will run - under either the retired name or `elements`...
+		expect(payload.preRequestScripts).toBeUndefined();
+		expect(payload.elements).toBeUndefined();
+		// ...and the agent has to be told, or a request that signs itself goes
+		// out unsigned with nothing saying so. The count comes off the composed
+		// `script.pre` elements now, so a miscounted fold reddens here.
 		const text = res.content.map((c) => c.text).join("\n");
-		expect(text).toMatch(/pre-request script\(s\).*NOT applied/i);
+		expect(text).toMatch(/1 pre-request script\(s\).*NOT applied/i);
 	});
 
 	// Under either agent-facing name - `postRequestScript` is the one both
@@ -5500,11 +5656,12 @@ describe("dispatchTool", () => {
 
 			expect(res.isError).toBeFalsy();
 			const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			// Replaces rather than joins: with no way to know which the agent
+			// meant, running both would add assertions they never asked for. The
+			// composed chain must not survive under any other key either.
 			expect(payload.tests).toBe("pm.test('adhoc', function () {});");
-			// The composed elements are left alone - there is no
-			// `postRequestScripts` wire field to clear since #1514, and /runs
-			// never reads `elements` as a validation script to begin with.
-			expect(payload.elements).toEqual(composedSavedRequest.elements);
+			expect(payload.postRequestScripts).toBeUndefined();
+			expect(payload.elements).toBeUndefined();
 		}
 	);
 
@@ -5524,9 +5681,12 @@ describe("dispatchTool", () => {
 		expect(res.isError).toBeFalsy();
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.url).toBe("https://staging.example.com/users");
-		// Only the stated field is overridden; the rest of the request stands.
+		// Only the stated field is overridden; the rest of the request stands -
+		// both composed assertions included, folded into the key /runs reads.
 		expect(payload.method).toBe("POST");
-		expect(payload.elements).toHaveLength(3);
+		expect(payload.tests).toBe(
+			"pm.test('chain', function () {});\n\npm.test('own', function () {});"
+		);
 	});
 
 	// The saved request stores http1.1 and the agent asks for http2, so a pass
@@ -5547,9 +5707,12 @@ describe("dispatchTool", () => {
 		expect(composeBody.request).toMatchObject({ httpVersion: "http2" });
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.httpVersion).toBe("http2");
-		// Only the stated field is overridden; the rest of the request stands.
+		// Only the stated field is overridden; the rest of the request stands -
+		// both composed assertions included, folded into the key /runs reads.
 		expect(payload.url).toBe("https://api.example.com/users");
-		expect(payload.elements).toHaveLength(3);
+		expect(payload.tests).toBe(
+			"pm.test('chain', function () {});\n\npm.test('own', function () {});"
+		);
 	});
 
 	// The other half of the rule: with nothing stated the stored protocol runs,

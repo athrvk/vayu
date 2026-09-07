@@ -156,14 +156,12 @@ void register_environment_routes (RouteContext& ctx) {
      * Returns: Array of environment objects with id, name, variables, and timestamps.
      */
     ctx.server.Get ("/environments", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_info ("GET /environments - Fetching all environments");
         auto envs               = ctx.db.get_environments ();
         nlohmann::json response = nlohmann::json::array ();
         for (const auto& e : envs) {
             response.push_back (vayu::json::serialize (e));
         }
-        vayu::utils::log_debug ("GET /environments - Returning " +
-        std::to_string (envs.size ()) + " environments");
+        vayu::utils::log_debug ("Returning " + std::to_string (envs.size ()) + " environments");
         res.set_content (response.dump (), "application/json");
     });
 
@@ -239,7 +237,6 @@ void register_environment_routes (RouteContext& ctx) {
     ctx.server.Delete (R"(/environments/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string id = req.matches[1];
-        vayu::utils::log_info ("DELETE /environments/" + id);
 
         auto existing = ctx.db.get_environment (id);
         if (!existing) {

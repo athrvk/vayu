@@ -149,8 +149,7 @@ void register_spec_describe_routes (RouteContext& ctx) {
                 vayu::utils::log_warning ("POST /specs/describe - " +
                 std::to_string (status) + ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info ("POST /specs/describe - " +
-                body["format"].get<std::string> () + ", " +
+                vayu::utils::log_info (body["format"].get<std::string> () + ", " +
                 std::to_string (body["operations"].size ()) + " operation(s)");
             }
             res.status = status;

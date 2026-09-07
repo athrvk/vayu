@@ -13,9 +13,14 @@
 import { describe, it, expect } from "vitest";
 import { bindableStrings, referencedVariableNames } from "./request-references";
 import type { RequestReferenceSource } from "./request-references";
-import type { FormFieldEntry, KeyValueEntry, RequestBody } from "@/types";
+import type { ElementDef, FormFieldEntry, KeyValueEntry, RequestBody } from "@/types";
 
 const kv = (key: string, value: string): KeyValueEntry => ({ key, value, enabled: true });
+
+/** One enabled `script.pre` / `script.post` element holding `script`. */
+function scriptElement(kind: "script.pre" | "script.post", script: string): ElementDef {
+	return { id: `el_${kind}`, kind, enabled: true, config: { script } };
+}
 
 function source(overrides: Partial<RequestReferenceSource> = {}): RequestReferenceSource {
 	return {
@@ -23,8 +28,7 @@ function source(overrides: Partial<RequestReferenceSource> = {}): RequestReferen
 		params: [],
 		headers: [],
 		body: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		resolvedAuth: { mode: "none" },
 		...overrides,
 	};
@@ -50,7 +54,7 @@ describe("referencedVariableNames - what the request uses", () => {
 				headers: [kv("{{hkey}}", "{{hval}}")],
 				body,
 				resolvedAuth: { mode: "bearer", token: "{{authtok}}" },
-				preRequestScript: 'pm.environment.get("scriptvar");',
+				elements: [scriptElement("script.pre", 'pm.environment.get("scriptvar");')],
 			})
 		);
 
@@ -97,8 +101,10 @@ describe("referencedVariableNames - what the request uses", () => {
 		// `pm.environment.get` call really reads its name.
 		const names = referencedVariableNames(
 			source({
-				preRequestScript: 'const literal = "{{tmplonly}}";',
-				postRequestScript: 'pm.environment.get("realvar");',
+				elements: [
+					scriptElement("script.pre", 'const literal = "{{tmplonly}}";'),
+					scriptElement("script.post", 'pm.environment.get("realvar");'),
+				],
 			})
 		);
 		expect(names).toEqual(["realvar"]);
@@ -106,7 +112,7 @@ describe("referencedVariableNames - what the request uses", () => {
 
 	it("does not read a pm.iterationData row name - that is the data contract", () => {
 		const names = referencedVariableNames(
-			source({ preRequestScript: 'pm.iterationData.get("plan");' })
+			source({ elements: [scriptElement("script.pre", 'pm.iterationData.get("plan");')] })
 		);
 		expect(names).toEqual([]);
 	});

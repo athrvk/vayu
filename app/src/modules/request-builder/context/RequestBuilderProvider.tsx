@@ -47,7 +47,7 @@ import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/revea
 import { apiService } from "@/services";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries";
-import type { ScriptPart, VariableValue } from "@/types";
+import type { ResolvedElement, VariableValue } from "@/types";
 import type {
 	RequestState,
 	ResponseState,
@@ -84,8 +84,7 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"formData",
 	"urlEncoded",
 	"auth",
-	"preRequestScript",
-	"testScript",
+	"elements",
 	"followRedirects",
 	"maxRedirects",
 	"httpVersion",
@@ -121,13 +120,12 @@ interface RequestBuilderProviderProps {
 	 */
 	initialResponse?: ResponseState | null;
 	/**
-	 * Script parts to show as "runs before your own" instead of the live
-	 * collection chain. The History run view passes what the run recorded, so a
-	 * copy of a past run lists the scripts that actually ran, not the ones the
-	 * collection carries today.
+	 * Elements to show as "runs before your own" instead of the live collection
+	 * chain (issue #1512). The History run view passes what the run recorded,
+	 * so a copy of a past run lists the scripts that actually ran, not the
+	 * ones the collection carries today.
 	 */
-	inheritedPreScripts?: ScriptPart[];
-	inheritedPostScripts?: ScriptPart[];
+	inheritedElements?: ResolvedElement[];
 	/**
 	 * The whole glued script a run recorded before script parts existed. Shown
 	 * read-only, because its collection and request halves cannot be separated
@@ -177,8 +175,7 @@ export default function RequestBuilderProvider({
 	initialRequest,
 	memoryKey: declaredMemoryKey,
 	initialResponse,
-	inheritedPreScripts,
-	inheritedPostScripts,
+	inheritedElements,
 	legacyPreScript,
 	legacyPostScript,
 	collectionId,
@@ -1265,8 +1262,7 @@ export default function RequestBuilderProvider({
 			setVariablesDraft,
 			response,
 			setResponse,
-			inheritedPreScripts,
-			inheritedPostScripts,
+			inheritedElements,
 			legacyPreScript,
 			legacyPostScript,
 			activeTab,
@@ -1308,8 +1304,7 @@ export default function RequestBuilderProvider({
 			setVariablesDraft,
 			response,
 			setResponse,
-			inheritedPreScripts,
-			inheritedPostScripts,
+			inheritedElements,
 			legacyPreScript,
 			legacyPostScript,
 			activeTab,

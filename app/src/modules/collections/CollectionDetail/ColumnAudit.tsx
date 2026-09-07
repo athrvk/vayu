@@ -48,6 +48,7 @@ import { Callout } from "@/components/shared";
 import { useCollectionsQuery, useMultipleCollectionRequests } from "@/queries";
 import { auditDataColumns, type AuditableRequest } from "@/services/data-files";
 import { collectionsUnderContract } from "@/lib/data-contract";
+import { scriptTextFor } from "@/lib/elements";
 import { resolveEffectiveAuth } from "@/modules/request-builder/utils/auth-resolution";
 import { walkAncestors } from "@/modules/collections/tree-utils";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
@@ -143,8 +144,8 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 			}));
 		});
 		const collectionScripts = chainCollections.flatMap((collection) => [
-			collection.preRequestScript,
-			collection.postRequestScript,
+			scriptTextFor(collection.elements, "script.pre") ?? "",
+			scriptTextFor(collection.elements, "script.post") ?? "",
 		]);
 		return auditDataColumns(declared, requests, collectionScripts);
 	}, [auditedCollectionIds, requestsByCollection, declared, collections, chainCollections]);

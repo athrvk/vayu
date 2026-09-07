@@ -470,8 +470,16 @@ export interface Collection {
 	order: number;
 	variables: Record<string, VariableValue>;
 	auth: Exclude<RequestAuth, { mode: "inherit" }>; // Collections are auth sources, never inherit
-	preRequestScript: string;
-	postRequestScript: string;
+	/**
+	 * Typed behaviours run at fixed phases of every step beneath this collection
+	 * (issue #1512): extractors, assertions, timers and scripts, in list order.
+	 * Replaces `preRequestScript`/`postRequestScript` - a script is now a
+	 * `script.pre`/`script.post` element like any other kind. This is the
+	 * collection's **own** list only; a request beneath it sees these plus its
+	 * ancestors', resolved by the engine at compose/execute time and shown in
+	 * the app by walking the chain (see `InheritedElementsNotice`).
+	 */
+	elements: ElementDef[];
 	/**
 	 * Optional the way `parentId` is: most collections declare no contract, and
 	 * absent and `{}` are the same state to every reader. Use
@@ -608,6 +616,106 @@ export interface ScriptPart {
 	script: string;
 }
 
+/**
+ * One property of an {@link ElementConfigSchema} - almost always a flat
+ * scalar, with one level of `object` nesting for the rare kind whose config
+ * groups two fields (`assert.status.range`'s `{min, max}`). The generic
+ * element form (`components/shared/ElementList/GenericElementForm.tsx`)
+ * renders one of these per property; a kind that needs more than one level,
+ * or a form richer than one row per field, ships a bespoke form instead
+ * (`elementForms.ts`).
+ */
+export interface ElementConfigProperty {
+	type?: "string" | "integer" | "number" | "boolean" | "array" | "object";
+	enum?: string[];
+	items?: { type?: string };
+	minimum?: number;
+	maximum?: number;
+	/** Present only when `type` is `"object"` - one level deep, never further. */
+	properties?: Record<string, ElementConfigProperty | null>;
+	required?: string[];
+}
+
+/**
+ * A JSON Schema object, scoped to what the element registry emits (issue
+ * #1512).
+ *
+ * A property's value is `| null` because JSON Schema lets an unconstrained
+ * property be written that way rather than as `{}` - `assert.jsonpath`'s
+ * `expected` does this, since it legally holds any JSON value. Read through
+ * `GenericElementForm`'s `PropertyRow`, which treats `null` the same as `{}`:
+ * a property that declares nothing still renders, as a plain text field,
+ * rather than the type checker's non-null promise crashing the one place that
+ * reads it.
+ */
+export interface ElementConfigSchema {
+	type: "object";
+	properties?: Record<string, ElementConfigProperty | null>;
+	required?: string[];
+	additionalProperties?: boolean;
+}
+
+/** One entry in the engine's element-kind catalogue, `GET /elements/kinds`. */
+export interface ElementKindSchema {
+	kind: string;
+	version: number;
+	label: string;
+	description: string;
+	category: string;
+	hotPathClass: "declarative" | "script";
+	configSchema: ElementConfigSchema;
+	phases: string[];
+}
+
+/**
+ * One typed behaviour attached to a request or collection (issue #1512): an
+ * extractor, assertion, timer, controller or script, run by the engine's
+ * element pipeline at the phase its `kind` implies (`GET /elements/kinds`
+ * names each kind's phases; never stored here). Replaces the two script
+ * columns - a script is now a `script.pre` / `script.post` element like any
+ * other kind, edited through the same `ElementList` as the rest.
+ *
+ * `config` is validated against the kind's schema engine-side on save; the
+ * app's form (generated or bespoke) is the only client-side check.
+ */
+export interface ElementDef {
+	id: string;
+	kind: string;
+	enabled: boolean;
+	name?: string;
+	config: Record<string, unknown>;
+}
+
+/**
+ * One element as sent inline to `POST /compose` / `POST /execute` for an
+ * ad-hoc send (issue #1512), stamped with where it came from - the
+ * generalized, N-kind form of {@link ScriptPart}. Built by
+ * `elements-parts.ts`, which walks the collection chain the way `scriptParts`
+ * used to for scripts alone. Absent `origin` is an inline send with no
+ * `requestId` chain to resolve from.
+ */
+export interface ResolvedElement extends ElementDef {
+	origin?: { kind: "collection" | "request"; id?: string; name?: string };
+}
+
+/**
+ * What one element did when its phase ran (issue #1512), carried on the same
+ * trace `scripts` rides (`RunResultTrace.elements`) - one entry per element
+ * that ran, beside the existing script test results.
+ *
+ * `origin` is absent for an inline send with no `requestId` to resolve a
+ * chain from (`docs/engine/api-reference.md`'s Elements section).
+ */
+export interface ElementOutcome {
+	id: string;
+	kind: string;
+	origin?: { kind: "collection" | "request"; id: string; name?: string };
+	outcome: "ok" | "failed" | "missing" | "skipped" | "error";
+	message?: string;
+	waitedMs?: number;
+	wrote?: unknown;
+}
+
 export interface Request {
 	id: string;
 	collectionId: string;
@@ -627,8 +735,13 @@ export interface Request {
 	body: RequestBody;
 	bodyType: BodyMode; // Denormalized mirror of body.mode - kept for queryability
 	auth: RequestAuth;
-	preRequestScript: string;
-	postRequestScript: string;
+	/**
+	 * Typed behaviours run at fixed phases of this request's step (issue
+	 * #1512): extractors, assertions, timers and scripts, in list order. This
+	 * request's **own** list only - see {@link Collection.elements} for the
+	 * inheritance rule.
+	 */
+	elements: ElementDef[];
 	/** Follow 3xx `Location` responses. Engine default is `true`. */
 	followRedirects: boolean;
 	/** Redirect hops allowed when {@link followRedirects} is on. Engine default is 10. */
@@ -1246,6 +1359,13 @@ export interface RunResultTrace {
 	 */
 	scripts?: RunResultScripts;
 	/**
+	 * What each of the step's typed elements did (issue #1512) - extractors,
+	 * assertions and timers, beside the script results `scripts` already
+	 * carries. One design send and one sequential-run step both write this;
+	 * a load-test trace never does, because load mode runs no element yet.
+	 */
+	elements?: ElementOutcome[];
+	/**
 	 * What checking this response against its declared schema found (issue
 	 * #628), stored **verbatim** as the live `/execute` body carried it - one
 	 * engine builder (`build_validation_payload`) fills both, so a restored
@@ -1733,6 +1853,11 @@ export interface ConsoleLogEntry {
 export interface SanityResult extends HttpResponse {
 	requestId?: string;
 	testResults?: TestResult[];
+	/**
+	 * What each of this send's non-script elements did (issue #1512) -
+	 * extractors, assertions and timers, beside `testResults` above.
+	 */
+	elements?: ElementOutcome[];
 	/**
 	 * A `string` is the pre-structured shape, kept in the type so the fallback in
 	 * `parse-logs.ts` is visible rather than a cast. A renderer can meet one when

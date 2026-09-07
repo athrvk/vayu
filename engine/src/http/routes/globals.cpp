@@ -79,7 +79,6 @@ void register_globals_routes (RouteContext& ctx) {
      * Returns: Object with id, variables, and updatedAt.
      */
     ctx.server.Get ("/globals", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_info ("GET /globals - Fetching global variables");
         auto globals = ctx.db.get_globals ();
 
         if (!globals) {
@@ -107,7 +106,6 @@ void register_globals_routes (RouteContext& ctx) {
             }
         }
 
-        vayu::utils::log_debug ("GET /globals - Returning global variables");
         res.set_content (response.dump (), "application/json");
     });
 

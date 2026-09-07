@@ -12,8 +12,8 @@
  * state. The result is a request-shape replacement: every request field is set
  * (with explicit defaults before flag overrides) so no stale body/auth/header
  * can survive from the previous request. Identity and scripts (`id`, `name`,
- * `collectionId`, `preRequestScript`, `testScript`) are deliberately never
- * included - curl can't express them, so the caller keeps its own.
+ * `collectionId`, `elements`) are deliberately never included - curl can't
+ * express them, so the caller keeps its own.
  *
  * A body read from a file (`-d @body.json`) is still skipped: the contents are
  * the body, and a pasted command cannot supply them. A **form file part**
