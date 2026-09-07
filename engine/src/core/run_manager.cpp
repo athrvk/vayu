@@ -1257,6 +1257,16 @@ vayu::Request& request) {
     context->load_template = tokenize_bindable_fields (request,
     context->load_data ? context->load_data->bound_columns : vayu::http::BoundColumnNames{});
 
+    // Scanned here, while the request is still owned and about to become the
+    // shared template every fast-path submission sends unchanged (issue
+    // #1540): a bare `{{token}}` with no data set and no credential behind it
+    // splits nothing above, so `load_template` stays empty and the fast path
+    // in `submit_one_request` never copies the request to scan it itself. The
+    // scan is one-time because the fast path's bytes never change between
+    // submissions.
+    context->template_unresolved_tokens =
+    vayu::http::routes::unresolved_token_names (request);
+
     // A streaming run's caps ride on the request itself, because the
     // event loop is what enforces them and the request is all it sees.
     // Attached after `build_request` rather than inside it: the caps
