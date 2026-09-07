@@ -29,9 +29,10 @@
  * and run it twice.
  *
  * **Body, for a run whose stored request body was truncated.** The engine caps
- * a stored trace body at `maxTraceBodyBytes`, so such a run holds only a slice
- * of what was sent; writing that slice back would corrupt the saved body. When
- * `seed.requestBodyTruncated` is set the body is left off the patch.
+ * a stored trace body, and the config snapshot's own body, at `maxTraceBodyBytes`,
+ * so such a run holds only a slice of what was sent; writing that slice back
+ * would corrupt the saved body. When `seed.requestBodyTruncated` is set the
+ * body is left off the patch.
  *
  * None is silent: {@link buildChangeset} emits each as a `kept` row, in the
  * same list as every change, with the reason inline. That is what makes "an

@@ -540,8 +540,9 @@ namespace {
 std::string run_config_snapshot (const std::string& body,
 bool is_scenario,
 const nlohmann::json& scenario_manifest,
-const vayu::core::LoadDataSet* data) {
-    std::string sanitized = vayu::json::sanitize_config_snapshot (body);
+const vayu::core::LoadDataSet* data,
+size_t max_body_bytes) {
+    std::string sanitized = vayu::json::sanitize_config_snapshot (body, max_body_bytes);
     if (is_scenario) {
         return scenario_snapshot (sanitized, scenario_manifest);
     }
@@ -1208,7 +1209,11 @@ DesignSend& send) {
     // payload nobody will store is work with no reader.
     if (!payload.transient) {
         send.run.id = vayu::utils::generate_id ("run_");
-        send.run.config_snapshot = vayu::json::sanitize_config_snapshot (req.body);
+        const auto max_snapshot_body_bytes =
+        static_cast<size_t> (ctx.db.get_config_int ("maxTraceBodyBytes",
+        static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
+        send.run.config_snapshot =
+        vayu::json::sanitize_config_snapshot (req.body, max_snapshot_body_bytes);
         send.run_id = send.run.id;
     }
 
@@ -1875,8 +1880,11 @@ httplib::Response& res) {
     run.type   = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
                                                       vayu::RunType::Load;
     run.status = vayu::RunStatus::Pending;
-    run.config_snapshot = run_config_snapshot (
-    req.body, is_scenario, scenario_manifest, load_data.set.get ());
+    const auto max_snapshot_body_bytes =
+    static_cast<size_t> (ctx.db.get_config_int ("maxTraceBodyBytes",
+    static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
+    run.config_snapshot = run_config_snapshot (req.body, is_scenario,
+    scenario_manifest, load_data.set.get (), max_snapshot_body_bytes);
     seed_run_times (run, now_ms ());
 
     if (json.contains ("requestId") && !json["requestId"].is_null ()) {

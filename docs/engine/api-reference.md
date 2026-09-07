@@ -6412,6 +6412,12 @@ holds only the first `maxTraceBodyBytes` of the original. Absent when the body
 fit. Clients surface this as a "body truncated for storage" notice and re-send
 to fetch the whole body.
 
+`configSnapshot.body` is capped the same way, independently of the trace
+(issue #1486): `content` over `maxTraceBodyBytes` is cut to that length and the
+`body` object gains the same `bodyTruncated` / `bodyBytes` pair. A run can be
+truncated on one side and not the other, since each is written by its own call
+into `sanitize_config_snapshot`.
+
 ### POST /runs/:runId/stop
 
 > Alias: `POST /run/:runId/stop` (deprecated - see [Deprecated aliases](#deprecated-aliases)).

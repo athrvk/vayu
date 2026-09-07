@@ -1243,7 +1243,32 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "}";
 }
 
-std::string sanitize_config_snapshot (const std::string& body) {
+namespace {
+
+// Cap a config snapshot's `body.content` in place, recording bodyTruncated +
+// bodyBytes (the original length) on the `body` object when cut - the same
+// sibling-key shape `cap_node_body` records on a trace node, one level down
+// here because `content` lives inside `body` rather than being it.
+void cap_snapshot_body (nlohmann::json& parsed, size_t max_body_bytes) {
+    auto body_it = parsed.find ("body");
+    if (body_it == parsed.end () || !body_it->is_object ()) {
+        return;
+    }
+    auto content_it = body_it->find ("content");
+    if (content_it == body_it->end () || !content_it->is_string ()) {
+        return;
+    }
+    const std::string content = content_it->get<std::string> ();
+    if (content.size () > max_body_bytes) {
+        *content_it                 = content.substr (0, max_body_bytes);
+        (*body_it)["bodyTruncated"] = true;
+        (*body_it)["bodyBytes"]     = content.size ();
+    }
+}
+
+} // namespace
+
+std::string sanitize_config_snapshot (const std::string& body, size_t max_body_bytes) {
     Json parsed;
     try {
         parsed = Json::parse (body);
@@ -1251,15 +1276,16 @@ std::string sanitize_config_snapshot (const std::string& body) {
         return body; // not JSON; store as-is
     }
 
-    // Allowlist within the auth subtree: keep only the mode, drop every
-    // credential field. Because we keep a fixed key rather than blocking known
-    // secret names, no future auth field (client secrets, tokens, private keys)
-    // can leak into the persisted snapshot.
     if (parsed.is_object ()) {
+        // Allowlist within the auth subtree: keep only the mode, drop every
+        // credential field. Because we keep a fixed key rather than blocking
+        // known secret names, no future auth field (client secrets, tokens,
+        // private keys) can leak into the persisted snapshot.
         if (auto it = parsed.find ("auth"); it != parsed.end () && it->is_object ()) {
             const std::string mode = it->value ("mode", std::string{ "none" });
             *it                    = Json::object ({ { "mode", mode } });
         }
+        cap_snapshot_body (parsed, max_body_bytes);
     }
     return parsed.dump ();
 }
