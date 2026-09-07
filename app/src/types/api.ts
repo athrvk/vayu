@@ -777,6 +777,43 @@ export interface StartScenarioRunRequest {
 	 * step on it.
 	 */
 	failOnSchemaError?: boolean;
+	/**
+	 * Overrides how the element pipeline runs across every step of a
+	 * **scenario load run** (`mode` present), without editing the collection
+	 * itself (issue #1495). Top-level, not inside `scenario` - the engine
+	 * reads it off the run payload directly (`validate_elements_run_override`,
+	 * `engine/src/core/load_strategy.cpp`) the same way for both `POST /runs`
+	 * shapes. Every key is optional; an unknown key or an out-of-set value is
+	 * a `400` naming the field.
+	 *
+	 * Accepted (and validated) on a design-mode run too, since the validator
+	 * does not distinguish the two shapes, but has nothing to override there -
+	 * a sequential run has no inline/deferred distinction to make. Omit it
+	 * outside a scenario load run.
+	 */
+	elements?: {
+		/**
+		 * `"asConfigured"` (default) | `"off"`. Accepted and stored, but not
+		 * yet wired to any timer kind - `timer.think`'s current phase is
+		 * sequential-run-only. Issue #1498 ("the timer family") owns finishing
+		 * this; see `docs/engine/elements.md`'s "Not yet wired: timers".
+		 */
+		timers?: "asConfigured" | "off";
+		/**
+		 * `"asMarked"` (default) reads each `script.*` element's own
+		 * `config.inline`; `"allInline"` / `"allDeferred"` force every
+		 * `script.*` element of the run one way regardless of its own
+		 * marking. `extract.*` and `assert.*` are unaffected - they always
+		 * run inline on a scenario load run.
+		 */
+		scripts?: "asMarked" | "allInline" | "allDeferred";
+		/**
+		 * Folds the element pipeline's own elapsed time into a step's
+		 * recorded latency when `true`. Default `false` - a step's latency is
+		 * its transfer alone.
+		 */
+		includeScriptTime?: boolean;
+	};
 }
 
 // Run Management API
