@@ -24,6 +24,11 @@
  * `scenario_snapshot` sits here for the same reason: it is the other thing
  * `POST /runs` does to a row before writing it, and what it keeps out of the
  * store is a security property rather than a formatting choice.
+ *
+ * `with_default_headers_snapshot` sits here for a related but distinct
+ * reason (issue #1488): what it adds to the row is not user data at all, so
+ * there is nothing to keep out - the property under test is that the merge
+ * happens and survives whatever the other two rewrites already did.
  */
 
 #include <gtest/gtest.h>
@@ -33,6 +38,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/http/default_headers.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http::routes {
@@ -40,14 +46,20 @@ namespace vayu::http::routes {
 void seed_run_times (vayu::db::Run& run, int64_t started_at);
 std::string scenario_snapshot (const std::string& sanitized, const nlohmann::json& manifest);
 std::string load_data_snapshot (const std::string& sanitized, size_t row_count);
+std::string with_default_headers_snapshot (const std::string& snapshot,
+const vayu::http::DefaultHeaderPolicy& header_policy);
+vayu::http::DefaultHeaderScope compression_scope_of (vayu::RunType type);
 } // namespace vayu::http::routes
 
 namespace {
 
 using nlohmann::json;
+using vayu::http::DefaultHeaderPolicy;
+using vayu::http::routes::compression_scope_of;
 using vayu::http::routes::load_data_snapshot;
 using vayu::http::routes::scenario_snapshot;
 using vayu::http::routes::seed_run_times;
+using vayu::http::routes::with_default_headers_snapshot;
 
 TEST (SeedRunTimes, SeedsEndTimeAlongsideStartTime) {
     vayu::db::Run run;
@@ -137,6 +149,58 @@ TEST (LoadDataSnapshot, ReplacesTheRowsWithTheirCount) {
 TEST (LoadDataSnapshot, LeavesANonObjectSnapshotAlone) {
     EXPECT_EQ (load_data_snapshot ("not json at all", 1), "not json at all");
     EXPECT_EQ (load_data_snapshot ("[1,2,3]", 1), "[1,2,3]");
+}
+
+// A baseline pinned before loadNegotiateCompression's 0.26 default flip (or
+// any later config change) needs to say what it measured under - issue
+// #1488. userAgent is recorded verbatim; requestId/acceptEncoding collapse
+// to whether each was negotiated at all.
+TEST (DefaultHeadersSnapshot, RecordsUserAgentRequestIdAndAcceptEncoding) {
+    DefaultHeaderPolicy policy;
+    policy.user_agent         = "Vayu/0.26.0";
+    policy.correlation_header = "X-Vayu-Request-Id";
+    policy.accept_encoding    = "gzip, br, deflate";
+
+    const std::string sanitized =
+    json{ { "method", "POST" }, { "url", "https://api.test/" } }.dump ();
+    const auto stored = json::parse (with_default_headers_snapshot (sanitized, policy));
+
+    ASSERT_TRUE (stored.contains ("defaultHeaders"));
+    const auto& headers = stored["defaultHeaders"];
+    EXPECT_EQ (headers["userAgent"], "Vayu/0.26.0");
+    EXPECT_EQ (headers["requestId"], true);
+    EXPECT_EQ (headers["acceptEncoding"], true);
+    // Everything else the client sent is left alone.
+    EXPECT_EQ (stored["method"], "POST");
+    EXPECT_EQ (stored["url"], "https://api.test/");
+}
+
+TEST (DefaultHeadersSnapshot, RecordsFalseWhenNegotiationIsOff) {
+    DefaultHeaderPolicy policy; // correlation_header / accept_encoding default-empty
+    ASSERT_TRUE (policy.correlation_header.empty ());
+    ASSERT_TRUE (policy.accept_encoding.empty ());
+
+    const auto stored =
+    json::parse (with_default_headers_snapshot (json::object ().dump (), policy));
+
+    EXPECT_EQ (stored["defaultHeaders"]["requestId"], false);
+    EXPECT_EQ (stored["defaultHeaders"]["acceptEncoding"], false);
+}
+
+TEST (DefaultHeadersSnapshot, LeavesANonObjectSnapshotAlone) {
+    DefaultHeaderPolicy policy;
+    EXPECT_EQ (with_default_headers_snapshot ("not json at all", policy), "not json at all");
+    EXPECT_EQ (with_default_headers_snapshot ("[1,2,3]", policy), "[1,2,3]");
+}
+
+// A load run (including a scenario carrying a load mode) reads the load
+// scope's own compression key; a sequential collection run negotiates the
+// way any other collection send does (issue #1488).
+TEST (CompressionScopeOf, PicksLoadForLoadAndDesignForScenario) {
+    EXPECT_EQ (compression_scope_of (vayu::RunType::Load),
+    vayu::http::DefaultHeaderScope::Load);
+    EXPECT_EQ (compression_scope_of (vayu::RunType::Scenario),
+    vayu::http::DefaultHeaderScope::Design);
 }
 
 } // namespace

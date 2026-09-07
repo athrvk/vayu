@@ -23,7 +23,14 @@
  */
 
 import { useMemo } from "react";
-import { ArrowDownRight, ArrowUpRight, GitCompareArrows, Minus, Pin } from "lucide-react";
+import {
+	AlertTriangle,
+	ArrowDownRight,
+	ArrowUpRight,
+	GitCompareArrows,
+	Minus,
+	Pin,
+} from "lucide-react";
 import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/utils";
@@ -177,6 +184,15 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 					<DeltaCell key={metric.metric} metric={metric} />
 				))}
 			</div>
+			{comparison.compressionNegotiationDiffers && (
+				<div className="flex items-center gap-2 mt-2 text-xs text-status-warning-text">
+					<AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+					<span>
+						Compression negotiation differs between these runs; byte and latency figures
+						are not directly comparable.
+					</span>
+				</div>
+			)}
 		</div>
 	);
 }

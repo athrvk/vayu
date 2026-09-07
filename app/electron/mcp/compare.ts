@@ -35,6 +35,21 @@ function num(obj: unknown, ...path: string[]): number | null {
 }
 
 /**
+ * Like {@link num}, but for a flag whose absence is itself meaningful
+ * (issue #1488): a report from before `metadata.configuration.acceptEncoding`
+ * existed carries no such key, and reads as `false` here - which is what
+ * every such run actually sent, not an unknown value defaulted away.
+ */
+function bool(obj: unknown, ...path: string[]): boolean {
+	let cur: unknown = obj;
+	for (const key of path) {
+		if (cur === null || typeof cur !== "object") return false;
+		cur = (cur as Record<string, unknown>)[key];
+	}
+	return cur === true;
+}
+
+/**
  * Which way is better for a metric - the half of a delta a number cannot
  * carry. `neutral` is not a hedge: `summary.totalRequests` moves with how long
  * a run was told to run, so calling either direction an improvement would
@@ -91,6 +106,15 @@ export interface RunComparison {
 	throughput: MetricDelta[];
 	reliability: MetricDelta[];
 	statusCodes: Record<string, { base: number; target: number }>;
+	/**
+	 * Whether the two runs negotiated a compressed response differently
+	 * (issue #1488) - a run recorded before `loadNegotiateCompression`'s
+	 * default flipped in 0.26 reads as `false`, so an older baseline against
+	 * a newer run reports a difference exactly when the newer one negotiated
+	 * and the older did not. `true` means the byte and latency deltas above
+	 * are not measuring the same thing.
+	 */
+	compressionNegotiationDiffers: boolean;
 }
 
 /**
@@ -173,5 +197,17 @@ export function compareReports(
 	collect(base, "base");
 	collect(target, "target");
 
-	return { baseRunId, targetRunId, latency, throughput, reliability, statusCodes };
+	const compressionNegotiationDiffers =
+		bool(base, "metadata", "configuration", "acceptEncoding") !==
+		bool(target, "metadata", "configuration", "acceptEncoding");
+
+	return {
+		baseRunId,
+		targetRunId,
+		latency,
+		throughput,
+		reliability,
+		statusCodes,
+		compressionNegotiationDiffers,
+	};
 }

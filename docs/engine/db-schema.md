@@ -1016,6 +1016,20 @@ snapshotted either: they are user data of unknown sensitivity, and the manifest
 records only their count. The writer is `vayu::core::build_scenario_manifest`
 (`core/scenario_plan.cpp`).
 
+**`config_snapshot`'s `defaultHeaders`** (issue #1488) - a load or collection
+run's snapshot also carries the run's resolved default-header decision at
+start: `{"userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding":
+true}`. This is a deliberate, narrow exception to
+[Default request headers](api-reference.md#default-request-headers)'s "nothing
+here is stored" rule - that rule is about not writing an applied default back
+into a *saved request*, the way the renderer used to freeze `X-Request-ID`
+into one before issue #1229. Here nothing is applied to anything: the value is
+read back only to compare one run's report against another's, most often a
+pinned baseline against a newer run after `loadNegotiateCompression`'s default
+changed underneath both. Written once at `POST /runs` alongside the rest of
+the snapshot (`with_default_headers_snapshot`, `http/routes/execution.cpp`);
+absent on a design run and on any run recorded before this issue.
+
 **Retention** - runs are append-only in normal use (every design-mode click adds a `runs` row,
 every load run its `metric_ticks`/`results`), so `Database::prune_runs(max_runs, max_age_days)` trims
 the history. A run is a victim when it falls **beyond the `maxRunsRetained` most-recent runs**

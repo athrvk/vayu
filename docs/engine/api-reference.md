@@ -6371,7 +6371,14 @@ Every parameter composes with every other; each one left out is a wildcard.
 `duration`, `concurrency`, `comment`, `followRedirects`, `maxRedirects`, and
 `httpVersion`. The first eight are each **omitted** when absent from the
 snapshot (a malformed snapshot yields an empty `summary`, never a `500`);
-`httpVersion` alone is always present. A raw `POST /runs` body of
+`httpVersion` alone is always present. Every run since issue #1488 adds a
+tenth, `acceptEncoding`: `true` when the run negotiated a compressed response
+(`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
+load run - see [Default request headers](#default-request-headers)), `false`
+when it did not, and **omitted**, not defaulted, for a run recorded before
+that issue -
+the baseline comparison (below) is the one reader that treats an absent key as
+`false`, matching what every such run actually sent. A raw `POST /runs` body of
 `"httpVersion": null` (erased before execution, so it behaves exactly like an
 absent key - see [POST /runs](#post-runs)) lands in the stored snapshot
 verbatim, and a run predating this field has no key at all; neither case
@@ -6533,6 +6540,20 @@ to fetch the whole body.
 `body` object gains the same `bodyTruncated` / `bodyBytes` pair. A run can be
 truncated on one side and not the other, since each is written by its own call
 into `sanitize_config_snapshot`.
+
+A load or collection run's `configSnapshot` also carries `defaultHeaders`
+(issue #1488), the run's resolved decision at start about what the engine
+would add to a request nobody wrote it into - never re-read for the send
+itself (see [Default request headers](#default-request-headers)), kept only
+so a later run's report can say whether the two measured under the same
+conditions:
+
+```json
+"defaultHeaders": { "userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding": true }
+```
+
+Absent on a design run (it carries no throughput to compare) and on any run
+recorded before this issue.
 
 ### POST /runs/:runId/stop
 
@@ -6742,7 +6763,8 @@ named it.
       "followRedirects": true,
       "maxRedirects": 10,
       "httpVersion": "auto",
-      "dataRowCount": 2
+      "dataRowCount": 2,
+      "acceptEncoding": true
     },
     "openapi": {
       "specId": "spec_3f2b1c9a-...",
@@ -7035,7 +7057,9 @@ snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,
 `rampUpDuration`, `timeout`, `comment`, `followRedirects`, `maxRedirects` -
 each omitted when absent) plus `httpVersion`, which is always present with the
 same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
-above). `rps` in the raw snapshot is renamed to `targetRps` here.
+above), and `acceptEncoding` (issue #1488), read out of the snapshot's
+`defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key
+of the same name. `rps` in the raw snapshot is renamed to `targetRps` here.
 
 ### GET /runs/:runId/samples
 

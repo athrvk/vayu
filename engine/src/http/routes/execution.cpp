@@ -523,6 +523,49 @@ std::string load_data_snapshot (const std::string& sanitized, size_t row_count) 
     return parsed.dump ();
 }
 
+/**
+ * @brief Record the run's resolved default-header decisions in the stored
+ *        snapshot (issue #1488), so a baseline pinned before a config change
+ *        - an engine upgrade that flipped `loadNegotiateCompression`'s
+ *        default included - stays distinguishable from a run recorded after.
+ *
+ * `default_headers.hpp` documents "nothing here is stored", about the
+ * request a user saves: applying a default at send time and then writing it
+ * back into the saved request is what let a load run replay a frozen
+ * `X-Request-ID` (issue #1229). This is a different fact - what the *run*
+ * decided, kept only for a later run's report to compare itself against, and
+ * never read back into a send. `userAgent` is the resolved value verbatim,
+ * since it can itself change across an engine upgrade; `requestId` and
+ * `acceptEncoding` collapse to booleans, because a comparison needs to know
+ * whether each was negotiated, not the exact header name or the
+ * content-encoding list libcurl advertised.
+ *
+ * A snapshot that is not JSON (which `sanitize_config_snapshot` passes
+ * through verbatim) is left alone, matching `scenario_snapshot` and
+ * `load_data_snapshot` beside it.
+ *
+ * Non-static: run_row_seed_test.cpp declares and drives it directly, the way
+ * it does its two siblings above.
+ */
+std::string with_default_headers_snapshot (const std::string& snapshot,
+const vayu::http::DefaultHeaderPolicy& header_policy) {
+    nlohmann::json parsed;
+    try {
+        parsed = nlohmann::json::parse (snapshot);
+    } catch (const std::exception&) {
+        return snapshot;
+    }
+    if (!parsed.is_object ()) {
+        return snapshot;
+    }
+    parsed["defaultHeaders"] = {
+        { "userAgent", header_policy.user_agent },
+        { "requestId", !header_policy.correlation_header.empty () },
+        { "acceptEncoding", !header_policy.accept_encoding.empty () },
+    };
+    return parsed.dump ();
+}
+
 namespace {
 
 /**
@@ -541,17 +584,31 @@ std::string run_config_snapshot (const std::string& body,
 bool is_scenario,
 const nlohmann::json& scenario_manifest,
 const vayu::core::LoadDataSet* data,
+const vayu::http::DefaultHeaderPolicy& header_policy,
 size_t max_body_bytes) {
     std::string sanitized = vayu::json::sanitize_config_snapshot (body, max_body_bytes);
+    std::string shaped = sanitized;
     if (is_scenario) {
-        return scenario_snapshot (sanitized, scenario_manifest);
-    }
-    if (data != nullptr && !data->rows.empty ()) {
+        shaped = scenario_snapshot (sanitized, scenario_manifest);
+    } else if (data != nullptr && !data->rows.empty ()) {
         // The rows out, their count in - the same rule the scenario manifest
         // keeps, and for the same reason (issue #993).
-        return load_data_snapshot (sanitized, data->rows.size ());
+        shaped = load_data_snapshot (sanitized, data->rows.size ());
     }
-    return sanitized;
+    return with_default_headers_snapshot (shaped, header_policy);
+}
+
+/**
+ * @brief Which compression key a run's `config_snapshot` decision should read
+ *        (issue #1488): `Load` for anything the event loop drives (a plain
+ *        load run or a scenario with a load mode), `Design` for a sequential
+ *        collection run, which negotiates the way any other collection send
+ *        does. Extracted so the branch does not add to
+ *        `handle_start_load_test`'s own cognitive complexity.
+ */
+vayu::http::DefaultHeaderScope compression_scope_of (vayu::RunType type) {
+    return type == vayu::RunType::Load ? vayu::http::DefaultHeaderScope::Load :
+                                         vayu::http::DefaultHeaderScope::Design;
 }
 
 /**
@@ -1883,8 +1940,11 @@ httplib::Response& res) {
     const auto max_snapshot_body_bytes =
     static_cast<size_t> (ctx.db.get_config_int ("maxTraceBodyBytes",
     static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
+    // Issue #1488 - see compression_scope_of's doc comment.
+    const auto header_policy = vayu::http::resolve_default_header_policy (
+    ctx.db, compression_scope_of (run.type));
     run.config_snapshot = run_config_snapshot (req.body, is_scenario,
-    scenario_manifest, load_data.set.get (), max_snapshot_body_bytes);
+    scenario_manifest, load_data.set.get (), header_policy, max_snapshot_body_bytes);
     seed_run_times (run, now_ms ());
 
     if (json.contains ("requestId") && !json["requestId"].is_null ()) {

@@ -37,9 +37,23 @@ vi.mock("@/services/api", () => ({
 
 const mocked = vi.mocked(apiService);
 
-function report(over: { p99: number; avgRps: number; errorRate: number }): RunReport {
+function report(over: {
+	p99: number;
+	avgRps: number;
+	errorRate: number;
+	acceptEncoding?: boolean;
+}): RunReport {
 	return {
-		metadata: { runId: "r", runType: "load", status: "completed", startTime: 0, endTime: 1000 },
+		metadata: {
+			runId: "r",
+			runType: "load",
+			status: "completed",
+			startTime: 0,
+			endTime: 1000,
+			...(over.acceptEncoding === undefined
+				? {}
+				: { configuration: { acceptEncoding: over.acceptEncoding } }),
+		},
 		summary: {
 			totalRequests: 1000,
 			successfulRequests: 1000,
@@ -221,5 +235,53 @@ describe("BaselineComparison", () => {
 		expect(mocked.listRuns).toHaveBeenCalledWith(
 			expect.objectContaining({ baseline: true, q: "https://api.example.test/checkout" })
 		);
+	});
+
+	/*
+	 * Issue #1488: a baseline pinned under a different compression-negotiation
+	 * setting than the run it is compared against means the byte and latency
+	 * deltas above are not a clean comparison, so the strip says so.
+	 */
+	it("warns when the baseline and the open run negotiated compression differently", async () => {
+		mocked.getRun.mockResolvedValue(run());
+		mocked.listRuns.mockResolvedValue(
+			baselinePage([run({ id: "run_baseline", baseline: true })])
+		);
+		// Baseline recorded before #1488 (no key at all) - reads as false.
+		mocked.getRunReport.mockResolvedValue(report({ p99: 50, avgRps: 100, errorRate: 1 }));
+
+		render(
+			withQueryClient(
+				<BaselineComparison
+					report={report({ p99: 50, avgRps: 100, errorRate: 1, acceptEncoding: true })}
+					runId="run_target"
+				/>
+			)
+		);
+
+		await waitFor(() => expect(screen.getByText("vs baseline")).toBeInTheDocument());
+		expect(screen.getByText(/Compression negotiation differs/)).toBeInTheDocument();
+	});
+
+	it("says nothing when both runs negotiated compression the same way", async () => {
+		mocked.getRun.mockResolvedValue(run());
+		mocked.listRuns.mockResolvedValue(
+			baselinePage([run({ id: "run_baseline", baseline: true })])
+		);
+		mocked.getRunReport.mockResolvedValue(
+			report({ p99: 50, avgRps: 100, errorRate: 1, acceptEncoding: true })
+		);
+
+		render(
+			withQueryClient(
+				<BaselineComparison
+					report={report({ p99: 50, avgRps: 100, errorRate: 1, acceptEncoding: true })}
+					runId="run_target"
+				/>
+			)
+		);
+
+		await waitFor(() => expect(screen.getByText("vs baseline")).toBeInTheDocument());
+		expect(screen.queryByText(/Compression negotiation differs/)).not.toBeInTheDocument();
 	});
 });
