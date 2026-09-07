@@ -345,7 +345,7 @@ std::optional<std::string> validate_elements_run_override (const nlohmann::json&
                "{\"fixedMs\": N} or {\"minMs\"/\"maxMs\": N}";
     }
     if (auto seed = elements->find ("seed");
-    seed != elements->end () && !seed->is_number_unsigned ()) {
+    seed != elements->end () && !is_non_negative_integer (*seed)) {
         return "'elements.seed' must be a non-negative integer";
     }
     if (auto scripts = elements->find ("scripts"); scripts != elements->end ()) {

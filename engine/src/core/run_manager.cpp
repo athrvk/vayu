@@ -805,9 +805,9 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
         // derives its virtual users' generators from `rng_seed` alone, so
         // the two must never disagree about which seed this run actually
         // used.
-        if (auto seed = elements->find ("seed");
-        seed != elements->end () && seed->is_number_unsigned ()) {
-            rng_seed = seed->get<uint64_t> ();
+        if (auto seed = elements->find ("seed"); seed != elements->end () &&
+        seed->is_number_integer () && seed->get<int64_t> () >= 0) {
+            rng_seed = static_cast<uint64_t> (seed->get<int64_t> ());
             rng.seed (rng_seed);
         }
     }
