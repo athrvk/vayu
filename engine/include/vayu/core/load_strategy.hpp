@@ -134,6 +134,25 @@ const std::function<bool (int64_t)>& should_continue);
 duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t default_ms);
 
 /**
+ * @brief Why a run payload's top-level `elements` override cannot run, or
+ *        `nullopt` if it can (issue #1495).
+ *
+ * `{ timers: "asConfigured" | "off", scripts: "asMarked" | "allInline" |
+ * "allDeferred", includeScriptTime: false }` - every key optional, an unknown
+ * key or an out-of-set value refused by name rather than ignored, the same
+ * `known_scenario_keys` discipline issue #1503 gave the `scenario` block.
+ * Validated for both load-run shapes - the check does not distinguish them -
+ * though only a scenario load run's element pipeline reads what it resolves
+ * to; a single-request payload has no `elements` attachment point yet (see
+ * `docs/engine/elements.md`'s Load paths section). Checked by the route
+ * before the run row exists; `RunContext`'s constructor re-derives the same
+ * three fields from a payload this has already accepted, so it never has to
+ * throw over one this validator would have refused first.
+ */
+[[nodiscard]] std::optional<std::string> validate_elements_run_override (
+const nlohmann::json& config);
+
+/**
  * @brief How long a `constant_rps` tick sleeps before it spins out the rest of
  *        @p remainder_us, in microseconds. 0 means spin the whole remainder.
  *

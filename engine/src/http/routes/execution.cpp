@@ -1820,6 +1820,16 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
         }
     }
 
+    // The `elements` override (issue #1495) is validated for both load-run
+    // shapes, not only a scenario's - the validator does not distinguish
+    // them, and a single-request payload has no `elements` attachment point
+    // to apply it to yet (see `docs/engine/elements.md`'s Load paths
+    // section), so this accepts the key there without it doing anything.
+    if (auto invalid = vayu::core::validate_elements_run_override (json)) {
+        vayu::utils::log_warning ("POST /runs - Invalid elements override: " + *invalid);
+        return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
+    }
+
     // Validate required fields
     if (!is_scenario) {
         if (!json.contains ("method") || !json.contains ("url")) {

@@ -382,13 +382,21 @@ logged as a warning: it means a client skipped composition.
   folds a pre-cutover row's scripts into `elements` first), and
   `preRequestScript` / `postRequestScript` / `tests` are refused wherever
   `elements` is now the only script source. The pipeline runs in the design
-  send and the sequential (single-VU) collection run; a **load** run
-  (`POST /runs` at scale) runs no element yet - that is #1495's job, so a
-  scenario load run still only inspects a step's compiled `elements` to
-  decide what to warn about and what to sample, and its own deferred `tests`
-  script keeps the pre-#1514 joined-parts shape untouched. Do not add
-  another behaviour column beside `elements`; a new behaviour is an element
-  kind.
+  send, the sequential (single-VU) collection run, and - since #1495 - a
+  scenario **load** run's own producer/completion hooks
+  (`scenario_load.cpp`'s `run_step_before` / `run_step_after`): a declarative
+  kind always runs there, and a `script.*` kind runs there only when its own
+  `config.inline` is set or the run's `elements.scripts` override forces it,
+  read through `HotPathClass` rather than a `kind ==` comparison. An
+  un-inlined script stays exactly where it always was, on the deferred
+  `tests` replay, which now skips a step whose script already ran inline
+  (`RunContext::script_element_runs_inline`, the one place that decision is
+  made, shared by both sides). A **single-request** load run
+  (`load_strategy.cpp`) still runs no element - `POST /runs`'s single-request
+  shape has no `elements` attachment point yet, only the legacy `tests`
+  string (`RunContext::test_script`); wiring one is a separate gap, not
+  #1495's. Do not add another behaviour column beside `elements`; a new
+  behaviour is an element kind.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the
@@ -673,10 +681,16 @@ before the send, in the same words and with the same code compose uses for the
 `ResidualRefusal` carrying the code). The two rules read different reaches
 (#1095): the empty-name rule reads every header name, the collision rule only
 the names that still held a token. A data row whose header-name column is
-blank is refused at bind time (`core/scenario_data.cpp`), because the load
-path runs no residual pass over what it binds - which is also why a value a
-script sets on step 1 never reaches step 2's `{{token}}` under load (#1495 adds
-the pass, with per-user scopes).
+blank is refused at bind time (`core/scenario_data.cpp`). A scenario load
+run's `submit_one` now runs this pass too (#1495), against a per-VU view: the
+run's scopes flattened once (`vayu::http::routes::flatten_variable_scopes`)
+plus that VU's own small write layer (`ScopeOverlay`, on `VirtualUser`), so a
+value one VU's step 1 sets reaches that same VU's step 2 `{{token}}` without
+two VUs' writes ever landing in one shared map. Never refused under load,
+only counted, on the same #1503 rule the load path has always followed: an
+unresolved name or a header-name collision the pass produces goes on the wire
+regardless. The single-request load path (`load_strategy.cpp`) is unchanged -
+see the element-pipeline bullet above for why.
 
 **The renderer's resolver is preview-only.** `useVariableResolver` /
 `app/src/lib/variable-resolution.ts` back tab titles, previews, unresolved-token

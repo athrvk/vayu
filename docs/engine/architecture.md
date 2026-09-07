@@ -1023,11 +1023,14 @@ object the design-mode sequential runner consumes - resolved once, before the ru
 row exists - and the executor is the only thing that differs.
 
 - **`concurrency` is the number of virtual users**, which is what k6 and JMeter
-  mean by it. A VU is a small value, not a thread: a cursor into the shared plan
-  plus its own cookies. On each completion the callback advances that VU's state
-  machine, and `maintain_concurrency`'s refill issues "the next step of VU *k*"
-  in place of "another copy of the one request". The controller, the SPSC
-  submission path and the single-producer discipline are unchanged.
+  mean by it. A VU is a small value, not a thread: a cursor into the shared plan,
+  its own cookies, and (since #1495) a small `ScopeOverlay` of the names it has
+  written - about 200 bytes per written variable, so 1,000 VUs cost kilobytes,
+  never the size of the run's whole scope. On each completion the callback
+  advances that VU's state machine, and `maintain_concurrency`'s refill issues
+  "the next step of VU *k*" in place of "another copy of the one request". The
+  controller, the SPSC submission path and the single-producer discipline are
+  unchanged.
 - **Cookie state is per-VU, never the shared jar** - see the Cookie Jar section's
   "Not on the load path" bullet, which this strengthens rather than contradicts.
   Each VU's list is seeded onto its own transfer and read back from it
@@ -1089,29 +1092,45 @@ row exists - and the executor is the only thing that differs.
   1 walking its passes, and a single send is a run of one.
   This is **template substitution, not a script hook**: two integers written into
   fields a compose-time scan already located, which is why it sits here rather
-  than reopening the recorded non-goal above (inline scripts on the load path).
+  than in the element-pipeline bullet below (issue #1495).
   A request that spells neither token has an empty template and is walked for
   nothing - the executor tests `empty()` and submits the shared request it
   always did. What every run does now pay is one unsynchronised increment per
   submission on the producer thread, which is what lets any load run tell a
   deferred script the iteration and the user a sampled response was sent as
   (`pm.info.iteration` / `pm.info.vu`).
-- **Scripts stay deferred, keyed per step.** Nothing runs inline; after the run
-  drains, each step's own `post_script` is replayed against the responses *that
-  step* produced, and the tallies land on that step's entry in the breakdown
-  (`scenario.steps[].tests`). Sampling is per step index for the same reason -
-  one flat run-wide reservoir lets the hot first step swamp the budget and never
-  samples the last step of a long plan. The run's `max_response_samples` budget
-  is split evenly across the steps that carry a script (not across every step),
-  floored at one apiece; a step with no script is never sampled and never
-  counted as a thinned sample. The byte budget beside it
-  (`max_response_sample_bytes`) is deliberately *not* split: those bodies are
-  resident in one process, so a forty-step plan must not multiply the ceiling by
-  forty, and a step that drops a sample over it is counted like any other thinned
-  one. A `pre_script` runs nowhere: it would have to run
-  before a send this mode never pauses for. `pm.execution` still throws in a
-  load run for the reason the flow-control section gives, and there is
-  deliberately no inline-script path on the load hot path.
+- **The element pipeline runs here too, per VU (issue #1495).** `submit_one` runs
+  `step.before` before binding and submitting; the completion runs `step.after`
+  once the response is in hand, before the VU is released. `extract.*` /
+  `assert.*` always run; a `script.pre` / `script.post` runs here only when its
+  own `config.inline` is set or the run's `elements.scripts` override forces
+  it - unmarked, a step's scripts still defer exactly as before this issue.
+  Each VU writes through its own `ScopeOverlay` (a handful of names, never the
+  run's shared scopes two VUs could race on), materialized against the base
+  scopes only when an inline script actually needs the mutable view
+  `pm.environment.set` writes through; the residual-token pass reads a cheap
+  flattened-map-plus-overlay merge instead, which is what makes correlation
+  (step 1's `extract.json` reaching step 2's `{{token}}`, *for that VU alone*)
+  work under load. `pm.execution` still throws in a load run for the reason the
+  flow-control section gives: an inline element can write state and mutate the
+  request, never redirect the sequence. See
+  [`elements.md`](elements.md#load-paths) for the full mechanics, including
+  what is deliberately still unwired (`elements.timers`, the single-request
+  path below).
+- **Un-inlined scripts stay deferred, keyed per step.** After the run drains,
+  each step's own `post_script` element - the ones that did not run inline
+  this run - is replayed against the responses *that step* produced, and the
+  tallies land on that step's entry in the breakdown (`scenario.steps[].tests`,
+  beside the new `scenario.steps[].elements` per-element tally). Sampling is
+  per step index for the same reason - one flat run-wide reservoir lets the hot
+  first step swamp the budget and never samples the last step of a long plan.
+  The run's `max_response_samples` budget is split evenly across the steps that
+  carry a deferred script (not across every step), floored at one apiece; a
+  step with no deferred script is never sampled and never counted as a thinned
+  sample. The byte budget beside it (`max_response_sample_bytes`) is
+  deliberately *not* split: those bodies are resident in one process, so a
+  forty-step plan must not multiply the ceiling by forty, and a step that drops
+  a sample over it is counted like any other thinned one.
 - The run's `runs.type` is **`load`**, not `scenario`: it publishes metric ticks
   and reports RPS and percentiles like any load run, and `scenario` is what the
   app reads to render a step list instead of the dashboard.

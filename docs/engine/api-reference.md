@@ -4897,6 +4897,7 @@ Start a load test run (Vayu Mode).
   "tests": "",               // Optional, deferred validation script
   "data": [],                // Optional data rows, one object per row - see below
   "thresholds": {},          // Optional pass/fail budgets - see below
+  "elements": {},            // Optional element-pipeline override for a scenario load run - see below
   "monitor": {},             // Optional server-vitals scrape - see below
   "followRedirects": true,   // Optional, default true - see POST /execute
   "maxRedirects": 10,        // Optional, default 10
@@ -5054,6 +5055,46 @@ counts toward `failed`: a budget the run could not measure was not met. The
 error rate and the throughput floor have no such gap - `maxErrorRatePct` is
 0/0-safe by request count, and a starved `minThroughputRps` already fails on
 its own - so both are always `evaluated: true`.
+
+#### The `elements` block (element-pipeline override)
+
+A **scenario** load run's `elements` block overrides how the element pipeline
+runs across every step of the run (issue #1495), without editing the
+collection itself.
+
+```jsonc
+{
+  "elements": {
+    "timers": "asConfigured",     // "asConfigured" (default) | "off"
+    "scripts": "asMarked",        // "asMarked" (default) | "allInline" | "allDeferred"
+    "includeScriptTime": false    // default false
+  }
+}
+```
+
+Every key is optional; an unknown key or an out-of-set value is a `400`
+naming the field, the same `invalid_run_config` shape the `scenario` block's
+own unknown-key rule uses, checked before the run row is created.
+
+- **`scripts`** decides whether a `script.pre` / `script.post` element runs
+  inline (on the producer/completion hooks, before or after the step's own
+  send) or stays deferred to the post-run `tests` replay. `"asMarked"` (the
+  default) reads each element's own `config.inline`; `"allInline"` /
+  `"allDeferred"` force every `script.*` element of the run one way,
+  regardless of its own marking. `extract.*` and `assert.*` are unaffected -
+  they always run inline on a scenario load run.
+- **`includeScriptTime`** folds the element pipeline's own elapsed time into
+  a step's recorded latency when `true`; by default (`false`) a step's
+  latency is its transfer alone, exactly as before this issue.
+- **`timers`** is accepted and stored but not yet wired to anything: no
+  kind reads it yet, since `timer.think`'s current phase (`step.between`) and
+  blocking wait are sequential-run-only. Issue #1498 ("the timer family")
+  owns finishing this.
+
+Not part of this block: a **single-request** `POST /runs` payload has no
+`elements` attachment point at all (see `tests` above), so this block is
+accepted there too - the validator does not distinguish the two run shapes -
+but has nothing to override.
 
 #### The `monitor` block (server vitals)
 
@@ -5589,20 +5630,32 @@ knob.
 - **Cookies are per virtual user**, empty at the start of each iteration, and
   the environment jar is untouched. One session shared between 1,000 virtual
   users is not the thing being measured.
-- **Scripts do not run inline. They stay deferred, keyed per step.** After the
-  run drains, each step's own post-request script is replayed against the
+- **The element pipeline runs here too, per virtual user (issue #1495).**
+  `extract.*` and `assert.*` always run - before the send (`step.before`) and
+  after the response (`step.after`). A `script.pre` / `script.post` element
+  runs there only when its own `config.inline` is `true`, or the run's
+  [`elements`](#the-elements-block-element-pipeline-override) override forces
+  it; unmarked, a step's scripts still stay deferred, keyed per step, exactly
+  as before this issue - see the next bullet. Each virtual user writes through
+  its own overlay, never the run's shared scopes, so a name one user's step 1
+  writes (an `extract.json`'s target, an inline script's
+  `pm.environment.set`) is visible only to that same user's later steps, never
+  to another user's concurrent one. `pm.execution` still throws - an inline
+  element can write state and mutate the request, never redirect the
+  sequence; flow control stays design-mode only (and, eventually, a
+  `control.*` element's).
+- **A script that did not run inline stays deferred, keyed per step.** After
+  the run drains, that step's own post-request script is replayed against the
   responses that step produced, and the tallies appear on that step's entry in
-  the breakdown as `tests` (see `scenario.steps` below). A step that carries no
-  script, or whose script never got a sampled response, carries no `tests`
-  object at all rather than a row of zeros. A pre-request script runs nowhere.
-  `pm.execution` still throws - a script that has already run against a recorded
-  response cannot redirect a sequence that already happened. Flow control is
-  design-mode only.
+  the breakdown as `tests` (see `scenario.steps` below). A step that carries
+  no script, whose script ran inline this run, or whose script never got a
+  sampled response, carries no `tests` object at all rather than a row of
+  zeros.
 
   Sampling is keyed per step for the same reason: the run's
   `max_response_samples` budget is split evenly across the steps that carry a
-  script (floored at one apiece), so the last step of a forty-step plan is
-  sampled instead of being crowded out by the first. The whole-run
+  deferred script (floored at one apiece), so the last step of a forty-step
+  plan is sampled instead of being crowded out by the first. The whole-run
   `testValidation` section still reports the aggregate - it says *something*
   failed, and the per-step `tests` say where.
 - **Data rows are claimed from one shared cursor**, one per virtual-user
@@ -5639,8 +5692,14 @@ knob.
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 0, "unresolvedTokens": 0,
-      "preRequestScript": "skipped",
       "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 },
+      "elements": [
+        { "id": "el_1", "kind": "extract.json", "passed": 480, "failed": 0, "skipped": 0 }
+      ] },
+    { "index": 1, "name": "Get me", "requestId": "req_b", "method": "GET",
+      "executed": 474, "errors": 0, "unresolvedTokens": 0,
+      "preRequestScript": "skipped",
+      "latency": { "min": 0.9, "p50": 3.1, "p95": 7.8, "p99": 10.0, "max": 22.5 },
       "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
   ]
 }
@@ -5649,19 +5708,28 @@ knob.
 One histogram is allocated per plan step at run start, which is the other thing
 `maxScenarioSteps` bounds.
 
-`tests` is the step's deferred validation, and is **absent** for a step that
-asserted nothing or whose script drew no sample - "no assertions" and "no
-failures" are different answers.
+`tests` is the step's *deferred* validation - a script that did not run inline
+this run - and is **absent** for a step whose script ran inline instead
+(its outcome is in `elements`), asserted nothing, or drew no sample - "no
+assertions" and "no failures" are different answers.
+
+`elements` (issue #1495) is the step's per-element pass/fail/skip tally,
+`{ id, kind, passed, failed, skipped }` one entry per compiled element that
+ran at least once this run - **absent** for a step with no elements or none
+that ever ran, the same convention `tests` follows. `skipped` folds in both a
+disabled element and a `script.*` element left deferred to the replay above.
 
 `unresolvedTokens` (issue #1503) counts, per step, how many of its executions
-sent a `{{token}}` composition never resolved - no residual pass runs under
-load, so a value composed at plan time and never bound (a script's
-`pm.environment.set` included, since that script never runs here either) goes
-on the wire literally rather than being refused. `preRequestScript` is
-`"skipped"` for a step whose request carries one and absent otherwise - see
-[scripting.md](scripting.md#pre-request-scripts) for why the mode never runs
-one at all. Neither ever fails the run by itself; both also feed the
-top-level `warnings` array below.
+sent a `{{token}}` composition the residual-token pass still could not answer
+- issue #1495 added a real resolution attempt here (against the executing
+virtual user's own scope overlay, see [`elements.md`](elements.md#load-paths)),
+but the load path's rule is unchanged: never refused, only counted, so a name
+still unanswered (or a header-name collision the attempt itself produced)
+goes on the wire regardless. `preRequestScript` is `"skipped"` for a step
+whose `script.pre` did not run inline this run and absent otherwise - a step
+whose `script.pre` did run inline reports its real outcome in `elements`
+instead, never both. Neither `unresolvedTokens` nor `preRequestScript` ever
+fails the run by itself; both also feed the top-level `warnings` array below.
 
 **Response:**
 ```json
