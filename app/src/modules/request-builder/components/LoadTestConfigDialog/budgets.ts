@@ -22,7 +22,12 @@
 
 import type { RunThresholds } from "@/types";
 
-export type BudgetKey = keyof RunThresholds;
+/**
+ * `failRun` is not a budget - it is a flag over the budgets below, rendered
+ * as its own switch rather than a numeric field - so it is excluded from the
+ * table-driven machinery here.
+ */
+export type BudgetKey = Exclude<keyof RunThresholds, "failRun">;
 
 export interface BudgetField {
 	key: BudgetKey;
@@ -90,6 +95,18 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		minInclusive: false,
 		max: 1_000_000_000,
 	},
+	{
+		key: "maxAssertionFailureRatePct",
+		id: "lt-budget-assertion-failure-rate",
+		label: "Assertion failure rate at most",
+		unit: "%",
+		// Same reasoning as the error rate above: "no assertion may fail" is a
+		// real budget.
+		min: 0,
+		minInclusive: true,
+		max: 100,
+		hint: "Counts every assert.* element and pm.test call this run made, inline or replayed.",
+	},
 ];
 
 /** What the user has typed, per budget. Blank means "not declared". */
@@ -102,6 +119,7 @@ export function emptyBudgetDraft(): BudgetDraft {
 		latencyP99Ms: "",
 		maxErrorRatePct: "",
 		minThroughputRps: "",
+		maxAssertionFailureRatePct: "",
 	};
 }
 
@@ -137,9 +155,11 @@ export function budgetError(draft: BudgetDraft): string | null {
  * starting a run no verdict will be computed for.
  *
  * Assumes {@link budgetError} passed; an unparseable field is skipped rather
- * than sent as `NaN`.
+ * than sent as `NaN`. `failRun` is folded in only when at least one budget
+ * was declared - the engine rejects `{ failRun: true }` alone, and a lone
+ * flag with no budget to judge means the same thing here.
  */
-export function buildThresholds(draft: BudgetDraft): RunThresholds | undefined {
+export function buildThresholds(draft: BudgetDraft, failRun = false): RunThresholds | undefined {
 	const thresholds: RunThresholds = {};
 	for (const field of BUDGET_FIELDS) {
 		const raw = draft[field.key].trim();
@@ -148,5 +168,7 @@ export function buildThresholds(draft: BudgetDraft): RunThresholds | undefined {
 		if (!Number.isFinite(value)) continue;
 		thresholds[field.key] = value;
 	}
-	return Object.keys(thresholds).length > 0 ? thresholds : undefined;
+	if (Object.keys(thresholds).length === 0) return undefined;
+	if (failRun) thresholds.failRun = true;
+	return thresholds;
 }

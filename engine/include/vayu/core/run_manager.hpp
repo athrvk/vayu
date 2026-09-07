@@ -924,6 +924,12 @@ struct RunSummaryInputs {
     // Absent when the run had no test script or no sampled responses - the
     // report then omits its testValidation section, as it always has.
     std::optional<ScriptValidationTotals> tests;
+    // This run's combined assert.* element and pm.test tally (issue #1497):
+    // `tests` above plus every declarative assertion and inline script
+    // assertion, folded together for `maxAssertionFailureRatePct`. Absent
+    // when the run made no assertion at all, which is what keeps that metric
+    // unevaluated rather than a trivial pass at 0/0.
+    std::optional<AssertionTotals> assertions;
     // The verdict on the budgets this run's config declared. Absent when it
     // declared none, which keeps the report's thresholdValidation section out
     // rather than reporting a run that passed zero checks. Sibling of `tests`,

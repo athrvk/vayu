@@ -1617,6 +1617,18 @@ export interface RunThresholds {
 	/** Share of the run's requests allowed to fail, 0-100. */
 	maxErrorRatePct?: number;
 	minThroughputRps?: number;
+	/**
+	 * Share of the run's assertions - `assert.*` element outcomes and
+	 * `pm.test` calls alike - allowed to fail, 0-100 (issue #1497).
+	 */
+	maxAssertionFailureRatePct?: number;
+	/**
+	 * A budget this run missed changes its terminal status to `failed`
+	 * rather than only being reported (issue #1497). Not a budget itself, so
+	 * it needs at least one of the above declared to mean anything - the
+	 * engine rejects `{ failRun: true }` alone the same way it rejects `{}`.
+	 */
+	failRun?: boolean;
 }
 
 /**

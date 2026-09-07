@@ -127,10 +127,10 @@ const FLUSH_MS = 500;
  * the status off the engine's completion frame (#1415). `null` is a stream that
  * ended without one.
  */
-function closeStream(status: "Completed" | "Stopped" | "Failed" | null = null): Promise<void> {
+function closeStream(status: "completed" | "stopped" | "failed" | null = null): Promise<void> {
 	return (
 		scenarioRunService as unknown as {
-			handleClose: (status: "Completed" | "Stopped" | "Failed" | null) => Promise<void>;
+			handleClose: (status: "completed" | "stopped" | "failed" | null) => Promise<void>;
 		}
 	).handleClose(status);
 }
@@ -622,14 +622,14 @@ describe("ScenarioRunService", () => {
 		 * error state was never reached by a real failure - the close cleared
 		 * the bar instead.
 		 *
-		 * Mutation check: drop the `status === "Failed"` branch in `handleClose`
+		 * Mutation check: drop the `status === "failed"` branch in `handleClose`
 		 * and this reddens twice over - no `fail`, and a `clear` that wipes the
 		 * bar the criterion is about.
 		 */
 		it("says failed when the engine's frame says the run failed", async () => {
 			scenarioRunService.startMonitoring("run_24");
 
-			await closeStream("Failed");
+			await closeStream("failed");
 
 			expect(mockProgressFail).toHaveBeenCalledWith(
 				RUN_PROGRESS_KEYS.collectionRun,
@@ -641,7 +641,7 @@ describe("ScenarioRunService", () => {
 		it("clears rather than reddens when the frame says the run completed", async () => {
 			scenarioRunService.startMonitoring("run_25");
 
-			await closeStream("Completed");
+			await closeStream("completed");
 
 			expect(mockProgressFail).not.toHaveBeenCalled();
 			expect(mockProgressClear).toHaveBeenCalledWith(
@@ -703,7 +703,7 @@ describe("ScenarioRunService", () => {
 		it("marks the icon when the engine's frame says the run failed", async () => {
 			scenarioRunService.startMonitoring("run_32");
 
-			await closeStream("Failed");
+			await closeStream("failed");
 
 			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
 		});
@@ -711,7 +711,7 @@ describe("ScenarioRunService", () => {
 		it("marks nothing when the frame says the run completed", async () => {
 			scenarioRunService.startMonitoring("run_33");
 
-			await closeStream("Completed");
+			await closeStream("completed");
 
 			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
 		});

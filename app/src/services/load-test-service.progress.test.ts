@@ -71,10 +71,10 @@ function tick(elapsed: number): LoadTestMetrics {
 }
 
 /** The two private handlers the SSE client calls in production. */
-function closeStream(status: "Completed" | "Stopped" | "Failed" | null = null): Promise<void> {
+function closeStream(status: "completed" | "stopped" | "failed" | null = null): Promise<void> {
 	return (
 		loadTestService as unknown as {
-			handleClose: (status: "Completed" | "Stopped" | "Failed" | null) => Promise<void>;
+			handleClose: (status: "completed" | "stopped" | "failed" | null) => Promise<void>;
 		}
 	).handleClose(status);
 }
@@ -192,14 +192,14 @@ describe("LoadTestService - the OS progress indicator", () => {
 	 * failed frame painted the bar itself the Windows taskbar error state was
 	 * never reached by a real failure - the close cleared the bar instead.
 	 *
-	 * Mutation check: drop the `status === "Failed"` branch in `handleClose`
+	 * Mutation check: drop the `status === "failed"` branch in `handleClose`
 	 * and this reddens twice over - no `fail`, and a `clear` that wipes the bar
 	 * the criterion is about.
 	 */
 	it("says failed when the engine's frame says the run failed", async () => {
 		loadTestService.startMonitoring("run_3");
 
-		await closeStream("Failed");
+		await closeStream("failed");
 
 		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_3");
 		expect(mockClear).not.toHaveBeenCalled();
@@ -208,7 +208,7 @@ describe("LoadTestService - the OS progress indicator", () => {
 	it("clears rather than reddens when the frame says the run completed", async () => {
 		loadTestService.startMonitoring("run_4");
 
-		await closeStream("Completed");
+		await closeStream("completed");
 
 		expect(mockFail).not.toHaveBeenCalled();
 		expect(mockClear).toHaveBeenCalledWith(LOAD_RUN, "run_4");
@@ -227,7 +227,7 @@ describe("LoadTestService - the OS progress indicator", () => {
 		vi.spyOn(console, "warn").mockImplementation(() => {});
 		loadTestService.startMonitoring("run_5");
 
-		await closeStream("Failed");
+		await closeStream("failed");
 
 		expect(mockFail).toHaveBeenCalledWith(LOAD_RUN, "run_5");
 		expect(mockClear).not.toHaveBeenCalled();

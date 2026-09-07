@@ -352,7 +352,7 @@ class ScenarioRunService {
 		// #1415 `runProgress.fail` was reachable only from `handleError`, which
 		// the engine's own failures never reach, so a real failure cleared the
 		// taskbar instead of reddening it.
-		if (status === "Failed") this.failProgress(runId);
+		if (status === "failed") this.failProgress(runId);
 		this.releaseRun(runId);
 		if (!runId) return;
 
@@ -367,7 +367,7 @@ class ScenarioRunService {
 		// carries (#1415).
 		this.notifyTerminal(
 			runId,
-			status === "Failed"
+			status === "failed"
 				? NOTIFY_KINDS.collectionRunFailed
 				: NOTIFY_KINDS.collectionRunFinished,
 			stepOutcomeLine(useScenarioRunStore.getState().summary.counts)

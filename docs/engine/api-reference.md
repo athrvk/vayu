@@ -5025,26 +5025,47 @@ its report has no such section at all.
     "latencyP95Ms": 40,        // ceiling, ms
     "latencyP99Ms": 50,        // ceiling, ms
     "maxErrorRatePct": 0.1,    // ceiling, percent of the run's requests; 0-100
-    "minThroughputRps": 10000  // floor, completed requests per second; > 0
+    "minThroughputRps": 10000, // floor, completed requests per second; > 0
+    "maxAssertionFailureRatePct": 0, // ceiling, percent of assert.* and pm.test outcomes; 0-100
+    "failRun": true            // a missed budget sets status "failed"; default false
   }
 }
 ```
 
-Every key is optional and at least one must be present. An unknown key, a
-non-numeric or out-of-range value, or an object that declares nothing is a `400`
-`invalid_run_config` naming the field - and, like every other run-config
-rejection, it happens before the run row is created, so a rejected request
-leaves no trace. A `null` value reads as absent, the same rule the flat numeric
-fields follow.
+Every key but `failRun` is a budget; at least one budget must be present (a
+`thresholds` object holding only `failRun` is rejected the same way an empty
+one is - it names nothing to judge). An unknown key, a non-numeric or
+out-of-range budget value, a non-boolean `failRun`, or an object that declares
+no budget is a `400` `invalid_run_config` naming the field - and, like every
+other run-config rejection, it happens before the run row is created, so a
+rejected request leaves no trace. A `null` value reads as absent, the same
+rule the flat numeric fields follow.
 
 `maxErrorRatePct` is measured against every response outside 2xx/3xx **plus** the
 transport failures that never got one - the same figure `summary.errorRate`
 reports. This is deliberately wider than the script-level `pm.test` view: a run
 of nothing but HTTP 500s has a transport error rate of zero.
 
+`maxAssertionFailureRatePct` (issue #1497) is measured against this run's
+combined assertion tally: every `assert.*` element outcome and every
+`pm.test` call, however the script that made it ran - inline on the load
+path or through the deferred replay. Unevaluated, like a latency percentile,
+when the run made no assertion at all - a run with no `assert.*` element and
+no test script is unaffected by declaring this budget. **Load runs only**
+(a single-request or a scenario load run, `POST /runs` with no `scenario`
+block or with one carrying a load `mode`): a **collection** (sequential,
+design-mode) run's config is still accepted with a `thresholds` block, but
+nothing evaluates it yet and its report carries no `thresholdValidation`
+section - the same "measured, not judged" behavior as a run that declared no
+budgets at all. Tracked in
+[#1564](https://github.com/athrvk/vayu/issues/1564).
+
 The verdict is the run's, not the process's: a run **stopped early** is judged on
-what it measured up to that point, and its status stays `completed` / `stopped`
-whatever the verdict says. A failing budget is reported, never a failed run.
+what it measured up to that point, and its status stays `stopped` whatever the
+verdict says. A **completed** run whose config set `thresholds.failRun: true`
+and whose budgets it missed ends `failed` instead of `completed`; without the
+flag, or on a run that met every budget, a failing budget is reported but
+never changes the terminal status.
 
 Each check carries `evaluated`. A latency percentile needs a completed request
 to mean anything, so a run that recorded none for that metric (every request

@@ -376,7 +376,7 @@ describe("a run superseded by the other service's run", () => {
 			scenarioRunService as unknown as {
 				handleClose: (status: string | null) => Promise<void>;
 			}
-		).handleClose("Completed");
+		).handleClose("completed");
 
 		expect(mockNotifyPost).toHaveBeenCalledTimes(1);
 		expect(mockNotifyPost.mock.calls[0]?.[0]).toMatchObject({

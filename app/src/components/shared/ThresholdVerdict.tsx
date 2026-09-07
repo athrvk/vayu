@@ -40,6 +40,7 @@ const METRIC_LABELS: Record<string, { label: string; unit: string; floor?: boole
 	latencyP99Ms: { label: "p99 latency", unit: "ms" },
 	maxErrorRatePct: { label: "Error rate", unit: "%" },
 	minThroughputRps: { label: "Throughput", unit: "req/s", floor: true },
+	maxAssertionFailureRatePct: { label: "Assertion failure rate", unit: "%" },
 };
 
 /** Trailing zeros are noise on a budget the user typed as a whole number. */

@@ -6745,8 +6745,18 @@ export const TOOLS: McpTool[] = [
 					latencyP99Ms: z.number().positive().max(86_400_000).optional(),
 					maxErrorRatePct: z.number().min(0).max(100).optional(),
 					minThroughputRps: z.number().positive().max(1_000_000_000).optional(),
+					maxAssertionFailureRatePct: z.number().min(0).max(100).optional(),
+					// Not a budget - whether a missed one fails the run, not itself
+					// measured against anything, so it is excluded from the
+					// at-least-one-budget refinement below.
+					failRun: z
+						.boolean()
+						.optional()
+						.describe(
+							"When true, a missed budget sets this run's terminal status to failed rather than only reporting the verdict. Default false."
+						),
 				})
-				.refine((t) => Object.keys(t).length > 0, {
+				.refine((t) => Object.keys(t).filter((key) => key !== "failRun").length > 0, {
 					// `error`, not zod 3's `message`: v4 still reads the old key as a
 					// deprecated alias, and a deprecated alias is what the next major
 					// takes away.

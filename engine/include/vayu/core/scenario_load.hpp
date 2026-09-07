@@ -92,6 +92,7 @@
 
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/scenario_plan.hpp"
+#include "vayu/core/threshold_eval.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/types.hpp"
@@ -274,6 +275,15 @@ class StepElementTallies {
     /// nothing happened" convention `unresolvedTokens` and `tests` follow.
     [[nodiscard]] nlohmann::json build (const ScenarioPlan& plan, size_t step) const;
 
+    /// Summed passed/failed across every step, for elements whose kind is
+    /// `assert.*` - the declarative half of issue #1497's combined assertion
+    /// tally. A `script.*` element's own outcome is not a `pass/fail` of its
+    /// assertions (see `script_kinds.cpp`'s file comment) and is deliberately
+    /// excluded here; its `pm.test` calls are tallied separately, on
+    /// `ScenarioLoadState::inline_script_tests_passed` /
+    /// `_failed`.
+    [[nodiscard]] AssertionTotals assertion_totals (const ScenarioPlan& plan) const;
+
     private:
     struct Counts {
         std::atomic<size_t> passed{ 0 };
@@ -322,6 +332,17 @@ struct ScenarioLoadState {
     /// Per-step, per-element pass/fail/skip tallies (issue #1495), written by
     /// the same completion that writes `steps` above - see the class comment.
     StepElementTallies element_tallies;
+    /// Combined pass/fail of every `pm.test` call an *inline* `script.pre` or
+    /// `script.post` element made this run (issue #1497). `element_tallies`
+    /// above already records that element's own outcome - did the script run
+    /// without throwing - which is a different question from whether its own
+    /// assertions passed (`script_kinds.cpp`'s file comment: "a script's own
+    /// `pm.test` assertions travel inside that `ScriptResult` untouched").
+    /// Nothing read those before this run's `maxAssertionFailureRatePct`; a
+    /// deferred (non-inline) script's tests are counted separately, in the
+    /// post-run replay's `ScriptValidationTotals`.
+    std::atomic<size_t> inline_script_tests_passed{ 0 };
+    std::atomic<size_t> inline_script_tests_failed{ 0 };
     /**
      * This run's shared variable scopes (issue #1495) - the same shape and
      * source a design send's would be, loaded once here rather than per

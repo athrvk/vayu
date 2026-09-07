@@ -59,6 +59,15 @@ struct ThresholdOutcome {
     size_t failed = 0;
 };
 
+/// This run's combined assertion tally: every `assert.*` element outcome and
+/// every `pm.test` call, however the script that made it ran - inline on the
+/// load path or through the deferred replay. What `maxAssertionFailureRatePct`
+/// is measured against; nothing else in the report reads it.
+struct AssertionTotals {
+    size_t passed = 0;
+    size_t failed = 0;
+};
+
 /**
  * @brief Reject a `thresholds` object the run could not act on.
  *
@@ -91,5 +100,16 @@ struct ThresholdOutcome {
  */
 [[nodiscard]] std::optional<ThresholdOutcome>
 evaluate_thresholds (const nlohmann::json& config, const RunSummaryInputs& inputs);
+
+/**
+ * @brief Does this run's config ask a failed budget to fail the run?
+ *
+ * Reads `thresholds.failRun`, defaulting to `false` - the pre-existing
+ * history semantics, where a budget miss is reported but never changes the
+ * terminal status, are what every run gets without asking for this. Absent,
+ * `null` or anything but `true` reads as `false`; `validate_thresholds`
+ * already refuses anything else the key could hold.
+ */
+[[nodiscard]] bool thresholds_fail_run (const nlohmann::json& config);
 
 } // namespace vayu::core

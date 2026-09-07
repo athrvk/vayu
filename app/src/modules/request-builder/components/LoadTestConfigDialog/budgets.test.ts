@@ -61,6 +61,19 @@ describe("budget validation", () => {
 		expect(budgetError(draft({ minThroughputRps: "0" }))).toMatch(/throughput/i);
 	});
 
+	it("accepts a zero assertion-failure-rate budget, the same real ask as the error rate", () => {
+		expect(budgetError(draft({ maxAssertionFailureRatePct: "0" }))).toBeNull();
+		expect(buildThresholds(draft({ maxAssertionFailureRatePct: "0" }))).toEqual({
+			maxAssertionFailureRatePct: 0,
+		});
+	});
+
+	it("rejects an assertion failure rate outside 0-100", () => {
+		expect(budgetError(draft({ maxAssertionFailureRatePct: "101" }))).toMatch(
+			/assertion failure rate/i
+		);
+	});
+
 	it("rejects text rather than sending NaN", () => {
 		expect(budgetError(draft({ latencyP99Ms: "fast" }))).toMatch(/number/i);
 	});
@@ -82,6 +95,7 @@ describe("the payload the dialog builds", () => {
 					latencyP99Ms: "50",
 					maxErrorRatePct: "0.1",
 					minThroughputRps: "10000",
+					maxAssertionFailureRatePct: "1",
 				})
 			)
 		).toEqual({
@@ -90,7 +104,22 @@ describe("the payload the dialog builds", () => {
 			latencyP99Ms: 50,
 			maxErrorRatePct: 0.1,
 			minThroughputRps: 10000,
+			maxAssertionFailureRatePct: 1,
 		});
+	});
+
+	it("folds failRun in only alongside a declared budget", () => {
+		expect(buildThresholds(draft({ latencyP99Ms: "50" }), true)).toEqual({
+			latencyP99Ms: 50,
+			failRun: true,
+		});
+		expect(buildThresholds(draft({ latencyP99Ms: "50" }), false)).toEqual({
+			latencyP99Ms: 50,
+		});
+		// No budget declared - the engine rejects `{ failRun: true }` alone the
+		// same way it rejects `{}`, so the flag must not turn an empty draft
+		// into a non-empty payload.
+		expect(buildThresholds(emptyBudgetDraft(), true)).toBeUndefined();
 	});
 
 	it("omits the object entirely rather than sending an empty one", () => {
