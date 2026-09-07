@@ -112,6 +112,36 @@ describe("ThresholdVerdict", () => {
 		expect(screen.getByText("90")).toBeInTheDocument();
 	});
 
+	it("shows no samples for a check the run could not measure, and counts it as unmeasurable", () => {
+		// Issue #1484: a latency ceiling with zero completed requests used to
+		// print "0ms" and pass. Mutation check: reverting the `evaluated`
+		// branch back to always formatting `check.actual` prints "0ms" here
+		// instead, and this assertion fails.
+		render(
+			<ThresholdVerdict
+				verdict={verdict({
+					checks: [
+						{ metric: "latencyP99Ms", limit: 200, passed: false, evaluated: false },
+					],
+					passed: 0,
+					failed: 1,
+					verdict: "failed",
+				})}
+			/>
+		);
+		expect(screen.getByText("no samples")).toBeInTheDocument();
+		expect(screen.getByText("0 of 1 budgets met, 1 not measurable.")).toBeInTheDocument();
+	});
+
+	it("treats a report with no evaluated field at all as fully measured", () => {
+		// A pre-#1484 engine never wrote the key. Mutation check: reading
+		// `check.evaluated !== false` as `check.evaluated === true` instead
+		// would print "no samples" for every check such a report carries.
+		render(<ThresholdVerdict verdict={verdict()} />);
+		expect(screen.getByText("1 of 1 budgets met.")).toBeInTheDocument();
+		expect(screen.queryByText("no samples")).not.toBeInTheDocument();
+	});
+
 	it("keeps a whole-number budget whole", () => {
 		cleanup();
 		render(

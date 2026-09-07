@@ -1297,6 +1297,15 @@ The comparator follows the metric (`≥` for the throughput floor, `≤` for the
 ceilings), and a metric key this build has no label for renders under its raw
 name rather than vanishing from a verdict whose counts still include it.
 
+A single check can itself carry no measurement (issue #1484): a latency
+ceiling checked against zero completed requests reports `evaluated: false`,
+which the card shows as "no samples" in place of a number rather than the
+`0` a run of nothing but errors would otherwise default to and trivially
+pass. Such a check counts toward `failed`, and the summary line grows a
+"N not measurable" clause. A report from a pre-#1484 engine carries no
+`evaluated` key at all and renders exactly as before - absence reads as
+measured, the value that engine effectively assumed everywhere.
+
 ## Capacity Summary (`components/shared/CapacitySummary.tsx`)
 
 What a `mode: "capacity"` run's adaptive search found (`RunReport.capacity`):

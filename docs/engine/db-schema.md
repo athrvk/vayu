@@ -812,7 +812,9 @@ default, so `sync_schema()` can
   },
   "tests": { "sampled": 10, "passed": 9, "failed": 1 },
   "thresholds": {
-    "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true } ],
+    "checks": [
+      { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true, "evaluated": true }
+    ],
     "passed": 1, "failed": 0
   },
   "schemaValidation": {
@@ -847,7 +849,11 @@ the same rule and for the same reason: absent when the run declared no
 [budgets](api-reference.md#the-thresholds-block-passfail-budgets), so the report's
 `thresholdValidation` section is left out rather than claiming a run passed nothing. Its `metric`
 keys are the wire names the payload declared, carried through unchanged; the report derives
-`verdict` from `failed` rather than storing it, so the two cannot contradict. The writer is
+`verdict` from `failed` rather than storing it, so the two cannot contradict. Each check's
+`evaluated` follows the same absent-vs-zero rule one level down (issue #1484): a latency percentile
+with no completed requests writes `evaluated: false` and omits `actual` rather than storing the
+default `0`, which a reader could not tell apart from a genuine 0ms measurement; such a check counts
+toward `failed`. The writer is
 `vayu::core::build_run_summary_payload` and the reader is `apply_run_summary`
 (`http/routes/runs.cpp`); `runs_route_test.cpp` round-trips the pair, so the key names cannot
 drift apart silently.
