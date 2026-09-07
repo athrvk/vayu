@@ -139,6 +139,9 @@ export { useConfigQuery, useRequestDefaultsQuery, useUpdateConfigMutation } from
 export { useScriptCompletionsQuery } from "./script-completions";
 export { useScriptTypeDefinitionsQuery } from "./script-types";
 
+// Element kind catalogue (issue #1512)
+export { useElementKindsQuery } from "./elements";
+
 // OAuth 2.0
 export {
 	useOAuth2TokenStatusQuery,

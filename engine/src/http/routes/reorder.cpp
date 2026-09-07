@@ -590,7 +590,7 @@ void register_reorder_routes (RouteContext& ctx) {
                 vayu::utils::log_warning ("POST /reorder - " +
                 std::to_string (status) + ": " + error_message_of (response));
             } else {
-                vayu::utils::log_info ("POST /reorder - wrote " +
+                vayu::utils::log_info ("wrote " +
                 std::to_string (response["collections"].size ()) + " collections, " +
                 std::to_string (response["requests"].size ()) + " requests");
             }

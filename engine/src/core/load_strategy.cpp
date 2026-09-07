@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <thread>
+#include <unordered_set>
 
 #include "vayu/core/load_pacing.hpp"
 #include "vayu/core/refill_deficit.hpp"
@@ -279,6 +280,46 @@ int64_t duration_field_ms (const nlohmann::json& config, const std::string& key,
         "(e.g. \"500ms\", \"30s\", \"5m\", \"2h\")");
     }
     return *parsed;
+}
+
+std::optional<std::string> validate_elements_run_override (const nlohmann::json& config) {
+    const auto elements = config.find ("elements");
+    if (elements == config.end () || elements->is_null ()) {
+        return std::nullopt;
+    }
+    if (!elements->is_object ()) {
+        return "'elements' must be an object";
+    }
+
+    static const std::unordered_set<std::string> known_keys = { "timers",
+        "scripts", "includeScriptTime" };
+    for (const auto& [key, value] : elements->items ()) {
+        (void)value;
+        if (!known_keys.contains (key)) {
+            return "'elements." + key +
+            "' is not a known field - expected one of timers, scripts, "
+            "includeScriptTime";
+        }
+    }
+
+    if (auto timers = elements->find ("timers"); timers != elements->end ()) {
+        if (!timers->is_string () || (*timers != "asConfigured" && *timers != "off")) {
+            return "'elements.timers' must be 'asConfigured' or 'off'";
+        }
+    }
+    if (auto scripts = elements->find ("scripts"); scripts != elements->end ()) {
+        if (!scripts->is_string () ||
+        (*scripts != "asMarked" && *scripts != "allInline" && *scripts != "allDeferred")) {
+            return "'elements.scripts' must be 'asMarked', 'allInline' or "
+                   "'allDeferred'";
+        }
+    }
+    if (auto include_time = elements->find ("includeScriptTime");
+    include_time != elements->end () && !include_time->is_boolean ()) {
+        return "'elements.includeScriptTime' must be a boolean";
+    }
+
+    return std::nullopt;
 }
 
 namespace {

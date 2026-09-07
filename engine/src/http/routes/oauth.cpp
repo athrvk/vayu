@@ -141,7 +141,6 @@ void register_oauth_routes (RouteContext& ctx) {
 
     ctx.server.Post ("/oauth2/token",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info ("POST /oauth2/token");
         auto [status, body] = oauth2_token_post (ctx.db, req.body);
         res.status          = status;
         res.set_content (body.dump (), "application/json");
@@ -149,7 +148,6 @@ void register_oauth_routes (RouteContext& ctx) {
 
     ctx.server.Post ("/oauth2/authorize/start",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info ("POST /oauth2/authorize/start");
         nlohmann::json body;
         try {
             body = nlohmann::json::parse (req.body);
@@ -179,7 +177,6 @@ void register_oauth_routes (RouteContext& ctx) {
 
     ctx.server.Post ("/oauth2/authorize/complete",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info ("POST /oauth2/authorize/complete");
         nlohmann::json body;
         try {
             body = nlohmann::json::parse (req.body);
@@ -219,7 +216,6 @@ void register_oauth_routes (RouteContext& ctx) {
 
     ctx.server.Delete ("/oauth2/token",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info ("DELETE /oauth2/token");
         auto [status, body] = oauth2_token_delete (ctx.db, req.get_param_value ("key"));
         res.status = status;
         res.set_content (body.dump (), "application/json");

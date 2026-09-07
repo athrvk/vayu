@@ -446,9 +446,9 @@ void register_spec_export_routes (RouteContext& ctx) {
                 vayu::utils::log_warning ("POST /specs/export - " +
                 std::to_string (status) + ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info ("POST /specs/export - " +
-                body["notes"]["direction"].get<std::string> () + ", " +
-                std::to_string (body["notes"]["requestsExported"].get<int> ()) + " request(s) exported, " +
+                vayu::utils::log_info (body["notes"]["direction"].get<std::string> () +
+                ", " + std::to_string (body["notes"]["requestsExported"].get<int> ()) +
+                " request(s) exported, " +
                 std::to_string (body["text"].get<std::string> ().size ()) + " bytes");
             }
             res.status = status;

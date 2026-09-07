@@ -251,6 +251,16 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/modules/collections/recorded-parse.testkit.ts",
 		paths: ["engine/tests/fixtures/import-conformance.json"],
 	},
+	/*
+	 * The element-kind catalogue `GET /elements/kinds` serves (issue #1512):
+	 * every kind the engine registers either has a bespoke form in
+	 * `elementForms.ts` or falls through to the schema-driven generic one, and
+	 * this fixture is the engine's own idea of the catalogue's current shape.
+	 */
+	elementKinds: {
+		reader: "app/src/components/shared/ElementList/element-kinds.conformance.test.tsx",
+		paths: ["engine/tests/fixtures/element-kinds.json"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**

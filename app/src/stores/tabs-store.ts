@@ -396,7 +396,7 @@ function nearestSurvivor(
  *
  * A collection tab hosts more than that one editor, and its siblings key
  * themselves off the same id with a suffix: `collection-<id>-info`, `-auth`,
- * `-preRequestScript`, `-postRequestScript` (`useDraftSaveContext`). Matching
+ * `-elements` (`useDraftSaveContext`). Matching
  * only the exact key read every one of those as clean, so the case scans for
  * its own id plus that suffix family. It stays scoped to `tab.entityId` - a
  * blanket `collection-` prefix would make every collection tab dirty whenever

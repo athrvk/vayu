@@ -951,8 +951,11 @@ Rules worth knowing before you rely on them:
   compose time; a `{{host}}` composition already substituted is finished text
   and this pass does not touch it - assign `pm.request.url` directly to change
   that.
-- **Load tests do not run pre-request scripts** - only the `tests` (post-request)
-  script runs there, so this applies to Send / Design Mode.
+- **A single-request load test still does not run pre-request scripts** -
+  only the `tests` (post-request) script runs there. A **scenario** load
+  run's `script.pre` element does now, but only when marked `inline` or
+  forced by the run's `elements.scripts` override (issue #1495) - see
+  [above](#load-test-scripts).
 
 ### Header methods (`pm.request.headers`)
 
@@ -2458,22 +2461,42 @@ every element at a step shares the one `Request` object being sent - only the
 JavaScript variable scope is per-element. The same holds for `script.post`
 elements and `pm.response`.
 
-**`POST /runs` is unchanged, and still joins.** It calls neither
-`refuse_legacy_script_fields` nor the element pipeline: a single-request load
-run's own deferred validation script still reads `tests` (or
-`postRequestScripts` / `postRequestScript`, tried in that order) exactly as
-before - a list of parts joined with a blank line and run as one script in one
-shared scope. A **scenario** load run (many virtual users replaying a
-collection concurrently) compiles each step's `elements` the same way the
-sequential run does (`resolve_step`), but only to answer two questions the
-load path already asked before elements existed - whether a step carries a
-`script.pre` / `script.post` element at all, for the "scripts do not run under
-load" warning and for deciding whether to sample a step's results - **it does
-not run `ElementPipeline`, and no element kind actually executes under
-load**. Wiring the pipeline into that path is issue #1495's job, not #1514's:
-until then, a design send and a sequential (single-VU) collection run are the
-only two places a `script.pre` / `script.post` element, or any other kind,
-actually runs.
+**A single-request `POST /runs` is unchanged, and still joins.** It calls
+neither `refuse_legacy_script_fields` nor the element pipeline: its own
+deferred validation script still reads `tests` (or `postRequestScripts` /
+`postRequestScript`, tried in that order) exactly as before - a list of parts
+joined with a blank line and run as one script in one shared scope. That
+payload shape has no `elements` attachment point at all, so there is nothing
+for `ElementPipeline` to run there.
+
+**A scenario load run's `elements` run inline now (issue #1495), opt-in per
+element.** `submit_one` (the producer, one virtual user at a time) runs
+`step.before` before binding and submitting; the completion runs `step.after`
+once the response is in hand. `extract.*` and `assert.*` always run there. A
+`script.pre` / `script.post` element runs there only when its own
+`config.inline` is `true`, or the run's `elements.scripts` override
+(`"allInline"` / `"allDeferred"`, beside the default `"asMarked"`) forces it
+one way or the other - unmarked, a step's scripts still defer to the post-run
+`tests` replay exactly as before this issue, and the replay itself now skips a
+step whose script already ran inline rather than running it twice.
+
+Every virtual user (VU) gets its own small write layer over the run's shared
+variable scopes (`ScopeOverlay`, on the VU): what one VU's inline
+`extract.*` or `script.*` writes on step 1 is visible to *that VU's* step 2,
+and invisible to every other VU's concurrent step 2 - two VUs sharing one
+name would otherwise read and overwrite each other's state, which is exactly
+the correlation-under-load bug this issue exists to fix. `pm.execution` still
+throws under load (`in_scenario` is `false`): an inline script can write
+state and mutate the request, the same way `script.pre` always could, but it
+cannot redirect the sequence - that stays the deferred replay's own script
+and, eventually, a `control.*` element's job, neither of which runs inline.
+The overlay is cleared at the same iteration boundary `pm.cookies`' per-VU
+jar is, for the same reason: a new iteration is a new user.
+
+See [`elements.md`](elements.md#load-paths) for the full mechanics -
+`ScopeOverlay`, the per-thread `ScriptEngine`, `elements.includeScriptTime`,
+and what is deliberately still unwired (`elements.timers`, the
+single-request path).
 
 ## Error Handling
 

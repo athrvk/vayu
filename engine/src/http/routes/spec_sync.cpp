@@ -1397,7 +1397,7 @@ void register_spec_sync_routes (RouteContext& ctx) {
                 vayu::utils::log_warning ("POST /specs/sync - " +
                 std::to_string (status) + ": " + error_message_of (response));
             } else {
-                vayu::utils::log_info ("POST /specs/sync - applied to spec " +
+                vayu::utils::log_info ("applied to spec " +
                 response["specId"].get<std::string> () + ": +" +
                 std::to_string (response["created"].get<size_t> ()) + " ~" +
                 std::to_string (response["updated"].get<size_t> ()) + " -" +

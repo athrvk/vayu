@@ -53,8 +53,8 @@ namespace {
 /**
  * @brief What a transfer's debug stream leaves behind for the caller.
  *
- * `verbose` gates the *logging* only - the outbound header frame is captured on
- * every send, because the raw-request view is built from it (issue #339). Since
+ * The outbound header frame is captured on every send regardless of log
+ * level, because the raw-request view is built from it (issue #339). Since
  * the cookie jar, libcurl synthesizes headers we never composed (`Cookie`, from
  * CURLOPT_COOKIELIST), so the composed header map no longer describes what went
  * on the wire and only libcurl can say what did.
@@ -65,7 +65,6 @@ namespace {
  * logs get exported and shared. Two surfaces, two audiences, two policies.
  */
 struct TransferDebug {
-    bool verbose = false;
     /// The last CURLINFO_HEADER_OUT frame, verbatim. Last, not first, so a
     /// followed redirect reports the request that produced the response the
     /// caller is looking at.
@@ -80,8 +79,11 @@ int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, v
         debug->last_header_out.assign (data, size);
     }
     // Nothing else to do when the caller only wanted the capture: the frames
-    // below are logging, and DATA_OUT can be a whole request body.
-    if (debug == nullptr || !debug->verbose) {
+    // below are logging, and DATA_OUT can be a whole request body. Gated on
+    // the logger's own level (issue #1510), not a bool threaded down from the
+    // daemon's `-v` flag through `Server`/`RouteContext`/`execute_exchange` -
+    // `-v 2` is what these frames have always meant "debug" as.
+    if (debug == nullptr || vayu::utils::Logger::instance ().get_verbosity () < 2) {
         return 0;
     }
 
@@ -547,10 +549,10 @@ Result<Response> Client::send (const Request& request) {
 
     // The debug stream is always on, verbose or not: the raw-request view is
     // built from the outbound header frame it carries, which is the only place
-    // libcurl's own additions (jar cookies above all) can be read from. The
-    // config flag decides whether the frames are also logged - see TransferDebug.
+    // libcurl's own additions (jar cookies above all) can be read from. Whether
+    // the frames are also logged is `debug_callback`'s own read of the
+    // logger's level - see TransferDebug.
     TransferDebug transfer_debug;
-    transfer_debug.verbose = impl_->config.verbose;
     set_opt<CURLOPT_VERBOSE> (curl, 1L);
     set_opt<CURLOPT_DEBUGFUNCTION> (curl, debug_callback);
     set_opt<CURLOPT_DEBUGDATA> (curl, &transfer_debug);

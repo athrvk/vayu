@@ -304,6 +304,60 @@ struct RunContext {
     // Test script for deferred validation
     std::string test_script;
 
+    /**
+     * `elements.scripts` (issue #1495), resolved once here from a payload
+     * `validate_elements_run_override` has already accepted: "asMarked"
+     * leaves each `script.*` element's own `config.inline` to decide,
+     * "allInline" / "allDeferred" force every one regardless of its own
+     * marking. Read by the load paths' producer/completion hooks per
+     * element - `extract.*` / `assert.*` / `timer.think` are never affected,
+     * since this key names only the script.* opt-in.
+     */
+    enum class ScriptsOverrideMode : std::uint8_t {
+        AsMarked,
+        AllInline,
+        AllDeferred
+    };
+    ScriptsOverrideMode scripts_override = ScriptsOverrideMode::AsMarked;
+
+    /// `elements.includeScriptTime` (issue #1495): false (the default) times
+    /// a step's own transfer only, excluding whatever an inline script or
+    /// declarative element spent applying; true folds that time back into
+    /// the recorded sample.
+    bool include_script_time = false;
+
+    /// `elements.timers` (issue #1495), stored for #1498's timer family to
+    /// read once it exists. This issue validates the key and stores the
+    /// choice but does not yet wire "off" to suppress `timer.think` under
+    /// load - see `docs/engine/elements.md`'s Load paths section.
+    bool timers_disabled = false;
+
+    /**
+     * Whether a compiled `script.*` element runs inline on a load run's
+     * producer/completion hooks (issue #1495) rather than being left to the
+     * deferred replay: the run's `elements.scripts` override when it forces
+     * one way or the other, else the element's own `config.inline`.
+     *
+     * A free function taking @p element_config directly - never a
+     * `CompiledElement` - so `run_manager.cpp`'s `find_step_post_script` (a
+     * step's own script text, not its outcome) and `scenario_load.cpp`'s
+     * pipeline hooks share one answer without either including the other's
+     * header. Declarative kinds (`extract.*`, `assert.*`, `timer.think`)
+     * always run inline and never call this - a caller gates on
+     * `HotPathClass` itself, since `core/elements` must not know about
+     * `RunContext`.
+     */
+    [[nodiscard]] static bool script_element_runs_inline (const nlohmann::json& element_config,
+    ScriptsOverrideMode scripts_mode) {
+        if (scripts_mode == ScriptsOverrideMode::AllInline) {
+            return true;
+        }
+        if (scripts_mode == ScriptsOverrideMode::AllDeferred) {
+            return false;
+        }
+        return element_config.value ("inline", false);
+    }
+
     // Latency (ms) past which a completion is captured as an outlier, resolved
     // once from the run config. 0 disables outlier capture - a threshold of
     // zero would mark every completion an outlier, which is the same as
@@ -758,13 +812,11 @@ struct ScriptValidation {
  *
  * Declared here rather than kept file-local so the per-step behaviour can be
  * tested directly against a drained run; the production caller is
- * `execute_load_test`.
- *
- * @param verbose Log the tallies, as the run's own logging does.
+ * `execute_load_test`. Logs its tallies at DEBUG unconditionally - the
+ * console shows them at `-v 2`, as the run's own logging does.
  */
-[[nodiscard]] ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
-vayu::db::Database& db,
-bool verbose);
+[[nodiscard]] ScriptValidation
+validate_scripts (const std::shared_ptr<RunContext>& context, vayu::db::Database& db);
 
 /**
  * @brief Check a drained load run's sampled responses against the contract it
@@ -785,12 +837,11 @@ bool verbose);
  *
  * Declared here rather than kept file-local so the pass can be driven against a
  * hand-seeded collector in tests; the production caller is `execute_load_test`,
- * beside `validate_scripts`.
- *
- * @param verbose Log the tallies, as the run's own logging does.
+ * beside `validate_scripts`. Logs its tallies at DEBUG unconditionally, as
+ * `validate_scripts` does.
  */
-[[nodiscard]] SampledValidationTotals
-validate_sampled_responses (const std::shared_ptr<RunContext>& context, bool verbose);
+[[nodiscard]] SampledValidationTotals validate_sampled_responses (
+const std::shared_ptr<RunContext>& context);
 
 /**
  * @brief Hang each step's deferred-validation tallies off its entry in a
@@ -1076,7 +1127,6 @@ class RunManager {
     bool start_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
-    bool verbose,
     std::shared_ptr<const ScenarioExecution> scenario = nullptr,
     std::unique_ptr<LoadDataSet> data                 = nullptr,
     LoadAuthPlan auth_plan                            = {});
@@ -1100,8 +1150,7 @@ class RunManager {
     const nlohmann::json& config,
     std::shared_ptr<const ScenarioExecution> execution,
     vayu::db::Database& db,
-    vayu::http::CookieJar& cookie_jar,
-    bool verbose);
+    vayu::http::CookieJar& cookie_jar);
 
     /**
      * @brief Stop every active run and join its worker thread.
@@ -1132,7 +1181,6 @@ class RunManager {
 // Worker functions
 void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
-bool verbose,
 RunManager& manager);
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr);
 

@@ -126,6 +126,17 @@ export function scriptsFromTrace(
 }
 
 /**
+ * The stored `elements` node (issue #1512), verbatim - beside `scriptsFromTrace`
+ * above, whose script kinds keep their own separate node. Absent on a trace
+ * with no non-script elements, and on any row written before this shipped.
+ */
+export function elementsFromTrace(
+	trace: NonNullable<RunResultSample["trace"]>
+): Pick<ResponseState, "elements"> {
+	return Array.isArray(trace.elements) ? { elements: trace.elements } : {};
+}
+
+/**
  * The stored `validation` node (issue #628), verbatim.
  *
  * The engine stores the *same object* it put in the live `/execute` body, so
@@ -262,6 +273,7 @@ export function responseFromRunResult(
 			// did, and the node is written on the failure path too.
 			...eventsFromTrace(trace),
 			...scriptsFromTrace(trace),
+			...elementsFromTrace(trace),
 			...validationFromTrace(trace),
 			...clientCertificateFromTrace(trace),
 		};
@@ -311,6 +323,7 @@ export function responseFromRunResult(
 		restoredFrom,
 		...eventsFromTrace(trace),
 		...scriptsFromTrace(trace),
+		...elementsFromTrace(trace),
 		...validationFromTrace(trace),
 		...clientCertificateFromTrace(trace),
 	};

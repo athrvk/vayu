@@ -80,9 +80,13 @@ are things Vayu plans to catch up on:
   test from many machines. Vayu runs from one.
 - **You have existing `.jmx` test plans**, or a team fluent in them. There is no
   importer for them here.
-- **Your load model is elaborate** - timers, ramp profiles, logic controllers,
-  correlation across steps. Vayu runs closed-loop constant concurrency and a
-  linear scenario.
+- **Your load model is elaborate** - think time and pacing timers, logic
+  controllers (loops, conditionals, transactions). Vayu runs closed-loop
+  constant concurrency and a linear scenario. Correlation across a scenario's
+  steps - a login's token reaching the next step's header, per virtual user -
+  does work under load now: mark the extracting element or script `inline`
+  (or set the run's `elements.scripts` override), or let it stay in the
+  post-run replay by default.
 - **It has to be JVM-native** for your infrastructure, monitoring, or compliance
   reasons.
 

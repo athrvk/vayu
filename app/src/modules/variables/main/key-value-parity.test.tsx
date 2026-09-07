@@ -121,8 +121,7 @@ function collectionWith(secret: boolean): Collection {
 			test: { value: "5123", enabled: true, secret, type: "string", createdAt: 1 },
 		},
 		auth: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		createdAt: new Date(0).toISOString(),
 		updatedAt: new Date(0).toISOString(),
 	};

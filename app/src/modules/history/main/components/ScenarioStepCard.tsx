@@ -61,6 +61,7 @@ import {
 	formatSize,
 	type ExchangeState,
 } from "@/components/shared/response-viewer";
+import ElementOutcomes from "@/modules/request-builder/components/ResponseViewer/ElementOutcomes";
 import SchemaValidation from "@/modules/request-builder/components/ResponseViewer/SchemaValidation";
 import TestResults from "@/modules/request-builder/components/ResponseViewer/TestResults";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
@@ -271,6 +272,16 @@ function ScenarioStepCard({
 			 */}
 			{testResults && testResults.length > 0 && (
 				<TestResults results={testResults} inset={false} />
+			)}
+
+			{/*
+			 * The step's typed elements (issue #1512) - extractors, assertions and
+			 * timers - beside the script results above. Same stored-trace source,
+			 * so a live row shows none until the run ends and the row is written,
+			 * exactly like `testResults`.
+			 */}
+			{response?.elements && response.elements.length > 0 && (
+				<ElementOutcomes outcomes={response.elements} inset={false} />
 			)}
 
 			{response && (

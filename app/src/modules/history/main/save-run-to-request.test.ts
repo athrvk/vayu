@@ -98,8 +98,7 @@ function liveRequest(overrides: Partial<Request> = {}): Request {
 		body: { mode: "none" },
 		bodyType: "none",
 		auth: { mode: "bearer", token: "REAL-TOKEN-KEEP-ME" },
-		preRequestScript: "old();",
-		postRequestScript: "oldTest();",
+		elements: [],
 		followRedirects: true,
 		maxRedirects: 10,
 		httpVersion: "auto",
@@ -133,14 +132,26 @@ describe("applyRunToRequest", () => {
 		expect(patch.httpVersion).toBe("http2");
 	});
 
-	it("writes the request's own script part, not the collection's", () => {
+	it("writes the request's own elements, not the collection's", () => {
 		const live = liveRequest();
 		const patch = applyRunToRequest(seedFromRun(run(), live), live);
 
-		// `const t = 1;` came from the collection and must not end up inside the
-		// request - the next send would run it twice.
-		expect(patch.preRequestScript).toBe("console.log(t);");
-		expect(patch.postRequestScript).toBe("pm.test('ok', () => {});");
+		// `const t = 1;` / `chainTest();` came from the collection and must not
+		// end up inside the request - the next send would run it twice.
+		expect(patch.elements).toEqual([
+			{
+				id: "seed-script-pre",
+				kind: "script.pre",
+				enabled: true,
+				config: { script: "console.log(t);" },
+			},
+			{
+				id: "seed-script-post",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('ok', () => {});" },
+			},
+		]);
 	});
 
 	it("never writes auth, even though the run recorded a mode", () => {
@@ -205,7 +216,7 @@ describe("applyRunToRequest", () => {
 		expect(patch.bodyType).toBe("jsonrpc");
 	});
 
-	it("omits scripts entirely for a run that has only the old glued string", () => {
+	it("omits elements entirely for a run that has only the old glued string", () => {
 		const legacy = run({
 			configSnapshot: {
 				method: "POST",
@@ -219,9 +230,8 @@ describe("applyRunToRequest", () => {
 		const patch = applyRunToRequest(seedFromRun(legacy, live), live);
 
 		// Nothing marks the boundary in the glued string, so the request's own
-		// part cannot be recovered. Leave both fields alone rather than guess.
-		expect(patch).not.toHaveProperty("preRequestScript");
-		expect(patch).not.toHaveProperty("postRequestScript");
+		// part cannot be recovered. Leave the field alone rather than guess.
+		expect(patch).not.toHaveProperty("elements");
 		// The rest still saves.
 		expect(patch.method).toBe("POST");
 	});
@@ -336,15 +346,18 @@ describe("buildChangeset", () => {
 		expect(auth!.driftFrom).toBeUndefined();
 	});
 
-	it("makes scripts a changed row with a diff, for a modern run", () => {
-		const live = liveRequest();
-		const pre = buildChangeset(seedFromRun(run(), live), live).find(
-			(i) => i.field === "Pre-request script"
+	it("makes elements a changed row when the run's elements differ from the request's", () => {
+		// `describeElements` summarises an elements list by kind/name, not by
+		// script content - so a change is visible when the composition differs,
+		// here an empty live list versus the run's two script elements.
+		const live = liveRequest({ elements: [] } as Partial<Request>);
+		const row = buildChangeset(seedFromRun(run(), live), live).find(
+			(i) => i.field === "Elements"
 		);
 
-		expect(pre!.state).toBe("changed");
-		expect(pre!.collapsible).toBe(true);
-		expect(pre!.segments).toBeDefined();
+		expect(row).toBeDefined();
+		expect(row!.state).toBe("changed");
+		expect(row!.segments).toBeDefined();
 	});
 
 	it("makes scripts a single kept row for a legacy run", () => {
@@ -360,8 +373,8 @@ describe("buildChangeset", () => {
 
 		const scripts = set.find((i) => i.field === "Scripts");
 		expect(scripts?.state).toBe("kept");
-		// The per-field script rows do not appear for a legacy run.
-		expect(set.map((i) => i.field)).not.toContain("Pre-request script");
+		// The per-field elements row does not appear for a legacy run.
+		expect(set.map((i) => i.field)).not.toContain("Elements");
 	});
 
 	/*
@@ -448,8 +461,20 @@ describe("buildChangeset", () => {
 			headers: [{ key: "X-Plain", value: "visible", enabled: true }],
 			body: { mode: "json", content: '{"a":1}' },
 			bodyType: "json",
-			preRequestScript: "console.log(t);",
-			postRequestScript: "pm.test('ok', () => {});",
+			elements: [
+				{
+					id: "live-pre",
+					kind: "script.pre",
+					enabled: true,
+					config: { script: "console.log(t);" },
+				},
+				{
+					id: "live-post",
+					kind: "script.post",
+					enabled: true,
+					config: { script: "pm.test('ok', () => {});" },
+				},
+			],
 			followRedirects: false,
 			maxRedirects: 3,
 			httpVersion: "http2",

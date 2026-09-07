@@ -23,7 +23,7 @@
  * are in scope.
  */
 
-import type { SanityResult, ScriptPart } from "@/types";
+import type { ResolvedElement, SanityResult } from "@/types";
 import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
@@ -252,6 +252,7 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		errorMessage: result.errorMessage,
 		consoleLogs: result.consoleLogs,
 		testResults: result.testResults,
+		elements: result.elements,
 		preScriptError: result.preScriptError,
 		postScriptError: result.postScriptError,
 		// Absent stays absent: the engine writes no `validation` at all for a
@@ -263,25 +264,22 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 }
 
 /**
- * Whether an execute that ran these script parts could have written a variable
+ * Whether an execute that ran these elements could have written a variable
  * the UI is showing, and so needs the environment/globals/collection caches
  * invalidated.
  *
- * Both kinds count. The gate used to read `if (preScriptParts)` at both call
- * sites, which is the same "copy that never receives the fix" trap this module
- * exists to close: `pm.environment.set` / `pm.globals.set` /
- * `pm.collectionVariables.set` persist engine-side from a post-request (Tests
- * tab) script exactly as they do from a pre-request one, so a request whose
- * only script was in the Tests tab stored the value while the variables editor
- * and the resolver kept showing the old one - `refetchOnWindowFocus` is off, so
- * nothing else was coming to correct it.
- *
- * Empty part lists are treated as no script, matching what the call sites'
- * truthiness checks already did with `undefined`.
+ * Every kind counts, not just scripts (issue #1512): `extract.json` /
+ * `extract.regex` / `extract.header` write to `env` / `collection` / `globals`
+ * scope exactly as `pm.environment.set` does, so treating only `script.*` as
+ * write-capable would leave a stale variables editor after a plain extractor
+ * ran. `pm.environment.set` / `pm.globals.set` / `pm.collectionVariables.set`
+ * persist engine-side from a post-request script exactly as from a
+ * pre-request one, so a request whose only script was in the Tests tab stored
+ * the value while the variables editor and the resolver kept showing the old
+ * one - `refetchOnWindowFocus` is off, so nothing else was coming to correct
+ * it. A non-empty resolved list is treated as write-capable; an empty one, as
+ * no element at all.
  */
-export function scriptsMayWriteVariables(
-	preScriptParts?: ScriptPart[],
-	postScriptParts?: ScriptPart[]
-): boolean {
-	return Boolean(preScriptParts?.length) || Boolean(postScriptParts?.length);
+export function elementsMayWriteVariables(elements?: ResolvedElement[]): boolean {
+	return Boolean(elements?.length);
 }

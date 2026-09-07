@@ -48,22 +48,36 @@
  * `{{data.*}}` token has an empty template and does no per-iteration work at
  * all.
  *
- * ## Scripts stay deferred, and are keyed per step (issue #450)
+ * ## The element pipeline runs here too, per VU (issue #1495)
  *
- * A step's `pre_script` / `post_script` are not run inline; the run's deferred
- * `validate_scripts` pass keeps its existing discipline, extended only by being
- * keyed per step index rather than per run. A step's `post_script` is replayed
- * after the run against the responses *that step* produced, which is why
- * sampling is per step too: one flat run-wide reservoir would let the hot first
- * step swamp the budget and never sample the last step of a long plan.
- * A `pre_script` still runs nowhere - it would have to run *before* a send this
- * mode never pauses for.
+ * `submit_one` runs `ElementPipeline::run(StepBefore, ...)` plus the residual-
+ * token pass before binding the request, and the completion runs
+ * `ElementPipeline::run(StepAfter, ...)` before `finish_step`. Declarative
+ * kinds (`extract.*`, `assert.*`) always run; a `script.*` kind runs here only
+ * when its own `config.inline` is set or the run's `elements.scripts` override
+ * forces it, read through `HotPathClass` rather than a `kind ==` comparison -
+ * otherwise the step keeps the pre-#1495 behaviour, deferred to
+ * `validate_scripts`' replay after the run, keyed per step index as before. A
+ * VU's writes (`extract.json` into a variable, an inline `script.pre`'s
+ * `pm.environment.set`) land in its own `VirtualUser::scope_overlay`
+ * (`vayu::http::routes::ScopeOverlay`), never the run's shared scopes - two
+ * users writing the same name is exactly the cross-contamination this rule
+ * exists to prevent, on the same reasoning `cookies` above is per-VU. The
+ * overlay is written on the completion path *before* `finish_step` releases
+ * `busy`, so the same acquire/release pairing that makes `cookies` visible to
+ * this VU's next step makes the overlay visible too, with no extra lock.
  *
- * `pm.execution` therefore still throws in a load run (`in_scenario == false`),
- * because a script that has already run against a recorded response cannot
- * redirect a sequence that already happened. Do not smuggle inline scripts in
- * here - the shape, if it is ever wanted, is a bounded pool of QuickJS contexts
- * per worker, and that is its own issue and its own benchmark.
+ * An inline script still cannot redirect the plan (`pm.execution` throws
+ * exactly as before, `in_scenario == false`): flow control only ever comes
+ * from a `control.*` element or the deferred replay's own script, neither of
+ * which exists on this path yet. What changed is only whether `script.pre` /
+ * `script.post` run now or later - each event-loop worker and the strategy
+ * thread get their own `ScriptEngine`
+ * (`vayu::http::routes::script_engine_for_this_thread`), never a pool behind
+ * one mutex, because a run's worker threads are spawned fresh for that run and
+ * joined before it retains - the same lifetime the event loop itself already
+ * relies on - so a thread-local instance is never stale and never shared
+ * across two runs.
  */
 
 #include <atomic>
@@ -73,11 +87,13 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::core {
@@ -155,6 +171,28 @@ struct VirtualUser {
      * token-free plan from ever consulting a row.
      */
     std::optional<size_t> data_row;
+    /**
+     * This VU's own write layer over the run's shared variable scopes (issue
+     * #1495): what an inline `extract.*` or `script.*` element wrote on an
+     * earlier step of this same iteration, read by the residual-token pass
+     * before every later step's send. Cleared at the same iteration boundary
+     * `cookies` is - a new iteration is a new user. Written and read under the
+     * same `busy` acquire/release pairing the struct comment describes; no
+     * VU-local lock is needed for the same reason none is needed for
+     * `cookies`.
+     */
+    vayu::http::routes::ScopeOverlay scope_overlay;
+    /**
+     * Steady-clock milliseconds before which `take_ready_vu` will not select
+     * this VU (issue #1495). Plumbing for a `timer.pacing` / gaussian
+     * `timer.think` to schedule a VU's next submission without blocking the
+     * producer thread; nothing writes a value past 0 yet - `timer.think`'s
+     * existing `apply` blocks the calling thread instead and runs only at
+     * `step.between`, which this load path does not invoke, so it is not
+     * reachable here even by accident. See `docs/engine/elements.md`'s Load
+     * paths section.
+     */
+    int64_t ready_at_ms = 0;
     /// In flight (or retired) when true. See the struct comment.
     std::atomic<bool> busy{ false };
     /// Set once the VU may start no further iteration; it then never becomes
@@ -208,14 +246,54 @@ class StepHistograms {
 };
 
 /**
+ * @brief Per-step, per-element pass/fail/skip tallies for a load run's report
+ *        (issue #1495) - `scenario.steps[i].elements[] = { id, kind, passed,
+ *        failed, skipped }`, the load-path sibling of the sequential run's
+ *        per-step `elements` trace.
+ *
+ * Sized once at construction from the plan's already-compiled `elements` per
+ * step, so recording is a lookup by element id into a fixed-size atomic array
+ * - no lock and no allocation on the completion path. `passed` is an `"ok"`
+ * outcome; `failed` folds in `"error"`; `skipped` folds in `"missing"` (no
+ * kind reports it yet) beside `"skipped"` itself - the report answers "did
+ * this run's steps see this element pass", not which of two failure shapes it
+ * was, matching `scenario.steps[i].elements`'s own three-bucket shape from
+ * #1512's Model section.
+ */
+class StepElementTallies {
+    public:
+    explicit StepElementTallies (const ScenarioPlan& plan);
+
+    /// A no-op for a step or an element id this run's plan does not have -
+    /// the pipeline runs no element outside a step's own compiled list, so
+    /// this only guards against a caller passing the wrong step index.
+    void record (size_t step, const std::string& element_id, const std::string& status);
+
+    /// This step's `elements` array, or an empty one for a step with no
+    /// compiled elements or none that ever ran - the same "absent when
+    /// nothing happened" convention `unresolvedTokens` and `tests` follow.
+    [[nodiscard]] nlohmann::json build (const ScenarioPlan& plan, size_t step) const;
+
+    private:
+    struct Counts {
+        std::atomic<size_t> passed{ 0 };
+        std::atomic<size_t> failed{ 0 };
+        std::atomic<size_t> skipped{ 0 };
+    };
+    std::vector<std::vector<Counts>> counts_by_step_;
+    std::vector<std::unordered_map<std::string, size_t>> index_of_id_by_step_;
+};
+
+/**
  * @brief The `steps` array of the run summary's `scenario` object.
  *
  * One entry per plan step, in plan order, carrying the step's identity beside
  * its numbers - a breakdown indexed only by position is unreadable next to a
  * 40-step sequence.
  */
-[[nodiscard]] nlohmann::json
-build_step_breakdown (const ScenarioPlan& plan, const StepHistograms& steps);
+[[nodiscard]] nlohmann::json build_step_breakdown (const ScenarioPlan& plan,
+const StepHistograms& steps,
+const StepElementTallies& elements);
 
 /**
  * @brief Everything a scenario load run accumulates, shared with its callbacks.
@@ -228,12 +306,43 @@ build_step_breakdown (const ScenarioPlan& plan, const StepHistograms& steps);
  * after the drain, not before.
  */
 struct ScenarioLoadState {
-    ScenarioLoadState (size_t step_count, size_t virtual_users, CoverageTally coverage)
-    : steps (step_count), coverage (std::move (coverage)),
+    ScenarioLoadState (const ScenarioPlan& plan,
+    size_t virtual_users,
+    CoverageTally coverage,
+    vayu::http::routes::ScriptVariableScopes base_scopes,
+    vayu::runtime::ScriptConfig script_config)
+    : steps (plan.steps.size ()), element_tallies (plan),
+      base_scopes (std::move (base_scopes)),
+      base_vars (vayu::http::routes::flatten_variable_scopes (this->base_scopes)),
+      script_config (script_config), coverage (std::move (coverage)),
       virtual_users (virtual_users) {
     }
 
     StepHistograms steps;
+    /// Per-step, per-element pass/fail/skip tallies (issue #1495), written by
+    /// the same completion that writes `steps` above - see the class comment.
+    StepElementTallies element_tallies;
+    /**
+     * This run's shared variable scopes (issue #1495) - the same shape and
+     * source a design send's would be, loaded once here rather than per
+     * submission. An inline `script.*` element materializes a per-VU copy of
+     * this through `VirtualUser::scope_overlay` before running; never mutated
+     * directly - a load run's writes are all per-VU, on the overlay, which is
+     * the isolation this issue exists to add.
+     */
+    vayu::http::routes::ScriptVariableScopes base_scopes;
+    /**
+     * @ref base_scopes, flattened once: every submission's residual-token
+     * pass starts from a copy of this map plus its own VU's small
+     * `ScopeOverlay`, rather than re-walking the collection-ancestor chain
+     * per submission the way a design send's single exchange does.
+     */
+    vayu::http::VariableValues base_vars;
+    /// This run's script configuration (timeout, memory, stack, console,
+    /// `pm.sendRequest`), resolved once and handed to
+    /// `vayu::http::routes::script_engine_for_this_thread` by every inline
+    /// `script.*` element - never re-read from `Database` per step.
+    vayu::runtime::ScriptConfig script_config;
     /**
      * Contract coverage (issue #629), written by every completion callback.
      *

@@ -20,6 +20,7 @@ import type {
 	VariableValue,
 } from "@/types";
 import { asRecord, asStr } from "@/lib/json-node";
+import { toElements } from "./elements-transformer";
 
 /**
  * The declared data contract, or `{}` when the row predates the column or holds
@@ -89,8 +90,7 @@ export class CollectionTransformer {
 			parentId: asStr(raw.parentId) ?? undefined,
 			order: typeof raw.order === "number" ? raw.order : 0,
 			variables: (asRecord(raw.variables) ?? {}) as Record<string, VariableValue>,
-			preRequestScript: asStr(raw.preRequestScript) ?? "",
-			postRequestScript: asStr(raw.postRequestScript) ?? "",
+			elements: toElements(raw.elements),
 			dataSchema: toDataSchema(raw.dataSchema),
 			openapi: toOpenApiBinding(raw.openapi),
 			auth,

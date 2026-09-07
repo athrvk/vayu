@@ -471,9 +471,8 @@ void register_spec_diff_routes (RouteContext& ctx) {
                 vayu::utils::log_warning ("POST /specs/diff - " +
                 std::to_string (status) + ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info ("POST /specs/diff - " +
-                std::to_string (body["added"].size ()) + " added, " +
-                std::to_string (body["removed"].size ()) + " removed, " +
+                vayu::utils::log_info (std::to_string (body["added"].size ()) +
+                " added, " + std::to_string (body["removed"].size ()) + " removed, " +
                 std::to_string (body["changed"].size ()) + " changed, " +
                 std::to_string (body["unchanged"].get<size_t> ()) + " unchanged");
             }

@@ -135,6 +135,10 @@ export const API_ENDPOINTS = {
 	SCRIPT_COMPLETIONS: `/scripting/completions`,
 	SCRIPT_TYPES: `/scripting/types`,
 
+	// Element kind catalogue (issue #1512): every extractor, assertion, timer,
+	// controller and script kind the engine registers, with its config schema.
+	ELEMENT_KINDS: `/elements/kinds`,
+
 	// Execution
 	// Composition first, execution second: POST /compose resolves {{variables}}
 	// and inherit auth engine-side and returns the payload the two execution

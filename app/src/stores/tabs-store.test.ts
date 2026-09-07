@@ -203,18 +203,17 @@ describe("LRU eviction never takes a dirty tab", () => {
 	/**
 	 * One case per key family a collection tab's editors can register.
 	 *
-	 * `VariableTableEditor` keys on the bare id; the Info, Auth and the two
-	 * Script panels suffix it (`useDraftSaveContext`). The case used to match
+	 * `VariableTableEditor` keys on the bare id; the Info, Auth and Elements
+	 * panels suffix it (`useDraftSaveContext`). The case used to match
 	 * only the bare key, so every suffixed sibling read as clean - the
 	 * "under-matching discards someone's work" direction the guard's own header
-	 * names. Reverting the prefix match fails all four suffix cases.
+	 * names. Reverting the prefix match fails all three suffix cases.
 	 */
 	it.each([
 		["the Variables sub-tab", "collection-col_1"],
 		["the Info tab", "collection-col_1-info"],
 		["the Auth tab", "collection-col_1-auth"],
-		["the pre-request Script tab", "collection-col_1-preRequestScript"],
-		["the post-request Script tab", "collection-col_1-postRequestScript"],
+		["the Elements tab", "collection-col_1-elements"],
 	])("spares a collection tab dirty in %s", (_label, contextId) => {
 		useTabsStore.getState().openTab({ type: "collection", entityId: "col_1" });
 		markDirty(contextId);
