@@ -180,7 +180,7 @@ export type SSEErrorHandler = (error: Error) => void;
  * converges on the stored report either way, and a null here means "ask it",
  * never "it finished".
  */
-export type SSETerminalStatus = "Completed" | "Stopped" | "Failed" | null;
+export type SSETerminalStatus = "completed" | "stopped" | "failed" | null;
 
 export type SSECloseHandler = (status: SSETerminalStatus) => void;
 
@@ -194,7 +194,13 @@ export type SSECloseHandler = (status: SSETerminalStatus) => void;
 export function parseTerminalStatus(raw: string): SSETerminalStatus {
 	try {
 		const { status } = JSON.parse(raw) as { status?: unknown };
-		if (status === "Completed" || status === "Stopped" || status === "Failed") return status;
+		// Lowercase, matching the engine's `to_string(RunStatus)` - the same
+		// values `RunReport["status"]` and a stored report's `metadata.status`
+		// already carry (issue #1497's `failRun` makes `Failed` a run-of-the-mill
+		// outcome rather than a crash-only rarity, which is what made this
+		// case mismatch worth closing: capitalized comparisons here never
+		// matched a real frame).
+		if (status === "completed" || status === "stopped" || status === "failed") return status;
 		return null;
 	} catch {
 		return null;

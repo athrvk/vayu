@@ -1446,6 +1446,33 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         // the payload builder treats as absent.
         inputs.coverage = build_scenario_load_coverage (*scenario_state);
     }
+    // Issue #1497's combined assertion tally: the deferred replay's pm.test
+    // results (already in `inputs.tests`, both single-request and scenario
+    // runs), plus - for a scenario run - every `assert.*` element outcome and
+    // every inline script's own pm.test calls, neither of which anything else
+    // reads at run level. Absent when the run made no assertion, so
+    // `maxAssertionFailureRatePct` stays unevaluated rather than a trivial
+    // pass at 0/0.
+    {
+        AssertionTotals assertions;
+        if (inputs.tests) {
+            assertions.passed += inputs.tests->passed;
+            assertions.failed += inputs.tests->failed;
+        }
+        if (scenario_state) {
+            const auto element_totals =
+            scenario_state->element_tallies.assertion_totals (context->scenario->plan);
+            assertions.passed += element_totals.passed;
+            assertions.failed += element_totals.failed;
+            assertions.passed += scenario_state->inline_script_tests_passed.load (
+            std::memory_order_relaxed);
+            assertions.failed += scenario_state->inline_script_tests_failed.load (
+            std::memory_order_relaxed);
+        }
+        if (assertions.passed + assertions.failed > 0) {
+            inputs.assertions = assertions;
+        }
+    }
     // Beside coverage, and deliberately not inside the `scenario_state`
     // block above: this pass reads the sample reservoirs, which are the
     // collector's, so it is available whether or not the executor left
@@ -1523,21 +1550,35 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     }
 
     // Store the whole-run summary: everything the report used to rebuild by
-    // scanning the run's metric rows, written once, here.
+    // scanning the run's metric rows, written once, here. Hoisted out of the
+    // try so the terminal-status decision below can read its verdict - the
+    // budgets this run just measured, never a second query for them (a core
+    // that reads, decides and writes holds one lock; engine/CLAUDE.md).
+    RunSummaryInputs inputs;
+    bool summary_stored = false;
     try {
         const RunTotals totals{ completed, actual_rps, total_duration_s,
             setup_overhead_s, avg_latency, percentiles };
-        const RunSummaryInputs inputs = collect_summary_inputs (
+        inputs = collect_summary_inputs (
         context, totals, validation, schema_totals, scenario_state);
         db.update_run_summary (
         context->run_id, build_run_summary_payload (inputs).dump ());
+        summary_stored = true;
     } catch (const std::exception& e) {
         vayu::utils::log_error ("Failed to store run summary: " + std::string (e.what ()));
     }
 
-    // Update run status with retry logic to handle any remaining contention
+    // Update run status with retry logic to handle any remaining contention.
+    // A stopped run keeps reporting Stopped regardless of verdict (issue
+    // #1497's failRun judges only a run that reached its own natural end);
+    // a completed run whose config asked `thresholds.failRun: true` and
+    // whose budgets it missed is judged too.
     vayu::RunStatus final_status =
     context->should_stop ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
+    if (!context->should_stop && summary_stored && inputs.thresholds &&
+    inputs.thresholds->failed > 0 && thresholds_fail_run (context->config)) {
+        final_status = vayu::RunStatus::Failed;
+    }
     db.update_run_status_with_retry (context->run_id, final_status);
 
     // Terminal status reached - trim old runs per the retention knobs.

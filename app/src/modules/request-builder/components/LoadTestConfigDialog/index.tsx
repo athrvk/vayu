@@ -113,6 +113,11 @@ interface SavedLoadTestConfig {
 	 */
 	budgets: BudgetDraft;
 	/**
+	 * Whether a missed budget above should fail the run, not only report it -
+	 * memoed alongside `budgets` for the same reason.
+	 */
+	failRun: boolean;
+	/**
 	 * The monitoring endpoint, memoed for the same reason the budgets are: it is
 	 * a property of the *target* rather than of one run, so retyping a
 	 * `/metrics` URL and its metric names for every run is the same friction the
@@ -329,6 +334,7 @@ export default function LoadTestConfigDialog({
 				latencyP99Ms: String(sloThresholdMs),
 			}
 	);
+	const [failRun, setFailRun] = useState(saved.failRun ?? false);
 	const [budgetsOpen, setBudgetsOpen] = useState(false);
 	/**
 	 * Server monitoring. The cadence and the metric cap are engine settings
@@ -584,6 +590,7 @@ export default function LoadTestConfigDialog({
 			streamDuration,
 			streamMaxEvents,
 			budgets,
+			failRun,
 			monitor,
 		});
 
@@ -598,7 +605,7 @@ export default function LoadTestConfigDialog({
 			comment: comment || undefined,
 			// Absent when nothing was declared - the engine rejects an empty
 			// object rather than starting a run no verdict can be computed for.
-			thresholds: buildThresholds(budgets),
+			thresholds: buildThresholds(budgets, failRun),
 			// Absent when no endpoint was given, for the same reason.
 			monitor: buildMonitor(monitor),
 		};
@@ -1055,6 +1062,23 @@ export default function LoadTestConfigDialog({
 									hint={field.hint}
 								/>
 							))}
+							<div className="flex items-start justify-between gap-3">
+								<Label
+									htmlFor="lt-fail-run"
+									className="text-xs font-normal leading-snug"
+								>
+									Fail the run when a budget is missed
+									<span className="block text-[11px] text-muted-foreground">
+										Otherwise a missed budget is reported but the run still ends
+										Completed.
+									</span>
+								</Label>
+								<Switch
+									id="lt-fail-run"
+									checked={failRun}
+									onCheckedChange={setFailRun}
+								/>
+							</div>
 						</CollapsibleContent>
 					</Collapsible>
 

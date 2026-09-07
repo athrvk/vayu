@@ -30,9 +30,11 @@
 
 namespace {
 
+using vayu::core::AssertionTotals;
 using vayu::core::evaluate_thresholds;
 using vayu::core::RunSummaryInputs;
 using vayu::core::ThresholdOutcome;
+using vayu::core::thresholds_fail_run;
 using vayu::core::validate_thresholds;
 
 /// A run that completed 1000 requests: 990 OK, 8 server errors, 2 transport
@@ -154,11 +156,12 @@ TEST (ThresholdEval, AThroughputFloorOfZeroIsRejected) {
 
 TEST (ThresholdEval, EveryKnownBudgetIsAcceptedTogether) {
     nlohmann::json thresholds{ { "latencyP50Ms", 20 }, { "latencyP95Ms", 40 },
-        { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 }, { "minThroughputRps", 10000 } };
+        { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 },
+        { "minThroughputRps", 10000 }, { "maxAssertionFailureRatePct", 5 } };
     EXPECT_FALSE (validate_thresholds (config_with (thresholds)).has_value ());
     auto outcome = evaluate_thresholds (config_with (thresholds), measured_run ());
     ASSERT_HAS_VALUE (outcome);
-    EXPECT_EQ (outcome->checks.size (), 5u);
+    EXPECT_EQ (outcome->checks.size (), 6u);
 }
 
 // --- The verdict: each budget passes and fails off the run's own numbers ---
@@ -307,6 +310,82 @@ TEST (ThresholdEval, AThroughputOrErrorRateBudgetIsAlwaysEvaluated) {
     evaluate_thresholds (config_with ({ { "minThroughputRps", 10 } }), empty));
     EXPECT_TRUE (throughput.evaluated);
     EXPECT_FALSE (throughput.passed); // 0 rps never meets a floor above zero
+}
+
+// --- maxAssertionFailureRatePct (issue #1497): assert.* elements and
+// pm.test calls, folded together, over a run's combined assertion tally ---
+
+TEST (ThresholdEval, AZeroAssertionFailureRateBudgetIsAccepted) {
+    // Same reasoning as the error rate: "no assertion may fail" is a real ask.
+    EXPECT_FALSE (
+    validate_thresholds (config_with ({ { "maxAssertionFailureRatePct", 0 } })).has_value ());
+}
+
+TEST (ThresholdEval, AnAssertionFailureRateBudgetOutsideZeroToHundredIsRejected) {
+    expect_rejected ({ { "maxAssertionFailureRatePct", -0.1 } }, "maxAssertionFailureRatePct");
+    expect_rejected ({ { "maxAssertionFailureRatePct", 100.5 } }, "maxAssertionFailureRatePct");
+}
+
+TEST (ThresholdEval, AnAssertionFailureRateBudgetIsUnevaluatedWithNoAssertions) {
+    // The run made no assertion at all - `inputs.assertions` stays unset, the
+    // same "no data" state a latency percentile with zero completions has.
+    auto check = only_check (evaluate_thresholds (
+    config_with ({ { "maxAssertionFailureRatePct", 0 } }), measured_run ()));
+    EXPECT_FALSE (check.evaluated);
+    EXPECT_FALSE (check.passed);
+}
+
+TEST (ThresholdEval, AnAssertionFailureRateBudgetReadsTheCombinedTally) {
+    RunSummaryInputs inputs = measured_run ();
+    inputs.assertions = AssertionTotals{ .passed = 18, .failed = 2 }; // 10%
+
+    auto pass = only_check (evaluate_thresholds (
+    config_with ({ { "maxAssertionFailureRatePct", 10 } }), inputs));
+    EXPECT_TRUE (pass.evaluated);
+    EXPECT_DOUBLE_EQ (pass.actual, 10.0);
+    EXPECT_TRUE (pass.passed);
+
+    auto fail = only_check (evaluate_thresholds (
+    config_with ({ { "maxAssertionFailureRatePct", 9 } }), inputs));
+    EXPECT_FALSE (fail.passed);
+}
+
+// --- thresholds.failRun (issue #1497): a flag, not a budget -----------------
+
+TEST (ThresholdEval, FailRunAcceptsOnlyABoolean) {
+    EXPECT_FALSE (validate_thresholds (
+    config_with ({ { "maxErrorRatePct", 5 }, { "failRun", true } }))
+    .has_value ());
+    EXPECT_FALSE (validate_thresholds (
+    config_with ({ { "maxErrorRatePct", 5 }, { "failRun", nullptr } }))
+    .has_value ()); // null reads as absent, the rule every other key follows
+    expect_rejected ({ { "maxErrorRatePct", 5 }, { "failRun", "yes" } }, "failRun");
+}
+
+TEST (ThresholdEval, FailRunAloneDeclaresNoBudget) {
+    // Not a budget itself - it needs at least one to mean anything, the same
+    // rejection an empty `{}` gets.
+    auto reason = validate_thresholds (config_with ({ { "failRun", true } }));
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("no budget"), std::string::npos) << *reason;
+}
+
+TEST (ThresholdEval, FailRunDoesNotBecomeASixthCheck) {
+    // The evaluator's declared-budget count must ignore it too, or `failRun`
+    // would show up in the report as a phantom, unjudgeable check.
+    auto outcome = evaluate_thresholds (
+    config_with ({ { "maxErrorRatePct", 5 }, { "failRun", true } }), measured_run ());
+    ASSERT_HAS_VALUE (outcome);
+    EXPECT_EQ (outcome->checks.size (), 1u);
+}
+
+TEST (ThresholdEval, ThresholdsFailRunReadsTheFlag) {
+    EXPECT_TRUE (thresholds_fail_run (
+    config_with ({ { "maxErrorRatePct", 5 }, { "failRun", true } })));
+    EXPECT_FALSE (thresholds_fail_run (config_with ({ { "maxErrorRatePct", 5 } })));
+    EXPECT_FALSE (thresholds_fail_run (
+    config_with ({ { "maxErrorRatePct", 5 }, { "failRun", false } })));
+    EXPECT_FALSE (thresholds_fail_run (nlohmann::json{ { "url", "http://localhost/" } }));
 }
 
 TEST (ThresholdEval, AStoredBudgetOfTheWrongTypeIsSkippedRatherThanGuessed) {

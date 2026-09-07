@@ -360,7 +360,7 @@ class LoadTestService {
 		// failures never reach, so a real failure cleared the bar instead of
 		// reddening it. Marking it also sets `progressFailedRunId`, which is
 		// what makes the clear below leave the flash standing.
-		if (status === "Failed") this.failProgress(runId);
+		if (status === "failed") this.failProgress(runId);
 		// Same reason, and the same moment: the run is over, so the taskbar stops
 		// claiming one is going. A run that already reported its failure keeps
 		// that flash instead - see `progressFailedRunId`. A close with no run to
@@ -415,7 +415,7 @@ class LoadTestService {
 			// The frame first, deliberately - the fetch above can fail, and a
 			// failure that could not be read must still report a failure rather
 			// than quietly report success.
-			const failed = status === "Failed" || (status === null && reportStatus === "Failed");
+			const failed = status === "failed" || (status === null && reportStatus === "failed");
 			this.notifyTerminal(
 				runId,
 				failed ? NOTIFY_KINDS.loadRunFailed : NOTIFY_KINDS.loadRunFinished,

@@ -83,10 +83,10 @@ import { NOTIFY_KINDS } from "./notify";
  * the status off the engine's completion frame (#1415). `null` is a stream that
  * ended without one - a dropped connection, or an older engine.
  */
-function closeStream(status: "Completed" | "Stopped" | "Failed" | null = null): Promise<void> {
+function closeStream(status: "completed" | "stopped" | "failed" | null = null): Promise<void> {
 	return (
 		loadTestService as unknown as {
-			handleClose: (status: "Completed" | "Stopped" | "Failed" | null) => Promise<void>;
+			handleClose: (status: "completed" | "stopped" | "failed" | null) => Promise<void>;
 		}
 	).handleClose(status);
 }
@@ -392,7 +392,7 @@ describe("LoadTestService", () => {
 			dashboard.currentRunId = "run_15d";
 			loadTestService.startMonitoring("run_15d");
 
-			await closeStream("Failed");
+			await closeStream("failed");
 
 			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
 			expect(mockNotifyPost).toHaveBeenCalledWith(
@@ -410,7 +410,7 @@ describe("LoadTestService", () => {
 			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
 				summary: {},
 				latency: {},
-				metadata: { status: "Failed" },
+				metadata: { status: "failed" },
 			} as Awaited<ReturnType<typeof apiService.getRunReport>>);
 			dashboard.currentRunId = "run_15e";
 			loadTestService.startMonitoring("run_15e");
@@ -435,7 +435,7 @@ describe("LoadTestService", () => {
 			dashboard.currentRunId = "run_15g";
 			loadTestService.startMonitoring("run_15g");
 
-			await closeStream("Failed");
+			await closeStream("failed");
 
 			expect(mockOsIconRunFailed).toHaveBeenCalledTimes(1);
 			expect(mockNotifyPost).toHaveBeenCalledWith(
@@ -450,7 +450,7 @@ describe("LoadTestService", () => {
 			dashboard.currentRunId = "run_15f";
 			loadTestService.startMonitoring("run_15f");
 
-			await closeStream("Completed");
+			await closeStream("completed");
 
 			expect(mockOsIconRunFailed).not.toHaveBeenCalled();
 			expect(mockNotifyPost).toHaveBeenCalledWith(

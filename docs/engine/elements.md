@@ -190,8 +190,11 @@ gap, outside this page's Status callout.
   the script-to-elements cut-over (this page's Status callout).
 - #1495 - the pipeline on a scenario load run's producer/completion hooks (this page's Load
   paths section).
-- #1497, #1515, #1498, #1500, #1499, #1501 - the assertion threshold, controllers, timers,
-  metrics, setup/teardown and load-time cookies that round out the kind table.
+- #1497 - the `maxAssertionFailureRatePct` run threshold and `thresholds.failRun`, over the
+  combined `assert.*` element and `pm.test` tally (load runs only; see `api-reference.md`'s
+  thresholds section).
+- #1515, #1498, #1500, #1499, #1501 - controllers, timers, metrics, setup/teardown and
+  load-time cookies that round out the kind table.
 - #1516 - the app's `ElementList` primitive and editor.
 - #1517 - MCP's `elements` fields and the `vayu://elements/kinds` resource.
 - #1518 - Postman/OpenAPI round-trip and a JMeter `.jmx` importer.

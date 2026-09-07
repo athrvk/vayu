@@ -1239,6 +1239,84 @@ TEST_F (ScenarioLoadTest, PerStepElementTalliesAreAttachedToTheBreakdown) {
 }
 
 // ============================================================================
+// The combined assertion tally (issue #1497): assert.* elements and an
+// inline script's own pm.test calls, summed for maxAssertionFailureRatePct.
+// ============================================================================
+
+TEST_F (ScenarioLoadTest, AssertionTotalsSumsOnlyAssertStarKindsAcrossSteps) {
+    ScenarioMockServer server;
+    auto execution                   = plan_over ({ server.url ("/echo") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { { { "id", "el_status" }, { "kind", "assert.status" }, { "enabled", true },
+      { "config", { { "in", json::array ({ 200 }) } } } },
+    // A non-assert kind beside it, to prove it is excluded from the sum -
+    // an extract.* pass/fail here must not inflate the assertion tally.
+    vayu::tests::extract_json_element_json ("el_extract", "$.ok", "ok") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto totals = state->element_tallies.assertion_totals (execution.plan);
+    EXPECT_EQ (totals.passed, 3u);
+    EXPECT_EQ (totals.failed, 0u);
+}
+
+TEST_F (ScenarioLoadTest, AFailingAssertStatusElementCountsAsAFailedAssertion) {
+    ScenarioMockServer server;
+    auto execution                   = plan_over ({ server.url ("/echo") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { { { "id", "el_status" }, { "kind", "assert.status" }, { "enabled", true },
+    { "config", { { "in", json::array ({ 404 }) } } } } }); // /echo answers 200
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto totals = state->element_tallies.assertion_totals (execution.plan);
+    EXPECT_EQ (totals.passed, 0u);
+    EXPECT_EQ (totals.failed, 2u);
+}
+
+// The gap this issue closes: `script_kinds.cpp`'s `apply` reports the
+// element's own outcome as "did the script throw", never whether its
+// `pm.test` calls passed - so before this, a failing inline assertion was
+// invisible at run level. Mutation check: remove the `pre_result.tests` /
+// `post_result.tests` loops in `scenario_load.cpp`'s `run_step_before` /
+// `run_step_after` and both counters here stay zero.
+TEST_F (ScenarioLoadTest, AnInlineScriptsPmTestCallsAreTalliedSeparatelyFromItsElementOutcome) {
+    ScenarioMockServer server;
+    auto execution                   = plan_over ({ server.url ("/echo") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_post", "script.post",
+    "pm.test('passes', function () { pm.expect(1).to.equal(1); });"
+    "pm.test('fails', function () { pm.expect(1).to.equal(2); });",
+    /*inline_script=*/true) });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    // `ScriptResult::success` already folds a failed `pm.test` into "did the
+    // script run cleanly" (`script_engine.cpp`'s post-eval loop over
+    // `result.tests`), so `StepElementTallies` - a single pass/fail bit per
+    // script *run* - already marks this element failed; that part predates
+    // this issue. What did not exist before this PR is the assertion-level
+    // count behind that one bit: one `pm.test` call passed and one failed,
+    // and only `inline_script_tests_passed`/`_failed` can tell the two apart
+    // from a run where *both* calls failed - the element tally reads
+    // identically either way.
+    EXPECT_EQ (state->inline_script_tests_passed.load (), 1u);
+    EXPECT_EQ (state->inline_script_tests_failed.load (), 1u);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    ASSERT_TRUE (summary["steps"][0].contains ("elements"));
+    EXPECT_EQ (summary["steps"][0]["elements"][0]["passed"], 0);
+    EXPECT_EQ (summary["steps"][0]["elements"][0]["failed"], 1);
+}
+
+// ============================================================================
 // Data rows in load mode (issue #449)
 // ============================================================================
 

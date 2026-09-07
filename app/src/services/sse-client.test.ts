@@ -237,20 +237,20 @@ describe("parseTerminalStatus", () => {
 	 * stream never produces one at all.
 	 */
 	it("reads the three statuses the engine emits", () => {
-		expect(parseTerminalStatus('{"status":"Completed"}')).toBe("Completed");
-		expect(parseTerminalStatus('{"status":"Stopped"}')).toBe("Stopped");
-		expect(parseTerminalStatus('{"status":"Failed"}')).toBe("Failed");
+		expect(parseTerminalStatus('{"status":"completed"}')).toBe("completed");
+		expect(parseTerminalStatus('{"status":"stopped"}')).toBe("stopped");
+		expect(parseTerminalStatus('{"status":"failed"}')).toBe("failed");
 	});
 
 	/*
 	 * Null is "ask the report", never "it finished" - which is the distinction
 	 * the whole fix turns on. Mutation check: default an unparseable frame to
-	 * "Completed" and a failed run whose frame was malformed reports success.
+	 * "completed" and a failed run whose frame was malformed reports success.
 	 */
 	it("answers null for a frame that carries no status it knows", () => {
 		for (const raw of [
 			'{"event":"complete","runId":"r1"}',
-			'{"status":"Running"}',
+			'{"status":"running"}',
 			'{"status":42}',
 			"not json",
 			"",
@@ -378,8 +378,8 @@ describe("SSEClient - the hand-off when a run is displaced", () => {
 		const first = handlers();
 
 		attach(client, "run_1", first);
-		MockEventSource.instances[0]?.complete("Completed");
-		expect(first.onClose).toHaveBeenCalledWith("Completed");
+		MockEventSource.instances[0]?.complete("completed");
+		expect(first.onClose).toHaveBeenCalledWith("completed");
 
 		attach(client, "run_2", handlers());
 		expect(first.onSuperseded).not.toHaveBeenCalled();

@@ -68,9 +68,30 @@ double measured_error_rate (const RunSummaryInputs& inputs) {
 constexpr double MAX_LATENCY_BUDGET_MS = 86400000.0; // a day; past it nothing completes
 constexpr double MAX_THROUGHPUT_BUDGET_RPS = 1e9;
 
+/// Share of this run's assertions - `assert.*` element outcomes and `pm.test`
+/// calls alike, inline or replayed - that failed, as a percentage. Zero when
+/// the run made none, which `assertion_data_present` is what keeps this
+/// metric out of the verdict for rather than a trivial pass.
+double measured_assertion_failure_rate (const RunSummaryInputs& inputs) {
+    if (!inputs.assertions) {
+        return 0.0;
+    }
+    const size_t total = inputs.assertions->passed + inputs.assertions->failed;
+    if (total == 0) {
+        return 0.0;
+    }
+    return static_cast<double> (inputs.assertions->failed) * 100.0 /
+    static_cast<double> (total);
+}
+
+bool assertion_data_present (const RunSummaryInputs& inputs) {
+    return inputs.assertions.has_value () &&
+    (inputs.assertions->passed + inputs.assertions->failed) > 0;
+}
+
 /// Every budget a run may declare, in the order the report lists them.
-const std::array<ThresholdMetric, 5>& metrics () {
-    static const std::array<ThresholdMetric, 5> table = { {
+const std::array<ThresholdMetric, 6>& metrics () {
+    static const std::array<ThresholdMetric, 6> table = { {
     { "latencyP50Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p50; },
@@ -88,6 +109,9 @@ const std::array<ThresholdMetric, 5>& metrics () {
     { "minThroughputRps", Direction::AtLeast, 0.0, false, MAX_THROUGHPUT_BUDGET_RPS,
     "greater than 0 and at most 1000000000", "It is a completed-requests-per-second floor.",
     [] (const RunSummaryInputs& in) { return in.throughput; }, nullptr },
+    { "maxAssertionFailureRatePct", Direction::AtMost, 0.0, true, 100.0,
+    "between 0 and 100", "It is a percentage of this run's assert.* and pm.test outcomes.",
+    measured_assertion_failure_rate, assertion_data_present },
     } };
     return table;
 }
@@ -157,6 +181,18 @@ std::optional<std::string> validate_thresholds (const nlohmann::json& config) {
 
     size_t declared = 0;
     for (const auto& [key, value] : thresholds.items ()) {
+        // Not a budget: whether a failed one fails the run, not itself
+        // measured against anything, so it never joins `declared` below.
+        if (key == "failRun") {
+            if (value.is_null ()) {
+                continue; // Same null-means-absent rule every other key follows.
+            }
+            if (!value.is_boolean ()) {
+                return "'thresholds.failRun' must be a boolean (got " +
+                std::string (value.type_name ()) + ")";
+            }
+            continue;
+        }
         const ThresholdMetric* metric = find_metric (key);
         if (metric == nullptr) {
             return "'thresholds." + key +
@@ -229,6 +265,18 @@ const RunSummaryInputs& inputs) {
         outcome.checks.push_back (std::move (check));
     }
     return outcome;
+}
+
+bool thresholds_fail_run (const nlohmann::json& config) {
+    if (!config.is_object () || !config.contains ("thresholds")) {
+        return false;
+    }
+    const auto& thresholds = config["thresholds"];
+    if (!thresholds.is_object () || !thresholds.contains ("failRun")) {
+        return false;
+    }
+    const auto& value = thresholds["failRun"];
+    return value.is_boolean () && value.get<bool> ();
 }
 
 } // namespace vayu::core

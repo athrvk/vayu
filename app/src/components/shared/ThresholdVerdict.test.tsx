@@ -95,6 +95,28 @@ describe("ThresholdVerdict", () => {
 		expect(screen.getByText(/≤ 50ms/)).toBeInTheDocument();
 	});
 
+	it("labels the assertion failure rate budget (issue #1497)", () => {
+		render(
+			<ThresholdVerdict
+				verdict={verdict({
+					checks: [
+						{
+							metric: "maxAssertionFailureRatePct",
+							limit: 0,
+							actual: 10,
+							passed: false,
+						},
+					],
+					passed: 0,
+					failed: 1,
+					verdict: "failed",
+				})}
+			/>
+		);
+		expect(screen.getByText(/Assertion failure rate/)).toBeInTheDocument();
+		expect(screen.getByText(/≤ 0%/)).toBeInTheDocument();
+	});
+
 	it("shows a metric it has no label for rather than dropping it", () => {
 		// The counts come from the engine. A check rendered away would leave
 		// "1 of 2 budgets met" above a single row and no way to see the other.
