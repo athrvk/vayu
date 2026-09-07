@@ -357,7 +357,11 @@ Stores individual HTTP request definitions.
 Disabled rows (`"enabled":false`) are preserved in storage and filtered at HTTP-execution time only.
 Duplicate keys are allowed. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
 `X-Request-ID` and `User-Agent` rows here; [the header-strip pass](#the-header-strip-pass-issue-1487)
-removes them once, at startup.
+removes them once, at startup. An optional `source` key (`"body-mode"` | `"stream"`)
+marks a row an app setting wrote rather than the user - the auto `Content-Type` a
+body-mode change adds, the `Accept` the Event stream toggle adds - so it can tell its
+own row apart from a hand-typed one across a reload; retyping the row's key or value
+clears it (issue #1481).
 
 **elements** - same shape and the same additive relationship to `pre_request_script` /
 `post_request_script` as [`collections.elements`](#collections) above; see that entry.
