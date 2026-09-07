@@ -625,6 +625,14 @@ min/max/options):
 }
 ```
 
+**Only entries this engine's own build declares are listed** (issue #1492): a
+row a *newer* engine wrote to the same workspace, then left behind for an
+older one to reopen, is never in `entries` - this engine has no label,
+validator or bounds for it, so serving it would describe a setting it cannot
+actually explain. `POST /config` applies the same rule to writes: a key
+outside this build's catalogue is refused as `"Unknown config key"`, the same
+message a key with no stored row at all gets.
+
 `min` and `max` are present only for entries that declare them (numeric
 types). `options` is present only for `type: "enum"` entries - a JSON array of
 `{value, label}`, so the renderer can draw a picker without a second,
@@ -968,8 +976,11 @@ In both shapes, non-string values (numbers, booleans) are coerced to strings.
 Each key is validated against its registered `type` and, for `integer` / `number`
 entries, its `min`/`max` range; `boolean` entries must be `"true"` or `"false"`;
 `enum` entries (e.g. `defaultHttpVersion`) must equal one of that entry's stored
-`options` values. Validation is all-or-nothing: if any key is unknown or out of
-range, nothing is applied and the response is `400` with the specific reason(s):
+`options` values. "Unknown" means outside this engine's own catalogue (see
+[GET /config](#get-config)) - a stored row from a different engine's build
+does not make a key known to this one. Validation is all-or-nothing: if any
+key is unknown or out of range, nothing is applied and the response is `400`
+with the specific reason(s):
 
 ```json
 { "error": { "code": "invalid_config", "message": "'workers' must be at most 128 (got 9999)" } }

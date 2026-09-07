@@ -217,6 +217,40 @@ TEST_F (DatabaseTest, RequestsInCollectionSortedByOrder) {
 // dynamically from GET /config - an upgraded database must lose the row too,
 // or the dead knob keeps showing up. Simulates the upgrade by planting the
 // row before re-running the seed.
+// `is_known_config_key` is the catalogue check `POST`/`GET /config` refuse an
+// unrecognised row by (issue #1492) - a row this build did not seed is not the
+// same as a row that does not exist, and only the seed pass can say which keys
+// this engine declares.
+TEST_F (DatabaseTest, KnownConfigKeyIsWhateverSeedDefaultConfigUpserted) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    EXPECT_TRUE (db.is_known_config_key ("workers"));
+    EXPECT_FALSE (db.is_known_config_key ("totally_made_up_key"));
+}
+
+// A row saved directly (as if a newer engine's own seed wrote it) has a real
+// row - `get_config_entry` finds it - but is not in this build's catalogue.
+// Mutation check: read `is_known_config_key` as "any row present" instead of
+// the seeded set, and this reds.
+TEST_F (DatabaseTest, ARowWithNoSeedingEntryIsNotAKnownConfigKey) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    ConfigEntry future_row;
+    future_row.key           = "futureEngineOnlyKey";
+    future_row.value         = "1";
+    future_row.type          = "integer";
+    future_row.label         = "Not Ours";
+    future_row.description   = "Declared by a build newer than this one.";
+    future_row.category      = "general_engine";
+    future_row.default_value = "1";
+    db.save_config_entry (future_row);
+
+    ASSERT_HAS_VALUE (db.get_config_entry ("futureEngineOnlyKey"));
+    EXPECT_FALSE (db.is_known_config_key ("futureEngineOnlyKey"));
+}
+
 TEST_F (DatabaseTest, SeedRemovesRetiredRequestBatchSizeEntry) {
     Database db (TEST_DB_PATH);
     db.init ();

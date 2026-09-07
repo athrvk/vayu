@@ -3607,6 +3607,11 @@ std::vector<ConfigEntry> Database::get_all_config_entries () {
     return impl_->storage.get_all<ConfigEntry> ();
 }
 
+bool Database::is_known_config_key (const std::string& key) const {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return known_config_keys_.contains (key);
+}
+
 int Database::applied_cache_size_bytes () const {
     // No DB mutex: the value is an atomic the open callback writes, and taking
     // the mutex here would order this read behind whatever query is running.
@@ -3843,6 +3848,7 @@ void Database::seed_default_config () {
     // - New entries get default values
     // - Existing entries preserve user-modified values but get updated metadata
     auto upsert_config = [&] (const ConfigEntry& new_entry) {
+        known_config_keys_.insert (new_entry.key);
         auto it = existing_map.find (new_entry.key);
         if (it != existing_map.end ()) {
             // Preserve user's value but update metadata (description, label, etc.)

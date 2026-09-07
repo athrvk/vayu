@@ -117,6 +117,19 @@ This ensures that:
 - Reinstalls work correctly
 - No manual intervention needed
 
+**A live engine is adopted only when its version matches this app's** (issue
+#1492). The lock file can point at a PID that is alive and answering `/health`
+but was built for a different Vayu release - a crash-then-relaunch across an
+upgrade, or two installed builds sharing a data directory. Adopting it
+silently would run every request through a sidecar the renderer was not built
+against, so `EngineSidecar` compares the running engine's `/health.version`
+against `app.getVersion()` before attaching to it: a match adopts as before,
+and a mismatch stops the daemon (`POST /shutdown`, then the same PID kill the
+graceful path already falls back to) and starts this build's own instead,
+logging both versions. A version that could not be read at all (the probe
+answered but the field was missing or malformed) adopts rather than disrupts
+a healthy engine on an ambiguous answer.
+
 ## Manual Cleanup
 
 If needed, users can manually remove the lock file:
@@ -153,6 +166,7 @@ rm ~/Library/Application\ Support/vayu-client/vayu.lock
 ### Electron Sidecar
 - Function: `checkLockFile()` - checks lock file and verifies PID
 - Function: `isVayuEngineRunning()` - cross-platform process check with process name verification. `process.kill(pid, 0)` first on every platform (no subprocess, and the stale-lock case ends there), then `tasklist` / `ps` to verify the name against PID reuse
+- Method: `adoptIfVersionMatches()` - the version gate above, called at both places `start()` finds a healthy engine already on the port
 - Automatic cleanup in `start()` method
 - File: `app/electron/sidecar.ts`
 

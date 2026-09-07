@@ -338,7 +338,10 @@ one app instance may drive it:
   orphan left by a crashed session, or in development one started by hand - the
   app *adopts* it: it is tracked by the PID in the lock file (`vayu.lock` in the
   data directory), reported as running, restarted for real when Settings asks,
-  and shut down on quit like any engine the app spawned itself.
+  and shut down on quit like any engine the app spawned itself. Adoption checks
+  the running engine's `/health.version` against this app's own first (issue
+  #1492): a mismatch is stopped rather than adopted, and this instance starts
+  its own build instead - see `docs/lock-file-handling.md`.
 - **Quit leaves nothing behind.** Shutdown is `POST /shutdown` first, then a
   wait for the process to go, then a name-verified kill by PID if it outstays
   the grace period. The name check is what keeps a recycled PID from being

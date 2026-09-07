@@ -141,6 +141,9 @@ function fakeSystem(overrides: Partial<SidecarSystem> = {}) {
 			return killed;
 		}),
 		probeHealth: vi.fn(async () => state.healthy),
+		// Matches the mocked `app.getVersion()` below, so existing adoption
+		// cases keep adopting unless a test overrides it to something else.
+		probeVersion: vi.fn(async () => "0.0.0-test"),
 		requestShutdown: vi.fn(async () => true),
 		isPortFree: vi.fn(async () => !state.healthy),
 		sleep: vi.fn(async () => {}),
@@ -198,6 +201,59 @@ describe("EngineSidecar - adoption", () => {
 
 		await sidecar.start();
 
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+		expect(sidecar.isRunning()).toBe(true);
+	});
+
+	// Issue #1492: a daemon built for a different Vayu version is not safe to
+	// adopt silently - it is stopped, the same way `stop()` stops any adopted
+	// engine, and this instance spawns its own. Mutation check: read
+	// `probeVersion`'s answer as advisory (adopt regardless), and both of these
+	// red on `spawnEngine` never being called.
+	it("stops a mismatched-version engine at the lock-PID adoption path and spawns its own", async () => {
+		const { system, state } = fakeSystem();
+		engineAlreadyRunning(state);
+		(system.probeVersion as ReturnType<typeof vi.fn>).mockResolvedValue("0.1.0-old");
+		(system.requestShutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			state.alivePids.delete(ADOPTED_PID);
+			state.healthy = false;
+			return true;
+		});
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		await sidecar.start();
+
+		expect(system.requestShutdown).toHaveBeenCalledWith(TEST_PORT);
+		expect(system.spawnEngine).toHaveBeenCalledOnce();
+		expect(sidecar.isRunning()).toBe(true);
+	});
+
+	it("stops a mismatched-version engine at the no-lock-PID adoption path and spawns its own", async () => {
+		const { system, state } = fakeSystem();
+		state.healthy = true;
+		(system.probeVersion as ReturnType<typeof vi.fn>).mockResolvedValue("0.1.0-old");
+		(system.requestShutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			state.healthy = false;
+			return true;
+		});
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		await sidecar.start();
+
+		expect(system.requestShutdown).toHaveBeenCalledWith(TEST_PORT);
+		expect(system.spawnEngine).toHaveBeenCalledOnce();
+		expect(sidecar.isRunning()).toBe(true);
+	});
+
+	it("adopts rather than disrupts a healthy engine when its version cannot be read", async () => {
+		const { system, state } = fakeSystem();
+		engineAlreadyRunning(state);
+		(system.probeVersion as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		await sidecar.start();
+
+		expect(system.requestShutdown).not.toHaveBeenCalled();
 		expect(system.spawnEngine).not.toHaveBeenCalled();
 		expect(sidecar.isRunning()).toBe(true);
 	});

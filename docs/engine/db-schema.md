@@ -1501,6 +1501,19 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 | `keywords`      | TEXT    | JSON array of extra search terms; `"[]"` when the entry declares none |
 | `unit`          | TEXT    | What a numeric value measures (`ms`, `sec`, `days`, `bytes`); NULL for a count |
 
+**A row can outlive the catalogue that wrote it** (issue #1492). `seed_default_config`
+only touches two lists on every start - the keys it upserts and a fixed retired-key
+list it deletes - so a row for a key neither list names (a workspace a *newer* engine
+opened, then reopened by this one) is left untouched: still on disk, still readable by
+`get_config_entry`, but not one this build's `seed_default_config` declared. `GET
+/config` and a successful `POST /config`'s echoed `entries` both filter to
+`Database::is_known_config_key`, the set `seed_default_config` populated on this
+start, rather than to "every row in the table" - so neither ever describes a setting
+this build has no label, no validator and no bounds for. `POST /config` refuses a
+write to such a key the same way it refuses a key with no row at all: "Unknown config
+key", `invalid_config`. `is_known_config_key` answers from that populated set, never
+from whether a row exists - a row existing is exactly the case this guards.
+
 **category** is a closed set, and it is the app that closes it: the renderer
 draws one sidebar row per category it declares
 (`app/src/modules/settings/engine-categories.ts`) and drops an entry whose
