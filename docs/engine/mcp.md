@@ -162,8 +162,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `run_request`          | execute  | `POST /compose` + `POST /execute` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` (×N) | allowlist per host |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` | allowlist on **every** step - one step off it refuses the whole run |
-| `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and both collection scripts |
-| `update_collection`    | write    | `GET /collections` (scan, only when variables change) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names |
+| `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar |
+| `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it |
 | `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
 | `diff_spec`            | read     | `POST /specs/diff`                           | - (each bucket capped at 50 entries, with `summary` carrying the true totals; the per-entry `draft` is dropped) |
@@ -172,8 +172,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `export_spec`          | read     | `POST /specs/export`                         | - (document text capped at 32 KB, with `contentBytes` for the true size; `notes` says what the export could not carry) |
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
 | `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
-| `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, both scripts - minus file body parts |
-| `update_request`       | write    | `PUT /requests/:id` (merge-patch)            | write toggle; same fields, and only the ones named are written |
+| `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts |
+| `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `list_trash`           | read     | `GET /trash`                                 | -                          |
 | `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation) |
@@ -550,16 +550,24 @@ Notes:
   *captured* - two different facts, so two different names.
 - **Collection-level state is writable, and merges the way an environment's
   does** (issue #759). `create_collection` / `update_collection` take the
-  `variables`, `auth` and pre/post-request scripts that shape every request
-  below them - the same three the composer walks (`compose_script_parts` runs the
-  chain's scripts before the request's own). `variables` uses
-  `update_environment`'s input and its rules unchanged, including
-  `removeVariables` and the "a new variable carries a value" refusal, because it
-  is the same blob shape and a second dialect would be a second thing to learn.
-  The read that makes it a merge is only done when variables are actually
-  changing: a rename sends one `PUT` and nothing else. A collection is the root
-  of an auth chain and never inherits, which the engine enforces - `{mode:
-  "none"}` is how a collection stops being an auth source.
+  `variables`, `auth` and `elements` that shape every request below them - the
+  same list the composer walks (`compose_elements` runs the chain's elements
+  before the request's own, issue #1514). `preRequestScript` /
+  `postRequestScript` stay as sugar on these two tools (issue #1517): a
+  non-empty string folds into a `script.pre` / `script.post` entry and an
+  empty one removes it - never sent to the engine under those two names, which
+  `POST /collections` / `PUT /collections/:id` refuse outright now that
+  `elements` is the only script source. `variables` uses `update_environment`'s
+  input and its rules unchanged, including `removeVariables` and the "a new
+  variable carries a value" refusal, because it is the same blob shape and a
+  second dialect would be a second thing to learn. The read that makes each a
+  merge is only done when it is needed: variables actually changing, or a
+  script argument with no explicit `elements` (which needs the stored list to
+  fold the sugar into without dropping the collection's other elements) -
+  passing `elements` directly, like a plain rename, sends one `PUT` and
+  nothing else. A collection is the root of an auth chain and never inherits,
+  which the engine enforces - `{mode: "none"}` is how a collection stops being
+  an auth source.
 - **`move_item` is a bounded move, not a reorder** (issue #759). It maps to
   `POST /reorder`, whose batch validates and commits under one acquisition of the
   engine's DB mutex (#386) - which is why re-parenting goes here rather than
@@ -810,31 +818,43 @@ outright, and a resolved one is the one that was checked - but a tool call that
 forwards a `preRequestScript` is not sending the composed bytes untouched, and
 the allowlist is a host rule rather than a payload one for exactly that reason.
 
-Scripts: the by-id compose path builds the ordered part list
-(`{ origin, id, name?, script }` - collection chain root→leaf, then the
-request's own) engine-side from the stored rows. The renderer's inline path
-still builds its own list from its editor state; MCP no longer builds any.
-MCP's ad-hoc tools forward agent-supplied strings
-(`preRequestScript`/`postRequestScript`) inside the inline request - scripts
-ride through composition untouched, never interpolated.
+Scripts: the by-id compose path attaches the collection chain's, then the
+request's own, `script.pre` / `script.post` elements under `elements`
+(`compose_elements`, issue #1514 - the ordered `{ origin, id, name?, script }`
+part list `compose_script_parts` built is retired). The renderer's inline path
+still builds its own `ScriptPart[]` from its editor state, a different concern
+(that composer runs client-side against unsaved state, not this server).
+`run_request`'s ad-hoc `preRequestScript` / `postRequestScript` no longer ride
+inside the inline `request` object (issue #1517): `/execute` refuses those two
+names outright now that `elements` is the only script source, so the tool
+reads them, folds each into an ad-hoc `script.pre` / `script.post` element,
+and appends both after compose - alongside any ad-hoc `elements` argument the
+agent gave directly - so they run in addition to whatever the composed
+request already carried, never replacing it. `start_load_run`'s ad-hoc
+`postRequestScript` / `tests` is the one survivor of the pre-#1514 shape:
+`POST /runs` never cut over (it runs no element yet, issue #1495), so it is
+still placed under `tests` on the run payload exactly as before.
 
-**One validation script, one name.** The post-response script is one field in
-the app - the request builder's **Tests** tab - and has historically reached the
-engine under two key names: `postRequestScript` on `POST /execute`, `tests` on
-`POST /runs`. Both endpoints now accept both names, so MCP declares
-**`postRequestScript` on both `run_request` and `start_load_run`**, and a script
-an agent writes for one carries to the other unchanged. It is still placed under
-`tests` on a run payload (`tools.ts::readValidationScript` +
-`composeLoadRunRequest`), because that is the name a run's own composed scripts
-do *not* use - which is what lets an explicit script displace them rather than
-sit beside them. `tests` stays accepted on both as the
-engine's own spelling - a Zod object strips keys it does not declare, so
-removing it would turn a script the agent believes is running into silence.
-Passing both names is rejected with a `ToolArgError` rather than resolved by
-precedence: they are one slot, and dropping either would report a run as
-validated by assertions that never ran. Under load the script runs against
-*sampled* responses (`max_response_samples` / `response_sample_rate`), not every
-one.
+**One validation script, one name - except where the engine still keeps two.**
+The post-response script is one field in the app - the request builder's
+**Tests** tab - and MCP declares it identically on `run_request` and
+`start_load_run` (`postRequestScript`, with `tests` accepted as an alias) so a
+script an agent writes for one reads the same on the other. What each tool
+*does* with it now differs (issue #1517): `run_request` folds it into an
+ad-hoc `script.post` element, since `/execute` refuses the raw
+`postRequestScript` field; `start_load_run` still places it under `tests` on
+the run payload (`tools.ts::readValidationScript` + `composeLoadRunRequest`),
+because `POST /runs` never cut over to `elements` and `tests` is the name a
+run's own composed elements do not use - which is what lets an explicit
+script replace them rather than sit beside them (the composed `script.post`
+elements are inert on this path either way, since a load run runs no element
+yet). `tests` stays accepted on both as the engine's own spelling for the run
+tool - a Zod object strips keys it does not declare, so removing it would turn
+a script the agent believes is running into silence. Passing both names is
+rejected with a `ToolArgError` rather than resolved by precedence: they are
+one slot, and dropping either would report a run as validated by assertions
+that never ran. Under load the script runs against *sampled* responses
+(`max_response_samples` / `response_sample_rate`), not every one.
 
 How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
 
@@ -854,14 +874,18 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   `inherit`, when a `collectionId` scopes the walk) and applies it at execute
   (oauth2 uses its token cache).
 - **Scripts** - composing by id attaches the collection chain's + the
-  request's own script parts engine-side, so a request's tests and setup
-  actually execute. `run_request` takes an agent-written `preRequestScript` /
-  `postRequestScript` instead, since an ad-hoc call has no chain to compose
-  from; `start_load_run` takes the same `postRequestScript` for a URL-only run.
-  Those two are supplied per call and are not stored - `create_request` and
-  `update_request` take the same two names to write a script onto the saved
-  request itself, which is what lets an agent-authored script outlive the call
-  that wrote it (see *Storing a request's scripts* below).
+  request's own `script.pre` / `script.post` elements engine-side (issue
+  #1514), so a saved request's assertions execute in the design send and the
+  sequential collection run; under load they ride along on `payload.elements`
+  but are not executed yet (issue #1495). `run_request` takes an ad-hoc
+  `preRequestScript` / `postRequestScript` instead (folded into elements,
+  above), since an ad-hoc call has no chain to compose from; `start_load_run`
+  takes the same `postRequestScript` for a URL-only run, placed under `tests`
+  as described above. Those two are supplied per call and are not stored -
+  `create_request` and `update_request` take the same two names as sugar for a
+  `script.pre` / `script.post` element stored on the request itself, which is
+  what lets an agent-authored script outlive the call that wrote it (see
+  *Storing a request's elements* below).
 - **Bodies** - `body` is a string and `bodyType` names the mode
   (`json` | `text` | `graphql` | `jsonrpc` | `xml` | `form-data` |
   `x-www-form-urlencoded`,
@@ -977,44 +1001,61 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   compose body's `request` overlay, like any other agent-stated field. On a
   URL-only call there is no saved row behind the request, so `httpVersion` is
   forwarded only when the caller actually supplies it.
-- **One post-request script, three names, all accepted everywhere.** It is
-  stored as `postRequestScript` (on a request and on a collection), sent as
-  `postRequestScripts` / `postRequestScript` to `POST /execute`, and as `tests`
-  to `POST /runs`. Both routes read every spelling through
-  `read_post_request_script`, so a payload composed for one endpoint starts the
-  other kind of run unchanged - which is what lets `start_load_run` send a saved
-  request's composed `postRequestScripts` to `/runs`. The names are tried in a
-  fixed order and the first non-blank wins; they are never merged. MCP still
-  shows the agent a single name (see *One validation script, one name* above) -
-  that is now a courtesy rather than a translation the wire depends on.
-- **Storing a request's scripts** - `create_request` and `update_request` both
-  take `preRequestScript` and `postRequestScript` (strings, optional), written
-  through to the engine's own field names on the request row, so the app's
-  **Pre-request** and **Tests** tabs open on exactly what the agent wrote.
-  `update_request` merge-patches them like every other field: **leave one out
-  and the stored script is kept; pass an empty string and it is cleared.** The
-  `tests` alias is deliberately absent here - it is the engine's spelling for an
-  *ad-hoc run body*, and a stored field answering to two names is a second name
-  to keep in step. Storing a script adds persistence, not execution capability:
-  an agent could already run arbitrary scripts through `run_request`, and a
+- **One post-response script, two names now, not three.** Before issue #1514
+  it was stored as `postRequestScript` (on a request and on a collection),
+  sent as `postRequestScripts` / `postRequestScript` to `POST /execute`, and
+  as `tests` to `POST /runs` - three spellings `read_post_request_script` read
+  on both routes. The cut-over ends two of them: it is stored as a
+  `script.post` element now (`create_request` / `update_request` /
+  `create_collection` / `update_collection`'s `preRequestScript` /
+  `postRequestScript` sugar folds a string into one, issue #1517), and
+  `POST /execute` refuses `postRequestScripts` / `postRequestScript` outright
+  - `elements` is its only script source. `POST /runs` alone kept the old
+  alias (it runs no element yet, issue #1495): `tests` / `postRequestScript`
+  there still means an ad-hoc validation script, read through
+  `read_post_request_script` exactly as before. MCP still shows the agent a
+  single name (see *One validation script, one name* above) for whichever of
+  the two very different things it now does.
+- **Storing a request's elements** - `create_request` and `update_request`
+  take `elements` (the whole list) plus `preRequestScript` /
+  `postRequestScript` sugar (strings, optional) that fold a script into a
+  `script.pre` / `script.post` entry rather than being written to the engine
+  under those two names, which `POST /requests` / `PUT /requests/:id` refuse
+  outright since issue #1514. `update_request` merge-patches `elements` like
+  every other field when the caller sends it directly: **leave it out and the
+  stored list is kept.** The script sugar merges at the entry level instead -
+  passing a script alone reads the request's current elements first
+  (`GET /requests/:id`), replaces or removes just that one kind, and writes
+  the whole list back, so a script written this way never drops the request's
+  other elements; **an empty string clears the kind.** `elements` and the
+  script sugar cannot both be given on one call - a caller who states the
+  whole list has already said what belongs in it. The `tests` alias is
+  deliberately absent here - it is the engine's spelling for an *ad-hoc run
+  body*, and a stored field answering to two names is a second name to keep
+  in step. Storing an element adds persistence, not execution capability: an
+  agent could already run arbitrary scripts through `run_request`, and a
   stored one runs only when the request is later sent. Both tools already
   declare `invalidates: ["request"]`, so the renderer refetches the row and
-  picks the scripts up without a further entity. A collection's own scripts -
-  the ones that run around *every* request below it - are
-  `create_collection` / `update_collection`'s fields of the same two names
-  (issue #759), and carry the same clearing rule.
+  picks the elements up without a further entity. A collection's own elements
+  - the ones that run around *every* request below it - are
+  `create_collection` / `update_collection`'s `elements` field and the same
+  two script names (issue #759), and carry the same merge and clearing rules.
 - **Load-testing a saved request** - `start_load_run` with a `requestId`
   composes it by id, exactly as `run_collection_smoke` and the app do:
-  variables resolved, stored auth applied through the collection chain, and the
-  chain's + its own test scripts attached. Any field stated explicitly (url,
-  method, headers, body, auth, httpVersion) rides in the compose body's
-  `request` overlay and replaces the stored one *before* resolution; an
-  explicit `postRequestScript` *replaces* the composed script parts rather than
-  joining them. Without a `requestId` the run is ad-hoc and `url` is required.
-  A saved request's **pre-request** script cannot run under load - `POST /runs`
-  has no such hook - so the composed `preRequestScripts` are stripped from the
-  payload and the count of dropped scripts is reported in the tool's result
-  rather than passing silently.
+  variables resolved, stored auth applied through the collection chain, and
+  the chain's + its own elements attached under `elements` (issue #1514). Any
+  field stated explicitly (url, method, headers, body, auth, httpVersion)
+  rides in the compose body's `request` overlay and replaces the stored one
+  *before* resolution; an explicit `postRequestScript` / `tests` *replaces*
+  the run's validation script rather than joining it - though since
+  `POST /runs` runs no element yet (issue #1495), the composed `elements`
+  were never the run's validation script to begin with, ad-hoc or not.
+  Without a `requestId` the run is ad-hoc and `url` is required. A saved
+  request's **pre-request** script cannot run under load - `POST /runs` has
+  no such hook - so the count of `script.pre` elements among the composed
+  `elements` is reported in the tool's result rather than passing silently;
+  the entries themselves are left on the payload, since the engine still
+  reads `elements` for its own warnings.
 - **Scenario runs - a collection as the unit of work** (issue #754, reversing
   #454's deferral). A collection's ordered sequence of requests can be run from
   MCP in both of the engine's modes, over the one `POST /runs` route that takes
@@ -1201,6 +1242,7 @@ Read-only Vayu data an agent can attach as context (`resources.ts`):
 | `vayu://config`             | Engine configuration entries.    |
 | `vayu://scripting/completions` | The script sandbox's full API surface (see below). |
 | `vayu://scripting/types`    | The same surface as TypeScript declarations - the `.d.ts` the app's editor loads, so a call's parameters and return type are the running engine's. |
+| `vayu://elements/kinds`     | The element registry's catalogue (see below): every kind's category, phases, hot-path class and config JSON Schema. |
 | `vayu://run/{runId}/report` | A run's full report (templated). |
 
 The templated report resource has a **list** callback (enumerates recent runs so
@@ -1227,6 +1269,22 @@ engine generates from the same table, and answers *what it takes and returns*
 a truncated API list concludes the sandbox cannot do what it can - and neither
 holds a copy of the surface here, which is the whole point: the app's own
 quick-reference panel had gone stale before #233 and this is what replaced it.
+
+### The element catalogue
+
+`vayu://elements/kinds` re-serves `GET /elements/kinds`, the element
+registry's catalogue (issue #1513): every kind's `category`, the `phases` it
+runs at, its `hotPathClass` and its `configSchema` - the same shape the app's
+generated element forms read (issue #1516). `create_request` / `update_request`
+/ `create_collection` / `update_collection`'s `elements` argument and
+`run_request`'s ad-hoc `elements` argument both name a `kind` as a bare
+string rather than an enumerated one, precisely so a kind the engine adds
+later needs no MCP change - read this resource rather than guessing a kind or
+its config shape. `element-kinds.conformance.test.ts` pins the resource, the
+schema's own examples and every kind literal a tool description names to the
+engine's own fixture, so a kind renamed engine-side without a matching update
+here fails the build rather than telling an agent to write a kind that no
+longer exists.
 
 #### `pm.sendRequest` is refused for MCP-started runs
 
