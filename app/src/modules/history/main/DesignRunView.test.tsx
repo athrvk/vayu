@@ -35,6 +35,7 @@ import type { Run, Request } from "@/types";
 
 const updateRequest = vi.fn();
 const executeRequest = vi.fn();
+const setBaseline = vi.fn().mockResolvedValue({});
 
 /**
  * Identity composition, as the engine's `POST /compose` behaves for an inline
@@ -90,6 +91,7 @@ vi.mock("@/queries", async () => {
 		}),
 		useCollectionAncestors: () => [],
 		useUpdateRequestMutation: () => ({ mutateAsync: updateRequest, isPending: false }),
+		useSetRunBaselineMutation: () => ({ mutateAsync: setBaseline, isPending: false }),
 	};
 });
 
@@ -354,6 +356,25 @@ describe("DesignRunView - sending it again", () => {
 
 		const payload = executeRequest.mock.calls[0][0];
 		expect(payload.httpVersion).toBe("http2");
+	});
+});
+
+describe("DesignRunView - pinning a design run (#1509)", () => {
+	it("offers Pin and calls the baseline mutation with this run's id", async () => {
+		renderView(designRun({ baseline: false }));
+
+		fireEvent.click(screen.getByRole("button", { name: "Pin" }));
+
+		await vi.waitFor(() =>
+			expect(setBaseline).toHaveBeenCalledWith({ runId: "run_1", baseline: true })
+		);
+	});
+
+	it("shows Unpin, pressed, once the run is pinned", () => {
+		renderView(designRun({ baseline: true }));
+
+		const button = screen.getByRole("button", { name: "Unpin" });
+		expect(button).toHaveAttribute("aria-pressed", "true");
 	});
 });
 
