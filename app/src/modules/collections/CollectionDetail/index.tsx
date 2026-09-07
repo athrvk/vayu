@@ -21,19 +21,18 @@ import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { useTabsStore, useSessionStore } from "@/stores";
 import AuthTab from "./AuthTab";
 import DataTab from "./DataTab";
+import ElementsTab from "./ElementsTab";
 import InfoTab from "./InfoTab";
 import MockServerControl from "./MockServerControl";
-import ScriptTab from "./ScriptTab";
 import SpecTab from "./SpecTab";
 import VariablesTab from "./VariablesTab";
 
-type CollectionTab = "info" | "auth" | "pre-script" | "post-script" | "variables" | "data" | "spec";
+type CollectionTab = "info" | "auth" | "elements" | "variables" | "data" | "spec";
 
 const TABS: { id: CollectionTab; label: string }[] = [
 	{ id: "info", label: "Info" },
 	{ id: "auth", label: "Auth" },
-	{ id: "pre-script", label: "Pre-request" },
-	{ id: "post-script", label: "Post-request" },
+	{ id: "elements", label: "Elements" },
 	{ id: "variables", label: "Variables" },
 	{ id: "data", label: "Data" },
 	{ id: "spec", label: "Spec" },
@@ -62,12 +61,7 @@ const TABS: { id: CollectionTab; label: string }[] = [
  * `spec` is absent for the same reason as `data`: binding is an explicit action,
  * and what it holds between actions is a whole OpenAPI document read from disk.
  */
-const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set([
-	"info",
-	"auth",
-	"pre-script",
-	"post-script",
-]);
+const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set(["info", "auth", "elements"]);
 
 export default function CollectionDetail() {
 	const { openTabs, activeTabId, specTabTarget, clearSpecTabTarget } = useTabsStore();
@@ -261,19 +255,8 @@ export default function CollectionDetail() {
 						{t.id === "auth" && (
 							<AuthTab collection={collection} active={tab === "auth"} />
 						)}
-						{t.id === "pre-script" && (
-							<ScriptTab
-								collection={collection}
-								kind="pre"
-								active={tab === "pre-script"}
-							/>
-						)}
-						{t.id === "post-script" && (
-							<ScriptTab
-								collection={collection}
-								kind="post"
-								active={tab === "post-script"}
-							/>
+						{t.id === "elements" && (
+							<ElementsTab collection={collection} active={tab === "elements"} />
 						)}
 						{t.id === "variables" && <VariablesTab collection={collection} />}
 						{/* Keyed: the Data tab reads the remembered file on mount

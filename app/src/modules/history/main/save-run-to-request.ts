@@ -40,6 +40,7 @@
  */
 
 import type {
+	ElementDef,
 	FormFieldEntry,
 	KeyValueEntry,
 	Request,
@@ -234,6 +235,13 @@ function describeBody(body: RequestBody | undefined): string {
 	return `${body.mode} (${body.content || ""})`;
 }
 
+/** A stable, human-readable rendering of an elements list, for the diff only. */
+function describeElements(elements: ElementDef[] | undefined): string {
+	const enabled = (elements ?? []).filter((e) => e.enabled);
+	if (enabled.length === 0) return "none";
+	return enabled.map((e) => e.name ?? e.kind).join(", ");
+}
+
 /** Right-aligned label for a key/value field: "2 removed", "1 changed", "3 changes". */
 function entriesLabel(entries: EntryChange[]): string {
 	const kinds = new Set(entries.map((e) => e.kind));
@@ -356,14 +364,9 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 			detail: "kept",
 			note: "This run predates per-part scripts, so its collection and request scripts are one string that cannot be split apart.",
 		});
-	} else {
+	} else if (patch.elements !== undefined) {
 		// `undefined` means the patch does not write the field, so it is not a change.
-		if (patch.preRequestScript !== undefined) {
-			scalar("Pre-request script", live.preRequestScript || "", patch.preRequestScript, true);
-		}
-		if (patch.postRequestScript !== undefined) {
-			scalar("Test script", live.postRequestScript || "", patch.postRequestScript, true);
-		}
+		scalar("Elements", describeElements(live.elements), describeElements(patch.elements));
 	}
 
 	scalar(
@@ -422,8 +425,7 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 	}
 
 	if (!isLegacyRun(seed)) {
-		patch.preRequestScript = request.preRequestScript ?? "";
-		patch.postRequestScript = request.testScript ?? "";
+		patch.elements = request.elements ?? [];
 	}
 
 	return patch;

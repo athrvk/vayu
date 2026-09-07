@@ -52,12 +52,13 @@ import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValue
 import { toHeaderItems } from "./utils/system-headers";
 import { toFlatHeaders } from "./utils/key-value";
 import { scriptParts } from "./utils/script-parts";
+import { elementsParts, scriptTextFor } from "./utils/elements-parts";
 import {
 	buildExecBody,
 	disabledDefaults,
 	execIdentity,
 	responseFromExecuteResult,
-	scriptsMayWriteVariables,
+	elementsMayWriteVariables,
 } from "./utils/execute-mapping";
 import type {
 	HttpMethod,
@@ -144,14 +145,13 @@ function buildUpdatePayload(
 	}
 	if (changedFields.has("auth")) payload.auth = request.auth;
 	/*
-	 * Both scripts are sent as they are when touched, empty string included.
-	 * `undefined` serialises the key out of the body, and an absent key on a
-	 * `PUT` means "leave the stored value alone" - so a script cleared to ""
-	 * has to be *sent*, not omitted, which is exactly what "touched" already
+	 * The whole list is sent when touched, empty array included. `undefined`
+	 * serialises the key out of the body, and an absent key on a `PUT` means
+	 * "leave the stored value alone" - so a list cleared to `[]` has to be
+	 * *sent*, not omitted, which is exactly what "touched" already
 	 * distinguishes from "never edited".
 	 */
-	if (changedFields.has("preRequestScript")) payload.preRequestScript = request.preRequestScript;
-	if (changedFields.has("testScript")) payload.postRequestScript = request.testScript;
+	if (changedFields.has("elements")) payload.elements = request.elements;
 	if (changedFields.has("followRedirects")) payload.followRedirects = request.followRedirects;
 	if (changedFields.has("maxRedirects")) payload.maxRedirects = request.maxRedirects;
 	if (changedFields.has("httpVersion")) payload.httpVersion = request.httpVersion;
@@ -346,13 +346,7 @@ export default function RequestBuilder() {
 			formData: toKeyValueItems(formFields),
 			urlEncoded: toKeyValueItems(urlEncodedFields),
 			auth: fetchedRequest.auth,
-			// `?? ""` rather than the bare field: these are optional on the
-			// wire type, and spreading an explicit `undefined` over
-			// `createDefaultRequestState()` would replace the `""` default with
-			// it. The save payload below sends both verbatim, so a state that
-			// held `undefined` would drop the key and lose a clear.
-			preRequestScript: fetchedRequest.preRequestScript ?? "",
-			testScript: fetchedRequest.postRequestScript ?? "",
+			elements: fetchedRequest.elements,
 			followRedirects: fetchedRequest.followRedirects,
 			maxRedirects: fetchedRequest.maxRedirects,
 			httpVersion: fetchedRequest.httpVersion,
@@ -397,22 +391,12 @@ export default function RequestBuilder() {
 			// here too would interpolate the payload twice.
 			const execBody = buildExecBody(request, (s) => s);
 
-			// Script parts: the collection chain root to leaf, then the
-			// request's own. The engine joins them and runs the result as
-			// one script. Joining here meant a stored run could not say
-			// which part came from where.
-			const preScriptParts = scriptParts(
-				collectionAncestors,
-				(c) => c.preRequestScript,
-				ownerId,
-				request.preRequestScript
-			);
-			const postScriptParts = scriptParts(
-				collectionAncestors,
-				(c) => c.postRequestScript,
-				ownerId,
-				request.testScript
-			);
+			// Elements: the collection chain root to leaf, then the request's
+			// own, minus whatever the request's own `inherit.disable` entries
+			// name (issue #1512). The engine runs the resolved list at each
+			// element's phase. Resolving here (rather than by requestId) means
+			// Send executes editor state that may be unsaved.
+			const elements = elementsParts(collectionAncestors, ownerId, request.elements);
 
 			// Compose engine-side, then execute the composed payload unchanged.
 			// The inline shape (not compose-by-id) is deliberate: Send executes
@@ -424,8 +408,7 @@ export default function RequestBuilder() {
 					headers: headersRecord,
 					body: execBody,
 					auth: { ...request.auth },
-					preRequestScripts: preScriptParts,
-					postRequestScripts: postScriptParts,
+					elements,
 					// Always sent, never elided: the engine defaults to
 					// following, so omitting `followRedirects: false` would
 					// silently follow the redirect the user asked to see.
@@ -456,7 +439,7 @@ export default function RequestBuilder() {
 				...(dataRow ? { dataColumns: Object.keys(dataRow) } : {}),
 			});
 
-			return { composed, preScriptParts, postScriptParts };
+			return { composed, elements };
 		},
 		[collectionAncestors, engineComposeRequest, activeEnvironmentId]
 	);
@@ -470,7 +453,7 @@ export default function RequestBuilder() {
 			if (!fetchedRequest) return null;
 
 			try {
-				const { composed, preScriptParts, postScriptParts } = await composeForSend(
+				const { composed, elements } = await composeForSend(
 					request,
 					fetchedRequest.id,
 					fetchedRequest.collectionId,
@@ -532,9 +515,9 @@ export default function RequestBuilder() {
 				});
 
 				// Refresh variables so script-set values (e.g. pm.environment.set)
-				// appear in the UI - post-request scripts write them too, see the
-				// helper's note.
-				if (scriptsMayWriteVariables(preScriptParts, postScriptParts)) {
+				// appear in the UI - an extractor's `scope` writes them too, see
+				// the helper's note.
+				if (elementsMayWriteVariables(elements)) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
@@ -728,12 +711,15 @@ export default function RequestBuilder() {
 						// validated the request's own, so a collection-level assertion
 						// passed in design mode and was never checked under load.
 						// Scripts ride through composition untouched - the engine
-						// never interpolates script text.
+						// never interpolates script text. Load mode runs no element
+						// yet (issue #1495), so this still joins the `script.post`
+						// elements' text into the same flat `ScriptPart[]` shape the
+						// deferred replay has always taken.
 						tests: scriptParts(
 							collectionAncestors,
-							(c) => c.postRequestScript,
+							(c) => scriptTextFor(c.elements, "script.post"),
 							fetchedRequest.id,
-							pendingLoadTestRequest.testScript
+							scriptTextFor(pendingLoadTestRequest.elements, "script.post")
 						),
 					},
 					collectionId: fetchedRequest.collectionId,
@@ -976,7 +962,9 @@ export default function RequestBuilder() {
 					onClose={handleCloseLoadTestDialog}
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
-					hasPreRequestScript={!!pendingLoadTestRequest?.preRequestScript?.trim()}
+					hasPreRequestScript={
+						!!scriptTextFor(pendingLoadTestRequest?.elements ?? [], "script.pre")
+					}
 					oauth2Config={pendingOAuth2Config ?? undefined}
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
 					collectionId={fetchedRequest?.collectionId}

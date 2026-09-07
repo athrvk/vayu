@@ -234,15 +234,17 @@ describe("DesignRunView - the copy shows the stored exchange", () => {
 		expect((url as HTMLInputElement).value).toBe("https://api.example.test/users?page=2");
 	});
 
-	it("lists the collection scripts the run recorded", () => {
+	it("lists the collection elements the run recorded", () => {
 		renderView(designRun());
 
-		selectTab(/^pre-request/i);
+		selectTab(/^elements/i);
 
 		// From the run's own parts. The live chain is mocked empty, so anything
 		// listed here can only have come from what was stored.
 		expect(screen.getByText(/runs before your own/i)).toBeTruthy();
-		expect(screen.getByText("API")).toBeTruthy();
+		// Both the collection's script.pre and script.post parts came from
+		// "API", so its name appears once per entry.
+		expect(screen.getAllByText("API").length).toBe(2);
 	});
 });
 
@@ -303,7 +305,7 @@ describe("DesignRunView - the copy is detached", () => {
 });
 
 describe("DesignRunView - sending it again", () => {
-	it("replays the recorded collection parts plus the edited request part", async () => {
+	it("replays the recorded collection elements plus the edited request's own", async () => {
 		executeRequest.mockResolvedValue({
 			status: 200,
 			statusText: "OK",
@@ -318,20 +320,45 @@ describe("DesignRunView - sending it again", () => {
 
 		const payload = executeRequest.mock.calls[0][0];
 
-		// As they were recorded, not as the collection reads now.
-		expect(payload.preRequestScripts).toEqual([
-			{ origin: "collection", id: "col_1", name: "API", script: "const t = 1;" },
-			{ origin: "request", script: "console.log(t);" },
-		]);
 		/*
-		 * The post list too. The brief only ever named `preRequestScripts`, so
-		 * sending the post list is easy to drop - and dropping it silently
-		 * discards the assertions the run was recorded with, which is exactly
-		 * the failure a replay is supposed to reproduce.
+		 * As they were recorded, not as the collection reads now: the two
+		 * collection-origin elements first (pre, then post - `handleExecute`'s
+		 * own order), then the request's own `script.pre` / `script.post`,
+		 * which `seedFromRun` reconstructed from the run's own parts. Dropping
+		 * the post half silently discards the assertions the run was recorded
+		 * with, which is exactly the failure a replay is supposed to reproduce.
 		 */
-		expect(payload.postRequestScripts).toEqual([
-			{ origin: "collection", id: "col_1", name: "API", script: "chainAssert();" },
-			{ origin: "request", script: "pm.test('ok', () => {});" },
+		expect(payload.elements).toEqual([
+			{
+				id: "col_1-script.pre",
+				kind: "script.pre",
+				enabled: true,
+				name: "API",
+				config: { script: "const t = 1;" },
+				origin: { kind: "collection", id: "col_1", name: "API" },
+			},
+			{
+				id: "col_1-script.post",
+				kind: "script.post",
+				enabled: true,
+				name: "API",
+				config: { script: "chainAssert();" },
+				origin: { kind: "collection", id: "col_1", name: "API" },
+			},
+			{
+				id: "seed-script-pre",
+				kind: "script.pre",
+				enabled: true,
+				config: { script: "console.log(t);" },
+				origin: { kind: "request" },
+			},
+			{
+				id: "seed-script-post",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('ok', () => {});" },
+				origin: { kind: "request" },
+			},
 		]);
 		// Filed under the same request, so the new run lands beside the old one.
 		expect(payload.requestId).toBe("req_1");
@@ -588,18 +615,20 @@ describe("DesignRunView - a run recorded before script parts existed", () => {
 	it("shows the whole recorded script with a note that its parts cannot be split", () => {
 		renderView(legacyRun());
 
-		selectRequestTab(/^pre-request/i);
+		selectRequestTab(/^elements/i);
 
-		expect(screen.getByText(/cannot be separated/i)).toBeTruthy();
+		// Both the pre and post `LegacyScriptNotice` render on the one Elements
+		// tab now, so the note appears twice - once per variant.
+		expect(screen.getAllByText(/cannot be separated/i).length).toBe(2);
 		// The text itself, not merely an acknowledgement that some exists.
 		expect(screen.getByText(/collectionSetup/)).toBeTruthy();
 		expect(screen.getByText(/requestOwnPart/)).toBeTruthy();
 	});
 
-	it("shows the recorded test script on the Tests tab too", () => {
+	it("shows the recorded test script on the same Elements tab too", () => {
 		renderView(legacyRun());
 
-		selectRequestTab(/^tests$/i);
+		selectRequestTab(/^elements/i);
 
 		expect(screen.getByText(/ownAssert/)).toBeTruthy();
 	});
@@ -618,14 +647,32 @@ describe("DesignRunView - a run recorded before script parts existed", () => {
 		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
 
 		const payload = executeRequest.mock.calls[0][0];
-		expect(payload.preRequestScripts).toEqual([{ origin: "request", script: GLUED_PRE }]);
-		expect(payload.postRequestScripts).toEqual([{ origin: "request", script: GLUED_POST }]);
+		// The whole glued string, replayed as a single request-origin element of
+		// each kind - `seedFromRun` cannot split it, so this is the only record
+		// of what ran. Dropping it (nothing read `legacyPreScript`/`legacyPostScript`)
+		// would silently replay no script at all for a run stored before parts.
+		expect(payload.elements).toEqual([
+			{
+				id: "legacy-script.pre",
+				kind: "script.pre",
+				enabled: true,
+				config: { script: GLUED_PRE },
+				origin: { kind: "request" },
+			},
+			{
+				id: "legacy-script.post",
+				kind: "script.post",
+				enabled: true,
+				config: { script: GLUED_POST },
+				origin: { kind: "request" },
+			},
+		]);
 	});
 
 	it("leaves the notice out for a run that has proper script parts", () => {
 		renderView(designRun());
 
-		selectRequestTab(/^pre-request/i);
+		selectRequestTab(/^elements/i);
 
 		expect(screen.queryByText(/cannot be separated/i)).toBeNull();
 	});

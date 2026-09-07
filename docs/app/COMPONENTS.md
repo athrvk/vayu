@@ -297,7 +297,7 @@ The request editor. Entry: `modules/request-builder/index.tsx`.
 | `components/ExternalChangeNotice.tsx` | One [`ExternalChangeCallout`](#shared-external-change-callout-componentssharedexternalchangecallouttsx) per conflicted field group (issue #1436) - the four body-shaping fields collapse into one "body" callout, and "Take theirs" resolves every field in the group it names |
 | `components/RequestBreadcrumb.tsx` | One read-only line above the URL bar: the collection chain root-first (`useCollectionAncestors`, cycle-guarded) then the request name, so the builder says which inherited auth, scripts and variables the open request carries. A collection segment opens that collection's tab; the name segment is inert, because renaming is the Info tab's job and a second surface would be two controls for one act. Ancestors get `min-w-0`/`truncate` and the name `shrink-0`, so a deep chain gives way and the name never does. **Renders nothing** - not an empty row - when there is no collection and no name, which is the permanent band `RequestDescription` used to charge every request for one row below |
 | `components/UrlBar/` | `index`, `MethodSelector`, `UrlInput`, `SendWithRowDialog`. The method dropdown lives **inside** the URL field's border (one control, not two - it was a separate `w-[76px]` box sized for OPTIONS). Send + Load Test are one **attached** pair on the same accent: Send is `--primary-fill` with a white label, Load Test is `--primary` at 12% with `--primary-text` and a transparent left border, so the join is a step in weight rather than a seam between materials. Send owns both corners when it is alone - `canStartLoadTest` false **and** no row caret. `SendWithRowDialog` is that caret: a split-button on Send that opens the collection's data rows and sends bound to one (issue #601). It is **absent**, not disabled, unless a data contract is in scope *and* `data-file-store` remembers a file for the collection that declared it - and while a stream is open, where Send is Stop. The file is read when it opens, never on mount, and the rows are held no longer than the send. It was a ~384px popover until issue #892, which is where every compromise in it came from - a row was one truncated line with its column name printed in front of every value, the list stopped at twenty rows, and a number field stood in for the rest. It is now a `2xl` dialog: the columns are named once in a sticky header, every row is in the grid (arriving as they are scrolled to, via `useGrowingWindow`), a filter narrows them across all columns, and the number field is the shortcut to a distant row rather than the only route to it. Clicking a row still sends outright, because the one-click loop is the point of the feature; the footer's **Send row N** is for a row reached by typing or by arrow keys. The grid is `role="grid"` with a roving tabindex, so a thousand rows are one tab stop rather than a thousand - **exactly one**, falling back to the first rendered row when the selected row is off screen (a remembered index past the window, or one a filter excludes), since a grid with no tab stop is a grid the keyboard cannot reach at all (issue #936). Arrow, Home, End and PageUp/PageDown move the selection *and* DOM focus together, so a screen reader is told which row is now selected; the selection itself is still never clamped to make a send possible (issue #894). Both shortcuts (`⌘↵` / `⌘⇧↵`) come from `constants/shortcuts.ts` and are shown on the buttons. Pasting a curl/wget command into `UrlInput` auto-imports it (see note below). Typing into the field merges the parsed query into `params[]` rather than replacing it (`mergeParamsFromUrl`, `utils/url.ts`) - a disabled param row is invisible in the query by design, so a wholesale replace deleted it on every keystroke, and clearing the query left the enabled rows it used to carry behind (issue #1482) |
-| `components/RequestTabs/` | `index` + `panels/`: `InfoPanel` (**first in the row**), `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `script/ScriptPanel`, `InheritedScriptsNotice`, `ChainCard`, `ExamplesPanel`, `SettingsPanel`. `AuthPanel` owns the mode picker (it is the only host that offers `inherit`) and delegates every field group to the shared [`AuthFields`](#shared-auth-fields-componentssharedauthfields), injecting a variable-aware `VariableInput`; OAuth 2.0 reaches [`OAuth2Form`](#shared-oauth-20-form-componentssharedoauth2form) through it. One `ScriptPanel` serves both script tabs, as `variant="pre"` and `variant="post"`; everything that differs between them - the field it binds, the two context keys it reads, the intro sentence and the one contextual line under the editor - is data in `script/script-variants.tsx`. **The editor fills the panel and the reference prose is gone** (issue #1223): it was pinned at 350px inside a scrolling tab while a 14-line `<pre>` and nine paragraphs of `pm.*` rules took the rest of a tall window, none of it insertable. The rules live where the author meets them - a member's rule in the engine's completion table, which Monaco shows on completion and hover, a hook's rule in the two pages the *Scripting docs* link opens (`script-rules.test.ts` holds each one to its new home) - and the lines themselves are now insertable templates in [`ScriptSnippets`](#shared-script-snippets-componentssharedscriptsnippetstsx). It replaced `PreScriptPanel` and `TestScriptPanel`, two ~155-line files that a normalised `diff` showed differing in three places. It renders `InheritedScriptsNotice` (the script equivalent of `AuthInheritBanner`) to name which ancestor collections contribute a pre-request or test script; that accepts an optional `entries` prop so a stored-run view can supply parts directly instead of reading the live chain. `AuthInheritBanner` and `InheritedScriptsNotice` share their chrome through `ChainCard` - the tinted box, summary row, captioned list and hairline separators - which they previously wrote out twice, identically. `InfoPanel` holds the request **name** (autosaved: committed trimmed on blur, a blank one refused out loud via `reportBlankNameRefused()` and the stored name restored through the context's `restoreStoredName()`) and its description, and is first because those are the first things you want to read about a request; it replaced `RequestDescription`, a permanent ~30px band above the tab strip that every request paid for whether or not it had one. Its badge is `1` for "there is something here", matching Body/Auth/Scripts/Settings. `ExamplesPanel` lists the request's saved example responses (issues #481, #588): one collapsed row per example with its status chip and name, expanding to the recorded headers and a `ResponseBody` view. Rows can be **removed** but not edited - delete landed with the response viewer's *Save as example* (below) because an example you can create and never remove is the #553 zombie shape at a smaller scale, and it is confirmed through `DeleteConfirmDialog` because a mock server answers with the first example of a matched route. It is not scoped to app-saved rows: the engine's route is not, and telling the two apart here would mean reading an `origin` no surface displays. A row whose `bodyTruncated` is set carries an amber **Partial body** chip beside its name (issue #659) - a mock server answers with the stored bytes as though they were a whole response, and until the engine had the column the fact lived only in the example's *name*, which a rename at save time erased. It keeps three empty-looking states apart (unsaved request, no examples, failed read), because collapsing them is how an unreachable engine reads as "this request documents nothing"; it carries no badge, since the count lives behind a query and a tab row should not wait on the network to finish drawing. `SettingsPanel` holds the per-request execution settings - the **Protocol**, the redirect policy (**Follow redirects** + **Maximum redirects**) and the **Event stream** toggle (issue #574); the tab strip badges it via `isRequestSettingsNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults. Its four rows are the settings screen's own - [`SelectSettingRow` / `ToggleRow` / `NumberSettingRow`](#row-primitives-and-save-models) - rather than a fourth copy of them (issue #702), so this tab is the first consumer of those primitives outside `modules/settings`. Sections are `Eyebrow` labels, one tier above the rows' `text-sm font-medium`: they were `h3`s set in the *same* type as the control labels, which read as six sibling headings, and "Protocol" was a heading with a label of the same name directly under it. A section holding one row is that row, so only **Redirects** (two rows) carries a heading. The scope line is stated once at the top; the only row it is not true of - **Event stream**, which a load test always buffers - says so itself |
+| `components/RequestTabs/` | `index` + `panels/`: `InfoPanel` (**first in the row**), `ParamsPanel`, `HeadersPanel`, `BodyPanel`, `AuthPanel`, `AuthInheritBanner`, `ElementsPanel`, `InheritedElementsNotice`, `LegacyScriptNotice`, `ChainCard`, `ExamplesPanel`, `SettingsPanel`. `AuthPanel` owns the mode picker (it is the only host that offers `inherit`) and delegates every field group to the shared [`AuthFields`](#shared-auth-fields-componentssharedauthfields), injecting a variable-aware `VariableInput`; OAuth 2.0 reaches [`OAuth2Form`](#shared-oauth-20-form-componentssharedoauth2form) through it. `ElementsPanel` replaces the old Pre-request and Tests tabs with one **Elements** tab (issue #1512): extractors, assertions, timers and scripts, all typed behaviours run by the engine's element pipeline at a fixed phase, edited through the shared [`ElementList`](#shared-elementlist-componentssharedelementlist) primitive. A script is a `script.pre` / `script.post` element now, edited through `ElementList`'s bespoke Monaco form (`elementForms.ts`) rather than a form of its own - the two script tabs, `ScriptPanel` and `script-variants.tsx`, are gone. `ElementsPanel` renders `InheritedElementsNotice` (the element equivalent of `AuthInheritBanner`) to name which ancestor collections contribute an element the request inherits, with a per-element **Disable** toggle that writes an `inherit.disable` entry into the request's own list rather than editing the ancestor; it accepts an optional `entries` prop so a stored-run view can supply the resolved list directly instead of reading the live chain. `LegacyScriptNotice` is unchanged: a run recorded before scripts were split into parts still shows its one glued string, read-only, since the request's own part cannot be recovered from it. `AuthInheritBanner` and `InheritedElementsNotice` share their chrome through `ChainCard` - the tinted box, summary row, captioned list and hairline separators - which they previously wrote out twice, identically. `InfoPanel` holds the request **name** (autosaved: committed trimmed on blur, a blank one refused out loud via `reportBlankNameRefused()` and the stored name restored through the context's `restoreStoredName()`) and its description, and is first because those are the first things you want to read about a request; it replaced `RequestDescription`, a permanent ~30px band above the tab strip that every request paid for whether or not it had one. Its badge is `1` for "there is something here", matching Body/Auth/Scripts/Settings. `ExamplesPanel` lists the request's saved example responses (issues #481, #588): one collapsed row per example with its status chip and name, expanding to the recorded headers and a `ResponseBody` view. Rows can be **removed** but not edited - delete landed with the response viewer's *Save as example* (below) because an example you can create and never remove is the #553 zombie shape at a smaller scale, and it is confirmed through `DeleteConfirmDialog` because a mock server answers with the first example of a matched route. It is not scoped to app-saved rows: the engine's route is not, and telling the two apart here would mean reading an `origin` no surface displays. A row whose `bodyTruncated` is set carries an amber **Partial body** chip beside its name (issue #659) - a mock server answers with the stored bytes as though they were a whole response, and until the engine had the column the fact lived only in the example's *name*, which a rename at save time erased. It keeps three empty-looking states apart (unsaved request, no examples, failed read), because collapsing them is how an unreachable engine reads as "this request documents nothing"; it carries no badge, since the count lives behind a query and a tab row should not wait on the network to finish drawing. `SettingsPanel` holds the per-request execution settings - the **Protocol**, the redirect policy (**Follow redirects** + **Maximum redirects**) and the **Event stream** toggle (issue #574); the tab strip badges it via `isRequestSettingsNonDefault` (in `utils/request-state`) only when the request departs from the engine defaults. Its four rows are the settings screen's own - [`SelectSettingRow` / `ToggleRow` / `NumberSettingRow`](#row-primitives-and-save-models) - rather than a fourth copy of them (issue #702), so this tab is the first consumer of those primitives outside `modules/settings`. Sections are `Eyebrow` labels, one tier above the rows' `text-sm font-medium`: they were `h3`s set in the *same* type as the control labels, which read as six sibling headings, and "Protocol" was a heading with a label of the same name directly under it. A section holding one row is that row, so only **Redirects** (two rows) carries a heading. The scope line is stated once at the top; the only row it is not true of - **Event stream**, which a load test always buffers - says so itself |
 | `components/ResponseViewer/` | `index`, `ResponseCookies`, `ResponseTimingTab`, `TestResults`, `SchemaValidation`, `ConsoleOutput`, `RawRequestResponse`, `ClientErrorView`, `SaveAsExampleDialog` + `save-as-example.ts` (status bar, actions and the Headers tab now come from `shared/response-viewer/`). The Console tab renders whenever the response carries console logs **or** a `preScriptError`/`postScriptError`, so a script that throws before logging still shows its error rather than a silent 200. The **Events** tab (issue #574) renders `ResponseEvents`, which now lives in `shared/response-viewer/` because a load run's sampled stream shows the same list - see that section. **Save as example** (issue #588) sits at the right of the tab row rather than beside Copy and Download, which live in the body pane because that is what they act on - this acts on the whole exchange. It is **absent**, not disabled, for an unsaved request (no id to nest an example under, and the Examples tab already says so in a sentence) and while a stream is still open (the placeholder response has no body yet). The payload rules that must not drift live in `save-as-example.ts`, not the dialog: `origin: "user"`, the importers' Content-Type mapping, and never an `order`. The **Tests** tab carries two kinds of result (issue #628): what a Tests script asserted, and `SchemaValidation` - the verdict against the schema the bound spec declares. It renders there rather than in a tab of its own because the tab set is a constant (see the note in `index.tsx`), and its chip in the status band comes from `shared/response-viewer/ValidationChip`. A response whose collection binds no document carries no verdict, and the tab shows exactly what it always did. The Body tab stacks **two independent notices** above the pane, and they are not exclusive (issue #1157): "Body truncated for storage" is `maxTraceBodyBytes` shortening a stored trace, which a re-send undoes, and "Body capped while reading" is the engine having stopped at `maxDesignResponseBodyBytes`, which a re-send reproduces - the remedy there is raising **Max Design Response Body** in Settings. A third, the pane's own 2 MB formatting limit, is rendered by `shared/response-viewer/ResponseBody` itself |
 | `components/LoadTestConfigDialog/` | Load-test configuration dialog (mode, duration, RPS, concurrency, …). Renders `OAuth2LoadTestGuard` when the request's effective auth is OAuth 2.0. A second disclosure, **Pass/fail budgets**, declares the run's latency / error-rate / throughput limits; the field table and its rules are `budgets.ts`, and the p99 field is seeded from the `sloThresholdMs` client setting so that setting becomes the default budget rather than a parallel notion of "too slow". A budget out of the engine's range blocks Start with a named message instead of being dropped from the payload. It also reads `GET /request-defaults` for **both** scopes and names the difference in one notice when they disagree (`default-headers.ts`), because the Headers tab shows the design answer and a load run resolves `Accept-Encoding` from `loadNegotiateCompression` |
 | `components/OAuth2LoadTestGuard.tsx`, `components/oauth2-load-test-coverage.ts` | Warns when a duration-based load test would outlive its access token, in the cases the engine will *not* renew mid-run (a query-placed token, `autoRefreshToken: false`, an `authorization_code` grant with no refresh token): offers **Refresh** when a fresh token would cover the run, or **blocks Start** (with a "Start anyway" override) when even a fresh token can't. A run the engine will keep current gets an info line, not a warning. The pure coverage decision lives in `oauth2-load-test-coverage.ts`, whose `isMidRunRefreshable` mirrors the config-and-token cases of the engine's `plan_auth_refresh` - not its last one, a user-supplied `Authorization` header that beats the token, which the guard is never handed the headers to see. Change one, change both |
@@ -361,7 +361,7 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 
 ### `CollectionDetail/` (screen `"collection-detail"`)
 
-Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows name + request count, and - right-aligned - the mock-server control; seven tabs:
+Tab shell reached via `navigationStore.navigateToCollection(id)`. Header shows name + request count, and - right-aligned - the mock-server control; six tabs:
 
 The **request count is the whole subtree**, not the requests the collection owns
 directly, and the shell computes it once for both the header and the Info tab. A
@@ -374,8 +374,7 @@ Spec tab counts it.
 |---|---|---|
 | Info | `InfoTab.tsx` | Name, description, request count (the shell's subtree count, handed down). **Autosaves** - no Save/Cancel |
 | Auth | `AuthTab.tsx` | Collection-level auth (concrete; never `inherit`). Mode picker + hints only - the fields are the shared [`AuthFields`](#shared-auth-fields-componentssharedauthfields). **The one tab with a Save button**, and it says so above the fields |
-| Pre-request | `ScriptTab.tsx` (`kind="pre"`) | Collection pre-request script. **Autosaves** on editor blur - no Save. Lists the same [`ScriptSnippets`](#shared-script-snippets-componentssharedscriptsnippetstsx) the request script panels do; it carried its own four-card `QUICK_REF` grid until issue #1223 - a second implementation of one concept, with different content, that inserted nothing |
-| Post-request | `ScriptTab.tsx` (`kind="post"`) | Collection post-request script. **Autosaves** on editor blur - no Save. Same snippets list, `context="test"` |
+| Elements | `ElementsTab.tsx` | Extractors, assertions, timers and scripts on the collection, through the shared [`ElementList`](#shared-elementlist-componentssharedelementlist) primitive (issue #1512). Replaces the Pre-request and Post-request tabs - a script is now a `script.pre` / `script.post` element like any other kind, edited by the same list. **The one other tab with a Save button** beside Auth, and for the same reason (#446): adding a kind, naming a row, toggling it, reordering it and editing its form are all separate focus stops, not one buffer a blur can commit |
 | Variables | `VariablesTab.tsx` | Collection-scoped variables (count badge) |
 | Data | `DataTab.tsx` | The declared **data contract** (issue #599): pick a file, preview it, **Declare** its columns onto `collection.dataSchema`, **Clear** to reset, plus the **referenced-columns audit** (`ColumnAudit.tsx`, issue #600). Declared-column count badge. Saves explicitly per action, so it holds no draft and is absent from `TABS_HOLDING_DRAFTS` |
 | Spec | `SpecTab.tsx` | The bound **OpenAPI document** (issue #638): where it came from, its short hash, when it was fetched and bound, and how many of the subtree's requests carry an operation identity. Binds a collection that was not imported from a spec - match by method and path shape, counts disclosed, matches stamped and nothing else touched - **Unbind** sends `openapi: null`, and **Export as OpenAPI** opens the export dialog (issue #630). The **Sync** section (`SpecSync.tsx`, issues #654 and #655) re-reads the document from the URL or file the binding recorded, reports what moved in three buckets, and applies the items the user ticks in one engine call - checking still writes nothing, and a removal is never ticked for you. Explicit per action, so it is absent from `TABS_HOLDING_DRAFTS` like Data |
@@ -1517,14 +1516,15 @@ draft is keeping against an external write it disagrees with. Started as
 `externalValue`) and moved here for issue #1436, when the request builder
 needed the identical notice for the identical reason: a second copy would have
 been the "written but never read" style drift CLAUDE.md warns about, just for
-a component instead of a field. `CollectionDetail`'s `InfoTab`/`ScriptTab`/`AuthTab`
+a component instead of a field. `CollectionDetail`'s `InfoTab`/`ElementsTab`/`AuthTab`
 and the request builder's `ExternalChangeNotice` (above) are its callers.
 
 ## Shared Script Snippets (`components/shared/ScriptSnippets.tsx`)
 
 The insertable templates under a script editor, listed for both script hosts -
-the request builder's `ScriptPanel` and the collection detail's `ScriptTab`
-(issue #1223).
+the shared `ElementList`'s `script.pre` / `script.post` bespoke form
+(`ScriptElementForm`, `components/shared/ElementList/`) used by both the
+request builder's Elements tab and the collection detail's (issue #1223).
 
 **It replaced two hand-rolled copies of one idea.** The request panels carried a
 14-line `<pre>` of `pm.*` calls plus nine paragraphs of rules, always on; the
@@ -1557,6 +1557,57 @@ GraphQL Variables pane's collapse lives in that store too. The whole header is
 the control, per the composite-row hit-area rule, and the body is rendered only
 while it is open. `cmdk` (`Command`) owns the arrow keys, the highlight, Enter to
 insert and the filter field, rather than a third copy of that keyboard handling.
+
+## Shared ElementList (`components/shared/ElementList/`)
+
+The primitive both Elements tabs bind to (issue #1512): an ordered list of a
+request's or collection's own elements - extractors, assertions, timers,
+controllers and scripts - each row a kind badge, an optional name, an enable
+switch, reorder buttons and delete, with the kind's form underneath. A
+primitive under `components/shared/` takes no feature-module context, so both
+hosts pass their own `elements` array, `onChange` setter and the catalogue
+(`useElementKindsQuery`) as props rather than the component reading either
+host's context - the same rule `request-builder/types.ts` states for why
+`KeyValueEditor` moved out of the request-builder module.
+
+**The default form is generated from the kind's JSON Schema**
+(`GenericElementForm.tsx`), the way `SettingsMain.tsx` renders a config entry
+by type: string, integer, number, boolean, enum and string-array properties
+map to the same row primitives - `NumberSettingRow` / `SelectSettingRow` /
+`ToggleRow` - `SettingsPanel.tsx` already uses, plus one level of `object`
+nesting for a kind whose config groups two fields (`assert.status.range`'s
+`{min, max}`). A kind the app has never seen is editable the day the engine
+ships it, which is the whole point of the catalogue being schema-carrying
+rather than a label list - `extract.json`'s path field is deliberately
+generic-form only, proving the point rather than special-casing it.
+
+**A bespoke override is the exception, in one map** (`elementForms.ts`), never
+inline in `ElementList`. Phase 0 ships exactly one: `script.pre` /
+`script.post` render `ScriptElementForm`'s Monaco editor and insertable
+snippets instead of the generic form's plain text field, because "the same
+editor" is what the Elements tab has to keep for a script. It deliberately
+carries none of the old `ScriptPanel`'s variable-reference chips or inherited/
+legacy notices - those read `useRequestBuilderContext`, which this primitive
+cannot depend on - so inheritance is shown once for the whole list by
+`InheritedElementsNotice` instead of once per script row.
+
+**The Add menu groups the catalogue by category**, never a hand-written list,
+so a kind the engine adds needs no change here; `inherit.disable` is excluded
+from it, since a user never adds one by hand - it is written by the
+inheritance notice's Disable toggle.
+
+**A new request or collection is seeded with an empty `script.pre`/
+`script.post` pair** (`lib/elements.ts`'s `defaultScriptElements`), enabled
+with `config.script: ""`. The two tabs this feature replaced were always
+present and ran only once given a non-blank body; `elements: []` on a fresh
+entity would hide that slot behind the Add menu for a user with no reason yet
+to know it exists. An empty script still passes the kind's own schema (only
+the property's presence is required, not its length), and `scriptTextFor`
+already treats a blank script as absent everywhere it is read, so the pair is
+inert until someone types into it. Seeded at every creation path -
+`useTreeCrud.ts`'s New Collection / Add Folder / Add Request, and
+`useNewRequest.ts`'s command-palette flow - not in `createDefaultRequestState`,
+which only fills transient local state and is never sent as a create payload.
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 
@@ -1779,34 +1830,26 @@ column still binds if the run's file carries it, so this is "check this", not
 The `{{` autocomplete offers declared columns as a **Data columns** group beside
 Variables and Dynamic.
 
-The same three states paint the data chips in the script panel's **"Names
-mentioned:"** row (issue #604), through the same `describeDataToken` call. A `data.*` name can
-never be in `allVariables` - the namespace is disjoint from the scopes - so the
-chip row's `resolves ? secondary : destructive` rule read every data column as
-undefined, which is the paint #592 removed from the builder. `DATA_TOKEN_TONE_CLASS`
-(`lib/data-token-tone.ts`) is the one table both surfaces read, so a column the
-chip calls declared is the one the token calls declared.
-
-**The row is "Names mentioned", not "Referenced", and a `{{}}` chip is neutral**
-(issue #659). The rest of the row had the same defect #604 fixed for `data.*`:
-every name was painted `resolves ? secondary : destructive`, which answers a
-question that only means something for a `pm.*.get()`. The engine never
-interpolates script source (D16), so a green `{{base_url}}` promised a
-substitution that does not happen. `referencedVariables` (`lib/referenced-variables.ts`)
-now returns each name with the syntax that found it - `pm` or `template` - and
-`pm` wins when a name is written both ways, because the script does read it.
-Template chips are muted, spelled `{{name}}`, and carry `TEMPLATE_IN_SCRIPT_NOTE`
-as their tooltip; `pm` chips keep the resolved/unresolved pair, except for the
-column reads below. The collection's Pre-request and Post-request tabs
-(`CollectionDetail/ScriptTab`) read the same helper and split `pm` from
-`template` the same way - they had also printed every name as `{{name}}`,
-including the ones the script reads through `pm`. They paint the column tones
-too (issue #1075): that tab kept a two-way ladder through #604 and #1063, so
-the same script pasted into a collection's tab rather than a request's lost
-every column state, and a name only a bound row can answer got the accent that
-says a variable does. Both ladders read one `DATA_TOKEN_TONE_CLASS`, so a
-column one calls declared is the one the other calls declared - two consumers
-of one rule, not two copies of it.
+**This chip row is retired pending a port to the element model (issue #1512).**
+Through issue #1075, both the request builder's script panel and the
+collection's Script tab painted a **"Names mentioned:"** row above their
+Monaco editor - `referencedVariables` (`lib/referenced-variables.ts`) split
+`pm` reads from `{{template}}` mentions (issue #659, decision D16: the engine
+never interpolates script source, so a green `{{base_url}}` chip promised a
+substitution that never happens), and `describeDataToken` /
+`describeColumnReference` / `describeScopedRead` painted the same
+`DATA_TOKEN_TONE_CLASS` (`lib/data-token-tone.ts`) both the URL bar and the
+Data tab's column audit use (issue #604), so a column one surface calls
+declared is the one every other surface calls declared. Both script panels
+are gone: a script is a `script.pre` / `script.post` element now, edited
+through `ElementList`'s bespoke form (`ScriptElementForm`,
+`components/shared/ElementList/`), which is a primitive under
+`components/shared/` and therefore cannot depend on either host's
+context - the same rule that keeps it out of `InheritedElementsNotice` too.
+Reintroducing this row (as a wrapper `ElementsPanel.tsx` /
+`ElementsTab.tsx` render around a `script.*` element, using the same
+functions) is real, disclosed follow-up work, not done in the migration that
+retired the two script panels.
 
 **A reference carries what its accessor can see, not only how it was spelled**
 (issue #1063). `referencedVariables` matched three accessors and left

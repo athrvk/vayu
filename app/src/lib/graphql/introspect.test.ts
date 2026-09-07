@@ -61,7 +61,15 @@ describe("buildIntrospectionRequest", () => {
 			// Composition returns the whole request; introspection is not sending
 			// the user's body or running their scripts.
 			body: { mode: "json", content: '{"real":"body"}' },
-			preRequestScripts: [{ origin: "collection", id: "c1", script: "pm.test()" }],
+			elements: [
+				{
+					id: "c1",
+					kind: "script.pre",
+					enabled: true,
+					config: { script: "pm.test()" },
+					origin: { kind: "collection", id: "c1" },
+				},
+			],
 		} as ComposedRequest);
 		expect(req.method).toBe("POST");
 		expect(req.url).toBe("https://api.test/gql");
@@ -71,7 +79,7 @@ describe("buildIntrospectionRequest", () => {
 		const body = req.body as { mode: string; content: string };
 		expect(body.mode).toBe("json");
 		expect(JSON.parse(body.content).query).toContain("IntrospectionQuery");
-		expect(req.preRequestScripts).toBeUndefined();
+		expect(req.elements).toBeUndefined();
 	});
 
 	// The #382 assertions: a schema load is not a run the user made, so it must

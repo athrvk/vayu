@@ -9,34 +9,29 @@
  */
 
 /**
- * Deleting a script has to reach the engine as a value (issue #1381).
+ * Deleting a script has to reach the engine as a value (issue #1381), and
+ * after issue #1512 a script is a `script.pre` / `script.post` element in
+ * `request.elements` rather than its own field.
  *
  * `PUT /requests/:id` is a merge patch: a key that is present is written, and a
  * key that is *absent* leaves the stored value alone. `JSON.stringify` drops a
- * key whose value is `undefined`, so the save payload's
- * `request.preRequestScript || undefined` turned the one state that means
- * "cleared" into the one wire shape that means "keep what you have". Emptying a
- * Tests script saved nothing, the mutation succeeded, the Dock said "Saved",
- * and the old script was back on the next open.
- *
- * The two script fields were the only ones in that payload written this way.
- * `name` looks similar and is not: it is omitted deliberately when blank,
- * because a nameless request is unusable everywhere it is listed - that
- * distinction is `save-request-name.test.ts`, and the cases here must not
- * disturb it.
+ * key whose value is `undefined`, so a payload built as
+ * `request.elements.length ? request.elements : undefined` would turn the one
+ * state that means "cleared down to nothing" into the one wire shape that
+ * means "keep what you have". Emptying the Elements tab down to `[]` has to
+ * save `elements: []`, not omit the key - `buildUpdatePayload` in
+ * `./index.tsx` sends the whole list whenever `elements` is in the touched
+ * set, empty array included, which is exactly what these cases pin.
  *
  * The save is driven through the real component rather than through the
- * payload builder alone, so the load-side seeding is in the path too: an
- * `undefined` arriving from the wire type and spreading over
- * `createDefaultRequestState()` would put the same hole back from the other
- * end.
+ * payload builder alone, so the load-side seeding is in the path too.
  *
- * Updated for issue #1436: the payload now carries only the fields the draft
- * has *touched* since its last known-good value, so `save()` below takes the
- * touched set the real provider would have computed, and an untouched script
- * is asserted absent from the patch rather than "sent unchanged" - there is no
- * more "unchanged" to resend once a field nobody edited is never in the
- * payload at all.
+ * Since issue #1436: the payload carries only the fields the draft has
+ * *touched* since its last known-good value, so `save()` below takes the
+ * touched set the real provider would have computed, and an untouched
+ * `elements` list is asserted absent from the patch rather than "sent
+ * unchanged" - there is no more "unchanged" to resend once a field nobody
+ * edited is never in the payload at all.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -44,18 +39,24 @@ import { render, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useTabsStore, useSessionStore, useDashboardStore } from "@/stores";
+import type { ElementDef } from "@/types";
 import type { RequestState, MergeableRequestField } from "./types";
 
 const updateRequest = vi.fn();
 
-const STORED_PRE = "pm.environment.set('t', Date.now());";
-const STORED_POST = "pm.test('ok', () => pm.response.to.have.status(200));";
+/** One enabled `script.pre` / `script.post` element holding `script`. */
+function scriptElement(kind: "script.pre" | "script.post", script: string): ElementDef {
+	return { id: `el_${kind}`, kind, enabled: true, config: { script } };
+}
 
-/** What the request query hands back - the two script keys are the variable. */
-let storedScripts: { preRequestScript?: string; postRequestScript?: string } = {
-	preRequestScript: STORED_PRE,
-	postRequestScript: STORED_POST,
-};
+const STORED_PRE = scriptElement("script.pre", "pm.environment.set('t', Date.now());");
+const STORED_POST = scriptElement(
+	"script.post",
+	"pm.test('ok', () => pm.response.to.have.status(200));"
+);
+
+/** What the request query hands back - `elements` is the variable. */
+let storedElements: ElementDef[] = [STORED_PRE, STORED_POST];
 
 const requestQuery = {
 	get data() {
@@ -69,7 +70,7 @@ const requestQuery = {
 			headers: [],
 			body: { mode: "none" },
 			auth: { mode: "none" },
-			...storedScripts,
+			elements: storedElements,
 			followRedirects: true,
 			maxRedirects: 10,
 			httpVersion: "auto",
@@ -145,7 +146,7 @@ async function save(state: RequestState, changedFields: Iterable<MergeableReques
 }
 
 beforeEach(() => {
-	storedScripts = { preRequestScript: STORED_PRE, postRequestScript: STORED_POST };
+	storedElements = [STORED_PRE, STORED_POST];
 	updateRequest.mockReset().mockResolvedValue({});
 	providerProps = {};
 	useTabsStore.setState({
@@ -156,80 +157,70 @@ beforeEach(() => {
 	useDashboardStore.getState().setStreaming(false);
 });
 
-describe("clearing a script", () => {
-	it("sends the empty string rather than dropping the key", async () => {
+describe("clearing every element", () => {
+	it("sends the empty array rather than dropping the key", async () => {
 		renderBuilder();
-		const patch = await save(seededState({ preRequestScript: "", testScript: "" }), [
-			"preRequestScript",
-			"testScript",
-		]);
+		const patch = await save(seededState({ elements: [] }), ["elements"]);
 
 		// `toHaveProperty` is the assertion that matters: an absent key is what
-		// the engine reads as "keep the stored script".
-		expect(patch).toHaveProperty("preRequestScript", "");
-		expect(patch).toHaveProperty("postRequestScript", "");
-	});
-
-	it("clears one script without touching the other", async () => {
-		renderBuilder();
-		const patch = await save(seededState({ testScript: "" }), ["testScript"]);
-
-		expect(patch).toHaveProperty("postRequestScript", "");
-		// Untouched, so it is not in the payload at all any more (issue #1436) -
-		// the engine's merge-patch already leaves an absent key alone, which is
-		// the correct "not sent" for a field nobody edited.
-		expect(patch).not.toHaveProperty("preRequestScript");
+		// the engine reads as "keep the stored elements".
+		expect(patch).toHaveProperty("elements");
+		expect(patch?.elements).toEqual([]);
 	});
 
 	it("still refuses to send a blank name, which is a different rule", async () => {
 		renderBuilder();
-		const patch = await save(seededState({ name: "   ", testScript: "" }), [
-			"name",
-			"testScript",
-		]);
+		const patch = await save(seededState({ name: "   ", elements: [] }), ["name", "elements"]);
 
 		expect(patch).not.toHaveProperty("name");
-		expect(patch).toHaveProperty("postRequestScript", "");
+		expect(patch?.elements).toEqual([]);
 	});
 });
 
-describe("a stored request that never had a script", () => {
-	it("seeds the editor with strings, not undefined", async () => {
-		// The wire type marks both optional, and spreading an `undefined` over
-		// `createDefaultRequestState()` replaces the `""` default with it - which
-		// would drop the key again on the first save.
-		storedScripts = {};
+describe("removing just one element", () => {
+	it("sends the reduced array, keeping the element that was not removed", async () => {
+		renderBuilder();
+		// The sole `script.pre` element deleted from the list; `script.post`
+		// untouched - both live in the one `elements` field, so removing one
+		// still touches (and resends) the whole array, minus that entry.
+		const patch = await save(seededState({ elements: [STORED_POST] }), ["elements"]);
+
+		expect(patch?.elements).toEqual([STORED_POST]);
+	});
+});
+
+describe("a stored request that never had an element", () => {
+	it("seeds the editor with an empty array, not undefined", async () => {
+		storedElements = [];
 		renderBuilder();
 
 		const initial = providerProps.initialRequest as Partial<RequestState>;
-		expect(initial.preRequestScript).toBe("");
-		expect(initial.testScript).toBe("");
+		expect(initial.elements).toEqual([]);
 	});
 
-	it("sends a touched script even when its value already matches what's stored", async () => {
+	it("sends a touched, empty list even when it already matches what's stored", async () => {
 		// Touching a field is "the user edited this control", not "the value
 		// changed" - `setRequest`/`updateField` mark a field touched on every
 		// call, so a field edited back to its starting value is still sent.
-		storedScripts = {};
+		storedElements = [];
 		renderBuilder();
-		const patch = await save(seededState(), ["preRequestScript", "testScript"]);
+		const patch = await save(seededState(), ["elements"]);
 
-		expect(patch).toHaveProperty("preRequestScript", "");
-		expect(patch).toHaveProperty("postRequestScript", "");
+		expect(patch).toHaveProperty("elements");
+		expect(patch?.elements).toEqual([]);
 	});
 });
 
-describe("a script the user kept", () => {
+describe("elements the user kept", () => {
 	it("is never resent when nothing about it was touched", async () => {
 		// Before issue #1436's partial save, every save carried the whole
-		// record, so an untouched script "rode along" unchanged. Now there is no
+		// record, so untouched elements "rode along" unchanged. Now there is no
 		// more riding along: a save carries only what changed, so editing the
-		// URL alone must not also resend scripts nobody edited.
+		// URL alone must not also resend elements nobody edited.
 		renderBuilder();
 		const patch = await save(seededState({ url: "https://api.test/v2" }), ["url"]);
 
 		expect(patch).toHaveProperty("url", "https://api.test/v2");
-		expect(patch).not.toHaveProperty("preRequestScript");
-		expect(patch).not.toHaveProperty("postRequestScript");
+		expect(patch).not.toHaveProperty("elements");
 	});
 });

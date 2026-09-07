@@ -98,8 +98,7 @@ function makeCollection(variables: Record<string, VariableValue>): Collection {
 		order: 0,
 		variables,
 		auth: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		createdAt: new Date(0).toISOString(),
 		updatedAt: new Date(0).toISOString(),
 	};

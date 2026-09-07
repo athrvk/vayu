@@ -22,7 +22,12 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { Collection, Request } from "@/types";
+import type { Collection, ElementDef, Request } from "@/types";
+
+/** One enabled `script.pre` / `script.post` element holding `script`. */
+function scriptElement(kind: "script.pre" | "script.post", script: string): ElementDef {
+	return { id: `el_${kind}`, kind, enabled: true, config: { script } };
+}
 
 const collections: Collection[] = [];
 const requestsByCollection = new Map<string, Request[]>();
@@ -59,8 +64,7 @@ function collection(
 		order: 0,
 		variables: {},
 		auth: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		dataSchema: columns ? { columns } : {},
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
@@ -81,8 +85,7 @@ function request(url: string, overrides: Partial<Request> = {}): Request {
 		body: { mode: "none" },
 		bodyType: "none",
 		auth: { mode: "inherit" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		followRedirects: true,
 		maxRedirects: 10,
 		verifySSL: true,
@@ -190,7 +193,7 @@ describe("what the run actually resolves", () => {
 		// on a parent is evidence - best-effort evidence, so it moves the verdict
 		// only in the direction that does not get a working column deleted.
 		const root = collection("root", undefined, ["plan"], {
-			preRequestScript: 'pm.iterationData.get("plan");',
+			elements: [scriptElement("script.pre", 'pm.iterationData.get("plan");')],
 		});
 		setTree([root, collection("child", "root")], { root: [], child: [request("https://x/a")] });
 

@@ -20,7 +20,7 @@ import ParamsPanel from "./panels/ParamsPanel";
 import HeadersPanel from "./panels/HeadersPanel";
 import BodyPanel from "./panels/BodyPanel";
 import AuthPanel from "./panels/AuthPanel";
-import ScriptPanel from "./panels/script/ScriptPanel";
+import ElementsPanel from "./panels/ElementsPanel";
 import ExamplesPanel from "./panels/ExamplesPanel";
 import SettingsPanel from "./panels/SettingsPanel";
 import { isRequestSettingsNonDefault } from "../../utils/request-state";
@@ -34,7 +34,7 @@ import { isRequestSettingsNonDefault } from "../../utils/request-state";
  * `min-h-40` floor in a short window overflows, as do the form-data and
  * urlencoded tables on the same tab.
  */
-const EDITOR_TABS = new Set<RequestTab>(["body", "pre-script", "test-script"]);
+const EDITOR_TABS = new Set<RequestTab>(["body"]);
 
 export default function RequestTabs() {
 	const { request, activeTab, setActiveTab } = useRequestBuilderContext();
@@ -74,18 +74,13 @@ export default function RequestTabs() {
 			badge: request.auth.mode !== "none" ? 1 : undefined,
 		},
 		{
-			id: "pre-script",
-			label: "Pre-request",
-			badge: request.preRequestScript.trim() ? 1 : undefined,
-		},
-		{
-			id: "test-script",
-			label: "Tests",
-			badge: request.testScript.trim() ? 1 : undefined,
+			id: "elements",
+			label: "Elements",
+			badge: request.elements.filter((e) => e.enabled).length || undefined,
 		},
 		{
 			/*
-			 * After the scripts and before Settings: examples describe what the
+			 * After the elements and before Settings: examples describe what the
 			 * request answers with, which belongs beside the request's own
 			 * definition rather than among its execution options. No badge - the
 			 * count lives behind a query, and a tab row that waits on the network
@@ -157,10 +152,8 @@ function TabContent() {
 			return <BodyPanel />;
 		case "auth":
 			return <AuthPanel />;
-		case "pre-script":
-			return <ScriptPanel variant="pre" />;
-		case "test-script":
-			return <ScriptPanel variant="post" />;
+		case "elements":
+			return <ElementsPanel />;
 		case "examples":
 			return <ExamplesPanel />;
 		case "settings":

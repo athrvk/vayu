@@ -7,20 +7,21 @@
 
 /**
  * The load-test payload's `tests` field is built by calling `scriptParts()`
- * over the collection chain, not by forwarding the request's own `testScript`
- * directly - that is the whole point of Task 7 (a load run used to validate
- * only the request's own test script; a collection-level assertion passed in
- * design mode and was never checked under load).
+ * over the collection chain, not by forwarding the request's own test script
+ * text directly - that is the whole point of Task 7 (a load run used to
+ * validate only the request's own test script; a collection-level assertion
+ * passed in design mode and was never checked under load).
  *
- * Delete that `scriptParts(...)` call and fall back to
- * `tests: pendingLoadTestRequest.testScript || undefined` and: it still
- * type-checks (`ScriptPart[] | undefined` vs `string | undefined` would be
- * the only mismatch, and a bare string literal assignment fails, but nothing
- * stops a well-meaning "simplification" that wraps the string back into a
- * single-element list), the rest of the suite still passes, and load runs
- * silently stop validating collection-level scripts again - a "written but
- * never read" regression with no error, no type failure, and no visibly
- * broken screen.
+ * The script text itself is now read via `scriptTextFor(elements, "script.post")`
+ * (issue #1512) rather than a raw `postRequestScript` field, both for a
+ * collection in the chain and for the request's own `pendingLoadTestRequest`.
+ * Delete either `scriptTextFor(...)` call and fall back to a raw field read
+ * (there is none left to read - `elements` is the only script-bearing field on
+ * `Request`/`Collection` now) and: it still type-checks as long as the read
+ * is coerced to a string, the rest of the suite still passes, and load runs
+ * silently stop validating collection-level (or the request's own) `script.post`
+ * elements again - a "written but never read" regression with no error, no
+ * type failure, and no visibly broken screen.
  *
  * A scan, not a render: same rationale as `redirect-policy-plumbing.test.ts` -
  * standing up the component would test the mocks, not the wiring.
@@ -59,18 +60,20 @@ describe("load test's `tests` field is built from the collection chain", () => {
 		const callStart = src.indexOf("tests: scriptParts(");
 		expect(callStart).toBeGreaterThan(-1);
 
-		// `pendingLoadTestRequest.testScript` appears exactly once in the file -
-		// as the last argument of this call. If the chain were dropped in favour
-		// of the request's own script alone, this index would move outside (or
-		// disappear from) the call's argument block.
-		const testScriptIndex = src.indexOf("pendingLoadTestRequest.testScript");
-		expect(testScriptIndex).toBeGreaterThan(callStart);
+		// The request's own script.post text, read via scriptTextFor(elements, ...)
+		// rather than a raw field, as the call's last argument. If the chain
+		// were dropped in favour of the request's own elements alone, this index
+		// would move outside (or disappear from) the call's argument block.
+		const ownScriptCall = 'scriptTextFor(pendingLoadTestRequest.elements, "script.post")';
+		const ownScriptIndex = src.indexOf(ownScriptCall);
+		expect(ownScriptIndex).toBeGreaterThan(callStart);
 
-		const callBlock = src.slice(
-			callStart,
-			testScriptIndex + "pendingLoadTestRequest.testScript".length
-		);
+		const callBlock = src.slice(callStart, ownScriptIndex + ownScriptCall.length);
 		expect(callBlock).toContain("collectionAncestors");
-		expect(callBlock).toContain("postRequestScript");
+		// Each collection's script.post text is read the same way, not via a
+		// raw `postRequestScript` field - reverting the per-collection getter to
+		// a field read stops a collection's script.post elements from
+		// validating under load, silently.
+		expect(callBlock).toContain('scriptTextFor(c.elements, "script.post")');
 	});
 });

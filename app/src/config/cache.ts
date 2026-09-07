@@ -35,6 +35,11 @@ export const QUERY_CACHE = {
 	SCRIPT_COMPLETIONS_GC_TIME_MS: 1 * HOUR,
 	SCRIPT_COMPLETIONS_RETRY: 1,
 
+	/** The element kind catalogue is static per engine version. */
+	ELEMENT_KINDS_STALE_TIME_MS: 1 * HOUR,
+	ELEMENT_KINDS_GC_TIME_MS: 1 * HOUR,
+	ELEMENT_KINDS_RETRY: 1,
+
 	/** Looking a request up in the cache retries quickly while it populates. */
 	REQUEST_LOOKUP_RETRY: 3,
 	REQUEST_LOOKUP_RETRY_DELAY_MS: 100,

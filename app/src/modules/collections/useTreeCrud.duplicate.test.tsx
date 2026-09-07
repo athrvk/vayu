@@ -50,8 +50,20 @@ const source: Request = {
 	body: { mode: "json", content: '{"a":1}' },
 	bodyType: "json",
 	auth: { mode: "bearer", token: "{{token}}" },
-	preRequestScript: "pm.variables.set('x', 1);",
-	postRequestScript: "pm.test('ok', () => {});",
+	elements: [
+		{
+			id: "el_1",
+			kind: "script.pre",
+			enabled: true,
+			config: { script: "pm.variables.set('x', 1);" },
+		},
+		{
+			id: "el_2",
+			kind: "script.post",
+			enabled: true,
+			config: { script: "pm.test('ok', () => {});" },
+		},
+	],
 	followRedirects: false,
 	maxRedirects: 3,
 	httpVersion: "http1.1",
