@@ -260,10 +260,17 @@ describe("seedFromRun", () => {
 	});
 
 	describe("scripts", () => {
-		it("gives the script tab only the request's own part", () => {
+		it("gives the script tab only the request's own part, as a script.pre element", () => {
 			const { request } = seedFromRun(run(), liveRequest);
 
-			expect(request.preRequestScript).toBe("console.log(t);");
+			expect(request.elements).toEqual([
+				{
+					id: "seed-script-pre",
+					kind: "script.pre",
+					enabled: true,
+					config: { script: "console.log(t);" },
+				},
+			]);
 		});
 
 		it("returns the collection parts separately, to show read-only", () => {
@@ -321,7 +328,7 @@ describe("seedFromRun", () => {
 			expect(seed.legacyPreScript).toBe("collectionPart\n\nrequestPart");
 			expect(seed.collectionPreScripts).toEqual([]);
 			expect(seed.collectionPostScripts).toEqual([]);
-			expect(seed.request.preRequestScript).toBe("");
+			expect(seed.request.elements).toEqual([]);
 		});
 	});
 

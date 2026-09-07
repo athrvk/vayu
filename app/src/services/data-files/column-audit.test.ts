@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import { auditDataColumns, type AuditableRequest } from "./column-audit";
+import type { ElementDef } from "@/types";
 
 function request(overrides: Partial<AuditableRequest> = {}): AuditableRequest {
 	return {
@@ -14,13 +15,17 @@ function request(overrides: Partial<AuditableRequest> = {}): AuditableRequest {
 		params: [],
 		headers: [],
 		body: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		// Already walked through the collection chain by the caller - `inherit` is
 		// not a value this function can be handed.
 		resolvedAuth: { mode: "none" },
 		...overrides,
 	};
+}
+
+/** One enabled `script.pre` / `script.post` element holding `script`. */
+function scriptElement(kind: "script.pre" | "script.post", script: string): ElementDef {
+	return { id: `el_${kind}`, kind, enabled: true, config: { script } };
 }
 
 describe("auditDataColumns", () => {
@@ -99,7 +104,13 @@ describe("auditDataColumns", () => {
 		// script reads it is what gets a working column deleted.
 		const audit = auditDataColumns(
 			["plan"],
-			[request({ postRequestScript: 'const p = pm.iterationData.get("plan");' })]
+			[
+				request({
+					elements: [
+						scriptElement("script.post", 'const p = pm.iterationData.get("plan");'),
+					],
+				}),
+			]
 		);
 		expect(audit.inScripts).toEqual(["plan"]);
 		expect(audit.unreferenced).toEqual([]);
@@ -112,8 +123,10 @@ describe("auditDataColumns", () => {
 			["a", "b"],
 			[
 				request({
-					preRequestScript: 'pm.iterationData?.get("a");',
-					postRequestScript: "if (pm.iterationData.has('b')) {}",
+					elements: [
+						scriptElement("script.pre", 'pm.iterationData?.get("a");'),
+						scriptElement("script.post", "if (pm.iterationData.has('b')) {}"),
+					],
 				}),
 			]
 		);
@@ -123,7 +136,13 @@ describe("auditDataColumns", () => {
 	it("finds nothing in a computed argument, which is what best-effort means", () => {
 		const audit = auditDataColumns(
 			["plan"],
-			[request({ postRequestScript: "const k = 'plan'; pm.iterationData.get(k);" })]
+			[
+				request({
+					elements: [
+						scriptElement("script.post", "const k = 'plan'; pm.iterationData.get(k);"),
+					],
+				}),
+			]
 		);
 		expect(audit.inScripts).toEqual([]);
 		expect(audit.unreferenced).toEqual(["plan"]);

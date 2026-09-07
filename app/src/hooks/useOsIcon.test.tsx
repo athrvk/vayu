@@ -63,8 +63,7 @@ function collection(id: string, name: string): Collection {
 		order: 0,
 		variables: {},
 		auth: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 	} as Collection;
 }
 

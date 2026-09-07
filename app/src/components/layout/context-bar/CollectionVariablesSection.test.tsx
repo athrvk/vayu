@@ -63,8 +63,7 @@ const collection = (id: string, variables: Record<string, VariableValue>): Colle
 	order: 0,
 	variables,
 	auth: { mode: "none" },
-	preRequestScript: "",
-	postRequestScript: "",
+	elements: [],
 	createdAt: "",
 	updatedAt: "",
 });

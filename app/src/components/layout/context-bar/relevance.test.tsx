@@ -95,8 +95,7 @@ function restRequest(overrides: Record<string, unknown> = {}) {
 		params: [],
 		headers: [],
 		auth: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		...overrides,
 	};
 }

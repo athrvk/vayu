@@ -91,8 +91,7 @@ const collection: Collection = {
 		} as VariableValue,
 	},
 	auth: { mode: "none" },
-	preRequestScript: "",
-	postRequestScript: "",
+	elements: [],
 	createdAt: new Date(0).toISOString(),
 	updatedAt: new Date(0).toISOString(),
 };

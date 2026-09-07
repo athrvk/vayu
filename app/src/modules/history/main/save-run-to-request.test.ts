@@ -98,8 +98,7 @@ function liveRequest(overrides: Partial<Request> = {}): Request {
 		body: { mode: "none" },
 		bodyType: "none",
 		auth: { mode: "bearer", token: "REAL-TOKEN-KEEP-ME" },
-		preRequestScript: "old();",
-		postRequestScript: "oldTest();",
+		elements: [],
 		followRedirects: true,
 		maxRedirects: 10,
 		httpVersion: "auto",
@@ -133,14 +132,26 @@ describe("applyRunToRequest", () => {
 		expect(patch.httpVersion).toBe("http2");
 	});
 
-	it("writes the request's own script part, not the collection's", () => {
+	it("writes the request's own elements, not the collection's", () => {
 		const live = liveRequest();
 		const patch = applyRunToRequest(seedFromRun(run(), live), live);
 
-		// `const t = 1;` came from the collection and must not end up inside the
-		// request - the next send would run it twice.
-		expect(patch.preRequestScript).toBe("console.log(t);");
-		expect(patch.postRequestScript).toBe("pm.test('ok', () => {});");
+		// `const t = 1;` / `chainTest();` came from the collection and must not
+		// end up inside the request - the next send would run it twice.
+		expect(patch.elements).toEqual([
+			{
+				id: "seed-script-pre",
+				kind: "script.pre",
+				enabled: true,
+				config: { script: "console.log(t);" },
+			},
+			{
+				id: "seed-script-post",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('ok', () => {});" },
+			},
+		]);
 	});
 
 	it("never writes auth, even though the run recorded a mode", () => {
@@ -205,7 +216,7 @@ describe("applyRunToRequest", () => {
 		expect(patch.bodyType).toBe("jsonrpc");
 	});
 
-	it("omits scripts entirely for a run that has only the old glued string", () => {
+	it("omits elements entirely for a run that has only the old glued string", () => {
 		const legacy = run({
 			configSnapshot: {
 				method: "POST",
@@ -219,9 +230,8 @@ describe("applyRunToRequest", () => {
 		const patch = applyRunToRequest(seedFromRun(legacy, live), live);
 
 		// Nothing marks the boundary in the glued string, so the request's own
-		// part cannot be recovered. Leave both fields alone rather than guess.
-		expect(patch).not.toHaveProperty("preRequestScript");
-		expect(patch).not.toHaveProperty("postRequestScript");
+		// part cannot be recovered. Leave the field alone rather than guess.
+		expect(patch).not.toHaveProperty("elements");
 		// The rest still saves.
 		expect(patch.method).toBe("POST");
 	});

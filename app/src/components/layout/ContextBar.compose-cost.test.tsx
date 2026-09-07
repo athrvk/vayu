@@ -58,8 +58,7 @@ vi.mock("@/queries", () => ({
 					params: [],
 					headers: [],
 					auth: { mode: "none" },
-					preRequestScript: "",
-					postRequestScript: "",
+					elements: [],
 				}
 			: undefined,
 		isLoading: false,

@@ -99,7 +99,7 @@ The service handles transformation between frontend (snake_case) and backend (ca
 {
   collection_id: "col_123"
   created_at: "2024-01-01T00:00:00Z"
-  pre_request_script: "console.log('test')"
+  elements: []
 }
 ```
 
@@ -108,7 +108,7 @@ The service handles transformation between frontend (snake_case) and backend (ca
 {
   collectionId: "col_123"
   createdAt: 1704067200000
-  preRequestScript: "console.log('test')"
+  elements: []
 }
 ```
 
@@ -1094,14 +1094,22 @@ await apiService.executeRequest({
   method: "GET",
   url: "https://api.example.com/users",
   headers: { "Authorization": "Bearer {{token}}" },
-  preRequestScripts: [
-    { origin: "request", id: "req_123", script: "console.log('Pre-request');" }
-  ],
-  postRequestScripts: [
+  elements: [
     {
-      origin: "request",
-      id: "req_123",
-      script: "pm.test('Status 200', () => pm.expect(pm.response.code).to.equal(200));"
+      id: "el_1",
+      kind: "script.pre",
+      enabled: true,
+      config: { script: "console.log('Pre-request');" },
+      origin: { kind: "request", id: "req_123" }
+    },
+    {
+      id: "el_2",
+      kind: "script.post",
+      enabled: true,
+      config: {
+        script: "pm.test('Status 200', () => pm.expect(pm.response.code).to.equal(200));"
+      },
+      origin: { kind: "request", id: "req_123" }
     }
   ],
   followRedirects: true,
@@ -1113,14 +1121,19 @@ await apiService.executeRequest({
 });
 ```
 
-`preRequestScripts` / `postRequestScripts` are an ordered list of `ScriptPart`s
-(`{ origin: "collection" | "request", id?, name?, script }`), not a single
-string: the collection chain's scripts (root→leaf), then the request's own.
-The renderer builds the list from its editor state (`scriptParts()` in
-`request-builder/utils/script-parts.ts`) and it rides through `POST /compose`
-untouched - script text is never interpolated; the by-id compose path (used by
-MCP) builds the same list engine-side. The **engine** joins the parts and runs
-the result - see `docs/engine/architecture.md` → *Request composition boundary*.
+`elements` (issue #1512) is the resolved, ordered list of typed behaviours to
+run - the collection chain's (root→leaf), then the request's own, minus
+whatever the request's own `inherit.disable` entries name, each stamped with
+its `origin`. A script is one of these now (`kind: "script.pre"` /
+`"script.post"`, `config.script` the text) - it replaces the old
+`preRequestScripts` / `postRequestScripts` `ScriptPart[]` fields, which the
+engine now refuses outright (400 naming `elements`). The renderer builds the
+list from its editor state (`elementsParts()` in
+`request-builder/utils/elements-parts.ts`, generalizing the old
+`scriptParts()`) and it rides through `POST /compose` untouched - script text
+is never interpolated; the by-id compose path (used by MCP) resolves the same
+list engine-side (`compose_elements`). The **engine** runs each element at its
+kind's phase - see `docs/engine/elements.md`.
 
 **Redirect policy, protocol and TLS verification are always sent, never
 elided.** `followRedirects`, `maxRedirects`, `httpVersion` and `verifySSL` all

@@ -66,15 +66,25 @@ vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({ data: { entries: [] } }),
 }));
 
+/** One `script.post` element holding `text`, on the same id every edit reuses. */
+function scriptElements(text: string) {
+	return [{ id: "el_1", kind: "script.post", enabled: true, config: { script: text } }];
+}
+
 /** Reads the dirty flag and offers the one edit the cases make. */
 function ScriptProbe() {
 	const { request, updateField, hasUnsavedChanges } = useRequestBuilderContext();
+	const script = request.elements.find((el) => el.kind === "script.post")?.config.script;
 	return (
 		<>
-			<span data-testid="script">{request.testScript}</span>
+			<span data-testid="script">{typeof script === "string" ? script : ""}</span>
 			<span data-testid="dirty">{String(hasUnsavedChanges)}</span>
-			<button onClick={() => updateField("testScript", "first")}>type first</button>
-			<button onClick={() => updateField("testScript", "second")}>type second</button>
+			<button onClick={() => updateField("elements", scriptElements("first"))}>
+				type first
+			</button>
+			<button onClick={() => updateField("elements", scriptElements("second"))}>
+				type second
+			</button>
 		</>
 	);
 }
@@ -155,7 +165,9 @@ describe("a save that raced an edit", () => {
 		save();
 		await harness().finish();
 
-		expect(harness().sent.map((r) => r.testScript)).toEqual(["first", "second"]);
+		expect(
+			harness().sent.map((r) => r.elements.find((el) => el.kind === "script.post")?.config.script)
+		).toEqual(["first", "second"]);
 	});
 
 	it("still reports clean when nothing was typed during the flight", async () => {

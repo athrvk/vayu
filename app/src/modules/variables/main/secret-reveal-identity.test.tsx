@@ -100,8 +100,7 @@ function twoSecrets(id = "col_1"): Collection {
 			beta: secret("beta-value", 2000),
 		},
 		auth: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		createdAt: new Date(0).toISOString(),
 		updatedAt: new Date(0).toISOString(),
 	};
