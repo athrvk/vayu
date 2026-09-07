@@ -76,6 +76,8 @@ import {
 	Input,
 	Label,
 	Switch,
+	ToggleGroup,
+	ToggleGroupItem,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { useStartScenarioRunMutation } from "@/queries";
@@ -114,6 +116,17 @@ const MIN_ITERATIONS = 1;
 const DEFAULT_VIRTUAL_USERS = "10";
 const DEFAULT_DURATION_SECONDS = "30";
 
+/**
+ * The `elements` run override (issue #1495), scenario-load-run only - a
+ * design-mode collection run has no inline/deferred distinction to make.
+ * Matches `docs/engine/api-reference.md`'s "elements" block exactly:
+ * `timers` is engine-accepted but not yet wired to a kind (#1498 finishes
+ * that), and `scripts` picks whether a `script.*` element runs inline on the
+ * event-loop worker or stays deferred to the post-run replay.
+ */
+const TIMERS_DEFAULT = "asConfigured";
+const SCRIPTS_DEFAULT = "asMarked";
+
 export default function RunCollectionDialog({
 	collection,
 	onOpenChange,
@@ -149,6 +162,10 @@ export default function RunCollectionDialog({
 	const [failOnSchemaError, setFailOnSchemaError] = useState(false);
 	const [virtualUsers, setVirtualUsers] = useState(DEFAULT_VIRTUAL_USERS);
 	const [durationSeconds, setDurationSeconds] = useState(DEFAULT_DURATION_SECONDS);
+	const [timersOverride, setTimersOverride] = useState<"asConfigured" | "off">(TIMERS_DEFAULT);
+	const [scriptsOverride, setScriptsOverride] = useState<
+		"asMarked" | "allInline" | "allDeferred"
+	>(SCRIPTS_DEFAULT);
 
 	/*
 	 * The contract this run is measured against, resolved through the chain
@@ -272,6 +289,25 @@ export default function RunCollectionDialog({
 							mode: "constant_concurrency" as const,
 							concurrency: virtualUserCount,
 							duration: `${durationSeconds.trim()}s`,
+							// Top-level, matching where the engine reads it
+							// (`validate_elements_run_override` looks at the run
+							// payload directly, not inside `scenario`). Omitted at
+							// the engine's own defaults, the same "absent already
+							// means what the user asked for" rule `failOnSchemaError`
+							// follows below.
+							...(timersOverride !== TIMERS_DEFAULT ||
+							scriptsOverride !== SCRIPTS_DEFAULT
+								? {
+										elements: {
+											...(timersOverride !== TIMERS_DEFAULT
+												? { timers: timersOverride }
+												: {}),
+											...(scriptsOverride !== SCRIPTS_DEFAULT
+												? { scripts: scriptsOverride }
+												: {}),
+										},
+									}
+								: {}),
 						}
 					: {}),
 				scenario: {
@@ -371,7 +407,7 @@ export default function RunCollectionDialog({
 							<span className="block text-xs font-normal text-muted-foreground">
 								Run the sequence as a load test: each virtual user walks it
 								independently, with its own cookies and its own data row, for the
-								duration. Scripts do not run.
+								duration.
 							</span>
 						</Label>
 						<Switch
@@ -429,6 +465,62 @@ export default function RunCollectionDialog({
 										: "Duration must be greater than zero seconds."}
 								</Callout>
 							)}
+
+							<div className="flex items-center justify-between gap-4">
+								<Label className="leading-snug">
+									Timers
+									<span className="block text-xs font-normal text-muted-foreground">
+										As configured, or off for this run.
+									</span>
+								</Label>
+								<ToggleGroup
+									size="sm"
+									aria-label="Timers"
+									value={timersOverride}
+									onValueChange={(value) => {
+										// Radix emits "" when the active segment is
+										// clicked again; a choice is not optional here.
+										if (value === "asConfigured" || value === "off") {
+											setTimersOverride(value);
+										}
+									}}
+								>
+									<ToggleGroupItem value="asConfigured">
+										As configured
+									</ToggleGroupItem>
+									<ToggleGroupItem value="off">Off</ToggleGroupItem>
+								</ToggleGroup>
+							</div>
+
+							<div className="flex items-center justify-between gap-4">
+								<Label className="leading-snug">
+									Scripts
+									<span className="block text-xs font-normal text-muted-foreground">
+										As marked runs a script inline only where its own element
+										says to; the other two override every script this run.
+									</span>
+								</Label>
+								<ToggleGroup
+									size="sm"
+									aria-label="Scripts"
+									value={scriptsOverride}
+									onValueChange={(value) => {
+										if (
+											value === "asMarked" ||
+											value === "allInline" ||
+											value === "allDeferred"
+										) {
+											setScriptsOverride(value);
+										}
+									}}
+								>
+									<ToggleGroupItem value="asMarked">As marked</ToggleGroupItem>
+									<ToggleGroupItem value="allInline">All inline</ToggleGroupItem>
+									<ToggleGroupItem value="allDeferred">
+										All deferred
+									</ToggleGroupItem>
+								</ToggleGroup>
+							</div>
 						</>
 					)}
 
