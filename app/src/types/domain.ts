@@ -54,13 +54,23 @@ export type AuthMode =
  */
 export type AutoHeaderSource = "body-mode" | "stream";
 
+/**
+ * `source` on a stored row: an app setting's own marker (`AutoHeaderSource`),
+ * or `"legacy-default"` - the engine's header-strip repair pass stamps this on
+ * a row it disabled because its value was the exact shape a pre-#1229 client
+ * wrote (`X-Vayu-Version`, `X-Request-ID`, `User-Agent`), so the row survives
+ * disabled rather than deleted and the user can re-enable it if the match was
+ * wrong (issue #1491).
+ */
+export type HeaderRowSource = AutoHeaderSource | "legacy-default";
+
 export interface KeyValueEntry {
 	key: string;
 	value: string;
 	enabled: boolean;
 	description?: string;
-	/** Present only on a row an app setting wrote; absent on one the user typed. */
-	source?: AutoHeaderSource;
+	/** Present only on a row an app setting or the engine's own repair pass wrote; absent on one the user typed. */
+	source?: HeaderRowSource;
 }
 
 /**

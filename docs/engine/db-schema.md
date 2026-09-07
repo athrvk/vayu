@@ -150,28 +150,43 @@ Best-effort like the sweeps before it: a failure is a warning, never a daemon th
 `auto_vacuum` was rejected as the alternative - switching an existing database's mode requires a
 full `VACUUM` anyway, and it changes page bookkeeping for every write thereafter.
 
-### The header-strip pass (issue #1487)
+### The header-strip pass (issues #1487, #1491)
 
-`Database::strip_stored_managed_headers()`, called from `init()`, removes the `X-Vayu-Version`,
+`Database::strip_stored_managed_headers()`, called from `init()`, disables the `X-Vayu-Version`,
 `X-Request-ID` and `User-Agent` rows a pre-#1229 renderer wrote into a saved request's `headers`
 column on the app's own behalf - default headers are applied per transfer now and never stored.
 Like the passes above it runs before `/health` can answer, but it is scoped so a workspace with
-nothing left to strip pays close to nothing for it:
+nothing left to touch pays close to nothing for it:
 
-- **A SQL `LIKE` over `headers` first.** Only rows whose header text could contain one of the
-  three names are loaded into a `Request` and JSON-parsed; `LIKE` is ASCII case-insensitive by
-  default, the same fold the exact predicate applies to a matched key. A workspace already
-  stripped costs one scan of the column, not a materialisation of every request's body and
-  script.
+- **A SQL `LIKE` over `headers` first, on undeleted rows only.** Only rows whose header text
+  could contain one of the three names, and whose `deleted_at` is `NULL`, are loaded into a
+  `Request` and JSON-parsed; `LIKE` is ASCII case-insensitive by default, the same fold the exact
+  predicate applies to a matched key. A workspace already handled costs one scan of the column,
+  not a materialisation of every request's body and script. A request in the trash is left
+  byte-identical - see below.
+- **A row is matched by value shape, not by name or header family alone** (issue #1491): a
+  `X-Vayu-Version` only when its value is a plain `MAJOR.MINOR.PATCH` version, an `X-Request-ID`
+  only when its value is the exact lowercase RFC 4122 v4 UUID `generateUUID()` produced, and a
+  `User-Agent` only when its value is `Vayu/` followed by that same plain version - never a name
+  or family match broad enough to catch a value the user typed on purpose.
+- **A match is disabled and marked, never deleted** (issue #1491): the row's `enabled` is set to
+  `false` (so it is never sent - the wire is exactly as clean as deleting it would have been) and
+  its `source` is set to `"legacy-default"`, the app-readable marker `KeyValueEntry.source` already
+  carries for an app-written row (issue #1481). The row survives for a user to find in the editor
+  and re-enable, in case a match turns out to be wrong.
 - **One transaction for the rewrite**, not one implicit commit per candidate row - the same shape
   `seed_default_config` uses.
-- **A one-time marker.** Once a pass finds nothing left to strip, it records a
+- **A one-time marker.** Once a pass finds nothing left to change, it records a
   `managedHeadersStripped` config entry (`advanced`, no everyday user story) and every later start
   skips the scan outright rather than re-running it to confirm nothing changed. #1492 will give
   this kind of migration bookkeeping a proper home; until then a config entry is where this
   file's other internal-only flags already live.
 - **`<db>.pre-upgrade.bak`** is written once, immediately before the first row this pass ever
   rewrites - see the backup note above.
+- **Trash is caught up on restore, not on the startup scan.** A request already in the trash when
+  this pass runs is skipped, so it stays byte-identical for as long as it sits there; restoring it
+  (`restore_request_locked` / `restore_collection_locked`) runs the same disable-and-mark step on
+  its way back, which is a no-op if the pass already handled it before the request was deleted.
 
 ### The script-to-elements fold (issue #1513)
 
@@ -365,12 +380,13 @@ Stores individual HTTP request definitions.
 ```
 Disabled rows (`"enabled":false`) are preserved in storage and filtered at HTTP-execution time only.
 Duplicate keys are allowed. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
-`X-Request-ID` and `User-Agent` rows here; [the header-strip pass](#the-header-strip-pass-issue-1487)
-removes them once, at startup. An optional `source` key (`"body-mode"` | `"stream"`)
-marks a row an app setting wrote rather than the user - the auto `Content-Type` a
-body-mode change adds, the `Accept` the Event stream toggle adds - so it can tell its
-own row apart from a hand-typed one across a reload; retyping the row's key or value
-clears it (issue #1481).
+`X-Request-ID` and `User-Agent` rows here; [the header-strip pass](#the-header-strip-pass-issues-1487-1491)
+disables them once, at startup, leaving each row in place with `source: "legacy-default"`.
+An optional `source` key (`"body-mode"` | `"stream"` | `"legacy-default"`) marks a row
+an app setting or that repair pass wrote rather than the user - the auto `Content-Type`
+a body-mode change adds, the `Accept` the Event stream toggle adds, or a row the
+header-strip pass disabled - so it can tell its own row apart from a hand-typed one
+across a reload; retyping the row's key or value clears it (issues #1481, #1491).
 
 **elements** - same shape and the same additive relationship to `pre_request_script` /
 `post_request_script` as [`collections.elements`](#collections) above; see that entry.

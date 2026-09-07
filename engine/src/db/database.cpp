@@ -1186,7 +1186,7 @@ void Database::init () {
     // fails must not cost the user their engine.
     try {
         if (const int64_t stripped = strip_stored_managed_headers (); stripped > 0) {
-            vayu::utils::log_info ("Removed Vayu's own headers from " +
+            vayu::utils::log_info ("Disabled Vayu's own headers on " +
             std::to_string (stripped) + " stored request(s); they are added at send time");
         }
     } catch (const std::exception& e) {
@@ -1610,6 +1610,14 @@ const TrashEntry& entry) {
         for (auto& request : impl_->storage.get_all<Request> (where (
              c (&Request::id) == entry.id && c (&Request::deleted_at) == entry.deleted_at))) {
             request.deleted_at.reset ();
+            // A row trashed before the startup pass ever reached it (issue
+            // #1491: trash is skipped there) gets the same disable-and-mark
+            // treatment on the way back, rather than coming back exactly as
+            // it went in.
+            if (auto rewritten =
+                vayu::http::strip_legacy_managed_headers (request.headers)) {
+                request.headers = std::move (*rewritten);
+            }
             impl_->storage.update (request);
         }
         return true; // Commit
@@ -1631,6 +1639,13 @@ TrashOutcome Database::restore_collection_locked (const TrashEntry& entry) {
                  where (c (&Request::collection_id) == collection_id &&
                  c (&Request::deleted_at) == entry.deleted_at))) {
                 request.deleted_at.reset ();
+                // See the same call in `restore_request_locked`: a row
+                // trashed before the startup pass ever reached it comes back
+                // through the same disable-and-mark treatment.
+                if (auto rewritten =
+                    vayu::http::strip_legacy_managed_headers (request.headers)) {
+                    request.headers = std::move (*rewritten);
+                }
                 impl_->storage.update (request);
             }
             for (auto& collection : impl_->storage.get_all<Collection> (
@@ -2108,9 +2123,15 @@ int64_t Database::strip_stored_managed_headers () {
     // to a matched key, so a workspace with nothing left to strip costs one
     // scan of this column rather than a materialisation of every request's
     // body and script (issue #1487).
-    auto candidates = impl_->storage.get_all<Request> (
-    where (like (&Request::headers, "%x-vayu-version%") or
-    like (&Request::headers, "%x-request-id%") or like (&Request::headers, "%user-agent%")));
+    // Trash is left alone (issue #1491): a restored row runs through the same
+    // disable pass on the way back, in `restore_request_locked` /
+    // `restore_collection_locked`, so a request in the trash stays
+    // byte-identical until then rather than being rewritten while nobody can
+    // see or undo it.
+    auto candidates =
+    impl_->storage.get_all<Request> (where (is_null (&Request::deleted_at) &&
+    (like (&Request::headers, "%x-vayu-version%") or like (&Request::headers, "%x-request-id%") or
+    like (&Request::headers, "%user-agent%"))));
 
     auto mark_done = [&] {
         save_config_entry (ConfigEntry{
@@ -2167,7 +2188,7 @@ int64_t Database::strip_stored_managed_headers () {
         }
         request.headers = std::move (*rewritten);
         // `updated_at` is left alone, as the spec-binding repair leaves it:
-        // this removes what the app wrote on its own behalf, not an edit
+        // this disables what the app wrote on its own behalf, not an edit
         // anybody made, and touching the timestamp would sort every request a
         // user owns to the top of "recently changed" on one upgrade.
         impl_->storage.replace (request);

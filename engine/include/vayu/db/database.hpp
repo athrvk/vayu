@@ -447,7 +447,7 @@ class Database {
     int64_t stamp_hashless_spec_bindings ();
 
     /**
-     * @brief Drop the header rows a pre-#1229 client saved into stored
+     * @brief Disable the header rows a pre-#1229 client saved into stored
      *        requests, and answer how many requests were rewritten.
      *
      * The renderer used to write `X-Vayu-Version` and a fresh `X-Request-ID`
@@ -459,15 +459,18 @@ class Database {
      * nothing that was already written down; this pass is the "already
      * written down" half.
      *
-     * Which rows go and why each rule is narrow:
-     * `http/default_headers.hpp`'s `strip_legacy_managed_headers`, which is the
-     * decision, so it can be read - and tested - without a database.
+     * Which rows match and why each rule is narrow enough to disable rather
+     * than delete: `http/default_headers.hpp`'s `strip_legacy_managed_headers`,
+     * which is the decision, so it can be read - and tested - without a
+     * database.
      *
      * Idempotent, and run at startup beside the other repair passes for the
-     * reason `stamp_hashless_spec_bindings` is: a stripped request is skipped
+     * reason `stamp_hashless_spec_bindings` is: a rewritten request is skipped
      * on the next start, so the pass costs one scan of a sidebar-sized table.
-     * Deleted rows are rewritten too, so a request restored from the trash
-     * afterwards does not bring the stale headers back with it.
+     * Trashed rows are left alone here (issue #1491) - `restore_request_locked`
+     * / `restore_collection_locked` run the same disable on a row on its way
+     * out of the trash, so a request sitting there stays byte-identical until
+     * someone actually brings it back.
      */
     int64_t strip_stored_managed_headers ();
 
