@@ -407,6 +407,19 @@ Json serialize (const vayu::db::Collection& c) {
     json["preRequestScript"]  = c.pre_request_script;
     json["postRequestScript"] = c.post_request_script;
 
+    // Elements (issue #1513), additive beside the two fields above - a
+    // migrated collection's scripts are also `script.pre`/`script.post`
+    // entries here, but nothing runs an element yet (#1514).
+    if (c.elements.empty ()) {
+        json["elements"] = Json::array ();
+    } else {
+        try {
+            json["elements"] = Json::parse (c.elements);
+        } catch (const std::exception&) {
+            json["elements"] = Json::array ();
+        }
+    }
+
     // The declared data contract. Same try-parse-with-default block as
     // variables: a row written before the column existed holds "", and an
     // unparseable blob is no more a schema than an absent one.
@@ -494,11 +507,22 @@ Json serialize (const vayu::db::Request& r) {
 
     json["preRequestScript"]  = r.pre_request_script;
     json["postRequestScript"] = r.post_request_script;
-    json["followRedirects"]   = r.follow_redirects;
-    json["maxRedirects"]      = r.max_redirects;
-    json["httpVersion"]       = r.http_version;
-    json["verifySSL"]         = r.verify_ssl;
-    json["stream"]            = r.stream;
+
+    // Elements (issue #1513), additive beside the two fields above.
+    if (r.elements.empty ()) {
+        json["elements"] = Json::array ();
+    } else {
+        try {
+            json["elements"] = Json::parse (r.elements);
+        } catch (const std::exception&) {
+            json["elements"] = Json::array ();
+        }
+    }
+    json["followRedirects"] = r.follow_redirects;
+    json["maxRedirects"]    = r.max_redirects;
+    json["httpVersion"]     = r.http_version;
+    json["verifySSL"]       = r.verify_ssl;
+    json["stream"]          = r.stream;
     // Operation identity (issue #637). Always present as a key, `null` when the
     // request declares none - the column is nullable, and a client that has to
     // tell "no operation" from "key not serialized yet" would be guessing. An
@@ -1230,6 +1254,9 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
 
     out << "\"preRequestScript\":" << Json (r.pre_request_script).dump () << ",";
     out << "\"postRequestScript\":" << Json (r.post_request_script).dump () << ",";
+    // Elements (issue #1513), additive beside the two fields above.
+    write_json_column (out, "elements", r.elements, "[]", max_field_size);
+    out << ",";
     out << "\"followRedirects\":" << (r.follow_redirects ? "true" : "false") << ",";
     out << "\"maxRedirects\":" << r.max_redirects << ",";
     out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";

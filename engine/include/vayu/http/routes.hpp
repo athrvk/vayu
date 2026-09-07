@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "vayu/core/elements.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/schema_validation.hpp"
@@ -34,6 +35,7 @@
 // see it. Included here so route TUs keep naming it through routes.hpp.
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/run_summary_cache.hpp"
+#include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::core {
@@ -355,6 +357,47 @@ apply_key_value_field (const nlohmann::json& json, const char* key, std::string&
         }
     }
     out = value.dump ();
+    return {};
+}
+
+/**
+ * Same null-vs-absent rule for `elements` (issue #1513): a null resets to
+ * `[]`; a present value must be an array the registry accepts -
+ * `vayu::core::Registry::validate` carries the shape check, the kind lookup
+ * and each entry's config-schema validation, so this stays a thin wrapper
+ * rather than a second copy of any of that.
+ */
+[[nodiscard]] inline RouteResult
+apply_elements_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = "[]";
+        }
+        return {};
+    }
+    const auto& value = json[key];
+    if (value.is_null ()) {
+        out = "[]";
+        return {};
+    }
+    // The engine assigns an `el_` id when the caller sends none (issue #1513's
+    // storage contract), validated *after* - a client that names no id at all
+    // gets one rather than a 400 asking it to invent one itself. A non-array
+    // `value` is left alone; `validate` below is what names that refusal.
+    nlohmann::json with_ids = value;
+    if (with_ids.is_array ()) {
+        for (auto& entry : with_ids) {
+            if (entry.is_object () &&
+            (!entry.contains ("id") || !entry["id"].is_string () ||
+            entry["id"].get<std::string> ().empty ())) {
+                entry["id"] = vayu::utils::generate_id ("el_");
+            }
+        }
+    }
+    if (auto reason = vayu::core::Registry::instance ().validate (with_ids)) {
+        return route_error (400, *reason);
+    }
+    out = with_ids.dump ();
     return {};
 }
 
@@ -1131,6 +1174,7 @@ void register_mock_issuer_routes (RouteContext& ctx);
 void register_inbox_routes (RouteContext& ctx);
 void register_event_stream_routes (RouteContext& ctx);
 void register_mock_server_routes (RouteContext& ctx);
+void register_elements_routes (RouteContext& ctx);
 
 /**
  * @brief Generate the TypeScript declarations for the `pm.*` script surface.

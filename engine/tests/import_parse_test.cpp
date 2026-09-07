@@ -92,6 +92,12 @@ json read_fixture () {
  * iterator's non-nullness and reports a `-Wnull-dereference` on nlohmann's
  * own internals - the traced-into-libstdc++ family that macro exists for,
  * not a real path through this function.
+ *
+ * The descent is `children.at (0)` behind an emptiness check, not a range-for
+ * that returns on its first iteration: MSVC's `/Od` build reports such a
+ * loop's never-reached increment as C4702, fatal under the `/WX` that is
+ * unconditional on that compiler, and only the Windows ASan leg builds at
+ * `/Od` (`/O2` folds the loop away, so `windows-prod` never sees it).
  */
 VAYU_IGNORE_FALSE_NULL_DEREFERENCE
 const nlohmann::ordered_json& first_request (const nlohmann::ordered_json& collection) {
@@ -99,8 +105,9 @@ const nlohmann::ordered_json& first_request (const nlohmann::ordered_json& colle
     requests != collection.end () && !requests->empty ()) {
         return requests->at (0);
     }
-    for (const nlohmann::ordered_json& child : collection.at ("children")) {
-        return first_request (child);
+    if (const nlohmann::ordered_json& children = collection.at ("children");
+    !children.empty ()) {
+        return first_request (children.at (0));
     }
     ADD_FAILURE () << "no request found under " << collection.dump ();
     static const nlohmann::ordered_json none;
