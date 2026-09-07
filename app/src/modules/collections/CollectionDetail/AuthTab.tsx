@@ -32,7 +32,7 @@
  * above the fields.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { Lock } from "lucide-react";
 
 import {
@@ -53,6 +53,7 @@ import {
 } from "@/constants/auth-modes";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
+import { useCollectionAuthDraftStore } from "@/stores";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import InheritanceChain from "./InheritanceChain";
@@ -137,9 +138,10 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 	// `mode === null` is exactly the digest/aws/ntlm set.
 	const uneditableLabel = uneditableAuthLabel(auth.mode);
 	const hint = mode ? AUTH_MODE_HINTS[mode] : undefined;
-	// The modes with credentials to type. `none`/`noauth` render an empty state
-	// and are saved by the picker alone, so they get neither the note nor the
-	// always-visible button row.
+	// The modes with fields to type into - gates the "saved together" hint
+	// above them. `none`/`noauth` render an empty state with nothing to type,
+	// but share the same Save Auth button below: every mode on this tab
+	// commits on that click, never on the picker alone.
 	const hasCredentialFields = mode !== null && mode !== "none" && mode !== "noauth";
 
 	const persist = useCallback(async () => {
@@ -154,6 +156,18 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 		isActive: active,
 		save: persist,
 	});
+
+	// Published outside this tab so the Inheritance Chain card (rendered below)
+	// and the context bar's `CollectionAuthSection` (mounted elsewhere in the
+	// tree) can show the picked-but-unsaved mode instead of the stale stored
+	// one (#1483). Equal to the stored value while clean, so this is a no-op
+	// then.
+	const setAuthDraft = useCollectionAuthDraftStore((s) => s.setDraft);
+	const clearAuthDraft = useCollectionAuthDraftStore((s) => s.clearDraft);
+	useEffect(() => {
+		setAuthDraft(collection.id, auth);
+		return () => clearAuthDraft(collection.id);
+	}, [collection.id, auth, setAuthDraft, clearAuthDraft]);
 
 	// A rejection here is rendered by <SaveFailed> below; the store-driven paths
 	// toast instead, since this callout may not be on screen at all.
@@ -264,38 +278,24 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 
 			<SaveFailed mutation={updateCollection} what="auth" className="mt-6" />
 
-			{hasCredentialFields && (
-				<div className="flex gap-2 mt-6">
-					<Button
-						onClick={handleSave}
-						disabled={!isDirty || updateCollection.isPending}
-						className="font-semibold"
-					>
-						{updateCollection.isPending ? "Saving…" : "Save Auth"}
-					</Button>
-					<Button
-						variant="outline"
-						onClick={resetDraft}
-						disabled={!isDirty || updateCollection.isPending}
-					>
-						Reset
-					</Button>
-				</div>
-			)}
+			<div className="flex gap-2 mt-6">
+				<Button
+					onClick={handleSave}
+					disabled={!isDirty || updateCollection.isPending}
+					className="font-semibold"
+				>
+					{updateCollection.isPending ? "Saving…" : "Save Auth"}
+				</Button>
+				<Button
+					variant="outline"
+					onClick={resetDraft}
+					disabled={!isDirty || updateCollection.isPending}
+				>
+					Reset
+				</Button>
+			</div>
 
-			{(mode === "none" || mode === "noauth") && isDirty && (
-				<div className="flex gap-2 mt-6">
-					<Button
-						onClick={handleSave}
-						disabled={updateCollection.isPending}
-						className="font-semibold"
-					>
-						{updateCollection.isPending ? "Saving…" : "Save"}
-					</Button>
-				</div>
-			)}
-
-			<InheritanceChain collectionId={collection.id} />
+			<InheritanceChain collectionId={collection.id} draftAuth={auth} />
 		</div>
 	);
 }

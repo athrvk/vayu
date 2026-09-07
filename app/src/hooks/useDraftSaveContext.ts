@@ -61,6 +61,8 @@ export function useDraftSaveContext({
 	const unregisterContext = useSaveStore((s) => s.unregisterContext);
 	const updateContext = useSaveStore((s) => s.updateContext);
 	const setActiveContext = useSaveStore((s) => s.setActiveContext);
+	const markPendingSave = useSaveStore((s) => s.markPendingSave);
+	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
 	const failSave = useSaveStore((s) => s.failSave);
 
 	// The registered save is bound once and reads the latest `save` when it runs,
@@ -87,9 +89,27 @@ export function useDraftSaveContext({
 		return () => unregisterContext(id);
 	}, [id, name, runSave, registerContext, unregisterContext]);
 
+	// Mirrors the registry entry's dirty flag onto the store-wide `status`, which
+	// is what the Dock actually reads for "Unsaved changes" (`hasPendingChanges`
+	// on a context is not consulted there - see save-store.ts). Without this,
+	// `useSaveManager`'s autosave editors lit the Dock on every keystroke and
+	// these three never did at all. Edge-triggered on `isDirty`, and guarded on
+	// `id` staying the same: a context switching entities (collection.id
+	// changing) reseeds cleanly rather than reporting the *previous* entity's
+	// dirty-to-clean transition as this one's save completing.
+	// Seeded `isDirty: false` regardless of the actual first render, so an
+	// editor that somehow mounts already dirty still reports the rising edge
+	// instead of silently agreeing with itself that nothing changed.
+	const prevRef = useRef({ id, isDirty: false });
 	useEffect(() => {
 		updateContext(id, { hasPendingChanges: isDirty });
-	}, [id, isDirty, updateContext]);
+		const prev = prevRef.current;
+		if (prev.id === id) {
+			if (isDirty && !prev.isDirty) markPendingSave();
+			else if (!isDirty && prev.isDirty) completeSaveThenIdle(id);
+		}
+		prevRef.current = { id, isDirty };
+	}, [id, isDirty, updateContext, markPendingSave, completeSaveThenIdle]);
 
 	useEffect(() => {
 		if (isActive) setActiveContext(id);
