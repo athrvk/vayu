@@ -66,8 +66,7 @@ function fixtureWith(request: Pick<RequestDraft, "name" | "url" | "params">): Im
 				description: "",
 				variables: {},
 				auth: { mode: "none" },
-				preRequestScript: "",
-				postRequestScript: "",
+				elements: [],
 				children: [],
 				requests: [
 					{
@@ -77,8 +76,7 @@ function fixtureWith(request: Pick<RequestDraft, "name" | "url" | "params">): Im
 						headers: [],
 						body: { mode: "none" },
 						auth: { mode: "inherit" },
-						preRequestScript: "",
-						postRequestScript: "",
+						elements: [],
 					},
 				],
 			},
@@ -107,8 +105,7 @@ function fixture(): ImportResult {
 				description: "",
 				variables: {},
 				auth: { mode: "none" },
-				preRequestScript: "",
-				postRequestScript: "",
+				elements: [],
 				requests: [
 					{
 						name: "r1",
@@ -119,8 +116,7 @@ function fixture(): ImportResult {
 						headers: [],
 						body: { mode: "json", content: "{}" },
 						auth: { mode: "inherit" },
-						preRequestScript: "",
-						postRequestScript: "",
+						elements: [],
 					},
 				],
 				children: [
@@ -129,8 +125,7 @@ function fixture(): ImportResult {
 						description: "",
 						variables: {},
 						auth: { mode: "none" },
-						preRequestScript: "",
-						postRequestScript: "",
+						elements: [],
 						requests: [
 							{
 								name: "r2",
@@ -141,8 +136,7 @@ function fixture(): ImportResult {
 								headers: [],
 								body: { mode: "none" },
 								auth: { mode: "inherit" },
-								preRequestScript: "",
-								postRequestScript: "",
+								elements: [],
 							},
 						],
 						children: [],
@@ -306,8 +300,7 @@ describe("ImportOrchestrator", () => {
 					description: "",
 					variables: {},
 					auth: { mode: "none" },
-					preRequestScript: "",
-					postRequestScript: "",
+					elements: [],
 					requests: [],
 					children: [],
 				},

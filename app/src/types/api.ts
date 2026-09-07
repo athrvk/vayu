@@ -1332,8 +1332,15 @@ export interface ImportApplyCollection {
 	order?: number;
 	variables?: Record<string, VariableValue>;
 	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	/**
+	 * Typed behaviours (extractors, assertions, timers, scripts - issue #1512),
+	 * carried through verbatim from the parsed draft. The app does not yet edit
+	 * or display these (issue #1516); this is passthrough only, so an import
+	 * with a `script.pre` / `script.post` element still lands on the created
+	 * row instead of being silently dropped now that `preRequestScript` /
+	 * `postRequestScript` are refused (issue #1514).
+	 */
+	elements?: unknown[];
 	/**
 	 * The spec document this collection binds, named by the payload's own temp id
 	 * (issue #637). `specTempId` and not `specId`: the document is created by the
@@ -1391,8 +1398,8 @@ export interface ImportApplyRequestItem {
 	body?: RequestBody;
 	bodyType?: string;
 	auth?: RequestAuth;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	/** See {@link ImportApplyCollection.elements}. */
+	elements?: unknown[];
 	/** Omitted unless the imported file states them; the engine then applies its own defaults. */
 	followRedirects?: boolean;
 	maxRedirects?: number;

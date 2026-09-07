@@ -30,19 +30,22 @@
  *    so resolving lazily in design mode would be a stopgap load mode has to
  *    undo.
  *
- * Composition goes through `compose_request_core` / `build_request` and the
- * script join through `read_pre_request_script` / `read_post_request_script`,
- * which is what keeps a step byte-identical to what a Send of the same request
- * would run. There is deliberately no second copy of resolution here.
+ * Composition goes through `compose_request_core` / `build_request` and each
+ * step's elements are `compose_elements`' resolved list, compiled once
+ * (issue #1514) - which is what keeps a step byte-identical to what a Send of
+ * the same request would run. There is deliberately no second copy of
+ * resolution here.
  */
 
 #include <cstddef>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "vayu/core/elements.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/schema_validation.hpp"
 #include "vayu/core/spec_coverage.hpp"
@@ -62,9 +65,15 @@ struct ScenarioStep {
     std::string name;
     /// Composed and auth-resolved. Credential-grade; see `build_scenario_manifest`.
     vayu::Request request;
-    /// Joined script parts (collection chain, then the request's own).
-    std::string pre_script;
-    std::string post_script;
+    /// This step's resolved element list, compiled once here rather than per
+    /// iteration (issue #1514) - `extract.*` / `assert.*` / `timer.think` /
+    /// `script.pre` / `script.post`, in the order `compose_elements` resolved
+    /// them (collection chain, then the request's own). A `shared_ptr` to a
+    /// `const` vector rather than the vector itself: `CompiledElement` holds
+    /// a `unique_ptr<Element>`, so a step carrying one is move-only unless the
+    /// list itself is shared by pointer, and every iteration of this step
+    /// reuses the same compiled list rather than recompiling it.
+    std::shared_ptr<const std::vector<vayu::core::CompiledElement>> elements;
     /// The stored, uncomposed URL. Carried on the step so the snapshot manifest
     /// can record a URL that is safe to persist without re-reading the row -
     /// `request.url` has `{{vars}}` substituted and may carry an `apikey` auth
@@ -113,6 +122,16 @@ struct ScenarioStep {
 struct ScenarioPlan {
     std::vector<ScenarioStep> steps;
 };
+
+/**
+ * Whether @p step carries a `script.pre` / `script.post` element (issue
+ * #1514's cut-over - `ScenarioStep::pre_script` / `post_script` are gone).
+ * The load path reads this to report a script it never runs (a load run
+ * executes no `step.before` / `step.after` phase - that pipeline is #1495);
+ * the deferred replay reads a step's script *text*, which is
+ * `find_step_post_script` in `run_manager.cpp`, not this.
+ */
+[[nodiscard]] bool step_has_script (const ScenarioStep& step, std::string_view kind);
 
 /**
  * The validated `scenario` block of a `POST /runs` payload.

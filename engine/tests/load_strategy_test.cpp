@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -216,6 +217,132 @@ TEST_F (LoadStrategyTest, RampUpDurationShorterThanRampStillRuns) {
 
     EXPECT_GT (context->requests_sent.load (), 0u)
     << "duration<ramp submitted nothing; partial-ramp behavior not implemented";
+}
+
+// A single-request load run's token-free fast path (issue #1540) never
+// copies the request per submission (issue #992), so it cannot re-scan for
+// an unresolved `{{token}}` the way the copying branch does at line ~445 of
+// load_strategy.cpp. `start_run` scans once instead and hands the names down
+// through `RunContext::load_unresolved_tokens`, which this test sets
+// directly since it drives the strategy without going through `start_run`.
+// Mutation check: remove the `record_unresolved_token` call from the fast
+// path in `submit_one_request` and this reds, because nothing else on that
+// branch ever looks at the field.
+TEST_F (LoadStrategyTest, FastPathWithAnUnresolvedTokenCountsAndWarnsWithoutRefusingTheRun) {
+    const size_t M        = 5;
+    nlohmann::json config = {
+        { "mode", "iterations" },
+        { "iterations", M },
+        { "concurrency", 1 },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-fastpath-unresolved", config);
+    context->load_unresolved_tokens = { "missing" };
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url () + "?token={{missing}}";
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    ASSERT_EQ (context->requests_sent.load (), M);
+    EXPECT_EQ (context->metrics_collector->unresolved_token_requests (), M)
+    << "the fast path sends the same unresolved bytes on every submission";
+    const auto names = context->metrics_collector->unresolved_token_names ();
+    ASSERT_EQ (names.size (), 1u);
+    EXPECT_EQ (names[0], "missing");
+}
+
+// The companion shapes: `load_unresolved_tokens` left empty (a request
+// resolved cleanly, or carries only a reserved name like `{{$vu}}`, which
+// `start_run` never puts in the set) records nothing on the fast path.
+TEST_F (LoadStrategyTest, FastPathWithNoUnresolvedTokenRecordsNoWarning) {
+    nlohmann::json config = {
+        { "mode", "iterations" },
+        { "iterations", 3 },
+        { "concurrency", 1 },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-fastpath-clean", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url () + "?vu={{$vu}}";
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_EQ (context->metrics_collector->unresolved_token_requests (), 0u);
+    EXPECT_TRUE (context->metrics_collector->unresolved_token_names ().empty ());
+}
+
+// The two cases above set `load_unresolved_tokens` directly, so neither
+// exercises `RunManager::start_run` actually populating it (`run_manager.cpp`,
+// beside the `load_template` build) before a real run reaches the fast path.
+// This one drives a real run end to end so a regression that dropped that
+// wiring - not just the fast-path record call above - fails a test.
+TEST_F (LoadStrategyTest, StartRunWiresTheFastPathScanIntoARealRunsReport) {
+    const size_t ITERATIONS = 3;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    vayu::db::Run row;
+    row.id              = "run-fastpath-wiring";
+    row.type            = vayu::RunType::Load;
+    row.status          = vayu::RunStatus::Pending;
+    row.config_snapshot = "{}";
+    row.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                     .count ();
+    row.end_time = 0;
+    db.create_run (row);
+
+    const nlohmann::json config = { { "mode", "iterations" },
+        { "iterations", ITERATIONS }, { "concurrency", 1 },
+        { "url", mock_server->fast_url () + "?auth={{token}}" },
+        { "method", "GET" }, { "timeout", 5000 } };
+
+    vayu::core::RunManager run_manager;
+    ASSERT_TRUE (run_manager.start_run (row.id, config, db, false));
+
+    const auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (30);
+    while (std::chrono::steady_clock::now () < deadline) {
+        const auto stored = db.get_run (row.id);
+        if (stored && stored->status != vayu::RunStatus::Running &&
+        stored->status != vayu::RunStatus::Pending) {
+            break;
+        }
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+    run_manager.shutdown (std::chrono::milliseconds (15000));
+
+    const auto stored = db.get_run (row.id);
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_FALSE (stored->summary.empty ()) << "the run produced no summary";
+    const auto summary = nlohmann::json::parse (stored->summary);
+    ASSERT_TRUE (summary.contains ("warnings")) << summary.dump ();
+    ASSERT_FALSE (summary["warnings"].empty ()) << summary.dump ();
+    EXPECT_EQ (summary["warnings"][0]["code"], "unresolved_tokens");
+    EXPECT_EQ (summary["warnings"][0]["count"], ITERATIONS);
+    const auto& names = summary["warnings"][0]["names"];
+    EXPECT_NE (std::find (names.begin (), names.end (), "token"), names.end ())
+    << summary.dump ();
 }
 
 // Closed-loop iterations: submit exactly M, never exceed N in flight.

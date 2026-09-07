@@ -37,8 +37,7 @@ export function requestFieldsFromDraft(r: RequestDraft): DraftRequestFields {
 		body: r.body,
 		bodyType: r.body.mode, // engine never derives this
 		auth: r.auth,
-		preRequestScript: r.preRequestScript,
-		postRequestScript: r.postRequestScript,
+		elements: r.elements,
 		// Spread rather than assigned so the payload object holds the key only
 		// when the source stated it. `JSON.stringify` would drop an `undefined`
 		// property anyway, but the payload is also compared structurally in

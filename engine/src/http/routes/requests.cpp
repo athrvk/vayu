@@ -269,11 +269,12 @@ bool is_create) {
     !outcome) {
         return outcome;
     }
-    apply_string_field (json, "preRequestScript", r.pre_request_script, "", is_create);
-    apply_string_field (json, "postRequestScript", r.post_request_script, "", is_create);
-    // Elements (issue #1513), additive beside the two script fields above:
-    // nothing runs an element yet (#1514), so a client with no elements
-    // editor keeps using the two fields exactly as before.
+    // Scripts are elements now (issue #1514's clean cut - no transitional
+    // alias, per the owner's decision on #1512): `preRequestScript` /
+    // `postRequestScript` refuse rather than write.
+    if (auto refusal = refuse_legacy_script_fields (json)) {
+        return route_error (400, *refusal);
+    }
     if (auto outcome = apply_elements_field (json, "elements", r.elements, is_create);
     !outcome) {
         return outcome;
@@ -545,7 +546,7 @@ void register_request_routes (RouteContext& ctx) {
      * the id; a body carrying one is a 400 (issue #97).
      * Body params: collectionId, name, method, url (all required), description,
      * params/headers (arrays of KeyValueEntry), body, bodyType, auth,
-     * preRequestScript, postRequestScript, order, followRedirects,
+     * elements, order, followRedirects,
      * maxRedirects, stream, specOperation ({operationId?, method, path} naming
      * the operation of the collection's bound spec this request is, or null for
      * none), httpVersion (absent/null seeds from the "defaultHttpVersion"

@@ -36,6 +36,7 @@
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "step_elements_test_helper.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -172,8 +173,9 @@ class ScriptSendRequestCapDesignTest : public ::testing::Test {
         request.url    = server_->url ();
 
         vayu::http::routes::ExchangeInputs inputs;
-        inputs.request            = std::move (request);
-        inputs.pre_script         = fetch_expecting (server_->url (), expected);
+        inputs.request  = std::move (request);
+        inputs.elements = vayu::tests::step_elements_with_pre_script (
+        fetch_expecting (server_->url (), expected));
         inputs.max_response_bytes = bound;
         return execute_exchange (engine, jar, "", scopes, std::move (inputs), false)
         .pre_script_result;
@@ -273,9 +275,10 @@ class ScriptSendRequestCapLoadTest : public ::testing::Test {
         execution->request.iterations    = 1;
 
         vayu::core::ScenarioStep step;
-        step.index          = 0;
-        step.name           = "Fetch";
-        step.post_script    = fetch_expecting (server_->url (), expected);
+        step.index    = 0;
+        step.name     = "Fetch";
+        step.elements = vayu::tests::step_elements_with_post_script (
+        fetch_expecting (server_->url (), expected));
         step.request.method = vayu::HttpMethod::GET;
         step.request.url    = server_->url ();
         execution->plan.steps.push_back (step);

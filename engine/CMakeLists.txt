@@ -480,6 +480,11 @@ add_library(vayu_core STATIC
     src/core/elements/registry.cpp
     src/core/elements/inherit_disable.cpp
     src/core/elements/script_kinds.cpp
+    src/core/elements/pipeline.cpp
+    src/core/elements/json_path.cpp
+    src/core/elements/extract_kinds.cpp
+    src/core/elements/assert_kinds.cpp
+    src/core/elements/timer_think.cpp
     # The only TU that sees VAYU_VERSION_STRING for the User-Agent - keep it
     # that way, or a version bump invalidates the whole compile cache (#659).
     src/core/user_agent.cpp

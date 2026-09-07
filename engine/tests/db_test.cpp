@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +21,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/utils/diagnostics.hpp"
 
 namespace vayu::db {
 namespace {
@@ -1602,6 +1604,15 @@ namespace {
 
 // A run whose one result carries `body_bytes` of trace, so deleting it frees a
 // known and substantial number of pages rather than a handful.
+//
+// The filler concatenation below is what GCC 13 reports as reading past the
+// small-string buffer at `-O3` (see utils/diagnostics.hpp) - but only once
+// this is inlined into `grow_then_prune`'s loop, which is the frame the
+// diagnostic actually attributes the read to; a suppression scoped to this
+// function alone left it firing. The pop sits after `grow_then_prune`
+// instead of here, so the region covers the whole inlining chain the
+// diagnostic can be blamed on.
+VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS
 void seed_bulky_run (Database& db, const std::string& id, int64_t start_time, size_t body_bytes) {
     vayu::db::Run run;
     run.id              = id;
@@ -1649,6 +1660,7 @@ int64_t grow_then_prune (int total_mib, int keep) {
     db.prune_runs (keep, 0);
     return database_file_size ();
 }
+VAYU_DIAGNOSTIC_POP
 
 // What a second start leaves the file at. The reclamation runs in `init`, so
 // every case below opens the database again rather than calling anything: what
@@ -1854,6 +1866,241 @@ TEST (ScratchDatabaseCleanup, RemovesEveryFileAnOpenedDatabaseLeavesBehind) {
     << " file(s) behind, starting with " << *remaining.begin ();
 
     fs::remove_all (dir);
+}
+
+// ============================================================================
+// migrate_before_sync (issue #1514's cut-over): pre_request_script /
+// post_request_script -> elements, ahead of sync_schema's DROP COLUMN.
+// ============================================================================
+
+namespace {
+
+/// Reopens @p path with sqlite3 directly and adds back the two pre-cutover
+/// script columns (already dropped from the current schema) - the shape a
+/// database written before this issue's engine looks like.
+void add_legacy_script_columns (const std::string& path) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path.c_str (), &handle), SQLITE_OK);
+    for (const char* table : { "requests", "collections" }) {
+        for (const char* column : { "pre_request_script", "post_request_script" }) {
+            char* err             = nullptr;
+            const std::string sql = std::string ("ALTER TABLE ") + table +
+            " ADD COLUMN " + column + " TEXT DEFAULT ''";
+            ASSERT_EQ (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, &err), SQLITE_OK)
+            << (err != nullptr ? err : "(no message)");
+            sqlite3_free (err);
+        }
+    }
+    sqlite3_close (handle);
+}
+
+void set_legacy_scripts (const std::string& path,
+const std::string& table,
+const std::string& id,
+const std::string& pre,
+const std::string& post) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path.c_str (), &handle), SQLITE_OK);
+    sqlite3_stmt* stmt    = nullptr;
+    const std::string sql = "UPDATE " + table +
+    " SET pre_request_script = ?1, post_request_script = ?2 WHERE id = ?3";
+    ASSERT_EQ (sqlite3_prepare_v2 (handle, sql.c_str (), -1, &stmt, nullptr), SQLITE_OK);
+    sqlite3_bind_text (stmt, 1, pre.c_str (), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt, 2, post.c_str (), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt, 3, id.c_str (), -1, SQLITE_TRANSIENT);
+    ASSERT_EQ (sqlite3_step (stmt), SQLITE_DONE);
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+}
+
+bool table_has_column (const std::string& path, const char* table, const char* column) {
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        return false;
+    }
+    const std::string sql = std::string ("PRAGMA table_info(") + table + ")";
+    sqlite3_stmt* stmt    = nullptr;
+    bool found            = false;
+    if (sqlite3_prepare_v2 (handle, sql.c_str (), -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            const auto* name = vayu::db::column_text (stmt, 1);
+            if (name != nullptr && std::string (name) == column) {
+                found = true;
+            }
+        }
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return found;
+}
+
+int64_t read_user_version (const std::string& path) {
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        return -1;
+    }
+    sqlite3_stmt* stmt = nullptr;
+    int64_t version    = -1;
+    if (sqlite3_prepare_v2 (handle, "PRAGMA user_version", -1, &stmt, nullptr) == SQLITE_OK &&
+    sqlite3_step (stmt) == SQLITE_ROW) {
+        version = sqlite3_column_int64 (stmt, 0);
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return version;
+}
+
+void set_user_version (const std::string& path, int64_t version) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path.c_str (), &handle), SQLITE_OK);
+    const std::string sql = "PRAGMA user_version = " + std::to_string (version);
+    ASSERT_EQ (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, nullptr), SQLITE_OK);
+    sqlite3_close (handle);
+}
+
+} // namespace
+
+TEST_F (DatabaseTest, MigratesPreCutoverScriptColumnsIntoElements) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_1";
+        r.collection_id = "col_1";
+        r.name          = "R";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+
+    add_legacy_script_columns (TEST_DB_PATH);
+    set_legacy_scripts (TEST_DB_PATH, "requests", "req_1",
+    "pm.environment.set('x', 1);", "pm.test('ok', () => {});");
+    ASSERT_TRUE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"))
+    << "test setup did not add the legacy column";
+    // The first `Database (TEST_DB_PATH)` block above already ran
+    // `migrate_before_sync` on a fresh file and left `user_version` at 1 (it
+    // found nothing to fold, but a database this engine has opened once is
+    // migrated). A real pre-cutover database was never opened by this engine
+    // at all, so it reads as `user_version` 0 - reset it here to simulate
+    // that genuinely unmigrated shape rather than one this test's own setup
+    // already marked done.
+    set_user_version (TEST_DB_PATH, 0);
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
+    EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "post_request_script"));
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 1);
+    EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    << "no pre-migration backup was written";
+    EXPECT_TRUE (table_has_column (std::string (TEST_DB_PATH) + ".pre-migration.bak",
+    "requests", "pre_request_script"))
+    << "the backup must still carry the pre-cutover columns";
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto folded = reopened.get_request ("req_1");
+    ASSERT_HAS_VALUE (folded);
+    const auto elements = nlohmann::json::parse (folded->elements);
+    ASSERT_EQ (elements.size (), 2u);
+    EXPECT_EQ (elements[0]["kind"], "script.pre");
+    EXPECT_EQ (elements[0]["config"]["script"], "pm.environment.set('x', 1);");
+    EXPECT_EQ (elements[1]["kind"], "script.post");
+    EXPECT_EQ (elements[1]["config"]["script"], "pm.test('ok', () => {});");
+}
+
+// A database the additive #1513 repair pass already folded (elements already
+// populated) must not gain a duplicate entry when this migration runs.
+TEST_F (DatabaseTest, MigrationLeavesAnAlreadyFoldedRowWithNoDuplicate) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_1";
+        r.collection_id = "col_1";
+        r.name          = "R";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        r.elements      = nlohmann::json::array (
+        { nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" }, { "enabled", true },
+             { "config", { { "script", "pm.environment.set('x', 1);" } } } } })
+                     .dump ();
+        db.save_request (r);
+    }
+
+    add_legacy_script_columns (TEST_DB_PATH);
+    set_legacy_scripts (
+    TEST_DB_PATH, "requests", "req_1", "pm.environment.set('x', 1);", "");
+    // See `MigratesPreCutoverScriptColumnsIntoElements`: the first open above
+    // already bumped `user_version` to 1, so without this reset the migrating
+    // open below would skip its scan entirely (version already current) and
+    // this test would pass vacuously rather than exercising the "already
+    // folded" skip it names.
+    set_user_version (TEST_DB_PATH, 0);
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto row = reopened.get_request ("req_1");
+    ASSERT_HAS_VALUE (row);
+    const auto elements = nlohmann::json::parse (row->elements);
+    ASSERT_EQ (elements.size (), 1u)
+    << "the already-folded script.pre must not be duplicated: " << row->elements;
+}
+
+TEST_F (DatabaseTest, MigrationDoesNothingOnASecondOpen) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    add_legacy_script_columns (TEST_DB_PATH);
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    ASSERT_EQ (read_user_version (TEST_DB_PATH), 1);
+    std::filesystem::remove (std::string (TEST_DB_PATH) + ".pre-migration.bak");
+
+    // A second open at `user_version` 1 must be a fast no-op: no backup
+    // rewritten (there is nothing left to migrate).
+    Database again (TEST_DB_PATH);
+    again.init ();
+    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    << "an already-migrated database must not be re-migrated";
+}
+
+TEST_F (DatabaseTest, ADatabaseFromANewerEngineIsRefused) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    set_user_version (TEST_DB_PATH, 99);
+
+    EXPECT_THROW ({ Database db (TEST_DB_PATH); }, std::runtime_error);
 }
 
 } // namespace

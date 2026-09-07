@@ -40,6 +40,7 @@
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "step_elements_test_helper.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/load_strategy.hpp"
@@ -663,7 +664,7 @@ TEST_F (ScenarioIdentityTest, EachVirtualUserBindsItsOwnNumberAndAdvancesItsOwnI
 TEST_F (ScenarioIdentityTest, ADeferredStepScriptReadsTheUserAndIterationItRanAs) {
     RecordingServer server;
     auto execution = plan_over (server.url ("/plain"));
-    execution.plan.steps[0].post_script =
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
     "pm.test('identity', function () {"
     "  if (pm.info.vu !== 1 && pm.info.vu !== 2) {"
     "    throw new Error('vu was ' + pm.info.vu);"
@@ -671,7 +672,7 @@ TEST_F (ScenarioIdentityTest, ADeferredStepScriptReadsTheUserAndIterationItRanAs
     "  if (typeof pm.info.iteration !== 'number') {"
     "    throw new Error('no iteration');"
     "  }"
-    "});";
+    "});");
 
     run_scenario (json{ { "mode", "iterations" }, { "iterations", 4 },
                   { "concurrency", 2 }, { "response_sample_rate", 1 } },
@@ -710,14 +711,14 @@ TEST_F (ScenarioIdentityTest, ADeferredStepScriptReadsTheUserAndIterationItRanAs
 TEST_F (ScenarioIdentityTest, AStepScriptResolvesTheIdentityItRanAs) {
     RecordingServer server;
     auto execution = plan_over (server.url ("/i/{{$vu}}-{{$iteration}}"));
-    execution.plan.steps[0].post_script =
+    execution.plan.steps[0].elements = vayu::tests::step_elements_with_post_script (
     "pm.test('identity', function () {"
     "  var resolved = pm.variables.replaceIn('{{$vu}}-{{$iteration}}');"
     "  var reported = pm.info.vu + '-' + pm.info.iteration;"
     "  if (resolved !== reported) {"
     "    throw new Error(resolved + ' is not the ' + reported + ' it ran as');"
     "  }"
-    "});";
+    "});");
 
     run_scenario (json{ { "mode", "iterations" }, { "iterations", 4 },
                   { "concurrency", 2 }, { "response_sample_rate", 1 } },

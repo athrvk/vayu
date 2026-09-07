@@ -59,8 +59,7 @@ export function request(over: Partial<RequestDraft> = {}): RequestDraft {
 		headers: [],
 		body: { mode: "none" },
 		auth: { mode: "inherit" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		...over,
 	};
 }
@@ -71,8 +70,7 @@ export function collection(over: Partial<CollectionDraft> = {}): CollectionDraft
 		description: "",
 		variables: {},
 		auth: { mode: "none" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		children: [],
 		requests: [],
 		...over,

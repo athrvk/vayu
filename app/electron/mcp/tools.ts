@@ -2342,6 +2342,11 @@ const runComparisonSchema = z.object({
 	throughput: z.array(metricDeltaSchema),
 	reliability: z.array(metricDeltaSchema),
 	statusCodes: z.record(z.string(), z.object({ base: z.number(), target: z.number() })),
+	// Whether the two runs negotiated a compressed response differently
+	// (issue #1488) - true means the byte and latency deltas above are not
+	// measuring the same thing. A run recorded before this field existed
+	// reads as not negotiated, same as an explicit false.
+	compressionNegotiationDiffers: z.boolean(),
 });
 
 const engineHealthSchema = z
@@ -6992,7 +6997,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request.",
+			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request. compressionNegotiationDiffers true means the two runs did not negotiate a compressed response the same way, so the byte and latency deltas are not a clean comparison - check the runs' config before reading a regression into them.",
 		annotations: {
 			title: "Compare runs",
 			readOnlyHint: true,
