@@ -204,7 +204,9 @@ echo "Running ${CLANG_TIDY} on staged C++ changes..."
 
 # The files to lint, in the order they were staged, minus vendored code and
 # paths that no longer exist on disk (a staged deletion has no file to lint).
-LINT_FILES=
+# An array, so a path can be handed to xargs/the loop below without quoting
+# tricks to survive whitespace in a filename.
+LINT_FILES=()
 for FILE in $FILES; do
     if [[ "$FILE" == *"vendor/"* ]]; then
         continue
@@ -212,7 +214,7 @@ for FILE in $FILES; do
     if [ ! -f "$FILE" ]; then
         continue
     fi
-    LINT_FILES="$LINT_FILES $FILE"
+    LINT_FILES+=("$FILE")
 done
 
 # Whole staged files, not changed lines (#946 - the promotion that closed the
@@ -241,16 +243,10 @@ done
 # prints its findings and exits 0. `STATUS` is declared beside `end_hook` above,
 # which is where it is finally read.
 #
-# One process per file, in parallel, not sequential: whole-file clang-tidy with
-# header analysis is ~10-30s/file, and a merge or a broad rename easily stages
-# dozens at once, which made the sequential version a multi-minute commit.
-# `xargs -P` keeps the one guarantee above - no file's status gets lost - for
-# free: it exits 123 once all invocations are done if any exited 1-125, and
-# stays 0 only if every one did, which is exactly the single pass/fail STATUS
-# already collapsed to. It does not say *which* file failed on its own, but
-# nothing before this change did either - the per-file "Linting $FILE..." line
-# and clang-tidy's own output, interleaved though they may be under `-P`, are
-# what named that before and still do.
+# Run in parallel (below) rather than one process per file in sequence, since
+# whole-file clang-tidy is slow (~10-30s/file) and a large commit can stage
+# dozens. `xargs -P`'s own exit status (123 if anything failed) is what feeds
+# STATUS, so the per-file guarantee above still holds.
 lint_one_file() {
     local FILE="$1"
     echo "Linting $FILE..."
@@ -307,18 +303,21 @@ lint_one_file() {
 export -f lint_one_file
 export CLANG_TIDY
 
-# `nproc` is Linux-only; `sysctl -n hw.ncpu` is its macOS equivalent. Neither is
-# guaranteed on every Windows shell this hook runs under, so the fallback is a
-# plain constant rather than a third probe - 4, matching this repo's own
-# Windows ctest parallelism default (`engine/tests/CMakeLists.txt`), is a
-# reasonable middle ground where neither command exists to ask.
+# nproc (Linux) -> sysctl -n hw.ncpu (macOS) -> 4, matching this repo's own
+# Windows ctest parallelism default, where neither exists.
 NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
-# Only invoked when there is at least one file, so as not to depend on how a
-# particular xargs handles empty input - GNU and BSD (macOS) disagree on
-# whether that runs the command once anyway, and this sidesteps asking.
-if [ -n "$LINT_FILES" ]; then
-    printf '%s\n' $LINT_FILES | xargs -P "$NPROC" -I{} bash -c 'lint_one_file "$@"' _ {} || STATUS=1
+if [ ${#LINT_FILES[@]} -gt 0 ]; then
+    if command -v xargs &> /dev/null; then
+        printf '%s\n' "${LINT_FILES[@]}" | xargs -P "$NPROC" -I{} bash -c 'lint_one_file "$@"' _ {} || STATUS=1
+    else
+        # No xargs (e.g. this hook's own test sandbox, or a stripped-down
+        # container): fall back to sequential rather than let a bare "command
+        # not found" masquerade as a clang-tidy finding below.
+        for FILE in "${LINT_FILES[@]}"; do
+            lint_one_file "$FILE" || STATUS=1
+        done
+    fi
 fi
 
 if [ "$STATUS" -ne 0 ]; then
