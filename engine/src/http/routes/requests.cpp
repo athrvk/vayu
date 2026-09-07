@@ -171,6 +171,38 @@ bool is_create) {
 }
 
 /**
+ * Applies `methodSource` - which app setting last wrote `method`, still
+ * unclaimed by the user (issue #1505) - under the same null-vs-absent rule as
+ * `specOperation` above: absent-on-create and `null` both mean no marker.
+ *
+ * The only value a client writes today is `"graphql"` (the GraphQL body mode's
+ * auto-`POST`), and it is validated rather than accepted as an opaque string -
+ * an unrecognized marker would silently outlive the setting that is supposed
+ * to own it, reverting a method the user picked because some other client
+ * wrote a source string this app does not recognize as its own.
+ */
+static RouteResult apply_method_source_field (const nlohmann::json& json,
+std::optional<std::string>& out,
+bool is_create) {
+    if (!json.contains ("methodSource")) {
+        if (is_create) {
+            out = std::nullopt;
+        }
+        return {};
+    }
+    const auto& value = json["methodSource"];
+    if (value.is_null ()) {
+        out = std::nullopt;
+        return {};
+    }
+    if (!value.is_string () || value.get<std::string> () != "graphql") {
+        return route_error (400, "Invalid 'methodSource': must be 'graphql' or null");
+    }
+    out = value.get<std::string> ();
+    return {};
+}
+
+/**
  * Applies the request body onto `r` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
  * verbs cannot drift apart on what a field means.
@@ -204,6 +236,13 @@ bool is_create) {
         return route_error (400, "Invalid HTTP method");
     }
     r.method = *method;
+
+    // The method-source marker (issue #1505). Same file, same applier list as
+    // `method` itself, so `POST /import/apply` (which runs this shared
+    // applier over a bulk payload) carries it too.
+    if (auto outcome = apply_method_source_field (json, r.method_source, is_create); !outcome) {
+        return outcome;
+    }
 
     if (auto outcome = apply_required_string_field (json, "url", r.url, is_create); !outcome) {
         return outcome;

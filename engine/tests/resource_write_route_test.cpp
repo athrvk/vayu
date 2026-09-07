@@ -685,6 +685,101 @@ TEST_F (ResourceWriteRouteTest, RequestInvalidMethodIsRejected) {
     std::string::npos);
 }
 
+// ---------------------------------------------------------------------------
+// Requests - methodSource (issue #1505). Which app setting last wrote
+// `method`, still unclaimed by the user - nullable like `specOperation`,
+// validated like it too, on the same null-vs-absent rule.
+// ---------------------------------------------------------------------------
+
+TEST_F (ResourceWriteRouteTest, RequestCreateAbsentMethodSourceIsNull) {
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" } });
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("methodSource"));
+    EXPECT_TRUE (body["methodSource"].is_null ());
+    const auto stored_request = db_->get_request (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_FALSE (stored_request->method_source.has_value ());
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateStoresMethodSourceGraphql) {
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "POST" },
+             { "url", "https://example.com" }, { "methodSource", "graphql" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["methodSource"], "graphql");
+    const auto stored_request = db_->get_request (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_request);
+    ASSERT_HAS_VALUE (stored_request->method_source);
+    EXPECT_EQ (*stored_request->method_source, "graphql");
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateKeepsMethodSourceWhenAbsent) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (update_request_response (*db_, id,
+               json{ { "method", "POST" }, { "methodSource", "graphql" } })
+               .first,
+    200);
+
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["methodSource"], "graphql")
+    << "an untouched marker must survive a patch";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateNullMethodSourceClears) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (update_request_response (*db_, id,
+               json{ { "method", "POST" }, { "methodSource", "graphql" } })
+               .first,
+    200);
+
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "methodSource", nullptr } });
+    ASSERT_EQ (status, 200);
+    EXPECT_TRUE (body["methodSource"].is_null ())
+    << "leaving GraphQL - or any other write - clears the marker";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestInvalidMethodSourceIsRejected) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "methodSource", "typed-it-myself" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("methodSource"), std::string::npos);
+
+    const auto stored_request = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_FALSE (stored_request->method_source.has_value ())
+    << "a rejected marker must not be stored under any other name";
+}
+
+TEST_F (ResourceWriteRouteTest, MethodSourceReadsBackThroughBothSerializers) {
+    // The two-serializer rule: `serialize` answers the single-request route and
+    // `serialize_to_stream` the list - see VerifySSLReadsBackThroughBothSerializers
+    // above for why both are asserted rather than one.
+    const std::string collection = make_collection ();
+    auto [status, created]       = create_request_response (*db_,
+          json{ { "collectionId", collection }, { "name", "R" }, { "method", "POST" },
+          { "url", "https://example.com" }, { "methodSource", "graphql" } });
+    ASSERT_EQ (status, 200);
+
+    const json listed =
+    json::parse (vayu::http::routes::list_requests_body (*db_, collection));
+    ASSERT_EQ (listed.size (), 1u);
+    ASSERT_TRUE (listed[0].contains ("methodSource"))
+    << "the list serializer dropped the field the single-request one carries";
+    EXPECT_EQ (listed[0]["methodSource"], created["methodSource"]);
+}
+
 TEST_F (ResourceWriteRouteTest, RequestMalformedKeyValueEntryIsRejected) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,

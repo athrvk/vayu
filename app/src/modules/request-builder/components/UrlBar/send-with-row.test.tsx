@@ -80,8 +80,6 @@ function ctx(
 		setBodyDrafts: vi.fn(),
 		getVariablesDraft: () => null,
 		setVariablesDraft: vi.fn(),
-		getAutoMethod: () => null,
-		setAutoMethod: vi.fn(),
 		response: null,
 		setResponse: vi.fn(),
 		activeTab: "params",

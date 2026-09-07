@@ -1317,7 +1317,8 @@ the null-vs-absent rule.
   "verifySSL": true,                 // Optional, verify the TLS certificate. Default true
   "stream": false,                   // Optional, consume the response as an event stream.
                                       // Default false - see below
-  "specOperation": null              // Optional, which spec operation this request is - see below
+  "specOperation": null,             // Optional, which spec operation this request is - see below
+  "methodSource": null               // Optional, which app setting wrote `method` - see below
 }
 ```
 
@@ -1354,6 +1355,16 @@ operation, and both request serializers emit `specOperation: null` for it - the
 key is always present, so a client never has to tell "no operation" from "not
 serialized". Two requests may name the same operation.
 
+**`methodSource` names which app setting last wrote `method`, still unclaimed by
+the user** (issue #1505). The only value a client writes is `"graphql"` - the
+GraphQL body mode setting `method` to `POST` on a fresh `GET` - and `null` (or
+absent on create) means no marker: either the user chose `method` themselves, or
+nothing has set it. `"graphql"` is the only accepted value; anything else is a
+`400`. The app clears the marker itself the moment `method` is written by
+anything other than the GraphQL switch, so a method the user has since picked is
+never reverted - the same "still ours" contract `KeyValueEntry.source` (issue
+#1481) gives a header row.
+
 **Response:** The created request object, carrying the engine-generated `id`.
 
 **Errors:** `400` if the body carries an `id`
@@ -1362,6 +1373,7 @@ required field is missing or `null`, if `collectionId` names a collection that
 does not exist (message `Collection '<id>' does not exist`), on an unrecognized
 `method`, on a
 `params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`,
+on a `methodSource` that is not `"graphql"` or `null`,
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
 names the field and lists the valid values); `413` naming the field, its size
 and the cap, when a serialized `params` / `headers` / `body` / `auth` is over
@@ -1385,8 +1397,9 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
 `PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
-`verifySSL` / `stream` / `specOperation` leaves the stored values untouched;
-sending `null` resets them to `true` / `10` / `true` / `false` / "no operation".
+`verifySSL` / `stream` / `specOperation` / `methodSource` leaves the stored
+values untouched; sending `null` resets them to
+`true` / `10` / `true` / `false` / "no operation" / "no marker".
 A non-boolean `followRedirects`, `verifySSL` or `stream`, or a non-integer
 `maxRedirects`, is ignored rather than rejected. `maxRedirects` is clamped to `0..100` on the way in.
 
@@ -1417,7 +1430,8 @@ carry `preRequestScript` / `postRequestScript` at all.
 **Errors:** `404` if the request does not exist; `400` on a `null`
 `collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection
 that does not exist, an unrecognized `method`, a
-malformed `params` / `headers` entry, a malformed `specOperation`, or an
+malformed `params` / `headers` entry, a malformed `specOperation`, a
+`methodSource` that is not `"graphql"` or `null`, or an
 `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`; `413` naming the
 field, its size and the cap, when a serialized `params` / `headers` / `body` /
 `auth` is over the engine's field cap (issue #1485,

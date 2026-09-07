@@ -6,27 +6,23 @@
  */
 
 /**
- * One reversible-side-effect record *per request*, for one setting (issue
- * #1269).
+ * The three reversible-side-effect settings this module used to hold a
+ * provider-keyed record for - the body mode's `Content-Type`, the Event
+ * stream toggle's `Accept`, the GraphQL mode's `POST` - all now mark
+ * ownership on the request's own state instead: the two header rows carry it
+ * on the row itself (`KeyValueEntry.source`, `utils/auto-header.ts`, issue
+ * #1481), and the method carries it on `RequestState.methodSource`
+ * (`panels/body/graphql-method.ts`, issue #1505). A ref-based record could not
+ * survive a reload, so a stale auto-written value was then indistinguishable
+ * from one the user chose; a value on the request itself is exactly as
+ * durable as the rest of the request. The generic per-request slot that held
+ * these records (`useAutoRecordSlot`) went with the last of them - see the
+ * VCS history for its shape if a future setting needs the pattern again.
  *
- * The three settings that change something on their way in - the body mode's
- * `Content-Type`, the Event stream toggle's `Accept`, the GraphQL mode's `POST`
- * - each remember what they changed so that leaving the setting can take it
- * back. Each record names the request it belongs to and the rules that read
- * them (`utils/auto-header.ts`, `panels/body/graphql-method.ts`) drop one
- * naming another request, which is the right answer to "is this record mine?"
- * and no answer at all to "where did the other request's record go?": one
- * `RequestBuilderProvider` serves every request tab, so a single slot per
- * setting meant the second request into a mode overwrote the first one's
- * record, and the first request kept the header row - or the method - the app
- * had changed for it, with nothing left that knew it was the app's.
- *
- * So the storage is keyed the way the record always was. The accessors stay
- * argument-free: the provider knows which request is on screen, and a caller
- * that had to pass the id could pass the wrong one.
+ * {@link UNSAVED_AUTO_KEY} outlives that slot: the Send-with-row picker's row
+ * memory (issue #1271) still is a provider-held per-request map, and needs
+ * the same fallback key for a builder that declares no identity of its own.
  */
-
-import { useCallback, useRef } from "react";
 
 /**
  * The key a record is filed under while the builder names no identity at all -
@@ -49,43 +45,3 @@ import { useCallback, useRef } from "react";
  * to declare an identity that does.
  */
 export const UNSAVED_AUTO_KEY = "__unsaved__";
-
-interface AutoRecordSlot<T> {
-	/** The record for the request on screen, or null if it has none. */
-	get: () => T | null;
-	/** Files a record against the request on screen; null forgets it. */
-	set: (record: T | null) => void;
-	/**
-	 * Drops every record whose key is not in `live`. Stable across renders, so
-	 * a subscription can hold it.
-	 */
-	retain: (live: ReadonlySet<string>) => void;
-}
-
-/**
- * @param requestKey which builder the accessors read and write for - the
- * provider's resolved `memoryKey`: the request's id, the identity a builder
- * over something else declared, or {@link UNSAVED_AUTO_KEY} when it has
- * neither.
- */
-export function useAutoRecordSlot<T>(requestKey: string): AutoRecordSlot<T> {
-	const byRequest = useRef(new Map<string, T>());
-
-	const get = useCallback(() => byRequest.current.get(requestKey) ?? null, [requestKey]);
-
-	const set = useCallback(
-		(record: T | null) => {
-			if (record === null) byRequest.current.delete(requestKey);
-			else byRequest.current.set(requestKey, record);
-		},
-		[requestKey]
-	);
-
-	const retain = useCallback((live: ReadonlySet<string>) => {
-		for (const key of byRequest.current.keys()) {
-			if (!live.has(key)) byRequest.current.delete(key);
-		}
-	}, []);
-
-	return { get, set, retain };
-}

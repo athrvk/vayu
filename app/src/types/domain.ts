@@ -64,6 +64,16 @@ export type AutoHeaderSource = "body-mode" | "stream";
  */
 export type HeaderRowSource = AutoHeaderSource | "legacy-default";
 
+/**
+ * Which app setting last wrote `Request.method`, still unclaimed by the user
+ * (issue #1505) - the same ownership-by-marker rule `AutoHeaderSource` states
+ * for a header row, applied to the one field that is not a `KeyValueEntry`.
+ * The GraphQL body mode is the only writer today: entering it sets `method` to
+ * `POST` on a fresh `GET` and stamps this; picking a method by hand, or
+ * leaving GraphQL, clears it the way retyping a marked header row does.
+ */
+export type MethodSource = "graphql";
+
 export interface KeyValueEntry {
 	key: string;
 	value: string;
@@ -604,6 +614,13 @@ export interface Request {
 	name: string;
 	description: string;
 	method: HttpMethod;
+	/**
+	 * Which app setting last wrote {@link method}, still unclaimed by the user
+	 * (issue #1505). Optional, unlike `stream`: the engine serializes `null` for
+	 * a request with no marker and `undefined` is how every reader here spells
+	 * that - the same `specOperation` convention below.
+	 */
+	methodSource?: MethodSource;
 	url: string;
 	params: KeyValueEntry[];
 	headers: KeyValueEntry[];

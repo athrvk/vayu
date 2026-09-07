@@ -119,6 +119,11 @@ function buildUpdatePayload(
 	}
 	if (changedFields.has("description")) payload.description = request.description;
 	if (changedFields.has("method")) payload.method = request.method as HttpMethod;
+	// Same null-vs-absent rule as `specOperation`: an untouched marker is
+	// omitted (keep), and leaving GraphQL - or picking a method by hand -
+	// touches it down to `undefined`, which has to reach the wire as an
+	// explicit `null` or the engine reads the absent key as "keep" instead.
+	if (changedFields.has("methodSource")) payload.methodSource = request.methodSource ?? null;
 	if (changedFields.has("url")) payload.url = request.url;
 	if (changedFields.has("params")) payload.params = toKeyValueEntries(request.params);
 	// Only the user's rows: nothing in editor state is Vayu's own any more
@@ -332,6 +337,7 @@ export default function RequestBuilder() {
 			name: fetchedRequest.name,
 			description: fetchedRequest.description,
 			method: fetchedRequest.method,
+			methodSource: fetchedRequest.methodSource,
 			url: fetchedRequest.url,
 			params: toKeyValueItems(fetchedRequest.params),
 			headers: toHeaderItems(fetchedRequest.headers),

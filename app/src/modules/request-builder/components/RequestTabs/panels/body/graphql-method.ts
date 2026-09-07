@@ -26,14 +26,22 @@
  * they have chosen *since* is never reverted, which is the same rule
  * `switchAutoHeader` states as "a row edited by hand is no longer ours".
  *
+ * Ownership used to live in a ref the provider held, keyed by request id -
+ * which meant nothing survived a reload, and a stale `POST` was then
+ * indistinguishable from one the user picked (issue #1505, the same gap
+ * #1481 closed for the Content-Type and Accept rows). `Request.methodSource`
+ * is the fix, on the row itself rather than beside it: `MethodSelector`
+ * clears it the moment the user picks a method by hand, the same way retyping
+ * a marked header row clears `KeyValueEntry.source`.
+ *
  * The rule lives here rather than in the click handler for the reason
  * `content-type.ts` gives: the only way to exercise a rule inside that handler
  * is to drive a Radix `Select` through jsdom, which does not commit a value
  * there.
  */
 
-import type { HttpMethod } from "@/types";
-import type { AutoMethod, BodyMode } from "../../../../types";
+import type { HttpMethod, MethodSource } from "@/types";
+import type { BodyMode } from "../../../../types";
 
 /**
  * The method a GraphQL body is sent with when the app picks one.
@@ -54,48 +62,44 @@ const REPLACEABLE_METHOD: HttpMethod = "GET";
 export interface GraphQLMethodSwitch {
 	/** The method for the new mode. The same one when nothing changed. */
 	method: HttpMethod;
-	/** The record to keep, or null when this side effect owns nothing. */
-	auto: AutoMethod | null;
+	/** The marker for the new mode, or undefined when this side effect owns nothing. */
+	methodSource?: MethodSource;
 }
 
 /**
  * Set the method the new mode needs, or put back the one the old mode replaced.
  *
- * @param mode      The body mode being switched *to*.
- * @param method    The request's current method.
- * @param requestId The request being edited now. A record belonging to another
- *   request is dropped rather than applied, for the reason `switchAutoHeader`
- *   drops one: the provider's ref outlives the request that filled it.
- * @param auto      The record this side effect held before the change.
+ * @param mode         The body mode being switched *to*.
+ * @param method       The request's current method.
+ * @param methodSource The request's current marker.
  *
- * Staying inside GraphQL (a re-selection of the same mode) keeps the record
+ * Staying inside GraphQL (a re-selection of the same mode) keeps the marker
  * rather than re-deriving it, so the method the user has since chosen is not
  * overwritten by a second visit to the mode they are already in.
  */
 export function switchGraphQLMethod(
 	mode: BodyMode,
 	method: HttpMethod,
-	requestId: string | null,
-	auto: AutoMethod | null
+	methodSource: MethodSource | undefined
 ): GraphQLMethodSwitch {
-	const ours = auto?.requestId === requestId ? auto : null;
+	const ours = methodSource === "graphql";
 
 	if (mode === "graphql") {
-		if (ours) return { method, auto: ours };
-		if (method !== REPLACEABLE_METHOD) return { method, auto: null };
-		return {
-			method: GRAPHQL_METHOD,
-			auto: { requestId, method: GRAPHQL_METHOD, previous: method },
-		};
+		if (ours) return { method, methodSource: "graphql" };
+		if (method !== REPLACEABLE_METHOD) return { method };
+		return { method: GRAPHQL_METHOD, methodSource: "graphql" };
 	}
 
 	// Leaving GraphQL. The revert is conditional on the method still being the
-	// one this record wrote: a user who has picked `PUT` since means it, and
+	// one the marker wrote: a user who has picked `PUT` since means it, and
 	// handing them back `GET` would be the silent rewrite this rule exists to
-	// avoid - in the other direction.
-	if (!ours) return { method, auto: null };
-	if (method !== ours.method) return { method, auto: null };
-	return { method: ours.previous, auto: null };
+	// avoid - in the other direction. `MethodSelector` already clears the
+	// marker the moment a method is picked by hand, so this second check only
+	// matters for a marker something other than this file wrote - MCP, import -
+	// which must not be trusted past what it actually wrote.
+	if (!ours) return { method };
+	if (method !== GRAPHQL_METHOD) return { method };
+	return { method: REPLACEABLE_METHOD };
 }
 
 /**

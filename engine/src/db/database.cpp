@@ -242,8 +242,12 @@ inline auto make_storage (const std::string& path) {
     make_column ("collection_id", &Request::collection_id),
     make_column ("name", &Request::name),
     make_column ("description", &Request::description), // NEW: request description
-    make_column ("method", &Request::method), make_column ("url", &Request::url),
-    make_column ("params", &Request::params),   // JSON array of KeyValueEntry
+    make_column ("method", &Request::method),
+    // Which app setting set `method`, still unclaimed by the user (issue
+    // #1505). Nullable on the `spec_operation` precedent below - ALTER-friendly
+    // without a default, and NULL is the only spelling of "no marker".
+    make_column ("method_source", &Request::method_source),
+    make_column ("url", &Request::url), make_column ("params", &Request::params), // JSON array of KeyValueEntry
     make_column ("headers", &Request::headers), // JSON array of KeyValueEntry
     make_column ("body", &Request::body),       // JSON discriminated union
     make_column ("body_type", &Request::body_type), make_column ("auth", &Request::auth), // JSON

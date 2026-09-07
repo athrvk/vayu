@@ -386,6 +386,7 @@ Stores individual HTTP request definitions.
 | `name`                | TEXT    |                                                      |
 | `description`         | TEXT    | Default `""`                                         |
 | `method`              | TEXT    | `GET` / `POST` / `PUT` / `PATCH` / `DELETE` / etc.  |
+| `method_source`       | TEXT    | Which app setting wrote `method`; NULL when none    |
 | `url`                 | TEXT    |                                                      |
 | `params`              | TEXT    | JSON array of `KeyValueEntry[]`                      |
 | `headers`             | TEXT    | JSON array of `KeyValueEntry[]`                      |
@@ -506,6 +507,19 @@ handle. A nullable column is `ALTER TABLE ADD COLUMN`-friendly without a default
 Both request serializers emit it as `specOperation`, `null` when the column is,
 and `apply_request_fields` applies it, so `POST`, `PUT` and `POST /import/apply`
 all carry it.
+
+**method_source** - which app setting last wrote `method`, still unclaimed by
+the user (issue #1505). The only writer today is the GraphQL body mode: entering
+it sets `method` to `POST` on a fresh `GET` and stamps `method_source: "graphql"`;
+leaving it reverts `method` to `GET` only while the marker is still there, and
+any other write to `method` clears it, the same "still ours" rule
+`switchAutoHeader`'s `KeyValueEntry.source` (issue #1481) applies to a header
+row. Nullable on the `spec_operation` precedent directly above, for the same
+reason: `NULL` is the only spelling of "no marker" and the column is
+`ALTER TABLE ADD COLUMN`-friendly without a default. `apply_request_fields`
+validates a present value against the one string the app writes (`"graphql"`)
+and rejects anything else with a `400`, so a marker this app does not recognize
+can never park itself here and revert a method the user actually chose.
 
 **http_version** stores `Request::http_version` (the *requested* protocol, an
 enum member spelled as text) - a different value and a different value space
