@@ -448,7 +448,10 @@ TEST_F (ConfigRouteTest, AdvancedFlagsExactlyTheRecordedInternals) {
         // written by `strip_stored_managed_headers` itself rather than seeded,
         // but every `init ()` sets it on first run, so it is as reliably
         // present as the rest of this list.
-        "managedHeadersStripped" };
+        "managedHeadersStripped",
+        // The one-time script-to-element fold's "already ran" marker (#1513),
+        // same shape and same reason as the one above.
+        "scriptsFoldedIntoElements" };
 
     auto entries = db_->get_all_config_entries ();
     ASSERT_FALSE (entries.empty ()) << "catalogue empty - nothing was scanned";

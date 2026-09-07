@@ -655,6 +655,18 @@ export interface Request {
 	order: number;
 	createdAt: string;
 	updatedAt: string;
+	/**
+	 * Names which of `params` / `headers` / `body` / `auth` the engine
+	 * substituted a default for on this row, because the stored column is over
+	 * its field cap (issue #1485). Only `GET /requests?collectionId=` (the tree
+	 * list) can carry this - `GET /requests/:id` always answers with the
+	 * genuine, whole value, however large, so a request opened in the builder is
+	 * never affected. Typed here because Duplicate reads it: a list-derived
+	 * record carrying this must not be copied, or the copy silently drops
+	 * whatever was substituted. Absent for a row with nothing over the cap, and
+	 * for one written before the engine had this field.
+	 */
+	truncatedFields?: string[];
 }
 
 /**
@@ -2031,8 +2043,18 @@ export interface RunReport {
 		checks: {
 			metric: string;
 			limit: number;
-			actual: number;
+			/** Absent when `evaluated` is false - there is no measurement to show. */
+			actual?: number;
 			passed: boolean;
+			/**
+			 * False when the run recorded no sample for this metric (issue #1484:
+			 * a latency percentile with zero completions used to read as 0ms,
+			 * trivially meeting an "at most" ceiling). Absent on a report a
+			 * pre-fix engine wrote, which never carried the field and never had
+			 * the bug's blind spot corrected either - reads as evaluated, the
+			 * same value that engine effectively assumed everywhere.
+			 */
+			evaluated?: boolean;
 		}[];
 		passed: number;
 		failed: number;
@@ -2339,6 +2361,8 @@ export interface EngineRecovery {
 export interface EngineHealth {
 	status: "ok";
 	version: string;
+	/** The `workers` setting's effective value: the configured count, or the
+	 *  detected core count when nothing overrides it. */
 	workers: number;
 	/**
 	 * Absent on a clean start, which is the ordinary case and the one a genuine

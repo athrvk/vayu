@@ -123,23 +123,43 @@ describe("RunItem baseline pin", () => {
 	});
 
 	/*
-	 * Only a load run gets the action. A design run's "report" is one exchange
-	 * and a collection run's is a step list - neither has percentiles, throughput
-	 * or an error rate to diff, so a pin on one would promise a comparison
-	 * nothing can render.
+	 * Every run type gets the pin (#1509): a design run's "report" is one
+	 * exchange and a collection run's is a step list, neither with percentiles,
+	 * throughput or an error rate to diff, so its pin makes no comparison
+	 * claim - the label says "Pin", not "Pin as baseline".
 	 */
-	it.each(["design", "scenario"] as const)("offers no pin on a %s run", (type) => {
+	it.each(["design", "scenario"] as const)("offers a plain Pin on a %s run", (type) => {
+		const onToggleBaseline = vi.fn();
 		render(
 			<RunItem
 				run={loadRun({ type, baseline: false })}
 				onSelect={noop}
 				onDelete={vi.fn()}
-				onToggleBaseline={vi.fn()}
+				onToggleBaseline={onToggleBaseline}
 				isDeleting={false}
 			/>
 		);
-		expect(screen.queryByRole("button", { name: /baseline/i })).not.toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Pin" }));
+		expect(onToggleBaseline).toHaveBeenCalledWith("run_1", true, expect.anything());
 	});
+
+	it.each(["design", "scenario"] as const)(
+		"marks a pinned %s row with a Pinned chip, not Baseline",
+		(type) => {
+			render(
+				<RunItem
+					run={loadRun({ type, baseline: true })}
+					onSelect={noop}
+					onDelete={vi.fn()}
+					onToggleBaseline={vi.fn()}
+					isDeleting={false}
+				/>
+			);
+			expect(screen.getByText("Pinned")).toBeInTheDocument();
+			expect(screen.queryByText("Baseline")).not.toBeInTheDocument();
+			expect(screen.getByRole("button", { name: "Unpin" })).toBeInTheDocument();
+		}
+	);
 
 	it("offers no pin when the list passes no handler", () => {
 		render(<RunItem run={loadRun()} onSelect={noop} onDelete={vi.fn()} isDeleting={false} />);

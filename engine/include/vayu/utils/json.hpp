@@ -202,7 +202,14 @@ void serialize_to_stream (const vayu::db::Request& request, std::ostream& out);
  * allowlist (keep `mode`) rather than a blocklist of known secret names, so no
  * future auth field can leak into the stored snapshot. Non-auth fields are left
  * intact. If `body` is not valid JSON it is returned unchanged.
+ *
+ * `body.content` (the request body being tested, not `body` itself) is capped
+ * at `max_body_bytes`, the same limit `cap_trace_bodies` applies to a stored
+ * trace, so one oversized send cannot leave a permanently bloated snapshot
+ * behind. A cut records `bodyTruncated`/`bodyBytes` on the `body` object,
+ * mirroring `cap_node_body`'s sibling-key shape.
  */
-[[nodiscard]] std::string sanitize_config_snapshot (const std::string& body);
+[[nodiscard]] std::string
+sanitize_config_snapshot (const std::string& body, size_t max_body_bytes);
 
 } // namespace vayu::json

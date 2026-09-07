@@ -255,6 +255,12 @@ bool is_create) {
     }
     apply_string_field (json, "preRequestScript", c.pre_request_script, "", is_create);
     apply_string_field (json, "postRequestScript", c.post_request_script, "", is_create);
+    // Elements (issue #1513), additive beside the two script fields above -
+    // see the equivalent comment in requests.cpp's apply_request_fields.
+    if (auto outcome = apply_elements_field (json, "elements", c.elements, is_create);
+    !outcome) {
+        return outcome;
+    }
 
     // The declared data contract (issue #599). `{}` is "no contract", which is
     // what both an absent field on create and an explicit null on update mean.

@@ -407,6 +407,19 @@ Json serialize (const vayu::db::Collection& c) {
     json["preRequestScript"]  = c.pre_request_script;
     json["postRequestScript"] = c.post_request_script;
 
+    // Elements (issue #1513), additive beside the two fields above - a
+    // migrated collection's scripts are also `script.pre`/`script.post`
+    // entries here, but nothing runs an element yet (#1514).
+    if (c.elements.empty ()) {
+        json["elements"] = Json::array ();
+    } else {
+        try {
+            json["elements"] = Json::parse (c.elements);
+        } catch (const std::exception&) {
+            json["elements"] = Json::array ();
+        }
+    }
+
     // The declared data contract. Same try-parse-with-default block as
     // variables: a row written before the column existed holds "", and an
     // unparseable blob is no more a schema than an absent one.
@@ -494,11 +507,22 @@ Json serialize (const vayu::db::Request& r) {
 
     json["preRequestScript"]  = r.pre_request_script;
     json["postRequestScript"] = r.post_request_script;
-    json["followRedirects"]   = r.follow_redirects;
-    json["maxRedirects"]      = r.max_redirects;
-    json["httpVersion"]       = r.http_version;
-    json["verifySSL"]         = r.verify_ssl;
-    json["stream"]            = r.stream;
+
+    // Elements (issue #1513), additive beside the two fields above.
+    if (r.elements.empty ()) {
+        json["elements"] = Json::array ();
+    } else {
+        try {
+            json["elements"] = Json::parse (r.elements);
+        } catch (const std::exception&) {
+            json["elements"] = Json::array ();
+        }
+    }
+    json["followRedirects"] = r.follow_redirects;
+    json["maxRedirects"]    = r.max_redirects;
+    json["httpVersion"]     = r.http_version;
+    json["verifySSL"]       = r.verify_ssl;
+    json["stream"]          = r.stream;
     // Operation identity (issue #637). Always present as a key, `null` when the
     // request declares none - the column is nullable, and a client that has to
     // tell "no operation" from "key not serialized yet" would be guessing. An
@@ -1177,28 +1201,39 @@ namespace {
  * A column that will not parse - or one past the field cap - is written as
  * @p fallback rather than failing the row: the list route streams many rows, and
  * one unreadable column must not cost the caller every other one.
+ *
+ * Returns true when @p fallback was written because the column was over
+ * @p max_field_size, so the caller can name the field in `truncatedFields`
+ * (issue #1485) - a column that is merely empty or unparseable is not
+ * "truncated" and does not count.
  */
-void write_json_column (std::ostream& out,
+bool write_json_column (std::ostream& out,
 const char* wire_name,
 const std::string& stored,
 const char* fallback,
 size_t max_field_size) {
     out << "\"" << wire_name << "\":";
-    if (stored.empty () || stored.size () > max_field_size) {
+    if (stored.size () > max_field_size) {
         out << fallback;
-        return;
+        return true;
+    }
+    if (stored.empty ()) {
+        out << fallback;
+        return false;
     }
     try {
         out << Json::parse (stored).dump ();
     } catch (const std::exception&) {
         out << fallback;
     }
+    return false;
 }
 
 } // namespace
 
 void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     const size_t max_field_size = vayu::core::constants::json::MAX_FIELD_SIZE;
+    std::vector<std::string> truncated_fields;
 
     out << "{";
     out << "\"id\":" << Json (r.id).dump () << ",";
@@ -1210,26 +1245,39 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"order\":" << r.order << ",";
 
     // Query params - JSON array of KeyValueEntry
-    write_json_column (out, "params", r.params, "[]", max_field_size);
+    if (write_json_column (out, "params", r.params, "[]", max_field_size)) {
+        truncated_fields.emplace_back ("params");
+    }
     out << ",";
 
     // Headers - JSON array of KeyValueEntry
-    write_json_column (out, "headers", r.headers, "[]", max_field_size);
+    if (write_json_column (out, "headers", r.headers, "[]", max_field_size)) {
+        truncated_fields.emplace_back ("headers");
+    }
     out << ",";
 
     // Body - JSON discriminated union
-    write_json_column (out, "body", r.body, "{\"mode\":\"none\"}", max_field_size);
+    if (write_json_column (out, "body", r.body, "{\"mode\":\"none\"}", max_field_size)) {
+        truncated_fields.emplace_back ("body");
+    }
     out << ",";
 
     out << "\"bodyType\":" << Json (r.body_type.empty () ? "none" : r.body_type).dump ()
         << ",";
 
     // Auth - JSON RequestAuth object
-    write_json_column (out, "auth", r.auth, "{\"mode\":\"inherit\"}", max_field_size);
+    if (write_json_column (out, "auth", r.auth, "{\"mode\":\"inherit\"}", max_field_size)) {
+        truncated_fields.emplace_back ("auth");
+    }
     out << ",";
 
     out << "\"preRequestScript\":" << Json (r.pre_request_script).dump () << ",";
     out << "\"postRequestScript\":" << Json (r.post_request_script).dump () << ",";
+    // Elements (issue #1513), additive beside the two fields above.
+    if (write_json_column (out, "elements", r.elements, "[]", max_field_size)) {
+        truncated_fields.emplace_back ("elements");
+    }
+    out << ",";
     out << "\"followRedirects\":" << (r.follow_redirects ? "true" : "false") << ",";
     out << "\"maxRedirects\":" << r.max_redirects << ",";
     out << "\"httpVersion\":" << Json (r.http_version).dump () << ",";
@@ -1240,10 +1288,42 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"specOperation\":" << spec_operation_node (r.spec_operation).dump () << ",";
     out << "\"updatedAt\":" << r.updated_at << ",";
     out << "\"createdAt\":" << r.created_at;
+    // Absent, not an empty array, when nothing was substituted (issue #1485) -
+    // the same absent-vs-zero rule this report's other optional sections
+    // follow, so a reader can tell "checked, nothing over cap" from "field not
+    // sent yet" without special-casing an empty list.
+    if (!truncated_fields.empty ()) {
+        out << ",\"truncatedFields\":" << Json (truncated_fields).dump ();
+    }
     out << "}";
 }
 
-std::string sanitize_config_snapshot (const std::string& body) {
+namespace {
+
+// Cap a config snapshot's `body.content` in place, recording bodyTruncated +
+// bodyBytes (the original length) on the `body` object when cut - the same
+// sibling-key shape `cap_node_body` records on a trace node, one level down
+// here because `content` lives inside `body` rather than being it.
+void cap_snapshot_body (nlohmann::json& parsed, size_t max_body_bytes) {
+    auto body_it = parsed.find ("body");
+    if (body_it == parsed.end () || !body_it->is_object ()) {
+        return;
+    }
+    auto content_it = body_it->find ("content");
+    if (content_it == body_it->end () || !content_it->is_string ()) {
+        return;
+    }
+    const std::string content = content_it->get<std::string> ();
+    if (content.size () > max_body_bytes) {
+        *content_it                 = content.substr (0, max_body_bytes);
+        (*body_it)["bodyTruncated"] = true;
+        (*body_it)["bodyBytes"]     = content.size ();
+    }
+}
+
+} // namespace
+
+std::string sanitize_config_snapshot (const std::string& body, size_t max_body_bytes) {
     Json parsed;
     try {
         parsed = Json::parse (body);
@@ -1251,15 +1331,16 @@ std::string sanitize_config_snapshot (const std::string& body) {
         return body; // not JSON; store as-is
     }
 
-    // Allowlist within the auth subtree: keep only the mode, drop every
-    // credential field. Because we keep a fixed key rather than blocking known
-    // secret names, no future auth field (client secrets, tokens, private keys)
-    // can leak into the persisted snapshot.
     if (parsed.is_object ()) {
+        // Allowlist within the auth subtree: keep only the mode, drop every
+        // credential field. Because we keep a fixed key rather than blocking
+        // known secret names, no future auth field (client secrets, tokens,
+        // private keys) can leak into the persisted snapshot.
         if (auto it = parsed.find ("auth"); it != parsed.end () && it->is_object ()) {
             const std::string mode = it->value ("mode", std::string{ "none" });
             *it                    = Json::object ({ { "mode", mode } });
         }
+        cap_snapshot_body (parsed, max_body_bytes);
     }
     return parsed.dump ();
 }

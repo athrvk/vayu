@@ -33,7 +33,11 @@ namespace vayu::http::routes {
  * unreachable" - two states the previous collection-list scan could not tell
  * apart, because one swallowed list failure looked identical to "not in any
  * list". Present -> 200 with the same serialized shape a list entry carries
- * (`serialize(const db::Request&)`), so the client transforms it identically.
+ * (`serialize(const db::Request&)`), so the client transforms it identically -
+ * with one deliberate exception (issue #1485): this route never substitutes a
+ * default for a column over the field cap, so it carries no `truncatedFields`
+ * and answers whatever is stored, whole, even for a row written before the
+ * cap existed. Only `serialize_to_stream` (the list) can produce that key.
  *
  * Extracted so the wiring (404 vs 200 + body) is covered without an in-process
  * HTTP server - see requests_route_test.cpp. The error body is built by
@@ -228,6 +232,13 @@ bool is_create) {
     }
     apply_string_field (json, "preRequestScript", r.pre_request_script, "", is_create);
     apply_string_field (json, "postRequestScript", r.post_request_script, "", is_create);
+    // Elements (issue #1513), additive beside the two script fields above:
+    // nothing runs an element yet (#1514), so a client with no elements
+    // editor keeps using the two fields exactly as before.
+    if (auto outcome = apply_elements_field (json, "elements", r.elements, is_create);
+    !outcome) {
+        return outcome;
+    }
     apply_int_field (json, "order", r.order, 0, is_create);
     apply_bool_field (json, "followRedirects", r.follow_redirects, true, is_create);
 

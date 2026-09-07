@@ -43,8 +43,10 @@ interface RunItemProps {
 	 */
 	onDelete: (runId: string, event?: React.MouseEvent) => void;
 	/**
-	 * Pin or unpin this run as its request's baseline. Absent for run types
-	 * that have nothing to compare against - see the action's own comment.
+	 * Pin or unpin this run. Every run type can be pinned - it keeps the run
+	 * past retention and finds it again under the Pinned filter. A load run's
+	 * pin is additionally its request's comparison baseline, which is why the
+	 * label differs by type - see the action's own comment.
 	 */
 	onToggleBaseline?: (runId: string, baseline: boolean, event?: React.MouseEvent) => void;
 	isDeleting: boolean;
@@ -140,6 +142,24 @@ export default function RunItem({
 		}
 	};
 
+	// A load run's pin is also its request's comparison baseline, so it keeps
+	// the more specific label; every other type just gets "Pin"/"Unpin".
+	const isLoadRun = run.type === "load";
+	const pinActionLabel = run.baseline
+		? isLoadRun
+			? "Unpin baseline"
+			: "Unpin"
+		: isLoadRun
+			? "Pin as baseline"
+			: "Pin";
+	const pinTooltip = run.baseline
+		? isLoadRun
+			? "Unpin this run as the baseline"
+			: "Unpin this run"
+		: isLoadRun
+			? "Pin this run as the baseline later runs are compared against"
+			: "Pin this run to keep it past retention and find it again later";
+
 	/*
 	 * The row's actions, offered on right-click (#1360). The same two handlers
 	 * the buttons above call - the pin and the delete are defined once, by the
@@ -147,10 +167,10 @@ export default function RunItem({
 	 * second definition of what they do.
 	 */
 	const rowActions: RowAction[] = [
-		...(onToggleBaseline && run.type === "load"
+		...(onToggleBaseline
 			? [
 					{
-						label: run.baseline ? "Unpin baseline" : "Pin as baseline",
+						label: pinActionLabel,
 						icon: run.baseline ? PinOff : Pin,
 						onSelect: () => onToggleBaseline(run.id, !run.baseline),
 						disabled: isTogglingBaseline,
@@ -231,7 +251,7 @@ export default function RunItem({
 									className="shrink-0 gap-1 bg-primary/15 text-primary px-1.5 py-0 text-[10px] font-semibold"
 								>
 									<Pin className="w-2.5 h-2.5" />
-									Baseline
+									{isLoadRun ? "Baseline" : "Pinned"}
 								</Badge>
 							)}
 						</div>
@@ -262,30 +282,25 @@ export default function RunItem({
 								<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
 							)}
 							{/*
-							 * Pin as baseline. Offered for a load run and nothing
-							 * else, because a baseline exists to be diffed and only
-							 * a load run has a report with percentiles, throughput
-							 * and an error rate to diff. A pinned run also stops
-							 * being pruned, which is a promise worth making only
-							 * where it buys something.
+							 * Pin this run. Every run type gets it: pinning keeps
+							 * the run past retention and finds it again under the
+							 * Pinned filter. A load run's pin is additionally its
+							 * request's comparison baseline, hence the label
+							 * difference above (pinActionLabel/pinTooltip).
 							 *
 							 * Stays visible once pinned - the pin is state, not a
 							 * hover affordance, and a row whose only sign of it
 							 * vanished with the pointer would read as unpinned.
 							 */}
-							{onToggleBaseline && run.type === "load" && (
+							{onToggleBaseline && (
 								<Button
 									variant="rowAction"
 									size="icon"
 									onClick={(e) => onToggleBaseline(run.id, !run.baseline, e)}
 									disabled={isTogglingBaseline}
-									aria-label={run.baseline ? "Unpin baseline" : "Pin as baseline"}
+									aria-label={pinActionLabel}
 									aria-pressed={!!run.baseline}
-									title={
-										run.baseline
-											? "Unpin this run as the baseline"
-											: "Pin this run as the baseline later runs are compared against"
-									}
+									title={pinTooltip}
 									className={cn(
 										"h-6 w-6 transition-opacity",
 										run.baseline || isTogglingBaseline

@@ -363,5 +363,24 @@ describe("seedFromRun", () => {
 		it("leaves it undefined for an untruncated run", () => {
 			expect(seedFromRun(run(), liveRequest).requestBodyTruncated).toBeUndefined();
 		});
+
+		it("sets requestBodyTruncated from the config snapshot's own cap, with no trace cut", () => {
+			// sanitize_config_snapshot caps body.content independently of the
+			// trace, so a run can be truncated there with the trace untouched.
+			const truncatedSnapshotOnly = run({
+				configSnapshot: {
+					method: "POST",
+					url: "https://api.example.test/users?page=2",
+					body: {
+						mode: "json",
+						content: "SLICE",
+						bodyTruncated: true,
+						bodyBytes: 5_242_880,
+					},
+				},
+			} as Partial<Run>);
+
+			expect(seedFromRun(truncatedSnapshotOnly, liveRequest).requestBodyTruncated).toBe(true);
+		});
 	});
 });

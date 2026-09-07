@@ -541,6 +541,12 @@ Variables are resolved with priority: **Environment > Collection > Global**
 
 - **Script Sandboxing**: QuickJS contexts are isolated with no filesystem or network access
 - **Local-Only Communication**: Control API only binds to `127.0.0.1:9876`
+- **No response caching**: every engine response carries `Cache-Control: no-store`
+  and the renderer's fetch client asks for `cache: "no-store"` as well (#1507).
+  Nothing the engine answers is valid to replay from a browser's disk cache - it
+  is a live read of state (a run, a request, a collection) that changes under
+  the client, and TanStack Query, not the HTTP cache, already holds whatever the
+  renderer keeps between polls.
 - **Context Isolation**: Electron renderer runs in isolated context (no Node.js access)
 - **No Cloud Sync**: All data stored locally in SQLite database
 - **No spellchecker**: every window the app opens - the shell and the OAuth

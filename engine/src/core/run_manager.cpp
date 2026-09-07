@@ -15,6 +15,7 @@
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_runner.hpp"
+#include "vayu/core/worker_count.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_exchange.hpp"
@@ -1139,7 +1140,7 @@ int configured_workers,
 int default_max_per_host) {
     // Configure EventLoop
     vayu::http::EventLoopConfig loop_config;
-    loop_config.num_workers = static_cast<size_t> (configured_workers); // Use configured workers (0 = auto-detect)
+    loop_config.num_workers = static_cast<size_t> (configured_workers); // Already resolved (see resolve_worker_count)
     loop_config.max_concurrent    = std::max (concurrency, size_t (100));
     loop_config.max_per_host      = static_cast<size_t> (default_max_per_host);
     loop_config.target_rps        = target_rps;
@@ -1173,9 +1174,7 @@ int default_max_per_host) {
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);
 
-    std::string workers_str =
-    configured_workers == 0 ? "auto" : std::to_string (configured_workers);
-    vayu::utils::log_debug ("EventLoop config: workers=" + workers_str +
+    vayu::utils::log_debug ("EventLoop config: workers=" + std::to_string (configured_workers) +
     ", max_concurrent=" + std::to_string (loop_config.max_concurrent) +
     ", max_per_host=" + std::to_string (loop_config.max_per_host) +
     ", target_rps=" + std::to_string (target_rps) +
@@ -1542,7 +1541,9 @@ RunManager& manager) {
         "eventLoopMaxConcurrent", vayu::core::constants::event_loop::MAX_CONCURRENT);
         int default_max_per_host = db.get_config_int (
         "eventLoopMaxPerHost", vayu::core::constants::event_loop::MAX_PER_HOST);
-        int configured_workers = db.get_config_int ("workers", 0); // 0 = auto-detect
+        // Resolved the same way /health reports it (vayu::core::resolve_worker_count),
+        // so the two numbers cannot drift apart.
+        int configured_workers = vayu::core::resolve_worker_count (db);
 
         // Per-test config can override defaults
         size_t concurrency =
@@ -1803,8 +1804,16 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     if (inputs.thresholds.has_value ()) {
         nlohmann::json checks = nlohmann::json::array ();
         for (const auto& check : inputs.thresholds->checks) {
-            checks.push_back ({ { "metric", check.metric }, { "limit", check.limit },
-            { "actual", check.actual }, { "passed", check.passed } });
+            nlohmann::json row = { { "metric", check.metric }, { "limit", check.limit },
+                { "passed", check.passed }, { "evaluated", check.evaluated } };
+            // Omitted rather than zeroed when unevaluated, the same rule this
+            // report follows for a section the run never populated - a
+            // ceiling of 0ms next to "passed": false would read as a real
+            // measurement instead of the absence it is.
+            if (check.evaluated) {
+                row["actual"] = check.actual;
+            }
+            checks.push_back (std::move (row));
         }
         summary["thresholds"] = { { "checks", checks },
             { "passed", inputs.thresholds->passed },

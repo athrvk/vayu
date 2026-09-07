@@ -8,6 +8,9 @@
 
 #include <gtest/gtest.h>
 
+#include <sstream>
+
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 
 namespace vayu::json {
@@ -294,6 +297,62 @@ TEST (JsonTest, SerializesRun) {
     EXPECT_EQ (json["configSnapshot"]["rps"], 100);
     EXPECT_EQ (json["requestId"], "req_1");
     EXPECT_EQ (json["environmentId"], "env_1");
+}
+
+// ============================================================================
+// serialize_to_stream - the list route's field cap (issue #1485)
+//
+// GET /requests substitutes a default for a stored column over
+// `json::MAX_FIELD_SIZE` (write_json_column), because one unreadable row must
+// not fail the whole page. Before this fix that substitution was silent -
+// indistinguishable from a genuinely empty field - so a caller that trusted
+// the list (Duplicate, an MCP agent copying `list_requests` verbatim) could
+// write the fallback back as if it were real. `truncatedFields` names which
+// columns were substituted, absent when none were.
+// ============================================================================
+
+TEST (JsonRequestListSerializer, MarksAnOversizedColumnTruncatedInsteadOfSubstitutingSilently) {
+    vayu::db::Request r;
+    r.id            = "req_1";
+    r.collection_id = "col_1";
+    r.name          = "R";
+    r.method        = vayu::HttpMethod::GET;
+    r.url           = "https://example.test";
+    r.params        = "[]";
+    r.headers       = "[]";
+    // Content need not be valid JSON: the cap is checked on the stored
+    // column's byte length before any parse is attempted.
+    r.body = std::string (vayu::core::constants::json::MAX_FIELD_SIZE + 1, 'a');
+    r.auth = R"({"mode":"inherit"})";
+
+    std::ostringstream out;
+    serialize_to_stream (r, out);
+    const auto parsed = nlohmann::json::parse (out.str ());
+
+    EXPECT_EQ (parsed["body"], nlohmann::json::parse (R"({"mode":"none"})"))
+    << "an oversized column still falls back, exactly like before this fix";
+    ASSERT_TRUE (parsed.contains ("truncatedFields"));
+    EXPECT_EQ (parsed["truncatedFields"], nlohmann::json::array ({ "body" }));
+}
+
+TEST (JsonRequestListSerializer, OmitsTruncatedFieldsWhenEveryColumnFitsTheCap) {
+    vayu::db::Request r;
+    r.id            = "req_1";
+    r.collection_id = "col_1";
+    r.name          = "R";
+    r.method        = vayu::HttpMethod::GET;
+    r.url           = "https://example.test";
+    r.params        = "[]";
+    r.headers       = "[]";
+    r.body          = R"({"mode":"none"})";
+    r.auth          = R"({"mode":"inherit"})";
+
+    std::ostringstream out;
+    serialize_to_stream (r, out);
+    const auto parsed = nlohmann::json::parse (out.str ());
+
+    EXPECT_FALSE (parsed.contains ("truncatedFields"))
+    << "absent, not an empty array, when nothing was substituted";
 }
 
 // ============================================================================

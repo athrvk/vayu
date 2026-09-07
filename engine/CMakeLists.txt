@@ -476,6 +476,10 @@ add_library(vayu_core STATIC
     src/core/threshold_eval.cpp
     src/core/capacity_controller.cpp
     src/core/monitor.cpp
+    src/core/worker_count.cpp
+    src/core/elements/registry.cpp
+    src/core/elements/inherit_disable.cpp
+    src/core/elements/script_kinds.cpp
     # The only TU that sees VAYU_VERSION_STRING for the User-Agent - keep it
     # that way, or a version bump invalidates the whole compile cache (#659).
     src/core/user_agent.cpp
@@ -664,6 +668,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/inbox.cpp
         src/http/routes/events.cpp
         src/http/routes/mock_server.cpp
+        src/http/routes/elements.cpp
     )
 
     target_link_libraries(vayu-engine PRIVATE

@@ -1015,6 +1015,13 @@ struct Collection {
     std::string auth; // JSON - Auth config (mode + fields), never 'inherit'
     std::string pre_request_script; // JS - runs before every request in this collection
     std::string post_request_script; // JS - runs after every request in this collection
+    // JSON array of elements (issue #1513): the ordered, typed behaviours
+    // attached to this collection - a migrated 0.26 collection's scripts land
+    // here as `script.pre`/`script.post` entries. `[]` is "no elements".
+    // `pre_request_script`/`post_request_script` above stay mapped nowhere
+    // once this column exists (see database.cpp); nothing yet reads this one
+    // either - the pipeline that runs an element is issue #1514.
+    std::string elements{ "[]" };
     // JSON - the data contract this collection declares (issue #599):
     // {"columns":[...], "declaredAt": ms, "fileName"?: "users.csv"}. `{}` means
     // no contract. The *schema* lives here, never the rows - a data file's rows
@@ -1055,6 +1062,10 @@ struct Request {
     std::string auth; // JSON - RequestAuth (mode + fields, may be 'inherit')
     std::string pre_request_script;  // JS Code
     std::string post_request_script; // JS Code (Tests)
+    // JSON array of elements (issue #1513) - see `Collection::elements` above
+    // for what this column is and why the two script fields above stay
+    // unmapped rather than removed.
+    std::string elements{ "[]" };
     int order = 0; // INTEGER NOT NULL DEFAULT 0 - position within collection
     // Execution options. Mirror the fields of the executable vayu::Request so a
     // saved request keeps the redirect policy the user chose. The in-struct

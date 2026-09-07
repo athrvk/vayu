@@ -13,6 +13,12 @@
 #include "temp_database.hpp"
 #include "vayu/http/client.hpp"
 
+// Defined in elements_registry_test.cpp; registers the environment that
+// writes tests/fixtures/element-kinds.json on every run (issue #1513).
+// Called explicitly here rather than at namespace scope in that file, which
+// would be a throwing initialiser before `main` has a frame to catch it.
+void register_element_kinds_fixture_writer ();
+
 namespace {
 
 /// The suite plus the scratch-directory bracket around it, so that `main` below
@@ -26,6 +32,7 @@ int run_all_tests (int argc, char** argv) {
     vayu::http::global_init ();
 
     testing::InitGoogleTest (&argc, argv);
+    register_element_kinds_fixture_writer ();
 
     // Give this process a private working directory so the relative `test_*.db`
     // paths fixtures open resolve somewhere no sibling process shares - what

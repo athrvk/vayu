@@ -1,0 +1,66 @@
+[
+  {
+    "category": "inherit",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "elementId": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "elementId"
+      ],
+      "type": "object"
+    },
+    "description": "Drops one element inherited from an ancestor collection, named by id, out of this request or collection's resolved list.",
+    "hotPathClass": "declarative",
+    "kind": "inherit.disable",
+    "label": "Disable inherited element",
+    "phases": [],
+    "version": 1
+  },
+  {
+    "category": "script",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "type": "object"
+    },
+    "description": "Runs before the request is sent.",
+    "hotPathClass": "script",
+    "kind": "script.pre",
+    "label": "Pre-request script",
+    "phases": [],
+    "version": 1
+  },
+  {
+    "category": "script",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "type": "object"
+    },
+    "description": "Runs after the response is received.",
+    "hotPathClass": "script",
+    "kind": "script.post",
+    "label": "Post-request script",
+    "phases": [],
+    "version": 1
+  }
+]

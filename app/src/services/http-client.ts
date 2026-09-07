@@ -184,10 +184,15 @@ class HttpClient {
 				url += `?${params.toString()}`;
 			}
 
-			// Build fetch options
+			// Build fetch options. `cache: "no-store"` is belt and braces (#1507):
+			// the engine already answers every response with `Cache-Control:
+			// no-store`, but a dev build talking to an older engine, or a future
+			// route that forgets the header, should not refill Chromium's disk
+			// cache with live engine state either.
 			const fetchOptions: RequestInit = {
 				method,
 				signal: controller.signal,
+				cache: "no-store",
 				headers: {
 					"ngrok-skip-browser-warning": "true",
 					...options?.headers,
@@ -280,6 +285,7 @@ class HttpClient {
 			const response = await fetch(`${this.baseURL}${path}`, {
 				method: "POST",
 				signal: controller.signal,
+				cache: "no-store",
 				headers: {
 					"Content-Type": "application/json",
 					Accept: SSE_ACCEPT,

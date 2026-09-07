@@ -114,6 +114,13 @@ export class RequestTransformer {
 
 		const specOperation = toSpecOperation(raw.specOperation);
 
+		// Which columns the engine substituted a default for (issue #1485) -
+		// absent for a row with nothing over the field cap, same reason
+		// `specOperation` is spread rather than assigned.
+		const truncatedFields = Array.isArray(raw.truncatedFields)
+			? (raw.truncatedFields as unknown[]).filter((f): f is string => typeof f === "string")
+			: undefined;
+
 		return {
 			id,
 			collectionId: asStr(raw.collectionId) ?? "",
@@ -151,6 +158,7 @@ export class RequestTransformer {
 			// explicit `undefined` would show up in the structural comparisons
 			// the request-builder's dirty check makes.
 			...(specOperation ? { specOperation } : {}),
+			...(truncatedFields?.length ? { truncatedFields } : {}),
 			order: typeof raw.order === "number" ? raw.order : 0,
 			createdAt: new Date(raw.createdAt as string | number).toISOString(),
 			updatedAt: new Date(raw.updatedAt as string | number).toISOString(),

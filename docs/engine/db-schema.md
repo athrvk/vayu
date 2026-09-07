@@ -11,7 +11,9 @@ automatically on startup - no migration scripts are needed for additive changes.
 
 > **Breaking changes**: because Vayu is pre-release, destructive schema changes (column removal,
 > type changes) wipe the database rather than migrating it. The `PRAGMA user_version` is
-> not currently managed; wipe is done by deleting the `.db` file.
+> not currently managed; wipe is done by deleting the `.db` file. An **additive** change - a new
+> column, or existing data reshaped into a new one alongside the old (the script-to-elements fold
+> below) - gets a startup repair pass instead, the shape both it and the header-strip pass share.
 
 ---
 
@@ -186,6 +188,22 @@ nothing left to touch pays close to nothing for it:
   (`restore_request_locked` / `restore_collection_locked`) runs the same disable-and-mark step on
   its way back, which is a no-op if the pass already handled it before the request was deleted.
 
+### The script-to-elements fold (issue #1513)
+
+`Database::fold_scripts_into_elements()`, called from `init()` beside the pass above, gives a
+0.26-shaped `requests` or `collections` row an `elements` entry per non-blank
+`pre_request_script` / `post_request_script`: `{"id": "el_...", "kind": "script.pre" |
+"script.post", "enabled": true, "config": {"script": "..."}}`. It is additive, not a migration in
+the destructive sense the callout above describes - `pre_request_script` and `post_request_script`
+stay mapped and keep driving every execution path (design send, sequential run) exactly as before,
+because nothing runs an *element* yet; the pipeline that does is issue #1514. Same shape as the
+header-strip pass: a candidate scan (`get_all` filtered to non-empty script columns, so an
+already-migrated workspace costs one query), a `<db>.pre-elements-fold.bak` snapshot written once
+immediately before the first row this pass ever rewrites (its own name, so a start that also runs
+the header-strip pass does not have one pass's snapshot overwrite the other's), one transaction for
+the whole rewrite, and a `scriptsFoldedIntoElements` config-entry marker so a later start never
+re-scans. `updated_at` is left alone, on the same precedent.
+
 ---
 
 ## Tables
@@ -217,12 +235,24 @@ Stores folder/group hierarchy for requests.
 | `auth`               | TEXT    | JSON: `RequestAuth` (never `inherit`)        |
 | `pre_request_script` | TEXT    | Default `""`                                 |
 | `post_request_script`| TEXT    | Default `""`                                 |
+| `elements`           | TEXT    | JSON array of elements (issue #1513); default `"[]"` |
 | `data_schema`        | TEXT    | JSON: the declared data contract; default `"{}"` |
 | `openapi`            | TEXT    | JSON: the bound spec document; default `"{}"` |
 | `order`              | INTEGER | Sort order within parent; default 0          |
 | `created_at`         | INTEGER | Unix ms                                      |
 | `updated_at`         | INTEGER | Unix ms                                      |
 | `deleted_at`         | INTEGER | Unix ms; NULL while the collection is live (issue #988) |
+
+**elements** - the ordered, typed behaviours attached to this collection (issue #1512): extractors,
+assertions, timers, controllers, scripts and metrics, each `{"id", "kind", "enabled", "name"?,
+"config"}` and validated against the registry `GET /elements/kinds` serves
+(`vayu::core::Registry::validate`, `engine/include/vayu/core/elements.hpp`). `[]` - the default,
+and what an explicit `null` on `PUT` resets to - means no elements. Additive beside
+`pre_request_script` / `post_request_script` above: a 0.26 collection's scripts are folded in here
+as `script.pre` / `script.post` entries by the startup pass above, but the two script columns keep
+driving execution unchanged until issue #1514's pipeline runs an element for real. `POST /compose`
+resolves a request's whole chain of these (its own collection's, root to leaf, then the request's)
+into one list, minus anything a `inherit.disable` entry names.
 
 **data_schema** - which columns this collection's data files are expected to
 carry, so `{{data.column}}` and `pm.iterationData` can be checked before a run
@@ -290,6 +320,15 @@ Collections are always auth sources - they never store `{"mode":"inherit"}`. The
 during the inherit walk (`request_composer.cpp`), so neither reaches the engine's `parse_auth` -
 which would treat them as no auth anyway.
 
+**Cap.** (issue #1485) `variables`, `auth`, `data_schema` and `openapi` are each
+refused at write time with a `413` naming the field, its size and the cap, when
+the serialized value is over `json::MAX_FIELD_SIZE` (10 MiB,
+`engine/include/vayu/core/constants.hpp`) - through the same shared
+`apply_json_field` the [`requests`](#requests) columns are capped by. Unlike
+`requests`, no collection column is ever substituted on read: `GET
+/collections` carries the same whole value `GET /collections/:id` does, so
+there is no `truncatedFields` here.
+
 **Cascade delete**: deleting a collection performs BFS to collect all descendant IDs, then
 deletes all their requests before deleting the collections deepest-first, wrapped in a single
 transaction so a crash mid-cascade cannot leave a half-deleted subtree. See
@@ -323,6 +362,7 @@ Stores individual HTTP request definitions.
 | `auth`                | TEXT    | JSON discriminated union (see below)                 |
 | `pre_request_script`  | TEXT    | Default `""`                                         |
 | `post_request_script` | TEXT    | Default `""`                                         |
+| `elements`            | TEXT    | JSON array of elements (issue #1513); default `"[]"` |
 | `order`               | INTEGER | Sort order within collection; default 0              |
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
@@ -342,6 +382,14 @@ Disabled rows (`"enabled":false`) are preserved in storage and filtered at HTTP-
 Duplicate keys are allowed. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
 `X-Request-ID` and `User-Agent` rows here; [the header-strip pass](#the-header-strip-pass-issues-1487-1491)
 disables them once, at startup, leaving each row in place with `source: "legacy-default"`.
+An optional `source` key (`"body-mode"` | `"stream"` | `"legacy-default"`) marks a row
+an app setting or that repair pass wrote rather than the user - the auto `Content-Type`
+a body-mode change adds, the `Accept` the Event stream toggle adds, or a row the
+header-strip pass disabled - so it can tell its own row apart from a hand-typed one
+across a reload; retyping the row's key or value clears it (issues #1481, #1491).
+
+**elements** - same shape and the same additive relationship to `pre_request_script` /
+`post_request_script` as [`collections.elements`](#collections) above; see that entry.
 
 **body** - discriminated union:
 ```json
@@ -364,6 +412,20 @@ The `oauth2` `config` holds the grant type, endpoints, client id/secret,
 placement options, etc. Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
+
+**Cap.** (issue #1485) `params`, `headers`, `body` and `auth` are each refused
+at write time - `400` if the value is not an object/array of the shape above,
+`413` naming the field, its size and the cap - when the serialized value is
+over `json::MAX_FIELD_SIZE` (10 MiB, `engine/include/vayu/core/constants.hpp`),
+the same limit `GET /requests` (the list route) has always read a column
+against. A row written before this cap existed can still be oversized: `GET
+/requests/:id` answers with it whole, however large, but `GET
+/requests?collectionId=` substitutes the field's documented default and adds
+`truncatedFields` (an array of the substituted field names, e.g. `["body"]`,
+omitted when nothing was substituted) to that row, so a caller reading the
+list can tell a genuinely empty field from one it cannot see the whole of.
+Nothing recomputes `truncatedFields` at write time or stores it - it is
+derived fresh on every list read from the same size check.
 
 **follow_redirects / max_redirects / http_version / stream** - the request's
 execution options, surfaced in the request builder's **Settings** tab and
@@ -696,6 +758,12 @@ clients on the same database agree - the app mirrors it into
 `session-store.ts` for synchronous reads and reconciles on launch
 (`useActiveEnvironmentRestore`), treating the engine's value as the truth.
 
+**Cap.** (issue #1485) `variables` is refused at write time with a `413` naming
+the field, its size and the cap, when the serialized value is over
+`json::MAX_FIELD_SIZE` (10 MiB, `engine/include/vayu/core/constants.hpp`) -
+the same `apply_json_field` guard the [`requests`](#requests) and
+[`collections`](#collections) columns share.
+
 ---
 
 ### `client_certificates`
@@ -827,7 +895,9 @@ default, so `sync_schema()` can
   },
   "tests": { "sampled": 10, "passed": 9, "failed": 1 },
   "thresholds": {
-    "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true } ],
+    "checks": [
+      { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true, "evaluated": true }
+    ],
     "passed": 1, "failed": 0
   },
   "schemaValidation": {
@@ -862,7 +932,11 @@ the same rule and for the same reason: absent when the run declared no
 [budgets](api-reference.md#the-thresholds-block-passfail-budgets), so the report's
 `thresholdValidation` section is left out rather than claiming a run passed nothing. Its `metric`
 keys are the wire names the payload declared, carried through unchanged; the report derives
-`verdict` from `failed` rather than storing it, so the two cannot contradict. The writer is
+`verdict` from `failed` rather than storing it, so the two cannot contradict. Each check's
+`evaluated` follows the same absent-vs-zero rule one level down (issue #1484): a latency percentile
+with no completed requests writes `evaluated: false` and omits `actual` rather than storing the
+default `0`, which a reader could not tell apart from a genuine 0ms measurement; such a check counts
+toward `failed`. The writer is
 `vayu::core::build_run_summary_payload` and the reader is `apply_run_summary`
 (`http/routes/runs.cpp`); `runs_route_test.cpp` round-trips the pair, so the key names cannot
 drift apart silently.
@@ -903,6 +977,19 @@ carry auth credentials. Before persistence, its top-level `auth` object is
 reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
 `utils/json.cpp`) - an allowlist, so no current or future auth field
 (`clientSecret`, `password`, tokens) leaks into a stored run.
+
+**`config_snapshot`'s body is capped at `maxTraceBodyBytes`** (issue #1486), the
+same limit and the same sibling-key shape the [`results`](#results) trace bodies
+use - `sanitize_config_snapshot` truncates `body.content` in place and records
+`bodyTruncated: true` / `bodyBytes: <original length>` on the `body` object when
+it cuts. Without this cap a single oversized send (a large upload, a big JSON
+fixture) left a permanently bloated `config_snapshot` behind: the one-time
+summary build the cache above pays per run id, and the `q` filter's `LIKE` /
+`collectionId`'s `json_extract` (`run_filter_where`, `db/database.cpp`, run
+unconditionally as part of every list query's `WHERE`) all scan the stored
+string's full length on every call that uses them. The by-id route
+(`GET /runs/:id`) returns whatever was stored, cap included - it never
+re-derives or re-truncates.
 
 **`config_snapshot` for a scenario run** - a run started from a `scenario` block
 (see [POST /runs](api-reference.md#post-runs)) stores a **step manifest**, never

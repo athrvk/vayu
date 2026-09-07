@@ -55,6 +55,9 @@ Low-level fetch wrapper with error handling and timeout management.
 - **Error Transformation**: Converts HTTP errors to `ApiError` with user-friendly messages
 - **Query Parameters**: Automatic URL encoding
 - **JSON Serialization**: Automatic request/response JSON handling
+- **No Caching**: every request passes `cache: "no-store"`, matching the
+  engine's own `Cache-Control: no-store` on every response (#1507) - nothing
+  the engine answers is valid to replay from Chromium's disk cache
 
 ### Error Handling
 
