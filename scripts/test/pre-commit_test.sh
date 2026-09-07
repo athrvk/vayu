@@ -712,8 +712,10 @@ echo "pre-commit lint without xargs"
 repo="$(make_repo)"
 stub="$(make_stub 19.1.0)"
 sandbox="$(make_sandbox_path)"
+set +e
 out="$(cd "$repo" && PATH="$stub:$sandbox" bash "$HOOK" 2>&1)"
 status=$?
+set -e
 rm -rf "$repo" "$stub" "$sandbox"
 if [[ "$status" -eq 0 && "$out" == *"STUB_LINTED"*"helper.cpp"* && "$out" == *"STUB_LINTED"*"main.cpp"* ]]; then
     pass "without xargs, every staged file is still linted sequentially"
@@ -724,8 +726,10 @@ fi
 repo="$(make_repo)"
 stub="$(make_stub 19.1.0 main.cpp)"
 sandbox="$(make_sandbox_path)"
+set +e
 out="$(cd "$repo" && PATH="$stub:$sandbox" bash "$HOOK" 2>&1)"
 status=$?
+set -e
 rm -rf "$repo" "$stub" "$sandbox"
 if [[ "$status" -ne 0 && "$out" != *"command not found"* ]]; then
     pass "without xargs, a finding still refuses the commit"
