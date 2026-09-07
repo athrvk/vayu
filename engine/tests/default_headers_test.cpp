@@ -34,7 +34,6 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/types.hpp"
-#include "vayu/utils/diagnostics.hpp"
 
 namespace vayu::http::routes {
 // Declared in config.cpp, the body of GET /request-defaults.
@@ -206,21 +205,26 @@ TEST (DefaultHeadersTest, AdvertisesOnlyWhatThisLibcurlCanDecode) {
 // The rows a pre-#1229 client saved into a request
 // ---------------------------------------------------------------------------
 
-// A release build's `-O3` inlines nlohmann's `value ()` deep enough that GCC
-// loses track of the `basic_json` these tests just parsed and reports a null
-// dereference inside nlohmann's own internals - the traced-into-a-library
-// family `VAYU_IGNORE_FALSE_NULL_DEREFERENCE` exists for (see
-// utils/diagnostics.hpp), not a real path through this file. Read every row's
-// `enabled` / `source` through these two, so the suppression lives in one
-// place rather than at every call site below.
-VAYU_IGNORE_FALSE_NULL_DEREFERENCE
+// `basic_json::value (key, default)` is the templated multi-arg accessor
+// that trips a release build's `-Wnull-dereference` on this compiler (a
+// `-O3` optimizer diagnostic that a `#pragma GCC diagnostic` scope around the
+// call site did not suppress - it fires from inlining decisions the pragma's
+// push/pop does not reach on every compiler version, unlike the
+// traced-into-a-library family `VAYU_IGNORE_FALSE_NULL_DEREFERENCE` in
+// utils/diagnostics.hpp actually covers). `find` + `is_boolean`/`is_string`
+// is the same shape `row_value` in `http/default_headers.cpp` already reads
+// a row through, and it does not instantiate that template at all.
 bool row_enabled (const nlohmann::json& row) {
-    return row.value ("enabled", true);
+    const auto it = row.find ("enabled");
+    return it == row.end () || !it->is_boolean () || it->get<bool> ();
 }
 std::string row_source (const nlohmann::json& row) {
-    return row.value ("source", std::string ());
+    const auto it = row.find ("source");
+    if (it != row.end () && it->is_string ()) {
+        return it->get<std::string> ();
+    }
+    return {};
 }
-VAYU_DIAGNOSTIC_POP
 
 // A row the pass matched should be present, disabled, and marked - never
 // absent. Written once so every case below states only what it adds.

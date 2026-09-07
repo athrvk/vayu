@@ -143,6 +143,26 @@ std::string row_value (const nlohmann::json& row) {
     return {};
 }
 
+/// A stored row's `enabled`, defaulting to `true` for a row that carries
+/// none - the same rule `request_composer.cpp`'s `flatten_stored_headers`
+/// applies at send time. `find` + `is_boolean` rather than
+/// `value ("enabled", true)`: the templated multi-arg accessor is what a
+/// release build's `-Wnull-dereference` false-positives on (issue #1491).
+bool row_enabled (const nlohmann::json& row) {
+    const auto it = row.find ("enabled");
+    return it == row.end () || !it->is_boolean () || it->get<bool> ();
+}
+
+/// A stored row's `source`, or "" for a row that carries none. Same shape as
+/// `row_value`, for the same reason `row_enabled` avoids `value (key, default)`.
+std::string row_source (const nlohmann::json& row) {
+    const auto it = row.find ("source");
+    if (it != row.end () && it->is_string ()) {
+        return it->get<std::string> ();
+    }
+    return {};
+}
+
 /// Is this stored row one a pre-#1229 renderer wrote - by provenance, not just
 /// by name or shape? See `strip_legacy_managed_headers` for why each rule is
 /// as narrow as it is.
@@ -258,11 +278,11 @@ std::optional<std::string> strip_legacy_managed_headers (const std::string& head
         // stops carrying, and the marker is what lets a user tell it apart
         // from one they typed and re-enable it from the table, the same way
         // #1481's `source` already lets a body-mode row be told apart.
-        if (row.value ("enabled", true)) {
+        if (row_enabled (row)) {
             row["enabled"] = false;
             changed        = true;
         }
-        if (row.value ("source", std::string ()) != LEGACY_DEFAULT_SOURCE) {
+        if (row_source (row) != LEGACY_DEFAULT_SOURCE) {
             row["source"] = std::string (LEGACY_DEFAULT_SOURCE);
             changed       = true;
         }
