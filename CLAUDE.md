@@ -177,6 +177,32 @@ and assert **both** branches.
 - Labels separate WHERE a change lands (`component:*`) from WHAT kind it is
   (`type:*`). See `.github/LABELING.md`; auto-labeling is `.github/labeler.yml`.
 
+## Comments - keep the constraint, cut the narration
+
+A comment earns its place by carrying something the code and git history do
+not: a non-obvious constraint, an invariant, a platform or compiler quirk
+that isn't obvious from the code alone. It does not earn its place by
+narrating what an issue already tracks - a paragraph retelling what #928's
+backlog paydown did duplicates information a link already carries for free.
+**The issue number stays, the retelling of the issue does not.**
+
+A suppression's reason comment (`eslint-disable`, `NOLINT` and their kin) is
+a separate category from either of the above and is never trimmed: at least
+one is mechanically load-bearing, not just for a human reader -
+`app/src/components/a11y-suppressions.test.ts` parses the reason on the line
+above every a11y suppression, so what looks like narration to a skimming
+human can be the thing a test actually asserts on. Check for a
+source-scanning guard before trimming a suppression comment elsewhere.
+
+Editing or removing an older comment in a file you are already touching is
+in scope for that change, not a drive-by edit that needs its own PR - a
+comment-only deletion cannot change runtime behaviour, so a reviewer
+verifies it by reading the diff once, unlike a code refactor bundled in for
+the same reason. It can still break a source-scanning guard (the a11y one
+above, or one like it), so run the tests a touched file's comments could
+affect before relying on that. This happens incrementally, as files are
+touched in the normal course of work, not as a standing bulk pass.
+
 ## Docs - keep them in step with the code
 
 **If you change something a doc describes, update that doc in the same commit.**
