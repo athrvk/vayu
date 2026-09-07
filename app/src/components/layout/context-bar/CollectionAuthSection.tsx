@@ -21,13 +21,18 @@
 
 import { useCollectionsQuery, useCollectionAncestors } from "@/queries";
 import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
-import { resolveAuthSource } from "@/modules/request-builder/utils/auth-resolution";
+import { resolveAuthSource, withDraftAuth } from "@/modules/request-builder/utils/auth-resolution";
+import { useCollectionAuthDraft } from "@/stores";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
 
 export function CollectionAuthSection({ tab }: ContextBarSectionProps) {
 	const { data: collections = [], isLoading } = useCollectionsQuery();
-	const ancestors = useCollectionAncestors(tab.entityId);
+	const rawAncestors = useCollectionAncestors(tab.entityId);
+	// The open Auth tab's live draft, when the tab this section describes has
+	// one open and it disagrees with what is stored (#1483) - a no-op otherwise.
+	const draftAuth = useCollectionAuthDraft(tab.entityId ?? undefined);
+	const ancestors = withDraftAuth(rawAncestors, tab.entityId ?? "", draftAuth);
 
 	const collection = collections.find((c) => c.id === tab.entityId);
 
@@ -40,7 +45,7 @@ export function CollectionAuthSection({ tab }: ContextBarSectionProps) {
 	if (isLoading && !collection) return <SectionLoading />;
 	if (!collection) return <SectionEmpty>This collection is no longer available</SectionEmpty>;
 
-	const own = collection.auth.mode;
+	const own = draftAuth?.mode ?? collection.auth.mode;
 	const label = AUTH_MODE_LABELS[own];
 
 	const origin =

@@ -154,6 +154,7 @@ add_executable(vayu_tests
     trash_test.cpp
     spec_coverage_test.cpp
     schema_validation_test.cpp
+    elements_registry_test.cpp
     version_isolation_test.cpp
     reentrant_test.cpp
     ascii_case_test.cpp
@@ -190,6 +191,7 @@ add_executable(vayu_tests
     ../src/http/routes/inbox.cpp
     ../src/http/routes/events.cpp
     ../src/http/routes/mock_server.cpp
+    ../src/http/routes/elements.cpp
     ../src/http/managed_listener.cpp
     # The daemon's own Server, so its shutdown ordering is testable rather
     # than only reachable by running the daemon (#646). It registers every
@@ -317,6 +319,7 @@ set(vayu_scratch_database_suites
     DatabaseTest
     DbRecoveryTest
     DeleteRunTest
+    ElementsRouteTest
     ErrorShapeRouteTest
     ExamplesRouteTest
     GlobalsRouteTest
@@ -357,6 +360,7 @@ set(vayu_scratch_database_suites
     ScenarioRunnerTest
     ScratchDatabaseCleanup
     ScriptRequestNameTest
+    ScriptsFoldedIntoElementsTest
     ScriptSendRequestCapLoadTest
     ScriptVariableScopesTest
     ServerBindTest

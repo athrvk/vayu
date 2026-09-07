@@ -44,6 +44,21 @@ export interface AuthSource {
  * what actually gets sent. `CLAUDE.md` forbids a third copy of the resolution
  * rules, and a second one was already one too many.
  */
+/**
+ * Substitute an in-progress edit for one collection's auth before walking the
+ * chain, so a dirty Auth tab's own inheritance chain and the context bar agree
+ * with the picker instead of the last-saved value (#1483). A no-op once the
+ * draft is undefined - the caller's normal, no-edit-open case.
+ */
+export function withDraftAuth(
+	ancestors: Collection[],
+	collectionId: string,
+	draftAuth: Collection["auth"] | undefined
+): Collection[] {
+	if (!draftAuth) return ancestors;
+	return ancestors.map((c) => (c.id === collectionId ? { ...c, auth: draftAuth } : c));
+}
+
 export function resolveAuthSource(ancestors: Collection[]): AuthSource {
 	for (let i = ancestors.length - 1; i >= 0; i--) {
 		const collection = ancestors[i];

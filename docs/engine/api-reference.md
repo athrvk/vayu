@@ -7,7 +7,9 @@ description: >-
 
 **Base URL:** `http://127.0.0.1:9876` (default, configurable via `--port`)
 
-All endpoints return JSON. **Every** error response has one shape - an `error`
+All endpoints return JSON. Every response also carries `Cache-Control: no-store`
+(#1507) - see [Listeners](architecture.md#listeners) for why. **Every** error
+response has one shape - an `error`
 object carrying a machine-readable `code` and a human-readable `message`:
 
 ```json
@@ -1401,6 +1403,14 @@ client that means "delete this script" has to send `""` rather than dropping the
 key - the app sent `script || undefined` until #1381, which serialises the key
 out of the body, so deleting a script saved nothing and reported success.
 
+**`elements`** (issue #1513) takes the array rule: absent keeps the stored list;
+`null` resets it to `[]`; a present value must be an array the element registry
+accepts (see [Elements](elements.md)) or the write is a `400` naming the index,
+the kind and the field. Additive beside `preRequestScript` / `postRequestScript`
+above, not a replacement for them - a request with no elements editor yet keeps
+using the two script fields exactly as before, and both may be set on the same
+write.
+
 **Response:** The updated request object.
 
 **Errors:** `404` if the request does not exist; `400` on a `null`
@@ -1428,6 +1438,47 @@ takes them.
   "id": "req_1234567890"
 }
 ```
+
+## Elements
+
+### GET /elements/kinds
+
+The element registry's catalogue (issue #1513): every kind a request's or
+collection's `elements` array may name, whatever the engine build actually
+registers - a kind added in one file (`engine/src/core/elements/`) appears
+here with nothing else changed, per [Elements](elements.md)'s extensibility
+contract. This is what #1516 (app) and #1517 (MCP) render a kind's editor
+from, and what `docs/engine/elements.md`'s kind table is checked against.
+
+**Response:**
+```json
+[
+  {
+    "kind": "inherit.disable",
+    "version": 1,
+    "phases": [],
+    "label": "Disable inherited element",
+    "description": "Drops one element inherited from an ancestor collection, named by id, out of this request or collection's resolved list.",
+    "category": "inherit",
+    "hotPathClass": "declarative",
+    "configSchema": {
+      "type": "object",
+      "properties": { "elementId": { "type": "string", "minLength": 1 } },
+      "required": ["elementId"],
+      "additionalProperties": false
+    }
+  }
+]
+```
+
+Phase 0 also registers `script.pre` and `script.post`, validate-only like
+`inherit.disable` - so a request or collection the startup fold migrated
+(`docs/engine/db-schema.md`) can be read back and written as-is without its
+own `elements` failing the registry that produced them - plus, in the test
+build only, a `test.echo` kind proving the registration path. No kind that
+actually *runs* (extractors, assertions, timers, controllers, metrics, and
+`script.*` executing for real) is registered yet; those land with #1514
+onward. See [Elements](elements.md) for the full kind table.
 
 ## Trash
 
@@ -4451,6 +4502,16 @@ joined with a blank line and run as a single script in one shared scope (see
 earlier part is visible to a later one; parts that are empty or only
 whitespace are dropped.
 
+**`elements`** (issue #1513, additive beside everything above) is `POST
+/compose`'s own resolved element list for a saved request's chain: the
+collection chain's elements root to leaf, then the request's own, minus
+anything disabled or named by an `inherit.disable` entry, each stamped with
+`origin: {kind: "collection" | "request", id, name?}`. Present only for the
+by-id path (an inline `request` has no chain to resolve one from). Nothing
+in the engine executes it yet - the pipeline that does is issue #1514 - so
+today it is informational, resolved the same request the script parts above
+are.
+
 **The pre-request script can change what is sent.** Its `pm.request` edits -
 method, url, headers, body - are applied to the request before it goes out, and
 because auth is resolved *before* the script runs, a script-set `Authorization`
@@ -4968,6 +5029,16 @@ of nothing but HTTP 500s has a transport error rate of zero.
 The verdict is the run's, not the process's: a run **stopped early** is judged on
 what it measured up to that point, and its status stays `completed` / `stopped`
 whatever the verdict says. A failing budget is reported, never a failed run.
+
+Each check carries `evaluated`. A latency percentile needs a completed request
+to mean anything, so a run that recorded none for that metric (every request
+errored before a response arrived) reports `evaluated: false` and omits
+`actual` entirely rather than the default `0`, which would otherwise read as a
+measured 0ms and trivially satisfy an "at most" ceiling. An unevaluated check
+counts toward `failed`: a budget the run could not measure was not met. The
+error rate and the throughput floor have no such gap - `maxErrorRatePct` is
+0/0-safe by request count, and a starved `minThroughputRps` already fails on
+its own - so both are always `evaluated: true`.
 
 #### The `monitor` block (server vitals)
 
@@ -6733,7 +6804,9 @@ named it.
   },
   "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
   "thresholdValidation": {
-    "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true } ],
+    "checks": [
+      { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true, "evaluated": true }
+    ],
     "passed": 1, "failed": 0, "verdict": "passed"
   },
   "auth": { "refreshes": [ { "atSeconds": 3620.4 } ], "refreshFailures": 0 },

@@ -43,6 +43,7 @@ RunSummaryInputs measured_run () {
     inputs.total_requests = 1000;
     inputs.throughput     = 500.0;
     inputs.status_codes   = { { 200, 990 }, { 500, 8 }, { 0, 2 } };
+    inputs.latency.count  = 1000;
     inputs.latency.p50    = 10.0;
     inputs.latency.p95    = 40.0;
     inputs.latency.p99    = 47.0;
@@ -236,6 +237,76 @@ TEST (ThresholdEval, ARunThatSentNothingHasNoErrorRate) {
     evaluate_thresholds (config_with ({ { "maxErrorRatePct", 1 } }), empty));
     EXPECT_DOUBLE_EQ (check.actual, 0.0);
     EXPECT_TRUE (check.passed);
+}
+
+// --- Zero samples: a latency ceiling must not read a default as a measurement
+// (issue #1484: a run where every request failed reported its budgets met) ---
+
+TEST (ThresholdEval, ALatencyBudgetWithNoCompletionsIsNotEvaluatedAndCountsAsFailed) {
+    // Every request sent, none completed - a timeout or a connection refusal
+    // on all of them, the exact shape a 100% error rate run has. `latency`
+    // keeps its all-default Percentiles (count 0, p99 0.0), which must not
+    // read as "p99 was 0ms".
+    RunSummaryInputs inputs;
+    inputs.total_requests = 5999;
+    inputs.status_codes   = { { 0, 5999 } };
+
+    auto check = only_check (
+    evaluate_thresholds (config_with ({ { "latencyP99Ms", 200 } }), inputs));
+    EXPECT_FALSE (check.evaluated);
+    EXPECT_FALSE (check.passed);
+}
+
+TEST (ThresholdEval, ARunWithSomeCompletionsStillEvaluatesEveryDeclaredLatencyBudget) {
+    // The guard reads each metric's own sample count, not a single run-wide
+    // flag - a run that completed at least one request must not blanket every
+    // percentile as unevaluated.
+    RunSummaryInputs inputs;
+    inputs.total_requests = 10;
+    inputs.status_codes   = { { 200, 10 } };
+    inputs.latency.count  = 10;
+    inputs.latency.p99    = 5.0;
+
+    auto check = only_check (
+    evaluate_thresholds (config_with ({ { "latencyP99Ms", 200 } }), inputs));
+    EXPECT_TRUE (check.evaluated);
+    EXPECT_TRUE (check.passed);
+    EXPECT_DOUBLE_EQ (check.actual, 5.0);
+}
+
+TEST (ThresholdEval, AnUnevaluatedLatencyCheckDoesNotHideAFailingErrorRateBudget) {
+    // The bug's own reproduction: a 100% error rate run with both a latency
+    // ceiling and an error-rate ceiling declared. The error rate still reads
+    // correctly (measured_error_rate has always been 0/0-safe by total
+    // requests, not by latency samples); the fix must not disturb it.
+    RunSummaryInputs inputs;
+    inputs.total_requests = 5999;
+    inputs.status_codes   = { { 0, 5999 } };
+
+    auto outcome = evaluate_thresholds (
+    config_with ({ { "latencyP99Ms", 200 }, { "maxErrorRatePct", 1 } }), inputs);
+    ASSERT_HAS_VALUE (outcome);
+    ASSERT_EQ (outcome->checks.size (), 2u);
+    EXPECT_FALSE (outcome->checks[0].evaluated); // latencyP99Ms: no completions
+    EXPECT_FALSE (outcome->checks[0].passed);
+    EXPECT_TRUE (outcome->checks[1].evaluated); // maxErrorRatePct: always evaluated
+    EXPECT_FALSE (outcome->checks[1].passed); // 100% > 1%
+    EXPECT_EQ (outcome->passed, 0u);
+    EXPECT_EQ (outcome->failed, 2u);
+}
+
+TEST (ThresholdEval, AThroughputOrErrorRateBudgetIsAlwaysEvaluated) {
+    // Neither metric has a "no data" state of its own: 0/0 error rate is
+    // already correct (ARunThatSentNothingHasNoErrorRate) and a starved
+    // throughput floor already fails on its own numbers.
+    RunSummaryInputs empty;
+    auto rate = only_check (
+    evaluate_thresholds (config_with ({ { "maxErrorRatePct", 50 } }), empty));
+    EXPECT_TRUE (rate.evaluated);
+    auto throughput = only_check (
+    evaluate_thresholds (config_with ({ { "minThroughputRps", 10 } }), empty));
+    EXPECT_TRUE (throughput.evaluated);
+    EXPECT_FALSE (throughput.passed); // 0 rps never meets a floor above zero
 }
 
 TEST (ThresholdEval, AStoredBudgetOfTheWrongTypeIsSkippedRatherThanGuessed) {

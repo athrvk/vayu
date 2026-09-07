@@ -152,14 +152,36 @@ describe("AuthTab with an editable auth mode", () => {
 		expect(screen.getByText(/an ancestor collection's auth stops here/i)).toBeInTheDocument();
 	});
 
-	it("saves a switch to the blocking mode", () => {
+	it("saves a switch to the blocking mode - only on the button, never on the pick alone", () => {
 		renderTab(makeCollection({ mode: "bearer", token: "abc" }));
 
 		fireEvent.click(screen.getByRole("combobox"));
 		fireEvent.click(screen.getByRole("option", { name: /No Auth \(blocks inheriting\)/i }));
-		fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+
+		// The comment this tab used to carry claimed none/noauth were "saved by
+		// the picker alone" - they never were, since nothing called mutateAsync
+		// until a button was pressed. Asserted here so a reintroduced auto-commit
+		// path (and a reintroduced stale comment) both fail this the same way.
+		expect(mutation.mutateAsync).not.toHaveBeenCalled();
+
+		fireEvent.click(screen.getByRole("button", { name: /save auth/i }));
 
 		expect(mutation.mutateAsync).toHaveBeenCalledWith({ id: "c1", auth: { mode: "noauth" } });
+	});
+
+	it("offers the same Save Auth / Reset row on a no-credential mode as on any other", () => {
+		// The tab used to render a second, differently-labelled "Save" button for
+		// none/noauth with no Reset beside it - one save vocabulary now, for
+		// every mode. Mutation check: reintroducing the split button removes
+		// "Reset" from this render.
+		renderTab(makeCollection({ mode: "bearer", token: "abc" }));
+
+		fireEvent.click(screen.getByRole("combobox"));
+		fireEvent.click(screen.getByRole("option", { name: /No Auth \(blocks inheriting\)/i }));
+
+		expect(screen.getByRole("button", { name: /save auth/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /reset/i })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument();
 	});
 
 	it("says no auth when there genuinely is none", () => {

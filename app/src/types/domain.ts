@@ -2033,8 +2033,18 @@ export interface RunReport {
 		checks: {
 			metric: string;
 			limit: number;
-			actual: number;
+			/** Absent when `evaluated` is false - there is no measurement to show. */
+			actual?: number;
 			passed: boolean;
+			/**
+			 * False when the run recorded no sample for this metric (issue #1484:
+			 * a latency percentile with zero completions used to read as 0ms,
+			 * trivially meeting an "at most" ceiling). Absent on a report a
+			 * pre-fix engine wrote, which never carried the field and never had
+			 * the bug's blind spot corrected either - reads as evaluated, the
+			 * same value that engine effectively assumed everywhere.
+			 */
+			evaluated?: boolean;
 		}[];
 		passed: number;
 		failed: number;

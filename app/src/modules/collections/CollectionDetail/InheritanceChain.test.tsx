@@ -120,4 +120,25 @@ describe("InheritanceChain", () => {
 		expect(screen.getByText("SOURCE")).toBeInTheDocument();
 		expect(screen.getByText("THIS")).toBeInTheDocument();
 	});
+
+	it("shows the tab's unsaved pick instead of the stored mode while it is dirty (#1483)", () => {
+		// The leaf is stored as bearer, so without `draftAuth` wired through
+		// `withDraftAuth` this would read "Bearer Token" and mark "root" as
+		// SOURCE - the stale-panel bug the draft prop exists to close.
+		chain.length = 0;
+		chain.push(
+			collection("root", "Acme", { mode: "bearer", token: "t" }),
+			collection("leaf", "Payments", { mode: "bearer", token: "old" })
+		);
+
+		render(<InheritanceChain collectionId="leaf" draftAuth={{ mode: "noauth" }} />);
+
+		expect(screen.getByText("No Auth (blocks inheriting)")).toBeInTheDocument();
+		expect(screen.queryByText("SOURCE")).not.toBeInTheDocument();
+		// Names Payments (the leaf) as the blocker, which only happens once its
+		// row reads the draft's noauth rather than its stored bearer token.
+		expect(
+			screen.getByText(/is set to No Auth, so requests below it inherit nothing/)
+		).toBeInTheDocument();
+	});
 });

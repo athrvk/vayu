@@ -25,11 +25,13 @@ import { Eyebrow } from "@/components/ui";
 import { useCollectionAncestors } from "@/queries/collections";
 import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
 import { cn } from "@/lib/utils";
-import { resolveAuthSource } from "@/modules/request-builder/utils/auth-resolution";
+import { resolveAuthSource, withDraftAuth } from "@/modules/request-builder/utils/auth-resolution";
 import type { Collection } from "@/types";
 
 interface InheritanceChainProps {
 	collectionId: string;
+	/** The Auth tab's live draft, when one is open and dirty - see `withDraftAuth`. */
+	draftAuth?: Collection["auth"];
 }
 
 /**
@@ -73,8 +75,9 @@ function describeAuth(c: Collection): string {
 	}
 }
 
-export default function InheritanceChain({ collectionId }: InheritanceChainProps) {
-	const ancestors = useCollectionAncestors(collectionId);
+export default function InheritanceChain({ collectionId, draftAuth }: InheritanceChainProps) {
+	const rawAncestors = useCollectionAncestors(collectionId);
+	const ancestors = withDraftAuth(rawAncestors, collectionId, draftAuth);
 
 	if (ancestors.length === 0) return null;
 

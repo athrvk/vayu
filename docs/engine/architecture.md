@@ -165,6 +165,11 @@ four more are opened on demand, and the rule that separates them is where each m
 | [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response |
 | [Collection mock server](api-reference.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped |
 
+Every management API response also carries `Cache-Control: no-store` (#1507, `server.cpp`): every
+route answers a live read of state that changes under the client, so nothing here is valid to replay
+from a browser's disk cache. The mock server and inbox listeners are separate `ManagedListener`-owned
+servers of their own (see the table above) and set neither this nor the CORS headers below.
+
 **The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
 are different reasons:
 

@@ -103,6 +103,7 @@ nav:
       - HTTP API: engine/api-reference.md
       - Test Scripting: engine/scripting.md
       - Local Database: engine/db-schema.md
+      - Elements: engine/elements.md
       - Command Line: engine/cli.md
       - MCP Server: engine/mcp.md
       - Benchmarks: engine/benchmarks.md

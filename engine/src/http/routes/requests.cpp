@@ -232,6 +232,13 @@ bool is_create) {
     }
     apply_string_field (json, "preRequestScript", r.pre_request_script, "", is_create);
     apply_string_field (json, "postRequestScript", r.post_request_script, "", is_create);
+    // Elements (issue #1513), additive beside the two script fields above:
+    // nothing runs an element yet (#1514), so a client with no elements
+    // editor keeps using the two fields exactly as before.
+    if (auto outcome = apply_elements_field (json, "elements", r.elements, is_create);
+    !outcome) {
+        return outcome;
+    }
     apply_int_field (json, "order", r.order, 0, is_create);
     apply_bool_field (json, "followRedirects", r.follow_redirects, true, is_create);
 

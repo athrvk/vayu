@@ -57,6 +57,7 @@
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/transport_policy.hpp"
+#include "vayu/utils/id.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/reentrant.hpp"
@@ -214,6 +215,14 @@ inline auto make_storage (const std::string& path) {
     make_column ("auth", &Collection::auth),           // NEW: JSON auth config
     make_column ("pre_request_script", &Collection::pre_request_script), // NEW: JS
     make_column ("post_request_script", &Collection::post_request_script), // NEW: JS
+    // The element list (issue #1513), additive beside the two script columns
+    // above rather than replacing them: `Database::fold_scripts_into_elements`
+    // backfills a `script.pre`/`script.post` entry per non-blank script once,
+    // but the columns stay mapped and keep driving every *execution* path
+    // (design send, sequential run) unchanged, because nothing runs an
+    // element yet - that pipeline is #1514. Retiring the two columns for real
+    // is that issue's to do, once execution reads `elements` instead.
+    make_column ("elements", &Collection::elements, default_value (std::string ("[]"))),
     // The declared data contract (issue #599). NOT NULL with a default_value on
     // the `keywords` precedent, so sync_schema can ALTER TABLE ADD COLUMN it
     // onto an existing, non-empty collections table - every pre-existing row
@@ -244,6 +253,9 @@ inline auto make_storage (const std::string& path) {
     make_column ("body_type", &Request::body_type), make_column ("auth", &Request::auth), // JSON
     make_column ("pre_request_script", &Request::pre_request_script),   // JS
     make_column ("post_request_script", &Request::post_request_script), // JS
+    // The element list (issue #1513) - see the `collections` table above for
+    // why it lands beside the two script columns rather than replacing them.
+    make_column ("elements", &Request::elements, default_value (std::string ("[]"))),
     make_column ("order", &Request::order), // NEW: position within collection
     // Redirect policy. NOT NULL, so the default_value is what lets sync_schema
     // ALTER TABLE ADD COLUMN these onto an existing, non-empty requests table -
@@ -1037,9 +1049,7 @@ Database::Database (const std::string& db_path) {
     // was written over the only other copy of the user's data. An
     // `integrity_check` pragma would answer a narrower question (pages, not
     // schema) and would not answer the one that matters here, which is whether
-    // *this engine* can open the file it is about to commit to; running the
-    // real open is also what migrates a backup taken by an older build before
-    // it is trusted.
+    // *this engine* can open the file it is about to commit to.
     auto probe_database = [] (const std::string& path) {
         try {
             Impl probe (path);
@@ -1182,6 +1192,18 @@ void Database::init () {
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
         "Startup managed-header cleanup failed: " + std::string (e.what ()));
+    }
+
+    // A 0.26 request or collection's scripts, as `script.pre` / `script.post`
+    // elements (issue #1513). Best-effort, like the passes around it.
+    try {
+        if (const int64_t folded = fold_scripts_into_elements (); folded > 0) {
+            vayu::utils::log_info ("Folded " + std::to_string (folded) +
+            " stored script(s) into element entries");
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "Startup script-to-element migration failed: " + std::string (e.what ()));
     }
 
     // No webhook inbox survives the process that opened it, so any capture row
@@ -2035,6 +2057,42 @@ namespace {
 // this file's other internal-only flags already live.
 constexpr std::string_view MANAGED_HEADERS_STRIPPED_KEY =
 "managedHeadersStripped";
+
+// Same bookkeeping shape, for the one-time script-to-element fold (#1513).
+constexpr std::string_view SCRIPTS_FOLDED_INTO_ELEMENTS_KEY =
+"scriptsFoldedIntoElements";
+
+bool is_blank_script (const std::string& s) {
+    return s.find_first_not_of (" \t\r\n") == std::string::npos;
+}
+
+/**
+ * A row's `pre_request_script` / `post_request_script` as the `elements`
+ * array `Registry::validate` accepts, appended after whatever the row already
+ * carries there - a row created after #1513 shipped may already hold elements
+ * of its own by the time this pass reaches it (unlikely on a first start, but
+ * this runs once and stays correct if it is ever re-run by hand).
+ */
+std::string elements_with_folded_scripts (const std::string& existing,
+const std::string& pre,
+const std::string& post) {
+    nlohmann::json elements =
+    nlohmann::json::parse (existing, nullptr, /*allow_exceptions=*/false);
+    if (!elements.is_array ()) {
+        elements = nlohmann::json::array ();
+    }
+    if (!is_blank_script (pre)) {
+        elements.push_back (
+        { { "id", vayu::utils::generate_id ("el_") }, { "kind", "script.pre" },
+        { "enabled", true }, { "config", { { "script", pre } } } });
+    }
+    if (!is_blank_script (post)) {
+        elements.push_back (
+        { { "id", vayu::utils::generate_id ("el_") }, { "kind", "script.post" },
+        { "enabled", true }, { "config", { { "script", post } } } });
+    }
+    return elements.dump ();
+}
 } // namespace
 
 int64_t Database::strip_stored_managed_headers () {
@@ -2119,6 +2177,91 @@ int64_t Database::strip_stored_managed_headers () {
     mark_done ();
     strip_transaction.commit ();
     return stripped;
+}
+
+/**
+ * A 0.26 request or collection's scripts, folded into `elements` as
+ * `script.pre` / `script.post` entries (issue #1513). Additive: the two
+ * script columns stay mapped and keep driving every execution path
+ * unchanged, because nothing runs an element until #1514's pipeline exists -
+ * this pass only gives migrated data an `elements` list to have, the same
+ * `GET /elements/kinds` catalogue and `Registry::validate` shape a client
+ * using the new field from a fresh install already gets.
+ */
+int64_t Database::fold_scripts_into_elements () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+
+    if (get_config_bool (std::string (SCRIPTS_FOLDED_INTO_ELEMENTS_KEY), false)) {
+        return 0;
+    }
+
+    auto request_candidates = impl_->storage.get_all<Request> (
+    where (is_not_equal (&Request::pre_request_script, "") or
+    is_not_equal (&Request::post_request_script, "")));
+    auto collection_candidates = impl_->storage.get_all<Collection> (
+    where (is_not_equal (&Collection::pre_request_script, "") or
+    is_not_equal (&Collection::post_request_script, "")));
+
+    auto mark_done = [&] {
+        save_config_entry (ConfigEntry{
+        .key   = std::string (SCRIPTS_FOLDED_INTO_ELEMENTS_KEY),
+        .value = "true",
+        .type  = "boolean",
+        .label = "Scripts folded into elements",
+        .description =
+        "Whether requests and collections saved before 0.27.0 have had "
+        "their pre/post-request scripts copied into the new `elements` "
+        "list as `script.pre` / `script.post` entries. Internal "
+        "bookkeeping for a one-time migration; turning it off re-runs it "
+        "on the next start.",
+        .category      = "general_engine",
+        .default_value = "false",
+        .min_value     = std::nullopt,
+        .max_value     = std::nullopt,
+        .options       = std::nullopt,
+        .updated_at    = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+        .count (),
+        .requires_restart = false,
+        .advanced         = true,
+        .keywords         = "[]",
+        .unit             = std::nullopt,
+        });
+    };
+
+    if (request_candidates.empty () && collection_candidates.empty ()) {
+        mark_done ();
+        return 0;
+    }
+
+    // Written once, immediately before the first row this pass ever rewrites -
+    // the `.pre-upgrade.bak` precedent (issue #1487), under its own name so a
+    // start that also runs `strip_stored_managed_headers` does not have this
+    // pass's snapshot overwrite that one's (or the reverse).
+    const fs::path db_file (impl_->opened_file);
+    fs::path pre_fold_backup = db_file;
+    pre_fold_backup += ".pre-elements-fold.bak";
+    copy_db_files (db_file, pre_fold_backup);
+
+    auto fold_transaction = impl_->storage.transaction_guard ();
+
+    int64_t folded = 0;
+    for (auto& request : request_candidates) {
+        request.elements = elements_with_folded_scripts (request.elements,
+        request.pre_request_script, request.post_request_script);
+        impl_->storage.replace (request);
+        ++folded;
+    }
+    for (auto& collection : collection_candidates) {
+        collection.elements = elements_with_folded_scripts (collection.elements,
+        collection.pre_request_script, collection.post_request_script);
+        impl_->storage.replace (collection);
+        ++folded;
+    }
+
+    mark_done ();
+    fold_transaction.commit ();
+    return folded;
 }
 
 // ============================================================================

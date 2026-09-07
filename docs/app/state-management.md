@@ -719,6 +719,27 @@ on one row - a save carrying the row's contents while a reorder rewrites its
 owner and order - is the clobber family #237 belongs to, and the drag is the
 half that can simply wait.
 
+#### `collection-auth-draft-store.ts` - A Collection's Live Auth-Tab Draft
+
+A `Map<collectionId, CollectionAuth>` mirroring `AuthTab`'s in-progress draft
+outside the component (#1483).
+
+**Key Methods:**
+
+```typescript
+const draftAuth = useCollectionAuthDraft(collectionId); // undefined = no tab open, or clean
+```
+
+**Non-persisted.** `AuthTab`'s draft is component-local `useEntityDraft` state,
+invisible to anything that is not `AuthTab` - including the Inheritance Chain
+card it renders as a child, and the context bar's `CollectionAuthSection`,
+mounted in a different part of the tree and backed by `useCollectionsQuery`
+directly. Both used to describe the last-saved mode while the picker sat on an
+unsaved one. `AuthTab` writes its current draft here on every render and clears
+its entry on unmount; `withDraftAuth` (`modules/request-builder/utils/auth-resolution.ts`)
+substitutes it into an ancestor chain before either reader calls
+`resolveAuthSource`, so a dirty pick and its own inheritance chain agree.
+
 #### `response-store.ts` - Response Cache
 
 In-memory storage of responses per request ID, persisted across view/tab switches but not to disk.
@@ -2415,6 +2436,14 @@ useDraftSaveContext({
   is silent by itself - the tab pairs it with `reportBlankNameRefused()`
   (`lib/blank-name.ts`), which restores the stored name and reports through
   `failSave`.
+- **`isDirty` also drives the Dock's "Unsaved changes" line (#1483).** The
+  registry's own `hasPendingChanges` is not what the Dock reads - only the
+  store-wide `status` is - so the hook calls `markPendingSave()` the moment
+  `isDirty` turns true and `completeSaveThenIdle(id)` the moment it turns false
+  again, mirroring `useSaveManager`'s autosave editors. Edge-triggered, and
+  reset rather than fired across an `id` change, so switching the entity a
+  mounted editor describes never reports the previous entity's save as this
+  one's.
 
 ### The request builder's draft adopts an external write per field
 
