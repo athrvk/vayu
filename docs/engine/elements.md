@@ -191,8 +191,9 @@ gap, outside this page's Status callout.
 - #1495 - the pipeline on a scenario load run's producer/completion hooks (this page's Load
   paths section).
 - #1497 - the `maxAssertionFailureRatePct` run threshold and `thresholds.failRun`, over the
-  combined `assert.*` element and `pm.test` tally (load runs only; see `api-reference.md`'s
-  thresholds section).
+  combined `assert.*` element and `pm.test` tally (see `api-reference.md`'s thresholds section).
+- #1564 - the same `thresholds` block, evaluated for a collection (sequential) run too, not
+  only a load run.
 - #1515, #1498, #1500, #1499, #1501 - controllers, timers, metrics, setup/teardown and
   load-time cookies that round out the kind table.
 - #1516 - the app's `ElementList` primitive and editor.

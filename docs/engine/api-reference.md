@@ -5062,14 +5062,16 @@ combined assertion tally: every `assert.*` element outcome and every
 `pm.test` call, however the script that made it ran - inline on the load
 path or through the deferred replay. Unevaluated, like a latency percentile,
 when the run made no assertion at all - a run with no `assert.*` element and
-no test script is unaffected by declaring this budget. **Load runs only**
-(a single-request or a scenario load run, `POST /runs` with no `scenario`
-block or with one carrying a load `mode`): a **collection** (sequential,
-design-mode) run's config is still accepted with a `thresholds` block, but
-nothing evaluates it yet and its report carries no `thresholdValidation`
-section - the same "measured, not judged" behavior as a run that declared no
-budgets at all. Tracked in
-[#1564](https://github.com/athrvk/vayu/issues/1564).
+no test script is unaffected by declaring this budget.
+
+**Every run mode is judged** (issue #1564): a single-request load run, a
+scenario load run and a **collection** (sequential, design-mode) run all
+evaluate the same `thresholds` block against their own numbers and store the
+same `thresholdValidation` shape. A collection run's error rate and latency
+percentiles are drawn from the steps it actually sent (a step a script or an
+unbound data row skipped counts toward neither), and its assertion tally is
+the same combined `assert.*`/`pm.test` count `maxAssertionFailureRatePct`
+reads for a load run.
 
 The verdict is the run's, not the process's: a run **stopped early** is judged on
 what it measured up to that point, and its status stays `stopped` whatever the

@@ -814,6 +814,14 @@ export interface StartScenarioRunRequest {
 		 */
 		includeScriptTime?: boolean;
 	};
+	/**
+	 * Pass/fail budgets this run is judged against (issue #1497 for a load
+	 * run; #1564 extends the same evaluation to a design-mode collection run).
+	 * Top-level, matching where the engine reads it (`validate_thresholds`,
+	 * `evaluate_thresholds`) for both `POST /runs` shapes. Omit to leave the
+	 * run measured but not judged - the pre-existing behaviour.
+	 */
+	thresholds?: RunThresholds;
 }
 
 // Run Management API
