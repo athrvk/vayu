@@ -645,6 +645,18 @@ export interface Request {
 	order: number;
 	createdAt: string;
 	updatedAt: string;
+	/**
+	 * Names which of `params` / `headers` / `body` / `auth` the engine
+	 * substituted a default for on this row, because the stored column is over
+	 * its field cap (issue #1485). Only `GET /requests?collectionId=` (the tree
+	 * list) can carry this - `GET /requests/:id` always answers with the
+	 * genuine, whole value, however large, so a request opened in the builder is
+	 * never affected. Typed here because Duplicate reads it: a list-derived
+	 * record carrying this must not be copied, or the copy silently drops
+	 * whatever was substituted. Absent for a row with nothing over the cap, and
+	 * for one written before the engine had this field.
+	 */
+	truncatedFields?: string[];
 }
 
 /**

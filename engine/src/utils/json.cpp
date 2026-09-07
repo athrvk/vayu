@@ -1201,28 +1201,39 @@ namespace {
  * A column that will not parse - or one past the field cap - is written as
  * @p fallback rather than failing the row: the list route streams many rows, and
  * one unreadable column must not cost the caller every other one.
+ *
+ * Returns true when @p fallback was written because the column was over
+ * @p max_field_size, so the caller can name the field in `truncatedFields`
+ * (issue #1485) - a column that is merely empty or unparseable is not
+ * "truncated" and does not count.
  */
-void write_json_column (std::ostream& out,
+bool write_json_column (std::ostream& out,
 const char* wire_name,
 const std::string& stored,
 const char* fallback,
 size_t max_field_size) {
     out << "\"" << wire_name << "\":";
-    if (stored.empty () || stored.size () > max_field_size) {
+    if (stored.size () > max_field_size) {
         out << fallback;
-        return;
+        return true;
+    }
+    if (stored.empty ()) {
+        out << fallback;
+        return false;
     }
     try {
         out << Json::parse (stored).dump ();
     } catch (const std::exception&) {
         out << fallback;
     }
+    return false;
 }
 
 } // namespace
 
 void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     const size_t max_field_size = vayu::core::constants::json::MAX_FIELD_SIZE;
+    std::vector<std::string> truncated_fields;
 
     out << "{";
     out << "\"id\":" << Json (r.id).dump () << ",";
@@ -1234,28 +1245,38 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"order\":" << r.order << ",";
 
     // Query params - JSON array of KeyValueEntry
-    write_json_column (out, "params", r.params, "[]", max_field_size);
+    if (write_json_column (out, "params", r.params, "[]", max_field_size)) {
+        truncated_fields.emplace_back ("params");
+    }
     out << ",";
 
     // Headers - JSON array of KeyValueEntry
-    write_json_column (out, "headers", r.headers, "[]", max_field_size);
+    if (write_json_column (out, "headers", r.headers, "[]", max_field_size)) {
+        truncated_fields.emplace_back ("headers");
+    }
     out << ",";
 
     // Body - JSON discriminated union
-    write_json_column (out, "body", r.body, "{\"mode\":\"none\"}", max_field_size);
+    if (write_json_column (out, "body", r.body, "{\"mode\":\"none\"}", max_field_size)) {
+        truncated_fields.emplace_back ("body");
+    }
     out << ",";
 
     out << "\"bodyType\":" << Json (r.body_type.empty () ? "none" : r.body_type).dump ()
         << ",";
 
     // Auth - JSON RequestAuth object
-    write_json_column (out, "auth", r.auth, "{\"mode\":\"inherit\"}", max_field_size);
+    if (write_json_column (out, "auth", r.auth, "{\"mode\":\"inherit\"}", max_field_size)) {
+        truncated_fields.emplace_back ("auth");
+    }
     out << ",";
 
     out << "\"preRequestScript\":" << Json (r.pre_request_script).dump () << ",";
     out << "\"postRequestScript\":" << Json (r.post_request_script).dump () << ",";
     // Elements (issue #1513), additive beside the two fields above.
-    write_json_column (out, "elements", r.elements, "[]", max_field_size);
+    if (write_json_column (out, "elements", r.elements, "[]", max_field_size)) {
+        truncated_fields.emplace_back ("elements");
+    }
     out << ",";
     out << "\"followRedirects\":" << (r.follow_redirects ? "true" : "false") << ",";
     out << "\"maxRedirects\":" << r.max_redirects << ",";
@@ -1267,6 +1288,13 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"specOperation\":" << spec_operation_node (r.spec_operation).dump () << ",";
     out << "\"updatedAt\":" << r.updated_at << ",";
     out << "\"createdAt\":" << r.created_at;
+    // Absent, not an empty array, when nothing was substituted (issue #1485) -
+    // the same absent-vs-zero rule this report's other optional sections
+    // follow, so a reader can tell "checked, nothing over cap" from "field not
+    // sent yet" without special-casing an empty list.
+    if (!truncated_fields.empty ()) {
+        out << ",\"truncatedFields\":" << Json (truncated_fields).dump ();
+    }
     out << "}";
 }
 

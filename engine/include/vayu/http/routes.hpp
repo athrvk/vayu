@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
@@ -293,6 +294,13 @@ bool is_create) {
  *
  * `[[nodiscard]]` because dropping the returned error is exactly the silent
  * acceptance this helper exists to prevent.
+ *
+ * A serialized value over `json::MAX_FIELD_SIZE` is refused with a `413`
+ * naming the field, its size and the cap, rather than stored (issue #1485):
+ * the list route substitutes a default for a column this large when it reads
+ * it back, so a write this helper let through could never be read back whole
+ * except by id - refusing it here is the one place that keeps the two reads
+ * from disagreeing about the same row.
  */
 [[nodiscard]] inline RouteResult apply_json_field (const nlohmann::json& json,
 const char* key,
@@ -313,7 +321,13 @@ bool is_create) {
     if (!value.is_object ()) {
         return route_error (400, std::format ("Invalid '{}': must be a JSON object", key));
     }
-    out = value.dump ();
+    std::string dumped = value.dump ();
+    if (dumped.size () > vayu::core::constants::json::MAX_FIELD_SIZE) {
+        return route_error (413,
+        std::format ("'{}' is {} bytes, over the limit of {}", key,
+        dumped.size (), vayu::core::constants::json::MAX_FIELD_SIZE));
+    }
+    out = std::move (dumped);
     return {};
 }
 
@@ -356,7 +370,13 @@ apply_key_value_field (const nlohmann::json& json, const char* key, std::string&
             key, i));
         }
     }
-    out = value.dump ();
+    std::string dumped = value.dump ();
+    if (dumped.size () > vayu::core::constants::json::MAX_FIELD_SIZE) {
+        return route_error (413,
+        std::format ("'{}' is {} bytes, over the limit of {}", key,
+        dumped.size (), vayu::core::constants::json::MAX_FIELD_SIZE));
+    }
+    out = std::move (dumped);
     return {};
 }
 

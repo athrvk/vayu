@@ -168,6 +168,27 @@ verb rather than a silently discarded write. Those fields are a collection's
 `name`, an environment's `name`, and a request's `collectionId`, `name`,
 `method` and `url`. Each is also required on create.
 
+### A stored JSON field has a write-time cap
+
+One rule, identical for every resource (issue #1485): a request's `params` /
+`headers` / `body` / `auth`, a collection's `variables` / `auth` / `dataSchema`
+/ `openapi`, and an environment's `variables` are each refused with a `413`
+when the serialized value is over the engine's field cap (10 MiB,
+`json::MAX_FIELD_SIZE` in `engine/include/vayu/core/constants.hpp`) - naming
+the field, its size and the cap, and leaving the stored row untouched. `POST
+/import/apply` enforces it too, through the same `apply_*_field` helpers every
+other write goes through.
+
+A row written before this cap existed can still be oversized. `GET
+/<resource>/:id` always answers with the field whole, however large it is -
+this did not change. Only a **request's** list route, `GET
+/requests?collectionId=`, behaves differently: it has always substituted the
+field's documented default for a column too large to serve efficiently across
+a whole page, and now names which fields it substituted for that row in a
+`truncatedFields` array (e.g. `["body"]`), omitted when nothing was. Neither
+`GET /collections` nor `GET /environments` substitutes or carries this field -
+see [GET /requests](#get-requests).
+
 ### Ordering
 
 Collections and requests both carry an `order` column that fixes their position
@@ -1054,7 +1075,9 @@ the null-vs-absent rule.
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
-`null`, or on a cycle (below).
+`null`, or on a cycle (below); `413` naming the field, its size and the cap,
+when a serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
+engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
 ### PUT /collections/:id
 
@@ -1081,7 +1104,9 @@ list it just left. See [Ordering](#ordering).
 **Response:** The updated collection object.
 
 **Errors:** `404` if the collection does not exist; `400` on a `null` `name` or
-on a cycle (below).
+on a cycle (below); `413` naming the field, its size and the cap, when a
+serialized `variables` / `auth` / `dataSchema` / `openapi` is over the
+engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
 **Cycle validation (both verbs):** `parentId` is validated to keep the
 collection tree acyclic, since a
@@ -1179,7 +1204,13 @@ then `id` - the same contract `GET /collections` has for collections. See
 **Response:** An array of request objects, each in the same shape as a
 `GET /requests/:id` response: `params`/`headers` are arrays of
 `{key, value, enabled}` entries and `body` is a JSON discriminated union
-(see the `requests` table in [db-schema.md](db-schema.md)).
+(see the `requests` table in [db-schema.md](db-schema.md)) - with one
+deliberate exception (issue #1485): a row whose `params` / `headers` / `body`
+/ `auth` is over the engine's [field cap](#a-stored-json-field-has-a-write-time-cap)
+carries that field's documented default here instead of the stored value, and
+names which fields were substituted in `truncatedFields` (omitted when
+nothing was). `GET /requests/:id` never substitutes - it answers with the
+field whole, however large.
 ```json
 [
   {
@@ -1333,7 +1364,9 @@ does not exist (message `Collection '<id>' does not exist`), on an unrecognized
 `method`, on a
 `params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`,
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
-names the field and lists the valid values).
+names the field and lists the valid values); `413` naming the field, its size
+and the cap, when a serialized `params` / `headers` / `body` / `auth` is over
+the engine's field cap (issue #1485, [see below](#a-stored-json-field-has-a-write-time-cap)).
 
 Unlike a collection's `parentId`, a request's `collectionId` **must** resolve to
 a stored collection. A request under no collection is unreachable: no
@@ -1389,7 +1422,10 @@ write.
 `collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection
 that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, a malformed `specOperation`, or an
-`httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`.
+`httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`; `413` naming the
+field, its size and the cap, when a serialized `params` / `headers` / `body` /
+`auth` is over the engine's field cap (issue #1485,
+[see below](#a-stored-json-field-has-a-write-time-cap)).
 
 ### DELETE /requests/:id
 
@@ -3077,7 +3113,9 @@ the null-vs-absent rule.
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), or if `name` is missing or
-`null`.
+`null`; `413` naming the field, its size and the cap, when a serialized
+`variables` is over the engine's
+[field cap](#a-stored-json-field-has-a-write-time-cap).
 
 ### PUT /environments/:id
 
@@ -3111,7 +3149,9 @@ it survives a restart and is shared by every client on the same database. See
 
 **Response:** The updated environment object.
 
-**Errors:** `404` if the environment does not exist; `400` on a `null` `name`.
+**Errors:** `404` if the environment does not exist; `400` on a `null` `name`;
+`413` naming the field, its size and the cap, when a serialized `variables` is
+over the engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
 ### DELETE /environments/:id
 

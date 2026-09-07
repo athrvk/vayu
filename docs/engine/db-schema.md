@@ -305,6 +305,15 @@ Collections are always auth sources - they never store `{"mode":"inherit"}`. The
 during the inherit walk (`request_composer.cpp`), so neither reaches the engine's `parse_auth` -
 which would treat them as no auth anyway.
 
+**Cap.** (issue #1485) `variables`, `auth`, `data_schema` and `openapi` are each
+refused at write time with a `413` naming the field, its size and the cap, when
+the serialized value is over `json::MAX_FIELD_SIZE` (10 MiB,
+`engine/include/vayu/core/constants.hpp`) - through the same shared
+`apply_json_field` the [`requests`](#requests) columns are capped by. Unlike
+`requests`, no collection column is ever substituted on read: `GET
+/collections` carries the same whole value `GET /collections/:id` does, so
+there is no `truncatedFields` here.
+
 **Cascade delete**: deleting a collection performs BFS to collect all descendant IDs, then
 deletes all their requests before deleting the collections deepest-first, wrapped in a single
 transaction so a crash mid-cascade cannot leave a half-deleted subtree. See
@@ -387,6 +396,20 @@ The `oauth2` `config` holds the grant type, endpoints, client id/secret,
 placement options, etc. Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
+
+**Cap.** (issue #1485) `params`, `headers`, `body` and `auth` are each refused
+at write time - `400` if the value is not an object/array of the shape above,
+`413` naming the field, its size and the cap - when the serialized value is
+over `json::MAX_FIELD_SIZE` (10 MiB, `engine/include/vayu/core/constants.hpp`),
+the same limit `GET /requests` (the list route) has always read a column
+against. A row written before this cap existed can still be oversized: `GET
+/requests/:id` answers with it whole, however large, but `GET
+/requests?collectionId=` substitutes the field's documented default and adds
+`truncatedFields` (an array of the substituted field names, e.g. `["body"]`,
+omitted when nothing was substituted) to that row, so a caller reading the
+list can tell a genuinely empty field from one it cannot see the whole of.
+Nothing recomputes `truncatedFields` at write time or stores it - it is
+derived fresh on every list read from the same size check.
 
 **follow_redirects / max_redirects / http_version / stream** - the request's
 execution options, surfaced in the request builder's **Settings** tab and
@@ -718,6 +741,12 @@ state is what makes it survive a restart and a reinstall, and what lets two
 clients on the same database agree - the app mirrors it into
 `session-store.ts` for synchronous reads and reconciles on launch
 (`useActiveEnvironmentRestore`), treating the engine's value as the truth.
+
+**Cap.** (issue #1485) `variables` is refused at write time with a `413` naming
+the field, its size and the cap, when the serialized value is over
+`json::MAX_FIELD_SIZE` (10 MiB, `engine/include/vayu/core/constants.hpp`) -
+the same `apply_json_field` guard the [`requests`](#requests) and
+[`collections`](#collections) columns share.
 
 ---
 
