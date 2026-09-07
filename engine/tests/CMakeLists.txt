@@ -40,6 +40,7 @@ add_executable(vayu_tests
     bounds_primitives_test.cpp
     db_concurrency_test.cpp
     db_recovery_test.cpp
+    health_route_test.cpp
     rate_limit_test.cpp
     metrics_helper_test.cpp
     metrics_collector_test.cpp
@@ -323,6 +324,7 @@ set(vayu_scratch_database_suites
     ErrorShapeRouteTest
     ExamplesRouteTest
     GlobalsRouteTest
+    HealthRouteTest
     ImportApplyRouteTest
     ImportParseRoute
     InboxListenerTest

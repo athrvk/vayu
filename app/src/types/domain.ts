@@ -2339,6 +2339,8 @@ export interface EngineRecovery {
 export interface EngineHealth {
 	status: "ok";
 	version: string;
+	/** The `workers` setting's effective value: the configured count, or the
+	 *  detected core count when nothing overrides it. */
 	workers: number;
 	/**
 	 * Absent on a clean start, which is the ordinary case and the one a genuine

@@ -488,6 +488,7 @@ Merged store managing engine connection status and restart-required notification
   engineStatus: EngineStatus  // "starting" | "connected" | "unreachable"
   engineError: string | null
   recovery: EngineRecovery | null  // What the engine's startup did to the database
+  workers: number | null  // The `workers` setting's effective value, or null before the first poll
   engineStartWindow: number | null  // When the engine now coming up began, or null
   pendingRestart: boolean
   restartRequiredKeys: string[]  // Config keys requiring restart
@@ -500,6 +501,7 @@ const {
   engineStatus, setEngineStatus,
   engineError, setEngineError,
   recovery, setEngineRecovery,
+  workers, setWorkers,
   engineStartWindow, openEngineStartWindow, closeEngineStartWindow,
   pendingRestart, addRestartRequiredKey, clearRestartRequired,
 } = useEngineStore();
@@ -509,6 +511,12 @@ const {
 written by the same poll that writes `engineError` and read by `RecoveryBanner`.
 `null` is a clean start; a value means the engine restored the database from its
 backup or deleted it as unrecoverable.
+
+`workers` is the `workers` field from the same poll (issue #1508) - the
+`workers` setting's effective value, not the machine's raw core count - read by
+the Dock's version-string tooltip. `null` before the first poll answers; it is
+not cleared on a later disconnect, so a hover during a brief drop still shows
+the last known count.
 
 `engineStatus` is `starting` while no poll has succeeded since the engine now
 coming up began coming up and it is still inside its grace window, `connected`

@@ -476,6 +476,7 @@ add_library(vayu_core STATIC
     src/core/threshold_eval.cpp
     src/core/capacity_controller.cpp
     src/core/monitor.cpp
+    src/core/worker_count.cpp
     src/core/elements/registry.cpp
     src/core/elements/inherit_disable.cpp
     src/core/elements/script_kinds.cpp

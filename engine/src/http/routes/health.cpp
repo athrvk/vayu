@@ -10,8 +10,7 @@
  * @brief Health check and shutdown routes
  */
 
-#include <thread>
-
+#include "vayu/core/worker_count.hpp"
 #include "vayu/db/recovery.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
@@ -30,12 +29,15 @@ namespace vayu::http::routes {
  * `recovery` is **absent** on a clean start rather than `null`, per the
  * engine's usual absent-not-null rule: a client that has never seen the key has
  * nothing to render, and the app's notice keys off its presence.
+ *
+ * Not `const`: `resolve_worker_count` reads the `workers` config entry, and
+ * `Database::get_config_int` is not itself `const`.
  */
-nlohmann::json build_health_response (const vayu::db::Database& db) {
+nlohmann::json build_health_response (vayu::db::Database& db) {
     nlohmann::json response;
     response["status"]  = "ok";
     response["version"] = vayu::Version::string;
-    response["workers"] = std::thread::hardware_concurrency ();
+    response["workers"] = vayu::core::resolve_worker_count (db);
 
     if (const auto& recovery = db.recovery ()) {
         nlohmann::json node;

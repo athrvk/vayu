@@ -488,6 +488,11 @@ Check engine status and version.
 }
 ```
 
+`workers` is the `workers` setting's effective value: the configured count
+when it is set, otherwise the detected core count - the same value the next
+run's `EventLoop` will use, not the machine's raw core count regardless of
+configuration.
+
 **`recovery` (optional, issue #922)** - present only when this engine startup had
 to recover the database, and **absent** on a clean start rather than `null`:
 

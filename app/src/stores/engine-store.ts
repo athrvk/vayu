@@ -59,6 +59,14 @@ interface EngineState {
 	recovery: EngineRecovery | null;
 
 	/**
+	 * The `workers` setting's effective value, as the last successful health
+	 * poll reported it (issue #1508) - the configured count, or the detected
+	 * core count when nothing overrides it. `null` before the first poll
+	 * answers, the same "nothing to render yet" rule `recovery` follows.
+	 */
+	workers: number | null;
+
+	/**
 	 * When the engine that is currently coming up began coming up, or `null` when
 	 * none is - the evidence a failed poll is classified against.
 	 *
@@ -97,6 +105,7 @@ interface EngineState {
 	setEngineStatus: (status: EngineStatus) => void;
 	setEngineError: (error: string | null) => void;
 	setEngineRecovery: (recovery: EngineRecovery | null) => void;
+	setWorkers: (workers: number | null) => void;
 	openEngineStartWindow: (openedAt: number) => void;
 	closeEngineStartWindow: () => void;
 
@@ -111,6 +120,7 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	engineStatus: "starting",
 	engineError: null,
 	recovery: null,
+	workers: null,
 	// Closed until the health poll mounts and opens it. Nothing can have polled
 	// before that, and a window left open here would be one no engine is inside.
 	engineStartWindow: null,
@@ -121,6 +131,7 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	setEngineStatus: (status) => set({ engineStatus: status }),
 	setEngineError: (error) => set({ engineError: error }),
 	setEngineRecovery: (recovery) => set({ recovery }),
+	setWorkers: (workers) => set({ workers }),
 	openEngineStartWindow: (openedAt) => set({ engineStartWindow: openedAt }),
 	closeEngineStartWindow: () => set({ engineStartWindow: null }),
 

@@ -72,6 +72,7 @@ export function useHealthQuery() {
 		setEngineStatus,
 		setEngineError,
 		setEngineRecovery,
+		setWorkers,
 		openEngineStartWindow,
 		closeEngineStartWindow,
 	} = useEngineStore();
@@ -131,6 +132,7 @@ export function useHealthQuery() {
 			// what its own startup did, including a different engine answering
 			// on the port after a restart.
 			setEngineRecovery(query.data.recovery ?? null);
+			setWorkers(query.data.workers);
 
 			// Nothing else in the app notices an engine that arrives late. Every
 			// other query gives up after `shouldRetryQuery`'s two attempts, and a
@@ -200,6 +202,7 @@ export function useHealthQuery() {
 		setEngineStatus,
 		setEngineError,
 		setEngineRecovery,
+		setWorkers,
 		closeEngineStartWindow,
 		queryClient,
 	]);
