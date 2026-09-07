@@ -1376,6 +1376,18 @@ section renders exactly as it did before budgets existed. The dialog seeds its
 p99 field from the client `sloThresholdMs` setting, which until then only
 annotated a chart.
 
+`maxAssertionFailureRatePct` (issue #1497) is the sixth budget, judged against
+the run's combined `assert.*` element and `pm.test` tally rather than against
+`testValidation`'s per-response view. `thresholds.failRun: true`
+(`LoadTestConfigDialog`'s own Switch, beside the budget fields rather than in
+`BUDGET_FIELDS` - it is a flag over the budgets, not one itself) changes what a
+missed budget *does*: the run's terminal status becomes `"failed"` instead of
+`"completed"`, so the history list and the taskbar failure cue pick it up, not
+only the verdict section. Load runs only, today - see
+[POST /runs](../engine/api-reference.md#post-runs)'s thresholds section for the
+collection-run gap this is tracked against
+([#1564](https://github.com/athrvk/vayu/issues/1564)).
+
 The engine range-checks this payload before it creates the run row and answers a
 violation with `400 invalid_run_config` (accepted ranges are tabulated under
 [POST /runs](../engine/api-reference.md#post-runs)). The renderer's own limits

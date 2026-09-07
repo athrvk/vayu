@@ -268,7 +268,13 @@ AssertionTotals StepElementTallies::assertion_totals (const ScenarioPlan& plan) 
         const auto& counts   = counts_by_step_[step];
         const size_t count   = std::min (elements.size (), counts.size ());
         for (size_t i = 0; i < count; ++i) {
-            if (!elements[i].kind.starts_with ("assert.")) {
+            // Read through the registry's own category, never a `kind ==` or
+            // prefix comparison outside `core/elements` (#1512's extensibility
+            // contract, rule 1) - the same lookup `load_pipeline_skip_reason`
+            // above uses for `HotPathClass`.
+            const auto* registered =
+            vayu::core::Registry::instance ().find (elements[i].kind);
+            if (registered == nullptr || registered->category != "assert") {
                 continue;
             }
             totals.passed += counts[i].passed.load (std::memory_order_relaxed);

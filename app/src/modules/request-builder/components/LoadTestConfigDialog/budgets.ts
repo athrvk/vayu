@@ -10,7 +10,7 @@
  * unusable, and what payload it builds.
  *
  * Kept component-free so the rules can be tested without rendering, and kept in
- * one table because the same five metrics drive the fields, the validation and
+ * one table because the same metrics drive the fields, the validation and
  * the payload - three hand-written lists would drift, and the way that failure
  * shows up is a budget the user typed and the engine never judged.
  *

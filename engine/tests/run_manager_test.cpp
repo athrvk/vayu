@@ -5,8 +5,10 @@
 #include <chrono>
 #include <thread>
 
+#include "mock_server.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/platform/platform.hpp"
 
@@ -645,4 +647,105 @@ TEST (ReadRetention, CarriesTheResponseSampleBudgetMarkerIntoTheSummary) {
     EXPECT_FALSE (build_run_summary_payload (
     uniform)["sampling"]["response_sample_budget_spent"]
     .get<bool> ());
+}
+
+// ============================================================================
+// finish_load_test's terminal-status decision (issue #1497). `finish_load_test`
+// itself is not declared in run_manager.hpp, so this drives it the only way a
+// test can: a real run, end to end through RunManager::start_run exactly as
+// the route does, the way run_stop_test.cpp's StoppedRunReachesTerminalStatus-
+// Promptly drives the stop path. The issue's own Tests section asked for this
+// case by name: "run_manager test: failRun: true with a failed budget stores
+// Failed."
+// ============================================================================
+
+class FailRunTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_run_manager_fail_run.db";
+
+    void SetUp () override {
+        vayu::http::global_init ();
+        server = std::make_unique<vayu::tests::SlowMockServer> ();
+        vayu::tests::remove_database_files (DB_PATH);
+        db = std::make_unique<vayu::db::Database> (DB_PATH);
+        db->init ();
+    }
+    void TearDown () override {
+        db.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+        server.reset ();
+        vayu::http::global_cleanup ();
+    }
+
+    /// Create the row `start_run` expects to already exist (the route's own
+    /// job), then drive the run to completion and hand back its stored status.
+    /// Waits well past a healthy run's own duration on purpose: a slow-but-
+    /// finishing run fails the caller's status assertion, not this wait.
+    std::optional<vayu::RunStatus> run_to_terminal_status (const std::string& run_id,
+    const nlohmann::json& config) {
+        vayu::db::Run row;
+        row.id              = run_id;
+        row.type            = vayu::RunType::Load;
+        row.status          = vayu::RunStatus::Pending;
+        row.config_snapshot = "{}";
+        row.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                         .count ();
+        row.end_time = 0;
+        db->create_run (row);
+
+        vayu::core::RunManager manager;
+        manager.start_run (run_id, config, *db);
+
+        const auto deadline =
+        std::chrono::steady_clock::now () + std::chrono::seconds (20);
+        while (manager.get_run (run_id) != nullptr &&
+        std::chrono::steady_clock::now () < deadline) {
+            std::this_thread::sleep_for (std::chrono::milliseconds (20));
+        }
+        if (manager.get_run (run_id) != nullptr) {
+            ADD_FAILURE () << "the run never reached a terminal status";
+            return std::nullopt;
+        }
+
+        auto stored = db->get_run (run_id);
+        if (!stored.has_value ()) {
+            ADD_FAILURE () << "the finished run left no row behind";
+            return std::nullopt;
+        }
+        return stored->status;
+    }
+
+    nlohmann::json base_config () const {
+        return { { "mode", "iterations" }, { "iterations", 3 }, { "concurrency", 1 },
+            { "url", server->fast_url () }, { "method", "GET" }, { "workers", 1 },
+            { "tests", "pm.test('always fails', function () { pm.expect(1).to.equal(2); });" } };
+    }
+
+    std::unique_ptr<vayu::tests::SlowMockServer> server;
+    std::unique_ptr<vayu::db::Database> db;
+};
+
+// Mutation check: comment out the `final_status = vayu::RunStatus::Failed`
+// assignment in `finish_load_test` and this reddens to Completed.
+TEST_F (FailRunTest, AFailedAssertionBudgetWithFailRunEndsTheRunFailed) {
+    auto config = base_config ();
+    config["thresholds"] = { { "maxAssertionFailureRatePct", 0 }, { "failRun", true } };
+
+    auto status = run_to_terminal_status ("run-fail-run-e2e", config);
+    ASSERT_HAS_VALUE (status);
+    EXPECT_EQ (*status, vayu::RunStatus::Failed);
+}
+
+// The companion: without `failRun`, the same missed budget is still reported
+// (this run's `thresholdValidation.verdict` is "failed", asserted at the unit
+// level in threshold_eval_test.cpp) but the terminal status is untouched - the
+// pre-existing history semantics nobody who did not opt in should see change.
+TEST_F (FailRunTest, TheSameMissedBudgetWithoutFailRunStaysCompleted) {
+    auto config          = base_config ();
+    config["thresholds"] = { { "maxAssertionFailureRatePct", 0 } };
+
+    auto status = run_to_terminal_status ("run-fail-run-optout-e2e", config);
+    ASSERT_HAS_VALUE (status);
+    EXPECT_EQ (*status, vayu::RunStatus::Completed);
 }
