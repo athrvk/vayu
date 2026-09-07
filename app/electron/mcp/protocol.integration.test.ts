@@ -387,6 +387,7 @@ describe("resources", () => {
 		expect(uris).toContain("vayu://config");
 		expect(uris).toContain("vayu://scripting/completions");
 		expect(uris).toContain("vayu://scripting/types");
+		expect(uris).toContain("vayu://elements/kinds");
 		await server.close();
 	});
 
@@ -411,6 +412,32 @@ describe("resources", () => {
 		const text = String((res.contents[0] as { text?: string }).text);
 		expect(text).toContain("declare namespace pm");
 		expect(text).toContain("ts:vayu/pm.d.ts");
+		await server.close();
+	});
+
+	// Issue #1517: an agent building an `elements` list reads the registry
+	// rather than guessing a kind's config shape.
+	it("serves the element kind catalogue from the engine", async () => {
+		const { client, server } = await connectClient({
+			client: fakeClient({
+				getElementKinds: async () => [
+					{
+						kind: "script.pre",
+						category: "script",
+						version: 1,
+						phases: ["step.before"],
+						label: "Pre-request script",
+						description: "Runs before the request is sent.",
+						hotPathClass: "script",
+						configSchema: { type: "object", required: ["script"] },
+					},
+				],
+			}),
+		});
+		const res = await client.readResource({ uri: "vayu://elements/kinds" });
+		const text = String((res.contents[0] as { text?: string }).text);
+		expect(text).toContain("script.pre");
+		expect(text).toContain("Pre-request script");
 		await server.close();
 	});
 

@@ -828,6 +828,75 @@ function stringArray(args: Record<string, unknown>, key: string): string[] | und
 class ToolArgError extends Error {}
 
 /**
+ * An optional `elements` argument: an array of `{ id?, kind, enabled?, name?,
+ * config }` objects (see {@link elementSchema}). The SDK validates a call
+ * against the Zod schema before the handler runs, but `dispatchTool` is also
+ * called directly (tests, and any future non-SDK transport), so the shape is
+ * re-checked here the same defensive way `headers` and `auth` already are -
+ * a non-array or an entry with no string `kind` is the caller's mistake
+ * rather than an empty list.
+ */
+function elementsArg(args: Record<string, unknown>, key = "elements"): unknown[] | undefined {
+	const v = args[key];
+	if (v === undefined) return undefined;
+	if (
+		!Array.isArray(v) ||
+		v.some(
+			(entry) =>
+				!entry ||
+				typeof entry !== "object" ||
+				typeof (entry as Record<string, unknown>).kind !== "string"
+		)
+	) {
+		throw new ToolArgError(`"${key}" must be an array of { kind, config } objects.`);
+	}
+	return v as unknown[];
+}
+
+/** Build a `script.pre` / `script.post` element from a sugar script string. */
+function scriptElement(
+	kind: "script.pre" | "script.post",
+	script: string
+): Record<string, unknown> {
+	return { kind, config: { script } };
+}
+
+/**
+ * Fold `preRequestScript` / `postRequestScript` sugar into an elements list:
+ * replaces whichever `script.pre` / `script.post` entry `base` already
+ * carries (there is at most one of each - the registry is the kind's
+ * authority, not this function), and an empty string clears the kind rather
+ * than adding an empty script, mirroring the merge-patch rule the two fields
+ * followed before they became elements. Absent (`undefined`) leaves that
+ * kind alone.
+ */
+function foldScriptSugar(
+	base: unknown[],
+	preScript: string | undefined,
+	postScript: string | undefined
+): unknown[] {
+	let out = base;
+	const withoutKind = (kind: string) =>
+		out.filter(
+			(entry) =>
+				!(
+					entry &&
+					typeof entry === "object" &&
+					(entry as Record<string, unknown>).kind === kind
+				)
+		);
+	if (preScript !== undefined) {
+		out = withoutKind("script.pre");
+		if (preScript !== "") out = [...out, scriptElement("script.pre", preScript)];
+	}
+	if (postScript !== undefined) {
+		out = withoutKind("script.post");
+		if (postScript !== "") out = [...out, scriptElement("script.post", postScript)];
+	}
+	return out;
+}
+
+/**
  * The refusal a data-mutating tool returns while the write toggle is off, or
  * null when writes are allowed. One wording for the collection / request /
  * environment tools: which of them was called does not change what the user has
@@ -1577,13 +1646,21 @@ async function runStreamingRequest(
  * The post-response validation script an agent supplied, under either name.
  *
  * One concept, historically two engine keys: `POST /execute` grew up calling it
- * `postRequestScript`, `POST /runs` calls it `tests`. Both endpoints now read
- * both names (`read_post_request_script`), so the choice here is purely about
- * what an agent sees: MCP names it `postRequestScript` on both tools - the way
- * the app's single **Tests** tab drives Send and a load run alike - and keeps
- * `tests` accepted as the engine's own spelling. Supplying both is rejected
- * rather than silently resolved: with no way to know which the agent meant,
- * picking one would drop a script the agent believes is running.
+ * `postRequestScript`, `POST /runs` calls it `tests`. Only `POST /runs` still
+ * reads either name as a raw wire field (`read_post_request_script` /
+ * `script_parts.cpp`, the deferred-validation-script alias issue #1514
+ * deliberately left untouched); `run_request` no longer forwards the string
+ * to `/execute` at all - issue #1514 refuses both names there, so
+ * `run_request`'s own handler folds this function's answer into an ad-hoc
+ * `script.post` element instead. This function only extracts the string and
+ * enforces the one-name rule; what each caller does with it differs.
+ *
+ * MCP names it `postRequestScript` on both tools regardless - the way the
+ * app's single **Tests** tab drives Send and a load run alike - and keeps
+ * `tests` accepted as the engine's own spelling for a load run. Supplying
+ * both is rejected rather than silently resolved: with no way to know which
+ * the agent meant, picking one would drop a script the agent believes is
+ * running.
  *
  * Ad-hoc, so this stays a plain string (still accepted by the engine's
  * `read_script`) rather than the `ScriptPart[]` the chain-composing callers
@@ -1614,19 +1691,28 @@ function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
  * saved request exactly as the app composes it for a load run and as
  * `run_collection_smoke` composes it for a Send - variables resolved, its
  * stored auth applied through the collection chain, and the chain's + its own
- * test scripts attached. Anything the agent states explicitly - url, method,
- * headers, body, auth, tests - is laid over the stored request *before*
- * resolution, so overrides carrying `{{variables}}` resolve too. Without a
- * `requestId` the run is ad-hoc and `url` is required.
+ * elements attached under `elements` (issue #1514 - script.pre/script.post
+ * among them, since a load run has no `POST /compose` output shape of its
+ * own). Anything the agent states explicitly - url, method, headers, body,
+ * auth, tests - is laid over the stored request *before* resolution, so
+ * overrides carrying `{{variables}}` resolve too. Without a `requestId` the
+ * run is ad-hoc and `url` is required.
  *
- * The composed scripts stay under `postRequestScripts`: `POST /runs` reads that
- * name as an alias of `tests` (`read_post_request_script`), which is what lets
- * one composed request start either kind of run without a second shape.
+ * The composed validation script is still read as `postRequestScripts` /
+ * `tests`, unlike the request/collection tools: `POST /runs` never cut over
+ * to `elements` (engine/CLAUDE.md - a load run "runs no element yet", it only
+ * inspects a step's compiled `elements` to decide what to warn about), so an
+ * agent-written `tests`/`postRequestScript` replaces the composed run's
+ * validation script exactly as it did before #1514, through the alias
+ * `read_post_request_script` still reads on this one endpoint.
  *
- * `droppedPreRequestScripts` counts what a load run cannot honour - the engine
- * has no pre-request hook on `POST /runs`, so a saved request that signs itself
- * in a pre-request script goes out unsigned under load. Counted and reported
- * rather than dropped in silence.
+ * `droppedPreRequestScripts` counts what a load run cannot honour - the
+ * engine has no pre-request hook on `POST /runs`, so a saved request that
+ * signs itself in a pre-request script goes out unsigned under load. Counted
+ * from the composed `elements`' `script.pre` entries (there is no
+ * `preRequestScripts` list on the wire to count since #1514) and reported
+ * rather than dropped in silence; the elements themselves are left on the
+ * payload; the engine only reads them for its own warnings.
  */
 async function composeLoadRunRequest(
 	args: Record<string, unknown>,
@@ -1666,22 +1752,27 @@ async function composeLoadRunRequest(
 
 	const payload = await composeViaEngine(ctx.client, composeBody, signal);
 
-	// A saved request's pre-request scripts cannot run under load; strip them
-	// from the payload but report how many were dropped.
-	const droppedPreRequestScripts = Array.isArray(payload.preRequestScripts)
-		? payload.preRequestScripts.length
-		: 0;
-	delete payload.preRequestScripts;
+	// A saved request's pre-request scripts cannot run under load; the load
+	// executor never runs an element (engine/CLAUDE.md), so a `script.pre`
+	// entry in the composed `elements` goes out unsigned. Counted and
+	// reported rather than dropped in silence; the entry itself stays on the
+	// payload, since the engine still reads `elements` for its own warnings.
+	const composedElements = Array.isArray(payload.elements) ? payload.elements : [];
+	const droppedPreRequestScripts = composedElements.filter(
+		(entry) =>
+			entry &&
+			typeof entry === "object" &&
+			(entry as Record<string, unknown>).kind === "script.pre"
+	).length;
 
 	// An agent-written validation script replaces the composed one rather than
-	// joining it, and must clear `postRequestScripts` to do so: /runs reads both
-	// names, prefers the list, and would otherwise run the saved request's
-	// assertions while silently ignoring the ones the agent asked for. This is
-	// the only place either name is placed on a run payload - the handler does
-	// not add it again.
+	// joining it: /runs prefers `tests`/`postRequestScripts` over anything in
+	// `elements` (it runs no element at all yet), so setting `payload.tests`
+	// here is enough - there is no `postRequestScripts` wire field left to
+	// clear since #1514, and the composed `script.post` entries are inert on
+	// this path either way.
 	const adHocScript = readValidationScript(args);
 	if (adHocScript !== undefined) {
-		delete payload.postRequestScripts;
 		payload.tests = adHocScript;
 	}
 
@@ -2064,29 +2155,76 @@ const streamBudgetMsInput = z
 	);
 
 /**
- * A saved request's stored scripts, as `create_request` and `update_request`
- * write them - the two fields the engine keeps on the row
- * (`preRequestScript` / `postRequestScript`) and the app's **Pre-request** and
- * **Tests** tabs edit.
+ * One entry of a request or collection's `elements` list (issue #1512):
+ * extractors, assertions, timers, controllers and scripts, each a `kind` plus
+ * its own `config`. `kind` is a bare string rather than a Zod enum - the
+ * engine's registry is the authority on what kinds exist (`GET
+ * /elements/kinds`, served here as the `vayu://elements/kinds` resource), and
+ * enumerating them here would need a tool change every time the engine adds
+ * one. `element-kinds.conformance.test.ts` is what keeps this schema and the
+ * resource from silently drifting apart.
+ */
+export const elementSchema = z.object({
+	id: z.string().optional().describe("Element id; omit to let the engine assign one."),
+	kind: z
+		.string()
+		.describe(
+			'Element kind, e.g. "script.pre", "extract.json", "assert.status" - read the `vayu://elements/kinds` resource for the current catalogue and each kind\'s config shape before writing one blind.'
+		),
+	enabled: z.boolean().optional().describe("Defaults to true."),
+	name: z.string().optional().describe("Optional display name."),
+	config: z
+		.record(z.string(), z.unknown())
+		.describe("Kind-specific configuration, validated engine-side against that kind's schema."),
+});
+
+/**
+ * The `elements` argument every write tool that stores them declares -
+ * `create_request` / `update_request` / `create_collection` /
+ * `update_collection`. Whole-list semantics (`scope` names what "whole" means
+ * for that tool): passing it replaces the stored list entirely, the same rule
+ * `headers` and `auth` already follow, because there is no per-entry patch to
+ * offer over a JSON column.
+ */
+function elementsInput(scope: string) {
+	return z
+		.array(elementSchema)
+		.optional()
+		.describe(
+			`The complete elements list for ${scope} (extractors, assertions, timers, scripts…), replacing whatever is stored. Leave it out to keep the stored list, or use \`preRequestScript\`/\`postRequestScript\` for the common case of just a script - passing both here and one of those on the same call is refused, since a caller who states the whole list has already said what belongs in it.`
+		);
+}
+
+/**
+ * A saved request's `script.pre` / `script.post` elements, offered under
+ * their pre-#1512 names so an agent that only knows scripts keeps working.
+ * `create_request` and `update_request` translate a non-empty string into a
+ * `script.pre` / `script.post` entry before calling the engine - which now
+ * refuses `preRequestScript` / `postRequestScript` as wire fields outright
+ * (issue #1514) - and fold it into whatever `elements` list is already
+ * stored (or, on a create, into the `elements` argument if one was also
+ * given; the two cannot both be given on an update, since an explicit
+ * `elements` there already states the whole list).
  *
- * One name per script here, deliberately. The `tests` alias exists on the *run*
- * tools because the engine spells an ad-hoc run body that way
- * (`readValidationScript`); a second name for a stored field would be a second
- * name to keep in step and a second way for an agent to half-write a script.
+ * One name per script here, deliberately. The `tests` alias exists on the
+ * *run* tools because the engine spells an ad-hoc run body that way
+ * (`readValidationScript`); a second name for a stored field would be a
+ * second name to keep in step and a second way for an agent to half-write a
+ * script.
  *
- * `clearable` appends the merge-patch rule, which is `update_request`'s alone -
- * on a create there is no stored script to keep.
+ * `clearable` appends the merge-patch rule, which is `update_request`'s alone
+ * - on a create there is no stored script to keep.
  */
 function storedScriptInput(which: "pre" | "post", clearable: boolean) {
 	const what =
 		which === "pre"
-			? "JavaScript stored on the request and run before it is sent - the app's Pre-request tab. Use it to sign or otherwise rewrite the request through pm.request."
-			: "JavaScript stored on the request and run after its response arrives - the app's Tests tab. Use pm.test(...) for assertions. Same script `run_request` takes under this name, but persisted onto the request rather than supplied per call.";
+			? "JavaScript run before the request is sent - the app's Pre-request tab. Use it to sign or otherwise rewrite the request through pm.request."
+			: "JavaScript run after its response arrives - the app's Tests tab. Use pm.test(...) for assertions. Same script `run_request` takes under this name, but stored as a script.post element rather than supplied per call.";
 	return z
 		.string()
 		.optional()
 		.describe(
-			`${what} Read the \`vayu://scripting/completions\` resource for the sandbox's surface rather than assuming what exists.` +
+			`${what} Stored as a \`script.${which}\` element. Read the \`vayu://scripting/completions\` resource for the sandbox's surface rather than assuming what exists.` +
 				(clearable
 					? " Leave it out to keep the stored script; pass an empty string to clear it."
 					: "")
@@ -2094,15 +2232,16 @@ function storedScriptInput(which: "pre" | "post", clearable: boolean) {
 }
 
 /**
- * A collection's stored scripts - the ones that run around *every* request in
- * it, not around one (issue #759).
+ * A collection's `script.pre` / `script.post` elements - the ones that run
+ * around *every* request in it, not around one (issue #759). Same
+ * elements-backed sugar {@link storedScriptInput} is for requests.
  *
  * A separate fragment from `storedScriptInput` rather than a parameter on it,
  * because what an agent has to know here is the scope: a script written onto a
  * collection runs for every request below it, including the ones in its
  * sub-collections, so the blast radius of a wrong one is a whole tree rather
  * than a row. Both take the same clearing rule the request scripts do on an
- * update - the engine merge-patches strings, so an empty string is a value.
+ * update - an empty string is a value, not an omission.
  */
 function collectionScriptInput(which: "pre" | "post") {
 	const when =
@@ -2113,7 +2252,7 @@ function collectionScriptInput(which: "pre" | "post") {
 		.string()
 		.optional()
 		.describe(
-			`JavaScript stored on the collection and run ${when} - the app's collection-level scripts. It runs for every request in the collection and in its sub-collections, so scope it accordingly. Read the \`vayu://scripting/completions\` resource for the sandbox's surface. Leave it out to keep the stored script; pass an empty string to clear it.`
+			`JavaScript run ${when} - the app's collection-level scripts, stored as a \`script.${which}\` element. It runs for every request in the collection and in its sub-collections, so scope it accordingly. Read the \`vayu://scripting/completions\` resource for the sandbox's surface. Leave it out to keep the stored script; pass an empty string to clear it.`
 		);
 }
 
@@ -4237,10 +4376,16 @@ export const TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth. The sandbox is synchronous and has no network: to sign a request use pm.crypto.sha256 / pm.crypto.hmacSha256 and the btoa / atob globals. Read the `vayu://scripting/completions` resource for the full surface."
+					"JavaScript run before the request is sent. It may edit pm.request.url / .method / .headers / .body, and those edits are what gets sent - a script-set header overrides the engine-applied auth. The sandbox is synchronous and has no network: to sign a request use pm.crypto.sha256 / pm.crypto.hmacSha256 and the btoa / atob globals. Sent to the engine as an ad-hoc `script.pre` element (issue #1514 refuses the raw field). Read the `vayu://scripting/completions` resource for the full surface."
 				),
 			postRequestScript: validationScriptInput,
 			tests: validationScriptAliasInput,
+			elements: z
+				.array(elementSchema)
+				.optional()
+				.describe(
+					"Ad-hoc elements (extractors, assertions, timers…) for this send only - not stored anywhere. Appended after whatever the composed request already carries (a saved request's own elements, plus its collection chain's), never replacing them. Read the `vayu://elements/kinds` resource for the catalogue."
+				),
 			stream: streamInput,
 			maxStreamEvents: maxStreamEventsInput,
 			streamBudgetMs: streamBudgetMsInput,
@@ -4255,12 +4400,16 @@ export const TOOLS: McpTool[] = [
 				url: requireStr(args, "url"),
 			};
 			if (request.method === undefined) request.method = "GET";
-			// `/execute`'s own key names for the two ad-hoc scripts. Scripts ride
-			// through composition untouched - the engine never interpolates them.
+			// The two ad-hoc scripts no longer ride as `preRequestScript` /
+			// `postRequestScript` on the composed payload - `/execute` refuses
+			// those wire fields outright since issue #1514's cut-over - so they
+			// are read here and folded into `script.pre` / `script.post` elements
+			// after composition, below, alongside any ad-hoc `elements` the caller
+			// gave directly. `readValidationScript` still owns the "postRequestScript"
+			// vs "tests" mutual-exclusion check; only what happens to the string it
+			// returns has changed.
 			const preScript = str(args, "preRequestScript");
-			if (preScript !== undefined) request.preRequestScript = preScript;
 			const postScript = readValidationScript(args);
-			if (postScript !== undefined) request.postRequestScript = postScript;
 			const authArg = readAuthArg(args);
 			if (authArg) request.auth = authArg;
 
@@ -4284,6 +4433,18 @@ export const TOOLS: McpTool[] = [
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err);
+			}
+			// Appended, not laid over `payload.elements` the way an inline `request`
+			// key would replace a composed field: these two scripts used to run
+			// *in addition to* whatever the composed request carried, and folding
+			// them in post-compose is what keeps that true now that they are
+			// elements too.
+			const adHocElements = foldScriptSugar(elementsArg(args) ?? [], preScript, postScript);
+			if (adHocElements.length > 0) {
+				payload.elements = [
+					...(Array.isArray(payload.elements) ? payload.elements : []),
+					...adHocElements,
+				];
 			}
 			const gate = checkAllowlist(String(payload.url ?? ""), ctx.config);
 			if (!gate.ok) return errorResult(gate.error!);
@@ -4389,7 +4550,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Create a collection (the folder saved requests live in), with the variables, auth and pre/post-request scripts every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`. " +
+			"Create a collection (the folder saved requests live in), with the variables, auth and elements (extractors, assertions, timers, scripts) every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`. " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
 			),
@@ -4411,6 +4572,7 @@ export const TOOLS: McpTool[] = [
 				"this collection",
 				'A collection is the root of an auth chain and never inherits, so "inherit" is refused by the engine; requests below it that store { mode: "inherit" } resolve to this block.'
 			),
+			elements: elementsInput("this collection"),
 			preRequestScript: collectionScriptInput("pre"),
 			postRequestScript: collectionScriptInput("post"),
 		},
@@ -4420,10 +4582,8 @@ export const TOOLS: McpTool[] = [
 			const payload: Record<string, unknown> = { name: requireStr(args, "name") };
 			const parentId = str(args, "parentId");
 			if (parentId !== undefined) payload.parentId = parentId;
-			for (const field of ["description", "preRequestScript", "postRequestScript"] as const) {
-				const value = str(args, field);
-				if (value !== undefined) payload[field] = value;
-			}
+			const description = str(args, "description");
+			if (description !== undefined) payload.description = description;
 			const auth = readAuthArg(args);
 			if (auth) payload.auth = auth;
 			const patch = readVariablesPatch(args);
@@ -4431,6 +4591,22 @@ export const TOOLS: McpTool[] = [
 			// create every variable is new, which is what turns the string form
 			// into a stored entry and enforces "a new variable carries a value".
 			if (patch !== undefined) payload.variables = mergeVariables({}, patch, []).variables;
+			const elementsGiven = elementsArg(args);
+			const preScript = str(args, "preRequestScript");
+			const postScript = str(args, "postRequestScript");
+			if (
+				elementsGiven !== undefined &&
+				(preScript !== undefined || postScript !== undefined)
+			) {
+				return errorResult(
+					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.'
+				);
+			}
+			if (elementsGiven !== undefined) {
+				payload.elements = elementsGiven;
+			} else if (preScript !== undefined || postScript !== undefined) {
+				payload.elements = foldScriptSugar([], preScript, postScript);
+			}
 			return callEngine(() => ctx.client.createCollection(payload, signal));
 		},
 	},
@@ -4439,7 +4615,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Change a collection: its name, description, variables, auth or pre/post-request scripts - the state every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth replaces the stored block whole. This is not a move - to re-parent a collection, use move_item. " +
+			"Change a collection: its name, description, variables, auth or elements (extractors, assertions, timers, scripts) - the state every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth and elements each replace the stored block/list whole. This is not a move - to re-parent a collection, use move_item. " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
 			),
@@ -4460,6 +4636,7 @@ export const TOOLS: McpTool[] = [
 				"this collection",
 				'A collection never inherits - it is the root of the chain - so the engine refuses "inherit" here; { mode: "none" } is how a collection stops being an auth source.'
 			),
+			elements: elementsInput("this collection"),
 			preRequestScript: collectionScriptInput("pre"),
 			postRequestScript: collectionScriptInput("post"),
 		},
@@ -4470,14 +4647,7 @@ export const TOOLS: McpTool[] = [
 			// The engine merge-patches, so a body naming nothing would be a write
 			// that changes nothing while reporting success. Say so instead.
 			const payload: Record<string, unknown> = {};
-			for (const field of [
-				"name",
-				"description",
-				// An empty string is a value here, not an omission - the same rule
-				// update_request's scripts follow, and how one gets cleared.
-				"preRequestScript",
-				"postRequestScript",
-			] as const) {
+			for (const field of ["name", "description"] as const) {
 				const value = str(args, field);
 				if (value !== undefined) payload[field] = value;
 			}
@@ -4485,27 +4655,62 @@ export const TOOLS: McpTool[] = [
 			if (auth) payload.auth = auth;
 			const patch = readVariablesPatch(args);
 			const removals = removalNames(args);
-			if (Object.keys(payload).length === 0 && patch === undefined && removals.length === 0) {
+			const elementsGiven = elementsArg(args);
+			const preScript = str(args, "preRequestScript");
+			const postScript = str(args, "postRequestScript");
+			if (
+				elementsGiven !== undefined &&
+				(preScript !== undefined || postScript !== undefined)
+			) {
 				return errorResult(
-					'Pass at least one field to change ("name", "description", "variables", "removeVariables", "auth", "preRequestScript" or "postRequestScript").'
+					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.'
+				);
+			}
+			if (
+				Object.keys(payload).length === 0 &&
+				patch === undefined &&
+				removals.length === 0 &&
+				elementsGiven === undefined &&
+				preScript === undefined &&
+				postScript === undefined
+			) {
+				return errorResult(
+					'Pass at least one field to change ("name", "description", "variables", "removeVariables", "auth", "elements", "preRequestScript" or "postRequestScript").'
 				);
 			}
 			let absentRemovals: string[] = [];
-			if (patch !== undefined || removals.length > 0) {
-				// `PUT /collections/:id` replaces the whole variables blob, exactly
-				// as the environment PUT does, so "change one variable" is a
-				// read-merge-write here too - without the read, an agent setting one
-				// variable would drop every other one the collection holds.
-				let existing: Record<string, unknown>;
+			// One fetch covers both read-merge-writes below: `PUT /collections/:id`
+			// replaces the variables blob and the elements list wholesale, exactly
+			// as the environment PUT does for variables, so "change one variable"
+			// or "add a script alongside the stored elements" is a
+			// read-merge-write here too - without the read, either would drop
+			// everything else the collection holds in that column.
+			const needsExisting =
+				patch !== undefined ||
+				removals.length > 0 ||
+				((preScript !== undefined || postScript !== undefined) &&
+					elementsGiven === undefined);
+			let existing: Record<string, unknown> | undefined;
+			if (needsExisting) {
 				try {
 					existing = ((await ctx.client.getCollection(collectionId, signal)) ??
 						{}) as Record<string, unknown>;
 				} catch (err) {
 					return engineErrorResult(err);
 				}
-				const merged = mergeVariables(existing.variables, patch, removals);
+			}
+			if (patch !== undefined || removals.length > 0) {
+				const merged = mergeVariables(existing!.variables, patch, removals);
 				payload.variables = merged.variables;
 				absentRemovals = merged.absentRemovals;
+			}
+			if (elementsGiven !== undefined) {
+				payload.elements = elementsGiven;
+			} else if (preScript !== undefined || postScript !== undefined) {
+				const existingElements = Array.isArray(existing?.elements)
+					? (existing!.elements as unknown[])
+					: [];
+				payload.elements = foldScriptSugar(existingElements, preScript, postScript);
 			}
 			const result = await callEngine(() =>
 				ctx.client.updateCollection(collectionId, payload, signal)
@@ -5106,7 +5311,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			'Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag and certificate-verification setting, and its pre-request and test scripts - everything the app\'s builder stores except file body parts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored script runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.',
+			'Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag, certificate-verification setting and its elements (extractors, assertions, timers, scripts) - everything the app\'s builder stores except file body parts. GUARDED: requires write access to be enabled in Vayu Settings. The URL may contain {{variables}} since it is only saved, not executed, and a stored element runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.',
 		annotations: {
 			title: "Create saved request",
 			readOnlyHint: false,
@@ -5135,6 +5340,7 @@ export const TOOLS: McpTool[] = [
 				'Omit it for the stored default, "inherit", which resolves against the collection chain when the request is sent.'
 			),
 			...requestSettingsInput(),
+			elements: elementsInput("this request"),
 			preRequestScript: storedScriptInput("pre", false),
 			postRequestScript: storedScriptInput("post", false),
 		},
@@ -5164,9 +5370,30 @@ export const TOOLS: McpTool[] = [
 			}
 			// Pass-through strings: absent leaves the engine's own default (empty),
 			// so only what the caller actually named is sent.
-			for (const field of ["description", "preRequestScript", "postRequestScript"] as const) {
-				const value = str(args, field);
-				if (value !== undefined) payload[field] = value;
+			const description = str(args, "description");
+			if (description !== undefined) payload.description = description;
+			// `elements` and the script sugar cannot both be given (elementsInput's
+			// description says so): a caller who stated the whole list has already
+			// said what belongs in it, so a sugar script folded in on top of it
+			// would be silently discarded or silently override an entry the caller
+			// meant to keep. See `update_request` for why this needs the engine's
+			// stored copy on an update; a create starts from nothing, so the sugar
+			// folds straight into an empty list.
+			const elementsGiven = elementsArg(args);
+			const preScript = str(args, "preRequestScript");
+			const postScript = str(args, "postRequestScript");
+			if (
+				elementsGiven !== undefined &&
+				(preScript !== undefined || postScript !== undefined)
+			) {
+				return errorResult(
+					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.'
+				);
+			}
+			if (elementsGiven !== undefined) {
+				payload.elements = elementsGiven;
+			} else if (preScript !== undefined || postScript !== undefined) {
+				payload.elements = foldScriptSugar([], preScript, postScript);
 			}
 			return callEngine(() => ctx.client.createRequest(payload, signal));
 		},
@@ -5176,7 +5403,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or pre/post-request scripts. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing a script replaces that script, and an empty string clears it.",
+			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it.",
 		annotations: {
 			title: "Update saved request",
 			readOnlyHint: false,
@@ -5206,6 +5433,7 @@ export const TOOLS: McpTool[] = [
 				"Replaces the stored block whole - send the mode and its credentials together. Leave it out to keep what is stored."
 			),
 			...requestSettingsInput(),
+			elements: elementsInput("this request"),
 			preRequestScript: storedScriptInput("pre", true),
 			postRequestScript: storedScriptInput("post", true),
 		},
@@ -5220,16 +5448,7 @@ export const TOOLS: McpTool[] = [
 			 * `method: "GET"` filler would silently rewrite the stored verb.
 			 */
 			const payload: Record<string, unknown> = {};
-			for (const field of [
-				"name",
-				"url",
-				"method",
-				"description",
-				// An empty string is a value here, not an omission: the engine's
-				// merge-patch stores it, which is how a script gets cleared.
-				"preRequestScript",
-				"postRequestScript",
-			] as const) {
+			for (const field of ["name", "url", "method", "description"] as const) {
 				const value = str(args, field);
 				if (value !== undefined) payload[field] = value;
 			}
@@ -5257,9 +5476,45 @@ export const TOOLS: McpTool[] = [
 					'"bodyType" describes "body" - pass the body it applies to, or leave both out.'
 				);
 			}
+			// `elements` (the whole list) or the script sugar, never both - see
+			// `elementsInput`. Sugar alone needs the request's *stored* elements
+			// first: `PUT /requests/:id` replaces the elements column wholesale
+			// (there is no per-entry patch, the same rule `headers` follows), so
+			// setting `payload.elements` to just the sugar-built script(s) would
+			// silently drop every extractor or assertion the request already
+			// carries. An explicit `elements` argument has already stated the
+			// whole list the caller wants, so no fetch is needed there.
+			const elementsGiven = elementsArg(args);
+			const preScript = str(args, "preRequestScript");
+			const postScript = str(args, "postRequestScript");
+			if (
+				elementsGiven !== undefined &&
+				(preScript !== undefined || postScript !== undefined)
+			) {
+				return errorResult(
+					'Pass "elements" or "preRequestScript"/"postRequestScript", not both - add a "script.pre"/"script.post" entry to "elements" directly instead.'
+				);
+			}
+			if (elementsGiven !== undefined) {
+				payload.elements = elementsGiven;
+			} else if (preScript !== undefined || postScript !== undefined) {
+				let stored: unknown;
+				try {
+					stored = await ctx.client.getRequest(requestId, signal);
+				} catch (err) {
+					return engineErrorResult(err);
+				}
+				const existing =
+					stored &&
+					typeof stored === "object" &&
+					Array.isArray((stored as Record<string, unknown>).elements)
+						? ((stored as Record<string, unknown>).elements as unknown[])
+						: [];
+				payload.elements = foldScriptSugar(existing, preScript, postScript);
+			}
 			if (Object.keys(payload).length === 0) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body, auth, followRedirects, maxRedirects, httpVersion, stream, description, preRequestScript or postRequestScript)."
+					"Pass at least one field to change (name, url, method, headers, body, auth, followRedirects, maxRedirects, httpVersion, stream, description, elements, preRequestScript or postRequestScript)."
 				);
 			}
 			return callEngine(() => ctx.client.updateRequest(requestId, payload, signal));

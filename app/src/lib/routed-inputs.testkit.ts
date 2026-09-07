@@ -234,6 +234,15 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/electron/mcp/variable-origins.conformance.test.ts",
 		paths: ["engine/tests/fixtures/variable-resolution-conformance.json"],
 	},
+	/*
+	 * The `vayu://elements/kinds` resource and the `elements` argument's `kind`
+	 * examples both name element kinds by string (issue #1517); this is what
+	 * pins them to the registry the engine's own fixture describes.
+	 */
+	mcpElementKinds: {
+		reader: "app/electron/mcp/element-kinds.conformance.test.ts",
+		paths: ["engine/tests/fixtures/element-kinds.json"],
+	},
 	setCookie: {
 		reader: "app/src/modules/request-builder/components/ResponseViewer/parse-set-cookie.conformance.test.ts",
 		paths: ["engine/tests/fixtures/set-cookie-conformance.json"],

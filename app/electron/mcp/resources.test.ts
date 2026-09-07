@@ -259,6 +259,81 @@ describe("vayu://scripting/types resource", () => {
 });
 
 /**
+ * The element registry's catalogue (issue #1517), the same anti-drift shape
+ * as the two scripting resources above: an agent building an `elements` list
+ * reads the engine's own kinds rather than a description that can go stale
+ * the moment the registry gains one.
+ */
+describe("vayu://elements/kinds resource", () => {
+	const elementsResource = () => {
+		const r = STATIC_RESOURCES.find((s) => s.uri === "vayu://elements/kinds");
+		if (!r) throw new Error("elements resource is not registered");
+		return r;
+	};
+
+	function elementsContext(payload: unknown, getElementKinds = vi.fn()) {
+		getElementKinds.mockResolvedValue(payload);
+		return {
+			ctx: { client: { getElementKinds } as unknown as EngineClient } as ToolContext,
+			getElementKinds,
+		};
+	}
+
+	const scriptPreKind = {
+		kind: "script.pre",
+		category: "script",
+		version: 1,
+		phases: ["step.before"],
+		label: "Pre-request script",
+		description: "Runs before the request is sent.",
+		hotPathClass: "script",
+		configSchema: { type: "object", required: ["script"] },
+	};
+
+	test("serves the engine's kind entries verbatim", async () => {
+		const { ctx, getElementKinds } = elementsContext([scriptPreKind]);
+
+		const kinds = await elementsResource().read(ctx);
+
+		expect(getElementKinds).toHaveBeenCalledTimes(1);
+		expect(kinds).toEqual([scriptPreKind]);
+	});
+
+	test("drops an entry with no string `kind`, keeping the valid ones", async () => {
+		const { ctx } = elementsContext([scriptPreKind, { label: "no kind here" }, null, "nope"]);
+		expect(await elementsResource().read(ctx)).toEqual([scriptPreKind]);
+	});
+
+	test("forwards the cancellation signal to the engine client", async () => {
+		const { ctx, getElementKinds } = elementsContext([scriptPreKind]);
+		const controller = new AbortController();
+
+		await elementsResource().read(ctx, controller.signal);
+
+		expect(getElementKinds).toHaveBeenCalledWith(controller.signal);
+	});
+
+	test.each([
+		["a payload that is not an array", { kinds: [scriptPreKind] }],
+		["an empty array", []],
+		["an array with nothing valid in it", [{ label: "no kind" }, null]],
+	])("throws loudly on %s", async (_label, payload) => {
+		const { ctx } = elementsContext(payload);
+		await expect(elementsResource().read(ctx)).rejects.toThrow(/elements\/kinds/);
+	});
+
+	test("propagates an engine failure rather than serving an empty catalogue", async () => {
+		const ctx = {
+			client: {
+				getElementKinds: vi.fn().mockRejectedValue(new Error("engine is down")),
+			} as unknown as EngineClient,
+		} as ToolContext;
+
+		await expect(elementsResource().read(ctx)).rejects.toThrow("engine is down");
+	});
+});
+
+/**
  * The description is what an agent reads before it reads the payload, so it is
  * the part that can lie. `vayu://runs` serves one page - the reader asks for
  * `?limit=100` - and a description promising "all runs" talks an agent out of

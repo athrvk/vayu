@@ -562,6 +562,20 @@ export class EngineClient {
 		return this.request("POST", "/config", payload, signal);
 	}
 
+	// --- Elements --------------------------------------------------------------
+
+	/**
+	 * The element registry's catalogue (issue #1513): every kind's category,
+	 * phases, hot-path class, label, description and config JSON Schema. What
+	 * `create_request` / `update_request` / `create_collection` /
+	 * `update_collection`'s `elements` argument validates against, engine-side;
+	 * served back here as the `vayu://elements/kinds` resource so an agent can
+	 * discover a kind's shape instead of guessing it (issue #1517).
+	 */
+	getElementKinds(signal?: AbortSignal): Promise<unknown> {
+		return this.request("GET", "/elements/kinds", undefined, signal);
+	}
+
 	// --- Write: saved requests / environments --------------------------------
 	//
 	// POST creates, PUT updates - the engine split the verbs in #95, so these
