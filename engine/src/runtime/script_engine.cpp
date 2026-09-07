@@ -7475,14 +7475,21 @@ jar_cookies_from_context (JSContext* ctx, const char* member) {
     if (data->cookie_read_lines) {
         return vayu::http::matching_in (*data->cookie_read_lines, data->request->url);
     }
-    JS_ThrowPlainError (ctx,
-    data->cookie_read_refusal != nullptr ?
+    // A `%s` template picked at runtime defeats `-Wformat-nonliteral` even
+    // where every candidate is itself a literal - the compiler cannot see
+    // past the branch - so the substitution is done here, in C++, and the
+    // format string `JS_ThrowPlainError` actually receives is the literal
+    // "%s" below, exactly one call site holding all the runtime content.
+    std::string refusal = data->cookie_read_refusal != nullptr ?
     data->cookie_read_refusal :
     "pm.cookies.%s is not available here: the cookie jar is a design-mode "
     "feature, and this execution has no jar to read. Use "
     "pm.response.cookies for the Set-Cookie of the response in hand. See "
-    "docs/engine/scripting.md.",
-    member);
+    "docs/engine/scripting.md.";
+    if (const auto placeholder = refusal.find ("%s"); placeholder != std::string::npos) {
+        refusal.replace (placeholder, 2, member);
+    }
+    JS_ThrowPlainError (ctx, "%s", refusal.c_str ());
     return std::nullopt;
 }
 
