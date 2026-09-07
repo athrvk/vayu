@@ -240,9 +240,19 @@ done
 # `engine/.clang-tidy` sets `WarningsAsErrors: '*'`; with that empty, clang-tidy
 # prints its findings and exits 0. `STATUS` is declared beside `end_hook` above,
 # which is where it is finally read.
-
-# Run clang-tidy
-for FILE in $LINT_FILES; do
+#
+# One process per file, in parallel, not sequential: whole-file clang-tidy with
+# header analysis is ~10-30s/file, and a merge or a broad rename easily stages
+# dozens at once, which made the sequential version a multi-minute commit.
+# `xargs -P` keeps the one guarantee above - no file's status gets lost - for
+# free: it exits 123 once all invocations are done if any exited 1-125, and
+# stays 0 only if every one did, which is exactly the single pass/fail STATUS
+# already collapsed to. It does not say *which* file failed on its own, but
+# nothing before this change did either - the per-file "Linting $FILE..." line
+# and clang-tidy's own output, interleaved though they may be under `-P`, are
+# what named that before and still do.
+lint_one_file() {
+    local FILE="$1"
     echo "Linting $FILE..."
     # We need compilation database for clang-tidy to work correctly with includes
     # Assuming build directory is engine/build
@@ -286,14 +296,30 @@ for FILE in $LINT_FILES; do
     # nothing and say it had linted.
     if [ -f "engine/build/compile_commands.json" ]; then
         "$CLANG_TIDY" --allow-no-checks --extra-arg=-Wno-ignored-gch \
-            -p engine/build "$FILE" || STATUS=1
+            -p engine/build "$FILE"
     else
         echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
         # Fallback: try to include common directories
         "$CLANG_TIDY" --allow-no-checks "$FILE" \
-            -- -Iengine/include -Iengine/vendor/quickjs-ng || STATUS=1
+            -- -Iengine/include -Iengine/vendor/quickjs-ng
     fi
-done
+}
+export -f lint_one_file
+export CLANG_TIDY
+
+# `nproc` is Linux-only; `sysctl -n hw.ncpu` is its macOS equivalent. Neither is
+# guaranteed on every Windows shell this hook runs under, so the fallback is a
+# plain constant rather than a third probe - 4, matching this repo's own
+# Windows ctest parallelism default (`engine/tests/CMakeLists.txt`), is a
+# reasonable middle ground where neither command exists to ask.
+NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+# Only invoked when there is at least one file, so as not to depend on how a
+# particular xargs handles empty input - GNU and BSD (macOS) disagree on
+# whether that runs the command once anyway, and this sidesteps asking.
+if [ -n "$LINT_FILES" ]; then
+    printf '%s\n' $LINT_FILES | xargs -P "$NPROC" -I{} bash -c 'lint_one_file "$@"' _ {} || STATUS=1
+fi
 
 if [ "$STATUS" -ne 0 ]; then
     echo
