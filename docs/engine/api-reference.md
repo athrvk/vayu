@@ -6868,7 +6868,9 @@ they are counted, not fixed. Each entry carries `code` and a human-readable
 `names` (a few of the unresolved names, capped); `pre_request_script_skipped`
 carries `steps` (how many carried one). Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
-every run that genuinely had nothing to say.
+every run that genuinely had nothing to say. `unresolved_tokens` covers every
+load shape alike (issue #1540): a single-request run with no data set and a
+scenario step report the same warning for the same mistake.
 
 **A streaming run adds a `stream` section** and no other run carries one:
 

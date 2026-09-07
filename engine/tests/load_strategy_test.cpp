@@ -218,6 +218,80 @@ TEST_F (LoadStrategyTest, RampUpDurationShorterThanRampStillRuns) {
     << "duration<ramp submitted nothing; partial-ramp behavior not implemented";
 }
 
+// A single-request load run's token-free fast path (issue #1540) never
+// copies the request per submission (issue #992), so it cannot re-scan for
+// an unresolved `{{token}}` the way the copying branch does at line ~445 of
+// load_strategy.cpp. `start_run` scans once instead and hands the names down
+// through `RunContext::template_unresolved_tokens`, which this test sets
+// directly since it drives the strategy without going through `start_run`.
+// Mutation check: remove the `record_unresolved_token` call from the fast
+// path in `submit_one_request` and this reds, because nothing else on that
+// branch ever looks at the field.
+TEST_F (LoadStrategyTest, FastPathWithAnUnresolvedTokenCountsAndWarnsWithoutRefusingTheRun) {
+    const size_t M        = 5;
+    nlohmann::json config = {
+        { "mode", "iterations" },
+        { "iterations", M },
+        { "concurrency", 1 },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-fastpath-unresolved", config);
+    context->template_unresolved_tokens = { "missing" };
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url () + "?token={{missing}}";
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    ASSERT_EQ (context->requests_sent.load (), M);
+    EXPECT_EQ (context->metrics_collector->unresolved_token_requests (), M)
+    << "the fast path sends the same unresolved bytes on every submission";
+    const auto names = context->metrics_collector->unresolved_token_names ();
+    ASSERT_EQ (names.size (), 1u);
+    EXPECT_EQ (names[0], "missing");
+}
+
+// The companion shapes: `template_unresolved_tokens` left empty (a request
+// resolved cleanly, or carries only a reserved name like `{{$vu}}`, which
+// `start_run` never puts in the set) records nothing on the fast path.
+TEST_F (LoadStrategyTest, FastPathWithNoUnresolvedTokenRecordsNoWarning) {
+    nlohmann::json config = {
+        { "mode", "iterations" },
+        { "iterations", 3 },
+        { "concurrency", 1 },
+    };
+    auto context =
+    std::make_shared<vayu::core::RunContext> ("test-fastpath-clean", config);
+    vayu::http::EventLoopConfig loop_config;
+    loop_config.max_concurrent = 2000;
+    loop_config.max_per_host   = 2000;
+    context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    context->event_loop->start ();
+
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = mock_server->fast_url () + "?vu={{$vu}}";
+    request.timeout_ms = 30000;
+
+    vayu::db::Database db (TEST_DB_PATH);
+    auto strategy = vayu::core::LoadStrategy::create (config);
+    strategy->execute (context, db, request);
+    context->event_loop->stop (false);
+
+    EXPECT_EQ (context->metrics_collector->unresolved_token_requests (), 0u);
+    EXPECT_TRUE (context->metrics_collector->unresolved_token_names ().empty ());
+}
+
 // Closed-loop iterations: submit exactly M, never exceed N in flight.
 // N kept within the httplib test-mock thread pool so /fast completes promptly;
 // stop(false) skips the drain (peak is already captured during execute).
