@@ -2377,9 +2377,10 @@ The **language** is current; what is missing is the **host environment**:
   was sent - and `vu`, which is `1` here because a single request repeated is
   one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
 - `POST /runs`'s `tests` field carries the collection chain's test scripts as
-  well as the request's own, composed the same way as `POST /execute` (see
-  [Script Parts](#script-parts) below) - a collection-level assertion is now
-  checked under load, not only in design mode
+  well as the request's own, joined into one script the way it always has been
+  (see [Script elements](#script-elements-design-send-and-the-sequential-run)
+  below) - a collection-level assertion is now checked under load, not only in
+  design mode
 - A value a pre-request script would have set - a token fetched and written
   with `pm.environment.set` - never reaches a later step or request under
   load, because the script that would set it never runs. The `{{token}}` it

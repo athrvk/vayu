@@ -5657,11 +5657,11 @@ top-level `warnings` array below.
 }
 ```
 
-**`tests` accepts both forms**, like `preRequestScripts` / `postRequestScripts`
-on `POST /execute` above: the legacy single string, or a list of parts
+**`tests` accepts both forms** - the legacy single string, or a list of parts
 (`[{ "origin": "collection" | "request", "id", "name", "script" }]`) that the
-engine joins itself (see [scripting.md](scripting.md#script-parts)). The list
-wins when both are sent. Sending the collection chain's parts means its
+engine joins itself, unchanged since before issue #1514 (see
+[scripting.md](scripting.md#script-elements-design-send-and-the-sequential-run)).
+The list wins when both are sent. Sending the collection chain's parts means its
 assertions are now actually checked under load - previously only the
 request's own `tests` string was ever sent, so a collection-level assertion
 passed in design mode and was silently never validated by a load run.
