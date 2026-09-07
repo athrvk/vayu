@@ -242,7 +242,9 @@ describe("DesignRunView - the copy shows the stored exchange", () => {
 		// From the run's own parts. The live chain is mocked empty, so anything
 		// listed here can only have come from what was stored.
 		expect(screen.getByText(/runs before your own/i)).toBeTruthy();
-		expect(screen.getByText("API")).toBeTruthy();
+		// Both the collection's script.pre and script.post parts came from
+		// "API", so its name appears once per entry.
+		expect(screen.getAllByText("API").length).toBe(2);
 	});
 });
 

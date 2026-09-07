@@ -192,6 +192,23 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 		[]
 	);
 
+	/**
+	 * The collection's own elements as the run recorded them (issue #1512),
+	 * for `InheritedElementsNotice` to show in place of the live chain - the
+	 * same "as it was, not as it reads now" rule `replayElements` applies for
+	 * execution above. No legacy element here: `LegacyScriptNotice` already
+	 * shows the glued string via `legacyPreScript`/`legacyPostScript` below,
+	 * and folding it into this list too would show it twice, mislabeled as
+	 * something a collection contributed.
+	 */
+	const inheritedElements = useMemo<ResolvedElement[]>(
+		() => [
+			...replayElements(seed.collectionPreScripts, undefined, "script.pre"),
+			...replayElements(seed.collectionPostScripts, undefined, "script.post"),
+		],
+		[replayElements, seed.collectionPreScripts, seed.collectionPostScripts]
+	);
+
 	const handleExecute = useCallback(
 		async (request: RequestState): Promise<ResponseState | null> => {
 			try {
@@ -215,9 +232,20 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				 * exactly as it ran - the engine drops a none-auth at compose.
 				 */
 				const elements: ResolvedElement[] = [
-					...replayElements(seed.collectionPreScripts, seed.legacyPreScript, "script.pre"),
-					...replayElements(seed.collectionPostScripts, seed.legacyPostScript, "script.post"),
-					...request.elements.map((el): ResolvedElement => ({ ...el, origin: { kind: "request" } })),
+					...replayElements(
+						seed.collectionPreScripts,
+						seed.legacyPreScript,
+						"script.pre"
+					),
+					...replayElements(
+						seed.collectionPostScripts,
+						seed.legacyPostScript,
+						"script.post"
+					),
+					...request.elements.map((el): ResolvedElement => ({
+						...el,
+						origin: { kind: "request" },
+					})),
 				];
 
 				const composed = await engineComposeRequest({
@@ -424,8 +452,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					   bounds it. */
 					memoryKey={run.id}
 					initialResponse={initialResponse}
-					inheritedPreScripts={seed.collectionPreScripts}
-					inheritedPostScripts={seed.collectionPostScripts}
+					inheritedElements={inheritedElements}
 					legacyPreScript={seed.legacyPreScript}
 					legacyPostScript={seed.legacyPostScript}
 					collectionId={null}

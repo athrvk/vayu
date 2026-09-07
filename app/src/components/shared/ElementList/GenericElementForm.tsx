@@ -55,10 +55,20 @@ function PropertyRow({
 	onChange,
 }: {
 	name: string;
-	property: ElementConfigProperty;
+	/**
+	 * JSON Schema allows an unconstrained property to be written as a literal
+	 * `null` rather than `{}` - the engine's `assert.jsonpath` kind does this
+	 * for `expected`, which can legally hold any JSON value. Typed as
+	 * possibly-absent here rather than tightening the schema type upstream, so
+	 * a kind whose schema takes this shape still renders instead of throwing
+	 * on `property.type` - the same "declares nothing" fallback a bare `{}`
+	 * already gets.
+	 */
+	property: ElementConfigProperty | null | undefined;
 	value: unknown;
 	onChange: (value: unknown) => void;
 }) {
+	property ??= {};
 	if (property.type === "boolean") {
 		return <ToggleRow label={name} checked={value === true} onChange={onChange} />;
 	}
@@ -105,7 +115,11 @@ function PropertyRow({
 							.split(",")
 							.map((part) => part.trim())
 							.filter((part) => part.length > 0);
-						onChange(itemType === "integer" ? parts.map(Number).filter((n) => !isNaN(n)) : parts);
+						onChange(
+							itemType === "integer"
+								? parts.map(Number).filter((n) => !isNaN(n))
+								: parts
+						);
 					}}
 				/>
 			</div>
@@ -123,7 +137,9 @@ function PropertyRow({
 						property={childProperty}
 						value={(value as Record<string, unknown> | undefined)?.[childName]}
 						onChange={(next) =>
-							onChange(setField((value as Record<string, unknown>) ?? {}, childName, next))
+							onChange(
+								setField((value as Record<string, unknown>) ?? {}, childName, next)
+							)
 						}
 					/>
 				))}

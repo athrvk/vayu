@@ -622,14 +622,25 @@ export interface ElementConfigProperty {
 	minimum?: number;
 	maximum?: number;
 	/** Present only when `type` is `"object"` - one level deep, never further. */
-	properties?: Record<string, ElementConfigProperty>;
+	properties?: Record<string, ElementConfigProperty | null>;
 	required?: string[];
 }
 
-/** A JSON Schema object, scoped to what the element registry emits (issue #1512). */
+/**
+ * A JSON Schema object, scoped to what the element registry emits (issue
+ * #1512).
+ *
+ * A property's value is `| null` because JSON Schema lets an unconstrained
+ * property be written that way rather than as `{}` - `assert.jsonpath`'s
+ * `expected` does this, since it legally holds any JSON value. Read through
+ * `GenericElementForm`'s `PropertyRow`, which treats `null` the same as `{}`:
+ * a property that declares nothing still renders, as a plain text field,
+ * rather than the type checker's non-null promise crashing the one place that
+ * reads it.
+ */
 export interface ElementConfigSchema {
 	type: "object";
-	properties?: Record<string, ElementConfigProperty>;
+	properties?: Record<string, ElementConfigProperty | null>;
 	required?: string[];
 	additionalProperties?: boolean;
 }

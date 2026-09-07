@@ -166,7 +166,9 @@ describe("a save that raced an edit", () => {
 		await harness().finish();
 
 		expect(
-			harness().sent.map((r) => r.elements.find((el) => el.kind === "script.post")?.config.script)
+			harness().sent.map(
+				(r) => r.elements.find((el) => el.kind === "script.post")?.config.script
+			)
 		).toEqual(["first", "second"]);
 	});
 
