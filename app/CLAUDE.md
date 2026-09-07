@@ -59,6 +59,10 @@ everything.
   its named cases on Ctrl/Cmd so those chords reach the window, and its
   editable-target check is `isTextEntryTarget`, which is `ownsEnterKey` plus a
   plain input. One list, not two.
+- **`dependencies` in `package.json` is the main process's runtime set and
+  nothing else** (`electron/packaged-dependencies.test.ts`). electron-builder
+  packs it, and only it, into the asar; every package Vite bundles for the
+  renderer is a devDependency. See `docs/app/building.md#dependencies`.
 - State: Zustand for UI state, TanStack Query for server state.
 - **A save that fails is retried, and the failure stays on screen until it
   lands** (#1479): `useSaveManager` backs off up to `SAVE_RETRY_MAX_DELAY_MS`,

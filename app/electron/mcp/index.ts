@@ -13,6 +13,7 @@
  *        docs/engine/mcp.md.
  */
 
+import type http from "node:http";
 import { EngineClient } from "./engine-client.js";
 import { McpHttpServer } from "./http.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
@@ -61,6 +62,11 @@ export class VayuMcpService {
 
 	isRunning(): boolean {
 		return this.httpServer.isRunning();
+	}
+
+	/** Serve one request on a socket this service does not own (`listener.ts`). */
+	handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+		return this.httpServer.handleRequest(req, res);
 	}
 
 	getUrl(): string {

@@ -21,7 +21,8 @@
  * for the other.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { stubNumberLocale } from "@/test/number-locale";
 import { render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import RequestResponseView from "./RequestResponseView";
@@ -69,6 +70,12 @@ const renderReport = (sampling?: RunReport["sampling"]) =>
 	);
 
 describe("RequestResponseView retention", () => {
+	let restoreLocale: () => void;
+	beforeEach(() => {
+		restoreLocale = stubNumberLocale("en-US");
+	});
+	afterEach(() => restoreLocale());
+
 	it("tells the reader the sampled list is a sample, not the whole run", () => {
 		renderReport({
 			errorsDropped: 0,

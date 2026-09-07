@@ -444,10 +444,34 @@ Key settings in `vite.config.ts`:
 
 ## Dependencies
 
-### Production Dependencies
+### `dependencies` is what the packaged main process runs
+
+electron-builder packs every package under `dependencies`, with its transitive
+closure, into `app.asar`, and nothing from `devDependencies`. The renderer never
+reads from there - Vite bundles its packages into `dist/` - so the only packages
+that belong under `dependencies` are the ones the unbundled main process imports
+at runtime:
+
+- **electron-store**: the `mcp-config.json` and `window-state.json` stores
+- **electron-updater**: the update check and download
+- **@modelcontextprotocol/sdk** and **zod**: the MCP server and its tool
+  schemas, loaded by the first request (see `docs/engine/mcp.md`)
+
+`electron/packaged-dependencies.test.ts` holds the two sets equal. A renderer
+package listed there ships a copy the app never opens: before the test that
+was every renderer package, and the 0.26.0 asar carried 14,479 files and a
+3.8 MB header, which Electron parses on every launch and keeps for the life of
+the main process, where the main process reads from about 2,500 files and a
+0.7 MB header. A main-process import missing from there is present in
+development and `ERR_MODULE_NOT_FOUND` in the packaged app, before a window
+exists. `electron-builder.json` also leaves `*.map` and `*.d.{ts,mts,cts}` out
+of what remains.
+
+### Renderer packages
+
+Bundled by Vite, so `devDependencies`:
 
 - **React 19**: UI framework
-- **Electron 44**: Desktop app framework
 - **Zustand**: State management
 - **TanStack Query**: Server state
 - **Radix UI**: Component primitives
@@ -457,8 +481,10 @@ Key settings in `vite.config.ts`:
 - **@fontsource** (Space Grotesk, Inter, JetBrains Mono, Fira Code, IBM Plex
   Mono, Space Mono): bundled font faces, imported from `src/fonts.css`
 
-### Development Dependencies
+### Tooling
 
+- **Electron 44**: the runtime itself, which electron-builder downloads and
+  ships beside the asar rather than inside it
 - **TypeScript 7** (installed as `tsc7`): every compile - the `pnpm type-check`
   gate and the `build` / `electron:compile` emit - see
   [One compiler runs, two are installed](#one-compiler-runs-two-are-installed)

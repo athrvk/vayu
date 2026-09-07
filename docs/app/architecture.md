@@ -82,6 +82,7 @@ The main process is responsible for:
 - **App Lifecycle**: Handles app ready, window close, and quit events. A close or quit that would stop a running inbox, mock server or mock issuer is intercepted first and names what it stops, so a window-scoped service is never taken silently (`service-stop-guard.ts`, issue #1363)
 - **Context Menu**: Composes the right-click menu from Chromium's `context-menu` params and the target the renderer announces (`context-menu.ts`, issue #1359)
 - **Notifications**: Shows or refuses an OS notification for what finished while the user was elsewhere, and reports the platform's willingness to the settings row (`notify.ts`, issue #1358)
+- **Process Footprint**: Sizes libuv's threadpool to one worker before any other module loads (`threadpool-size.ts`). On Windows each worker commits its 8 MB stack, and nothing here hands the pool more than one file at a time; the MCP port is bound at launch with the SDK behind it loaded by the first request (`mcp/listener.ts`)
 
 **Key Responsibilities:**
 - Spawns the engine binary as a child process

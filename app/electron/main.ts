@@ -5,6 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+// First, ahead of every other module: the pool it sizes reads the variable
+// once, at its first use. See threadpool-size.ts.
+import "./threadpool-size.js";
 import {
 	app,
 	BrowserWindow,
@@ -76,11 +79,12 @@ import { revealWhenReady } from "./window-reveal.js";
  * main-process evaluation, before `app.whenReady` and therefore ahead of the
  * window, on every launch including the ones where MCP is switched off.
  *
- * `config`, `store` and `connect` reach none of that (`electron-store` and
- * `node:child_process` are their heaviest dependencies), so the startup gate and
- * the Settings IPC read them directly and for free. The two symbols that do pull
- * the SDK - the service and the tool catalog - are loaded on demand by
- * `loadMcp()` below.
+ * `config`, `store`, `connect` and `listener` reach none of that
+ * (`electron-store`, `node:child_process` and `node:http` are their heaviest
+ * dependencies), so the startup gate, the Settings IPC and the port itself cost
+ * nothing. The two symbols that do pull the SDK - the service and the tool
+ * catalog - are loaded on demand by `loadMcp()` below: the catalog when Settings
+ * asks, the service when the first request reaches the port.
  */
 import { resolveSafetyConfig, sanitizeSafetyInput, type McpSafetyConfig } from "./mcp/config.js";
 import {
@@ -91,6 +95,7 @@ import {
 	saveMcpEnabled,
 } from "./mcp/store.js";
 import { connectClient, type McpConnectClient } from "./mcp/connect.js";
+import { McpListener } from "./mcp/listener.js";
 import type { McpDataChangedEvent } from "./mcp/tools.js";
 import type { VayuMcpService } from "./mcp/index.js";
 import {
@@ -146,7 +151,11 @@ const __dirname = path.dirname(__filename);
 
 // Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
-// MCP server (Streamable HTTP) exposing the engine to agents. See mcp/index.ts.
+// The MCP port, bound while the server is enabled. See mcp/listener.ts.
+let mcpListener: McpListener | null = null;
+// The MCP service behind it (Streamable HTTP, exposing the engine to agents; see
+// mcp/index.ts), built by the first request the listener receives - null until
+// then, and read as "not loaded yet" by the Settings IPC below.
 let mcpService: VayuMcpService | null = null;
 let mainWindow: BrowserWindow | null = null;
 
@@ -858,28 +867,38 @@ async function startMcp() {
 	try {
 		// Inside the try, not ahead of it: this is the first thing in the whole app
 		// to touch the persisted MCP config, so it is where a store failure lands.
-		// It also gates the import below, so a disabled launch never evaluates the
-		// SDK or the tool registry at all.
 		if (!loadMcpEnabled()) {
 			console.log("[Main] MCP server disabled by preference; not starting.");
 			return;
 		}
-		const { VayuMcpService } = await loadMcp();
-		mcpService = new VayuMcpService({
-			engineBaseUrl: `http://${ENGINE_HOST}:${ENGINE_PORT}`,
+		// Only the port is paid for here. The SDK, the tool registry and the
+		// service are loaded by the first request that reaches it, so a launch no
+		// agent connects to never evaluates them (5-7 MB resident, measured).
+		const listener = new McpListener({
 			host: MCP_HOST,
 			port: MCP_PORT,
-			version: app.getVersion(),
-			safety: loadPersistedSafety(),
-			onDataChanged: sendMcpDataChanged,
+			loadHandler: async () => {
+				const { VayuMcpService } = await loadMcp();
+				const service = new VayuMcpService({
+					engineBaseUrl: `http://${ENGINE_HOST}:${ENGINE_PORT}`,
+					host: MCP_HOST,
+					port: MCP_PORT,
+					version: app.getVersion(),
+					safety: loadPersistedSafety(),
+					onDataChanged: sendMcpDataChanged,
+				});
+				mcpService = service;
+				return (req, res) => service.handleRequest(req, res);
+			},
 		});
-		await mcpService.start();
-		console.log("[Main] MCP server listening at", mcpService.getUrl());
+		await listener.start();
+		mcpListener = listener;
+		console.log("[Main] MCP server listening at", listener.url);
 	} catch (error) {
 		// The MCP server is a non-critical convenience - a bind failure (e.g. port
 		// in use) must not take down the app. Log and continue.
 		console.error("[Main] Failed to start MCP server (continuing without it):", error);
-		mcpService = null;
+		mcpListener = null;
 	}
 }
 
@@ -901,14 +920,17 @@ function sendMcpDataChanged(event: McpDataChangedEvent): void {
 }
 
 async function stopMcp() {
-	if (mcpService) {
-		try {
-			await mcpService.stop();
-			console.log("[Main] MCP server stopped");
-		} catch (error) {
-			console.error("[Main] Error stopping MCP server:", error);
-		}
-		mcpService = null;
+	const listener = mcpListener;
+	mcpListener = null;
+	// The service never bound a socket of its own, so closing the port is all
+	// there is to stop; a later start builds a fresh one on first request.
+	mcpService = null;
+	if (!listener) return;
+	try {
+		await listener.stop();
+		console.log("[Main] MCP server stopped");
+	} catch (error) {
+		console.error("[Main] Error stopping MCP server:", error);
 	}
 }
 
@@ -1030,8 +1052,8 @@ function setupIpcHandlers() {
 	// MCP server status - used by Settings to show the connect URL and state.
 	ipcMain.handle("mcp:status", () => {
 		return {
-			running: mcpService?.isRunning() ?? false,
-			url: mcpService?.getUrl() ?? MCP_ENDPOINT_URL,
+			running: mcpListener?.isRunning() ?? false,
+			url: mcpListener?.url ?? MCP_ENDPOINT_URL,
 			enabled: loadMcpEnabled(),
 		};
 	});
@@ -1043,7 +1065,7 @@ function setupIpcHandlers() {
 		if (client !== "claude" && client !== "vscode") {
 			return { ok: false, reason: "unsupported", message: "Unsupported client" };
 		}
-		const url = mcpService?.getUrl() ?? MCP_ENDPOINT_URL;
+		const url = mcpListener?.url ?? MCP_ENDPOINT_URL;
 		return connectClient(client as McpConnectClient, url);
 	});
 
@@ -1052,14 +1074,14 @@ function setupIpcHandlers() {
 	ipcMain.handle("mcp:setEnabled", async (_event, enabled: unknown) => {
 		const on = enabled === true;
 		saveMcpEnabled(on);
-		if (on && !mcpService) {
+		if (on && !mcpListener) {
 			await startMcp();
-		} else if (!on && mcpService) {
+		} else if (!on && mcpListener) {
 			await stopMcp();
 		}
 		return {
-			running: mcpService?.isRunning() ?? false,
-			url: mcpService?.getUrl() ?? MCP_ENDPOINT_URL,
+			running: mcpListener?.isRunning() ?? false,
+			url: mcpListener?.url ?? MCP_ENDPOINT_URL,
 			enabled: on,
 		};
 	});
@@ -1479,7 +1501,7 @@ const resumeQuitAfterFlush = (result: FlushResult | null) => {
 // still running" - the latter only clears after the awaits, so a quit landing
 // mid-shutdown started a second one on top of it.
 const quitShutdown = createQuitShutdown({
-	hasWork: () => Boolean((engineSidecar && engineSidecar.isRunning()) || mcpService),
+	hasWork: () => Boolean((engineSidecar && engineSidecar.isRunning()) || mcpListener),
 	stop: async () => {
 		await stopMcp();
 		await stopEngine();

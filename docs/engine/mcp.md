@@ -22,7 +22,11 @@ agent gets a clean "start Vayu" error. Threat model and posture: [`SECURITY.md`]
 - **Hosted in the app.** MCP is a capability the running app exposes, not a
   separate process to manage. It is started and stopped alongside the engine
   sidecar by `app/electron/main.ts`, best-effort (a bind failure logs and the app
-  continues without it).
+  continues without it). Only the port is bound at launch (`listener.ts`, which
+  imports no SDK); the SDK, the tool registry and the service are loaded by the
+  first `POST /mcp` that arrives, so a launch no agent connects to never
+  evaluates them - 5-7 MB of the main process at idle, measured on the packaged
+  Windows app.
 - **Proxy, not a second source of truth.** Every tool maps to an existing engine
   endpoint via a thin `fetch` client (`engine-client.ts`). The main process
   cannot import the renderer's `@/services`, so this client is standalone.
@@ -92,9 +96,11 @@ covers most clients with a single URL; Zed (stdio-only) uses the CLI below.
 
 ### Streamable HTTP (primary)
 
-`http.ts` hosts the endpoint on `127.0.0.1:9877/mcp`. It is **stateless**: each
-`POST /mcp` gets a fresh SDK server + transport (`sessionIdGenerator: undefined`,
-`enableJsonResponse: true`); `GET`/`DELETE` return `405`; non-`/mcp` paths `404`.
+`listener.ts` binds `127.0.0.1:9877` at launch and answers what needs no SDK
+(`gates.ts`: non-`/mcp` paths `404`, `GET`/`DELETE` `405`); `http.ts` serves
+each `POST /mcp` once the first one has loaded it. Serving is **stateless**:
+each `POST /mcp` gets a fresh SDK server + transport
+(`sessionIdGenerator: undefined`, `enableJsonResponse: true`).
 DNS-rebinding protection is on (Host must be `127.0.0.1:9877` / `localhost:9877`).
 A body that is not valid JSON is answered `400` with JSON-RPC `-32700` (parse
 error), and one over the 4 MB cap `413` with `-32600` - past the cap the rest of

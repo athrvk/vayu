@@ -586,6 +586,104 @@ Between c=64 and c=128 the app engine sits inside a 0.8% band (51,439 / 51,849 /
 throughput (`liveTickIntervalMs` 500 vs 1000: 51,518 vs 51,439) - so it can be
 left at 500 ms for a smoother chart.
 
+### The app's memory at idle and in use (2026-09-07, Windows, packaged 0.26.0)
+
+The engine's footprint is not where the app's memory goes: at idle it holds
+about 4 MB, and under a 200 RPS run about 47. This section is the rest of the
+picture, per process, taken on the same **i5-8300H** laptop as the timer
+sections above (GTX 1050 Ti with the Intel UHD 630 beside it, a 3840x2160
+display at 125%), on the packaged 0.26.0 installed from winget. It is the
+baseline [#1562](https://github.com/athrvk/vayu/pull/1562) was measured
+against; the branch column is that PR.
+
+**Instrument.** Private bytes per process from `Win32_Process` every 5 s, the
+Electron process type read off each command line (`--type=`). Working set is
+not used: it moves with shared DLL pages and read 130-210 MB for the GPU
+process across runs where private stayed within 5 MB. Chromium's own
+allocator breakdown comes from a `disabled-by-default-memory-infra` trace over
+CDP; the renderer's JS heap from `Runtime.getHeapUsage` (`performance.memory`
+is quantised and rate-limited, and read the same number for a whole session).
+Idle is sampled at **45 s** after launch: the first update check fires at 60 s
+and the main process commits ~30 MB at that moment (libuv's four threadpool
+workers, each with an 8 MB stack that Windows commits rather than reserves;
+#1562 sizes the pool to one), so a sample straddling it reads as noise.
+
+**The floor.** A copy of the same Electron binary with the asar replaced by a
+`main.cjs` that opens one same-size frameless window on a blank page. Nothing
+in this row is Vayu's, and most of it is the graphics driver:
+`nvwgf2umx.dll` alone maps 85 MB into the GPU process, and `dxcompiler.dll`
+another 25.
+
+| private MB at idle | main | renderer | GPU process | network | engine | total |
+|---|---:|---:|---:|---:|---:|---:|
+| floor: empty window, same binary | 30 | 22 | 142 | 12 | - | 206 |
+| 0.26.0, a restored request tab with its body editor | 83-86 | ~100 | ~181 | 12.5 | 4 | 375-385 |
+| 0.26.0, Welcome tab only | 79 | 50 | 181 | 12.4 | 4 | 327 |
+| #1562's branch, same restored tab | **51-54** | ~100 | ~181 | 12.5 | 4 | ~345 |
+| #1562's branch at 150 s, after the update check | **59-62** | | | | | |
+
+The renderer's ~50 MB between the Welcome row and the restored-tab row is
+Monaco plus the request surface; the app shell itself is 28 MB over a blank
+page. The GPU process is compositor tiles and swap-chain buffers at that
+resolution on top of the driver, and `app.disableHardwareAcceleration()` is a
+loss here (404 vs 373 MB total: SwiftShader keeps the GPU process at ~180 and
+software raster adds 14 to the renderer). Minimising the window releases
+nothing. The main process was the one place with something structural in it,
+which is what #1562 removed: a 14,479-file asar header Electron parses on every
+launch and keeps (-25 MB), the MCP SDK evaluated for a server no request had
+reached (-5), and the threadpool commit (-24 of commit charge).
+
+**In use.** The app was driven the way a user drives it - the request opened
+from the tree, Send clicked, the load test started from the URL bar's Load
+Test dialog so its own live dashboard opened - with fixtures created and
+deleted through the MCP tools. The target was a local server answering a 17 KB
+JSON body after 5 ms.
+
+| private MB, a request | main | renderer | GPU process | engine |
+|---|---:|---:|---:|---:|
+| idle, run tab restored | 84 | 105 | 197 | 4 |
+| request tab opened | 85 | 119 | 250 | 4 |
+| first Send: response pane and its editor mount | 85 | ~150 | 258 | 4.5 |
+| 20 Sends back to back, peak mid-burst | 85 | 199 | 240 | 4.6 |
+| 60 s after the burst | 85 | **121** | 243 | 4.7 |
+
+The renderer's JS heap over the same sequence: 20 MB idle, 23 with the tab,
+27 after the twenty sends. What a burst leaves behind is 2-6 MB over the open
+tab.
+
+| private MB, a 200 RPS x 30 s load test (5,999 requests, live dashboard with 5 charts) | main | renderer | GPU process | engine |
+|---|---:|---:|---:|---:|
+| before | 85 | 100 | 227 | 9 |
+| running, t+5 / t+15 / t+25 s | 85 | 119 / 106 / 108 | 334 / 300 / 298 | 41 / 43 / 45 |
+| done +5 s | 85 | 104 | 321 | **12** |
+| done +125 s | 85 | 105 | 320 | 6 |
+| both tabs closed, +60 s | 85 | 113 | 310 | 6 |
+
+The engine holds its response reservoir for the run's length and releases it
+within 5 s of completion. The renderer is flat while streaming (JS heap 22-23
+MB); the five accelerated canvases cost it 28 MB while on screen and nothing
+after. The GPU process's Chromium-tracked memory returns to where it started
+(`gpu/shared_images` 39 MB before, 82 during, 46 after), but the process's
+private bytes stay 70-100 MB up: the driver pools freed texture memory,
+nothing references it, the next charts reuse it, and it shrinks under memory
+pressure (a critical-pressure signal took 26 MB off it in a separate
+measurement). That is the one number in these tables that does not come back
+on its own, and it is not the app's to give back.
+
+**Leak check.** After the run, with both tabs closed and a forced GC: a heap
+snapshot holds 0 detached DOM nodes and 0 live `uPlot` instances, and the
+`window` / `document` listener counts are identical to before the run (the
+five `dppxchange` listeners the charts add are gone). `UPlotChart.tsx` tears
+down its plot and its `ResizeObserver` on unmount, and the numbers agree.
+
+**Verdict: nothing leaks; every cost is bounded and returns when its phase
+ends, except the driver's texture pool.** The idle number is the floor plus
+Monaco plus tiles at 4K, and the main-process share is the part #1562 takes.
+For the next measurement: sample at 45 s or after 150 s, never across the 60 s
+check; create fixtures over MCP and delete them with `confirmed: true`
+(destructive tools answer a preview first) - `list_runs` returns `{ data }`
+and carries no URL, so name probe runs by their request.
+
 ## Prior results (2026-07, CLI, unreconciled)
 
 These numbers were measured earlier via `scripts/test/bench-compare.sh` on a

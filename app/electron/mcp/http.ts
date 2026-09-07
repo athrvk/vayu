@@ -18,6 +18,7 @@ import http from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer, type McpServerInfo, type ToolContextProvider } from "./server.js";
 import { MCP_PATH } from "../constants.js";
+import { answerInternalError, answerUnlessMcpPost } from "./gates.js";
 
 export interface McpHttpServerOptions {
 	host: string;
@@ -51,18 +52,7 @@ export class McpHttpServer {
 		if (this.server) return Promise.resolve();
 		return new Promise((resolve, reject) => {
 			const server = http.createServer((req, res) => {
-				this.handle(req, res).catch((err) => {
-					if (!res.headersSent) {
-						res.writeHead(500, { "Content-Type": "application/json" });
-					}
-					res.end(
-						JSON.stringify({
-							jsonrpc: "2.0",
-							error: { code: -32603, message: `Internal error: ${String(err)}` },
-							id: null,
-						})
-					);
-				});
+				void this.handleRequest(req, res);
 			});
 			server.on("error", reject);
 			server.listen(this.opts.port, this.opts.host, () => {
@@ -79,29 +69,18 @@ export class McpHttpServer {
 		return new Promise((resolve) => server.close(() => resolve()));
 	}
 
-	private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-		const url = req.url ?? "";
-		if (!url.startsWith(MCP_PATH)) {
-			res.writeHead(404, { "Content-Type": "application/json" });
-			res.end(JSON.stringify({ error: "Not found. The MCP endpoint is at /mcp." }));
-			return;
-		}
+	/**
+	 * Serve one request, answering a handler that threw past its own error
+	 * paths with the 500 shape. Public so a socket bound elsewhere - the
+	 * launch-time listener in `listener.ts` - can hand its requests here;
+	 * `start()` puts the same handler on a socket of this server's own.
+	 */
+	handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+		return this.handle(req, res).catch((err) => answerInternalError(res, err));
+	}
 
-		// Stateless mode: GET/DELETE (session streams) are not supported.
-		if (req.method !== "POST") {
-			res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" });
-			res.end(
-				JSON.stringify({
-					jsonrpc: "2.0",
-					error: {
-						code: -32000,
-						message: "Method not allowed. This endpoint is POST-only.",
-					},
-					id: null,
-				})
-			);
-			return;
-		}
+	private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+		if (answerUnlessMcpPost(req, res)) return;
 
 		let body: unknown;
 		try {
