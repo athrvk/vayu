@@ -1626,10 +1626,9 @@ would read and act on.
   to step outside any script (`docs/engine/architecture.md`'s Cookie Jar
   section, "Not on the load path"), with no lock, because that user's own
   completion is the only reader. A single-request run (no scenario, no
-  virtual user) and a scenario
-  step's deferred replay (a recorded response, not the user that fetched it)
-  still throw there, each naming its own reason rather than the one sentence
-  above.
+  virtual user) and a scenario step's deferred replay (a recorded response,
+  not the user that fetched it) still throw there, each naming its own
+  reason rather than the one sentence above.
 - **Writing goes through `jar()`**, below. There is deliberately no flat
   `pm.cookies.set(name, value)`: a written cookie needs a URL to take its
   domain and path from, which is exactly why Postman's write half hangs off
