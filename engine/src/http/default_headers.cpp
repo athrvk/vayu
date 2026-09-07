@@ -61,21 +61,63 @@ const std::string& built_accept_encodings () {
     return value;
 }
 
-/// A bare RFC 4122 UUID - `generateUUID()`'s shape, and the only `X-Request-ID`
-/// value the repair pass treats as the renderer's rather than the user's.
+/// A lowercase RFC 4122 v4 UUID - `generateUUID()`'s exact shape, and the only
+/// `X-Request-ID` value the repair pass treats as the renderer's rather than
+/// the user's own (issue #1491). `generateUUID()` fixes the version nibble at
+/// `4` and the variant nibble at `8`/`9`/`a`/`b`, and its `toString(16)` never
+/// emits an uppercase digit; a v1 UUID, an uppercase one, or any other shape a
+/// caller pinned deliberately was never a value this renderer produced.
 bool is_bare_uuid (std::string_view value) {
     constexpr std::string_view LAYOUT = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
+    constexpr size_t VERSION_INDEX    = 14;
+    constexpr size_t VARIANT_INDEX    = 19;
     if (value.size () != LAYOUT.size ()) {
         return false;
     }
     for (size_t i = 0; i < LAYOUT.size (); ++i) {
         const bool want_dash = LAYOUT[i] == '-';
-        const auto byte      = static_cast<unsigned char> (value[i]);
-        if (want_dash ? value[i] != '-' : std::isxdigit (byte) == 0) {
+        if (want_dash) {
+            if (value[i] != '-') {
+                return false;
+            }
+            continue;
+        }
+        // Lowercase hex only: `isxdigit` also accepts 'A'-'F', which
+        // `generateUUID()` never writes.
+        if (std::isdigit (static_cast<unsigned char> (value[i])) == 0 &&
+        (value[i] < 'a' || value[i] > 'f')) {
             return false;
         }
     }
-    return true;
+    if (value[VERSION_INDEX] != '4') {
+        return false;
+    }
+    const char variant = value[VARIANT_INDEX];
+    return variant == '8' || variant == '9' || variant == 'a' || variant == 'b';
+}
+
+/// A plain `MAJOR.MINOR.PATCH` version string - the only shape
+/// `VAYU_VERSION_STRING` has ever taken, and the only `X-Vayu-Version` /
+/// `User-Agent` value the repair pass treats as the engine's own rather than
+/// something a user typed by hand (issue #1491).
+bool is_plain_semver (std::string_view value) {
+    size_t start   = 0;
+    int num_groups = 0;
+    while (true) {
+        const size_t dot             = value.find ('.', start);
+        const std::string_view group = value.substr (start,
+        dot == std::string_view::npos ? std::string_view::npos : dot - start);
+        if (group.empty () || std::any_of (group.begin (), group.end (), [] (char c) {
+                return std::isdigit (static_cast<unsigned char> (c)) == 0;
+            })) {
+            return false;
+        }
+        ++num_groups;
+        if (dot == std::string_view::npos) {
+            return num_groups == 3;
+        }
+        start = dot + 1;
+    }
 }
 
 /// The ASCII whitespace both sides of this rule strip, spelled out rather than
@@ -101,18 +143,23 @@ std::string row_value (const nlohmann::json& row) {
     return {};
 }
 
-/// Is this stored row one a pre-#1229 renderer wrote? See
-/// `strip_legacy_managed_headers` for why each rule is as narrow as it is.
+/// Is this stored row one a pre-#1229 renderer wrote - by provenance, not just
+/// by name or shape? See `strip_legacy_managed_headers` for why each rule is
+/// as narrow as it is.
 bool legacy_managed_row (const std::string& key, const std::string& value) {
-    const std::string folded = vayu::utils::ascii_lower (trimmed (key));
+    const std::string folded       = vayu::utils::ascii_lower (trimmed (key));
+    const std::string_view value_v = trimmed (value);
     if (folded == "x-vayu-version") {
-        return true;
+        return is_plain_semver (value_v);
     }
     if (folded == "x-request-id") {
-        return is_bare_uuid (trimmed (value));
+        return is_bare_uuid (value_v);
     }
     if (folded == "user-agent") {
-        return vayu::utils::ascii_lower (trimmed (value)).starts_with ("vayu/");
+        constexpr std::string_view PREFIX = "vayu/";
+        const std::string folded_value    = vayu::utils::ascii_lower (value_v);
+        return folded_value.starts_with (PREFIX) &&
+        is_plain_semver (std::string_view (folded_value).substr (PREFIX.size ()));
     }
     return false;
 }
@@ -201,20 +248,29 @@ std::optional<std::string> strip_legacy_managed_headers (const std::string& head
         return std::nullopt;
     }
 
-    nlohmann::json kept = nlohmann::json::array ();
-    bool dropped        = false;
-    for (const auto& row : rows) {
-        if (row.is_object () && row.contains ("key") && row["key"].is_string () &&
-        legacy_managed_row (row["key"].get<std::string> (), row_value (row))) {
-            dropped = true;
+    bool changed = false;
+    for (auto& row : rows) {
+        if (!row.is_object () || !row.contains ("key") || !row["key"].is_string () ||
+        !legacy_managed_row (row["key"].get<std::string> (), row_value (row))) {
             continue;
         }
-        kept.push_back (row);
+        // Disable, do not delete (issue #1491): the row is what the wire
+        // stops carrying, and the marker is what lets a user tell it apart
+        // from one they typed and re-enable it from the table, the same way
+        // #1481's `source` already lets a body-mode row be told apart.
+        if (row.value ("enabled", true)) {
+            row["enabled"] = false;
+            changed        = true;
+        }
+        if (row.value ("source", std::string ()) != LEGACY_DEFAULT_SOURCE) {
+            row["source"] = std::string (LEGACY_DEFAULT_SOURCE);
+            changed       = true;
+        }
     }
-    if (!dropped) {
+    if (!changed) {
         return std::nullopt;
     }
-    return kept.dump ();
+    return rows.dump ();
 }
 
 bool suppresses_default_header (const Request& request, std::string_view name) {

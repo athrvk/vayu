@@ -76,6 +76,48 @@ describe("the rows a pre-#1229 client wrote", () => {
 
 		expect(rows.map((r) => r.key)).toEqual(["Accept", "X-Trace", ""]);
 	});
+
+	// Issue #1491: matching on the header's name or family alone deletes a
+	// value that was never the renderer's. Each case here is a value the old
+	// broad rule would have caught and the tightened one must not.
+	it("keeps an X-Vayu-Version whose value someone actually typed", () => {
+		const rows = toHeaderItems([
+			{ key: "X-Vayu-Version", value: "hand-written", enabled: true },
+		]);
+
+		expect(rows.find((r) => r.key === "X-Vayu-Version")?.value).toBe("hand-written");
+	});
+
+	it("keeps an X-Request-ID that is a UUID but not the generator's exact shape", () => {
+		const rows = toHeaderItems([
+			// Upper case: the generator's `toString(16)` never produces one.
+			{ key: "X-Request-ID", value: "3F2504E0-4F89-41D3-9A0C-0305E82C3301", enabled: true },
+			// A v1 UUID: version nibble is not `4`.
+			{ key: "X-Request-ID", value: "3f2504e0-4f89-11d3-9a0c-0305e82c3301", enabled: true },
+		]);
+
+		expect(rows.map((r) => r.key)).toEqual(["X-Request-ID", "X-Request-ID", ""]);
+	});
+
+	it("does not filter a row the engine's repair pass already disabled and marked", () => {
+		// The engine disables a matching row in place rather than deleting it
+		// (issue #1491) and stamps `source: "legacy-default"`; the editor must
+		// not filter it out a second time, or the marked-but-kept row silently
+		// vanishes from state on the next save.
+		const rows = toHeaderItems([
+			{
+				key: "X-Vayu-Version",
+				value: "0.9.0",
+				enabled: false,
+				source: "legacy-default",
+			},
+		]);
+
+		expect(rows.find((r) => r.key === "X-Vayu-Version")).toMatchObject({
+			enabled: false,
+			source: "legacy-default",
+		});
+	});
 });
 
 describe("the editor rows themselves", () => {

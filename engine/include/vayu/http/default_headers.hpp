@@ -67,6 +67,12 @@ inline constexpr std::string_view LOAD_NEGOTIATE_COMPRESSION_KEY =
 inline constexpr std::string_view DEFAULT_CORRELATION_HEADER =
 "X-Vayu-Request-Id";
 
+/// The `source` value the header-strip repair pass stamps on a row it
+/// disables (issue #1491), read by the app as the same optional marker
+/// #1481 already added to a header row for exactly this purpose - telling a
+/// row a client wrote apart from one the user typed.
+inline constexpr std::string_view LEGACY_DEFAULT_SOURCE = "legacy-default";
+
 /**
  * @brief The resolved decision about what this send adds, read from config
  *        once per request or per run rather than per transfer.
@@ -141,11 +147,11 @@ const DefaultHeaderPolicy& policy);
 [[nodiscard]] std::optional<std::string> unusable_header_name (std::string_view name);
 
 /**
- * @brief Drop the rows a pre-#1229 client wrote into a stored request, or
+ * @brief Disable the rows a pre-#1229 client wrote into a stored request, or
  *        nothing when @p headers_json carries none.
  *
  * @param headers_json A request's stored `headers`: a JSON array of
- *        `{key, value, enabled, description?}` rows.
+ *        `{key, value, enabled, description?, source?}` rows.
  * @return The rewritten array, or `std::nullopt` when nothing changed - which
  *         is also the answer for text that does not parse as that array, since
  *         a repair pass must not rewrite what it cannot read.
@@ -155,16 +161,26 @@ const DefaultHeaderPolicy& policy);
  * frozen correlation id and the version of the day it was saved - which a load
  * run, a collection run, an export and a generated snippet all then reproduced.
  * Not writing them any more leaves every request saved before that untouched,
- * so they are stripped once, at startup.
+ * so they are disabled once, at startup.
  *
- * Three rules, each as narrow as it can be, because this deletes user data:
+ * A matching row is set `enabled: false` and `source: "legacy-default"`
+ * rather than removed (issue #1491): the wire is just as clean, since a
+ * disabled row is never sent, but the row survives for a user to find and
+ * re-enable if the match turns out to be a false positive. That is why each
+ * of the three rules below matches the renderer's *exact* value shape, not
+ * just the header's name or family - matching on name or shape alone means
+ * deleting user data, and disabling in place is only as safe as the match is
+ * narrow:
  *
- * - `X-Vayu-Version` goes unconditionally. The renderer never let it be edited,
- *   so no value of it was ever anyone's.
- * - `X-Request-ID` goes only when its value is a bare UUID, the shape the
- *   renderer generated. A correlation id someone typed stays.
- * - `User-Agent` goes only when its value is a `Vayu/...`. A browser's or a
- *   crawler's `User-Agent` is exactly the header a testing tool exists to send.
+ * - `X-Vayu-Version` matches only when its value is a plain
+ *   `MAJOR.MINOR.PATCH` version, the only shape the renderer ever wrote.
+ *   `x-vayu-version: hand-written` is not one, and stays enabled.
+ * - `X-Request-ID` matches only when its value is a lowercase RFC 4122 v4
+ *   UUID, the exact shape `generateUUID()` produced. A correlation id someone
+ *   typed, or a UUID of another version or case, stays.
+ * - `User-Agent` matches only when its value is `Vayu/` followed by that same
+ *   plain version. A browser's or a crawler's `User-Agent` is exactly the
+ *   header a testing tool exists to send.
  */
 [[nodiscard]] std::optional<std::string> strip_legacy_managed_headers (
 const std::string& headers_json);

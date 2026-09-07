@@ -205,7 +205,18 @@ TEST (DefaultHeadersTest, AdvertisesOnlyWhatThisLibcurlCanDecode) {
 // The rows a pre-#1229 client saved into a request
 // ---------------------------------------------------------------------------
 
-TEST (DefaultHeadersTest, StripsTheRowsTheRendererUsedToSave) {
+// A row the pass matched should be present, disabled, and marked - never
+// absent. Written once so every case below states only what it adds.
+void expect_disabled_and_marked (const nlohmann::json& row) {
+    EXPECT_FALSE (row.value ("enabled", true)) << row.dump ();
+    EXPECT_EQ (row.value ("source", std::string ()), "legacy-default") << row.dump ();
+}
+
+TEST (DefaultHeadersTest, DisablesAndMarksTheRowsTheRendererUsedToSaveRatherThanDeletingThem) {
+    // Issue #1491: deleting a matched row is unrecoverable if the match turns
+    // out to be wrong. Disabling in place keeps the wire just as clean (a
+    // disabled row is never sent) while leaving the row for a user to find and
+    // re-enable.
     const std::string stored = R"([
         {"key":"X-Vayu-Version","value":"0.1.1","enabled":true},
         {"key":"x-request-id","value":"6b2b9b3e-6d3a-4d4a-9d6e-2a9f0a1b2c3d","enabled":true},
@@ -216,14 +227,19 @@ TEST (DefaultHeadersTest, StripsTheRowsTheRendererUsedToSave) {
     const auto rewritten = vayu::http::strip_legacy_managed_headers (stored);
     ASSERT_HAS_VALUE (rewritten);
     const auto rows = nlohmann::json::parse (*rewritten);
-    ASSERT_EQ (rows.size (), 1U);
-    EXPECT_EQ (rows[0]["key"], "X-Team");
+    ASSERT_EQ (rows.size (), 4U) << "no row is dropped, only disabled";
+    expect_disabled_and_marked (rows[0]);
+    expect_disabled_and_marked (rows[1]);
+    expect_disabled_and_marked (rows[2]);
+    EXPECT_TRUE (rows[3].value ("enabled", true))
+    << "the user's own row is untouched";
+    EXPECT_FALSE (rows[3].contains ("source"));
 }
 
 TEST (DefaultHeadersTest, KeepsTheHeadersOfThoseNamesThatWereTheUsersOwn) {
-    // Each rule is deliberately narrow, because this deletes user data: a
-    // correlation id someone typed is not a UUID, and a browser's User-Agent is
-    // exactly the header a testing tool exists to send.
+    // Each rule is deliberately narrow, because acting on this deletes user
+    // data: a correlation id someone typed is not a UUID, and a browser's
+    // User-Agent is exactly the header a testing tool exists to send.
     const std::string stored = R"json([
         {"key":"X-Request-ID","value":"order-42","enabled":true},
         {"key":"User-Agent","value":"Mozilla/5.0 Firefox","enabled":true}
@@ -232,10 +248,25 @@ TEST (DefaultHeadersTest, KeepsTheHeadersOfThoseNamesThatWereTheUsersOwn) {
     EXPECT_FALSE (vayu::http::strip_legacy_managed_headers (stored).has_value ());
 }
 
+TEST (DefaultHeadersTest, MatchesTheExactValueShapeNotJustTheHeadersNameOrFamily) {
+    // Issue #1491: the pre-fix rule matched `X-Vayu-Version` on name alone and
+    // `X-Request-ID` on any bare UUID, so a hand-written value of the first
+    // and a v1 or upper-case UUID for the second were deleted even though
+    // neither is a shape the renderer ever produced.
+    const std::string stored = R"json([
+        {"key":"X-Vayu-Version","value":"hand-written","enabled":true},
+        {"key":"X-Request-ID","value":"6B2B9B3E-6D3A-4D4A-9D6E-2A9F0A1B2C3D","enabled":true},
+        {"key":"X-Request-ID","value":"6b2b9b3e-6d3a-1d4a-9d6e-2a9f0a1b2c3d","enabled":true}
+    ])json";
+
+    EXPECT_FALSE (vayu::http::strip_legacy_managed_headers (stored).has_value ())
+    << "none of these three is the exact shape the renderer wrote";
+}
+
 TEST (DefaultHeadersTest, ReadsAPaddedRowTheSameWayTheEditorDoes) {
     // The renderer's copy of this rule trims, so this one does too: a row this
-    // pass kept and the editor hid would be a header on the wire that nothing
-    // shows.
+    // pass kept enabled and the editor hid would be a header on the wire that
+    // nothing shows.
     // Every byte of ASCII whitespace the renderer's copy strips, since the two
     // sides answering differently is what this rule exists to prevent.
     const std::string stored =
@@ -244,13 +275,25 @@ TEST (DefaultHeadersTest, ReadsAPaddedRowTheSameWayTheEditorDoes) {
 
     const auto rewritten = vayu::http::strip_legacy_managed_headers (stored);
     ASSERT_HAS_VALUE (rewritten);
-    EXPECT_EQ (nlohmann::json::parse (*rewritten).size (), 0U);
+    const auto rows = nlohmann::json::parse (*rewritten);
+    ASSERT_EQ (rows.size (), 2U);
+    expect_disabled_and_marked (rows[0]);
+    expect_disabled_and_marked (rows[1]);
 }
 
 TEST (DefaultHeadersTest, LeavesAloneWhatItCannotRead) {
     EXPECT_FALSE (vayu::http::strip_legacy_managed_headers ("not json").has_value ());
     EXPECT_FALSE (vayu::http::strip_legacy_managed_headers ("{}").has_value ());
     EXPECT_FALSE (vayu::http::strip_legacy_managed_headers ("[]").has_value ());
+}
+
+TEST (DefaultHeadersTest, IsIdempotentOnARowItHasAlreadyDisabledAndMarked) {
+    const std::string stored = R"json([
+        {"key":"X-Vayu-Version","value":"0.1.1","enabled":false,"source":"legacy-default"}
+    ])json";
+
+    EXPECT_FALSE (vayu::http::strip_legacy_managed_headers (stored).has_value ())
+    << "nothing left to change on a row already disabled and marked";
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +485,7 @@ TEST_F (DefaultHeaderConfigTest, AScopeTheEndpointDoesNotKnowIsRefused) {
 // The startup repair over stored requests
 // ---------------------------------------------------------------------------
 
-TEST_F (DefaultHeaderConfigTest, StartupStripsTheStoredRowsAndLeavesTheUsersAlone) {
+TEST_F (DefaultHeaderConfigTest, StartupDisablesTheStoredRowsAndLeavesTheUsersAlone) {
     vayu::db::Collection collection;
     collection.id   = "col_headers";
     collection.name = "Headers";
@@ -471,11 +514,16 @@ TEST_F (DefaultHeaderConfigTest, StartupStripsTheStoredRowsAndLeavesTheUsersAlon
     reset_managed_headers_marker ();
     EXPECT_EQ (db_->strip_stored_managed_headers (), 1);
 
-    auto stripped = db_->get_request ("req_managed");
-    ASSERT_HAS_VALUE (stripped);
-    const auto rows = nlohmann::json::parse (stripped->headers);
-    ASSERT_EQ (rows.size (), 1U);
-    EXPECT_EQ (rows[0]["key"], "X-Team");
+    auto disabled = db_->get_request ("req_managed");
+    ASSERT_HAS_VALUE (disabled);
+    const auto rows = nlohmann::json::parse (disabled->headers);
+    ASSERT_EQ (rows.size (), 3U) << "rows are disabled, not removed";
+    EXPECT_FALSE (rows[0].value ("enabled", true));
+    EXPECT_EQ (rows[0].value ("source", std::string ()), "legacy-default");
+    EXPECT_FALSE (rows[1].value ("enabled", true));
+    EXPECT_EQ (rows[1].value ("source", std::string ()), "legacy-default");
+    EXPECT_TRUE (rows[2].value ("enabled", true)) << "X-Team is the user's own";
+    EXPECT_FALSE (rows[2].contains ("source"));
 
     auto kept = db_->get_request ("req_untouched");
     ASSERT_HAS_VALUE (kept);
@@ -484,6 +532,36 @@ TEST_F (DefaultHeaderConfigTest, StartupStripsTheStoredRowsAndLeavesTheUsersAlon
     // Idempotent: the pass runs at every startup, and a second one must find
     // nothing left to do rather than rewriting rows again.
     EXPECT_EQ (db_->strip_stored_managed_headers (), 0);
+}
+
+TEST_F (DefaultHeaderConfigTest, StartupLeavesATrashedRequestByteIdenticalUntilItIsRestored) {
+    vayu::db::Collection collection;
+    collection.id   = "col_trash";
+    collection.name = "Trash";
+    db_->create_collection (collection);
+
+    vayu::db::Request trashed;
+    trashed.id            = "req_trashed";
+    trashed.collection_id = "col_trash";
+    trashed.name          = "Trashed";
+    trashed.url           = "https://example.com/";
+    trashed.headers = R"([{"key":"X-Vayu-Version","value":"0.1.1","enabled":true}])";
+    db_->save_request (trashed);
+    db_->delete_request ("req_trashed");
+
+    reset_managed_headers_marker ();
+    EXPECT_EQ (db_->strip_stored_managed_headers (), 0)
+    << "a trashed row is not a candidate for the startup pass";
+
+    ASSERT_HAS_VALUE (db_->restore_deleted ("req_trashed"));
+
+    auto after_restore = db_->get_request ("req_trashed");
+    ASSERT_HAS_VALUE (after_restore);
+    const auto rows = nlohmann::json::parse (after_restore->headers);
+    ASSERT_EQ (rows.size (), 1U)
+    << "still disabled in place, not removed, on restore";
+    EXPECT_FALSE (rows[0].value ("enabled", true));
+    EXPECT_EQ (rows[0].value ("source", std::string ()), "legacy-default");
 }
 
 // A repair that runs once is a migration and gets a migration's bookkeeping
