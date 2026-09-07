@@ -21,6 +21,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/utils/diagnostics.hpp"
 
 namespace vayu::db {
 namespace {
@@ -1603,6 +1604,9 @@ namespace {
 
 // A run whose one result carries `body_bytes` of trace, so deleting it frees a
 // known and substantial number of pages rather than a handful.
+// The filler concatenation below is what GCC 13 reports as reading past the
+// small-string buffer at `-O3`. See utils/diagnostics.hpp.
+VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS
 void seed_bulky_run (Database& db, const std::string& id, int64_t start_time, size_t body_bytes) {
     vayu::db::Run run;
     run.id              = id;
@@ -1621,6 +1625,7 @@ void seed_bulky_run (Database& db, const std::string& id, int64_t start_time, si
     r.trace_data  = R"({"body":")" + std::string (body_bytes, 'x') + R"("})";
     db.add_result (r);
 }
+VAYU_DIAGNOSTIC_POP
 
 constexpr size_t MIB = size_t{ 1024 } * 1024;
 

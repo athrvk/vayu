@@ -232,8 +232,7 @@ function draftOf(entry: SpecDiffAdded): RequestDraft {
 		...rest,
 		method: entry.draft.method as HttpMethod,
 		auth: { mode: "inherit" },
-		preRequestScript: "",
-		postRequestScript: "",
+		elements: [],
 		specOperation: entry.operation,
 	};
 }

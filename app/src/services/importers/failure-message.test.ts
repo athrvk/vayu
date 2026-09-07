@@ -25,8 +25,7 @@ function result(): ImportResult {
 				description: "",
 				variables: {},
 				auth: { mode: "none" },
-				preRequestScript: "",
-				postRequestScript: "",
+				elements: [],
 				children: [
 					{
 						tempId: "c2",
@@ -34,8 +33,7 @@ function result(): ImportResult {
 						description: "",
 						variables: {},
 						auth: { mode: "none" },
-						preRequestScript: "",
-						postRequestScript: "",
+						elements: [],
 						children: [],
 						requests: [
 							{
@@ -48,8 +46,7 @@ function result(): ImportResult {
 								headers: [],
 								body: { mode: "none" },
 								auth: { mode: "inherit" },
-								preRequestScript: "",
-								postRequestScript: "",
+								elements: [],
 							},
 						],
 					},

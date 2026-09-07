@@ -10,8 +10,7 @@ function fixture(): ImportResult {
 				description: "",
 				variables: {},
 				auth: { mode: "none" },
-				preRequestScript: "",
-				postRequestScript: "",
+				elements: [],
 				requests: [
 					{
 						name: "r",
@@ -22,8 +21,7 @@ function fixture(): ImportResult {
 						headers: [],
 						body: { mode: "none" },
 						auth: { mode: "inherit" },
-						preRequestScript: "",
-						postRequestScript: "",
+						elements: [],
 					},
 				],
 				children: [
@@ -32,8 +30,7 @@ function fixture(): ImportResult {
 						description: "",
 						variables: {},
 						auth: { mode: "none" },
-						preRequestScript: "",
-						postRequestScript: "",
+						elements: [],
 						requests: [
 							{
 								name: "r2",
@@ -44,8 +41,7 @@ function fixture(): ImportResult {
 								headers: [],
 								body: { mode: "none" },
 								auth: { mode: "inherit" },
-								preRequestScript: "",
-								postRequestScript: "",
+								elements: [],
 							},
 						],
 						children: [],

@@ -358,8 +358,7 @@ describe("buildSyncPayload", () => {
 
 		const item = body.create[0];
 		expect(item.auth).toEqual({ mode: "inherit" });
-		expect(item.preRequestScript).toBe("");
-		expect(item.postRequestScript).toBe("");
+		expect(item.elements).toEqual([]);
 		expect(item.url).toBe("{{baseUrl}}/vets?limit=10");
 		expect(item.params).toEqual([{ key: "limit", value: "10", enabled: true }]);
 		expect(item.bodyType).toBe("json");

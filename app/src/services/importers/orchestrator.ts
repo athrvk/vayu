@@ -176,8 +176,7 @@ function flatten(
 		...(order !== undefined ? { order } : {}),
 		variables: c.variables,
 		auth: c.auth,
-		preRequestScript: c.preRequestScript,
-		postRequestScript: c.postRequestScript,
+		elements: c.elements,
 		...(specTempId ? { openapi: { specTempId } } : {}),
 	});
 
