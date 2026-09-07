@@ -29,8 +29,10 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -385,6 +387,17 @@ struct ExchangeInputs {
      * (`ClientConfig::truncate_over_limit`).
      */
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+
+    /// Bound onto `ElementContext::pacing_state` / `rng` / `timers_override`
+    /// (issue #1498), for a `timer.pacing` or gaussian `timer.think` element
+    /// this exchange's `step.before` / `step.between` dispatch runs. Null for
+    /// a design send (a one-off exchange has no run to be reproducible
+    /// against and no previous pass to measure a cadence from) - only the
+    /// scenario runner's `run_step_exchange` sets these, from the run's own
+    /// `RunContext`.
+    std::unordered_map<std::string, int64_t>* pacing_state = nullptr;
+    std::mt19937_64* rng                                   = nullptr;
+    const vayu::core::TimersOverride* timers_override      = nullptr;
 };
 
 /** What one exchange produced. */

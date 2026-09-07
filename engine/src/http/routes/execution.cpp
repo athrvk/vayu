@@ -1904,6 +1904,11 @@ nlohmann::json& scenario_manifest) {
         vayu::utils::log_warning ("POST /runs - Invalid scenario: " + resolved.error);
         return RouteError{ 400, error_body (400, resolved.error, "invalid_scenario") };
     }
+    if (vayu::core::is_scenario_load_run (json)) {
+        if (auto reason = vayu::core::refuse_shared_pacing_under_load (resolved.plan)) {
+            return RouteError{ 400, error_body (400, *reason, "invalid_run_config") };
+        }
+    }
 
     scenario_manifest = vayu::core::build_scenario_manifest (
     resolved.request, resolved.plan, resolved.spec);

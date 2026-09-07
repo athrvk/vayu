@@ -51,6 +51,18 @@ int64_t steady_now_ms () {
 
 } // namespace
 
+std::mt19937_64 derive_vu_rng (uint64_t run_seed, size_t vu_index) {
+    // A fixed-point splitmix64 round rather than `run_seed ^ vu_index`
+    // directly: two adjacent VU indices must not produce two adjacent, highly
+    // correlated seeds, which is exactly what XOR-with-a-small-integer would
+    // do to `std::mt19937_64`'s seed-sequence input.
+    uint64_t mixed = run_seed + (static_cast<uint64_t> (vu_index) * 0x9E3779B97F4A7C15ULL);
+    mixed = (mixed ^ (mixed >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    mixed = (mixed ^ (mixed >> 27)) * 0x94D049BB133111EBULL;
+    mixed = mixed ^ (mixed >> 31);
+    return std::mt19937_64{ mixed };
+}
+
 bool is_scenario_load_run (const nlohmann::json& config) {
     if (!config.is_object ()) {
         return false;
@@ -458,7 +470,11 @@ vayu::Request& request) {
         .set_variable =
         [&] (std::string_view scope, const std::string& name,
         const std::string& value) { vu.scope_overlay.set (scope, name, value); },
-        .should_stop = nullptr,
+        .should_stop      = nullptr,
+        .blocking_allowed = false, // A worker thread must never block here.
+        .rng              = &vu.rng,
+        .pacing_state     = &vu.pacing_state,
+        .timers_override  = &context->timers_override,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore, ctx,
@@ -539,7 +555,11 @@ const vayu::Response& response) {
         .set_variable =
         [&] (std::string_view scope, const std::string& name,
         const std::string& value) { vu.scope_overlay.set (scope, name, value); },
-        .should_stop = nullptr,
+        .should_stop      = nullptr,
+        .blocking_allowed = false,
+        .rng              = &vu.rng,
+        .pacing_state     = &vu.pacing_state,
+        .timers_override  = &context->timers_override,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx, *step.elements,
@@ -628,7 +648,7 @@ class ScenarioLoadDriver {
                 // honest, and the step's `errors` column in the report's
                 // breakdown is what attributes the failure to a step.
                 context_->requests_sent++;
-                finish_step (state_, execution_.plan.steps.size (), vu, step_index,
+                finish_step (context_, state_, execution_.plan, vu, step_index,
                 /*errored=*/true, nullptr);
                 handle_result (context_, db_,
                 vayu::Result<vayu::Response> (vayu::Error{
@@ -678,9 +698,8 @@ class ScenarioLoadDriver {
         // immutable, const data shared by the run's context.
         const ScenarioStep* step_ptr = &step;
         context_->event_loop->submit (request,
-        [context = context_, &db = db_, state = state_, step_ptr,
-        step_count = execution_.plan.steps.size (), vu, step_index, iteration,
-        vu_index, row, pipeline_before_ms,
+        [context = context_, &db = db_, state = state_, &plan = execution_.plan,
+        step_ptr, vu, step_index, iteration, vu_index, row, pipeline_before_ms,
         sent_request] (size_t, const vayu::Result<vayu::Response>& result) {
             if (result.is_error ()) {
                 // No `Response` object exists at all - nothing for `step.after`
@@ -689,7 +708,7 @@ class ScenarioLoadDriver {
                 // was sent and did not answer, reported as status 0 rather
                 // than a status the server never sent (issue #629).
                 state->coverage.record (step_index, 0);
-                finish_step (state, step_count, vu, step_index, /*errored=*/true, nullptr);
+                finish_step (context, state, plan, vu, step_index, /*errored=*/true, nullptr);
                 handle_result (context, db, result,
                 ResultAnnotations{ row, step_index, iteration, vu_index });
                 return;
@@ -715,7 +734,7 @@ class ScenarioLoadDriver {
             // that counted only successes would report the send as if it never
             // happened.
             state->coverage.record (step_index, response.status_code);
-            finish_step (state, step_count, vu, step_index, errored,
+            finish_step (context, state, plan, vu, step_index, errored,
             errored ? nullptr : &response.cookie_lines);
             handle_result (context, db, result,
             ResultAnnotations{ row, step_index, iteration, vu_index });
@@ -776,6 +795,86 @@ class ScenarioLoadDriver {
     }
 
     /**
+     * `step.between` (issue #1498), for the step that just completed -
+     * `timer.think`'s load-path counterpart to `scenario_runner.cpp`'s own
+     * dispatch, run here instead of blocking a worker thread: every
+     * outcome's `waited_ms` is summed and applied to `vu.ready_at_ms`, never
+     * to the step's own recorded latency, which by this point is already
+     * decided. A `timer.pacing` element here is always `_scopeEntry: false`
+     * (its entry occurrence dispatches at `step.before` of its own step, not
+     * `step.between` of whatever preceded it) and reports `waited_ms: 0`, so
+     * it contributes nothing through this path - see @ref
+     * schedule_next_entry_wait for its actual scheduling.
+     */
+    static void run_step_between (const std::shared_ptr<RunContext>& context,
+    ScenarioLoadState& state,
+    const ScenarioStep& completed_step,
+    size_t step_index,
+    VirtualUser& vu) {
+        if (!completed_step.elements || completed_step.elements->empty ()) {
+            return;
+        }
+        std::vector<vayu::core::ElementOutcome> outcomes;
+        vayu::ScriptResult unused_pre;
+        vayu::ScriptResult unused_post;
+        vayu::core::ElementContext ctx{
+            // Never read or written by a `step.between` kind (`timer.think`,
+            // `timer.pacing`) - bound to the step's own stored request only
+            // because `ElementContext::request` is a reference, on the same
+            // `const_cast` precedent `run_step_after` uses for `response`.
+            .request = const_cast<vayu::Request&> (completed_step.request), // NOLINT(cppcoreguidelines-pro-type-const-cast)
+            .response           = nullptr,
+            .run_pre_script     = nullptr,
+            .run_post_script    = nullptr,
+            .pre_script_result  = unused_pre,
+            .post_script_result = unused_post,
+            .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
+            .should_stop      = nullptr,
+            .blocking_allowed = false,
+            .rng              = &vu.rng,
+            .pacing_state     = &vu.pacing_state,
+            .timers_override  = &context->timers_override,
+        };
+        vayu::core::ElementPipeline::run (
+        vayu::core::Phase::StepBetween, ctx, *completed_step.elements, outcomes);
+
+        int64_t total_wait_ms = 0;
+        for (const auto& outcome : outcomes) {
+            total_wait_ms += outcome.waited_ms.value_or (0);
+            state.element_tallies.record (step_index, outcome.id, outcome.status);
+        }
+        if (total_wait_ms > 0) {
+            vu.ready_at_ms = std::max (vu.ready_at_ms, steady_now_ms () + total_wait_ms);
+        }
+    }
+
+    /**
+     * `timer.pacing`'s actual scheduling (issue #1498): asks every element of
+     * @p next_step - the step this VU will run once ready again, already
+     * advanced past the wrap-to-0 / step+1 decision - whether it should hold
+     * the VU back, and applies the longest such answer to `ready_at_ms`.
+     * Called here, before the VU can next be selected, because `step.before`
+     * (where `timer.pacing` actually dispatches) only ever runs *after*
+     * `take_ready_vu` has already chosen this VU - too late to defer without
+     * blocking the caller.
+     */
+    static void schedule_next_entry_wait (const ScenarioStep& next_step, VirtualUser& vu) {
+        if (!next_step.elements || next_step.elements->empty ()) {
+            return;
+        }
+        const int64_t now = steady_now_ms ();
+        for (const auto& compiled : *next_step.elements) {
+            if (!compiled.element) {
+                continue;
+            }
+            if (auto delay =
+                compiled.element->scheduled_ready_delay_ms (vu.pacing_state, now)) {
+                vu.ready_at_ms = std::max (vu.ready_at_ms, now + *delay);
+            }
+        }
+    }
+
+    /**
      * One step's outcome applied to the run's tallies and the VU's state
      * machine, and the only writer of `busy`'s `true -> false` edge. Shared by
      * the completion callback and the data-binding failure, so a step that
@@ -785,16 +884,23 @@ class ScenarioLoadDriver {
      * @p next_cookies is null for an outcome that carries none - an error, or a
      * step that was never sent.
      */
-    static void finish_step (const std::shared_ptr<ScenarioLoadState>& state,
-    size_t step_count,
+    static void finish_step (const std::shared_ptr<RunContext>& context,
+    const std::shared_ptr<ScenarioLoadState>& state,
+    const ScenarioPlan& plan,
     VirtualUser* vu,
     size_t step_index,
     bool errored,
     const std::vector<std::string>* next_cookies) {
+        const size_t step_count = plan.steps.size ();
         state->steps_executed.fetch_add (1, std::memory_order_relaxed);
         if (errored) {
             state->steps.record_error (step_index);
             state->steps_errored.fetch_add (1, std::memory_order_relaxed);
+        } else {
+            // Skipped for an errored (or never-sent) step, on the same rule
+            // the sequential run's own `step.between` dispatch follows
+            // (`scenario_runner.cpp`'s `run_iteration`).
+            run_step_between (context, *state, plan.steps[step_index], step_index, *vu);
         }
 
         const bool last_step = step_index + 1 >= step_count;
@@ -821,6 +927,13 @@ class ScenarioLoadDriver {
             vu->cookies =
             next_cookies != nullptr ? *next_cookies : std::vector<std::string>{};
         }
+
+        // Always, even after an errored step: the VU still has a next step
+        // (the wrap-to-0 above already decided which), and a folder's
+        // pacing must hold whether the pass that just ended succeeded or
+        // not - "regardless of the folder's own duration" includes an
+        // error's duration too.
+        schedule_next_entry_wait (plan.steps[vu->step], *vu);
 
         // Released *before* handle_result, which is what increments the
         // completion count `in_flight()` is derived from: a VU that became
@@ -908,6 +1021,9 @@ const ScenarioExecution& execution) {
         // 1-based, so `{{$vu}}` reads as a person numbers users rather than as
         // an array index (issue #994).
         user->index = i + 1;
+        // Derived from the run's seed rather than sharing `context->rng`
+        // across every worker thread (issue #1498) - see `derive_vu_rng`.
+        user->rng = derive_vu_rng (context->rng_seed, user->index);
         state->vus.push_back (std::move (user));
     }
 

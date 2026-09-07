@@ -671,6 +671,12 @@ ExchangeInputs inputs) {
             set_scope_variable (scopes, scope, name, value);
         },
         .should_stop = nullptr, // A single exchange has nothing to interrupt.
+        // `blocking_allowed` stays true (the default): a design send and the
+        // sequential run both call this function on a thread that may block,
+        // never on the load path's own event-loop worker.
+        .rng             = inputs.rng,
+        .pacing_state    = inputs.pacing_state,
+        .timers_override = inputs.timers_override,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,
