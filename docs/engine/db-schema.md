@@ -962,6 +962,19 @@ reduced to just `{"mode": "..."}` (via `sanitize_config_snapshot` in
 `utils/json.cpp`) - an allowlist, so no current or future auth field
 (`clientSecret`, `password`, tokens) leaks into a stored run.
 
+**`config_snapshot`'s body is capped at `maxTraceBodyBytes`** (issue #1486), the
+same limit and the same sibling-key shape the [`results`](#results) trace bodies
+use - `sanitize_config_snapshot` truncates `body.content` in place and records
+`bodyTruncated: true` / `bodyBytes: <original length>` on the `body` object when
+it cuts. Without this cap a single oversized send (a large upload, a big JSON
+fixture) left a permanently bloated `config_snapshot` behind: the one-time
+summary build the cache above pays per run id, and the `q` filter's `LIKE` /
+`collectionId`'s `json_extract` (`run_filter_where`, `db/database.cpp`, run
+unconditionally as part of every list query's `WHERE`) all scan the stored
+string's full length on every call that uses them. The by-id route
+(`GET /runs/:id`) returns whatever was stored, cap included - it never
+re-derives or re-truncates.
+
 **`config_snapshot` for a scenario run** - a run started from a `scenario` block
 (see [POST /runs](api-reference.md#post-runs)) stores a **step manifest**, never
 the resolved plan. The manifest *replaces* the block as sent, rather than

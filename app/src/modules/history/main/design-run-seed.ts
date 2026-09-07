@@ -38,7 +38,15 @@ interface DesignSnapshot {
 	method?: string;
 	url?: string;
 	headers?: Record<string, string>;
-	body?: { mode?: string; content?: string; fields?: KeyValueEntry[] };
+	body?: {
+		mode?: string;
+		content?: string;
+		fields?: KeyValueEntry[];
+		/** Set by `sanitize_config_snapshot` when `content` exceeded `maxTraceBodyBytes`. */
+		bodyTruncated?: boolean;
+		/** The body's original byte length, present only when truncated. */
+		bodyBytes?: number;
+	};
 	auth?: { mode?: string };
 	preRequestScripts?: ScriptPart[];
 	postRequestScripts?: ScriptPart[];
@@ -78,10 +86,9 @@ export interface DesignRunSeed {
 	recordedAuthMode?: string;
 	/**
 	 * True when the engine truncated this run's stored request body
-	 * (`maxTraceBodyBytes`). The editable copy still shows the full body from the
-	 * config snapshot (which is not capped), but "Save this run to the request"
-	 * must not write a possibly-incomplete body back - see
-	 * {@link applyRunToRequest}. Read from `trace.request.bodyTruncated`.
+	 * (`maxTraceBodyBytes`), on the trace or on the config snapshot itself -
+	 * both are capped at the same limit. "Save this run to the request" must
+	 * not write a possibly-incomplete body back - see {@link applyRunToRequest}.
 	 */
 	requestBodyTruncated?: boolean;
 }
@@ -172,7 +179,10 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 		// "none" carries no information the absence would not, so normalise it away.
 		recordedAuthMode:
 			snapshot.auth?.mode && snapshot.auth.mode !== "none" ? snapshot.auth.mode : undefined,
-		// Only surfaces `true`; an untruncated run leaves it undefined.
-		requestBodyTruncated: trace?.request?.bodyTruncated ? true : undefined,
+		// Only surfaces `true`; an untruncated run leaves it undefined. Either
+		// source cutting the body is enough - the trace and the config snapshot
+		// are capped independently, at the same limit.
+		requestBodyTruncated:
+			trace?.request?.bodyTruncated || body?.bodyTruncated ? true : undefined,
 	};
 }
