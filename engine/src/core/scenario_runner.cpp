@@ -542,10 +542,11 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.in_scenario = true;
     // A `timer.pacing` element's `step.before` dispatch (issue #1498) reads
     // these off the run it belongs to - a design send's own `ExchangeInputs`
-    // leaves all three null, which is what keeps pacing meaningless there.
+    // leaves all four null, which is what keeps pacing meaningless there.
     inputs.pacing_state    = &ctx.context->pacing_state;
     inputs.rng             = &ctx.context->rng;
     inputs.timers_override = &ctx.context->timers_override;
+    inputs.should_stop     = [&] { return ctx.context->should_stop.load (); };
 
     // The data pass, per iteration and before the send: composition
     // left every `{{data.column}}` written as it stands, because

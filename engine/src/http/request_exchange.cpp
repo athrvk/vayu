@@ -670,7 +670,7 @@ ExchangeInputs inputs) {
         [&] (std::string_view scope, const std::string& name, const std::string& value) {
             set_scope_variable (scopes, scope, name, value);
         },
-        .should_stop = nullptr, // A single exchange has nothing to interrupt.
+        .should_stop = inputs.should_stop,
         // `blocking_allowed` stays true (the default): a design send and the
         // sequential run both call this function on a thread that may block,
         // never on the load path's own event-loop worker.
