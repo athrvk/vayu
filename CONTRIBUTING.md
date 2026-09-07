@@ -31,7 +31,7 @@ We are committed to providing a friendly, safe, and welcoming environment. Pleas
 ### Pull Requests
 
 1. **Fork the repository**
-2. **Create a feature branch** from `main`
+2. **Create a feature branch** from `master`
 3. **Make your changes** with clear commits
 4. **Add tests** for new functionality (if applicable)
 5. **Update documentation** if needed
@@ -41,7 +41,7 @@ We are committed to providing a friendly, safe, and welcoming environment. Pleas
 
 ### Prerequisites
 
-- **C++ Engine**: CMake 3.25+, C++20 compiler, vcpkg
+- **C++ Engine**: CMake 3.25+, C++23 compiler, vcpkg
 - **Electron App**: Node.js ≥ 22 LTS, pnpm ≥ 11
 
 ### Quick Start
