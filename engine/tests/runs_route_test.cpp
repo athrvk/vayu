@@ -233,6 +233,27 @@ TEST_F (RunsRouteTest, SummaryHttpVersionDefaultsToAutoOnNullOrAbsent) {
     EXPECT_EQ (body["data"][1]["summary"]["httpVersion"], "auto");
 }
 
+// A baseline's list row needs the same compression signal the open run's full
+// snapshot carries, since the baseline comparison reads the pinned run
+// through this list endpoint rather than GET /runs/:id (issue #1488).
+TEST_F (RunsRouteTest, SummaryCarriesAcceptEncodingWhenSnapshotHasIt) {
+    seed ({ .id = "run_negotiated",
+    .config_snapshot = R"({"url":"https://a/","defaultHeaders":{"userAgent":"Vayu/0.26.0","requestId":true,"acceptEncoding":true}})" });
+    seed ({ .id = "run_not_negotiated",
+    .start_time = 1,
+    .config_snapshot = R"({"url":"https://b/","defaultHeaders":{"userAgent":"Vayu/0.26.0","requestId":false,"acceptEncoding":false}})" });
+    seed ({ .id = "run_pre_1488", .start_time = 2, .config_snapshot = R"({"url":"https://c/"})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    // Newest first: run_pre_1488, run_not_negotiated, run_negotiated.
+    EXPECT_EQ (body["data"][0]["id"], "run_pre_1488");
+    EXPECT_FALSE (body["data"][0]["summary"].contains ("acceptEncoding"));
+    EXPECT_EQ (body["data"][1]["id"], "run_not_negotiated");
+    EXPECT_EQ (body["data"][1]["summary"]["acceptEncoding"], false);
+    EXPECT_EQ (body["data"][2]["id"], "run_negotiated");
+    EXPECT_EQ (body["data"][2]["summary"]["acceptEncoding"], true);
+}
+
 // A collection run's row has no url and no method - its work is a sequence -
 // so `scenario` is the only thing on it that says what ran. The step manifest
 // itself stays off the row: it is the size of the plan, and the row is the part
@@ -734,6 +755,20 @@ TEST (RunReportConfigTest, OmitsFollowRedirectsAndMaxRedirectsWhenAbsent) {
     EXPECT_FALSE (config_obj.contains ("followRedirects"));
     EXPECT_FALSE (config_obj.contains ("maxRedirects"));
     EXPECT_EQ (config_obj.size (), 2u); // mode + httpVersion("auto")
+}
+
+// Same field as SummaryCarriesAcceptEncodingWhenSnapshotHasIt, read for
+// GET /runs/:runId/report's `configuration` object rather than the list row
+// (issue #1488).
+TEST (RunReportConfigTest, CarriesAcceptEncodingWhenSnapshotHasItAndOmitsItOtherwise) {
+    auto negotiated = json::parse (
+    R"({"mode":"once","defaultHeaders":{"userAgent":"Vayu/0.26.0","requestId":false,"acceptEncoding":true}})");
+    auto pre_1488 = json::parse (R"({"mode":"once"})");
+
+    EXPECT_EQ (
+    vayu::http::routes::build_run_report_config (negotiated)["acceptEncoding"], true);
+    EXPECT_FALSE (vayu::http::routes::build_run_report_config (pre_1488).contains (
+    "acceptEncoding"));
 }
 
 // ============================================================================

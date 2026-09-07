@@ -28,6 +28,7 @@
 #include <string>
 
 #include "optional_assert.hpp"
+#include "step_elements_test_helper.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -158,10 +159,10 @@ class LoadScriptScopesTest : public ::testing::Test {
         execution->request.iterations    = 1;
 
         vayu::core::ScenarioStep step;
-        step.index          = 0;
-        step.request_id     = "req_1";
-        step.name           = "List users";
-        step.post_script    = step_script;
+        step.index      = 0;
+        step.request_id = "req_1";
+        step.name       = "List users";
+        step.elements = vayu::tests::step_elements_with_post_script (step_script);
         step.request.method = vayu::HttpMethod::GET;
         step.request.url    = "https://api.example.com/users";
         execution->plan.steps.push_back (step);

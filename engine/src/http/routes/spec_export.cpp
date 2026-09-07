@@ -267,6 +267,31 @@ bool example_has_extra_headers (const std::string& blob) {
     });
 }
 
+/**
+ * A row's `script.pre` / `script.post` element text, or `""` for a row with
+ * none (issue #1514's cut-over: the export notes only ever checked `.empty()`
+ * on the two script columns this replaced, to count a script among what
+ * OpenAPI cannot express - never the text itself - so reading it back off
+ * `elements` keeps that contract with no change to `openapi_export.cpp`).
+ */
+std::string exported_script_text (const std::string& elements_json, const char* kind) {
+    const auto elements =
+    nlohmann::json::parse (elements_json, nullptr, /*allow_exceptions=*/false);
+    if (!elements.is_array ()) {
+        return "";
+    }
+    for (const auto& element : elements) {
+        if (!element.is_object () || element.value ("kind", "") != kind) {
+            continue;
+        }
+        const auto& config = element.value ("config", nlohmann::json::object ());
+        if (config.contains ("script") && config["script"].is_string ()) {
+            return config["script"].get<std::string> ();
+        }
+    }
+    return "";
+}
+
 /// One request, and the examples stored against it, as the exporter reads
 /// them - @p folder_collection_id is the collection it is directly filed
 /// under, which may differ from @p row's own `collection_id` on nothing here
@@ -277,22 +302,22 @@ const std::vector<vayu::db::Collection>& collections,
 const std::string& root_id,
 const std::string& folder_collection_id) {
     vayu::core::ExportRequest entry;
-    entry.name                = row.name;
-    entry.description         = row.description;
-    entry.method              = vayu::to_string (row.method);
-    entry.url                 = row.url;
-    entry.params              = read_rows (row.params);
-    entry.headers             = read_rows (row.headers);
-    entry.body                = read_body (row.body);
-    entry.spec_operation      = read_identity (row.spec_operation);
-    entry.auth                = read_auth (row.auth);
-    entry.pre_request_script  = row.pre_request_script;
-    entry.post_request_script = row.post_request_script;
-    entry.follow_redirects    = row.follow_redirects;
-    entry.max_redirects       = row.max_redirects;
-    entry.http_version        = row.http_version;
-    entry.verify_ssl          = row.verify_ssl;
-    entry.stream              = row.stream;
+    entry.name           = row.name;
+    entry.description    = row.description;
+    entry.method         = vayu::to_string (row.method);
+    entry.url            = row.url;
+    entry.params         = read_rows (row.params);
+    entry.headers        = read_rows (row.headers);
+    entry.body           = read_body (row.body);
+    entry.spec_operation = read_identity (row.spec_operation);
+    entry.auth           = read_auth (row.auth);
+    entry.pre_request_script = exported_script_text (row.elements, "script.pre");
+    entry.post_request_script = exported_script_text (row.elements, "script.post");
+    entry.follow_redirects = row.follow_redirects;
+    entry.max_redirects    = row.max_redirects;
+    entry.http_version     = row.http_version;
+    entry.verify_ssl       = row.verify_ssl;
+    entry.stream           = row.stream;
     entry.folder_path = folder_path_of (collections, root_id, folder_collection_id);
     for (const auto& example : db.get_request_examples (row.id)) {
         entry.examples.push_back ({ example.name, example.status, example.body,
@@ -380,11 +405,13 @@ export_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     }
 
     vayu::core::ExportCollection export_collection;
-    export_collection.name                = root->name;
-    export_collection.description         = root->description;
-    export_collection.auth                = read_auth (root->auth);
-    export_collection.pre_request_script  = root->pre_request_script;
-    export_collection.post_request_script = root->post_request_script;
+    export_collection.name        = root->name;
+    export_collection.description = root->description;
+    export_collection.auth        = read_auth (root->auth);
+    export_collection.pre_request_script =
+    exported_script_text (root->elements, "script.pre");
+    export_collection.post_request_script =
+    exported_script_text (root->elements, "script.post");
     std::tie (export_collection.base_url_value, export_collection.other_variables) =
     read_collection_variables (root->variables);
 

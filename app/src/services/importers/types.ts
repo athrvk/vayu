@@ -293,8 +293,14 @@ export interface RequestDraft {
 	headers: KeyValueEntry[];
 	body: RequestBody;
 	auth: RequestAuth; // "inherit" allowed; resolved at execution
-	preRequestScript: string;
-	postRequestScript: string;
+	/**
+	 * Typed behaviours (issue #1512) - a `script.pre` / `script.post` entry is
+	 * how a source's scripts arrive now that `preRequestScript` /
+	 * `postRequestScript` are refused (issue #1514). The app does not parse or
+	 * edit these (issue #1516); they ride through to the apply payload
+	 * unchanged.
+	 */
+	elements: unknown[];
 	/**
 	 * Per-request redirect settings, when the source states them (Postman's
 	 * item-level `protocolProfileBehavior`; Insomnia's `settingFollowRedirects`,
@@ -350,8 +356,8 @@ export interface CollectionDraft {
 	description: string;
 	variables: Record<string, VariableValue>;
 	auth: Exclude<RequestAuth, { mode: "inherit" }>; // collections never inherit
-	preRequestScript: string;
-	postRequestScript: string;
+	/** See {@link RequestDraft.elements}. */
+	elements: unknown[];
 	children: CollectionDraft[];
 	requests: RequestDraft[];
 	/**

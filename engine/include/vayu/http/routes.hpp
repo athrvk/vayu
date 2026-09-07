@@ -421,6 +421,33 @@ apply_elements_field (const nlohmann::json& json, const char* key, std::string& 
     return {};
 }
 
+/**
+ * Refuse `preRequestScript`, `postRequestScript` and `tests` (issue #1514's
+ * cut-over): the owner's decision was a clean cut, not a transitional read/
+ * write alias, so every route that used to accept a script as one of these
+ * keys now refuses it outright, naming `elements` as the replacement. Checked
+ * against every spelling `script_parts.hpp` used to accept (`preRequestScripts`
+ * / `postRequestScripts` included), so a caller cannot dodge the refusal by
+ * sending the list form instead of the singular one.
+ *
+ * A plain message rather than a `RouteResult`: callers answer with it two
+ * different ways (`route_error` here, a bare 400 in `read_execute_payload`),
+ * and the check itself is the same three lines either way.
+ */
+[[nodiscard]] inline std::optional<std::string> refuse_legacy_script_fields (
+const nlohmann::json& json) {
+    for (const char* key : { "preRequestScript", "preRequestScripts",
+         "postRequestScript", "postRequestScripts", "tests" }) {
+        if (json.contains (key) && !json[key].is_null ()) {
+            return std::format (
+            "'{}' is no longer accepted - scripts are 'elements' "
+            "now (a 'script.pre' or 'script.post' entry)",
+            key);
+        }
+    }
+    return std::nullopt;
+}
+
 /** Same rule for a boolean field. A non-boolean, non-null value is ignored. */
 inline void apply_bool_field (const nlohmann::json& json,
 const char* key,
@@ -1123,7 +1150,11 @@ const vayu::Request& request,
 const vayu::Response& response,
 const StreamRecord* stream                                     = nullptr,
 const std::optional<vayu::core::ValidationVerdict>& validation = std::nullopt,
-const nlohmann::json& scripts = nlohmann::json::object ());
+const nlohmann::json& scripts = nlohmann::json::object (),
+/// This exchange's element outcomes (issue #1514), the same array
+/// `build_response_json` also returns - one object, two homes, on the
+/// `scripts` precedent above. An empty array writes no node.
+const nlohmann::json& elements = nlohmann::json::array ());
 
 /**
  * @brief Callback type for graceful shutdown

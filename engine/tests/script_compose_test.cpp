@@ -123,7 +123,6 @@ TEST (ScriptParts, SameKeyServesBothFormsForTests) {
 // accept both and MCP can send one composed payload to either.
 
 using vayu::http::read_post_request_script;
-using vayu::http::read_pre_request_script;
 
 TEST (ScriptNames, PostScriptIsReadUnderTheExecuteSpelling) {
     auto list = nlohmann::json::parse (
@@ -173,14 +172,7 @@ TEST (ScriptNames, TheFirstNonBlankNameWinsAndNamesAreNeverMerged) {
     EXPECT_EQ (read_post_request_script (blank_list), "real");
 }
 
-TEST (ScriptNames, PreRequestScriptHasOneSpellingAndNoneMeansEmpty) {
-    auto json = nlohmann::json::parse (R"({"preRequestScript":"pre"})");
-    EXPECT_EQ (read_pre_request_script (json), "pre");
-
-    // `tests` is a post-request name and must never satisfy the pre-request
-    // read - a load payload carrying `tests` has no pre-request script.
-    auto tests_only = nlohmann::json::parse (R"({"tests":"pm.test(\"a\",()=>{});"})");
-    EXPECT_EQ (read_pre_request_script (tests_only), "");
+TEST (ScriptNames, AnEmptyPayloadHasNoPostRequestScript) {
     EXPECT_TRUE (read_post_request_script (nlohmann::json::object ()).empty ());
 }
 
@@ -196,7 +188,6 @@ TEST (ScriptNames, ANonObjectPayloadHasNoScriptAndDoesNotThrow) {
          nlohmann::json ("a string"), nlohmann::json (42) }) {
         EXPECT_NO_THROW ({
             EXPECT_EQ (read_post_request_script (payload), "");
-            EXPECT_EQ (read_pre_request_script (payload), "");
             EXPECT_EQ (read_script (payload, "tests", "tests"), "");
         })
         << "payload: " << payload.dump ();

@@ -12,11 +12,13 @@ by the engine at fixed phases of a step (issue #1512). This page is the kind cat
 shape both sides of the wire agree on; it is generated from, or checked against, the registry
 `GET /elements/kinds` serves.
 
-> **Status:** issue #1513 lands the storage, the registry and the catalogue below. No kind runs
-> yet - the pipeline that executes an element in the design send, the sequential run and the load
-> paths is issues #1514 and #1495. Until then, `pre_request_script` / `post_request_script` keep
-> driving execution exactly as before; `elements` sits beside them (see
-> [`db-schema.md`](db-schema.md#the-script-to-elements-fold-issue-1513)).
+> **Status:** issue #1513 landed the storage, the registry and the catalogue. Issue #1514 lands the
+> pipeline that runs a kind in the design send and the sequential collection run, and the phase-0
+> kinds below. `elements` is the only script source now - `pre_request_script` /
+> `post_request_script` are gone, cut over by a one-shot migration (see
+> [`db-schema.md`](db-schema.md#the-script-to-elements-migration-issue-1514)); no transitional
+> alias, per the owner's decision. The load paths (a scenario load run's per-step pipeline) are
+> issue #1495 - a load run still executes no element inline.
 
 ## Shape
 
@@ -58,28 +60,74 @@ only where one is worth writing by hand.
 
 ## Kinds
 
-Phase 0 registers `inherit.disable` and `script.pre` / `script.post` validate-only - each has no
-`compile`, so nothing constructs an `Element` from one and nothing runs. `script.pre` / `script.post`
-exist so `Database::fold_scripts_into_elements`'s own output (a migrated request's or collection's
-scripts, folded in at startup) round-trips through `Registry::validate` rather than being rejected
-by the very migration that produced it; `pre_request_script` / `post_request_script` still drive
-every execution path unchanged until #1514's pipeline reads `elements` instead. The test binary also
-registers a `test.echo` kind, proving the registration path itself - never in a production build.
-The table below is the single reference for every kind that exists once the rest of the epic lands,
-generated from or checked against the registry so a kind added on one side and forgotten on another
-fails a test rather than shipping silently mismatched.
+`inherit.disable` has no `compile`: it is consumed at compose time (`compose_elements`), never
+constructed into a running `Element`. Every other kind below has one, registered in
+`engine/src/core/elements/registry.cpp`. The test binary also registers a `test.echo` kind, proving
+the registration path itself - never in a production build. The table below is the single
+reference for every kind that exists once the rest of the epic lands, generated from or checked
+against the registry so a kind added on one side and forgotten on another fails a test rather than
+shipping silently mismatched.
 
 | Kind | Category | Phases | Runs since |
 |------|----------|--------|------------|
 | `inherit.disable` | inherit | (consumed at compose time, not a phase) | #1513 |
-| `script.pre` | script | (validate-only; #1514 assigns the real phase) | #1513 |
-| `script.post` | script | (validate-only; #1514 assigns the real phase) | #1513 |
+| `extract.json` | extract | `step.after` | #1514 |
+| `extract.regex` | extract | `step.after` | #1514 |
+| `extract.header` | extract | `step.after` | #1514 |
+| `assert.status` | assert | `step.after` | #1514 |
+| `assert.jsonpath` | assert | `step.after` | #1514 |
+| `assert.contains` | assert | `step.after` | #1514 |
+| `assert.duration` | assert | `step.after` | #1514 |
+| `assert.size` | assert | `step.after` | #1514 |
+| `timer.think` | timer | `step.between` | #1514 |
+| `script.pre` | script | `step.before` | #1513 (validate-only), #1514 (runs) |
+| `script.post` | script | `step.after` | #1513 (validate-only), #1514 (runs) |
+
+`extract.json` reads a JSONPath subset - `$.a.b`, `[n]`, `[*]`, `..name`; a filter (`[?...]`) is
+refused at validate. `extract.regex` compiles its `pattern` once, at plan-resolution time, and
+writes a `$1$`-style template of the match's groups. Both, and `extract.header`, share `variable`,
+`scope` (`env` | `collection` | `globals`), `default` and the JMeter `matchNo` convention: `1`-based
+picks a match, `0` picks one at random, `-1` writes every match as `<variable>_1` ..
+`<variable>_N` plus a `<variable>_matchNr` count. A miss without a `default` reports `"missing"`,
+and only when `required: true` also fails the step - through the same `tests` list a `pm.test`
+assertion writes to, which is why the SSE frame's `tests` tally and `describe_failed_tests` count a
+declarative assertion exactly as they count a scripted one.
+
+`assert.status` takes an `in` list or a `range`; `assert.jsonpath` takes the same path subset with
+one of `expected`, `regex` or `exists`, plus `negate`; `assert.contains` compares a `field` (`body`
+| `headers` | `url` | `status`) against `text` in `contains` | `equals` | `matches` mode;
+`assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
+an `op`. `timer.think` takes `ms`, or `minMs`/`maxMs` for a uniform random wait; it runs in
+`step.between`, after this step's own outcome is decided and before the next step begins, so the
+wait never counts against either step's latency, and it polls the run's stop signal every 50ms so a
+`Stop` mid-wait lands promptly rather than at the end of a multi-second think.
+
+The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
+step, through `ElementContext`'s lazily filled slot - a body over `maxElementBodyBytes` (default 1
+MiB) is not parsed, and every such kind on that step reports `skipped` with the reason.
+
+`script.pre` / `script.post`'s `apply` never touches `ScriptEngine` itself: it calls back into
+`ElementContext::run_pre_script` / `run_post_script`, which the caller (`execute_exchange`, and the
+streaming send's own inline pipeline calls) binds to the exact `execute_script` call design mode has
+always made. The element's own outcome is whether the script ran without throwing; the script's own
+`pm.test` assertions travel inside the same `vayu::ScriptResult` untouched, so a scripted step's
+trace shape is unchanged by this cut-over.
+
+## The step trace
+
+A design send's and a sequential run step's stored trace gains an `elements` array beside the
+existing `scripts` node - one entry per compiled element that ran at `step.before` or `step.after`
+(`step.between` too, for the sequential run), each `{ id, kind, origin, outcome, message?, waitedMs?,
+wrote? }`. `outcome` is one of `ok` | `failed` | `missing` | `skipped` | `error`; a disabled element
+is reported `skipped` without its `apply` ever running. `POST /execute`'s live response body carries
+the same array under the same key - one object, two homes, on the `scripts` node's own precedent.
 
 ## Related issues
 
 - #1513 - this page's storage, registry and catalogue.
 - #1514 - the pipeline in the design send and the sequential run, the phase-0 behaviour kinds
-  (`extract.*`, `assert.*`, `timer.think`, `script.*`), per-element outcomes in the step trace.
+  (`extract.*`, `assert.*`, `timer.think`, `script.*`), per-element outcomes in the step trace, and
+  the script-to-elements cut-over (this page's Status callout).
 - #1495 - the pipeline on the load paths.
 - #1497, #1515, #1498, #1500, #1499, #1501 - the assertion threshold, controllers, timers,
   metrics, setup/teardown and load-time cookies that round out the kind table.

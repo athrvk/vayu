@@ -319,6 +319,30 @@ std::string join_exec (const json* event) {
     return text == nullptr ? std::string () : *text;
 }
 
+/**
+ * Writes @p pre / @p post as `script.pre` / `script.post` elements on
+ * @p item['elements'] (issue #1514's cut-over: `elements` is the only script
+ * source an import payload can carry now - `preRequestScript` /
+ * `postRequestScript` are refused on the write routes `POST /import/apply`
+ * shares with `PUT /requests/:id` and `PUT /collections/:id`). A blank
+ * script contributes no entry, matching the old fields' "" default reading
+ * as "no script".
+ */
+void set_script_elements (json& item, const std::string& pre, const std::string& post) {
+    json elements = json::array ();
+    if (pre.find_first_not_of (" \t\r\n") != std::string::npos) {
+        elements.push_back (
+        { { "kind", "script.pre" }, { "config", { { "script", pre } } } });
+    }
+    if (post.find_first_not_of (" \t\r\n") != std::string::npos) {
+        elements.push_back (
+        { { "kind", "script.post" }, { "config", { { "script", post } } } });
+    }
+    if (!elements.empty ()) {
+        item["elements"] = std::move (elements);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // `oauth2-import.ts`
 // ---------------------------------------------------------------------------
@@ -1256,10 +1280,10 @@ json pm_request (const json* item, PostmanCounts& counts) {
     with_required_content_type (map_key_values (prop (rq, "header")), body);
     request["body"] = std::move (body);
     request["auth"] = std::move (auth);
-    request["preRequestScript"] =
-    counts.options.import_scripts ? join_exec (pm_event (events, "prerequest")) : "";
-    request["postRequestScript"] =
-    counts.options.import_scripts ? join_exec (pm_event (events, "test")) : "";
+    if (counts.options.import_scripts) {
+        set_script_elements (request, join_exec (pm_event (events, "prerequest")),
+        join_exec (pm_event (events, "test")));
+    }
     pm_redirects (item, request);
     if (!examples.empty ()) {
         request["examples"] = std::move (examples);
@@ -1326,10 +1350,10 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     to_var_record (prop (node, "variable"), counts.skipped_variable_metadata);
     collection["auth"] = collection_auth (prop (node, "auth"),
     counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
-    collection["preRequestScript"] =
-    counts.options.import_scripts ? join_exec (pm_event (events, "prerequest")) : "";
-    collection["postRequestScript"] =
-    counts.options.import_scripts ? join_exec (pm_event (events, "test")) : "";
+    if (counts.options.import_scripts) {
+        set_script_elements (collection, join_exec (pm_event (events, "prerequest")),
+        join_exec (pm_event (events, "test")));
+    }
     collection["children"] = std::move (children);
     collection["requests"] = std::move (requests);
     return collection;
@@ -1849,12 +1873,10 @@ class InsomniaTree {
         request["headers"] = with_required_content_type (map_key_values (&headers), body);
         request["body"] = std::move (body);
         request["auth"] = insomnia_auth (prop (resource, "authentication"), counts_);
-        request["preRequestScript"]  = counts_.options.import_scripts ?
-         as_string (prop (resource, "preRequestScript")) :
-         "";
-        request["postRequestScript"] = counts_.options.import_scripts ?
-        as_string (prop (resource, "afterResponseScript")) :
-        "";
+        if (counts_.options.import_scripts) {
+            set_script_elements (request, as_string (prop (resource, "preRequestScript")),
+            as_string (prop (resource, "afterResponseScript")));
+        }
         insomnia_redirects (resource, request);
         return request;
     }
@@ -1906,14 +1928,12 @@ class InsomniaTree {
         // Insomnia 9.3+ lets a folder carry scripts, and its v4 export writes
         // model fields verbatim - so these are the request-level key names. An
         // export that spells them differently reads as absent.
-        collection["preRequestScript"]  = counts_.options.import_scripts ?
-         as_string (prop (node, "preRequestScript")) :
-         "";
-        collection["postRequestScript"] = counts_.options.import_scripts ?
-        as_string (prop (node, "afterResponseScript")) :
-        "";
-        collection["children"]          = std::move (children);
-        collection["requests"]          = std::move (requests);
+        if (counts_.options.import_scripts) {
+            set_script_elements (collection, as_string (prop (node, "preRequestScript")),
+            as_string (prop (node, "afterResponseScript")));
+        }
+        collection["children"] = std::move (children);
+        collection["requests"] = std::move (requests);
         return collection;
     }
 
@@ -2420,16 +2440,16 @@ json draft_request (const SpecRequestDraft& entry) {
     }
 
     json request;
-    request["name"]              = draft.name;
-    request["description"]       = draft.description;
-    request["method"]            = draft.method;
-    request["url"]               = draft.url;
-    request["params"]            = std::move (params);
-    request["headers"]           = std::move (headers);
-    request["body"]              = draft_body (draft.body);
-    request["auth"]              = json{ { "mode", "inherit" } };
-    request["preRequestScript"]  = "";
-    request["postRequestScript"] = "";
+    request["name"]        = draft.name;
+    request["description"] = draft.description;
+    request["method"]      = draft.method;
+    request["url"]         = draft.url;
+    request["params"]      = std::move (params);
+    request["headers"]     = std::move (headers);
+    request["body"]        = draft_body (draft.body);
+    request["auth"]        = json{ { "mode", "inherit" } };
+    // OpenAPI has no script concept, so this request declares no elements -
+    // an absent key is the same "[]" default `""` used to mean.
     if (!examples.empty ()) {
         request["examples"] = std::move (examples);
     }
@@ -2469,14 +2489,12 @@ class OperationFolders {
         if (found == order_.end ()) {
             order_.push_back (name);
             json folder;
-            folder["name"]              = name;
-            folder["description"]       = from_tag ? describe (name) : "";
-            folder["variables"]         = json::object ();
-            folder["auth"]              = json{ { "mode", "none" } };
-            folder["preRequestScript"]  = "";
-            folder["postRequestScript"] = "";
-            folder["children"]          = json::array ();
-            folder["requests"]          = json::array ();
+            folder["name"]        = name;
+            folder["description"] = from_tag ? describe (name) : "";
+            folder["variables"]   = json::object ();
+            folder["auth"]        = json{ { "mode", "none" } };
+            folder["children"]    = json::array ();
+            folder["requests"]    = json::array ();
             folders_.emplace (name, std::move (folder));
         } else if (from_tag &&
         folders_.at (name).at ("description").get_ref<const std::string&> ().empty ()) {
@@ -2609,10 +2627,8 @@ walk::Dialect dialect) {
       json{ { "baseUrl", { { "value", base_url }, { "enabled", true } } } };
     root["auth"] =
     v3 ? scheme_to_auth_v3 (scheme.node) : scheme_to_auth_v2 (scheme.node);
-    root["preRequestScript"]  = "";
-    root["postRequestScript"] = "";
-    root["children"]          = folders.children ();
-    root["requests"]          = folders.root_requests ();
+    root["children"] = folders.children ();
+    root["requests"] = folders.root_requests ();
     // The document itself, so the import can store it and bind this collection
     // to it in the same atomic call (#637). `raw` and not a re-serialization:
     // the engine hashes the bytes it stores, and a sync compares against that
@@ -2760,11 +2776,9 @@ int order) {
     item["headers"]          = draft.at ("headers");
     item["body"]             = draft.at ("body");
     item["bodyType"] = draft.at ("body").at ("mode"); // the engine never derives this
-    item["auth"]              = draft.at ("auth");
-    item["preRequestScript"]  = draft.at ("preRequestScript");
-    item["postRequestScript"] = draft.at ("postRequestScript");
-    for (const char* optional :
-    { "followRedirects", "maxRedirects", "verifySSL", "examples", "specOperation" }) {
+    item["auth"] = draft.at ("auth");
+    for (const char* optional : { "followRedirects", "maxRedirects",
+         "verifySSL", "examples", "specOperation", "elements" }) {
         carry (draft, item, optional);
     }
     item["order"] = order;
@@ -2815,10 +2829,9 @@ json& specs) {
     if (order != nullptr) {
         collection["order"] = *order;
     }
-    collection["variables"]         = draft.at ("variables");
-    collection["auth"]              = draft.at ("auth");
-    collection["preRequestScript"]  = draft.at ("preRequestScript");
-    collection["postRequestScript"] = draft.at ("postRequestScript");
+    collection["variables"] = draft.at ("variables");
+    collection["auth"]      = draft.at ("auth");
+    carry (draft, collection, "elements");
     if (!spec_temp_id.empty ()) {
         collection["openapi"] = json{ { "specTempId", spec_temp_id } };
     }

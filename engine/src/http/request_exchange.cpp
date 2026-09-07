@@ -41,6 +41,21 @@ int64_t exchange_now_ms () {
 
 } // namespace
 
+void set_scope_variable (ScriptVariableScopes& scopes,
+std::string_view scope,
+const std::string& name,
+const std::string& value) {
+    vayu::Environment* target = &scopes.collection;
+    if (scope == "env") {
+        target = &scopes.environment;
+    } else if (scope == "globals") {
+        target = &scopes.globals;
+    }
+    vayu::Variable variable;
+    variable.value  = value;
+    (*target)[name] = variable;
+}
+
 size_t design_response_body_bound (vayu::db::Database& db) {
     return static_cast<size_t> (db.get_config_int ("maxDesignResponseBodyBytes",
     static_cast<int> (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
@@ -550,14 +565,45 @@ ExchangeInputs inputs) {
         ctx.iteration_data = inputs.iteration_data;
     };
 
-    // Execute pre-request script. `for_prerequest` is what makes its
-    // pm.request edits reach the wire; everything below this line - the
-    // send, the stored trace, the raw request the app shows - reads the
-    // post-script request.
-    auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (outcome.request);
-    bind (pre_ctx, &pre_cookie_writes);
-    outcome.pre_script_result =
-    execute_script (engine, inputs.pre_script, pre_ctx, "Pre-request");
+    static const std::vector<vayu::core::CompiledElement> NO_ELEMENTS;
+    const std::vector<vayu::core::CompiledElement>& elements =
+    inputs.elements ? *inputs.elements : NO_ELEMENTS;
+
+    // Everything a compiled element's `apply` needs (issue #1514): script
+    // kinds run through the two callbacks below, which are exactly the
+    // `for_prerequest` / `for_test` + `execute_script` calls this function
+    // has always made - `script.pre` / `script.post` are the only kinds that
+    // touch them, so nothing about a scripted step's shape changes.
+    vayu::core::ElementContext element_ctx{
+        .request  = outcome.request,
+        .response = nullptr,
+        .run_pre_script =
+        [&] (const std::string& script) {
+            // `for_prerequest` is what makes `pm.request` edits reach the
+            // wire; everything below this line - the send, the stored
+            // trace, the raw request the app shows - reads the write-back.
+            auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (outcome.request);
+            bind (pre_ctx, &pre_cookie_writes);
+            return execute_script (engine, script, pre_ctx, "Pre-request");
+        },
+        .run_post_script =
+        [&] (const std::string& script) {
+            auto post_ctx =
+            vayu::runtime::ScriptContext::for_test (outcome.request, outcome.response);
+            bind (post_ctx, &post_cookie_writes);
+            return execute_script (engine, script, post_ctx, "Post-request");
+        },
+        .pre_script_result  = outcome.pre_script_result,
+        .post_script_result = outcome.post_script_result,
+        .set_variable =
+        [&] (std::string_view scope, const std::string& name, const std::string& value) {
+            set_scope_variable (scopes, scope, name, value);
+        },
+        .should_stop = nullptr, // A single exchange has nothing to interrupt.
+    };
+
+    vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,
+    element_ctx, elements, outcome.element_outcomes);
 
     // `pm.execution.skipRequest()` - nothing goes out, and with no response
     // there is nothing for a test script to assert on either. The script's jar
@@ -603,11 +649,9 @@ ExchangeInputs inputs) {
         outcome.response = client.send (outcome.request).value ();
     }
 
-    auto post_ctx =
-    vayu::runtime::ScriptContext::for_test (outcome.request, outcome.response);
-    bind (post_ctx, &post_cookie_writes);
-    outcome.post_script_result =
-    execute_script (engine, inputs.post_script, post_ctx, "Post-request");
+    element_ctx.response = &outcome.response;
+    vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, element_ctx,
+    elements, outcome.element_outcomes);
 
     // The post-request script's jar writes: the transfer has already
     // captured, so there is nothing left to carry them. A write its own

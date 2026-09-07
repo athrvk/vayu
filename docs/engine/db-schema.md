@@ -9,22 +9,32 @@ Vayu uses SQLite via `sqlite_orm`. The schema is defined in `engine/src/db/datab
 struct definitions live in `engine/include/vayu/types.hpp`. `sync_schema()` adds new columns
 automatically on startup - no migration scripts are needed for additive changes.
 
-> **Breaking changes**: because Vayu is pre-release, destructive schema changes (column removal,
-> type changes) wipe the database rather than migrating it. The `PRAGMA user_version` is
-> not currently managed; wipe is done by deleting the `.db` file. An **additive** change - a new
-> column, or existing data reshaped into a new one alongside the old (the script-to-elements fold
-> below) - gets a startup repair pass instead, the shape both it and the header-strip pass share.
+> **Breaking changes**: a destructive schema change is now a versioned migration, not a wipe.
+> `PRAGMA user_version` is the marker: `Database::Database`'s `migrate_before_sync` (issue #1514)
+> reads it before `sync_schema ()` ever runs, and a version behind the engine's own gets whatever
+> data-preserving pass that version's cut-over needs, run against the raw file with its own
+> `sqlite3` connection - ahead of `sync_schema ()`, because that call is what would `DROP COLUMN` a
+> retiring column before a later pass could read it. A version *newer* than the engine's is refused
+> outright, naming both versions, rather than opened and possibly written to with settings this
+> build does not understand. The [script-to-elements migration](#the-script-to-elements-migration-issue-1514)
+> below is the first of these; the same mechanism serves the next destructive change, not a new one
+> invented per issue. An **additive** change - a new column, or existing data reshaped into a new
+> one alongside the old - still gets a startup repair pass instead, the shape the header-strip pass
+> uses.
 
 ---
 
 ## Startup validation, backup and recovery
 
-`Database::Database` (`engine/src/db/database.cpp`) opens the database and runs
-`sync_schema()` before anything else uses it, and what it does next depends on
-whether that succeeded:
+`Database::Database` (`engine/src/db/database.cpp`) reads `PRAGMA user_version` before anything
+else - a version newer than this engine's throws immediately and the constructor fails outright
+(see [the script-to-elements migration](#the-script-to-elements-migration-issue-1514)); that is
+not corruption, and none of the recovery below applies to it. Past that gate it runs `sync_schema()`
+before anything else uses the database, and what it does next depends on whether that succeeded:
 
 | Outcome | What happens to the files | What is recorded |
 |---------|---------------------------|------------------|
+| A newer `user_version` than this engine understands | Nothing - the constructor throws before the file is touched, and the daemon does not start | (the exception, naming both versions) |
 | Opens cleanly | The whole file set is copied to `<db>.bak` (sidecars included), so the backup is only ever taken from a database that validated | Nothing |
 | Fails, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
 | Fails, `<db>.bak` fails the same validation | The backup is left untouched as evidence, the corrupt file set is quarantined, and a fresh empty database is created | `backup_also_corrupt` |
@@ -188,21 +198,44 @@ nothing left to touch pays close to nothing for it:
   (`restore_request_locked` / `restore_collection_locked`) runs the same disable-and-mark step on
   its way back, which is a no-op if the pass already handled it before the request was deleted.
 
-### The script-to-elements fold (issue #1513)
+### The script-to-elements migration (issue #1514)
 
-`Database::fold_scripts_into_elements()`, called from `init()` beside the pass above, gives a
-0.26-shaped `requests` or `collections` row an `elements` entry per non-blank
-`pre_request_script` / `post_request_script`: `{"id": "el_...", "kind": "script.pre" |
-"script.post", "enabled": true, "config": {"script": "..."}}`. It is additive, not a migration in
-the destructive sense the callout above describes - `pre_request_script` and `post_request_script`
-stay mapped and keep driving every execution path (design send, sequential run) exactly as before,
-because nothing runs an *element* yet; the pipeline that does is issue #1514. Same shape as the
-header-strip pass: a candidate scan (`get_all` filtered to non-empty script columns, so an
-already-migrated workspace costs one query), a `<db>.pre-elements-fold.bak` snapshot written once
-immediately before the first row this pass ever rewrites (its own name, so a start that also runs
-the header-strip pass does not have one pass's snapshot overwrite the other's), one transaction for
-the whole rewrite, and a `scriptsFoldedIntoElements` config-entry marker so a later start never
-re-scans. `updated_at` is left alone, on the same precedent.
+Issue #1513 landed `elements` additively, beside the two script columns, with a startup repair pass
+(`fold_scripts_into_elements`) that gave a 0.26-shaped row an `elements` entry without touching
+`pre_request_script` / `post_request_script` - nothing ran an *element* yet, so the columns had to
+keep driving execution. Issue #1514 lands the pipeline that runs one, which is what makes the two
+columns dead data and the cut a real migration rather than another additive pass. The repair pass,
+its `scriptsFoldedIntoElements` marker and its `.pre-elements-fold.bak` snapshot are gone; `PRAGMA
+user_version` is the marker now.
+
+`migrate_before_sync (path)` (`engine/src/db/database.cpp`, a free function in the anonymous
+namespace, called from `Database::Database` before *any* `sync_schema ()` - including the
+constructor's own validation probe) opens `path` with a raw `sqlite3` connection, independent of
+`sqlite_orm`:
+
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `1`) throws
+   `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
+   try-catch, so the exception reaches the daemon's own startup failure path rather than being read
+   as "will not open" and quarantined the way a genuinely corrupt file is. Equal to `SCHEMA_VERSION`
+   is a fast no-op. `0` (every database written before this issue, folded by #1513's pass or not)
+   proceeds to fold.
+2. **Fold, if either table still has the script columns.** For each of `requests` and
+   `collections` that does: `<db>.pre-migration.bak` is written once, immediately before the first
+   row is rewritten (issue #1487's rule - the one on-disk copy of the exact pre-cutover script text
+   if the fold below were ever found wrong), then in one transaction, per row: parse `elements`,
+   append a `{"id": "el_...", "kind": "script.pre" | "script.post", "enabled": true, "config":
+   {"script": "..."}}` for each non-blank script column *not already represented* in `elements` (the
+   check that makes a database #1513's additive pass already folded safe to re-run through this
+   migration without a duplicate), and write the row back. A database neither table needs folding
+   for (a fresh install, or one some other path already brought to this shape) skips the backup and
+   the transaction.
+3. **Set `user_version = 1`.** Only after this returns does `sync_schema ()` see a mapping with no
+   `pre_request_script` / `post_request_script` columns and `ALTER TABLE ... DROP COLUMN` them -
+   the ordering this migration exists to guarantee, per `engine/CLAUDE.md`'s "Removing a column"
+   rule.
+
+`GET /elements/kinds`'s `script.pre` / `script.post` entries gained `apply` in the same issue, so a
+row this migration folds is not just storage-compatible but immediately runnable.
 
 ---
 
@@ -233,9 +266,7 @@ Stores folder/group hierarchy for requests.
 | `description`        | TEXT    | Default `""`                                 |
 | `variables`          | TEXT    | JSON: `Record<string, VariableValue>`        |
 | `auth`               | TEXT    | JSON: `RequestAuth` (never `inherit`)        |
-| `pre_request_script` | TEXT    | Default `""`                                 |
-| `post_request_script`| TEXT    | Default `""`                                 |
-| `elements`           | TEXT    | JSON array of elements (issue #1513); default `"[]"` |
+| `elements`           | TEXT    | JSON array of elements (issue #1513, run by #1514); default `"[]"` |
 | `data_schema`        | TEXT    | JSON: the declared data contract; default `"{}"` |
 | `openapi`            | TEXT    | JSON: the bound spec document; default `"{}"` |
 | `order`              | INTEGER | Sort order within parent; default 0          |
@@ -247,12 +278,13 @@ Stores folder/group hierarchy for requests.
 assertions, timers, controllers, scripts and metrics, each `{"id", "kind", "enabled", "name"?,
 "config"}` and validated against the registry `GET /elements/kinds` serves
 (`vayu::core::Registry::validate`, `engine/include/vayu/core/elements.hpp`). `[]` - the default,
-and what an explicit `null` on `PUT` resets to - means no elements. Additive beside
-`pre_request_script` / `post_request_script` above: a 0.26 collection's scripts are folded in here
-as `script.pre` / `script.post` entries by the startup pass above, but the two script columns keep
-driving execution unchanged until issue #1514's pipeline runs an element for real. `POST /compose`
-resolves a request's whole chain of these (its own collection's, root to leaf, then the request's)
-into one list, minus anything a `inherit.disable` entry names.
+and what an explicit `null` on `PUT` resets to - means no elements. The only script source since
+issue #1514's cut-over: a pre-cutover collection's scripts are folded in here as `script.pre` /
+`script.post` entries by [`migrate_before_sync`](#the-script-to-elements-migration-issue-1514), and
+`preRequestScript` / `postRequestScript` are refused (`400`, naming `elements`) on every route that
+used to accept them. `POST /compose` resolves a request's whole chain of these (its own
+collection's, root to leaf, then the request's) into one list, minus anything a `inherit.disable`
+entry names.
 
 **data_schema** - which columns this collection's data files are expected to
 carry, so `{{data.column}}` and `pm.iterationData` can be checked before a run
@@ -360,9 +392,7 @@ Stores individual HTTP request definitions.
 | `body`                | TEXT    | JSON discriminated union (see below)                 |
 | `body_type`           | TEXT    | Denormalized mirror of `body.mode`; kept for queries |
 | `auth`                | TEXT    | JSON discriminated union (see below)                 |
-| `pre_request_script`  | TEXT    | Default `""`                                         |
-| `post_request_script` | TEXT    | Default `""`                                         |
-| `elements`            | TEXT    | JSON array of elements (issue #1513); default `"[]"` |
+| `elements`            | TEXT    | JSON array of elements (issue #1513, run by #1514); default `"[]"` |
 | `order`               | INTEGER | Sort order within collection; default 0              |
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
@@ -388,8 +418,8 @@ a body-mode change adds, the `Accept` the Event stream toggle adds, or a row the
 header-strip pass disabled - so it can tell its own row apart from a hand-typed one
 across a reload; retyping the row's key or value clears it (issues #1481, #1491).
 
-**elements** - same shape and the same additive relationship to `pre_request_script` /
-`post_request_script` as [`collections.elements`](#collections) above; see that entry.
+**elements** - same shape, and the same script-to-elements cut-over, as
+[`collections.elements`](#collections) above; see that entry.
 
 **body** - discriminated union:
 ```json
@@ -1015,6 +1045,20 @@ memory for the run's life and nowhere else. Inline `data` rows are not
 snapshotted either: they are user data of unknown sensitivity, and the manifest
 records only their count. The writer is `vayu::core::build_scenario_manifest`
 (`core/scenario_plan.cpp`).
+
+**`config_snapshot`'s `defaultHeaders`** (issue #1488) - a load or collection
+run's snapshot also carries the run's resolved default-header decision at
+start: `{"userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding":
+true}`. This is a deliberate, narrow exception to
+[Default request headers](api-reference.md#default-request-headers)'s "nothing
+here is stored" rule - that rule is about not writing an applied default back
+into a *saved request*, the way the renderer used to freeze `X-Request-ID`
+into one before issue #1229. Here nothing is applied to anything: the value is
+read back only to compare one run's report against another's, most often a
+pinned baseline against a newer run after `loadNegotiateCompression`'s default
+changed underneath both. Written once at `POST /runs` alongside the rest of
+the snapshot (`with_default_headers_snapshot`, `http/routes/execution.cpp`);
+absent on a design run and on any run recorded before this issue.
 
 **Retention** - runs are append-only in normal use (every design-mode click adds a `runs` row,
 every load run its `metric_ticks`/`results`), so `Database::prune_runs(max_runs, max_age_days)` trims

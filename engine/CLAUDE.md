@@ -188,15 +188,23 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or
   later; the bundled one is 3.53), which runs before `init ()` and therefore
   before any repair pass can read the column. Read the data out in a step
-  that runs ahead of the probe (a `PRAGMA user_version`-gated migration, not
-  yet introduced) or keep the column mapped; a pass that runs after the
-  probe reads a column that is already gone. #1513 kept `pre_request_script`
-  / `post_request_script` mapped rather than dropping them: dropping them
-  broke every currently-passing scripting test (design send, sequential run),
-  since the pipeline that reads `elements` instead of the two columns is
-  #1514, not this issue. `Database::fold_scripts_into_elements` (additive,
-  `docs/engine/db-schema.md`) gives older data an `elements` entry per script
-  without touching the columns; the real drop + version gate wait for #1514.
+  that runs ahead of the probe - a `PRAGMA user_version`-gated migration - or
+  keep the column mapped; a pass that runs after the probe reads a column
+  that is already gone. `Database::migrate_before_sync` (`database.cpp`,
+  #1514) is that migration, called as the constructor's very first,
+  unguarded statement so the exception it can throw (see below) propagates
+  rather than being caught by the recovery path meant for corruption: open
+  raw sqlite3, read `PRAGMA user_version`, refuse to start on a version newer
+  than this engine's `SCHEMA_VERSION` (a newer database is not corrupt and
+  must never be quarantined), and on an older or fresh one fold any row whose
+  `pre_request_script` / `post_request_script` is non-blank and not already
+  represented in `elements` into a `script.pre` / `script.post` entry, all
+  inside one transaction, before `sync_schema ()` ever runs and drops the two
+  columns. #1513 kept the columns mapped and folded them additively instead
+  (`fold_scripts_into_elements`, since retired) because nothing ran a
+  `script.*` element before #1514's pipeline existed; now that it does, the
+  two columns are dead data and this is the real cut-over the #1513 comment
+  above once deferred.
 - **One request line per HTTP call, from one place** (#1510).
   `vayu::utils::Logger` has a console verbosity (`-v 0|1|2`: warnings and
   errors, info, debug) and a separate file level (`logLevel`, default debug,
@@ -366,12 +374,21 @@ logged as a warning: it means a client skipped composition.
   an element kind, not a column** (#1512): extractors, assertions, timers,
   controllers, scripts and metrics each register once under
   `engine/src/core/elements/`, are validated against that registry, served by
-  `GET /elements/kinds`, and run by one pipeline in every execution path.
-  #1513 lands the registry and the `elements` column, additively - it keeps
-  `pre_request_script` / `post_request_script` mapped and folds their data
-  into `elements` rather than dropping them, since nothing runs an element
-  before #1514's pipeline exists. Do not add another behaviour column beside
-  the three; a new behaviour is an element kind.
+  `GET /elements/kinds`, and run by `vayu::core::ElementPipeline`. #1513
+  landed the registry and the `elements` column; #1514 landed the phase-0
+  kinds (`extract.*`, `assert.*`, `timer.think`, `script.*`) and the
+  pipeline itself, cutting `pre_request_script` / `post_request_script` over
+  for good - the two columns are gone (`Database::migrate_before_sync`
+  folds a pre-cutover row's scripts into `elements` first), and
+  `preRequestScript` / `postRequestScript` / `tests` are refused wherever
+  `elements` is now the only script source. The pipeline runs in the design
+  send and the sequential (single-VU) collection run; a **load** run
+  (`POST /runs` at scale) runs no element yet - that is #1495's job, so a
+  scenario load run still only inspects a step's compiled `elements` to
+  decide what to warn about and what to sample, and its own deferred `tests`
+  script keeps the pre-#1514 joined-parts shape untouched. Do not add
+  another behaviour column beside `elements`; a new behaviour is an element
+  kind.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the
@@ -553,7 +570,10 @@ logged as a warning: it means a client skipped composition.
   `X-Vayu-Version` and a frozen `X-Request-ID` into the saved request, which a
   load run then replayed. `Accept-Encoding` is the one recorded without being
   appended: libcurl writes that line itself from `CURLOPT_ACCEPT_ENCODING`,
-  which is what makes it decode. Add a default there, never in a driver.
+  which is what makes it decode. Add a default there, never in a driver. A
+  load or collection run's `config_snapshot` records the resolved decision
+  too (#1488), for a later run's report to compare against - never re-applied
+  to a send, the one deliberate exception to "none of it is stored".
 - **Every outbound transfer leaves through one `TransportPolicy`** (#705,
   `include/vayu/http/transport_policy.hpp`), resolved from `proxyMode` /
   `proxyUrl` / `proxyBypass` at the point of use (run-scoped on the load and

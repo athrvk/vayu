@@ -23,6 +23,15 @@ namespace vayu::core {
 ElementKind make_inherit_disable_kind ();
 ElementKind make_script_pre_kind ();
 ElementKind make_script_post_kind ();
+ElementKind make_extract_json_kind ();
+ElementKind make_extract_regex_kind ();
+ElementKind make_extract_header_kind ();
+ElementKind make_assert_status_kind ();
+ElementKind make_assert_jsonpath_kind ();
+ElementKind make_assert_contains_kind ();
+ElementKind make_assert_duration_kind ();
+ElementKind make_assert_size_kind ();
+ElementKind make_timer_think_kind ();
 
 namespace {
 
@@ -117,6 +126,15 @@ Registry& Registry::instance () {
         registry.register_kind (make_inherit_disable_kind ());
         registry.register_kind (make_script_pre_kind ());
         registry.register_kind (make_script_post_kind ());
+        registry.register_kind (make_extract_json_kind ());
+        registry.register_kind (make_extract_regex_kind ());
+        registry.register_kind (make_extract_header_kind ());
+        registry.register_kind (make_assert_status_kind ());
+        registry.register_kind (make_assert_jsonpath_kind ());
+        registry.register_kind (make_assert_contains_kind ());
+        registry.register_kind (make_assert_duration_kind ());
+        registry.register_kind (make_assert_size_kind ());
+        registry.register_kind (make_timer_think_kind ());
         return true;
     }();
     (void)registered;

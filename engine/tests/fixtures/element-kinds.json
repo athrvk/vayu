@@ -39,7 +39,9 @@
     "hotPathClass": "script",
     "kind": "script.pre",
     "label": "Pre-request script",
-    "phases": [],
+    "phases": [
+      "step.before"
+    ],
     "version": 1
   },
   {
@@ -60,7 +62,358 @@
     "hotPathClass": "script",
     "kind": "script.post",
     "label": "Post-request script",
-    "phases": [],
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "extract",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "matchNo": {
+          "type": "integer"
+        },
+        "path": {
+          "pattern": "^\\$(\\.[A-Za-z0-9_]+|\\.\\.[A-Za-z0-9_]+|\\[\\*\\]|\\[-?[0-9]+\\])*$",
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "scope": {
+          "enum": [
+            "env",
+            "collection",
+            "globals"
+          ],
+          "type": "string"
+        },
+        "variable": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "variable"
+      ],
+      "type": "object"
+    },
+    "description": "Reads one value out of the JSON response body by a JSONPath subset ($.a.b, [n], [*], ..name) into a variable.",
+    "hotPathClass": "declarative",
+    "kind": "extract.json",
+    "label": "Extract from JSON",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "extract",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "field": {
+          "enum": [
+            "body",
+            "headers",
+            "url",
+            "status"
+          ],
+          "type": "string"
+        },
+        "matchNo": {
+          "type": "integer"
+        },
+        "pattern": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "scope": {
+          "enum": [
+            "env",
+            "collection",
+            "globals"
+          ],
+          "type": "string"
+        },
+        "template": {
+          "type": "string"
+        },
+        "variable": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern",
+        "variable"
+      ],
+      "type": "object"
+    },
+    "description": "Runs a regular expression against the response and writes a match (or a $1$-style template of its groups) into a variable.",
+    "hotPathClass": "declarative",
+    "kind": "extract.regex",
+    "label": "Extract with a regular expression",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "extract",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "header": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "scope": {
+          "enum": [
+            "env",
+            "collection",
+            "globals"
+          ],
+          "type": "string"
+        },
+        "variable": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "header",
+        "variable"
+      ],
+      "type": "object"
+    },
+    "description": "Copies one response header's value into a variable.",
+    "hotPathClass": "declarative",
+    "kind": "extract.header",
+    "label": "Extract a response header",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "assert",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "in": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "range": {
+          "additionalProperties": false,
+          "properties": {
+            "max": {
+              "type": "integer"
+            },
+            "min": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "min",
+            "max"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "description": "Fails the step unless the response status is in a set or a range.",
+    "hotPathClass": "declarative",
+    "kind": "assert.status",
+    "label": "Assert status code",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "assert",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "exists": {
+          "type": "boolean"
+        },
+        "expected": null,
+        "negate": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "regex": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "description": "Fails the step unless a JSONPath match exists, equals a value or matches a regular expression.",
+    "hotPathClass": "declarative",
+    "kind": "assert.jsonpath",
+    "label": "Assert JSON value",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "assert",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "enum": [
+            "body",
+            "headers",
+            "url",
+            "status"
+          ],
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "contains",
+            "equals",
+            "matches"
+          ],
+          "type": "string"
+        },
+        "negate": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "description": "Fails the step unless a field contains, equals or matches text.",
+    "hotPathClass": "declarative",
+    "kind": "assert.contains",
+    "label": "Assert text",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "assert",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "maxMs": {
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "maxMs"
+      ],
+      "type": "object"
+    },
+    "description": "Fails the step if the response took longer than a bound.",
+    "hotPathClass": "declarative",
+    "kind": "assert.duration",
+    "label": "Assert response time",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "assert",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "op": {
+          "enum": [
+            "lt",
+            "lte",
+            "gt",
+            "gte",
+            "eq"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "bytes"
+      ],
+      "type": "object"
+    },
+    "description": "Fails the step unless the response body size compares as configured.",
+    "hotPathClass": "declarative",
+    "kind": "assert.size",
+    "label": "Assert body size",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "timer",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "maxMs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "minMs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ms": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "description": "Waits a fixed or uniformly random span before the next step, outside this step's own latency.",
+    "hotPathClass": "declarative",
+    "kind": "timer.think",
+    "label": "Think time",
+    "phases": [
+      "step.between"
+    ],
     "version": 1
   }
 ]

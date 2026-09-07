@@ -118,6 +118,12 @@ struct StepRecord {
      * step that proved something.
      */
     std::optional<StepTestTally> tests;
+    /// Every compiled element's outcome on this step (issue #1514):
+    /// `step.before` and `step.after` from the exchange, `step.between`'s
+    /// (`timer.think`) appended once flow control has decided the step is
+    /// staying in the run. Empty for a step with no elements, and for one
+    /// whose data row could not bind - no exchange ran, so nothing did either.
+    std::vector<vayu::core::ElementOutcome> elements;
     /// The design-mode trace (`build_result_trace`) plus this step's identity.
     nlohmann::json trace;
 };

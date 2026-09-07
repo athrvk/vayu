@@ -523,6 +523,65 @@ std::string load_data_snapshot (const std::string& sanitized, size_t row_count) 
     return parsed.dump ();
 }
 
+/**
+ * @brief Record the run's resolved default-header decisions in the stored
+ *        snapshot (issue #1488), so a baseline pinned before a config change
+ *        - an engine upgrade that flipped `loadNegotiateCompression`'s
+ *        default included - stays distinguishable from a run recorded after.
+ *
+ * `default_headers.hpp` documents "nothing here is stored", about the
+ * request a user saves: applying a default at send time and then writing it
+ * back into the saved request is what let a load run replay a frozen
+ * `X-Request-ID` (issue #1229). This is a different fact - what the *run*
+ * decided, kept only for a later run's report to compare itself against, and
+ * never read back into a send. `userAgent` is the resolved value verbatim,
+ * since it can itself change across an engine upgrade; `requestId` and
+ * `acceptEncoding` collapse to booleans, because a comparison needs to know
+ * whether each was negotiated, not the exact header name or the
+ * content-encoding list libcurl advertised.
+ *
+ * A snapshot that is not JSON (which `sanitize_config_snapshot` passes
+ * through verbatim) is left alone, matching `scenario_snapshot` and
+ * `load_data_snapshot` beside it.
+ *
+ * Non-static: run_row_seed_test.cpp declares and drives it directly, the way
+ * it does its two siblings above.
+ */
+std::string with_default_headers_snapshot (const std::string& snapshot,
+const vayu::http::DefaultHeaderPolicy& header_policy) {
+    nlohmann::json parsed;
+    try {
+        parsed = nlohmann::json::parse (snapshot);
+    } catch (const std::exception&) {
+        return snapshot;
+    }
+    if (!parsed.is_object ()) {
+        return snapshot;
+    }
+    parsed["defaultHeaders"] = {
+        { "userAgent", header_policy.user_agent },
+        { "requestId", !header_policy.correlation_header.empty () },
+        { "acceptEncoding", !header_policy.accept_encoding.empty () },
+    };
+    return parsed.dump ();
+}
+
+/**
+ * @brief Which compression key a run's `config_snapshot` decision should read
+ *        (issue #1488): `Load` for anything the event loop drives (a plain
+ *        load run or a scenario with a load mode), `Design` for a sequential
+ *        collection run, which negotiates the way any other collection send
+ *        does. Extracted so the branch does not add to
+ *        `handle_start_load_test`'s own cognitive complexity.
+ *
+ * Non-static: run_row_seed_test.cpp declares and drives it directly, the way
+ * it does the other snapshot helpers above.
+ */
+vayu::http::DefaultHeaderScope compression_scope_of (vayu::RunType type) {
+    return type == vayu::RunType::Load ? vayu::http::DefaultHeaderScope::Load :
+                                         vayu::http::DefaultHeaderScope::Design;
+}
+
 namespace {
 
 /**
@@ -541,17 +600,18 @@ std::string run_config_snapshot (const std::string& body,
 bool is_scenario,
 const nlohmann::json& scenario_manifest,
 const vayu::core::LoadDataSet* data,
+const vayu::http::DefaultHeaderPolicy& header_policy,
 size_t max_body_bytes) {
     std::string sanitized = vayu::json::sanitize_config_snapshot (body, max_body_bytes);
+    std::string shaped = sanitized;
     if (is_scenario) {
-        return scenario_snapshot (sanitized, scenario_manifest);
-    }
-    if (data != nullptr && !data->rows.empty ()) {
+        shaped = scenario_snapshot (sanitized, scenario_manifest);
+    } else if (data != nullptr && !data->rows.empty ()) {
         // The rows out, their count in - the same rule the scenario manifest
         // keeps, and for the same reason (issue #993).
-        return load_data_snapshot (sanitized, data->rows.size ());
+        shaped = load_data_snapshot (sanitized, data->rows.size ());
     }
-    return sanitized;
+    return with_default_headers_snapshot (shaped, header_policy);
 }
 
 /**
@@ -571,10 +631,24 @@ vayu::core::ScenarioLimits load_data_limits (vayu::db::Database& db) {
     return limits;
 }
 
+/// Every compiled element's outcome (issue #1514), the same array
+/// `record_design_result` also writes - one object, two homes, on the
+/// `build_script_result_node` precedent. Empty for an exchange with no
+/// elements.
+nlohmann::json build_element_outcomes_node (
+const std::vector<vayu::core::ElementOutcome>& outcomes) {
+    nlohmann::json node = nlohmann::json::array ();
+    for (const auto& outcome : outcomes) {
+        node.push_back (outcome.to_json ());
+    }
+    return node;
+}
+
 // Build the final response JSON with script results
 nlohmann::json build_response_json (const vayu::Response& response,
 const nlohmann::json& scripts,
-const std::optional<vayu::core::ValidationVerdict>& validation) {
+const std::optional<vayu::core::ValidationVerdict>& validation,
+const nlohmann::json& elements = nlohmann::json::array ()) {
     nlohmann::json response_json = vayu::json::serialize (response);
     // The schema verdict (#628), on the same terms as the script keys below:
     // one builder, and the stored trace gets the *same* object, so a restored
@@ -590,6 +664,9 @@ const std::optional<vayu::core::ValidationVerdict>& validation) {
     // `record_design_result` for the trace's `scripts` key - one object, two
     // homes, so a key can never mean one thing live and another restored.
     response_json.update (scripts);
+    if (elements.is_array () && !elements.empty ()) {
+        response_json["elements"] = elements;
+    }
     return response_json;
 }
 
@@ -768,7 +845,8 @@ const vayu::Request& request,
 const vayu::Response& response,
 const StreamRecord* stream,
 const std::optional<vayu::core::ValidationVerdict>& validation,
-const nlohmann::json& scripts) {
+const nlohmann::json& scripts,
+const nlohmann::json& elements) {
     if (!run_id) {
         return;
     }
@@ -812,6 +890,9 @@ const nlohmann::json& scripts) {
         // Tests pane's worth of nothing on every stored send.
         if (scripts.is_object () && !scripts.empty ()) {
             trace["scripts"] = scripts;
+        }
+        if (elements.is_array () && !elements.empty ()) {
+            trace["elements"] = elements;
         }
 
         if (stream) {
@@ -1023,8 +1104,10 @@ struct DesignSend {
     /// every recording step keys off that.
     std::optional<std::string> run_id;
     vayu::Request request;
-    std::string pre_script;
-    std::string post_script;
+    /// This send's resolved, compiled element list (issue #1514) - the
+    /// payload's `elements` field, compiled once. `script.pre` / `script.post`
+    /// are the only script source left; a plain empty vector runs nothing.
+    std::shared_ptr<const std::vector<vayu::core::CompiledElement>> elements;
     std::optional<std::string> script_request_name;
     std::string cookie_scope;
     vayu::runtime::ScriptConfig script_config;
@@ -1070,6 +1153,15 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     if (!stream.ok) {
         vayu::utils::log_warning ("POST /execute - " + stream.error);
         return stream.error;
+    }
+
+    // Scripts are elements now (issue #1514's clean cut, no transitional
+    // alias): a caller still sending `preRequestScript` / `postRequestScript`
+    // / `tests` is refused before anything is built or written, exactly as
+    // the two write routes refuse them.
+    if (auto refusal = refuse_legacy_script_fields (json)) {
+        vayu::utils::log_warning ("POST /execute - " + *refusal);
+        return refusal;
     }
 
     // The row this send binds, if the caller named one (issue #601). Read
@@ -1171,9 +1263,10 @@ const ExecutePayload& payload,
 DesignSend& send) {
     const nlohmann::json& json = payload.json;
 
-    // Extract scripts
-    send.pre_script  = vayu::http::read_pre_request_script (json);
-    send.post_script = vayu::http::read_post_request_script (json);
+    // This send's elements (issue #1514) - `preRequestScript` /
+    // `postRequestScript` are refused before this point (`read_execute_payload`).
+    send.elements = std::make_shared<const std::vector<vayu::core::CompiledElement>> (
+    vayu::core::compile_elements (json.value ("elements", nlohmann::json::array ())));
 
     // The run row. Built even for a transient execution, because it is also
     // how this handler carries scope: `load_script_variable_scopes` and
@@ -1223,8 +1316,7 @@ DesignSend& send) {
     ", method=" + json.value ("method", "UNKNOWN") + ", url=" + json.value ("url", "UNKNOWN") +
     ", request_id=" + send.run.request_id.value_or ("none") +
     ", environment_id=" + send.run.environment_id.value_or ("none") +
-    ", has_pre_script=" + std::string (!send.pre_script.empty () ? "true" : "false") +
-    ", has_post_script=" + std::string (!send.post_script.empty () ? "true" : "false"));
+    ", elements=" + std::to_string (send.elements ? send.elements->size () : 0));
 
     if (send.run_id) {
         try {
@@ -1319,6 +1411,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // as it is on the buffered path.
     ScriptVariableScopes scopes;
     vayu::ScriptResult pre_script_result;
+    vayu::ScriptResult post_script_result_placeholder; // unused; step.before touches only pre_script_result
+    std::vector<vayu::core::ElementOutcome> pre_element_outcomes;
     std::vector<vayu::http::CookieWrite> pre_cookie_writes;
     // Resolved once here rather than at each of the three uses below
     // (the pre-request script's `pm.sendRequest`, the transfer, and
@@ -1344,27 +1438,60 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // that resolves on the buffered path and stays literal here would be one
     // send behaving two ways.
     scopes = load_script_variable_scopes (ctx.db, send.run);
-    if (!send.pre_script.empty ()) {
-        vayu::runtime::ScriptEngine script_engine (send.script_config);
-        auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (send.request);
-        bind_script_scopes (
-        pre_ctx, scopes, ctx.cookie_jar, send.cookie_scope, &pre_cookie_writes);
-        pre_ctx.request_id         = send.run.request_id;
-        pre_ctx.request_name       = send.script_request_name;
-        pre_ctx.transport          = transport;
-        pre_ctx.default_headers    = default_headers;
-        pre_ctx.max_response_bytes = script_response_bound;
-        // The same row the transfer below carries, on the same terms
-        // as the buffered path: a stream is still one send, and one
-        // send with a row is iteration 0 of 1.
-        if (send.data_row) {
-            pre_ctx.iteration_data  = &*send.data_row;
-            pre_ctx.iteration       = 0;
-            pre_ctx.vu              = vayu::core::SOLE_VIRTUAL_USER;
-            pre_ctx.iteration_count = 1;
-        }
-        pre_script_result =
-        execute_script (script_engine, send.pre_script, pre_ctx, "Pre-request");
+
+    static const std::vector<vayu::core::CompiledElement> NO_ELEMENTS;
+    const std::vector<vayu::core::CompiledElement>& elements =
+    send.elements ? *send.elements : NO_ELEMENTS;
+    // Built only where an element exists - the QuickJS runtime itself is
+    // what is not free, and a `script.pre` element's `apply` is the only
+    // thing here that reaches it.
+    std::optional<vayu::runtime::ScriptEngine> script_engine;
+    if (!elements.empty ()) {
+        script_engine.emplace (send.script_config);
+    }
+    {
+        // `step.after`'s reference is never read: `run_post_script` is not
+        // called from `step.before`, and the pipeline below runs only that
+        // one phase - the post half runs on the worker thread, in its own
+        // `ElementContext`, once the stream has terminated.
+        vayu::ScriptResult unread_post_result;
+        vayu::core::ElementContext element_ctx{
+            .request  = send.request,
+            .response = nullptr,
+            .run_pre_script =
+            [&] (const std::string& script) {
+                auto pre_ctx =
+                vayu::runtime::ScriptContext::for_prerequest (send.request);
+                bind_script_scopes (pre_ctx, scopes, ctx.cookie_jar,
+                send.cookie_scope, &pre_cookie_writes);
+                pre_ctx.request_id         = send.run.request_id;
+                pre_ctx.request_name       = send.script_request_name;
+                pre_ctx.transport          = transport;
+                pre_ctx.default_headers    = default_headers;
+                pre_ctx.max_response_bytes = script_response_bound;
+                // The same row the transfer below carries, on the same
+                // terms as the buffered path: a stream is still one send,
+                // and one send with a row is iteration 0 of 1.
+                if (send.data_row) {
+                    pre_ctx.iteration_data  = &*send.data_row;
+                    pre_ctx.iteration       = 0;
+                    pre_ctx.vu              = vayu::core::SOLE_VIRTUAL_USER;
+                    pre_ctx.iteration_count = 1;
+                }
+                return execute_script (*script_engine, script, pre_ctx, "Pre-request");
+            },
+            .run_post_script =
+            [] (const std::string&) { return vayu::ScriptResult{}; },
+            .pre_script_result  = pre_script_result,
+            .post_script_result = unread_post_result,
+            .set_variable =
+            [&] (std::string_view scope, const std::string& name, const std::string& value) {
+                set_scope_variable (scopes, scope, name, value);
+            },
+            .should_stop = nullptr, // A single exchange has nothing to interrupt.
+        };
+        vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,
+        element_ctx, elements, pre_element_outcomes);
     }
 
     // `stream` and `transient` are mutually exclusive - `read_stream_flag`
@@ -1412,14 +1539,16 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // pre-request script and the transfer used.
     spec.on_complete =
     [&db = ctx.db, &jar = ctx.cookie_jar, id = run_id, cookie_scope = send.cookie_scope,
-    run = send.run, script_config = send.script_config,
-    post_request_script = send.post_script, request_name = send.script_request_name,
-    scopes, iteration_data = send.data_row, transport, default_headers,
-    script_response_bound, pre_script_result] (const vayu::Request& sent,
-    const vayu::Response& response, const vayu::http::SseStreamContext& context) mutable {
+    run = send.run, script_config = send.script_config, elements = send.elements,
+    request_name = send.script_request_name, scopes, iteration_data = send.data_row,
+    transport, default_headers, script_response_bound, pre_script_result,
+    pre_element_outcomes] (const vayu::Request& sent, const vayu::Response& response,
+    const vayu::http::SseStreamContext& context) mutable {
         StreamRecord record;
         nlohmann::json scripts = nlohmann::json::object ();
-        record.events          = vayu::http::stream_trace_node (context);
+        std::vector<vayu::core::ElementOutcome> element_outcomes =
+        std::move (pre_element_outcomes);
+        record.events = vayu::http::stream_trace_node (context);
         if (context.end_reason () == vayu::http::SseEndReason::Stopped) {
             record.status = vayu::RunStatus::Stopped;
         } else if (response.has_error ()) {
@@ -1428,7 +1557,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
             record.status = vayu::RunStatus::Completed;
         }
 
-        const bool has_script_output = !post_request_script.empty () ||
+        const bool has_element_output = elements && !elements->empty ();
+        const bool has_script_output  = has_element_output ||
         !pre_script_result.tests.empty () ||
         !pre_script_result.console_output.empty () || !pre_script_result.success;
         if (has_script_output) {
@@ -1438,29 +1568,57 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
             // result row, which is the only record the stream leaves.
             try {
                 vayu::ScriptResult post_script_result;
-                if (!post_request_script.empty ()) {
+                if (has_element_output) {
                     vayu::runtime::ScriptEngine script_engine (script_config);
                     std::vector<vayu::http::CookieWrite> post_cookie_writes;
-                    auto post_ctx = vayu::runtime::ScriptContext::for_test (sent, response);
-                    bind_script_scopes (post_ctx, scopes, jar, cookie_scope, &post_cookie_writes);
-                    post_ctx.request_id         = run.request_id;
-                    post_ctx.request_name       = request_name;
-                    post_ctx.transport          = transport;
-                    post_ctx.default_headers    = default_headers;
-                    post_ctx.max_response_bytes = script_response_bound;
-                    if (iteration_data) {
-                        post_ctx.iteration_data = &*iteration_data;
-                        post_ctx.iteration      = 0;
-                        post_ctx.vu             = vayu::core::SOLE_VIRTUAL_USER;
-                        post_ctx.iteration_count = 1;
-                    }
-                    // The node the trace is about to store, not a copy
-                    // of it: `pm.response.eventsTruncated` and the
-                    // stored marker are then the same value by
-                    // construction rather than by agreement.
-                    post_ctx.response_events = &record.events;
-                    post_script_result       = execute_script (script_engine,
-                          post_request_script, post_ctx, "Post-request");
+                    // A local, mutable copy rather than casting away `sent` /
+                    // `response`'s const: nothing at `step.after` has a wire
+                    // left to carry a `pm.request` edit back onto, so the
+                    // copy is exactly as meaningful as the reference would
+                    // have been, without a const_cast.
+                    vayu::Request mutable_sent      = sent;
+                    vayu::Response mutable_response = response;
+                    vayu::core::ElementContext element_ctx{
+                        .request  = mutable_sent,
+                        .response = &mutable_response,
+                        .run_pre_script =
+                        [] (const std::string&) { return vayu::ScriptResult{}; },
+                        .run_post_script =
+                        [&] (const std::string& script) {
+                            auto post_ctx =
+                            vayu::runtime::ScriptContext::for_test (sent, response);
+                            bind_script_scopes (post_ctx, scopes, jar,
+                            cookie_scope, &post_cookie_writes);
+                            post_ctx.request_id         = run.request_id;
+                            post_ctx.request_name       = request_name;
+                            post_ctx.transport          = transport;
+                            post_ctx.default_headers    = default_headers;
+                            post_ctx.max_response_bytes = script_response_bound;
+                            if (iteration_data) {
+                                post_ctx.iteration_data = &*iteration_data;
+                                post_ctx.iteration      = 0;
+                                post_ctx.vu = vayu::core::SOLE_VIRTUAL_USER;
+                                post_ctx.iteration_count = 1;
+                            }
+                            // The node the trace is about to store, not a
+                            // copy of it: `pm.response.eventsTruncated` and
+                            // the stored marker are then the same value by
+                            // construction rather than by agreement.
+                            post_ctx.response_events = &record.events;
+                            return execute_script (
+                            script_engine, script, post_ctx, "Post-request");
+                        },
+                        .pre_script_result  = pre_script_result,
+                        .post_script_result = post_script_result,
+                        .set_variable =
+                        [&] (std::string_view scope, const std::string& name,
+                        const std::string& value) {
+                            set_scope_variable (scopes, scope, name, value);
+                        },
+                        .should_stop = nullptr,
+                    };
+                    vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter,
+                    element_ctx, *elements, element_outcomes);
                     // Nothing left to carry them - the transfer has
                     // already captured, exactly as on the buffered path.
                     jar.apply (cookie_scope, post_cookie_writes);
@@ -1479,7 +1637,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         // No verdict: a stream's body is an event stream, not a
         // document any response schema describes (see the contract on
         // the parameter).
-        record_design_result (db, id, sent, response, &record, std::nullopt, scripts);
+        record_design_result (db, id, sent, response, &record, std::nullopt,
+        scripts, build_element_outcomes_node (element_outcomes));
     };
 
     auto context = ctx.sse_manager.start (std::move (spec));
@@ -1517,8 +1676,7 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     // worse than a missing one (issue #300).
     ExchangeInputs inputs;
     inputs.request      = std::move (send.request);
-    inputs.pre_script   = send.pre_script;
-    inputs.post_script  = send.post_script;
+    inputs.elements     = send.elements;
     inputs.request_id   = send.run.request_id;
     inputs.request_name = send.script_request_name;
     // Read at the point of use, so a settings change applies to the next
@@ -1555,12 +1713,16 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     // empty-state that used to make "passed" and "never ran" identical.
     const nlohmann::json scripts =
     build_script_result_node (exchange.pre_script_result, exchange.post_script_result);
+    // Every compiled element's outcome (issue #1514) - `extract.*` /
+    // `assert.*` beside `script.pre` / `script.post`, on the same one-object-
+    // two-homes rule as `scripts` above.
+    const nlohmann::json elements = build_element_outcomes_node (exchange.element_outcomes);
 
     // Store result to database (non-blocking, errors logged). A transient
     // execution stops here: no trace row, so the post-auth headers this
     // exchange carries never reach disk - and neither do these results.
     record_design_result (ctx.db, send.run_id, exchange.request, exchange.response,
-    /*send.stream=*/nullptr, validation, scripts);
+    /*send.stream=*/nullptr, validation, scripts, elements);
 
     // Persist script-set variables (design mode only; best-effort)
     persist_script_variables (
@@ -1570,7 +1732,8 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     // Engine returns 200 - the server's status is in the response body
     res.status = 200;
     res.set_content (
-    build_response_json (exchange.response, scripts, validation).dump (2), "application/json");
+    build_response_json (exchange.response, scripts, validation, elements).dump (2),
+    "application/json");
 }
 
 /**
@@ -1883,8 +2046,11 @@ httplib::Response& res) {
     const auto max_snapshot_body_bytes =
     static_cast<size_t> (ctx.db.get_config_int ("maxTraceBodyBytes",
     static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
+    // Issue #1488 - see compression_scope_of's doc comment.
+    const auto header_policy = vayu::http::resolve_default_header_policy (
+    ctx.db, compression_scope_of (run.type));
     run.config_snapshot = run_config_snapshot (req.body, is_scenario,
-    scenario_manifest, load_data.set.get (), max_snapshot_body_bytes);
+    scenario_manifest, load_data.set.get (), header_policy, max_snapshot_body_bytes);
     seed_run_times (run, now_ms ());
 
     if (json.contains ("requestId") && !json["requestId"].is_null ()) {

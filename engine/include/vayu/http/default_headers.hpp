@@ -43,6 +43,11 @@ class Database;
  *   one with no `User-Agent` at all.
  * - **Nothing here is stored.** These are applied at send time from config, so
  *   they cannot go stale in a saved request the way the renderer's copies did.
+ *   A load or collection run's `config_snapshot` is the one deliberate
+ *   exception (issue #1488, `with_default_headers_snapshot` in
+ *   `http/routes/execution.cpp`): it records the resolved decision for a
+ *   later run's report to compare itself against, and never reads it back
+ *   into a send.
  * - **The correlation id is namespaced and off by default.** `X-Request-ID` is
  *   a public name gateways give their own meaning to; the default here is
  *   `X-Vayu-Request-Id`, and the name is configurable for a server that reads

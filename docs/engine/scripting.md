@@ -2377,9 +2377,10 @@ The **language** is current; what is missing is the **host environment**:
   was sent - and `vu`, which is `1` here because a single request repeated is
   one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
 - `POST /runs`'s `tests` field carries the collection chain's test scripts as
-  well as the request's own, composed the same way as `POST /execute` (see
-  [Script Parts](#script-parts) below) - a collection-level assertion is now
-  checked under load, not only in design mode
+  well as the request's own, joined into one script the way it always has been
+  (see [Script elements](#script-elements-design-send-and-the-sequential-run)
+  below) - a collection-level assertion is now checked under load, not only in
+  design mode
 - A value a pre-request script would have set - a token fetched and written
   with `pm.environment.set` - never reaches a later step or request under
   load, because the script that would set it never runs. The `{{token}}` it
@@ -2428,37 +2429,51 @@ shape:
 `pm.execution` still throws throughout - a deferred script cannot redirect a
 sequence that already happened - and no step script runs inline.
 
-## Script Parts
+## Script elements (design send and the sequential run)
 
-A script's effective source is composed of parts: the collection chain's own
-script, then the request's own script, in that order. Each route accepts its
-own field(s), each in either of two forms:
+Issue #1514 cut `POST /execute` and the stored resources (`POST`/`PUT
+/collections`, `POST`/`PUT /requests`) over to `elements` for good - a clean
+cut, not a transitional alias. `preRequestScript`, `preRequestScripts`,
+`postRequestScript`, `postRequestScripts` and `tests` are all refused with a
+`400` naming `elements` as the replacement (`null` is accepted as a no-op; a
+real value is not). A script is now a `script.pre` or `script.post` **element**
+- `{"kind": "script.pre" | "script.post", "config": {"script": "..."}}` -
+compiled and run by `vayu::core::ElementPipeline` at `step.before` /
+`step.after` alongside every other element kind. See
+[elements.md](elements.md).
 
-- `POST /execute` takes `preRequestScript` / `postRequestScript` (legacy
-  single string, already-joined text) or `preRequestScripts` /
-  `postRequestScripts` (a list of parts). The load path (`POST /runs`) does not
-  read either of these two keys.
-- `POST /runs` takes `tests` (the deferred validation script), either as a
-  legacy single string or as a list of parts. `POST /execute` does not read
-  `tests`.
+**Each script element runs its own script, independently - there is no more
+joined-parts scope.** A design send's or a sequential step's compiled list
+can carry more than one `script.pre` element (one folded from the collection,
+one from the request, say), and the pipeline calls each one's `apply` in
+list order, but every call opens a **fresh** `ScriptContext` - there is no
+longer a blank-line join that ran the collection's and the request's text as
+one script in one shared scope. A `const` or `let` one `script.pre` element
+declares is **not** visible to the next one. State that is meant to carry
+across them has to go through a store the elements share instead:
+`pm.environment` / `pm.collectionVariables` / `pm.globals` / `pm.iterationData`
+read back whatever an earlier element wrote, and a `pm.request` edit is
+visible to a later `script.pre` element (and to the send itself) because
+every element at a step shares the one `Request` object being sent - only the
+JavaScript variable scope is per-element. The same holds for `script.post`
+elements and `pm.response`.
 
-A list of parts is an array of objects, each recording where it came from -
-`{ "origin": "collection" | "request", "id": "...", "name": "...", "script":
-"..." }` - so a stored run can say which part is whose.
-
-When both the list and the legacy string are sent for the same field, **the
-list wins**; they are never merged. Parts that are empty or only whitespace are
-dropped.
-
-**The parts are joined with a blank line (`"\n\n"`) and run as a single script
-in one shared JavaScript scope** - one call to the script engine per field
-(`engine.execute()` for `preRequestScript(s)` / `postRequestScript(s)`,
-`engine.execute_test()` for `tests`), not one call per part. That means a
-`const` or `let` declared in the collection's part is visible to the
-request's part, exactly as if one person had typed the whole thing into one
-editor. It also means a syntax error's reported line number is counted from
-the start of the joined text, not from the start of whichever part actually
-has the mistake.
+**`POST /runs` is unchanged, and still joins.** It calls neither
+`refuse_legacy_script_fields` nor the element pipeline: a single-request load
+run's own deferred validation script still reads `tests` (or
+`postRequestScripts` / `postRequestScript`, tried in that order) exactly as
+before - a list of parts joined with a blank line and run as one script in one
+shared scope. A **scenario** load run (many virtual users replaying a
+collection concurrently) compiles each step's `elements` the same way the
+sequential run does (`resolve_step`), but only to answer two questions the
+load path already asked before elements existed - whether a step carries a
+`script.pre` / `script.post` element at all, for the "scripts do not run under
+load" warning and for deciding whether to sample a step's results - **it does
+not run `ElementPipeline`, and no element kind actually executes under
+load**. Wiring the pipeline into that path is issue #1495's job, not #1514's:
+until then, a design send and a sequential (single-VU) collection run are the
+only two places a `script.pre` / `script.post` element, or any other kind,
+actually runs.
 
 ## Error Handling
 

@@ -1226,8 +1226,7 @@ field whole, however large.
     "body": { "mode": "none" },
     "bodyType": "none",
     "auth": { "mode": "inherit" },
-    "preRequestScript": "",
-    "postRequestScript": "",
+    "elements": [],
     "followRedirects": true,
     "maxRedirects": 10,
     "httpVersion": "auto",
@@ -1273,8 +1272,7 @@ entry.
   "body": { "mode": "none" },
   "bodyType": "none",
   "auth": { "mode": "inherit" },
-  "preRequestScript": "",
-  "postRequestScript": "",
+  "elements": [],
   "followRedirects": true,
   "maxRedirects": 10,
   "httpVersion": "auto",
@@ -1307,8 +1305,9 @@ the null-vs-absent rule.
   "body": {"mode": "none"},          // Optional, request body
   "bodyType": "none",                // Optional, mirrors body.mode - see The request body union
   "auth": {},                        // Optional, authentication config
-  "preRequestScript": "",            // Optional, JavaScript pre-request script
-  "postRequestScript": "",           // Optional, JavaScript test script
+  "elements": [],                    // Optional, typed behaviours - see Elements. The only
+                                      // script source; preRequestScript/postRequestScript/tests
+                                      // are refused (400, naming "elements")
   "order": 0,                        // Optional, appended after the collection's requests if
                                       // omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
@@ -1400,21 +1399,18 @@ coerced. Changing the global `defaultHttpVersion` afterward does not
 retroactively alter a request already saved; only an explicit `null` on this
 request re-seeds it.
 
-**`preRequestScript` and `postRequestScript`** take the same rule, and the empty
-string is where it bites: an absent key leaves the stored script untouched,
-while `""` is a value that stores and is therefore how a script is *cleared*.
-`null` clears it too, since the default for these fields is the empty string. A
-client that means "delete this script" has to send `""` rather than dropping the
-key - the app sent `script || undefined` until #1381, which serialises the key
-out of the body, so deleting a script saved nothing and reported success.
+**`preRequestScript`, `postRequestScript` and `tests` are refused.** Issue
+#1514's cut-over is a clean cut, not a transitional alias: any of these three
+keys present (even `null` is accepted as a no-op, but a real value is not) is a
+`400` naming `elements` as the replacement. Scripts are `elements` now -
+`{"kind": "script.pre" | "script.post", "config": {"script": "..."}}`.
 
-**`elements`** (issue #1513) takes the array rule: absent keeps the stored list;
-`null` resets it to `[]`; a present value must be an array the element registry
-accepts (see [Elements](elements.md)) or the write is a `400` naming the index,
-the kind and the field. Additive beside `preRequestScript` / `postRequestScript`
-above, not a replacement for them - a request with no elements editor yet keeps
-using the two script fields exactly as before, and both may be set on the same
-write.
+**`elements`** (issue #1513, run by issue #1514's pipeline) takes the array
+rule: absent keeps the stored list; `null` resets it to `[]`; a present value
+must be an array the element registry accepts (see [Elements](elements.md)) or
+the write is a `400` naming the index, the kind and the field. The only script
+source - `GET /requests/:id` and every list response carry it and no longer
+carry `preRequestScript` / `postRequestScript` at all.
 
 **Response:** The updated request object.
 
@@ -2829,7 +2825,7 @@ about a document" true rather than nearly true.
 ```json
 {
   "collections": [ { "name": "Sample API", "description": "", "variables": {}, "auth": {"mode":"none"},
-                     "preRequestScript": "", "postRequestScript": "", "children": [], "requests": [] } ],
+                     "elements": [], "children": [], "requests": [] } ],
   "environments": [],
   "globals": {},
   "meta": {
@@ -2947,7 +2943,7 @@ accepted a client-supplied `id` - which they no longer do (see
     { "tempId": "c1", "parentTempId": null, "name": "My API", "order": 0,
       "variables": {}, "auth": {"mode":"none"},
       "openapi": {"specTempId": "s1"},
-      "preRequestScript": "", "postRequestScript": "" },
+      "elements": [] },
     { "tempId": "c2", "parentTempId": "c1", "name": "Users", "order": 0 }
   ],
   "requests": [
@@ -4091,8 +4087,7 @@ and is never re-resolved - see [POST /execute](#post-execute) and
     "headers": { "X-Token": "{{token}}" },
     "body": { "mode": "json", "content": "{\"name\":\"{{name}}\"}" },
     "auth": { "mode": "inherit" },
-    "preRequestScripts": [],
-    "postRequestScripts": []
+    "elements": []
   },
   "collectionId": "col_1234567890", // Optional: chain scope for an inline request
   "environmentId": "env_1234567890", // Optional: environment scope
@@ -4142,8 +4137,9 @@ and is never re-resolved - see [POST /execute](#post-execute) and
 
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to
-  `inherit`), the ordered script-part lists (collection chain root→leaf, then
-  the request's own), the stored execution options (`followRedirects` /
+  `inherit`), the resolved `elements` list (collection chain root→leaf, then
+  the request's own, each stamped with its origin - see [Elements](elements.md)),
+  the stored execution options (`followRedirects` /
   `maxRedirects` / `httpVersion` / `verifySSL`, always emitted) and its `requestName` (the
   script sandbox reads it as `pm.info.requestName`; omitted when the row's name
   is empty). The request's own collection scopes resolution; `collectionId` is
@@ -4297,8 +4293,12 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by scripts as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional, uses environment variables
-  "preRequestScript": "",              // Optional
-  "postRequestScript": "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));",
+  "elements": [                        // Optional, typed behaviours - see Elements. The only
+                                       // script source; preRequestScript/postRequestScript(s)/tests
+                                       // are refused (400, naming "elements")
+    { "kind": "script.post", "config": { "script":
+      "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));" } }
+  ],
   "allowScriptRequests": false,        // Optional, default false - see below
   "followRedirects": true,             // Optional, default true
   "maxRedirects": 10,                  // Optional, default 10
@@ -4486,36 +4486,32 @@ streaming send's scripts are governed by it exactly as a buffered send's are -
 the app sends it on both halves of Send (issue #653). See
 [scripting.md](scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
-**Script parts.** `preRequestScript` / `postRequestScript` above are the legacy
-single-string form and still work. The engine also accepts `preRequestScripts`
-/ `postRequestScripts`: a list of parts, each recording where it came from, so
-a stored run can say which part is the collection's and which is the
-request's:
+**`elements` is the only script source, and it runs** (issue #1514's cut-over,
+replacing #1513's `preRequestScript(s)` / `postRequestScript(s)`). A caller
+still sending any of `preRequestScript`, `preRequestScripts`,
+`postRequestScript`, `postRequestScripts` or `tests` - even naming one with
+`null` is accepted as a no-op, but a real value is not - is refused with a
+`400` naming `elements` as the replacement, before any run row exists. For
+the by-id path, an element list a caller supplies inline is laid over `POST
+/compose`'s own resolved chain (collection root to leaf, then the request's
+own, minus anything disabled or named by an `inherit.disable` entry, each
+stamped with `origin: {kind: "collection" | "request", id, name?}`) exactly
+as any other inline field overlays the stored one; an inline-only send has no
+chain to resolve one from, so its elements carry no `origin`.
 
-```json
-{
-  "preRequestScripts": [
-    { "origin": "collection", "id": "c1", "name": "API", "script": "const base = pm.environment.get('baseUrl');" },
-    { "origin": "request", "id": "r1", "script": "pm.environment.set('traceId', base);" }
-  ]
-}
-```
-
-When both forms are sent, the list wins - they are never merged. Parts are
-joined with a blank line and run as a single script in one shared scope (see
-[scripting.md](scripting.md#script-parts)), so a variable declared in an
-earlier part is visible to a later one; parts that are empty or only
-whitespace are dropped.
-
-**`elements`** (issue #1513, additive beside everything above) is `POST
-/compose`'s own resolved element list for a saved request's chain: the
-collection chain's elements root to leaf, then the request's own, minus
-anything disabled or named by an `inherit.disable` entry, each stamped with
-`origin: {kind: "collection" | "request", id, name?}`. Present only for the
-by-id path (an inline `request` has no chain to resolve one from). Nothing
-in the engine executes it yet - the pipeline that does is issue #1514 - so
-today it is informational, resolved the same request the script parts above
-are.
+`vayu::core::ElementPipeline` runs the compiled list at each phase this send
+reaches: `script.pre` elements at `step.before`, immediately before the
+transfer (so a `pm.request` edit reaches the wire); `extract.*` / `assert.*` /
+`script.post` elements at `step.after`, once the response (or, for a
+streaming send, the terminated stream) is in. `assert.*` outcomes append to
+the same `pm.test()` channel a `script.post` element's assertions do, so the
+response body's `testResults` and `consoleLogs` (see below) do not
+distinguish a declarative assertion from one a script wrote by hand. The
+response body and the stored trace both carry an `elements` array beside
+`scripts` - one entry per element that ran, each `{id, kind, origin, outcome,
+message?, waitedMs?, wrote?}` with `outcome` one of `ok` | `failed` |
+`missing` | `skipped` | `error` (a disabled element reports `skipped` without
+its `apply` ever running) - see [Elements](elements.md#the-step-trace).
 
 **The pre-request script can change what is sent.** Its `pm.request` edits -
 method, url, headers, body - are applied to the request before it goes out, and
@@ -5661,11 +5657,11 @@ top-level `warnings` array below.
 }
 ```
 
-**`tests` accepts both forms**, like `preRequestScripts` / `postRequestScripts`
-on `POST /execute` above: the legacy single string, or a list of parts
+**`tests` accepts both forms** - the legacy single string, or a list of parts
 (`[{ "origin": "collection" | "request", "id", "name", "script" }]`) that the
-engine joins itself (see [scripting.md](scripting.md#script-parts)). The list
-wins when both are sent. Sending the collection chain's parts means its
+engine joins itself, unchanged since before issue #1514 (see
+[scripting.md](scripting.md#script-elements-design-send-and-the-sequential-run)).
+The list wins when both are sent. Sending the collection chain's parts means its
 assertions are now actually checked under load - previously only the
 request's own `tests` string was ever sent, so a collection-level assertion
 passed in design mode and was silently never validated by a load run.
@@ -6371,7 +6367,14 @@ Every parameter composes with every other; each one left out is a wildcard.
 `duration`, `concurrency`, `comment`, `followRedirects`, `maxRedirects`, and
 `httpVersion`. The first eight are each **omitted** when absent from the
 snapshot (a malformed snapshot yields an empty `summary`, never a `500`);
-`httpVersion` alone is always present. A raw `POST /runs` body of
+`httpVersion` alone is always present. Every run since issue #1488 adds a
+tenth, `acceptEncoding`: `true` when the run negotiated a compressed response
+(`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
+load run - see [Default request headers](#default-request-headers)), `false`
+when it did not, and **omitted**, not defaulted, for a run recorded before
+that issue -
+the baseline comparison (below) is the one reader that treats an absent key as
+`false`, matching what every such run actually sent. A raw `POST /runs` body of
 `"httpVersion": null` (erased before execution, so it behaves exactly like an
 absent key - see [POST /runs](#post-runs)) lands in the stored snapshot
 verbatim, and a run predating this field has no key at all; neither case
@@ -6533,6 +6536,20 @@ to fetch the whole body.
 `body` object gains the same `bodyTruncated` / `bodyBytes` pair. A run can be
 truncated on one side and not the other, since each is written by its own call
 into `sanitize_config_snapshot`.
+
+A load or collection run's `configSnapshot` also carries `defaultHeaders`
+(issue #1488), the run's resolved decision at start about what the engine
+would add to a request nobody wrote it into - never re-read for the send
+itself (see [Default request headers](#default-request-headers)), kept only
+so a later run's report can say whether the two measured under the same
+conditions:
+
+```json
+"defaultHeaders": { "userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding": true }
+```
+
+Absent on a design run (it carries no throughput to compare) and on any run
+recorded before this issue.
 
 ### POST /runs/:runId/stop
 
@@ -6742,7 +6759,8 @@ named it.
       "followRedirects": true,
       "maxRedirects": 10,
       "httpVersion": "auto",
-      "dataRowCount": 2
+      "dataRowCount": 2,
+      "acceptEncoding": true
     },
     "openapi": {
       "specId": "spec_3f2b1c9a-...",
@@ -6868,7 +6886,9 @@ they are counted, not fixed. Each entry carries `code` and a human-readable
 `names` (a few of the unresolved names, capped); `pre_request_script_skipped`
 carries `steps` (how many carried one). Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
-every run that genuinely had nothing to say.
+every run that genuinely had nothing to say. `unresolved_tokens` covers every
+load shape alike (issue #1540): a single-request run with no data set and a
+scenario step report the same warning for the same mistake.
 
 **A streaming run adds a `stream` section** and no other run carries one:
 
@@ -7035,7 +7055,9 @@ snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,
 `rampUpDuration`, `timeout`, `comment`, `followRedirects`, `maxRedirects` -
 each omitted when absent) plus `httpVersion`, which is always present with the
 same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
-above). `rps` in the raw snapshot is renamed to `targetRps` here.
+above), and `acceptEncoding` (issue #1488), read out of the snapshot's
+`defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key
+of the same name. `rps` in the raw snapshot is renamed to `targetRps` here.
 
 ### GET /runs/:runId/samples
 

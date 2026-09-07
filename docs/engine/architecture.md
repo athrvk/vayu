@@ -599,16 +599,29 @@ unresolved-token painting; the shared conformance fixture
 (`engine/tests/fixtures/variable-resolution-conformance.json`) holds it to the
 engine's behaviour.
 
-Script composition: clients on the inline path send an ordered list of parts
-(`{ origin: "collection" | "request", id?, name?, script }` -
-`preRequestScripts` / `postRequestScripts` on `POST /execute`, `tests` on
-`POST /runs`; the legacy single-string field still works) built by walking the
-collection chain root-to-leaf then appending the request's own (`scriptParts`
-in `app/src/modules/request-builder/utils/script-parts.ts`); the by-id path
-builds the same list engine-side. The engine joins the parts with `"\n\n"`,
-dropping any whose script is empty or only whitespace, and runs the result once
-(`engine/src/http/script_parts.cpp::read_script`). Script text is **never**
-interpolated - a `{{...}}` inside a script is user JavaScript, not a template.
+Script composition on `POST /execute` and the sequential run: a script is a
+`script.pre` / `script.post` **element** (#1514's cut-over off #1513's two
+script columns), resolved the same way every other element kind is - the
+collection chain's `elements` root-to-leaf, then the request's own, minus
+anything disabled or named by an `inherit.disable` entry, each stamped with
+its origin (`compose_elements` engine-side for the by-id path; a client on the
+inline path sends its own `elements` array and it overlays the resolved chain
+field by field). `preRequestScript(s)` / `postRequestScript(s)` / `tests` are
+refused with a `400` naming `elements` on `POST /execute` and on the stored
+resources alike - a clean cut, not a transitional alias. Each `script.pre` /
+`script.post` element runs as its **own** script, in its own fresh
+`ScriptContext`, at `ElementPipeline`'s `step.before` / `step.after` - there is
+no longer a blank-line join across a chain's script elements; state that must
+carry from one to the next goes through `pm.environment` /
+`pm.collectionVariables` / `pm.globals` / `pm.iterationData`, or, for a
+`pm.request` edit, through the one `Request` object every element at the step
+shares. Script text is **never** interpolated - a `{{...}}` inside a script is
+user JavaScript, not a template. `POST /runs`'s own deferred `tests` script is
+unchanged by any of this (#1495's job): it still takes an ordered list of parts
+(`{ origin: "collection" | "request", id?, name?, script }`, or the legacy
+single-string field) joined with `"\n\n"` into one script run once
+(`engine/src/http/script_parts.cpp::read_script`), and a scenario load run does
+not run any element at all - see [scripting.md](scripting.md#script-elements-design-send-and-the-sequential-run).
 
 ### Database (`SQLite`)
 
@@ -755,17 +768,28 @@ came back.
 
 Recorded here rather than left to be re-derived: **JMeter's logic-controller
 zoo** (if / while / switch / loop / interleave - `setNextRequest` covers the
-workflows people actually build); **k6's open-model and arrival-rate executors
-for scenarios**; **distributed load**; **the engine reading data files from
-disk** (the sandbox has no filesystem, and a user-supplied path would be a new
-trust boundary); **parallel steps within an iteration** (an iteration is
-ordered - that is the whole primitive); **a scenario-level test script**
-asserting across steps; **replacing `run_collection_smoke`** (an unordered,
+workflows people actually build; a declarative `controller.*` element kind is
+future work, #1497/#1515, and even then names a condition, not a nested
+sub-flow); **k6's open-model and arrival-rate executors for scenarios**;
+**distributed load**; **the engine reading data files from disk** (the
+sandbox has no filesystem, and a user-supplied path would be a new trust
+boundary); **parallel steps within an iteration** (an iteration is ordered -
+that is the whole primitive); **a scenario-level test script** asserting
+across steps; **replacing `run_collection_smoke`** (an unordered,
 share-nothing, agent-facing matrix is a different tool and stays); and
-**inline scripts on the load path**. The escape hatch for that last one, if it
-is ever wanted, is a bounded pool of QuickJS contexts per worker evaluated only
-for iterations the sampler already selected - its own issue, and its own
-benchmark.
+**inline elements on the load path**. As of #1514, `extract.*`, `assert.*`,
+`timer.think` and `script.*` are declarative elements that run **inline** -
+synchronously, per step, in list order - everywhere this section's design
+send and sequential run cover; under **load** none of them do, `POST /runs`
+still runs no element at all (a scenario load run only inspects a step's
+compiled `elements` to decide whether to warn and whether to sample it), and a
+script stays deferred: replayed against the sampled responses after the run
+drains, exactly as it did before elements existed. Wiring the pipeline into
+that path, so a load run's `extract.*` and `assert.*` run inline too rather
+than only a deferred script, is #1495's job. The escape hatch for a script
+staying inline there too, if it is ever wanted, is a bounded pool of QuickJS
+contexts per worker evaluated only for iterations the sampler already
+selected - its own issue, and its own benchmark.
 
 Two things were deliberately left open: whether a **stored scenario entity**
 ever lands (the seam exists; the demand does not), and **retry /

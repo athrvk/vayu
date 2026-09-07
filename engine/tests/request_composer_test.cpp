@@ -447,14 +447,22 @@ class RequestComposerTest : public ::testing::Test {
         if (!parent_id.empty ()) {
             col.parent_id = parent_id;
         }
-        col.name                = "Collection " + id;
-        col.variables           = variables;
-        col.auth                = auth;
-        col.pre_request_script  = pre;
-        col.post_request_script = post;
-        col.order               = 0;
-        col.created_at          = 1;
-        col.updated_at          = 1;
+        col.name      = "Collection " + id;
+        col.variables = variables;
+        col.auth      = auth;
+        json elements = json::array ();
+        if (!pre.empty ()) {
+            elements.push_back ({ { "id", "el_pre_" + id }, { "kind", "script.pre" },
+            { "enabled", true }, { "config", { { "script", pre } } } });
+        }
+        if (!post.empty ()) {
+            elements.push_back ({ { "id", "el_post_" + id }, { "kind", "script.post" },
+            { "enabled", true }, { "config", { { "script", post } } } });
+        }
+        col.elements   = elements.dump ();
+        col.order      = 0;
+        col.created_at = 1;
+        col.updated_at = 1;
         db_->create_collection (col);
     }
 
@@ -539,14 +547,16 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
 
     auto r = make_request ("req_1", "leaf");
     r.headers = R"([{"key":"X-Token","value":"{{token}}","enabled":true},{"key":"X-Off","value":"nope","enabled":false},{"key":"","value":"dropped"}])";
-    r.body = R"({"mode":"json","content":"{\"host\":\"{{host}}\"}"})";
-    r.auth = R"({"mode":"inherit"})";
-    r.pre_request_script  = "console.log('own pre');";
-    r.post_request_script = "";
-    r.follow_redirects    = false;
-    r.max_redirects       = 3;
-    r.http_version        = "http2";
-    r.verify_ssl          = false;
+    r.body     = R"({"mode":"json","content":"{\"host\":\"{{host}}\"}"})";
+    r.auth     = R"({"mode":"inherit"})";
+    r.elements = json::array (
+    { json{ { "id", "el_own_pre" }, { "kind", "script.pre" }, { "enabled", true },
+    { "config", { { "script", "console.log('own pre');" } } } } })
+                 .dump ();
+    r.follow_redirects = false;
+    r.max_redirects    = 3;
+    r.http_version     = "http2";
+    r.verify_ssl       = false;
     db_->save_request (r);
 
     auto [status, payload] = vayu::http::compose_request_core (
@@ -569,15 +579,22 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     EXPECT_EQ (payload["auth"]["mode"], "bearer");
     EXPECT_EQ (payload["auth"]["token"], "leaf-token");
 
-    // Script parts: chain root->leaf then the request's own, blanks dropped.
-    ASSERT_EQ (payload["preRequestScripts"].size (), 2u);
-    EXPECT_EQ (payload["preRequestScripts"][0]["origin"], "collection");
-    EXPECT_EQ (payload["preRequestScripts"][0]["id"], "root");
-    EXPECT_EQ (payload["preRequestScripts"][1]["origin"], "request");
-    EXPECT_EQ (payload["preRequestScripts"][1]["script"], "console.log('own pre');");
-    ASSERT_EQ (payload["postRequestScripts"].size (), 2u);
-    EXPECT_EQ (payload["postRequestScripts"][0]["id"], "root");
-    EXPECT_EQ (payload["postRequestScripts"][1]["id"], "leaf");
+    // Elements: chain root->leaf (each level's own elements in the order
+    // seeded: pre then post) then the request's own (issue #1514's cut-over -
+    // `elements` is the only script source now). root carries both pre and
+    // post, leaf only post, the request only its own pre.
+    ASSERT_EQ (payload["elements"].size (), 4u);
+    EXPECT_EQ (payload["elements"][0]["kind"], "script.pre");
+    EXPECT_EQ (payload["elements"][0]["origin"]["kind"], "collection");
+    EXPECT_EQ (payload["elements"][0]["origin"]["id"], "root");
+    EXPECT_EQ (payload["elements"][0]["config"]["script"], "console.log('root pre');");
+    EXPECT_EQ (payload["elements"][1]["kind"], "script.post");
+    EXPECT_EQ (payload["elements"][1]["origin"]["id"], "root");
+    EXPECT_EQ (payload["elements"][2]["kind"], "script.post");
+    EXPECT_EQ (payload["elements"][2]["origin"]["id"], "leaf");
+    EXPECT_EQ (payload["elements"][3]["kind"], "script.pre");
+    EXPECT_EQ (payload["elements"][3]["origin"]["kind"], "request");
+    EXPECT_EQ (payload["elements"][3]["config"]["script"], "console.log('own pre');");
 
     // Execution options always emitted from the stored row.
     EXPECT_EQ (payload["followRedirects"], false);

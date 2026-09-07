@@ -37,6 +37,7 @@
 
 #include "echo_server.hpp"
 #include "optional_assert.hpp"
+#include "step_elements_test_helper.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -478,7 +479,7 @@ class ResidualTokenExchangeTest : public ::testing::Test {
 
         vayu::http::routes::ExchangeInputs inputs;
         inputs.request     = std::move (request);
-        inputs.pre_script  = pre;
+        inputs.elements    = vayu::tests::step_elements_with_pre_script (pre);
         inputs.in_scenario = in_scenario;
         return execute_exchange (engine, jar, "", scopes, std::move (inputs));
     }

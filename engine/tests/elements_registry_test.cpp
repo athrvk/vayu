@@ -237,144 +237,40 @@ TEST_F (ElementsRouteTest, PutWithAnUnknownKindReturns400NamingIt) {
     std::string::npos);
 }
 
-TEST_F (ElementsRouteTest, LegacyScriptFieldsStillSaveBesideElements) {
-    // #1513 lands `elements` additively: the app's two script tabs (#1516's
-    // job to replace) still edit `preRequestScript` / `postRequestScript`
-    // directly, and that must keep working exactly as before.
+TEST_F (ElementsRouteTest, LegacyScriptFieldsAreRefused) {
+    // Issue #1514's clean cut (the owner's decision on #1512): no
+    // transitional read/write alias, so a caller still sending
+    // `preRequestScript` / `postRequestScript` / `tests` is refused rather
+    // than silently accepted or ignored.
+    const std::string collection = make_collection ();
+    for (const char* key : { "preRequestScript", "postRequestScript", "tests" }) {
+        auto [status, body] = create_request_response (*db_,
+        json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+        { "url", "https://example.test" }, { key, "pm.test('ok', () => {});" } });
+        EXPECT_EQ (status, 400) << key;
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("elements"), std::string::npos)
+        << key;
+    }
+}
+
+TEST_F (ElementsRouteTest, NeitherSerializerEmitsTheRetiredScriptKeys) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,
              json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
-             { "url", "https://example.test" }, { "preRequestScript", "pm.test('ok', () => {});" } });
+             { "url", "https://example.test" },
+             { "elements",
+             json::array ({ json{ { "kind", "script.pre" },
+             { "config", { { "script", "pm.test('ok', () => {});" } } } } }) } });
     ASSERT_EQ (status, 200);
-    EXPECT_EQ (body["preRequestScript"], "pm.test('ok', () => {});");
-    EXPECT_EQ (body["elements"], json::array ());
-}
+    EXPECT_FALSE (body.contains ("preRequestScript"));
+    EXPECT_FALSE (body.contains ("postRequestScript"));
+    EXPECT_EQ (body["elements"][0]["kind"], "script.pre");
 
-class ScriptsFoldedIntoElementsTest : public ::testing::Test {
-    protected:
-    static constexpr const char* DB_PATH = "test_scripts_fold.db";
-
-    void SetUp () override {
-        cleanup ();
-        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
-        db_->init ();
-    }
-    void TearDown () override {
-        db_.reset ();
-        cleanup ();
-    }
-    static void cleanup () {
-        vayu::tests::remove_database_files (DB_PATH);
-    }
-
-    // `SetUp` already ran the fold on an empty database, which marks it done
-    // (issue #1487's precedent) - a test adding 0.26-shaped data afterwards
-    // must clear the marker first, or the pass skips it outright.
-    void reset_fold_marker () {
-        db_->save_config_entry (vayu::db::ConfigEntry{
-        .key              = "scriptsFoldedIntoElements",
-        .value            = "false",
-        .type             = "boolean",
-        .label            = "Scripts folded into elements",
-        .description      = "",
-        .category         = "general_engine",
-        .default_value    = "false",
-        .min_value        = std::nullopt,
-        .max_value        = std::nullopt,
-        .options          = std::nullopt,
-        .updated_at       = 0,
-        .requires_restart = false,
-        .advanced         = true,
-        .keywords         = "[]",
-        .unit             = std::nullopt,
-        });
-    }
-
-    std::unique_ptr<vayu::db::Database> db_;
-};
-
-TEST_F (ScriptsFoldedIntoElementsTest, AScriptedRowGainsElementsAndKeepsItsScriptFields) {
-    vayu::db::Collection col;
-    col.id   = "col_1";
-    col.name = "C";
-    db_->create_collection (col);
-
-    vayu::db::Request scripted;
-    scripted.id                  = "req_scripted";
-    scripted.collection_id       = "col_1";
-    scripted.name                = "Scripted";
-    scripted.url                 = "https://example.test/";
-    scripted.pre_request_script  = "pm.environment.set('x', 1);";
-    scripted.post_request_script = "pm.test('ok', () => {});";
-    db_->save_request (scripted);
-
-    vayu::db::Request plain;
-    plain.id            = "req_plain";
-    plain.collection_id = "col_1";
-    plain.name          = "Plain";
-    plain.url           = "https://example.test/plain";
-    db_->save_request (plain);
-
-    reset_fold_marker ();
-    EXPECT_EQ (db_->fold_scripts_into_elements (), 1);
-
-    auto folded = db_->get_request ("req_scripted");
-    ASSERT_HAS_VALUE (folded);
-    // Scripts are untouched - #1514's pipeline still runs them from here.
-    EXPECT_EQ (folded->pre_request_script, "pm.environment.set('x', 1);");
-    EXPECT_EQ (folded->post_request_script, "pm.test('ok', () => {});");
-    const auto elements = json::parse (folded->elements);
-    ASSERT_EQ (elements.size (), 2u);
-    EXPECT_EQ (elements[0]["kind"], "script.pre");
-    EXPECT_EQ (elements[0]["config"]["script"], "pm.environment.set('x', 1);");
-    EXPECT_EQ (elements[1]["kind"], "script.post");
-    EXPECT_EQ (elements[1]["config"]["script"], "pm.test('ok', () => {});");
-    // Validate-only (no `compile`): the fold's own output must round-trip
-    // through the same validator every write route runs, or a client that
-    // reads a migrated row back could never PUT it as-is.
-    EXPECT_FALSE (Registry::instance ().validate (elements).has_value ());
-
-    auto untouched = db_->get_request ("req_plain");
-    ASSERT_HAS_VALUE (untouched);
-    EXPECT_EQ (untouched->elements, "[]");
-
-    // Idempotent: the second call must find nothing left to fold.
-    EXPECT_EQ (db_->fold_scripts_into_elements (), 0);
-}
-
-TEST_F (ScriptsFoldedIntoElementsTest, ASecondStartupSkipsTheScanOnceMarkedDone) {
-    vayu::db::Collection col;
-    col.id   = "col_marker";
-    col.name = "C";
-    db_->create_collection (col);
-
-    vayu::db::Request scripted;
-    scripted.id                 = "req_marker";
-    scripted.collection_id      = "col_marker";
-    scripted.name               = "Scripted";
-    scripted.url                = "https://example.test/";
-    scripted.pre_request_script = "pm.environment.set('x', 1);";
-    db_->save_request (scripted);
-
-    reset_fold_marker ();
-    EXPECT_EQ (db_->fold_scripts_into_elements (), 1);
-    EXPECT_TRUE (db_->get_config_bool ("scriptsFoldedIntoElements", false));
-
-    // Added after the marker was set: a real scan would find and fold it,
-    // but the marker means the pass never looks.
-    vayu::db::Request late;
-    late.id                 = "req_late";
-    late.collection_id      = "col_marker";
-    late.name               = "Late";
-    late.url                = "https://example.test/late";
-    late.pre_request_script = "pm.environment.set('y', 2);";
-    db_->save_request (late);
-
-    EXPECT_EQ (db_->fold_scripts_into_elements (), 0)
-    << "the marker should have skipped the scan outright";
-    auto still_unfolded = db_->get_request ("req_late");
-    ASSERT_HAS_VALUE (still_unfolded);
-    EXPECT_EQ (still_unfolded->elements, "[]");
+    const json listed = json::parse (list_requests_body (*db_, collection));
+    ASSERT_EQ (listed.size (), 1u);
+    EXPECT_FALSE (listed[0].contains ("preRequestScript"));
+    EXPECT_FALSE (listed[0].contains ("postRequestScript"));
 }
 
 /**

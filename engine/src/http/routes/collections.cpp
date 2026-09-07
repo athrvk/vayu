@@ -253,10 +253,11 @@ bool is_create) {
     !outcome) {
         return outcome;
     }
-    apply_string_field (json, "preRequestScript", c.pre_request_script, "", is_create);
-    apply_string_field (json, "postRequestScript", c.post_request_script, "", is_create);
-    // Elements (issue #1513), additive beside the two script fields above -
-    // see the equivalent comment in requests.cpp's apply_request_fields.
+    // Scripts are elements now (issue #1514's clean cut) - see the
+    // equivalent comment in requests.cpp's apply_request_fields.
+    if (auto refusal = refuse_legacy_script_fields (json)) {
+        return route_error (400, *refusal);
+    }
     if (auto outcome = apply_elements_field (json, "elements", c.elements, is_create);
     !outcome) {
         return outcome;
@@ -456,7 +457,7 @@ void register_collection_routes (RouteContext& ctx) {
      * pointing at PUT, never a silent update (issue #95). The engine assigns
      * the id; a body carrying one is a 400 (issue #97).
      * Body params: name (required string), description, parentId, order,
-     * variables, auth, preRequestScript, postRequestScript.
+     * variables, auth, elements.
      * Returns: The created collection object, or 400 (body `id`, missing
      * `name`, bad field shape, cycle).
      */
