@@ -14,6 +14,7 @@ import type {
 	DeclaredOperation,
 	ResponseSchemaIndex,
 	SpecOperation,
+	MethodSource,
 	Request,
 	Environment,
 	Run,
@@ -178,6 +179,8 @@ export interface CreateRequestRequest {
 	stream?: boolean;
 	/** Which spec operation this request is - see {@link Request.specOperation}. */
 	specOperation?: SpecOperation;
+	/** Which app setting wrote `method` - see {@link Request.methodSource}. */
+	methodSource?: MethodSource;
 	order?: number;
 }
 
@@ -212,6 +215,12 @@ export interface UpdateRequestRequest {
 	 * un-stamping are the same verb.
 	 */
 	specOperation?: SpecOperation | null;
+	/**
+	 * `MethodSource | null`, same rule as `specOperation` above: absent keeps
+	 * the stored marker and an explicit `null` clears it - which is what
+	 * leaving GraphQL, or picking a method by hand, sends.
+	 */
+	methodSource?: MethodSource | null;
 	order?: number;
 }
 

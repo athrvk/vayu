@@ -498,6 +498,14 @@ A request carries **`specOperation`** - which operation of the bound spec it is
 absent key; on `updateRequest` the field is `SpecOperation | null`, so stamping
 and clearing an identity are the same verb.
 
+A request also carries **`methodSource`** - which app setting last wrote
+`method`, still unclaimed by the user (issue #1505): `MethodSource` (`"graphql"`,
+the GraphQL body mode's auto-`POST`) or absent. Same null-vs-absent rule as
+`specOperation`: the engine serializes `null` for no marker, `RequestTransformer`
+turns that into an absent key and drops a value it does not recognize, and
+`updateRequest`'s field is `MethodSource | null`, so leaving GraphQL - or
+picking a method by hand - clears the marker the same way.
+
 #### Trash
 
 ```typescript

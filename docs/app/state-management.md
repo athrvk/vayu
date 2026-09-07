@@ -2158,11 +2158,6 @@ in the provider - is what drops one belonging to another request.
 
 ### `RequestBuilderContext` - the headers a setting added
 
-```typescript
-getAutoMethod: () => AutoMethod | null
-setAutoMethod: (auto: AutoMethod | null) => void
-```
-
 Two settings each own a header row: the body mode's `Content-Type` (written by
 `BodyPanel`) and the Event stream toggle's `Accept: text/event-stream` (written
 by `SettingsPanel`, issue #574). GraphQL is sent as a JSON envelope and
@@ -2204,67 +2199,46 @@ Two things it is deliberate about:
   exists to fix. A disabled declaration does not count: it is not sent, so the
   header the mode needs is still missing.
 
-The one slot left, `AutoMethod`, is not a header row at all (issue #1228). A
-new request is a GET, and GraphQL over GET is a different transport - the
-document travels as query parameters and a mutation cannot be sent that way -
-so picking the GraphQL body mode on a request still holding that default used
-to build one the server answered with a bare `400`. The mode now sets `POST`
-the same reversible way it sets the `Content-Type` header above, and leaving
-the mode puts the method back - but what it owns is a scalar field on the
-request, not a row in an array, so it has nowhere to carry a marker of its own:
-`AutoMethod` stays `{ requestId, method, previous }` - the value it wrote and
-the value it replaced - held in the provider the way the two header slots used
-to be. `switchGraphQLMethod` in `panels/body/graphql-method.ts` is the rule
-that reads it, called from `BodyPanel.handleModeChange` beside
-`switchAutoHeader`. It keeps the same two guarantees stated as bullets above,
-read against a scalar instead of a row: a method the user has since chosen -
-the field's value no longer matching what this record wrote - is no longer
-ours to revert, and a record naming another request is dropped rather than
-applied. A GET still reaches GraphQL through the door this side effect does not
-touch - the user picks GET back, or an import wrote one - which is when the
-Query pane header's `BadgeText` names the transport that will be used. It has
-the same reload gap issue #1481 fixed for the two header rows - a fresh mount
-loses the record just as before - tracked as issue #1505, since `method` has
-no row to mark.
-
-**The method slot holds one record per request, bounded by the open tabs**
-(issue #1269). One provider serves every request tab, and a slot holding a
-single record held whichever request entered the mode last: the request before
-it kept the `POST` the app had set for it, with nothing left that knew it was
-the app's - the very bug the record exists to prevent, one request removed. So
-the slot is a map from request id to record (`context/auto-record-slot.ts`),
-keyed the way the record already named itself, and the accessors keep their
-argument-free shape: the provider knows which request is on screen, and a
-caller that had to pass the id could pass the wrong one. Resetting the record
-when the active request changes was the smaller alternative and is wrong in the
-same direction as the bug - it strands the first request's method at the moment
-of the switch rather than at the second request's mode change.
-
-What bounds the maps is the open tabs. A record can only ever be read by the
-builder it names, so once that builder has no tab it is unreachable, and a
-per-builder store that nothing prunes is how a map becomes a leak; `tabs-store`
-is subscribed to rather than selected from, because a provider that re-rendered
-on every tab focus would charge the request the user is working in for it.
-`MAX_OPEN_TABS` caps the tab strip, so it caps the maps. Both request tabs and
-run tabs are swept, by their `entityId` - a request id and a run id respectively,
-from different tables and so unable to collide. A run tab holding no builder at
-all (a load test, a scenario) only ever keeps a key nothing wrote.
+The setting that used to be the one slot left, `AutoMethod`, is not a header
+row at all (issue #1228). A new request is a GET, and GraphQL over GET is a
+different transport - the document travels as query parameters and a mutation
+cannot be sent that way - so picking the GraphQL body mode on a request still
+holding that default used to build one the server answered with a bare `400`.
+The mode now sets `POST` the same reversible way it sets the `Content-Type`
+header above, and leaving the mode puts the method back. It has the same
+reload gap issue #1481 fixed for the two header rows, closed the same way by
+issue #1505: ownership lives on `RequestState.methodSource?: MethodSource`
+(`"graphql"`, the domain type mirroring `HeaderRowSource`), a value on the
+request itself rather than a ref-held record, so it is exactly as durable as
+`request.method` beside it. `switchGraphQLMethod` in
+`panels/body/graphql-method.ts` is the rule that reads and writes it, called
+from `BodyPanel.handleModeChange` alongside `switchAutoHeader`, and it keeps
+the same two guarantees stated as bullets above, read against a scalar field
+instead of a row: a method the user has since chosen - `methodSource` no
+longer `"graphql"` - is no longer this side effect's to revert, and
+`MethodSelector`'s `onValueChange` clears the marker in the same call that
+sets the hand-picked method, the exact moment `KeyValueEditor`'s `handleUpdate`
+clears a header row's `source` on a retype. A GET still reaches GraphQL
+through the door this side effect does not touch - the user picks GET back, or
+an import wrote one - which is when the Query pane header's `BadgeText` names
+the transport that will be used.
 
 **Which identity a builder files under is one value, resolved once** (issue
-#1272): `memoryKey ?? request.id ?? UNSAVED_AUTO_KEY`, read by every per-builder
-map the provider holds - the method slot above and the picker's row memory
-below. A request tab is its request and passes nothing. The editable copy
-History renders for a stored run passes the run id, because `design-run-seed.ts`
-gives that copy `id: null` on purpose - a null id is one of the two gates that
-stop an edited copy from rewriting the saved request - so every open run copy
-used to share the id-less bucket. That was not a near miss: the rules read a
-`requestId` of `null` against another `null` as a match, so the second run tab
-to pick GraphQL was handed the first one's record, accepted it as its own and
-took the "already in this mode" branch - its method was never set to `POST`, and
-its record was the other tab's. A prop rather than a field on `RequestState`
-that only History would set: `request.id` stays honestly null, and no request
-grows a "which run am I" field for one caller. A run id names a tab, so those
-records are bounded by the same sweep rather than exempt from it.
+#1272): `memoryKey ?? request.id ?? UNSAVED_AUTO_KEY`, read by every
+per-builder map the provider still holds - now only the Send-with-row picker's
+row memory below, since the three reversible-setting records above all moved
+onto the request's own state. A request tab is its request and passes
+nothing. The editable copy History renders for a stored run passes the run
+id, because `design-run-seed.ts` gives that copy `id: null` on purpose - a
+null id is one of the two gates that stop an edited copy from rewriting the
+saved request - so every open run copy used to share the id-less bucket
+before issue #1272. That was not a near miss: the rules read a `requestId` of
+`null` against another `null` as a match, so the second run tab's picked row
+was handed the first one's record and read as its own. A prop rather than a
+field on `RequestState` that only History would set: `request.id` stays
+honestly null, and no request grows a "which run am I" field for one caller.
+A run id names a tab, so that memory is bounded by the same sweep rather than
+exempt from it.
 
 `UNSAVED_AUTO_KEY` is what remains for a builder declaring neither - nothing in
 the app today - and it is the one key the sweep cannot drop, since a key naming
@@ -2272,13 +2246,18 @@ no tab cannot be bounded by the tabs. It is kept rather than removed because the
 alternative for such a builder is sharing whichever key was written last, which
 the `null === null` ownership check hands out as owned rather than refusing.
 
-**The same sweep bounds the Send-with-row picker's memory** (issue #1271), the
-provider's other per-request map: which row index each request was last sent
-with (`rowIndexByRequest`, issues #659 and #1062). It survives a tab switch and
-a return, because neither of those is a send - and it goes when the tab does,
-for the reason above, since the request it was picked for can no longer be
-switched to. Two maps, one rule, one sweep, and one identity: the key resolved
-above is the key both file under.
+**The open tabs bound the Send-with-row picker's memory** (issue #1271), the
+provider's one remaining per-request map: which row index each request was
+last sent with (`rowIndexByRequest`, issues #659 and #1062). It survives a tab
+switch and a return, because neither of those is a send - and it goes when the
+tab does, since the request it was picked for can no longer be switched to.
+`tabs-store` is subscribed to rather than selected from, because a provider
+that re-rendered on every tab focus would charge the request the user is
+working in for it. `MAX_OPEN_TABS` caps the tab strip, so it caps the map, and
+both request tabs and run tabs are swept, by their `entityId` - a request id
+and a run id respectively, from different tables and so unable to collide. A
+run tab holding no builder at all (a load test, a scenario) only ever keeps a
+key nothing wrote.
 
 The row memory is `useState` rather than a ref - `lastRowIndex` is read while
 rendering - so its half of the sweep is a `setState`, and `retainKeys`
@@ -2286,11 +2265,10 @@ rendering - so its half of the sweep is a `setState`, and `retainKeys`
 live. Without that identity guard the provider would re-render on every tab
 focus, which is exactly the cost the subscription was chosen to avoid.
 
-In the provider rather than in the panels for the drafts' reason and one of its
-own: Radix unmounts an inactive `TabsContent`, so a panel-local record is gone
-by the next change - and then nothing removes the header, which is the bug the
-record exists to fix. Ephemeral, like the drafts: what is persisted is the
-header row itself, in `request.headers`, or the method, in `request.method`.
+The two header markers and `methodSource` need none of this: what is
+persisted is the row itself, in `request.headers`, or the method's own marker,
+in `request.methodSource` - no provider-side map, no sweep, nothing a reload
+can lose that a save does not already carry.
 
 ### `useSaveManager()` - Auto-Save Manager
 

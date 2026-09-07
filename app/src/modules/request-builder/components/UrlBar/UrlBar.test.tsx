@@ -55,8 +55,6 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		setBodyDrafts: vi.fn(),
 		getVariablesDraft: () => null,
 		setVariablesDraft: vi.fn(),
-		getAutoMethod: () => null,
-		setAutoMethod: vi.fn(),
 		response: null,
 		setResponse: vi.fn(),
 		activeTab: "params",

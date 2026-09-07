@@ -29,12 +29,17 @@ import { getMethodColor } from "@/utils";
 import type { HttpMethod } from "@/types";
 
 export default function MethodSelector() {
-	const { request, updateField } = useRequestBuilderContext();
+	const { request, setRequest } = useRequestBuilderContext();
 
 	return (
 		<Select
 			value={request.method}
-			onValueChange={(value) => updateField("method", value as HttpMethod)}
+			onValueChange={(value) =>
+				// Both fields in one call: a method picked by hand is no longer
+				// GraphQL's, the same way retyping a marked header row clears its
+				// `source` (see `graphql-method.ts`, issue #1505).
+				setRequest({ method: value as HttpMethod, methodSource: undefined })
+			}
 		>
 			<SelectTrigger
 				aria-label="HTTP method"

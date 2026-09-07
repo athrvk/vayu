@@ -20,6 +20,7 @@ import type {
 	RequestBody,
 	RequestAuth,
 	SpecOperation,
+	MethodSource,
 } from "@/types";
 import { asRecord, asStr } from "@/lib/json-node";
 import { toElements } from "./elements-transformer";
@@ -88,6 +89,20 @@ function toSpecOperation(raw: unknown): SpecOperation | undefined {
 	return { ...(operationId ? { operationId } : {}), method, path };
 }
 
+/**
+ * Which app setting wrote `method`, or `undefined`.
+ *
+ * The engine serializes `null` for a request with no marker, so the common
+ * case arrives as a non-string and leaves here as absent. The one recognized
+ * value is `"graphql"` - anything else (a marker from a future app version,
+ * a hand-edited database) reads as no marker at all, on the same "half-written
+ * degrades to absent" rule `toSpecOperation` above follows, rather than being
+ * passed on as a value nothing here knows how to act on.
+ */
+function toMethodSource(raw: unknown): MethodSource | undefined {
+	return raw === "graphql" ? "graphql" : undefined;
+}
+
 export class RequestTransformer {
 	static toFrontend(raw: RawRequest): Request {
 		const id = asStr(raw.id);
@@ -114,6 +129,7 @@ export class RequestTransformer {
 		if (rawAuth?.mode) auth = rawAuth as RequestAuth;
 
 		const specOperation = toSpecOperation(raw.specOperation);
+		const methodSource = toMethodSource(raw.methodSource);
 
 		// Which columns the engine substituted a default for (issue #1485) -
 		// absent for a row with nothing over the field cap, same reason
@@ -128,6 +144,7 @@ export class RequestTransformer {
 			name: asStr(raw.name) ?? "",
 			description: asStr(raw.description) ?? "",
 			method: (asStr(raw.method) as HttpMethod) ?? "GET",
+			...(methodSource ? { methodSource } : {}),
 			url: asStr(raw.url) ?? "",
 			params,
 			headers,

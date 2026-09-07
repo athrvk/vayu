@@ -158,6 +158,36 @@ describe("RequestTransformer spec operation", () => {
 });
 
 /**
+ * `methodSource` (issue #1505) marks `method` as still owned by the GraphQL
+ * body mode. Same absent-key rule as `specOperation` above, for the same
+ * reader-facing reason - and the one accepted value is validated rather than
+ * passed through opaquely, unlike a header row's `source`: a marker this app
+ * does not recognize must read as no marker, not as a value nothing here acts
+ * on but nothing clears either.
+ */
+describe("RequestTransformer method source", () => {
+	it("carries the marker through", () => {
+		const req = RequestTransformer.toFrontend({ ...base, methodSource: "graphql" });
+		expect(req.methodSource).toBe("graphql");
+	});
+
+	it("reads the engine's null as no marker, with the key absent", () => {
+		const req = RequestTransformer.toFrontend({ ...base, methodSource: null });
+		expect("methodSource" in req).toBe(false);
+	});
+
+	it("reads a marker predating this column as no marker", () => {
+		const req = RequestTransformer.toFrontend({ ...base });
+		expect("methodSource" in req).toBe(false);
+	});
+
+	it("drops a value it does not recognize rather than passing it through", () => {
+		const req = RequestTransformer.toFrontend({ ...base, methodSource: "typed-it-myself" });
+		expect(req.methodSource).toBeUndefined();
+	});
+});
+
+/**
  * `truncatedFields` (issue #1485) names which columns the list route
  * substituted a default for. Without an explicit read here it is exactly the
  * "written but never read" defect this transformer exists to prevent - the
