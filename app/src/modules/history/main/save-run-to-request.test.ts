@@ -346,15 +346,18 @@ describe("buildChangeset", () => {
 		expect(auth!.driftFrom).toBeUndefined();
 	});
 
-	it("makes scripts a changed row with a diff, for a modern run", () => {
-		const live = liveRequest();
-		const pre = buildChangeset(seedFromRun(run(), live), live).find(
-			(i) => i.field === "Pre-request script"
+	it("makes elements a changed row when the run's elements differ from the request's", () => {
+		// `describeElements` summarises an elements list by kind/name, not by
+		// script content - so a change is visible when the composition differs,
+		// here an empty live list versus the run's two script elements.
+		const live = liveRequest({ elements: [] } as Partial<Request>);
+		const row = buildChangeset(seedFromRun(run(), live), live).find(
+			(i) => i.field === "Elements"
 		);
 
-		expect(pre!.state).toBe("changed");
-		expect(pre!.collapsible).toBe(true);
-		expect(pre!.segments).toBeDefined();
+		expect(row).toBeDefined();
+		expect(row!.state).toBe("changed");
+		expect(row!.segments).toBeDefined();
 	});
 
 	it("makes scripts a single kept row for a legacy run", () => {
@@ -370,8 +373,8 @@ describe("buildChangeset", () => {
 
 		const scripts = set.find((i) => i.field === "Scripts");
 		expect(scripts?.state).toBe("kept");
-		// The per-field script rows do not appear for a legacy run.
-		expect(set.map((i) => i.field)).not.toContain("Pre-request script");
+		// The per-field elements row does not appear for a legacy run.
+		expect(set.map((i) => i.field)).not.toContain("Elements");
 	});
 
 	/*
@@ -458,8 +461,20 @@ describe("buildChangeset", () => {
 			headers: [{ key: "X-Plain", value: "visible", enabled: true }],
 			body: { mode: "json", content: '{"a":1}' },
 			bodyType: "json",
-			preRequestScript: "console.log(t);",
-			postRequestScript: "pm.test('ok', () => {});",
+			elements: [
+				{
+					id: "live-pre",
+					kind: "script.pre",
+					enabled: true,
+					config: { script: "console.log(t);" },
+				},
+				{
+					id: "live-post",
+					kind: "script.post",
+					enabled: true,
+					config: { script: "pm.test('ok', () => {});" },
+				},
+			],
 			followRedirects: false,
 			maxRedirects: 3,
 			httpVersion: "http2",
