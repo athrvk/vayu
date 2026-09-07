@@ -113,6 +113,20 @@ nlohmann::json config_error (const std::string& message) {
     return error_body (400, message, "invalid_config");
 }
 
+// Every stored config row this engine's own catalogue declares (issue #1492) -
+// the one list `GET /config` and `POST /config`'s echoed `entries` both serve,
+// so a row a newer engine wrote and this one does not understand never reaches
+// a client through either path.
+nlohmann::json catalogued_config_entries_json (vayu::db::Database& db) {
+    nlohmann::json entries_array = nlohmann::json::array ();
+    for (const auto& entry : db.get_all_config_entries ()) {
+        if (db.is_known_config_key (entry.key)) {
+            entries_array.push_back (config_entry_json (entry));
+        }
+    }
+    return entries_array;
+}
+
 // One config value as the string the store holds. Shared by the two body
 // shapes below so a number or a boolean cannot mean different text depending
 // on which of them carried it.
@@ -349,8 +363,21 @@ const std::function<void ()>& before_write) {
     std::vector<std::string> errors;
 
     for (const auto& [key, value] : updates) {
+        // Checked against this engine's own catalogue (issue #1492), not
+        // merely against whether a row exists: a workspace a newer engine
+        // opened can carry a row for a key this build's `seed_default_config`
+        // does not declare, and this build has no validator for it - accepting
+        // the write on the strength of the row alone would apply a value this
+        // engine cannot check against the rules the key was defined with.
+        if (!db.is_known_config_key (key)) {
+            errors.push_back ("Unknown config key '" + key + "'");
+            continue;
+        }
         auto existing = db.get_config_entry (key);
         if (!existing) {
+            // Not reachable in practice - every catalogued key has a row by
+            // the time a request is served, seeded before the listener
+            // starts - kept as the honest answer if it ever is.
             errors.push_back ("Unknown config key '" + key + "'");
             continue;
         }
@@ -394,13 +421,8 @@ const std::function<void ()>& before_write) {
 
     vayu::utils::log_info ("Updated " + std::to_string (to_update.size ()) + " config entries");
 
-    nlohmann::json entries_array = nlohmann::json::array ();
-    for (const auto& entry : db.get_all_config_entries ()) {
-        entries_array.push_back (config_entry_json (entry));
-    }
-
     nlohmann::json response;
-    response["entries"] = entries_array;
+    response["entries"] = catalogued_config_entries_json (db);
     response["success"] = true;
     return { 200, response };
 }
@@ -543,13 +565,8 @@ void register_config_routes (RouteContext& ctx) {
      */
     ctx.server.Get ("/config", [&ctx] (const httplib::Request&, httplib::Response& res) {
         try {
-            nlohmann::json entries_array = nlohmann::json::array ();
-            for (const auto& entry : ctx.db.get_all_config_entries ()) {
-                entries_array.push_back (config_entry_json (entry));
-            }
-
             nlohmann::json response;
-            response["entries"] = entries_array;
+            response["entries"] = catalogued_config_entries_json (ctx.db);
             res.set_content (response.dump (2), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error ("GET /config - Error: " + std::string (e.what ()));

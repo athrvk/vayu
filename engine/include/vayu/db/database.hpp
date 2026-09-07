@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <sqlite_orm/sqlite_orm.h>
@@ -842,6 +843,24 @@ class Database {
     void seed_default_config (); // Initialize default config values if empty
 
     /**
+     * @brief Whether @p key is one this running engine's build declares -
+     *        i.e. one `seed_default_config` upserts, not merely one with a row
+     *        in the table (issue #1492).
+     *
+     * A row can outlive the catalogue that wrote it: a workspace opened by a
+     * newer engine, then reopened by this one, still carries that newer
+     * engine's config rows (`seed_default_config` only deletes its own fixed
+     * retired-key list, never a key it does not recognise at all - deleting an
+     * unrecognised row would be this build guessing that a row it cannot
+     * explain is safe to destroy). Without this check `GET /config` would list
+     * a setting this build cannot describe or validate, and `POST /config`
+     * would accept a write to it merely because the row already existed.
+     * Populated once, by `seed_default_config`, from the exact set of keys it
+     * upserts - never the retired list, and never read before the first seed.
+     */
+    bool is_known_config_key (const std::string& key) const;
+
+    /**
      * @brief SQLite page-cache size in force on the last connection opened, in
      * bytes (0 before the first one).
      *
@@ -881,6 +900,10 @@ class Database {
     /// The startup recovery record, read from the marker file in the
     /// constructor. See `recovery()`.
     std::optional<RecoveryRecord> recovery_;
+
+    /// The keys `seed_default_config` upserted on this engine's last seed
+    /// pass - this build's config catalogue. See `is_known_config_key`.
+    std::unordered_set<std::string> known_config_keys_;
 
     /**
      * @brief Delete a run and every child row it owns (ticks, metrics, results).

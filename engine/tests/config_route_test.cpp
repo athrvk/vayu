@@ -134,6 +134,53 @@ TEST_F (ConfigRouteTest, UnknownKeyNamesTheKey) {
     EXPECT_NE (message.find ("totally_made_up_key"), std::string::npos);
 }
 
+// A row a newer engine's `seed_default_config` wrote and this build never
+// upserted (issue #1492): the row is real, but the key is not in this
+// engine's catalogue. Refused the same way a key with no row at all is -
+// mutation check: gate `is_known_config_key` on `db.get_config_entry`
+// existing instead, and this reds, because the row makes `existing` true.
+TEST_F (ConfigRouteTest, ARowFromANewerEngineIsRefusedAsUnknown) {
+    vayu::db::ConfigEntry future_row;
+    future_row.key           = "futureEngineOnlyKey";
+    future_row.value         = "1";
+    future_row.type          = "integer";
+    future_row.label         = "Not Ours";
+    future_row.description   = "Declared by a build newer than this one.";
+    future_row.category      = "general_engine";
+    future_row.default_value = "1";
+    db_->save_config_entry (future_row);
+
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"futureEngineOnlyKey":"2"}})");
+    EXPECT_EQ (status, 400);
+    const auto message = body["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("Unknown config key"), std::string::npos);
+    EXPECT_NE (message.find ("futureEngineOnlyKey"), std::string::npos);
+}
+
+// The same row must not surface through a successful response's echoed
+// `entries` either - a client reading that list would otherwise render a
+// setting this build cannot describe or validate.
+TEST_F (ConfigRouteTest, ARowFromANewerEngineIsExcludedFromEchoedEntries) {
+    vayu::db::ConfigEntry future_row;
+    future_row.key           = "futureEngineOnlyKey";
+    future_row.value         = "1";
+    future_row.type          = "integer";
+    future_row.label         = "Not Ours";
+    future_row.description   = "Declared by a build newer than this one.";
+    future_row.category      = "general_engine";
+    future_row.default_value = "1";
+    db_->save_config_entry (future_row);
+
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"2"}})");
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    for (const auto& entry : body["entries"]) {
+        EXPECT_NE (entry["key"].get<std::string> (), "futureEngineOnlyKey");
+    }
+}
+
 TEST_F (ConfigRouteTest, OutOfRangeReportsBoundAndValue) {
     // "workers" is seeded as an integer with min 1 / max 128.
     auto [status, body] =

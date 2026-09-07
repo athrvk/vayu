@@ -72,19 +72,34 @@ function isPortAvailable(port: number): Promise<boolean> {
 	});
 }
 
-/**
- * Check if our engine is already running on a port
- */
-async function isEngineRunning(port: number): Promise<boolean> {
+/** `GET /health`'s body, or null on any transport, timeout or parse failure. */
+async function fetchHealth(port: number): Promise<{ status?: string; version?: string } | null> {
 	try {
 		const response = await fetch(`http://127.0.0.1:${port}/health`, {
 			signal: AbortSignal.timeout(ENGINE_HEALTH_REQUEST_TIMEOUT_MS),
 		});
-		const data = await response.json();
-		return data?.status === "ok";
+		return await response.json();
 	} catch {
-		return false;
+		return null;
 	}
+}
+
+/**
+ * Check if our engine is already running on a port
+ */
+async function isEngineRunning(port: number): Promise<boolean> {
+	const data = await fetchHealth(port);
+	return data?.status === "ok";
+}
+
+/**
+ * The running engine's own `version` (issue #1492), or null when the probe
+ * failed or answered with no readable version - callers read null as "could
+ * not tell", not as "no engine here"; `isEngineRunning` already answers that.
+ */
+async function probeEngineVersion(port: number): Promise<string | null> {
+	const data = await fetchHealth(port);
+	return typeof data?.version === "string" ? data.version : null;
 }
 
 /**
@@ -279,6 +294,8 @@ export interface SidecarSystem {
 	killEngineProcess(pid: number): boolean;
 	/** Does an engine answer `/health` with `status: ok` on this port? */
 	probeHealth(port: number): Promise<boolean>;
+	/** The `version` a healthy engine on this port answers with, or null. */
+	probeVersion(port: number): Promise<string | null>;
 	/** `POST /shutdown`. True means accepted, not that the process has gone. */
 	requestShutdown(port: number): Promise<boolean>;
 	/** Can we bind this port, i.e. is nothing at all listening? */
@@ -295,6 +312,7 @@ export const defaultSidecarSystem: SidecarSystem = {
 	isEngineProcessAlive: isVayuEngineRunning,
 	killEngineProcess: killVayuEngineProcess,
 	probeHealth: isEngineRunning,
+	probeVersion: probeEngineVersion,
 	requestShutdown: requestEngineShutdown,
 	isPortFree: isPortAvailable,
 	sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -447,6 +465,49 @@ export class EngineSidecar {
 	}
 
 	/**
+	 * Decide whether a healthy engine already on the port is safe to adopt,
+	 * and stop it instead when it is not (issue #1492).
+	 *
+	 * A crash-then-relaunch, or two installed builds sharing a data
+	 * directory, can land this instance next to a daemon built for a
+	 * different Vayu version - a `/request-defaults` shape this renderer was
+	 * not built against, a config key this build cannot validate, a database
+	 * schema this build refuses to open (`Database::migrate_before_sync`
+	 * already refuses the *file* on that mismatch; nothing stopped the app
+	 * from talking to a live *process* built for a different one). Adopting
+	 * it silently would run every request through a sidecar this session
+	 * never agreed to. `probeVersion` returning null - the probe answered but
+	 * the version could not be read - adopts rather than disrupts a healthy
+	 * engine on an ambiguous answer, the same direction `isPidCertainlyDead`
+	 * takes for its own unclear case.
+	 *
+	 * @returns whether the engine on the port was adopted. `false` means it
+	 *          was stopped instead, and the caller falls through to spawning.
+	 */
+	private async adoptIfVersionMatches(pid: number | null): Promise<boolean> {
+		const runningVersion = await this.system.probeVersion(this.port);
+		if (runningVersion === null || runningVersion === app.getVersion()) {
+			console.log(
+				`[Sidecar] Adopting the engine already running on port ${this.port}` +
+					(pid !== null ? ` (PID ${pid})` : " (no lock PID)")
+			);
+			this.ownership = { kind: "adopted", pid };
+			return true;
+		}
+
+		console.warn(
+			`[Sidecar] Engine on port ${this.port} is version ${runningVersion}, this app ` +
+				`is ${app.getVersion()} - stopping it instead of adopting a mismatched daemon`
+		);
+		this.ownership = { kind: "adopted", pid };
+		await this.system.requestShutdown(this.port);
+		await this.stopAdopted(pid);
+		// Same gap `restart()` waits out between a stop and the spawn that follows.
+		await this.system.sleep(ENGINE_PORT_RELEASE_DELAY_MS);
+		return false;
+	}
+
+	/**
 	 * Start the engine process
 	 */
 	async start(): Promise<void> {
@@ -469,11 +530,10 @@ export class EngineSidecar {
 				);
 				// Verify engine is actually responding on the port
 				if (await this.system.probeHealth(this.port)) {
-					console.log(
-						`[Sidecar] Adopting the engine already running on port ${this.port} (PID ${lockStatus.pid})`
-					);
-					this.ownership = { kind: "adopted", pid: lockStatus.pid };
-					return;
+					if (await this.adoptIfVersionMatches(lockStatus.pid)) {
+						return;
+					}
+					// Mismatched daemon stopped instead of adopted - fall through to spawn.
 				} else {
 					console.warn(
 						`[Sidecar] Lock file indicates process ${lockStatus.pid} is running, but engine is not responding on port ${this.port}`
@@ -501,11 +561,10 @@ export class EngineSidecar {
 		// crash). No lock file to read a PID from, so ownership is by port only -
 		// stop() falls back to watching health for the exit.
 		if (await this.system.probeHealth(this.port)) {
-			console.log(
-				`[Sidecar] Adopting the engine already running on port ${this.port} (no lock PID)`
-			);
-			this.ownership = { kind: "adopted", pid: readPidFromLock(lockPath) };
-			return;
+			if (await this.adoptIfVersionMatches(readPidFromLock(lockPath))) {
+				return;
+			}
+			// Mismatched daemon stopped instead of adopted - fall through to spawn.
 		}
 
 		// Check if port is in use by something else
