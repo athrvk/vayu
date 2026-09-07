@@ -343,9 +343,12 @@ std::string stored_failure_text (vayu::db::Database& db, const std::string& run_
             continue;
         }
         auto trace = json::parse (result.trace_data, nullptr, /*allow_exceptions=*/false);
-        if (auto failures = trace.find ("failures");
-        failures != trace.end () && failures->is_array () && !failures->empty ()) {
-            return (*failures)[0].get<std::string> ();
+        if (!trace.contains ("failures")) {
+            continue;
+        }
+        const auto& failures = trace.at ("failures");
+        if (failures.is_array () && !failures.empty ()) {
+            return failures.front ().get<std::string> ();
         }
     }
     return {};
