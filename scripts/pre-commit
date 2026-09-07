@@ -204,7 +204,9 @@ echo "Running ${CLANG_TIDY} on staged C++ changes..."
 
 # The files to lint, in the order they were staged, minus vendored code and
 # paths that no longer exist on disk (a staged deletion has no file to lint).
-LINT_FILES=
+# An array, so a path can be handed to xargs/the loop below without quoting
+# tricks to survive whitespace in a filename.
+LINT_FILES=()
 for FILE in $FILES; do
     if [[ "$FILE" == *"vendor/"* ]]; then
         continue
@@ -212,7 +214,7 @@ for FILE in $FILES; do
     if [ ! -f "$FILE" ]; then
         continue
     fi
-    LINT_FILES="$LINT_FILES $FILE"
+    LINT_FILES+=("$FILE")
 done
 
 # Whole staged files, not changed lines (#946 - the promotion that closed the
@@ -240,9 +242,13 @@ done
 # `engine/.clang-tidy` sets `WarningsAsErrors: '*'`; with that empty, clang-tidy
 # prints its findings and exits 0. `STATUS` is declared beside `end_hook` above,
 # which is where it is finally read.
-
-# Run clang-tidy
-for FILE in $LINT_FILES; do
+#
+# Run in parallel (below) rather than one process per file in sequence, since
+# whole-file clang-tidy is slow (~10-30s/file) and a large commit can stage
+# dozens. `xargs -P`'s own exit status (123 if anything failed) is what feeds
+# STATUS, so the per-file guarantee above still holds.
+lint_one_file() {
+    local FILE="$1"
     echo "Linting $FILE..."
     # We need compilation database for clang-tidy to work correctly with includes
     # Assuming build directory is engine/build
@@ -286,14 +292,33 @@ for FILE in $LINT_FILES; do
     # nothing and say it had linted.
     if [ -f "engine/build/compile_commands.json" ]; then
         "$CLANG_TIDY" --allow-no-checks --extra-arg=-Wno-ignored-gch \
-            -p engine/build "$FILE" || STATUS=1
+            -p engine/build "$FILE"
     else
         echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
         # Fallback: try to include common directories
         "$CLANG_TIDY" --allow-no-checks "$FILE" \
-            -- -Iengine/include -Iengine/vendor/quickjs-ng || STATUS=1
+            -- -Iengine/include -Iengine/vendor/quickjs-ng
     fi
-done
+}
+export -f lint_one_file
+export CLANG_TIDY
+
+# nproc (Linux) -> sysctl -n hw.ncpu (macOS) -> 4, matching this repo's own
+# Windows ctest parallelism default, where neither exists.
+NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+if [ ${#LINT_FILES[@]} -gt 0 ]; then
+    if command -v xargs &> /dev/null; then
+        printf '%s\n' "${LINT_FILES[@]}" | xargs -P "$NPROC" -I{} bash -c 'lint_one_file "$@"' _ {} || STATUS=1
+    else
+        # No xargs (e.g. this hook's own test sandbox, or a stripped-down
+        # container): fall back to sequential rather than let a bare "command
+        # not found" masquerade as a clang-tidy finding below.
+        for FILE in "${LINT_FILES[@]}"; do
+            lint_one_file "$FILE" || STATUS=1
+        done
+    fi
+fi
 
 if [ "$STATUS" -ne 0 ]; then
     echo

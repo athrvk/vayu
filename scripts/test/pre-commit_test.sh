@@ -696,6 +696,47 @@ else
     fail "the formatting verdict survives a tidy skip" "exit $HOOK_STATUS: $HOOK_OUTPUT"
 fi
 
+# --- Parallel lint falls back without xargs ----------------------------------
+echo
+echo "pre-commit lint without xargs"
+
+# make_sandbox_path's own PATH has no xargs (issue #1544: a container missing
+# it made the hook's own "clang-tidy reported findings" refusal a lie - it had
+# never run). A real clang-tidy stub goes in front of that PATH, same as the
+# format-check cases above, so this is a statement about the fallback, not
+# about clang-tidy being absent too.
+#
+# Mutation-check: remove the `command -v xargs` branch in scripts/pre-commit
+# and both cases below redden with "xargs: command not found" instead of a
+# clean pass/refusal.
+repo="$(make_repo)"
+stub="$(make_stub 19.1.0)"
+sandbox="$(make_sandbox_path)"
+set +e
+out="$(cd "$repo" && PATH="$stub:$sandbox" bash "$HOOK" 2>&1)"
+status=$?
+set -e
+rm -rf "$repo" "$stub" "$sandbox"
+if [[ "$status" -eq 0 && "$out" == *"STUB_LINTED"*"helper.cpp"* && "$out" == *"STUB_LINTED"*"main.cpp"* ]]; then
+    pass "without xargs, every staged file is still linted sequentially"
+else
+    fail "the sequential fallback still lints everything" "exit $status: $out"
+fi
+
+repo="$(make_repo)"
+stub="$(make_stub 19.1.0 main.cpp)"
+sandbox="$(make_sandbox_path)"
+set +e
+out="$(cd "$repo" && PATH="$stub:$sandbox" bash "$HOOK" 2>&1)"
+status=$?
+set -e
+rm -rf "$repo" "$stub" "$sandbox"
+if [[ "$status" -ne 0 && "$out" != *"command not found"* ]]; then
+    pass "without xargs, a finding still refuses the commit"
+else
+    fail "the sequential fallback still gates on a finding" "exit $status: $out"
+fi
+
 echo
 echo "passed: $PASSED, failed: $FAILED"
 [ "$FAILED" -eq 0 ]
