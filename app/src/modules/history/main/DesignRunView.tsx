@@ -37,10 +37,15 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Save } from "lucide-react";
+import { Save, Pin, PinOff, Loader2 } from "lucide-react";
 import { RequestBuilderProvider } from "@/modules/request-builder/context";
 import RequestBuilderLayout from "@/modules/request-builder/components/RequestBuilderLayout";
-import { useRequestQuery, isRequestNotFound, queryKeys } from "@/queries";
+import {
+	useRequestQuery,
+	isRequestNotFound,
+	queryKeys,
+	useSetRunBaselineMutation,
+} from "@/queries";
 import { useEngine } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
 import { Button, Badge } from "@/components/ui";
@@ -71,6 +76,27 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
 	const [showSaveDialog, setShowSaveDialog] = useState(false);
+
+	// A design run has no comparison to make, but pinning it is still how a
+	// user keeps a known-good (or known-bad) reply past retention and finds
+	// it again later - see issue #1509. Reuses the same mutation RunItem's
+	// row pin calls; nothing about it is load-run-specific.
+	const setBaselineMutation = useSetRunBaselineMutation();
+	const handleTogglePin = async () => {
+		try {
+			await setBaselineMutation.mutateAsync({ runId: run.id, baseline: !run.baseline });
+		} catch {
+			showToast(
+				run.baseline ? "Couldn't unpin this run." : "Couldn't pin this run.",
+				"error"
+			);
+		}
+	};
+	const PinIcon = run.baseline ? PinOff : Pin;
+	const pinLabel = run.baseline ? "Unpin" : "Pin";
+	const pinTooltip = run.baseline
+		? "Unpin this run"
+		: "Pin this run to keep it past retention and find it again later";
 
 	/*
 	 * The live request, when it still exists. It is the only source of
@@ -351,23 +377,35 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						Run sent auth: {seed.recordedAuthMode}
 					</Badge>
 				)}
-				{/*
-				 * The Save button exists only while the request does. When it has
-				 * been deleted there is nothing to write back to, so it is absent
-				 * rather than disabled - a disabled button invites a hunt for the
-				 * condition that would enable it, and none can be met here.
-				 */}
-				{liveRequest && (
+				<div className="ml-auto flex items-center gap-2">
 					<Button
 						variant="outline"
 						size="sm"
-						className="ml-auto"
-						onClick={() => setShowSaveDialog(true)}
+						onClick={() => void handleTogglePin()}
+						disabled={setBaselineMutation.isPending}
+						aria-pressed={!!run.baseline}
+						title={pinTooltip}
 					>
-						<Save className="w-3.5 h-3.5 mr-1.5" />
-						Save this run to the request
+						{setBaselineMutation.isPending ? (
+							<Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+						) : (
+							<PinIcon className="w-3.5 h-3.5 mr-1.5" />
+						)}
+						{pinLabel}
 					</Button>
-				)}
+					{/*
+					 * The Save button exists only while the request does. When it has
+					 * been deleted there is nothing to write back to, so it is absent
+					 * rather than disabled - a disabled button invites a hunt for the
+					 * condition that would enable it, and none can be met here.
+					 */}
+					{liveRequest && (
+						<Button variant="outline" size="sm" onClick={() => setShowSaveDialog(true)}>
+							<Save className="w-3.5 h-3.5 mr-1.5" />
+							Save this run to the request
+						</Button>
+					)}
+				</div>
 			</div>
 
 			<div className="flex-1 min-h-0">

@@ -188,9 +188,15 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or
   later; the bundled one is 3.53), which runs before `init ()` and therefore
   before any repair pass can read the column. Read the data out in a step
-  that runs ahead of the probe (the `PRAGMA user_version`-gated migration
-  #1513 introduces) or keep the column mapped; a pass that runs after the
-  probe reads a column that is already gone.
+  that runs ahead of the probe (a `PRAGMA user_version`-gated migration, not
+  yet introduced) or keep the column mapped; a pass that runs after the
+  probe reads a column that is already gone. #1513 kept `pre_request_script`
+  / `post_request_script` mapped rather than dropping them: dropping them
+  broke every currently-passing scripting test (design send, sequential run),
+  since the pipeline that reads `elements` instead of the two columns is
+  #1514, not this issue. `Database::fold_scripts_into_elements` (additive,
+  `docs/engine/db-schema.md`) gives older data an `elements` entry per script
+  without touching the columns; the real drop + version gate wait for #1514.
 - **The logger has two switches, and the request log is not yet one of them.**
   `vayu::utils::Logger` has a console verbosity (`-v 0|1|2`: warnings and
   errors, info, debug) and a separate file level (`logLevel`, default debug,
@@ -345,9 +351,11 @@ logged as a warning: it means a client skipped composition.
   controllers, scripts and metrics each register once under
   `engine/src/core/elements/`, are validated against that registry, served by
   `GET /elements/kinds`, and run by one pipeline in every execution path.
-  #1513 lands the registry, the `elements` column and the migration of the two
-  script columns; until it does, do not add another behaviour column beside
-  `pre_request_script` / `post_request_script`.
+  #1513 lands the registry and the `elements` column, additively - it keeps
+  `pre_request_script` / `post_request_script` mapped and folds their data
+  into `elements` rather than dropping them, since nothing runs an element
+  before #1514's pipeline exists. Do not add another behaviour column beside
+  the three; a new behaviour is an element kind.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the

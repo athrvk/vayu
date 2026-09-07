@@ -74,6 +74,10 @@ vi.mock("@/stores", () => ({
 	}),
 	useSessionStore: (selector: (s: unknown) => unknown) =>
 		selector({ setLastCollectionId: vi.fn() }),
+	// AuthTab publishes its draft here (#1483); these tests are about draft
+	// survival across a tab switch, not about the mirror, so a no-op stands in.
+	useCollectionAuthDraftStore: (selector: (s: unknown) => unknown) =>
+		selector({ setDraft: vi.fn(), clearDraft: vi.fn() }),
 }));
 
 // Monaco and the variables editor are not what these tests are about, and both

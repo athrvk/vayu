@@ -18,6 +18,10 @@
  * drifting. Silent when the run declared no budgets: an absent section says
  * "not judged", which is a different claim from "judged and passed nothing" and
  * is the reason a run without budgets renders exactly as it did before.
+ *
+ * A single check can itself be unmeasurable (issue #1484): a latency ceiling
+ * checked against zero completed requests has no number to compare, and
+ * showing "0ms" there would read as a real - and passing - measurement.
  */
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
@@ -52,6 +56,9 @@ export function ThresholdVerdict({ verdict, className }: ThresholdVerdictProps) 
 	if (!verdict || verdict.checks.length === 0) return null;
 
 	const failed = verdict.failed > 0;
+	// Absent (a pre-#1484 engine) reads as evaluated - that engine never wrote
+	// the field and never had the gap it now closes either.
+	const unmeasurable = verdict.checks.filter((check) => check.evaluated === false).length;
 
 	return (
 		<Card className={className}>
@@ -87,7 +94,8 @@ export function ThresholdVerdict({ verdict, className }: ThresholdVerdictProps) 
 			</CardHeader>
 			<CardContent>
 				<p className="mb-3 text-xs text-muted-foreground">
-					{verdict.passed} of {verdict.passed + verdict.failed} budgets met.
+					{verdict.passed} of {verdict.passed + verdict.failed} budgets met
+					{unmeasurable > 0 ? `, ${unmeasurable} not measurable` : ""}.
 				</p>
 				<ul className="space-y-1.5">
 					{verdict.checks.map((check) => {
@@ -98,6 +106,9 @@ export function ThresholdVerdict({ verdict, className }: ThresholdVerdictProps) 
 						// "≤" would describe the opposite budget from the one the
 						// verdict beside it was computed against.
 						const comparator = meta?.floor ? "≥" : "≤";
+						// A pre-#1484 report has no `evaluated` key at all and reads as
+						// measured, the same value that engine effectively assumed.
+						const evaluated = check.evaluated !== false;
 
 						return (
 							<li
@@ -119,8 +130,14 @@ export function ThresholdVerdict({ verdict, className }: ThresholdVerdictProps) 
 											: "text-destructive-text"
 									)}
 								>
-									{formatValue(check.actual)}
-									{unit}
+									{evaluated ? (
+										<>
+											{formatValue(check.actual ?? 0)}
+											{unit}
+										</>
+									) : (
+										"no samples"
+									)}
 								</span>
 							</li>
 						);

@@ -15,7 +15,7 @@
  * This row is the one that never had a `⋯` menu: its pin and its delete are
  * hover-revealed buttons. The menu is a second way to reach the *same two
  * handlers* - so what these cases pin is that it offers what the row offers, no
- * more (a run with nothing to compare against is not offered a baseline pin),
+ * more (a row given no pin handler is not offered one in the menu either),
  * and that a selection from it reaches the handler with no event to stop.
  */
 import { describe, it, expect, vi } from "vitest";
@@ -78,23 +78,31 @@ describe("a history row's right-click menu", () => {
 		expect(await screen.findByRole("menuitem", { name: "Unpin baseline" })).toBeInTheDocument();
 	});
 
-	it("offers no baseline pin where the row has no pin button either", async () => {
-		// A design run has nothing to compare against, so the list passes no
-		// handler - and the menu must not invent an action the row cannot do.
+	it("offers no pin where the row has no pin button either", async () => {
+		// No handler passed - the menu must not invent an action the row cannot do.
+		render(<RunItem run={run()} onSelect={noop} onDelete={noop} isDeleting={false} />);
+
+		fireEvent.contextMenu(row());
+
+		await screen.findByRole("menu");
+		expect(screen.queryByRole("menuitem", { name: /pin/i })).toBeNull();
+		expect(screen.getByRole("menuitem", { name: "Delete run" })).toBeInTheDocument();
+	});
+
+	it("offers a plain Pin, not a baseline claim, on a design run's menu", async () => {
 		render(
 			<RunItem
 				run={run({ type: "design" })}
 				onSelect={noop}
 				onDelete={noop}
+				onToggleBaseline={noop}
 				isDeleting={false}
 			/>
 		);
 
 		fireEvent.contextMenu(row());
 
-		await screen.findByRole("menu");
-		expect(screen.queryByRole("menuitem", { name: /baseline/i })).toBeNull();
-		expect(screen.getByRole("menuitem", { name: "Delete run" })).toBeInTheDocument();
+		expect(await screen.findByRole("menuitem", { name: "Pin" })).toBeInTheDocument();
 	});
 
 	it("reaches the delete handler with no row event to stop", async () => {

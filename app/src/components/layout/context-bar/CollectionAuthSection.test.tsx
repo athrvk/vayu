@@ -21,9 +21,10 @@
  * and the inheriting cases redden.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { CollectionAuthSection } from "./CollectionAuthSection";
+import { useCollectionAuthDraftStore } from "@/stores";
 import type { Collection, RequestAuth } from "@/types";
 
 let collections: Collection[] = [];
@@ -65,6 +66,10 @@ const bearer: Exclude<RequestAuth, { mode: "inherit" }> = { mode: "bearer", toke
 
 beforeEach(() => {
 	collections = [];
+});
+
+afterEach(() => {
+	useCollectionAuthDraftStore.setState({ drafts: new Map() });
 });
 
 describe("CollectionAuthSection", () => {
@@ -126,5 +131,20 @@ describe("CollectionAuthSection", () => {
 		render(<CollectionAuthSection tab={TAB} />);
 
 		expect(screen.getByText("This collection is no longer available")).toBeInTheDocument();
+	});
+
+	it("shows the Auth tab's unsaved pick instead of the stored mode while it is dirty (#1483)", () => {
+		// Stored mode is bearer; an open Auth tab has picked noauth but not yet
+		// saved. Without the draft store wired in this would still read "Bearer
+		// Token" and "Requests set to Inherit send this." - the stale-panel bug.
+		collections = [collection("col_leaf", bearer)];
+		useCollectionAuthDraftStore.getState().setDraft("col_leaf", { mode: "noauth" });
+
+		render(<CollectionAuthSection tab={TAB} />);
+
+		expect(screen.getByText("No Auth (blocks inheriting)")).toBeInTheDocument();
+		expect(
+			screen.getByText("Requests below inherit nothing - the walk stops here.")
+		).toBeInTheDocument();
 	});
 });

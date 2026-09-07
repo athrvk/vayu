@@ -11,7 +11,9 @@ automatically on startup - no migration scripts are needed for additive changes.
 
 > **Breaking changes**: because Vayu is pre-release, destructive schema changes (column removal,
 > type changes) wipe the database rather than migrating it. The `PRAGMA user_version` is
-> not currently managed; wipe is done by deleting the `.db` file.
+> not currently managed; wipe is done by deleting the `.db` file. An **additive** change - a new
+> column, or existing data reshaped into a new one alongside the old (the script-to-elements fold
+> below) - gets a startup repair pass instead, the shape both it and the header-strip pass share.
 
 ---
 
@@ -171,6 +173,22 @@ nothing left to strip pays close to nothing for it:
 - **`<db>.pre-upgrade.bak`** is written once, immediately before the first row this pass ever
   rewrites - see the backup note above.
 
+### The script-to-elements fold (issue #1513)
+
+`Database::fold_scripts_into_elements()`, called from `init()` beside the pass above, gives a
+0.26-shaped `requests` or `collections` row an `elements` entry per non-blank
+`pre_request_script` / `post_request_script`: `{"id": "el_...", "kind": "script.pre" |
+"script.post", "enabled": true, "config": {"script": "..."}}`. It is additive, not a migration in
+the destructive sense the callout above describes - `pre_request_script` and `post_request_script`
+stay mapped and keep driving every execution path (design send, sequential run) exactly as before,
+because nothing runs an *element* yet; the pipeline that does is issue #1514. Same shape as the
+header-strip pass: a candidate scan (`get_all` filtered to non-empty script columns, so an
+already-migrated workspace costs one query), a `<db>.pre-elements-fold.bak` snapshot written once
+immediately before the first row this pass ever rewrites (its own name, so a start that also runs
+the header-strip pass does not have one pass's snapshot overwrite the other's), one transaction for
+the whole rewrite, and a `scriptsFoldedIntoElements` config-entry marker so a later start never
+re-scans. `updated_at` is left alone, on the same precedent.
+
 ---
 
 ## Tables
@@ -202,12 +220,24 @@ Stores folder/group hierarchy for requests.
 | `auth`               | TEXT    | JSON: `RequestAuth` (never `inherit`)        |
 | `pre_request_script` | TEXT    | Default `""`                                 |
 | `post_request_script`| TEXT    | Default `""`                                 |
+| `elements`           | TEXT    | JSON array of elements (issue #1513); default `"[]"` |
 | `data_schema`        | TEXT    | JSON: the declared data contract; default `"{}"` |
 | `openapi`            | TEXT    | JSON: the bound spec document; default `"{}"` |
 | `order`              | INTEGER | Sort order within parent; default 0          |
 | `created_at`         | INTEGER | Unix ms                                      |
 | `updated_at`         | INTEGER | Unix ms                                      |
 | `deleted_at`         | INTEGER | Unix ms; NULL while the collection is live (issue #988) |
+
+**elements** - the ordered, typed behaviours attached to this collection (issue #1512): extractors,
+assertions, timers, controllers, scripts and metrics, each `{"id", "kind", "enabled", "name"?,
+"config"}` and validated against the registry `GET /elements/kinds` serves
+(`vayu::core::Registry::validate`, `engine/include/vayu/core/elements.hpp`). `[]` - the default,
+and what an explicit `null` on `PUT` resets to - means no elements. Additive beside
+`pre_request_script` / `post_request_script` above: a 0.26 collection's scripts are folded in here
+as `script.pre` / `script.post` entries by the startup pass above, but the two script columns keep
+driving execution unchanged until issue #1514's pipeline runs an element for real. `POST /compose`
+resolves a request's whole chain of these (its own collection's, root to leaf, then the request's)
+into one list, minus anything a `inherit.disable` entry names.
 
 **data_schema** - which columns this collection's data files are expected to
 carry, so `{{data.column}}` and `pm.iterationData` can be checked before a run
@@ -308,6 +338,7 @@ Stores individual HTTP request definitions.
 | `auth`                | TEXT    | JSON discriminated union (see below)                 |
 | `pre_request_script`  | TEXT    | Default `""`                                         |
 | `post_request_script` | TEXT    | Default `""`                                         |
+| `elements`            | TEXT    | JSON array of elements (issue #1513); default `"[]"` |
 | `order`               | INTEGER | Sort order within collection; default 0              |
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
@@ -327,6 +358,9 @@ Disabled rows (`"enabled":false`) are preserved in storage and filtered at HTTP-
 Duplicate keys are allowed. A pre-#1229 renderer also wrote its own `X-Vayu-Version`,
 `X-Request-ID` and `User-Agent` rows here; [the header-strip pass](#the-header-strip-pass-issue-1487)
 removes them once, at startup.
+
+**elements** - same shape and the same additive relationship to `pre_request_script` /
+`post_request_script` as [`collections.elements`](#collections) above; see that entry.
 
 **body** - discriminated union:
 ```json
@@ -812,7 +846,9 @@ default, so `sync_schema()` can
   },
   "tests": { "sampled": 10, "passed": 9, "failed": 1 },
   "thresholds": {
-    "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true } ],
+    "checks": [
+      { "metric": "latencyP99Ms", "limit": 50, "actual": 30.0, "passed": true, "evaluated": true }
+    ],
     "passed": 1, "failed": 0
   },
   "schemaValidation": {
@@ -847,7 +883,11 @@ the same rule and for the same reason: absent when the run declared no
 [budgets](api-reference.md#the-thresholds-block-passfail-budgets), so the report's
 `thresholdValidation` section is left out rather than claiming a run passed nothing. Its `metric`
 keys are the wire names the payload declared, carried through unchanged; the report derives
-`verdict` from `failed` rather than storing it, so the two cannot contradict. The writer is
+`verdict` from `failed` rather than storing it, so the two cannot contradict. Each check's
+`evaluated` follows the same absent-vs-zero rule one level down (issue #1484): a latency percentile
+with no completed requests writes `evaluated: false` and omits `actual` rather than storing the
+default `0`, which a reader could not tell apart from a genuine 0ms measurement; such a check counts
+toward `failed`. The writer is
 `vayu::core::build_run_summary_payload` and the reader is `apply_run_summary`
 (`http/routes/runs.cpp`); `runs_route_test.cpp` round-trips the pair, so the key names cannot
 drift apart silently.

@@ -850,6 +850,66 @@ compose_error (int status, std::string_view code, const std::string& message) {
     return { status, routes::error_body (status, message, code) };
 }
 
+// One level's stored `elements` blob, parsed with the same
+// empty-or-unparsable-is-`[]` fallback every stored JSON column uses.
+nlohmann::json parsed_elements (const std::string& blob) {
+    if (blob.empty ()) {
+        return nlohmann::json::array ();
+    }
+    auto parsed = nlohmann::json::parse (blob, nullptr, /*allow_exceptions=*/false);
+    return parsed.is_array () ? parsed : nlohmann::json::array ();
+}
+
+// Every `inherit.disable` target across the whole chain plus the request's
+// own list - a request may disable an element its own collection declared,
+// not only one from an ancestor, so this is gathered before any level is
+// emitted.
+std::unordered_set<std::string> disabled_element_ids (
+const std::vector<nlohmann::json>& levels) {
+    std::unordered_set<std::string> disabled;
+    for (const auto& elements : levels) {
+        for (const auto& element : elements) {
+            if (!element.is_object () || element.value ("kind", "") != "inherit.disable") {
+                continue;
+            }
+            const auto& config = element.value ("config", nlohmann::json::object ());
+            if (config.contains ("elementId") && config["elementId"].is_string ()) {
+                disabled.insert (config["elementId"].get<std::string> ());
+            }
+        }
+    }
+    return disabled;
+}
+
+// One level's enabled, non-disabled, non-`inherit.disable` elements, each
+// stamped with where it came from.
+void emit_level (nlohmann::json& out,
+const nlohmann::json& elements,
+const std::unordered_set<std::string>& disabled,
+const char* origin_kind,
+const std::string& origin_id,
+const std::string& origin_name) {
+    for (const auto& element : elements) {
+        if (!element.is_object () || element.value ("kind", "") == "inherit.disable") {
+            continue;
+        }
+        if (!element.value ("enabled", true)) {
+            continue;
+        }
+        const auto id = element.value ("id", "");
+        if (!id.empty () && disabled.contains (id)) {
+            continue;
+        }
+        nlohmann::json stamped = element;
+        nlohmann::json origin = { { "kind", origin_kind }, { "id", origin_id } };
+        if (!origin_name.empty ()) {
+            origin["name"] = origin_name;
+        }
+        stamped["origin"] = origin;
+        out.push_back (std::move (stamped));
+    }
+}
+
 // Append one script part, skipping blanks - the same rule the clients'
 // scriptParts helpers and the engine's read_script apply.
 void push_script_part (nlohmann::json& parts,
@@ -872,7 +932,9 @@ const std::string& script) {
 
 // The ordered script-part list for a saved request: the collection chain's
 // scripts root->leaf, then the request's own - the order the renderer sends,
-// so parent-collection setup runs before the request's script.
+// so parent-collection setup runs before the request's script. Still what
+// drives execution (design send, sequential run): #1513 adds `elements`
+// beside this, it does not replace it - that is #1514's pipeline.
 nlohmann::json compose_script_parts (const std::vector<vayu::db::Collection>& chain,
 const vayu::db::Request& request,
 bool pre) {
@@ -884,6 +946,33 @@ bool pre) {
     push_script_part (parts, "request", request.id, "",
     pre ? request.pre_request_script : request.post_request_script);
     return parts;
+}
+
+/**
+ * The resolved element list for a saved request (issue #1513): the collection
+ * chain's elements root->leaf, then the request's own, minus disabled and
+ * `inherit.disable` targets from *either* level - each stamped with where it
+ * came from. Additive beside `compose_script_parts` above: nothing here
+ * executes an element (#1514), it only resolves which ones apply.
+ */
+nlohmann::json compose_elements (const std::vector<vayu::db::Collection>& chain,
+const vayu::db::Request& request) {
+    std::vector<nlohmann::json> levels;
+    levels.reserve (chain.size () + 1);
+    for (const auto& col : chain) {
+        levels.push_back (parsed_elements (col.elements));
+    }
+    levels.push_back (parsed_elements (request.elements));
+
+    const auto disabled = disabled_element_ids (levels);
+
+    nlohmann::json out = nlohmann::json::array ();
+    for (size_t i = 0; i < chain.size (); ++i) {
+        emit_level (
+        out, levels[i], disabled, "collection", chain[i].id, chain[i].name);
+    }
+    emit_level (out, levels.back (), disabled, "request", request.id, "");
+    return out;
 }
 
 // Flatten a stored KeyValueEntry[] headers blob into the object map /execute
@@ -962,6 +1051,13 @@ const std::vector<vayu::db::Collection>& chain) {
     nlohmann::json post = compose_script_parts (chain, request, /*pre=*/false);
     if (!post.empty ()) {
         payload["postRequestScripts"] = post;
+    }
+    // Elements (issue #1513), additive beside the two script-part lists
+    // above: nothing consumes this yet (#1514), but a composed payload
+    // already reflects a request's resolved list.
+    nlohmann::json elements = compose_elements (chain, request);
+    if (!elements.empty ()) {
+        payload["elements"] = elements;
     }
 
     // Always emitted, never elided - the same rule both clients follow: the

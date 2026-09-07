@@ -41,6 +41,12 @@ struct ThresholdMetric {
     const char* range; // the accepted span, spelled for the rejection message
     const char* why;   // appended to a rejection, explains the bound
     double (*measured) (const RunSummaryInputs&);
+    /// Whether this run's numbers mean anything for this metric. `nullptr`
+    /// means always yes: the error rate and throughput are 0/0-safe already
+    /// (see `measured_error_rate`, and a starved throughput floor already
+    /// fails on its own). A latency percentile needs a real completion to
+    /// mean anything, so it is not evaluated when the run recorded none.
+    bool (*has_data) (const RunSummaryInputs&);
 };
 
 /// Share of this run's requests that did not succeed, as a percentage - the
@@ -67,18 +73,21 @@ const std::array<ThresholdMetric, 5>& metrics () {
     static const std::array<ThresholdMetric, 5> table = { {
     { "latencyP50Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
-    [] (const RunSummaryInputs& in) { return in.latency.p50; } },
+    [] (const RunSummaryInputs& in) { return in.latency.p50; },
+    [] (const RunSummaryInputs& in) { return in.latency.count > 0; } },
     { "latencyP95Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
-    [] (const RunSummaryInputs& in) { return in.latency.p95; } },
+    [] (const RunSummaryInputs& in) { return in.latency.p95; },
+    [] (const RunSummaryInputs& in) { return in.latency.count > 0; } },
     { "latencyP99Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
-    [] (const RunSummaryInputs& in) { return in.latency.p99; } },
+    [] (const RunSummaryInputs& in) { return in.latency.p99; },
+    [] (const RunSummaryInputs& in) { return in.latency.count > 0; } },
     { "maxErrorRatePct", Direction::AtMost, 0.0, true, 100.0, "between 0 and 100",
-    "It is a percentage of the run's requests.", measured_error_rate },
+    "It is a percentage of the run's requests.", measured_error_rate, nullptr },
     { "minThroughputRps", Direction::AtLeast, 0.0, false, MAX_THROUGHPUT_BUDGET_RPS,
     "greater than 0 and at most 1000000000", "It is a completed-requests-per-second floor.",
-    [] (const RunSummaryInputs& in) { return in.throughput; } },
+    [] (const RunSummaryInputs& in) { return in.throughput; }, nullptr },
     } };
     return table;
 }
@@ -201,10 +210,17 @@ const RunSummaryInputs& inputs) {
         ThresholdCheck check;
         check.metric = metric->key;
         check.limit  = limit;
-        check.actual = metric->measured (inputs);
-        check.passed = metric->direction == Direction::AtMost ?
-        check.actual <= check.limit :
-        check.actual >= check.limit;
+        check.evaluated = metric->has_data == nullptr || metric->has_data (inputs);
+        if (check.evaluated) {
+            check.actual = metric->measured (inputs);
+            check.passed = metric->direction == Direction::AtMost ?
+            check.actual <= check.limit :
+            check.actual >= check.limit;
+        } else {
+            // A budget the run could not measure was not met - counted below
+            // as a failure, never silently dropped from the tally.
+            check.passed = false;
+        }
         if (check.passed) {
             ++outcome.passed;
         } else {

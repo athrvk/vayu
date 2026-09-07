@@ -44,6 +44,12 @@ struct ThresholdCheck {
     double limit  = 0.0;
     double actual = 0.0;
     bool passed   = false;
+    /// False when the run recorded no sample for this metric - a latency
+    /// percentile with zero completed requests reads as 0ms, which trivially
+    /// satisfies an "at most" ceiling. `actual` is meaningless then, and the
+    /// check counts toward `failed`: a budget the run could not measure was
+    /// not met.
+    bool evaluated = true;
 };
 
 /// Every declared budget's verdict. `failed == 0` is the run's pass.

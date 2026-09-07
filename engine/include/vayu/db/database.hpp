@@ -472,6 +472,18 @@ class Database {
     int64_t strip_stored_managed_headers ();
 
     /**
+     * @brief Fold a 0.26 request's or collection's scripts into `elements`
+     *        as `script.pre` / `script.post` entries (issue #1513).
+     *
+     * Additive and idempotent, run at startup beside the other repair
+     * passes: `pre_request_script` / `post_request_script` stay mapped and
+     * keep driving every execution path unchanged (nothing runs an element
+     * before #1514's pipeline exists), so this only gives older data the
+     * `elements` list a fresh row already starts with.
+     */
+    int64_t fold_scripts_into_elements ();
+
+    /**
      * @brief Persist a whole import in one transaction (issue #96).
      *
      * Either every row lands or none does: a bulk import that failed halfway
