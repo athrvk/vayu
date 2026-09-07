@@ -371,7 +371,12 @@ describe("seedFromRun", () => {
 				configSnapshot: {
 					method: "POST",
 					url: "https://api.example.test/users?page=2",
-					body: { mode: "json", content: "SLICE", bodyTruncated: true, bodyBytes: 5_242_880 },
+					body: {
+						mode: "json",
+						content: "SLICE",
+						bodyTruncated: true,
+						bodyBytes: 5_242_880,
+					},
 				},
 			} as Partial<Run>);
 
