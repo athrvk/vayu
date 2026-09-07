@@ -1054,6 +1054,14 @@ struct Request {
     std::string name;
     std::string description; // TEXT NOT NULL DEFAULT ''
     HttpMethod method = HttpMethod::GET;
+    // Which app setting set `method`, still untouched by the user since (issue
+    // #1505). Nullable on the `spec_operation` precedent below: the only
+    // writer today is the GraphQL body mode setting `method` to POST on a
+    // fresh GET, and NULL is "the user's own choice, or nothing has set it" -
+    // the same absence a second spelling would make every reader handle twice.
+    // Cleared the moment `method` is written by anything other than that same
+    // switch, so a method the user has since picked is never reverted.
+    std::optional<std::string> method_source;
     std::string url;
     std::string params; // JSON array of KeyValueEntry: [{key,value,enabled,description?}]
     std::string headers; // JSON array of KeyValueEntry

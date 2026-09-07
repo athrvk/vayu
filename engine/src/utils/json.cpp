@@ -298,6 +298,17 @@ Json spec_operation_node (const std::optional<std::string>& stored) {
     }
 }
 
+/**
+ * The `methodSource` value both request serializers emit (issue #1505), on
+ * the `spec_operation_node` precedent above: one reading, called from both,
+ * so the single-request and list routes cannot come to disagree about
+ * whether `method` still carries an app-written marker. A plain string
+ * column, not JSON, so there is nothing here to fail to parse.
+ */
+Json method_source_node (const std::optional<std::string>& stored) {
+    return stored.has_value () ? Json (*stored) : Json (nullptr);
+}
+
 } // namespace
 
 Json serialize (const vayu::db::SpecDocument& s) {
@@ -457,6 +468,9 @@ Json serialize (const vayu::db::Request& r) {
     json["name"]         = r.name;
     json["description"]  = r.description;
     json["method"]       = to_string (r.method);
+    // Always present as a key, `null` when the column is - same rule as
+    // `specOperation` below, and for the same reason (issue #1505).
+    json["methodSource"] = method_source_node (r.method_source);
     json["url"]          = r.url;
     json["order"]        = r.order;
 
@@ -1241,6 +1255,9 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"name\":" << Json (r.name).dump () << ",";
     out << "\"description\":" << Json (r.description).dump () << ",";
     out << "\"method\":" << Json (to_string (r.method)).dump () << ",";
+    // Through the same `method_source_node` the object serializer uses, so the
+    // list route and the single route cannot come to disagree about it.
+    out << "\"methodSource\":" << method_source_node (r.method_source).dump () << ",";
     out << "\"url\":" << Json (r.url).dump () << ",";
     out << "\"order\":" << r.order << ",";
 

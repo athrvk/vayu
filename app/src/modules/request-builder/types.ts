@@ -28,6 +28,7 @@ import type {
 	HttpMethod,
 	HttpVersion,
 	KeyValueItem,
+	MethodSource,
 	RequestAuth,
 	ResolvedVariable,
 	ResponseTiming,
@@ -98,33 +99,6 @@ export interface BodyConfig {
 	urlEncoded?: KeyValueItem[];
 }
 
-/**
- * The method a body mode set, and what it was before (issue #1228).
- *
- * GraphQL over `GET` is sent as query parameters and cannot carry a mutation at
- * all, so choosing the mode on a request still holding the default `GET` sets
- * `POST` - and leaving the mode puts `GET` back. `method` is what this record
- * set, and it is re-checked before the revert: a method the user has picked
- * since is theirs, and reverting it would take a choice away rather than
- * complete one.
- *
- * The body mode's `Content-Type` row and the Event stream toggle's `Accept`
- * row used to carry the identical shape (`AutoHeader`), tracked the same
- * ephemeral, per-request way. That could not survive a reload - a stale
- * auto-written row was then indistinguishable from one the user typed (issue
- * #1481) - so both now mark ownership on the row itself (`KeyValueEntry.source`,
- * see `utils/auto-header.ts`) instead of in a provider-held record. `method`
- * cannot follow: it is a scalar field on the request, not a `KeyValueEntry`,
- * so it has nowhere to carry a marker of its own, and stays on the ref-based
- * per-request record here. It has the same reload gap #1481 fixed for the two
- * header rows; see issue #1505 for giving it a persisted marker.
- */
-export interface AutoMethod {
-	requestId: string | null;
-	method: HttpMethod;
-	previous: HttpMethod;
-}
-
 // ============================================================================
 // Request State
 // ============================================================================
@@ -138,6 +112,12 @@ export interface RequestState {
 
 	// Request
 	method: HttpMethod;
+	/**
+	 * Which app setting last wrote {@link method}, still unclaimed by the user
+	 * (issue #1505) - see `Request.methodSource` for the full rationale and
+	 * `graphql-method.ts` for the one setting that writes it.
+	 */
+	methodSource?: MethodSource;
 	url: string;
 	params: KeyValueItem[];
 	headers: KeyValueItem[];
@@ -432,16 +412,6 @@ export interface RequestBuilderContextValue {
 	setBodyDrafts: (drafts: BodyDrafts) => void;
 	getVariablesDraft: () => VariablesDraft | null;
 	setVariablesDraft: (draft: VariablesDraft) => void;
-
-	/**
-	 * The method the GraphQL body mode set, so leaving the mode can put back
-	 * the one it replaced (issue #1228). The Content-Type and Accept rows this
-	 * used to sit beside are gone from the context - they mark ownership on the
-	 * row itself now (`KeyValueEntry.source`) - but `method` is a scalar field,
-	 * not a row, so it still needs a provider-held record. See {@link AutoMethod}.
-	 */
-	getAutoMethod: () => AutoMethod | null;
-	setAutoMethod: (auto: AutoMethod | null) => void;
 
 	// Response State
 	response: ResponseState | null;

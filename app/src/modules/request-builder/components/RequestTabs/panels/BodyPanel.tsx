@@ -103,14 +103,13 @@ const EDITOR_BOX = "min-h-40 flex-1 overflow-hidden rounded-md border border-inp
 export default function BodyPanel() {
 	const {
 		request,
+		setRequest,
 		updateField,
 		resolveString,
 		getBodyDrafts,
 		setBodyDrafts,
 		getVariablesDraft,
 		setVariablesDraft,
-		getAutoMethod,
-		setAutoMethod,
 		resolvedAuth,
 	} = useRequestBuilderContext();
 	const variables = useVariableSupport();
@@ -217,18 +216,18 @@ export default function BodyPanel() {
 		 * server answered with a bare 400 (issue #1228). The method moves the
 		 * same reversible way the header above does, and back again on the way
 		 * out; `graphql-method.ts` is the rule, including why a method the user
-		 * chose is left alone in both directions.
+		 * chose is left alone in both directions. Both fields write in one call,
+		 * the way the headers update above does: writing `method` alone would
+		 * leave a stale `methodSource` marking a method the user is about to pick
+		 * for themselves as still GraphQL's.
 		 */
-		const graphqlMethod = switchGraphQLMethod(
-			mode,
-			request.method,
-			request.id,
-			getAutoMethod()
-		);
-		if (graphqlMethod.method !== request.method) {
-			updateField("method", graphqlMethod.method);
+		const graphqlMethod = switchGraphQLMethod(mode, request.method, request.methodSource);
+		if (
+			graphqlMethod.method !== request.method ||
+			graphqlMethod.methodSource !== request.methodSource
+		) {
+			setRequest({ method: graphqlMethod.method, methodSource: graphqlMethod.methodSource });
 		}
-		setAutoMethod(graphqlMethod.auto);
 	};
 
 	const undoContentType = () => {

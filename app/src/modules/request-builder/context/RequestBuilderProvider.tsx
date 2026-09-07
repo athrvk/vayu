@@ -19,7 +19,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
-import { useAutoRecordSlot, UNSAVED_AUTO_KEY } from "./auto-record-slot";
+import { UNSAVED_AUTO_KEY } from "./auto-record-slot";
 import { retainKeys } from "./retain-keys";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
@@ -49,7 +49,6 @@ import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries";
 import type { ScriptPart, VariableValue } from "@/types";
 import type {
-	AutoMethod,
 	RequestState,
 	ResponseState,
 	RequestTab,
@@ -76,6 +75,7 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"name",
 	"description",
 	"method",
+	"methodSource",
 	"url",
 	"params",
 	"headers",
@@ -97,8 +97,12 @@ interface RequestBuilderProviderProps {
 	children: ReactNode;
 	initialRequest?: Partial<RequestState>;
 	/**
-	 * The identity this builder files its per-builder memory under - the three
-	 * auto side-effect records and the picker's row index (issue #1272).
+	 * The identity this builder files its per-builder memory under - the
+	 * Send-with-row picker's row index (issue #1272), the one per-request map
+	 * left provider-side now that the three reversible-setting records (the
+	 * body mode's `Content-Type`, the Event stream toggle's `Accept`, the
+	 * GraphQL mode's `method`) all mark ownership on the request's own state
+	 * instead (issues #1481, #1505).
 	 *
 	 * Defaults to `request.id`, which is what a request tab wants. The History
 	 * run view passes its run id, because the copy it renders is deliberately
@@ -452,31 +456,18 @@ export default function RequestBuilderProvider({
 	 * #1272). Spelled once rather than per map - the maps share a sweep, and two
 	 * spellings of one rule are how they drift apart.
 	 *
-	 * The Content-Type row a body mode adds, and the `Accept: text/event-stream`
-	 * row the Event stream toggle adds, used to be tracked the same way - and
-	 * that in-memory record could not survive a reload, leaving a stale
-	 * auto-written row indistinguishable from one the user typed (issue #1481).
-	 * Both now carry their own ownership on the row itself (`source`, see
-	 * `utils/auto-header.ts`) and need no slot here.
+	 * The Content-Type row a body mode adds, the `Accept: text/event-stream`
+	 * row the Event stream toggle adds, and the method the GraphQL mode sets
+	 * (issue #1228) used to all be tracked this way - an in-memory record that
+	 * could not survive a reload, leaving a stale auto-written value
+	 * indistinguishable from one the user chose (issue #1481). All three now
+	 * carry their own ownership on the request's own state (`KeyValueEntry.source`
+	 * for the two rows, `RequestState.methodSource` for the method, issue
+	 * #1505) and need no slot here.
 	 */
 	const memoryKey = declaredMemoryKey ?? request.id ?? UNSAVED_AUTO_KEY;
 
-	/*
-	 * The method the GraphQL body mode set, so leaving the mode can put back
-	 * the one it replaced (issue #1228). Here because the panel that writes it
-	 * is unmounted whenever another tab is on screen, and a record that does
-	 * not outlive the panel leaves the method changed with nothing left to
-	 * change it back. Unlike the two header rows above, there is no row to mark:
-	 * `method` is a scalar field on the request, not a `KeyValueEntry` - see
-	 * `AutoMethod`'s doc comment for the follow-up this leaves open.
-	 */
-	const {
-		get: getAutoMethod,
-		set: setAutoMethod,
-		retain: retainAutoMethods,
-	} = useAutoRecordSlot<AutoMethod>(memoryKey);
-
-	// What bounds it is stated with the row memory below, which the same sweep
+	// What bounds the row memory below is stated there, which the same sweep
 	// bounds (issue #1271): one rule over every per-builder map the provider
 	// holds, rather than one rule each.
 
@@ -593,11 +584,10 @@ export default function RequestBuilderProvider({
 				if (tab.entityId === null) continue;
 				if (tab.type === "request" || tab.type === "run") live.add(tab.entityId);
 			}
-			retainAutoMethods(live);
 			retainRowIndexes(live);
 		};
 		return useTabsStore.subscribe((s) => retainOpen(s.openTabs));
-	}, [retainAutoMethods, retainRowIndexes]);
+	}, [retainRowIndexes]);
 
 	/**
 	 * The row the preview resolves against - the picked one, once the file it
@@ -1273,8 +1263,6 @@ export default function RequestBuilderProvider({
 			setBodyDrafts,
 			getVariablesDraft,
 			setVariablesDraft,
-			getAutoMethod,
-			setAutoMethod,
 			response,
 			setResponse,
 			inheritedPreScripts,
@@ -1318,8 +1306,6 @@ export default function RequestBuilderProvider({
 			setBodyDrafts,
 			getVariablesDraft,
 			setVariablesDraft,
-			getAutoMethod,
-			setAutoMethod,
 			response,
 			setResponse,
 			inheritedPreScripts,
