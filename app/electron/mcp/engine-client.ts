@@ -455,9 +455,14 @@ export class EngineClient {
 	 * The runs pinned as baselines for one saved request, newest first. One row
 	 * is all any caller needs - "the baseline" is the most recent pin - so the
 	 * page is bounded to it rather than to the 100 `listRuns` allows.
+	 *
+	 * `type: "load"` because a pin is not load-specific (#1509) but a
+	 * comparison is: only a load run has the percentiles and throughput a
+	 * baseline diff needs, so a more-recently-pinned design or scenario run of
+	 * the same request must never shadow the load baseline this resolves.
 	 */
 	listBaselineRuns(requestId: string, signal?: AbortSignal): Promise<unknown> {
-		return this.listRuns({ baseline: true, limit: 1, requestId }, signal);
+		return this.listRuns({ baseline: true, type: "load", limit: 1, requestId }, signal);
 	}
 
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {

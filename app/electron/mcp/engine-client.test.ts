@@ -396,7 +396,10 @@ describe("EngineClient run housekeeping", () => {
 		});
 	});
 
-	it("resolves a baseline through the same query builder", async () => {
+	it("resolves a baseline through the same query builder, scoped to load runs", async () => {
+		// #1509: a design or scenario run can be pinned too, but only a load run
+		// has the percentiles a baseline comparison diffs - an unscoped lookup
+		// would let a more-recently-pinned non-load run shadow the load baseline.
 		const { fetchImpl, calls } = recordingFetch();
 		await client(fetchImpl).listBaselineRuns("req_1");
 		const url = new URL(calls[0].url);
@@ -405,6 +408,7 @@ describe("EngineClient run housekeeping", () => {
 			limit: "1",
 			offset: "0",
 			requestId: "req_1",
+			type: "load",
 			baseline: "true",
 		});
 	});
