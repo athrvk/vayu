@@ -791,6 +791,7 @@ vayu::core::RunSummaryInputs summary_inputs () {
     inputs.bytes_sent              = 1024;
     inputs.bytes_received          = 8192;
     inputs.status_codes            = { { 200, 90 }, { 500, 7 }, { 0, 3 } };
+    inputs.latency.count           = 100;
     inputs.latency.min             = 1.0;
     inputs.latency.max             = 90.0;
     inputs.latency.p50             = 10.0;
@@ -1060,12 +1061,41 @@ TEST_F (RunsRouteTest, ReportCarriesTheThresholdVerdict) {
     EXPECT_DOUBLE_EQ (verdict["checks"][0]["limit"].get<double> (), 50.0);
     EXPECT_DOUBLE_EQ (verdict["checks"][0]["actual"].get<double> (), 30.0);
     EXPECT_TRUE (verdict["checks"][0]["passed"].get<bool> ());
+    EXPECT_TRUE (verdict["checks"][0]["evaluated"].get<bool> ());
     EXPECT_EQ (verdict["checks"][1]["metric"].get<std::string> (), "maxErrorRatePct");
     EXPECT_FALSE (verdict["checks"][1]["passed"].get<bool> ());
 
     // The one assertion that pins the two sides together.
     EXPECT_DOUBLE_EQ (verdict["checks"][1]["actual"].get<double> (),
     body["summary"]["errorRate"].get<double> ());
+}
+
+// Issue #1484: a run whose every request errored before completing has no
+// latency samples at all, and its stored `evaluated: false` / omitted
+// `actual` must survive the round trip through the summary column exactly
+// like every other absent-vs-zero section this report carries.
+TEST_F (RunsRouteTest, ReportOmitsActualAndMarksUnevaluatedForALatencyCheckWithNoSamples) {
+    seed ({ .id = "run_no_samples", .start_time = 1000 });
+    vayu::core::RunSummaryInputs inputs;
+    inputs.total_requests = 5999;
+    inputs.status_codes   = { { 0, 5999 } };
+    inputs.thresholds     = vayu::core::evaluate_thresholds (
+    nlohmann::json{ { "thresholds", { { "latencyP99Ms", 200 } } } }, inputs);
+    db_->update_run_summary (
+    "run_no_samples", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_samples");
+    ASSERT_EQ (status, 200);
+
+    ASSERT_TRUE (body.contains ("thresholdValidation"));
+    const auto& verdict = body["thresholdValidation"];
+    EXPECT_EQ (verdict["verdict"].get<std::string> (), "failed");
+    EXPECT_EQ (verdict["failed"].get<size_t> (), 1u);
+    ASSERT_EQ (verdict["checks"].size (), 1u);
+    const auto& check = verdict["checks"][0];
+    EXPECT_FALSE (check["evaluated"].get<bool> ());
+    EXPECT_FALSE (check["passed"].get<bool> ());
+    EXPECT_FALSE (check.contains ("actual"));
 }
 
 TEST_F (RunsRouteTest, AThresholdVerdictPassesOnlyWhenNothingFailed) {

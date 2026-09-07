@@ -4990,6 +4990,16 @@ The verdict is the run's, not the process's: a run **stopped early** is judged o
 what it measured up to that point, and its status stays `completed` / `stopped`
 whatever the verdict says. A failing budget is reported, never a failed run.
 
+Each check carries `evaluated`. A latency percentile needs a completed request
+to mean anything, so a run that recorded none for that metric (every request
+errored before a response arrived) reports `evaluated: false` and omits
+`actual` entirely rather than the default `0`, which would otherwise read as a
+measured 0ms and trivially satisfy an "at most" ceiling. An unevaluated check
+counts toward `failed`: a budget the run could not measure was not met. The
+error rate and the throughput floor have no such gap - `maxErrorRatePct` is
+0/0-safe by request count, and a starved `minThroughputRps` already fails on
+its own - so both are always `evaluated: true`.
+
 #### The `monitor` block (server vitals)
 
 A run may name a metrics endpoint on the target, which the engine scrapes for
@@ -6754,7 +6764,9 @@ named it.
   },
   "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
   "thresholdValidation": {
-    "checks": [ { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true } ],
+    "checks": [
+      { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true, "evaluated": true }
+    ],
     "passed": 1, "failed": 0, "verdict": "passed"
   },
   "auth": { "refreshes": [ { "atSeconds": 3620.4 } ], "refreshFailures": 0 },
