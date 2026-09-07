@@ -557,6 +557,16 @@ describe("the elements override", () => {
 		expect(mutate.mock.calls[0][0].elements).toEqual({ timers: "off" });
 	});
 
+	it("sends a Scripts-only override when only Scripts is changed", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+		const scripts = screen.getByRole("radiogroup", { name: /^scripts$/i });
+		fireEvent.click(within(scripts).getByRole("radio", { name: /all inline/i }));
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0].elements).toEqual({ scripts: "allInline" });
+	});
+
 	it("sends both fields when both Timers and Scripts are changed", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		enableLoadTest();
