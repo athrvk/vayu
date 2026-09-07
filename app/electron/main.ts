@@ -5,6 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+// First, ahead of every other module: the pool it sizes reads the variable
+// once, at its first use. See threadpool-size.ts.
+import "./threadpool-size.js";
 import {
 	app,
 	BrowserWindow,
