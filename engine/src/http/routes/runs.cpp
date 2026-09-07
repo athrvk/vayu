@@ -64,6 +64,27 @@ void add_http_version (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
+// Whether this run negotiated a compressed response, read out of the nested
+// `defaultHeaders` object issue #1488 added to the snapshot at run start.
+// Nested rather than flat so it cannot collide with a client-controlled
+// top-level key `add_if_present` would otherwise copy verbatim.
+//
+// Omitted, not defaulted, when the snapshot predates this field - unlike
+// httpVersion, an absent key here does not mean "the engine's own default
+// applied at read time", it means "no run-scoped decision was ever
+// recorded". The baseline comparison (app side) is the one place that reads
+// an absent key as false, because that is what every pre-0.26 run actually
+// sent.
+void add_accept_encoding (nlohmann::json& dst, const nlohmann::json& src) {
+    if (!src.contains ("defaultHeaders") || !src["defaultHeaders"].is_object ()) {
+        return;
+    }
+    const auto& headers = src["defaultHeaders"];
+    if (headers.contains ("acceptEncoding") && headers["acceptEncoding"].is_boolean ()) {
+        dst["acceptEncoding"] = headers["acceptEncoding"];
+    }
+}
+
 // A scenario run's list-row descriptor, or an absent key when the snapshot is
 // not a scenario's.
 //
@@ -95,9 +116,11 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
 
 // The compact list-row summary: exactly the nine keys the history/dashboard
 // list UIs read, each omitted when absent from the snapshot (httpVersion
-// excepted - see add_http_version), plus `scenario` on a collection run only.
-// A malformed config_snapshot yields an empty object, never an error - the full
-// snapshot stays available on GET /runs/:id.
+// excepted - see add_http_version), plus `acceptEncoding` (issue #1488) and
+// `scenario` on a collection run only, both omitted rather than defaulted
+// when the snapshot carries neither. A malformed config_snapshot yields an
+// empty object, never an error - the full snapshot stays available on
+// GET /runs/:id.
 nlohmann::json build_run_summary (const std::string& config_snapshot) {
     nlohmann::json summary = nlohmann::json::object ();
     try {
@@ -108,6 +131,7 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
                 add_if_present (summary, config, key);
             }
             add_http_version (summary, config);
+            add_accept_encoding (summary, config);
             add_scenario (summary, config);
         }
     } catch (...) {
@@ -781,10 +805,11 @@ int64_t offset) {
 
 /**
  * The GET /runs/:runId/report `configuration` object: the load-test tuning
- * knobs plus httpVersion/followRedirects/maxRedirects (ten keys total), built
- * from an already-parsed config_snapshot. `rps`/`targetRps` is the one
- * rename, so it stays as an inline branch in the caller rather than living in
- * this key list.
+ * knobs plus httpVersion/followRedirects/maxRedirects (ten keys total) and,
+ * when the snapshot carries one, `acceptEncoding` (issue #1488), built from
+ * an already-parsed config_snapshot. `rps`/`targetRps` is the one rename, so
+ * it stays as an inline branch in the caller rather than living in this key
+ * list.
  *
  * Extracted (like get_runs_response above) so this is covered directly - see
  * runs_route_test.cpp - without the full report handler's DB/metrics reads.
@@ -803,6 +828,7 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
         add_if_present (config_obj, config, key);
     }
     add_http_version (config_obj, config);
+    add_accept_encoding (config_obj, config);
     return config_obj;
 }
 

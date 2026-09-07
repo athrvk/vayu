@@ -137,6 +137,15 @@ const CASES: { name: string; base: Record<string, unknown>; target: Record<strin
 		},
 		target: { latency: 7, summary: null, statusCodes: null },
 	},
+	{
+		// A baseline pinned before loadNegotiateCompression's default flipped
+		// (issue #1488) against a run recorded after: the base carries no
+		// `acceptEncoding` at all, which must read the same as an explicit
+		// `false`, not as "unknown".
+		name: "a pre-#1488 baseline against a run that negotiated compression",
+		base: { metadata: { configuration: { mode: "constant_rps" } } },
+		target: { metadata: { configuration: { acceptEncoding: true } } },
+	},
 ];
 
 describe("run comparison mirror", () => {
@@ -173,6 +182,33 @@ describe("run comparison mirror", () => {
 
 		expect(mainCompare("a", "b", base, target).statusCodes).toEqual(expected);
 		expect(rendererCompare("a", "b", base, target).statusCodes).toEqual(expected);
+	});
+
+	/*
+	 * Equality alone (the test.each above) already proves the two sides agree,
+	 * but not that either computed the *right* answer - two implementations
+	 * that both always returned `false` would agree forever. Pin the value.
+	 */
+	test("compressionNegotiationDiffers reads a real difference, and an absent key as false", () => {
+		const negotiated = { metadata: { configuration: { acceptEncoding: true } } };
+		const notNegotiated = { metadata: { configuration: { acceptEncoding: false } } };
+		const preIssue = { metadata: { configuration: { mode: "once" } } };
+
+		for (const compare of [mainCompare, rendererCompare]) {
+			expect(compare("a", "b", negotiated, notNegotiated).compressionNegotiationDiffers).toBe(
+				true
+			);
+			expect(compare("a", "b", negotiated, negotiated).compressionNegotiationDiffers).toBe(
+				false
+			);
+			// Absent reads as false, same as an explicit false - not "unknown".
+			expect(compare("a", "b", preIssue, notNegotiated).compressionNegotiationDiffers).toBe(
+				false
+			);
+			expect(compare("a", "b", preIssue, negotiated).compressionNegotiationDiffers).toBe(
+				true
+			);
+		}
 	});
 
 	test("a malformed pair is dropped rather than keyed by its index", () => {

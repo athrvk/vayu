@@ -537,7 +537,10 @@ logged as a warning: it means a client skipped composition.
   `X-Vayu-Version` and a frozen `X-Request-ID` into the saved request, which a
   load run then replayed. `Accept-Encoding` is the one recorded without being
   appended: libcurl writes that line itself from `CURLOPT_ACCEPT_ENCODING`,
-  which is what makes it decode. Add a default there, never in a driver.
+  which is what makes it decode. Add a default there, never in a driver. A
+  load or collection run's `config_snapshot` records the resolved decision
+  too (#1488), for a later run's report to compare against - never re-applied
+  to a send, the one deliberate exception to "none of it is stored".
 - **Every outbound transfer leaves through one `TransportPolicy`** (#705,
   `include/vayu/http/transport_policy.hpp`), resolved from `proxyMode` /
   `proxyUrl` / `proxyBypass` at the point of use (run-scoped on the load and

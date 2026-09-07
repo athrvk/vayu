@@ -863,6 +863,19 @@ export interface RunConfigSnapshot {
 	 * *negotiated* protocol on a single exchange (`ResponseState.httpVersion`).
 	 */
 	httpVersion?: HttpVersion;
+	/**
+	 * A load or collection run's resolved default-header decision at start
+	 * (issue #1488) - `userAgent` is the value verbatim, `requestId` and
+	 * `acceptEncoding` are whether each was negotiated at all. Absent on a
+	 * design run and on any run recorded before this field existed. Never
+	 * re-applied to a send; kept only so a baseline comparison can tell
+	 * whether two runs measured under the same conditions.
+	 */
+	defaultHeaders?: {
+		userAgent: string;
+		requestId: boolean;
+		acceptEncoding: boolean;
+	};
 	[key: string]: unknown;
 }
 
@@ -1308,7 +1321,7 @@ export interface RunScenarioSummary {
 
 /**
  * The compact per-row summary the paginated `GET /runs` list carries in place
- * of the full {@link RunConfigSnapshot}. Mirrors all ten keys
+ * of the full {@link RunConfigSnapshot}. Mirrors all eleven keys
  * `build_run_summary` sends (`engine/src/http/routes/runs.cpp`); each is
  * omitted by the engine when absent from the stored snapshot, except
  * `httpVersion` which the engine always normalizes to a value (see
@@ -1335,6 +1348,14 @@ export interface RunSummary {
 	followRedirects?: boolean;
 	/** Sent by the engine, not yet rendered - see the note above. */
 	maxRedirects?: number;
+	/**
+	 * Whether this run negotiated a compressed response (issue #1488) - see
+	 * {@link RunConfigSnapshot.defaultHeaders}. Omitted, not `false`, for a
+	 * run recorded before this field existed; the baseline comparison is the
+	 * one reader that treats an absent value as `false`, matching what such a
+	 * run actually sent.
+	 */
+	acceptEncoding?: boolean;
 	/**
 	 * A collection run's sequence, and nothing else's - see
 	 * {@link RunScenarioSummary}. Read by the history row, which has no `url` to
@@ -1849,6 +1870,8 @@ export interface RunReport {
 			followRedirects?: boolean;
 			/** Sent by the engine since 0.11.0; not rendered anywhere yet. */
 			maxRedirects?: number;
+			/** See {@link RunSummary.acceptEncoding} (issue #1488). */
+			acceptEncoding?: boolean;
 		};
 		/**
 		 * The document this run was measured against (issue #637), echoed from
