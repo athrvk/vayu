@@ -455,6 +455,109 @@ TEST (ResidualTokens, ARequestWithNeitherATokenNorAnEmptyNameIsUntouched) {
     EXPECT_EQ (request.url, before.url);
 }
 
+// --- the load path's per-VU overlay (issue #1495) ----------------------------
+//
+// `ScopeOverlay` is what makes `resolve_residual_tokens` safe to call once per
+// VU per submission instead of once per run: a VU's writes land here, never on
+// the run's shared scopes, and `apply_onto` merges them onto a *copy* of the
+// flattened run map at the same precedence the run's own scopes carry.
+
+using vayu::http::routes::flatten_variable_scopes;
+using vayu::http::routes::ScopeOverlay;
+
+TEST (ScopeOverlayTest, AnUnwrittenOverlayChangesNothing) {
+    ScopeOverlay overlay;
+    EXPECT_TRUE (overlay.empty ());
+
+    auto vars = flatten_variable_scopes (environment_with ("token", "base"));
+    overlay.apply_onto (vars);
+    EXPECT_EQ (vars["token"], "base");
+}
+
+TEST (ScopeOverlayTest, AWrittenNameShadowsTheRunsOwnValueForThisVuAlone) {
+    ScopeOverlay overlay;
+    overlay.set ("env", "token", "vu-own");
+    EXPECT_FALSE (overlay.empty ());
+
+    auto vars = flatten_variable_scopes (environment_with ("token", "base"));
+    overlay.apply_onto (vars);
+    EXPECT_EQ (vars["token"], "vu-own");
+
+    // The base map itself is untouched - a second VU merging the same base
+    // must still see "base", never this VU's write.
+    auto other_vars = flatten_variable_scopes (environment_with ("token", "base"));
+    EXPECT_EQ (other_vars["token"], "base");
+}
+
+// `set`'s scope selection mirrors `set_scope_variable`'s: "env" / "globals"
+// name their own slot, anything else (including "collection") is the leaf
+// collection scope - and `apply_onto`'s precedence is environment over
+// collection over globals, the same order `values_from_scopes` builds the
+// base map in. Mutation check: apply the three scopes in a different order
+// and this reds.
+TEST (ScopeOverlayTest, ThreeScopesResolveInCompositionsPrecedenceOrder) {
+    ScopeOverlay overlay;
+    overlay.set ("globals", "name", "from-globals");
+    overlay.set ("collection", "name", "from-collection");
+    auto vars = flatten_variable_scopes ({});
+    overlay.apply_onto (vars);
+    EXPECT_EQ (vars["name"], "from-collection");
+
+    overlay.set ("env", "name", "from-env");
+    vars = flatten_variable_scopes ({});
+    overlay.apply_onto (vars);
+    EXPECT_EQ (vars["name"], "from-env");
+}
+
+TEST (ScopeOverlayTest, ClearRemovesEveryWrittenName) {
+    ScopeOverlay overlay;
+    overlay.set ("env", "a", "1");
+    overlay.set ("collection", "b", "2");
+    overlay.set ("globals", "c", "3");
+    overlay.clear ();
+    EXPECT_TRUE (overlay.empty ());
+}
+
+// `materialize` is the one place this issue pays a real copy - only reached
+// when an inline script needs a mutable `Environment&` to run against, never
+// on the residual-token pass's own hot path.
+TEST (ScopeOverlayTest, MaterializeLayersTheOverlayOntoARealCopyOfTheBaseScopes) {
+    ScriptVariableScopes base = environment_with ("token", "base");
+    base.collection["kept"]   = value_of ("still-here");
+
+    ScopeOverlay overlay;
+    overlay.set ("env", "token", "written");
+    auto materialized = overlay.materialize (base);
+
+    EXPECT_EQ (materialized.environment["token"].value, "written");
+    EXPECT_EQ (materialized.collection["kept"].value, "still-here")
+    << "an untouched scope must survive materialization unchanged";
+    // The base itself must not have been mutated by materializing a copy of
+    // it - the whole point of the overlay is that a VU's write never reaches
+    // the scopes another VU's concurrent submission reads.
+    EXPECT_FALSE (base.environment.contains ("token") &&
+    base.environment.at ("token").value == "written");
+}
+
+// `replace_from` is how an inline script's result becomes this VU's overlay
+// going forward: whatever the script left the materialized copy as, not a
+// diff against what it started with - correct because the copy it mutated
+// already started as base-plus-this-VU's-prior-overlay.
+TEST (ScopeOverlayTest, ReplaceFromAdoptsWhateverTheMaterializedCopyEndedAs) {
+    ScopeOverlay overlay;
+    overlay.set ("env", "keep", "first-write");
+
+    ScriptVariableScopes mutated;
+    mutated.environment["keep"] = value_of ("first-write"); // unchanged by the script
+    mutated.environment["new_name"] = value_of ("second-write"); // the script's own write
+    overlay.replace_from (mutated);
+
+    auto vars = flatten_variable_scopes ({});
+    overlay.apply_onto (vars);
+    EXPECT_EQ (vars["keep"], "first-write");
+    EXPECT_EQ (vars["new_name"], "second-write");
+}
+
 // --- the exchange, on the wire -----------------------------------------------
 
 class ResidualTokenExchangeTest : public ::testing::Test {

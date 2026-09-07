@@ -79,7 +79,8 @@ const nlohmann::json* ensure_parsed_body (ElementContext& ctx) {
 void ElementPipeline::run (Phase phase,
 ElementContext& ctx,
 const std::vector<CompiledElement>& elements,
-std::vector<ElementOutcome>& sink) {
+std::vector<ElementOutcome>& sink,
+const std::function<std::optional<std::string> (const CompiledElement&)>& skip_reason) {
     for (const auto& compiled : elements) {
         if (!compiled.element || compiled.element->phase () != phase) {
             continue;
@@ -90,9 +91,16 @@ std::vector<ElementOutcome>& sink) {
         ctx.outcome_waited_ms.reset ();
         ctx.outcome_wrote.reset ();
 
+        std::optional<std::string> skipped;
         if (!compiled.enabled) {
+            skipped = "disabled";
+        } else if (skip_reason) {
+            skipped = skip_reason (compiled);
+        }
+
+        if (skipped) {
             ctx.outcome_status  = "skipped";
-            ctx.outcome_message = "disabled";
+            ctx.outcome_message = skipped;
         } else {
             try {
                 compiled.element->apply (ctx);

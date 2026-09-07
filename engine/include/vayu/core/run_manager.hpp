@@ -304,6 +304,60 @@ struct RunContext {
     // Test script for deferred validation
     std::string test_script;
 
+    /**
+     * `elements.scripts` (issue #1495), resolved once here from a payload
+     * `validate_elements_run_override` has already accepted: "asMarked"
+     * leaves each `script.*` element's own `config.inline` to decide,
+     * "allInline" / "allDeferred" force every one regardless of its own
+     * marking. Read by the load paths' producer/completion hooks per
+     * element - `extract.*` / `assert.*` / `timer.think` are never affected,
+     * since this key names only the script.* opt-in.
+     */
+    enum class ScriptsOverrideMode : std::uint8_t {
+        AsMarked,
+        AllInline,
+        AllDeferred
+    };
+    ScriptsOverrideMode scripts_override = ScriptsOverrideMode::AsMarked;
+
+    /// `elements.includeScriptTime` (issue #1495): false (the default) times
+    /// a step's own transfer only, excluding whatever an inline script or
+    /// declarative element spent applying; true folds that time back into
+    /// the recorded sample.
+    bool include_script_time = false;
+
+    /// `elements.timers` (issue #1495), stored for #1498's timer family to
+    /// read once it exists. This issue validates the key and stores the
+    /// choice but does not yet wire "off" to suppress `timer.think` under
+    /// load - see `docs/engine/elements.md`'s Load paths section.
+    bool timers_disabled = false;
+
+    /**
+     * Whether a compiled `script.*` element runs inline on a load run's
+     * producer/completion hooks (issue #1495) rather than being left to the
+     * deferred replay: the run's `elements.scripts` override when it forces
+     * one way or the other, else the element's own `config.inline`.
+     *
+     * A free function taking @p element_config directly - never a
+     * `CompiledElement` - so `run_manager.cpp`'s `find_step_post_script` (a
+     * step's own script text, not its outcome) and `scenario_load.cpp`'s
+     * pipeline hooks share one answer without either including the other's
+     * header. Declarative kinds (`extract.*`, `assert.*`, `timer.think`)
+     * always run inline and never call this - a caller gates on
+     * `HotPathClass` itself, since `core/elements` must not know about
+     * `RunContext`.
+     */
+    [[nodiscard]] static bool script_element_runs_inline (const nlohmann::json& element_config,
+    ScriptsOverrideMode scripts_mode) {
+        if (scripts_mode == ScriptsOverrideMode::AllInline) {
+            return true;
+        }
+        if (scripts_mode == ScriptsOverrideMode::AllDeferred) {
+            return false;
+        }
+        return element_config.value ("inline", false);
+    }
+
     // Latency (ms) past which a completion is captured as an outlier, resolved
     // once from the run config. 0 disables outlier capture - a threshold of
     // zero would mark every completion an outlier, which is the same as

@@ -290,13 +290,19 @@ std::optional<vayu::db::Request>& linked_request) {
  * this call - the plan owns it for the run's whole life - so a `const
  * std::string*` needs no copy.
  */
-const std::string* find_step_post_script (const ScenarioStep& step) {
+const std::string* find_step_post_script (const ScenarioStep& step,
+RunContext::ScriptsOverrideMode scripts_mode) {
     if (!step.elements) {
         return nullptr;
     }
     for (const auto& element : *step.elements) {
         if (element.kind != "script.post") {
             continue;
+        }
+        // Already ran inline this run (issue #1495) - the pipeline hook
+        // already reported its outcome, so there is nothing left to replay.
+        if (RunContext::script_element_runs_inline (element.config, scripts_mode)) {
+            return nullptr;
         }
         if (auto found = element.config.find ("script");
         found != element.config.end () && found->is_string ()) {
@@ -332,7 +338,8 @@ std::vector<std::string>& failure_messages) {
     for (size_t i = 0; i < steps; ++i) {
         const auto& step = plan.steps[i];
         const auto& samples = context->metrics_collector->step_response_samples (i);
-        const std::string* post_script = find_step_post_script (step);
+        const std::string* post_script =
+        find_step_post_script (step, context->scripts_override);
         // A step with no script, or one whose script never got a sample to
         // run against, reports nothing rather than a row of zeros - the
         // same distinction the whole-run section has always kept.
@@ -750,6 +757,22 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     // own; before that, a collection-level assertion was silently never
     // checked.
     test_script = vayu::http::read_post_request_script (config);
+
+    // Resolved from a payload `validate_elements_run_override` has already
+    // accepted (the route checks before the run row exists), so a value
+    // outside the known set here falls back to the default rather than
+    // throwing - there is no rejection left to make this late.
+    if (auto elements = config.find ("elements");
+    elements != config.end () && elements->is_object ()) {
+        const std::string scripts = elements->value ("scripts", std::string{});
+        if (scripts == "allInline") {
+            scripts_override = ScriptsOverrideMode::AllInline;
+        } else if (scripts == "allDeferred") {
+            scripts_override = ScriptsOverrideMode::AllDeferred;
+        }
+        include_script_time = elements->value ("includeScriptTime", false);
+        timers_disabled = elements->value ("timers", std::string{}) == "off";
+    }
 
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
 }
