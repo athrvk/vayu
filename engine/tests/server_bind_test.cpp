@@ -123,9 +123,16 @@ TEST_F (ServerBindTest, EveryResponseCarriesNoStoreCacheControl) {
     ASSERT_TRUE (server.start ());
 
     httplib::Client client ("127.0.0.1", port);
-    auto response = client.Get ("/health");
-    ASSERT_TRUE (response);
-    EXPECT_EQ (response->get_header_value ("Cache-Control"), "no-store");
+    auto health_response = client.Get ("/health");
+    ASSERT_TRUE (health_response);
+    EXPECT_EQ (health_response->get_header_value ("Cache-Control"), "no-store");
+
+    // The header comes from one call site (set_default_headers), but a second,
+    // unrelated JSON route pins that it is truly a server-wide default rather
+    // than something that happened to land on /health alone.
+    auto collections_response = client.Get ("/collections");
+    ASSERT_TRUE (collections_response);
+    EXPECT_EQ (collections_response->get_header_value ("Cache-Control"), "no-store");
 
     server.stop ();
 }

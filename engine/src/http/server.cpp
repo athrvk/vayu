@@ -163,12 +163,10 @@ void Server::setup_routes () {
     { "Access-Control-Allow-Headers", "Content-Type, Authorization, ngrok-skip-browser-warning" },
     // Every response here is a live read of state that changes under the
     // client (#1507); none of it is valid to replay from a browser's disk
-    // cache. The mock server and inbox listener answer arbitrary
-    // user-configured bodies to external callers, not this rule's target,
-    // but they run on this same Server and inherit it too - harmless, since
-    // it only ever adds a second cache instruction alongside anything a mock
-    // route already sets, on top of the CORS headers those routes already
-    // inherit the same way.
+    // cache. The mock server and inbox listeners are separate
+    // ManagedListener-owned httplib::Server instances (mock_server.cpp,
+    // routes/inbox.cpp) and never call set_default_headers, so neither this
+    // nor the CORS trio above reaches them; only this management API does.
     { "Cache-Control", "no-store" } });
 
     // Handle OPTIONS preflight requests
