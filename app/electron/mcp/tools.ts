@@ -1577,17 +1577,15 @@ async function runStreamingRequest(
  * The post-response validation script an agent supplied, under either name.
  *
  * One concept, historically two engine keys: `POST /execute` grew up calling it
- * `postRequestScript`, `POST /runs` calls it `tests`. Both endpoints now read
- * both names (`read_post_request_script`), so the choice here is purely about
- * what an agent sees: MCP names it `postRequestScript` on both tools - the way
- * the app's single **Tests** tab drives Send and a load run alike - and keeps
- * `tests` accepted as the engine's own spelling. Supplying both is rejected
- * rather than silently resolved: with no way to know which the agent meant,
- * picking one would drop a script the agent believes is running.
- *
- * Ad-hoc, so this stays a plain string (still accepted by the engine's
- * `read_script`) rather than the `ScriptPart[]` the chain-composing callers
- * send - there is no collection chain here to collect parts from.
+ * `postRequestScript`, `POST /runs` calls it `tests`. The two endpoints have
+ * since diverged - `/execute` takes `elements` and refuses both old spellings
+ * (issue #1514), while `/runs` still reads `tests` - so this returns the script
+ * as a plain string and each caller spells it the way its own endpoint wants.
+ * MCP names it `postRequestScript` on both tools regardless - the way the app's
+ * single **Tests** tab drives Send and a load run alike - and keeps `tests`
+ * accepted as the engine's own spelling on the run tools. Supplying both is
+ * rejected rather than silently resolved: with no way to know which the agent
+ * meant, picking one would drop a script the agent believes is running.
  */
 function readValidationScript(args: Record<string, unknown>): string | undefined {
 	const post = str(args, "postRequestScript");
@@ -1598,6 +1596,135 @@ function readValidationScript(args: Record<string, unknown>): string | undefined
 		);
 	}
 	return post ?? tests;
+}
+
+/**
+ * The element kind a script of each phase becomes on the wire (issue #1512).
+ *
+ * Since #1514's clean cut, `elements` is the only script field `/requests`,
+ * `/collections` and `/execute` accept: a script is an entry of one of these
+ * kinds carrying its text at `config.script`, and the old `preRequestScript` /
+ * `postRequestScript` / `tests` keys are refused outright with a 400 naming
+ * `elements`.
+ *
+ * The MCP tools deliberately keep the *old argument names*: an agent still
+ * writes `preRequestScript` / `postRequestScript`, because renaming the tool
+ * surface is issue #1517's job, not this translation's. So the whole
+ * one-script-per-phase <-> `elements` conversion lives in these three helpers
+ * rather than being spelled out in each of the six handlers that need it.
+ */
+const SCRIPT_ELEMENT_KINDS = { pre: "script.pre", post: "script.post" } as const;
+
+/**
+ * One `elements` entry carrying a script.
+ *
+ * `id` is optional because the two destinations differ: `POST /requests` and
+ * `POST /collections` stamp an `el_` id onto an entry that names none
+ * (`apply_elements_field`), which is the engine's own storage contract and
+ * beats inventing an id here that two different rows would share. `/execute`
+ * stores nothing and assigns nothing, so the ad-hoc callers pass a stable id -
+ * per-element outcomes come back keyed by it, and an empty one reports as
+ * anonymous.
+ */
+function scriptElement(
+	which: "pre" | "post",
+	script: string,
+	id?: string
+): Record<string, unknown> {
+	return {
+		...(id !== undefined ? { id } : {}),
+		kind: SCRIPT_ELEMENT_KINDS[which],
+		enabled: true,
+		config: { script },
+	};
+}
+
+/**
+ * Merge one script argument into a target's stored `elements` list.
+ *
+ * Find-or-create against the **first** element of that kind: an existing one
+ * keeps its id, name and position and only takes the new text, and an empty
+ * string removes it, which is how `update_request` / `update_collection` clear
+ * a script. Everything else in the list is carried through untouched - the
+ * other phase's script, a second script of the same kind, an extractor, an
+ * assertion - which is the whole reason the caller reads the stored list first
+ * instead of writing a fresh one-element array over it.
+ *
+ * First-match rather than collapse-all is the conservative half of that rule:
+ * MCP exposes one script per phase and the engine joins every enabled one, so a
+ * list holding two could be read either way. Rewriting only the one this
+ * surface can address leaves an app-authored second element alone; #1517, which
+ * gives the tools real `elements` arguments, is what lets an agent address it.
+ */
+function upsertScriptElement(
+	stored: unknown,
+	which: "pre" | "post",
+	script: string
+): Record<string, unknown>[] {
+	const kind = SCRIPT_ELEMENT_KINDS[which];
+	const existing = Array.isArray(stored) ? stored : [];
+	const out: Record<string, unknown>[] = [];
+	let matched = false;
+	for (const entry of existing) {
+		if (!isRecord(entry)) continue;
+		if (matched || entry.kind !== kind) {
+			out.push(entry);
+			continue;
+		}
+		matched = true;
+		// An empty string clears the script: drop the element rather than leave
+		// an enabled entry whose `config.script` runs nothing.
+		if (script !== "") {
+			out.push({
+				...entry,
+				config: { ...(isRecord(entry.config) ? entry.config : {}), script },
+			});
+		}
+	}
+	if (!matched && script !== "") out.push(scriptElement(which, script));
+	return out;
+}
+
+/**
+ * The script arguments a create/update tool was actually given, as
+ * `[phase, text]` pairs.
+ *
+ * An empty string is a value here rather than an omission - it is how
+ * `update_request` and `update_collection` clear a stored script, which
+ * `upsertScriptElement` turns into a removal. An argument the agent did not
+ * name at all is absent from the list, and leaves the stored element alone.
+ */
+function readScriptEdits(args: Record<string, unknown>): ["pre" | "post", string][] {
+	const edits: ["pre" | "post", string][] = [];
+	for (const which of ["pre", "post"] as const) {
+		const value = str(args, `${which}RequestScript`);
+		if (value !== undefined) edits.push([which, value]);
+	}
+	return edits;
+}
+
+/**
+ * The joined text of every enabled element of one script kind, or `""`.
+ *
+ * Mirrors the engine's own `read_script` join (`"\n\n"`, `script_parts.cpp`) and
+ * the renderer's `scriptTextFor` (`src/lib/elements.ts`), which this cannot
+ * import: `tsconfig.node.json` withholds the `@/*` mapping so production code in
+ * `electron/` cannot reach into `src/`. Used to fold a composed `elements` list
+ * back into the single string `POST /runs` still reads.
+ */
+function scriptTextFromElements(elements: unknown, which: "pre" | "post"): string {
+	if (!Array.isArray(elements)) return "";
+	const kind = SCRIPT_ELEMENT_KINDS[which];
+	return elements
+		.filter(
+			(el): el is Record<string, unknown> =>
+				isRecord(el) && el.kind === kind && el.enabled !== false
+		)
+		.map((el) =>
+			isRecord(el.config) && typeof el.config.script === "string" ? el.config.script : ""
+		)
+		.filter((script) => script.trim().length > 0)
+		.join("\n\n");
 }
 
 /** Read an optional agent-supplied `auth` block (a `{ mode, … }` object). */
@@ -1619,9 +1746,16 @@ function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
  * resolution, so overrides carrying `{{variables}}` resolve too. Without a
  * `requestId` the run is ad-hoc and `url` is required.
  *
- * The composed scripts stay under `postRequestScripts`: `POST /runs` reads that
- * name as an alias of `tests` (`read_post_request_script`), which is what lets
- * one composed request start either kind of run without a second shape.
+ * **The two endpoints spell the script differently, so this translates.**
+ * `POST /compose` returns the resolved chain as `elements` and nothing else
+ * (issue #1514 retired `preRequestScripts` / `postRequestScripts` from it),
+ * while a single-target `POST /runs` reads its validation script only through
+ * `read_post_request_script` - `tests` or the `postRequestScript(s)` aliases -
+ * and never looks at `elements`. Left alone, a saved request's stored
+ * assertions would compose into `elements` and then be silently ignored under
+ * load. So the composed `script.post` elements are folded back into `tests`,
+ * joined the way the engine joins parts, and `elements` is dropped rather than
+ * left on the payload for an endpoint that does not read it.
  *
  * `droppedPreRequestScripts` counts what a load run cannot honour - the engine
  * has no pre-request hook on `POST /runs`, so a saved request that signs itself
@@ -1666,24 +1800,27 @@ async function composeLoadRunRequest(
 
 	const payload = await composeViaEngine(ctx.client, composeBody, signal);
 
-	// A saved request's pre-request scripts cannot run under load; strip them
-	// from the payload but report how many were dropped.
-	const droppedPreRequestScripts = Array.isArray(payload.preRequestScripts)
-		? payload.preRequestScripts.length
+	// A saved request's pre-request scripts cannot run under load; report how
+	// many the composed chain held before `elements` leaves the payload.
+	const droppedPreRequestScripts = Array.isArray(payload.elements)
+		? payload.elements.filter(
+				(el) => isRecord(el) && el.kind === SCRIPT_ELEMENT_KINDS.pre && el.enabled !== false
+			).length
 		: 0;
-	delete payload.preRequestScripts;
+
+	// The composed assertions, folded into the one name a single-target run
+	// reads. `elements` goes either way: /runs would ignore it, and leaving it
+	// on the payload would suggest a pipeline that does not run here.
+	const composedTests = scriptTextFromElements(payload.elements, "post");
+	delete payload.elements;
 
 	// An agent-written validation script replaces the composed one rather than
-	// joining it, and must clear `postRequestScripts` to do so: /runs reads both
-	// names, prefers the list, and would otherwise run the saved request's
-	// assertions while silently ignoring the ones the agent asked for. This is
-	// the only place either name is placed on a run payload - the handler does
-	// not add it again.
+	// joining it: with no way to know which the agent meant, running both would
+	// add assertions they never asked for. This is the only place `tests` is
+	// placed on a run payload - the handler does not add it again.
 	const adHocScript = readValidationScript(args);
-	if (adHocScript !== undefined) {
-		delete payload.postRequestScripts;
-		payload.tests = adHocScript;
-	}
+	const tests = adHocScript ?? composedTests;
+	if (tests !== "") payload.tests = tests;
 
 	return { payload, droppedPreRequestScripts };
 }
@@ -2065,17 +2202,22 @@ const streamBudgetMsInput = z
 
 /**
  * A saved request's stored scripts, as `create_request` and `update_request`
- * write them - the two fields the engine keeps on the row
- * (`preRequestScript` / `postRequestScript`) and the app's **Pre-request** and
- * **Tests** tabs edit.
+ * write them - what the app's **Pre-request** and **Tests** tabs edit.
+ *
+ * The *argument* stays `preRequestScript` / `postRequestScript` even though the
+ * engine stores neither: since issue #1514 a stored script is a `script.pre` or
+ * `script.post` entry in the row's `elements` list, and the handlers translate
+ * (`upsertScriptElement`). Renaming the tool surface to match is issue #1517's
+ * job - one that also gives the tools real `elements` arguments - so doing it
+ * here would break every MCP client twice instead of once.
  *
  * One name per script here, deliberately. The `tests` alias exists on the *run*
  * tools because the engine spells an ad-hoc run body that way
  * (`readValidationScript`); a second name for a stored field would be a second
  * name to keep in step and a second way for an agent to half-write a script.
  *
- * `clearable` appends the merge-patch rule, which is `update_request`'s alone -
- * on a create there is no stored script to keep.
+ * `clearable` appends the merge rule, which is `update_request`'s alone - on a
+ * create there is no stored script to keep.
  */
 function storedScriptInput(which: "pre" | "post", clearable: boolean) {
 	const what =
@@ -4255,12 +4397,30 @@ export const TOOLS: McpTool[] = [
 				url: requireStr(args, "url"),
 			};
 			if (request.method === undefined) request.method = "GET";
-			// `/execute`'s own key names for the two ad-hoc scripts. Scripts ride
-			// through composition untouched - the engine never interpolates them.
+			/*
+			 * The two ad-hoc scripts, as the `elements` entries `/execute` now
+			 * takes: it refuses `preRequestScript` / `postRequestScript` / `tests`
+			 * outright (issue #1514), and `/compose` copies an inline request's
+			 * keys onto the payload verbatim, so sending the old names here would
+			 * surface as a 400 from the send rather than from composition.
+			 *
+			 * The request's own scripts only, which is the scope this tool always
+			 * had: composition is inline (no `requestId` reaches `/compose`, see
+			 * below), so there is no stored row or collection chain to inherit
+			 * elements from and nothing is being dropped by not walking one.
+			 * Scripts ride through composition untouched - the engine never
+			 * interpolates them.
+			 */
+			const elements: Record<string, unknown>[] = [];
 			const preScript = str(args, "preRequestScript");
-			if (preScript !== undefined) request.preRequestScript = preScript;
+			if (preScript !== undefined) {
+				elements.push(scriptElement("pre", preScript, "mcp-script-pre"));
+			}
 			const postScript = readValidationScript(args);
-			if (postScript !== undefined) request.postRequestScript = postScript;
+			if (postScript !== undefined) {
+				elements.push(scriptElement("post", postScript, "mcp-script-post"));
+			}
+			if (elements.length > 0) request.elements = elements;
 			const authArg = readAuthArg(args);
 			if (authArg) request.auth = authArg;
 
@@ -4420,10 +4580,15 @@ export const TOOLS: McpTool[] = [
 			const payload: Record<string, unknown> = { name: requireStr(args, "name") };
 			const parentId = str(args, "parentId");
 			if (parentId !== undefined) payload.parentId = parentId;
-			for (const field of ["description", "preRequestScript", "postRequestScript"] as const) {
-				const value = str(args, field);
-				if (value !== undefined) payload[field] = value;
+			const description = str(args, "description");
+			if (description !== undefined) payload.description = description;
+			// Scripts are `elements` on the wire (issue #1514). Nothing is stored
+			// yet on a create, so the list is built outright rather than merged.
+			const elements: Record<string, unknown>[] = [];
+			for (const [which, script] of readScriptEdits(args)) {
+				if (script !== "") elements.push(scriptElement(which, script));
 			}
+			if (elements.length > 0) payload.elements = elements;
 			const auth = readAuthArg(args);
 			if (auth) payload.auth = auth;
 			const patch = readVariablesPatch(args);
@@ -4470,32 +4635,33 @@ export const TOOLS: McpTool[] = [
 			// The engine merge-patches, so a body naming nothing would be a write
 			// that changes nothing while reporting success. Say so instead.
 			const payload: Record<string, unknown> = {};
-			for (const field of [
-				"name",
-				"description",
-				// An empty string is a value here, not an omission - the same rule
-				// update_request's scripts follow, and how one gets cleared.
-				"preRequestScript",
-				"postRequestScript",
-			] as const) {
+			for (const field of ["name", "description"] as const) {
 				const value = str(args, field);
 				if (value !== undefined) payload[field] = value;
 			}
+			const scriptEdits = readScriptEdits(args);
 			const auth = readAuthArg(args);
 			if (auth) payload.auth = auth;
 			const patch = readVariablesPatch(args);
 			const removals = removalNames(args);
-			if (Object.keys(payload).length === 0 && patch === undefined && removals.length === 0) {
+			if (
+				Object.keys(payload).length === 0 &&
+				scriptEdits.length === 0 &&
+				patch === undefined &&
+				removals.length === 0
+			) {
 				return errorResult(
 					'Pass at least one field to change ("name", "description", "variables", "removeVariables", "auth", "preRequestScript" or "postRequestScript").'
 				);
 			}
 			let absentRemovals: string[] = [];
-			if (patch !== undefined || removals.length > 0) {
-				// `PUT /collections/:id` replaces the whole variables blob, exactly
-				// as the environment PUT does, so "change one variable" is a
-				// read-merge-write here too - without the read, an agent setting one
-				// variable would drop every other one the collection holds.
+			// One read serves both merges. `PUT /collections/:id` replaces the
+			// whole variables blob and the whole `elements` list rather than
+			// patching inside either, so "change one of them" is a
+			// read-merge-write here - without the read, an agent setting one
+			// variable would drop every other one the collection holds, and
+			// setting one script would drop every other element on it.
+			if (patch !== undefined || removals.length > 0 || scriptEdits.length > 0) {
 				let existing: Record<string, unknown>;
 				try {
 					existing = ((await ctx.client.getCollection(collectionId, signal)) ??
@@ -4503,9 +4669,18 @@ export const TOOLS: McpTool[] = [
 				} catch (err) {
 					return engineErrorResult(err);
 				}
-				const merged = mergeVariables(existing.variables, patch, removals);
-				payload.variables = merged.variables;
-				absentRemovals = merged.absentRemovals;
+				if (patch !== undefined || removals.length > 0) {
+					const merged = mergeVariables(existing.variables, patch, removals);
+					payload.variables = merged.variables;
+					absentRemovals = merged.absentRemovals;
+				}
+				if (scriptEdits.length > 0) {
+					let elements = existing.elements;
+					for (const [which, script] of scriptEdits) {
+						elements = upsertScriptElement(elements, which, script);
+					}
+					payload.elements = elements;
+				}
 			}
 			const result = await callEngine(() =>
 				ctx.client.updateCollection(collectionId, payload, signal)
@@ -5164,10 +5339,15 @@ export const TOOLS: McpTool[] = [
 			}
 			// Pass-through strings: absent leaves the engine's own default (empty),
 			// so only what the caller actually named is sent.
-			for (const field of ["description", "preRequestScript", "postRequestScript"] as const) {
-				const value = str(args, field);
-				if (value !== undefined) payload[field] = value;
+			const description = str(args, "description");
+			if (description !== undefined) payload.description = description;
+			// Scripts are `elements` on the wire (issue #1514). Nothing is stored
+			// yet on a create, so the list is built outright rather than merged.
+			const elements: Record<string, unknown>[] = [];
+			for (const [which, script] of readScriptEdits(args)) {
+				if (script !== "") elements.push(scriptElement(which, script));
 			}
+			if (elements.length > 0) payload.elements = elements;
 			return callEngine(() => ctx.client.createRequest(payload, signal));
 		},
 	},
@@ -5220,19 +5400,11 @@ export const TOOLS: McpTool[] = [
 			 * `method: "GET"` filler would silently rewrite the stored verb.
 			 */
 			const payload: Record<string, unknown> = {};
-			for (const field of [
-				"name",
-				"url",
-				"method",
-				"description",
-				// An empty string is a value here, not an omission: the engine's
-				// merge-patch stores it, which is how a script gets cleared.
-				"preRequestScript",
-				"postRequestScript",
-			] as const) {
+			for (const field of ["name", "url", "method", "description"] as const) {
 				const value = str(args, field);
 				if (value !== undefined) payload[field] = value;
 			}
+			const scriptEdits = readScriptEdits(args);
 			if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
 				payload.headers = toKeyValueEntries(args.headers);
 			}
@@ -5257,10 +5429,31 @@ export const TOOLS: McpTool[] = [
 					'"bodyType" describes "body" - pass the body it applies to, or leave both out.'
 				);
 			}
-			if (Object.keys(payload).length === 0) {
+			if (Object.keys(payload).length === 0 && scriptEdits.length === 0) {
 				return errorResult(
 					"Pass at least one field to change (name, url, method, headers, body, auth, followRedirects, maxRedirects, httpVersion, stream, description, preRequestScript or postRequestScript)."
 				);
+			}
+			// Scripts are `elements` now (issue #1514), and `PUT /requests/:id`
+			// replaces that list whole rather than patching inside it - so a
+			// script edit is a read-merge-write, or it would drop every other
+			// element the request holds. Read only when one was actually named:
+			// an update that touches no script must not pay for a GET.
+			if (scriptEdits.length > 0) {
+				let stored: Record<string, unknown>;
+				try {
+					stored = ((await ctx.client.getRequest(requestId, signal)) ?? {}) as Record<
+						string,
+						unknown
+					>;
+				} catch (err) {
+					return engineErrorResult(err);
+				}
+				let elements = stored.elements;
+				for (const [which, script] of scriptEdits) {
+					elements = upsertScriptElement(elements, which, script);
+				}
+				payload.elements = elements;
 			}
 			return callEngine(() => ctx.client.updateRequest(requestId, payload, signal));
 		},
