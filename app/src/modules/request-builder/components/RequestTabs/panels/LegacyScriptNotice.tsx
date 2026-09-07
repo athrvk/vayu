@@ -26,7 +26,9 @@
  */
 
 import { Callout } from "@/components/shared";
-import type { InheritedScriptVariant } from "./InheritedScriptsNotice";
+
+/** Which script a run recorded before parts existed glued together. */
+export type InheritedScriptVariant = "pre" | "post";
 
 interface LegacyScriptNoticeProps {
 	variant: InheritedScriptVariant;

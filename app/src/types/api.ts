@@ -27,6 +27,8 @@ import type {
 	OAuth2Config,
 	LoadTestMode,
 	ScriptPart,
+	ElementDef,
+	ResolvedElement,
 	HttpVersion,
 	RunThresholds,
 	RunMonitorConfig,
@@ -108,8 +110,7 @@ export interface CreateCollectionRequest {
 	order?: number;
 	variables?: Record<string, VariableValue>;
 	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	elements?: ElementDef[];
 	dataSchema?: CollectionDataSchema;
 	/** The spec document to bind at create time - see {@link Collection.openapi}. */
 	openapi?: CollectionOpenApiBinding;
@@ -128,8 +129,7 @@ export interface UpdateCollectionRequest {
 	order?: number;
 	variables?: Record<string, VariableValue>;
 	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	elements?: ElementDef[];
 	/**
 	 * `CollectionDataSchema | null`, not just the object: the engine reads absent
 	 * as "keep the declared contract" and an explicit JSON `null` as "reset to
@@ -168,8 +168,7 @@ export interface CreateRequestRequest {
 	body?: RequestBody;
 	bodyType?: string;
 	auth?: RequestAuth;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	elements?: ElementDef[];
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	httpVersion?: HttpVersion;
@@ -199,8 +198,7 @@ export interface UpdateRequestRequest {
 	body?: RequestBody;
 	bodyType?: string;
 	auth?: RequestAuth;
-	preRequestScript?: string;
-	postRequestScript?: string;
+	elements?: ElementDef[];
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	httpVersion?: HttpVersion;
@@ -327,8 +325,14 @@ export interface ExecuteRequestRequest {
 	headers?: Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
-	preRequestScripts?: ScriptPart[];
-	postRequestScripts?: ScriptPart[];
+	/**
+	 * The resolved elements to run for this exchange - the collection chain's,
+	 * root to leaf, then the request's own, each stamped with its origin
+	 * (issue #1512). Replaces `preRequestScripts`/`postRequestScripts`: a
+	 * script is one of these now, at `kind: "script.pre"` / `"script.post"`.
+	 * The engine refuses the two old keys outright (400 naming `elements`).
+	 */
+	elements?: ResolvedElement[];
 	/**
 	 * Redirect policy. Omitted means the engine's own defaults apply (follow,
 	 * cap at 10) - send them explicitly so a request that opts out of following

@@ -50,6 +50,7 @@ import ResponseCookies from "./ResponseCookies";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
 import SchemaValidation from "./SchemaValidation";
+import ElementOutcomes from "./ElementOutcomes";
 import TestResults from "./TestResults";
 import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
@@ -188,6 +189,9 @@ export default function ResponseViewer() {
 	const consoleLogCount = shown.consoleLogs?.length ?? 0;
 	const hasScriptError = !!shown.preScriptError || !!shown.postScriptError;
 	const testResults = shown.testResults ?? [];
+	// Non-script outcomes (issue #1512) - extractors, assertions and timers,
+	// beside `testResults` above which stays the script kinds' own shape.
+	const elementOutcomes = shown.elements ?? [];
 
 	/*
 	 * Two sources, one list (issue #574) - the handoff `ScenarioRunView` makes.
@@ -506,11 +510,14 @@ export default function ResponseViewer() {
 					 * collection with no spec bound sees exactly what it saw
 					 * before.
 					 */}
-					{testResults.length > 0 || shown.validation ? (
+					{testResults.length > 0 || shown.validation || elementOutcomes.length > 0 ? (
 						<div className="h-full overflow-auto p-4 space-y-4">
 							{shown.validation && <SchemaValidation validation={shown.validation} />}
 							{testResults.length > 0 && (
 								<TestResults results={testResults} inset={false} />
+							)}
+							{elementOutcomes.length > 0 && (
+								<ElementOutcomes outcomes={elementOutcomes} inset={false} />
 							)}
 						</div>
 					) : (

@@ -22,6 +22,7 @@ import type {
 	SpecOperation,
 } from "@/types";
 import { asRecord, asStr } from "@/lib/json-node";
+import { toElements } from "./elements-transformer";
 import {
 	DEFAULT_FOLLOW_REDIRECTS,
 	DEFAULT_STREAM,
@@ -133,8 +134,7 @@ export class RequestTransformer {
 			body,
 			bodyType: (asStr(raw.bodyType) as BodyMode) ?? body.mode ?? "none",
 			auth,
-			preRequestScript: asStr(raw.preRequestScript) ?? "",
-			postRequestScript: asStr(raw.postRequestScript) ?? "",
+			elements: toElements(raw.elements),
 			// Redirect policy: a request stored before these columns existed
 			// comes back without them, and must read as the engine default
 			// rather than as "do not follow" / "zero hops".

@@ -74,8 +74,7 @@ export function useRequestVariables(tab: Tab) {
 			params: request.params ?? [],
 			headers: request.headers ?? [],
 			body: request.body ?? { mode: "none" },
-			preRequestScript: request.preRequestScript ?? "",
-			postRequestScript: request.postRequestScript ?? "",
+			elements: request.elements ?? [],
 			resolvedAuth: resolveEffectiveAuth(request.auth ?? { mode: "none" }, ancestors),
 		});
 

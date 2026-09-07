@@ -19,7 +19,7 @@
  *                     sanitize_config_snapshot keeps only the auth mode
  */
 
-import type { Run, Request, RequestAuth, ScriptPart, KeyValueEntry } from "@/types";
+import type { Run, Request, RequestAuth, ScriptPart, ElementDef, KeyValueEntry } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
@@ -125,6 +125,26 @@ function collectionParts(parts: ScriptPart[] | undefined): ScriptPart[] {
 	return (parts ?? []).filter((p) => p.origin === "collection");
 }
 
+/**
+ * A recorded script part as a `script.pre` / `script.post` element (issue
+ * #1512), so a run's historical parts can ride the same `elements` wire field
+ * a replay now sends - see `DesignRunView.tsx`'s `handleExecute`. Only the
+ * script text and origin survive a stored run; `enabled` is always true,
+ * since a disabled element was never recorded as a part in the first place.
+ */
+export function scriptPartToElement(
+	part: ScriptPart,
+	kind: "script.pre" | "script.post"
+): ElementDef {
+	return {
+		id: part.id ? `${part.id}-${kind}` : `legacy-${kind}`,
+		kind,
+		enabled: true,
+		...(part.name ? { name: part.name } : {}),
+		config: { script: part.script },
+	};
+}
+
 export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSeed {
 	const snapshot = (run.configSnapshot ?? {}) as DesignSnapshot;
 	const trace = run.result?.trace;
@@ -160,8 +180,28 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 				bodyMode === "x-www-form-urlencoded" ? (body?.fields ?? []) : []
 			),
 			auth,
-			preRequestScript: ownScript(snapshot.preRequestScripts),
-			testScript: ownScript(snapshot.postRequestScripts),
+			elements: [
+				...(ownScript(snapshot.preRequestScripts).trim()
+					? [
+							{
+								id: "seed-script-pre",
+								kind: "script.pre",
+								enabled: true,
+								config: { script: ownScript(snapshot.preRequestScripts) },
+							} satisfies ElementDef,
+						]
+					: []),
+				...(ownScript(snapshot.postRequestScripts).trim()
+					? [
+							{
+								id: "seed-script-post",
+								kind: "script.post",
+								enabled: true,
+								config: { script: ownScript(snapshot.postRequestScripts) },
+							} satisfies ElementDef,
+						]
+					: []),
+			],
 			followRedirects: snapshot.followRedirects ?? DEFAULT_FOLLOW_REDIRECTS,
 			maxRedirects: snapshot.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
 			httpVersion: isHttpVersion(snapshot.httpVersion)

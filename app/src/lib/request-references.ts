@@ -40,6 +40,7 @@ import { VARIABLE_PATTERN } from "@/constants/variables";
 import { dataColumnName } from "@/lib/variable-resolution";
 import { referencedVariables } from "@/lib/referenced-variables";
 import { isDynamicVariableName } from "@/lib/dynamic-variables";
+import { scriptTextFor } from "@/lib/elements";
 import type { KeyValueEntry, Request, RequestAuth, RequestBody } from "@/types";
 
 /**
@@ -50,10 +51,7 @@ import type { KeyValueEntry, Request, RequestAuth, RequestBody } from "@/types";
  * Required, and typed to exclude `inherit`, so a caller holding raw rows has to
  * resolve rather than accidentally hand over an `inherit` that walks nothing.
  */
-export type RequestReferenceSource = Pick<
-	Request,
-	"url" | "params" | "headers" | "body" | "preRequestScript" | "postRequestScript"
-> & {
+export type RequestReferenceSource = Pick<Request, "url" | "params" | "headers" | "body" | "elements"> & {
 	resolvedAuth: Exclude<RequestAuth, { mode: "inherit" }>;
 };
 
@@ -177,7 +175,10 @@ export function referencedVariableNames(request: RequestReferenceSource): string
 		for (const match of text.matchAll(VARIABLE_PATTERN)) add(match[1]);
 	}
 
-	for (const script of [request.preRequestScript, request.postRequestScript]) {
+	for (const script of [
+		scriptTextFor(request.elements, "script.pre"),
+		scriptTextFor(request.elements, "script.post"),
+	]) {
 		for (const reference of referencedVariables(script ?? "")) {
 			// `pm` reads a variable; `template` (a `{{}}` in script text) reads
 			// nothing. `row` is `pm.iterationData` - a data read, not a variable.

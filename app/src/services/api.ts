@@ -37,6 +37,7 @@ import type {
 	SanityResult,
 	ScriptCompletionsResponse,
 	ScriptTypeDefinitionsResponse,
+	ElementKindSchema,
 	CreateCollectionRequest,
 	UpdateCollectionRequest,
 	ListRequestsParams,
@@ -892,6 +893,11 @@ export const apiService = {
 
 	async getScriptTypeDefinitions(): Promise<ScriptTypeDefinitionsResponse> {
 		return await httpClient.get<ScriptTypeDefinitionsResponse>(API_ENDPOINTS.SCRIPT_TYPES);
+	},
+
+	// Elements
+	async getElementKinds(): Promise<ElementKindSchema[]> {
+		return await httpClient.get<ElementKindSchema[]>(API_ENDPOINTS.ELEMENT_KINDS);
 	},
 
 	// Import
