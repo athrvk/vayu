@@ -1297,17 +1297,23 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsPmTestCallsAreTalliedSeparatelyFromItsE
         { "concurrency", 1 } };
     auto state        = run (config, execution);
 
+    // `ScriptResult::success` already folds a failed `pm.test` into "did the
+    // script run cleanly" (`script_engine.cpp`'s post-eval loop over
+    // `result.tests`), so `StepElementTallies` - a single pass/fail bit per
+    // script *run* - already marks this element failed; that part predates
+    // this issue. What did not exist before this PR is the assertion-level
+    // count behind that one bit: one `pm.test` call passed and one failed,
+    // and only `inline_script_tests_passed`/`_failed` can tell the two apart
+    // from a run where *both* calls failed - the element tally reads
+    // identically either way.
     EXPECT_EQ (state->inline_script_tests_passed.load (), 1u);
     EXPECT_EQ (state->inline_script_tests_failed.load (), 1u);
 
-    // The element's own outcome is unaffected: the script did not throw, so
-    // it still reports "ok" even though one of its assertions failed - this
-    // test's whole point is that the two are different questions.
     const auto summary =
     vayu::core::build_scenario_load_summary (*state, execution.plan);
     ASSERT_TRUE (summary["steps"][0].contains ("elements"));
-    EXPECT_EQ (summary["steps"][0]["elements"][0]["passed"], 1);
-    EXPECT_EQ (summary["steps"][0]["elements"][0]["failed"], 0);
+    EXPECT_EQ (summary["steps"][0]["elements"][0]["passed"], 0);
+    EXPECT_EQ (summary["steps"][0]["elements"][0]["failed"], 1);
 }
 
 // ============================================================================
