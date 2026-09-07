@@ -194,9 +194,7 @@ int run_daemon (std::span<char* const> args) {
     [&db] () -> int64_t { return db.get_config_int ("liveRetentionMs", 60000); });
 
     // Create and start HTTP server
-    // verbose parameter is kept for backward compatibility with server internals
-    bool verbose_legacy = (verbosity >= 1);
-    vayu::http::Server server (db, run_manager, port, verbose_legacy);
+    vayu::http::Server server (db, run_manager, port);
 
     // Set shutdown callback for /shutdown endpoint
     // This callback is invoked before the server stops, allowing us to

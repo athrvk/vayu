@@ -200,6 +200,20 @@ on is refused on stderr with exit code **1** rather than dropped:
 | `-d, --data-dir <DIR>` | A directory path |
 | `-v, --verbose [LEVEL]` | 0 (warn/error), 1 (info) or 2 (debug); `-v` on its own means 1 |
 
+At `-v 2`, every route on the management server and every capture on a webhook
+inbox writes one request line - method, path, status, duration and response
+bytes, never the query string, headers or body (issue #1510). `-v 1` shows
+only the non-2xx ones; `-v 0` still shows a 5xx, because an engine failure is
+not something a quiet run should hide:
+
+```
+$ vayu-engine --verbose 2
+...
+GET /health 200 0.4ms 61B
+GET /inbox 200 1.3ms 412B
+POST /runs 202 3.1ms 118B
+```
+
 ```
 $ vayu-engine --port notanumber
 vayu-engine: --port expects a number between 1 and 65535, got "notanumber"

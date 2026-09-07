@@ -17,6 +17,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/managed_listener.hpp"
+#include "vayu/http/request_log.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/diagnostics.hpp"
@@ -619,6 +620,9 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     // #1140). CONNECT, TRACE and PRI are the remainder and are not routable - a
     // webhook is never one.
     httplib::Server& svr = inbox->listener.server ();
+    // The other server in the process (issue #1510): one request line per
+    // capture, same hook as the management API's.
+    vayu::http::install_request_logger (svr);
     svr.Get (AnyPathServer::ROUTE, capture); // also serves HEAD
     svr.Post (AnyPathServer::ROUTE, capture);
     svr.Put (AnyPathServer::ROUTE, capture);

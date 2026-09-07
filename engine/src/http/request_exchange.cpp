@@ -515,8 +515,7 @@ ExchangeOutcome execute_exchange (vayu::runtime::ScriptEngine& engine,
 vayu::http::CookieJar& jar,
 const std::string& cookie_scope,
 ScriptVariableScopes& scopes,
-ExchangeInputs inputs,
-bool verbose) {
+ExchangeInputs inputs) {
     ExchangeOutcome outcome;
     outcome.request = std::move (inputs.request);
 
@@ -589,7 +588,6 @@ bool verbose) {
     } else {
         vayu::http::ClientConfig config;
         config.default_headers = inputs.default_headers;
-        config.verbose         = verbose;
         config.cookie_jar      = &jar;
         config.cookie_scope    = cookie_scope;
         config.cookie_writes   = std::move (pre_cookie_writes);

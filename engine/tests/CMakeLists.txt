@@ -57,6 +57,7 @@ add_executable(vayu_tests
     load_stream_events_test.cpp
     sse_stream_test.cpp
     server_bind_test.cpp
+    request_log_test.cpp
     numeric_flag_test.cpp
     high_resolution_timer_test.cpp
     argument_rules_test.cpp
@@ -194,6 +195,7 @@ add_executable(vayu_tests
     ../src/http/routes/mock_server.cpp
     ../src/http/routes/elements.cpp
     ../src/http/managed_listener.cpp
+    ../src/http/request_log.cpp
     # The daemon's own Server, so its shutdown ordering is testable rather
     # than only reachable by running the daemon (#646). It registers every
     # route group, which is why health.cpp joins the list here too.

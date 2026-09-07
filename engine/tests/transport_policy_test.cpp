@@ -867,7 +867,7 @@ TEST_F (LoadRunScriptTransportTest, ADeferredScriptTraversesTheRunsProxy) {
     configure_run (context);
     context->metrics_collector->record_response_sample (sampled_response ());
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u);
@@ -906,7 +906,7 @@ TEST_F (LoadRunScriptTransportTest, ADeferredStepScriptTraversesTheRunsProxy) {
     context->metrics_collector->record_step_response_sample (sampled_response (), 0,
     vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1, /*data_row_index=*/std::nullopt });
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
 
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& step_totals = validation.steps[0];
@@ -934,7 +934,7 @@ TEST_F (LoadRunScriptTransportTest, ADeferredScriptStaysOffTheProxyWhenTheRunDoe
     configure_run (context);
     context->metrics_collector->record_response_sample (sampled_response ());
 
-    const auto validation = vayu::core::validate_scripts (context, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context, *db_);
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u);

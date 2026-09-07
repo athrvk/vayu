@@ -67,7 +67,6 @@ void register_health_routes (RouteContext& ctx) {
      * (issue #922).
      */
     ctx.server.Get ("/health", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_debug ("GET /health - Health check requested");
         res.set_content (build_health_response (ctx.db).dump (), "application/json");
     });
 
@@ -84,7 +83,7 @@ void register_health_routes (RouteContext& ctx) {
      * 4. daemon.cpp then performs final cleanup (stop runs, release lock, flush logs)
      */
     ctx.server.Post ("/shutdown", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_info ("POST /shutdown - Graceful shutdown requested");
+        vayu::utils::log_info ("Graceful shutdown requested");
         nlohmann::json response;
         response["status"]  = "ok";
         response["message"] = "Shutdown initiated";

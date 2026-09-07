@@ -1220,6 +1220,54 @@ Three bounds, all applied by the engine itself (issue #985):
   enough because history is the per-start files, which retention already
   bounds.
 
+### Request logging
+
+One line per HTTP call, from one place (issue #1510). Before this, a route's
+request line was hand-written per handler - about half the routes had none at
+all (`GET /inbox` and the mock listings among them), so an absent line was
+never evidence a route did not run, and none of the 48 lines that did exist
+carried a status code or a duration.
+
+`vayu::http::install_request_logger` (`http/request_log.hpp`) is the one hook:
+a `set_pre_routing_handler` stamps the start time onto the response's
+cpp-httplib-provided `user_data` slot, and `set_logger` reads it back once the
+response is built, to emit exactly one line:
+
+```
+GET /inbox 200 1.3ms 412B
+```
+
+Method, path, status, duration and response bytes, in that order, and nothing
+else - never the query string, headers or body, any of which can carry a
+token, an OAuth code or a credential. The line's level follows its status:
+2xx at DEBUG (so only `-v 2` shows the happy path), 3xx/4xx at INFO (`-v 1`
+shows a caller's own mistake), 5xx at WARNING (visible even at `-v 0`, because
+an engine failure is not something a quiet run should hide).
+
+The hook is installed on both `httplib::Server` instances the engine owns: the
+management API, in `Server::setup_routes`, and the webhook inbox's own
+listener, in `routes/inbox.cpp`. The mock server's listener is not one of
+them - it already installs its own `set_pre_routing_handler` to route an
+arbitrarily long mocked path (issue #1139), and that handler's return value
+decides whether cpp-httplib routes the request at all.
+
+A route handler still logs its own line where the hook cannot know something:
+a run starting or stopping, a count a handler computed, a config write. Those
+lines no longer repeat the method and path the centralised line already
+carries - `tests/request_log_test.cpp`'s source scan fails the build if a
+route file's `log_info`/`log_debug` call starts with a bare HTTP method name
+again, the exact shape the 48 original lines shared.
+
+The daemon's old `bool verbose` - threaded through `Server`, `RouteContext`,
+`execute_exchange`, every load-run worker function, and `client.cpp`'s curl
+transfer-debug frames - is retired in the same issue. Everything that used to
+gate on it now reads `vayu::utils::Logger::instance ()` directly: an
+unconditional DEBUG line where a function used to log only "if verbose", and
+`get_verbosity () >= 2` for the curl frames specifically. The per-run JSON
+`"verbose"` key (a caller opting one load run into curl debug frames on the
+event-loop path, read in `run_manager.cpp`'s `configure_event_loop`) is a
+different, independent switch and is unaffected.
+
 ## Security
 
 - **Local-only binding**: the management API only listens on `127.0.0.1`. A

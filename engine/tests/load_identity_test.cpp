@@ -518,7 +518,7 @@ TEST_F (LoadIdentityTest, TheDeferredScriptReadsTheIterationAndUserItWasSentAs) 
     std::sort (iterations.begin (), iterations.end ());
     EXPECT_EQ (iterations, (std::vector<size_t>{ 0, 1, 2 }));
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
     EXPECT_EQ (validation.run->passed, 3u);
@@ -540,7 +540,7 @@ TEST_F (LoadIdentityTest, ADeferredScriptResolvesTheIdentityItWasSentAs) {
 
     run (payload);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u) << replay_failures ();
     EXPECT_EQ (validation.run->passed, 3u);
@@ -686,7 +686,7 @@ TEST_F (ScenarioIdentityTest, ADeferredStepScriptReadsTheUserAndIterationItRanAs
         << "a step sample carries no iteration";
     }
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_EQ (validation.steps.size (), 1u);
     // Read through one binding rather than re-derived per assertion: the guard
     // and the uses have to be the same expression for the checker - and for a
@@ -723,7 +723,7 @@ TEST_F (ScenarioIdentityTest, AStepScriptResolvesTheIdentityItRanAs) {
                   { "concurrency", 2 }, { "response_sample_rate", 1 } },
     execution);
 
-    const auto validation = vayu::core::validate_scripts (context_, *db_, false);
+    const auto validation = vayu::core::validate_scripts (context_, *db_);
     ASSERT_EQ (validation.steps.size (), 1u);
     const auto& step_tally = validation.steps[0];
     ASSERT_HAS_VALUE (step_tally);

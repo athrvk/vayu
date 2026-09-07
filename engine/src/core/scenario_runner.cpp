@@ -516,7 +516,6 @@ struct StepContext {
 std::string run_step_exchange (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::CookieJar* cookie_jar,
 const std::string& cookie_scope,
-bool verbose,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const StepContext& ctx,
 const ScenarioStep& step,
@@ -568,8 +567,8 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     }
 
     if (data_bind_error.empty ()) {
-        exchange = vayu::http::routes::execute_exchange (script_engine,
-        *cookie_jar, cookie_scope, scopes, std::move (inputs), verbose);
+        exchange = vayu::http::routes::execute_exchange (
+        script_engine, *cookie_jar, cookie_scope, scopes, std::move (inputs));
     } else {
         // Nothing was sent and no script ran. The partially bound
         // request is kept anyway: the trace is where the user sees
@@ -806,7 +805,6 @@ ScenarioStepStore& store) {
 void run_iteration (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::CookieJar* cookie_jar,
 const std::string& cookie_scope,
-bool verbose,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const StepContext& base,
 const ScenarioPlan& plan,
@@ -831,7 +829,7 @@ ScenarioStepStore& store) {
         vayu::http::routes::ExchangeOutcome exchange;
         const StepContext& step_ctx       = base;
         const std::string data_bind_error = run_step_exchange (script_engine,
-        cookie_jar, cookie_scope, verbose, scopes, step_ctx, step, exchange);
+        cookie_jar, cookie_scope, scopes, step_ctx, step, exchange);
 
         ++steps_this_iteration;
         recent_steps.push_back (step.name);
@@ -871,7 +869,6 @@ void execute_scenario_run (const std::shared_ptr<RunContext>& context,
 const std::shared_ptr<const ScenarioExecution>& execution,
 vayu::db::Database* db_ptr,
 vayu::http::CookieJar* cookie_jar,
-bool verbose,
 RunManager& manager) {
     auto& db          = *db_ptr;
     const auto& plan  = execution->plan;
@@ -1004,7 +1001,7 @@ RunManager& manager) {
                 transport, default_headers, cookie_scope, data_rows,
                 data_row_index, iteration, asked.iterations,
                 fail_on_schema_error, max_trace_body_bytes, max_response_bytes };
-            run_iteration (script_engine, cookie_jar, cookie_scope, verbose, scopes, step_ctx,
+            run_iteration (script_engine, cookie_jar, cookie_scope, scopes, step_ctx,
             plan, step_index, max_steps_per_iteration, coverage, summary, store);
 
             if (!context->should_stop) {
@@ -1067,13 +1064,11 @@ RunManager& manager) {
         vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
     }
 
-    if (verbose) {
-        vayu::utils::log_info ("Scenario run " + context->run_id + " " +
-        vayu::to_string (final_status) + ": " + std::to_string (summary.steps_executed) +
-        " step(s) over " + std::to_string (summary.iterations_completed) + " iteration(s), " +
-        std::to_string (summary.passed) + " passed, " + std::to_string (summary.failed) +
-        " failed, " + std::to_string (summary.errored) + " errored");
-    }
+    vayu::utils::log_debug ("Scenario run " + context->run_id + " " +
+    vayu::to_string (final_status) + ": " + std::to_string (summary.steps_executed) +
+    " step(s) over " + std::to_string (summary.iterations_completed) + " iteration(s), " +
+    std::to_string (summary.passed) + " passed, " + std::to_string (summary.failed) +
+    " failed, " + std::to_string (summary.errored) + " errored");
 
     context->is_running = false;
     // After the last step event, never before: a consumer treats `closed` as

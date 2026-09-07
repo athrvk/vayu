@@ -1138,7 +1138,6 @@ struct RouteContext {
     httplib::Server& server;
     vayu::db::Database& db;
     vayu::core::RunManager& run_manager;
-    bool verbose;
     ShutdownCallback on_shutdown; // Optional graceful-shutdown callback
     vayu::http::OAuth2AuthorizeManager& authorize_manager; // Owned by Server; see server.hpp
     /// The design-mode cookie jar (issue #301). Owned by Server; read by

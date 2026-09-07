@@ -1339,7 +1339,6 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
 
     if (!wants_envelope) {
         // Legacy no-param path: today's bare array, byte-shape-identical.
-        vayu::utils::log_info ("GET /runs - Fetching all runs (legacy)");
         try {
             auto runs                = ctx.db.get_all_runs ();
             nlohmann::json json_runs = nlohmann::json::array ();
@@ -1400,14 +1399,6 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
             filter.baseline = false;
     }
 
-    // Debug, not info: this is the polled endpoint, and at the production
-    // verbosity the app spawns the engine with (`--verbose 1`) an info line
-    // here was flushed to stdout every 5s, through a pipe the Electron main
-    // process reads, splits and logs - a third process woken per tick by an
-    // idle app (#1150). The file sink defaults to `debug`, so the line is not
-    // lost, only taken off the console's poll cadence.
-    vayu::utils::log_debug ("GET /runs - Listing runs (limit=" + std::to_string (limit) +
-    ", offset=" + std::to_string (offset) + ")");
     try {
         auto [status, body] =
         get_runs_response (ctx.db, filter, limit, offset, ctx.run_summary_cache);
@@ -1421,11 +1412,10 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
 
 void handle_get_run (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
-    vayu::utils::log_info ("GET /runs/:id - Fetching run: " + run_id);
     try {
         auto run = ctx.db.get_run (run_id);
         if (run) {
-            vayu::utils::log_debug ("GET /runs/:id - Found run: " + run_id +
+            vayu::utils::log_debug ("Found run: " + run_id +
             ", type=" + to_string (run->type) + ", status=" + to_string (run->status));
             auto payload = vayu::json::serialize (*run);
             // A design run is one exchange, so it travels with the run.
@@ -1450,7 +1440,6 @@ void handle_get_run (RouteContext& ctx, const httplib::Request& req, httplib::Re
 
 void handle_delete_run (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
-    vayu::utils::log_info ("DELETE /runs/:id - Deleting run: " + run_id);
     try {
         auto [status, body] =
         delete_run_response (ctx.db, ctx.run_manager, run_id, DELETE_STOP_WAIT_MS);
@@ -1471,7 +1460,6 @@ void handle_delete_run (RouteContext& ctx, const httplib::Request& req, httplib:
 
 void handle_set_baseline (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
-    vayu::utils::log_info ("PUT /runs/:id/baseline - Run: " + run_id);
     try {
         auto [status, body] = set_run_baseline_response (ctx.db, run_id, req.body);
         res.status = status;
@@ -1489,7 +1477,6 @@ void handle_set_baseline (RouteContext& ctx, const httplib::Request& req, httpli
 
 void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
-    vayu::utils::log_info ("POST /runs/:id/stop - Stopping run: " + run_id);
     try {
         auto run = ctx.db.get_run (run_id);
         if (!run) {
@@ -1565,7 +1552,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
 
             // Calculate summary metrics
             auto summary = vayu::utils::MetricsHelper::calculate_summary (*context);
-            vayu::utils::log_info ("POST /runs/:id/stop - Run stopped: " + run_id +
+            vayu::utils::log_info ("Run stopped: " + run_id +
             ", total_requests=" + std::to_string (summary.total_requests) +
             ", errors=" + std::to_string (summary.errors));
             auto response =

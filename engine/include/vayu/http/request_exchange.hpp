@@ -384,8 +384,7 @@ ExchangeOutcome execute_exchange (vayu::runtime::ScriptEngine& engine,
 vayu::http::CookieJar& jar,
 const std::string& cookie_scope,
 ScriptVariableScopes& scopes,
-ExchangeInputs inputs,
-bool verbose);
+ExchangeInputs inputs);
 
 /**
  * What this database is configured to let a design-mode send read

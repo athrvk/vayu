@@ -483,7 +483,6 @@ void register_request_routes (RouteContext& ctx) {
     ctx.server.Get (R"(/requests/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string request_id = req.matches[1];
-        vayu::utils::log_info ("GET /requests/:id - Fetching request: " + request_id);
         try {
             auto [status, body] = get_request_response (ctx.db, request_id);
             if (status == 404) {
@@ -578,7 +577,6 @@ void register_request_routes (RouteContext& ctx) {
     ctx.server.Delete (R"(/requests/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string request_id = req.matches[1];
-        vayu::utils::log_info ("DELETE /requests/:id - Deleting request: " + request_id);
         try {
             auto request = ctx.db.get_request (request_id);
             if (!request) {

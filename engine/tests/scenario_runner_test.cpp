@@ -353,8 +353,7 @@ class ScenarioRunnerTest : public ::testing::Test {
         run.end_time   = started_at;
         db_->create_run (run);
 
-        EXPECT_TRUE (manager_.start_scenario_run (
-        run_id, config, execution, *db_, jar_, /*verbose=*/false));
+        EXPECT_TRUE (manager_.start_scenario_run (run_id, config, execution, *db_, jar_));
         return run_id;
     }
 

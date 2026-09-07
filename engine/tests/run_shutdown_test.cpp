@@ -110,7 +110,7 @@ TEST_F (RunShutdownTest, ShutdownStopsAndJoinsAWorkerMidRun) {
     create_run_row (run_id);
 
     vayu::core::RunManager manager;
-    ASSERT_TRUE (manager.start_run (run_id, hang_config (), *db, false));
+    ASSERT_TRUE (manager.start_run (run_id, hang_config (), *db));
 
     auto context = manager.get_run (run_id);
     ASSERT_NE (context, nullptr);
@@ -149,7 +149,7 @@ TEST_F (RunShutdownTest, DestructorDrainsAnActiveRun) {
     auto start = Clock::now ();
     {
         vayu::core::RunManager manager;
-        ASSERT_TRUE (manager.start_run (run_id, hang_config (), *db, false));
+        ASSERT_TRUE (manager.start_run (run_id, hang_config (), *db));
         auto context = manager.get_run (run_id);
         ASSERT_NE (context, nullptr);
         ASSERT_NO_FATAL_FAILURE (wait_until_submitting (context));
@@ -175,7 +175,7 @@ TEST_F (RunShutdownTest, StartRunAfterShutdownIsRefused) {
     const std::string run_id = "run-shutdown-refused";
     create_run_row (run_id);
 
-    EXPECT_FALSE (manager.start_run (run_id, hang_config (), *db, false));
+    EXPECT_FALSE (manager.start_run (run_id, hang_config (), *db));
     EXPECT_EQ (manager.active_count (), 0u);
     EXPECT_EQ (manager.tracked_worker_count (), 0u);
     EXPECT_EQ (manager.get_run (run_id), nullptr);
@@ -207,7 +207,7 @@ TEST_F (RunShutdownTest, FinishedWorkersAreReapedByTheNextStartRun) {
     nlohmann::json quick = { { "mode", "iterations" }, { "iterations", 1 },
         { "concurrency", 1 }, { "url", server->fast_url () },
         { "method", "GET" }, { "timeout", 5000 }, { "workers", 1 } };
-    ASSERT_TRUE (manager.start_run (first, quick, *db, false));
+    ASSERT_TRUE (manager.start_run (first, quick, *db));
 
     auto start = Clock::now ();
     while (manager.active_count () > 0 && ms_since (start) < 15000) {
@@ -217,7 +217,7 @@ TEST_F (RunShutdownTest, FinishedWorkersAreReapedByTheNextStartRun) {
 
     const std::string second = "run-shutdown-reap-2";
     create_run_row (second);
-    ASSERT_TRUE (manager.start_run (second, hang_config (), *db, false));
+    ASSERT_TRUE (manager.start_run (second, hang_config (), *db));
 
     EXPECT_EQ (manager.tracked_worker_count (), 1u)
     << "the finished run's thread handle was never reaped";

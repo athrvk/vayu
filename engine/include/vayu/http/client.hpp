@@ -51,7 +51,6 @@ struct ClientConfig {
     /// `User-Agent` alone, which is what a `Client` added before the policy
     /// existed.
     DefaultHeaderPolicy default_headers;
-    bool verbose = vayu::core::constants::defaults::VERBOSE;
 
     /**
      * @brief How this transfer reaches the network (issue #705).

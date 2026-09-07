@@ -108,7 +108,7 @@ class DesignReadCapTest : public ::testing::Test {
         vayu::http::routes::ExchangeInputs inputs;
         inputs.request            = std::move (request);
         inputs.max_response_bytes = bound;
-        return execute_exchange (engine, jar, "", scopes, std::move (inputs), false);
+        return execute_exchange (engine, jar, "", scopes, std::move (inputs));
     }
 
     std::unique_ptr<BigBodyServer> server_;
