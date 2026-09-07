@@ -73,15 +73,19 @@
  * follows as an out-of-bounds `memcpy`. Nothing is out of bounds - the string
  * has already reallocated by the time the copy runs.
  *
- * **Both flags, because it is one diagnostic wearing two names.** GCC reports
- * the same `char_traits.h:435` `memcpy` as `-Warray-bounds` or as
- * `-Wstringop-overflow` depending on which pass reaches it first, so silencing
- * one alone just moves the warning to the other spelling.
+ * **Three flags, because it is one diagnostic wearing three names.** GCC
+ * reports the same `char_traits.h:435` `memcpy` as `-Warray-bounds`, as
+ * `-Wstringop-overflow` or as `-Wstringop-overread` depending on which pass
+ * reaches it first - and, for the last of the three, on whether the call
+ * survives far enough inlined into a *caller's* caller to be blamed there
+ * instead (issue #1514's `seed_bulky_run` / `grow_then_prune`) - so silencing
+ * fewer than all three just moves the warning to whichever spelling is left.
  */
-#define VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS            \
-    _Pragma ("GCC diagnostic push")                       \
-    _Pragma ("GCC diagnostic ignored \"-Warray-bounds\"") \
-    _Pragma ("GCC diagnostic ignored \"-Wstringop-overflow\"")
+#define VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS                 \
+    _Pragma ("GCC diagnostic push")                            \
+    _Pragma ("GCC diagnostic ignored \"-Warray-bounds\"")      \
+    _Pragma ("GCC diagnostic ignored \"-Wstringop-overflow\"") \
+    _Pragma ("GCC diagnostic ignored \"-Wstringop-overread\"")
 
 /// Ends the region opened by any `VAYU_IGNORE_FALSE_*` above.
 #define VAYU_DIAGNOSTIC_POP _Pragma ("GCC diagnostic pop")

@@ -1604,8 +1604,14 @@ namespace {
 
 // A run whose one result carries `body_bytes` of trace, so deleting it frees a
 // known and substantial number of pages rather than a handful.
+//
 // The filler concatenation below is what GCC 13 reports as reading past the
-// small-string buffer at `-O3`. See utils/diagnostics.hpp.
+// small-string buffer at `-O3` (see utils/diagnostics.hpp) - but only once
+// this is inlined into `grow_then_prune`'s loop, which is the frame the
+// diagnostic actually attributes the read to; a suppression scoped to this
+// function alone left it firing. The pop sits after `grow_then_prune`
+// instead of here, so the region covers the whole inlining chain the
+// diagnostic can be blamed on.
 VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS
 void seed_bulky_run (Database& db, const std::string& id, int64_t start_time, size_t body_bytes) {
     vayu::db::Run run;
@@ -1625,7 +1631,6 @@ void seed_bulky_run (Database& db, const std::string& id, int64_t start_time, si
     r.trace_data  = R"({"body":")" + std::string (body_bytes, 'x') + R"("})";
     db.add_result (r);
 }
-VAYU_DIAGNOSTIC_POP
 
 constexpr size_t MIB = size_t{ 1024 } * 1024;
 
@@ -1655,6 +1660,7 @@ int64_t grow_then_prune (int total_mib, int keep) {
     db.prune_runs (keep, 0);
     return database_file_size ();
 }
+VAYU_DIAGNOSTIC_POP
 
 // What a second start leaves the file at. The reclamation runs in `init`, so
 // every case below opens the database again rather than calling anything: what
