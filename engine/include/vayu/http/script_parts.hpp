@@ -27,32 +27,17 @@ namespace vayu::http {
 std::string read_script (const nlohmann::json& json, const char* list_key, const char* legacy_key);
 
 /**
- * Read the pre-request script from an execution payload.
+ * Read the post-request (test) script from a load-run payload.
  *
- * Accepted under `preRequestScripts` (list) or `preRequestScript` (string).
- *
- * Only `POST /execute` runs one - `POST /runs` has no pre-request hook - so a
- * load payload carrying the field is not an error, it simply has nowhere to run
- * it. That asymmetry is the engine's, not a client's.
- */
-std::string read_pre_request_script (const nlohmann::json& json);
-
-/**
- * Read the post-request (test) script from an execution payload.
- *
- * **One script, several names.** It is stored as `postRequestScript`, `POST
- * /execute` grew up calling it `postRequestScript`/`postRequestScripts`, and
- * `POST /runs` calls it `tests`. They mean the same thing, so both endpoints
- * read all of them through here and a payload composed for one endpoint can be
- * sent to the other unchanged. Before this, a `tests` key reached `/execute`
- * and a `postRequestScripts` key reached `/runs` and both were silently
- * dropped - each endpoint only knew its own spelling.
- *
- * The names are tried in a fixed order (`postRequestScripts`,
- * `postRequestScript`, then `tests` in either form) and the **first that yields
- * a non-blank script wins**; they are never merged. Add a new spelling to the
- * table in the .cpp, not to a call site - a name known in one route and not the
- * other is exactly the defect this replaced.
+ * **One script, several names**, kept for `POST /runs` alone: issue #1514
+ * cut `POST /execute` and the stored resources over to `elements`, refusing
+ * `preRequestScript(s)` / `postRequestScript(s)` / `tests` outright, but a
+ * load run's own deferred validation script (issue #1495's job to fold into
+ * the pipeline) still reads through here exactly as before, under
+ * `postRequestScripts`, `postRequestScript` or `tests` in either form - the
+ * names are tried in that fixed order and the **first that yields a
+ * non-blank script wins**; they are never merged. Add a new spelling to the
+ * table in the .cpp, not to a call site.
  */
 std::string read_post_request_script (const nlohmann::json& json);
 

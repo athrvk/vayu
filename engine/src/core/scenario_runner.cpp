@@ -526,8 +526,7 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     // this request, and the next iteration must start from the
     // composed one rather than from whatever the last pass left.
     inputs.request      = step.request;
-    inputs.pre_script   = step.pre_script;
-    inputs.post_script  = step.post_script;
+    inputs.elements     = step.elements;
     inputs.request_id   = step.request_id;
     inputs.request_name = step.name;
     inputs.iteration    = ctx.iteration;
@@ -616,6 +615,9 @@ ScenarioSummaryInputs& summary) {
     // live watcher reads. A step whose row could not bind ran no
     // script and gets no tally - `exchange` is the default one.
     record.tests = tally_tests (exchange.pre_script_result, exchange.post_script_result);
+    // `step.before` and `step.after`'s outcomes (issue #1514); the caller
+    // (`run_iteration`) appends `step.between`'s onto this same vector.
+    record.elements = exchange.element_outcomes;
 
     // What the contract says about what came back (issue #681).
     // Only for a step that sent: a skipped step and one whose data
@@ -763,6 +765,18 @@ ScenarioStepStore& store) {
     !scripts.empty ()) {
         record.trace["scripts"] = std::move (scripts);
     }
+    // Every compiled element's outcome (issue #1514), `step.before` /
+    // `step.after` / `step.between` alike - `assert.*` failures already
+    // travel inside `scripts` above too (`describe_failed_tests` reads them
+    // from the same `tests` list a script's own `pm.test` writes to), so
+    // this is the per-element detail beside that one-line summary.
+    if (!record.elements.empty ()) {
+        nlohmann::json elements = nlohmann::json::array ();
+        for (const auto& outcome : record.elements) {
+            elements.push_back (outcome.to_json ());
+        }
+        record.trace["elements"] = std::move (elements);
+    }
 
     ++summary.steps_executed;
     // Only a step that actually sent counts towards coverage: a
@@ -841,6 +855,33 @@ ScenarioStepStore& store) {
 
         StepRecord record =
         record_step (step_ctx, step, exchange, data_bind_error, summary);
+
+        // `step.between` (issue #1514): `timer.think` and anything else
+        // phased here run after this step's own outcome is decided - so a
+        // wait never counts against the step's own latency - and before flow
+        // control reads it, so a `Stop` mid-wait ends the run promptly rather
+        // than after one more step. Skipped entirely for a step whose row
+        // could not bind (no exchange ran) or that already errored.
+        if (data_bind_error.empty () &&
+        record.outcome != StepOutcome::Errored && step.elements) {
+            vayu::ScriptResult unread_pre;
+            vayu::ScriptResult unread_post;
+            vayu::core::ElementContext between_ctx{
+                .request  = exchange.request,
+                .response = nullptr,
+                .run_pre_script =
+                [] (const std::string&) { return vayu::ScriptResult{}; },
+                .run_post_script =
+                [] (const std::string&) { return vayu::ScriptResult{}; },
+                .pre_script_result  = unread_pre,
+                .post_script_result = unread_post,
+                .set_variable       = [] (std::string_view, const std::string&,
+                                const std::string&) {},
+                .should_stop = [&] { return base.context->should_stop.load (); },
+            };
+            vayu::core::ElementPipeline::run (vayu::core::Phase::StepBetween,
+            between_ctx, *step.elements, record.elements);
+        }
 
         bool end_iteration = record.outcome == StepOutcome::Errored;
         const size_t next_position =

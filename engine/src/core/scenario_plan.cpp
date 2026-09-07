@@ -7,6 +7,7 @@
 
 #include "vayu/core/scenario_plan.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -21,7 +22,6 @@
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
-#include "vayu/http/script_parts.hpp"
 
 namespace vayu::core {
 
@@ -476,12 +476,17 @@ ScenarioPlan& plan) {
     }
 
     ScenarioStep step;
-    step.index          = index;
-    step.request_id     = row.id;
-    step.name           = row.name;
-    step.request        = std::move (built.request);
-    step.pre_script     = vayu::http::read_pre_request_script (payload);
-    step.post_script    = vayu::http::read_post_request_script (payload);
+    step.index      = index;
+    step.request_id = row.id;
+    step.name       = row.name;
+    step.request    = std::move (built.request);
+    // The only script source since issue #1514's cut-over: `elements`
+    // resolved the collection chain's and the request's own script.pre /
+    // script.post entries beside every declarative kind, the same list
+    // `POST /compose` returns. Compiled once, here, rather than per
+    // iteration - every executor reuses this shared list.
+    step.elements = std::make_shared<const std::vector<vayu::core::CompiledElement>> (
+    vayu::core::compile_elements (payload.value ("elements", nlohmann::json::array ())));
     step.stored_url     = row.url;
     step.spec_operation = row.spec_operation.value_or (std::string ());
     step.data_template  = std::move (data_template);
@@ -657,6 +662,14 @@ const SpecBinding& spec) {
         }
     }
     return manifest;
+}
+
+bool step_has_script (const ScenarioStep& step, std::string_view kind) {
+    if (!step.elements) {
+        return false;
+    }
+    return std::any_of (step.elements->begin (), step.elements->end (),
+    [&] (const CompiledElement& element) { return element.kind == kind; });
 }
 
 } // namespace vayu::core

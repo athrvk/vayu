@@ -404,12 +404,10 @@ Json serialize (const vayu::db::Collection& c) {
         }
     }
 
-    json["preRequestScript"]  = c.pre_request_script;
-    json["postRequestScript"] = c.post_request_script;
-
-    // Elements (issue #1513), additive beside the two fields above - a
-    // migrated collection's scripts are also `script.pre`/`script.post`
-    // entries here, but nothing runs an element yet (#1514).
+    // Elements (issue #1513, run by issue #1514's pipeline) - the only
+    // script source since the cut-over; a migrated collection's scripts are
+    // `script.pre` / `script.post` entries here. Neither `preRequestScript`
+    // nor `postRequestScript` is emitted any more.
     if (c.elements.empty ()) {
         json["elements"] = Json::array ();
     } else {
@@ -505,10 +503,9 @@ Json serialize (const vayu::db::Request& r) {
         }
     }
 
-    json["preRequestScript"]  = r.pre_request_script;
-    json["postRequestScript"] = r.post_request_script;
-
-    // Elements (issue #1513), additive beside the two fields above.
+    // Elements (issue #1513, run by issue #1514's pipeline) - the only
+    // script source since the cut-over. Neither `preRequestScript` nor
+    // `postRequestScript` is emitted any more.
     if (r.elements.empty ()) {
         json["elements"] = Json::array ();
     } else {
@@ -1271,9 +1268,8 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     }
     out << ",";
 
-    out << "\"preRequestScript\":" << Json (r.pre_request_script).dump () << ",";
-    out << "\"postRequestScript\":" << Json (r.post_request_script).dump () << ",";
-    // Elements (issue #1513), additive beside the two fields above.
+    // Elements (issue #1513, run by issue #1514's pipeline) - the only
+    // script source since the cut-over.
     if (write_json_column (out, "elements", r.elements, "[]", max_field_size)) {
         truncated_fields.emplace_back ("elements");
     }

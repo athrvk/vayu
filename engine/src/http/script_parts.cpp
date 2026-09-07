@@ -68,12 +68,9 @@ std::string read_script (const nlohmann::json& json, const char* list_key, const
     return json.value (legacy_key, std::string{});
 }
 
-// The name tables. Every route reads a script through one of the two functions
-// below, so a spelling added here is understood everywhere at once.
-
-std::string read_pre_request_script (const nlohmann::json& json) {
-    return read_first_named (json, { { "preRequestScripts", "preRequestScript" } });
-}
+// The name table. The load path (`POST /runs`) reads its deferred validation
+// script through this one function, so a spelling added here is understood
+// everywhere it still matters.
 
 std::string read_post_request_script (const nlohmann::json& json) {
     return read_first_named (json,

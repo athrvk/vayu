@@ -128,6 +128,19 @@ class ScenarioMockServer {
             record (req);
             res.set_content (R"({"id":"seven","name":"Rex"})", "application/json");
         });
+        // Issue #1514's phase-0 kinds: a token to extract, and an endpoint that
+        // echoes the `Authorization` header back so a step can prove it saw the
+        // token the previous step extracted.
+        svr.Get ("/token", [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_content (R"({"token":"secret-abc"})", "application/json");
+        });
+        svr.Get ("/echo-auth", [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_content (
+            R"({"authorization":")" + req.get_header_value ("Authorization") + "\"}",
+            "application/json");
+        });
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -238,11 +251,39 @@ class ScenarioRunnerTest : public ::testing::Test {
         r.url     = absolute_url.empty () ? server_->url (path) : absolute_url;
         r.headers = headers;
         r.body    = body;
-        r.pre_request_script  = pre_script;
-        r.post_request_script = post_script;
-        r.order               = order;
-        r.created_at          = 1;
-        r.updated_at          = 1;
+        json elements = json::array ();
+        if (!pre_script.empty ()) {
+            elements.push_back ({ { "id", "el_pre_" + id }, { "kind", "script.pre" },
+            { "enabled", true }, { "config", { { "script", pre_script } } } });
+        }
+        if (!post_script.empty ()) {
+            elements.push_back ({ { "id", "el_post_" + id }, { "kind", "script.post" },
+            { "enabled", true }, { "config", { { "script", post_script } } } });
+        }
+        r.elements   = elements.dump ();
+        r.order      = order;
+        r.created_at = 1;
+        r.updated_at = 1;
+        db_->save_request (r);
+    }
+
+    /// A request in `col_1` carrying an arbitrary `elements` array (issue
+    /// #1514's phase-0 kinds - `extract.*` / `assert.*` / `timer.think` -
+    /// which `seed_request` above has no parameters for).
+    void seed_request_with_elements (const std::string& id,
+    int order,
+    const std::string& path,
+    const json& elements) {
+        vayu::db::Request r;
+        r.id            = id;
+        r.collection_id = "col_1";
+        r.name          = "Step " + id;
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = server_->url (path);
+        r.elements      = elements.dump ();
+        r.order         = order;
+        r.created_at    = 1;
+        r.updated_at    = 1;
         db_->save_request (r);
     }
 
@@ -704,6 +745,101 @@ TEST_F (ScenarioRunnerTest, AFailedAssertionIsNotAnErrorAndTheIterationContinues
     auto scenario = summary_of (run_id)["scenario"];
     EXPECT_EQ (scenario["failed"].get<size_t> (), 1u);
     EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+}
+
+// ============================================================================
+// Issue #1514: the element pipeline's phase-0 kinds, no script anywhere.
+// ============================================================================
+
+// The acceptance criterion: a login-then-call collection with no script sends
+// a real bearer token on step 2, and the report carries both steps' element
+// outcomes.
+TEST_F (ScenarioRunnerTest, ExtractJsonFeedsTheNextStepsBearerToken) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/token",
+    json::array ({ json{ { "id", "el_extract" }, { "kind", "extract.json" },
+    { "config", { { "path", "$.token" }, { "variable", "token" }, { "scope", "collection" } } } } }));
+    seed_request ("req_b", 1, "/echo-auth", "", "", "", "", // pre/post/url/name
+    R"([{"key":"Authorization","value":"Bearer {{token}}","enabled":true}])");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[1].authorization, "Bearer secret-abc")
+    << "step 2 must carry the real token step 1 extracted, not a literal "
+       "{{token}}";
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    for (const auto& row : rows) {
+        EXPECT_EQ (json::parse (row.trace_data)["outcome"].get<std::string> (), "passed");
+    }
+    const auto step1_elements = json::parse (rows[0].trace_data)["elements"];
+    ASSERT_EQ (step1_elements.size (), 1u);
+    EXPECT_EQ (step1_elements[0]["kind"], "extract.json");
+    EXPECT_EQ (step1_elements[0]["outcome"], "ok");
+    EXPECT_EQ (step1_elements[0]["wrote"], true);
+}
+
+// A declarative assertion fails a step exactly as a scripted one does - same
+// classification, same iteration-continues rule - without any script at all.
+TEST_F (ScenarioRunnerTest, AFailingAssertStatusElementFailsTheStepWithoutAnyScript) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/ok",
+    json::array ({ json{ { "id", "el_assert" }, { "kind", "assert.status" },
+    { "config", { { "in", json::array ({ 999 }) } } } } }));
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (server_->requests ().size (), 2u)
+    << "a failed assertion is not an error - the iteration continues";
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    const auto trace0 = json::parse (rows[0].trace_data);
+    EXPECT_EQ (trace0["outcome"].get<std::string> (), "failed");
+    EXPECT_NE (rows[0].error.find ("Status code"), std::string::npos) << rows[0].error;
+    ASSERT_EQ (trace0["elements"].size (), 1u);
+    EXPECT_EQ (trace0["elements"][0]["outcome"], "failed");
+    EXPECT_EQ (json::parse (rows[1].trace_data)["outcome"].get<std::string> (), "passed");
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["failed"].get<size_t> (), 1u);
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+}
+
+// `timer.think` waits between steps, outside either one's own latency, and
+// the wait itself becomes a `step.between` outcome on the step it followed.
+TEST_F (ScenarioRunnerTest, TimerThinkWaitsBetweenStepsAndReportsHowLong) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/ok",
+    json::array ({ json{ { "id", "el_timer" }, { "kind", "timer.think" },
+    { "config", { { "ms", 200 } } } } }));
+    seed_request ("req_b", 1, "/login");
+
+    const auto started = std::chrono::steady_clock::now ();
+    const auto run_id  = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - started);
+    EXPECT_GE (elapsed.count (), 200)
+    << "the think time did not hold up the run at all";
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    const auto trace0 = json::parse (rows[0].trace_data);
+    ASSERT_EQ (trace0["elements"].size (), 1u);
+    EXPECT_EQ (trace0["elements"][0]["kind"], "timer.think");
+    EXPECT_EQ (trace0["elements"][0]["outcome"], "ok");
+    EXPECT_GE (trace0["elements"][0]["waitedMs"].get<int64_t> (), 200);
+    // The wait must not inflate the step's own reported latency - `/ok`
+    // answers immediately, so anything near 200ms there would mean the wait
+    // ran inside the step instead of between it and the next one.
+    EXPECT_LT (rows[0].latency_ms, 100.0);
 }
 
 TEST_F (ScenarioRunnerTest, AStopIsHonouredBetweenStepsNotAfterTheIteration) {
@@ -1207,8 +1343,8 @@ using NextStep = vayu::core::NextStepResolution::Kind;
 
 TEST (ScenarioNextStep, ResolvesAUniqueNameToItsPosition) {
     vayu::core::ScenarioPlan plan;
-    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
-    plan.steps.push_back ({ 1, "req_b", "Second", {}, "", "", "" });
+    plan.steps.push_back ({ 0, "req_a", "First", {}, {}, "" });
+    plan.steps.push_back ({ 1, "req_b", "Second", {}, {}, "" });
 
     const auto index = vayu::core::build_step_index (plan);
     auto resolved    = vayu::core::resolve_next_step (index, "Second");
@@ -1219,7 +1355,7 @@ TEST (ScenarioNextStep, ResolvesAUniqueNameToItsPosition) {
 
 TEST (ScenarioNextStep, RefusesATargetNoStepAnswersTo) {
     vayu::core::ScenarioPlan plan;
-    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
+    plan.steps.push_back ({ 0, "req_a", "First", {}, {}, "" });
 
     auto resolved =
     vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "Missing");
@@ -1234,9 +1370,9 @@ TEST (ScenarioNextStep, RefusesATargetNoStepAnswersTo) {
 
 TEST (ScenarioNextStep, RefusesADuplicatedNameAndNamesEveryPosition) {
     vayu::core::ScenarioPlan plan;
-    plan.steps.push_back ({ 0, "req_a", "Twin", {}, "", "", "" });
-    plan.steps.push_back ({ 1, "req_b", "Other", {}, "", "", "" });
-    plan.steps.push_back ({ 2, "req_c", "Twin", {}, "", "", "" });
+    plan.steps.push_back ({ 0, "req_a", "Twin", {}, {}, "" });
+    plan.steps.push_back ({ 1, "req_b", "Other", {}, {}, "" });
+    plan.steps.push_back ({ 2, "req_c", "Twin", {}, {}, "" });
 
     auto resolved =
     vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "Twin");
@@ -1250,8 +1386,8 @@ TEST (ScenarioNextStep, RefusesADuplicatedNameAndNamesEveryPosition) {
 // collection whose steps carry neither surprise keeps behaving as it did.
 TEST (ScenarioNextStep, ResolvesARequestIdWhenNoNameAnswers) {
     vayu::core::ScenarioPlan plan;
-    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
-    plan.steps.push_back ({ 1, "req_b", "Second", {}, "", "", "" });
+    plan.steps.push_back ({ 0, "req_a", "First", {}, {}, "" });
+    plan.steps.push_back ({ 1, "req_b", "Second", {}, {}, "" });
 
     auto resolved =
     vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "req_b");
@@ -1261,11 +1397,11 @@ TEST (ScenarioNextStep, ResolvesARequestIdWhenNoNameAnswers) {
 
 TEST (ScenarioNextStep, PrefersTheNameWhenOneStepsNameIsAnothersId) {
     vayu::core::ScenarioPlan plan;
-    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
+    plan.steps.push_back ({ 0, "req_a", "First", {}, {}, "" });
     // Step 1 is *named* what step 2 is *identified* by. The name is what a
     // script author can see in the sidebar, so it wins.
-    plan.steps.push_back ({ 1, "req_b", "req_c", {}, "", "", "" });
-    plan.steps.push_back ({ 2, "req_c", "Third", {}, "", "", "" });
+    plan.steps.push_back ({ 1, "req_b", "req_c", {}, {}, "" });
+    plan.steps.push_back ({ 2, "req_c", "Third", {}, {}, "" });
 
     auto resolved =
     vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "req_c");
@@ -1277,7 +1413,7 @@ TEST (ScenarioNextStep, PrefersTheNameWhenOneStepsNameIsAnothersId) {
 // runner, which reads it as the stop form real `null` already means here.
 TEST (ScenarioNextStep, TheStringNullEndsTheIteration) {
     vayu::core::ScenarioPlan plan;
-    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
+    plan.steps.push_back ({ 0, "req_a", "First", {}, {}, "" });
 
     auto resolved =
     vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "null");
@@ -1289,8 +1425,8 @@ TEST (ScenarioNextStep, TheStringNullEndsTheIteration) {
 // and reading the stop form first would make that step unreachable.
 TEST (ScenarioNextStep, AStepNamedNullWinsOverTheStopForm) {
     vayu::core::ScenarioPlan plan;
-    plan.steps.push_back ({ 0, "req_a", "First", {}, "", "", "" });
-    plan.steps.push_back ({ 1, "req_b", "null", {}, "", "", "" });
+    plan.steps.push_back ({ 0, "req_a", "First", {}, {}, "" });
+    plan.steps.push_back ({ 1, "req_b", "null", {}, {}, "" });
 
     auto resolved =
     vayu::core::resolve_next_step (vayu::core::build_step_index (plan), "null");

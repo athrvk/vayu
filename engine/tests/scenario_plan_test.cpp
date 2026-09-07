@@ -98,13 +98,18 @@ class ScenarioPlanTest : public ::testing::Test {
         if (!parent_id.empty ()) {
             col.parent_id = parent_id;
         }
-        col.name               = "Collection " + id;
-        col.auth               = auth;
-        col.pre_request_script = pre_script;
-        col.data_schema        = data_schema;
-        col.order              = order;
-        col.created_at         = created_at;
-        col.updated_at         = created_at;
+        col.name = "Collection " + id;
+        col.auth = auth;
+        if (!pre_script.empty ()) {
+            col.elements = nlohmann::json::array (
+            { nlohmann::json{ { "id", "el_pre_" + id }, { "kind", "script.pre" },
+            { "enabled", true }, { "config", { { "script", pre_script } } } } })
+                           .dump ();
+        }
+        col.data_schema = data_schema;
+        col.order       = order;
+        col.created_at  = created_at;
+        col.updated_at  = created_at;
         db_->create_collection (col);
     }
 
@@ -118,18 +123,23 @@ class ScenarioPlanTest : public ::testing::Test {
     const std::string& headers     = "",
     const std::string& body        = "") {
         vayu::db::Request r;
-        r.id                  = id;
-        r.collection_id       = collection_id;
-        r.name                = "Request " + id;
-        r.method              = vayu::HttpMethod::GET;
-        r.url                 = url;
-        r.headers             = headers;
-        r.body                = body;
-        r.auth                = auth;
-        r.post_request_script = post_script;
-        r.order               = order;
-        r.created_at          = created_at;
-        r.updated_at          = created_at;
+        r.id            = id;
+        r.collection_id = collection_id;
+        r.name          = "Request " + id;
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = url;
+        r.headers       = headers;
+        r.body          = body;
+        r.auth          = auth;
+        if (!post_script.empty ()) {
+            r.elements = nlohmann::json::array (
+            { nlohmann::json{ { "id", "el_post_" + id }, { "kind", "script.post" },
+            { "enabled", true }, { "config", { { "script", post_script } } } } })
+                         .dump ();
+        }
+        r.order      = order;
+        r.created_at = created_at;
+        r.updated_at = created_at;
         db_->save_request (r);
     }
 
@@ -364,13 +374,22 @@ TEST_F (ScenarioPlanTest, StepMatchesWhatComposeReturnsForTheSameRequest) {
     EXPECT_EQ (step.request.url, payload["url"].get<std::string> ());
     EXPECT_EQ (to_string (step.request.method), payload["method"].get<std::string> ());
 
-    // Non-empty, so the equalities below are comparing something.
-    const std::string expected_pre = vayu::http::read_pre_request_script (payload);
-    const std::string expected_post = vayu::http::read_post_request_script (payload);
-    ASSERT_FALSE (expected_pre.empty ());
-    ASSERT_FALSE (expected_post.empty ());
-    EXPECT_EQ (step.pre_script, expected_pre);
-    EXPECT_EQ (step.post_script, expected_post);
+    // Non-empty, so the equality below is comparing something: both a
+    // script.pre and a script.post element should be present, matching what
+    // `POST /compose` resolved independently.
+    ASSERT_TRUE (step.elements);
+    ASSERT_EQ (step.elements->size (), payload["elements"].size ());
+    bool saw_pre  = false;
+    bool saw_post = false;
+    for (size_t i = 0; i < step.elements->size (); ++i) {
+        const auto& compiled = (*step.elements)[i];
+        EXPECT_EQ (compiled.kind, payload["elements"][i]["kind"].get<std::string> ());
+        EXPECT_EQ (compiled.config, payload["elements"][i]["config"]);
+        saw_pre |= compiled.kind == "script.pre";
+        saw_post |= compiled.kind == "script.post";
+    }
+    EXPECT_TRUE (saw_pre);
+    EXPECT_TRUE (saw_post);
 
     // Environment variables resolved, and auth applied into the plan.
     EXPECT_EQ (step.request.url, "https://api.example.test/orders/42");

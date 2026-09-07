@@ -52,6 +52,7 @@
 
 #include "echo_server.hpp"
 #include "optional_assert.hpp"
+#include "step_elements_test_helper.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -336,9 +337,8 @@ class SendWithRowTest : public ::testing::Test {
         vayu::http::routes::ScriptVariableScopes scopes;
 
         vayu::http::routes::ExchangeInputs inputs;
-        inputs.request     = std::move (request);
-        inputs.pre_script  = pre;
-        inputs.post_script = post;
+        inputs.request  = std::move (request);
+        inputs.elements = vayu::tests::step_elements_with_scripts (pre, post);
         if (row != nullptr) {
             inputs.iteration_data  = row;
             inputs.iteration       = 0;
