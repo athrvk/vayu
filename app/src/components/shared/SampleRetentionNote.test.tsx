@@ -16,7 +16,8 @@
  * the run's byte budget is what thinned it (issue #1192).
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { stubNumberLocale } from "@/test/number-locale";
 import { render, screen } from "@testing-library/react";
 import { SampleRetentionNote } from "./SampleRetentionNote";
 import type { RunReport } from "@/types/domain";
@@ -30,6 +31,12 @@ const sampling = (over: Partial<NonNullable<RunReport["sampling"]>> = {}) => ({
 });
 
 describe("SampleRetentionNote", () => {
+	let restoreLocale: () => void;
+	beforeEach(() => {
+		restoreLocale = stubNumberLocale("en-US");
+	});
+	afterEach(() => restoreLocale());
+
 	it("reports what a bounded trace store displaced, and what the shown set therefore is", () => {
 		render(
 			<SampleRetentionNote
@@ -57,6 +64,20 @@ describe("SampleRetentionNote", () => {
 
 		expect(screen.getByText(/998,000 further responses were displaced/)).toBeInTheDocument();
 		expect(screen.getByText(/1,000 tested/)).toBeInTheDocument();
+	});
+
+	it("groups the counts the way the host's locale does", () => {
+		restoreLocale();
+		restoreLocale = stubNumberLocale("de-DE");
+		render(
+			<SampleRetentionNote
+				sampling={sampling({ successTracesDropped: 5, responseSamplesDropped: 998_000 })}
+				shown={1_000}
+				budget="responses"
+			/>
+		);
+
+		expect(screen.getByText(/998\.000 further responses were displaced/)).toBeInTheDocument();
 	});
 
 	// The store is bounded twice and one counter reports both, so the marker is
