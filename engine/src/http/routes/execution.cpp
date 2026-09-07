@@ -566,6 +566,22 @@ const vayu::http::DefaultHeaderPolicy& header_policy) {
     return parsed.dump ();
 }
 
+/**
+ * @brief Which compression key a run's `config_snapshot` decision should read
+ *        (issue #1488): `Load` for anything the event loop drives (a plain
+ *        load run or a scenario with a load mode), `Design` for a sequential
+ *        collection run, which negotiates the way any other collection send
+ *        does. Extracted so the branch does not add to
+ *        `handle_start_load_test`'s own cognitive complexity.
+ *
+ * Non-static: run_row_seed_test.cpp declares and drives it directly, the way
+ * it does the other snapshot helpers above.
+ */
+vayu::http::DefaultHeaderScope compression_scope_of (vayu::RunType type) {
+    return type == vayu::RunType::Load ? vayu::http::DefaultHeaderScope::Load :
+                                         vayu::http::DefaultHeaderScope::Design;
+}
+
 namespace {
 
 /**
@@ -596,19 +612,6 @@ size_t max_body_bytes) {
         shaped = load_data_snapshot (sanitized, data->rows.size ());
     }
     return with_default_headers_snapshot (shaped, header_policy);
-}
-
-/**
- * @brief Which compression key a run's `config_snapshot` decision should read
- *        (issue #1488): `Load` for anything the event loop drives (a plain
- *        load run or a scenario with a load mode), `Design` for a sequential
- *        collection run, which negotiates the way any other collection send
- *        does. Extracted so the branch does not add to
- *        `handle_start_load_test`'s own cognitive complexity.
- */
-vayu::http::DefaultHeaderScope compression_scope_of (vayu::RunType type) {
-    return type == vayu::RunType::Load ? vayu::http::DefaultHeaderScope::Load :
-                                         vayu::http::DefaultHeaderScope::Design;
 }
 
 /**
