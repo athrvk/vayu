@@ -60,6 +60,7 @@
 #include "competing_writer.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
@@ -743,6 +744,72 @@ TEST_F (ResourceWriteRouteTest, RequestCreateWrongShapeObjectFieldIsRejected) {
     }
     EXPECT_TRUE (db_->get_requests_in_collection (collection).empty ())
     << "a rejected create must not leave a record behind";
+}
+
+// ---------------------------------------------------------------------------
+// The write-time field cap (issue #1485). `apply_json_field` and
+// `apply_key_value_field` (routes.hpp) refuse a serialized value over
+// `json::MAX_FIELD_SIZE` with a 413 naming the field, rather than storing a
+// row the list route could only read back with a substituted default. Shared
+// by all three resources, so one test per resource is enough to prove the
+// guard reaches each of them; the request cases also pin the create/update
+// pair and that a refusal never touches the stored row.
+// ---------------------------------------------------------------------------
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateOversizedBodyIsRejectedWith413) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    const auto before_row        = db_->get_request (id);
+    ASSERT_HAS_VALUE (before_row);
+
+    const std::string huge (vayu::core::constants::json::MAX_FIELD_SIZE + 1, 'a');
+    auto [status, error] = update_request_response (
+    *db_, id, json{ { "body", { { "mode", "raw" }, { "raw", huge } } } });
+    EXPECT_EQ (status, 413);
+    EXPECT_NE (error["error"]["message"].get<std::string> ().find ("body"),
+    std::string::npos);
+
+    const auto after_row = db_->get_request (id);
+    ASSERT_HAS_VALUE (after_row);
+    EXPECT_EQ (after_row->body, before_row->body)
+    << "a refused write must not touch the stored row";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateOversizedBodyIsRejectedWith413) {
+    const std::string collection = make_collection ();
+    const std::string huge (vayu::core::constants::json::MAX_FIELD_SIZE + 1, 'a');
+    auto [status, error] = create_request_response (*db_,
+    json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+    { "url", "https://example.com" }, { "body", { { "mode", "raw" }, { "raw", huge } } } });
+    EXPECT_EQ (status, 413);
+    EXPECT_NE (error["error"]["message"].get<std::string> ().find ("body"),
+    std::string::npos);
+    EXPECT_TRUE (db_->get_requests_in_collection (collection).empty ())
+    << "a rejected create must not leave a record behind";
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionOversizedVariablesIsRejectedWith413) {
+    const std::string id = make_collection ();
+    const std::string huge (vayu::core::constants::json::MAX_FIELD_SIZE + 1, 'a');
+    auto [status, error] = update_collection_response (
+    *db_, id, json{ { "variables", { { "padding", huge } } } });
+    EXPECT_EQ (status, 413);
+    EXPECT_NE (error["error"]["message"].get<std::string> ().find ("variables"),
+    std::string::npos);
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentOversizedVariablesIsRejectedWith413) {
+    auto [create_status, created] =
+    create_environment_response (*db_, json{ { "name", "E" } });
+    ASSERT_EQ (create_status, 200);
+    const std::string id = created["id"].get<std::string> ();
+
+    const std::string huge (vayu::core::constants::json::MAX_FIELD_SIZE + 1, 'a');
+    auto [status, error] = update_environment_response (
+    *db_, id, json{ { "variables", { { "padding", huge } } } });
+    EXPECT_EQ (status, 413);
+    EXPECT_NE (error["error"]["message"].get<std::string> ().find ("variables"),
+    std::string::npos);
 }
 
 TEST_F (ResourceWriteRouteTest, RequestMaxRedirectsIsClamped) {

@@ -21,6 +21,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
 import { useTreeCrud } from "./useTreeCrud";
+import { useToastStore } from "@/stores";
 import type { Collection, Request } from "@/types";
 
 const createRequest = vi.fn();
@@ -79,6 +80,7 @@ function renderCrud() {
 beforeEach(() => {
 	createRequest.mockReset();
 	createRequest.mockResolvedValue({ id: "r-1-copy", collectionId: "c-1" });
+	useToastStore.setState({ toasts: [] });
 });
 
 describe("duplicating a request", () => {
@@ -93,5 +95,23 @@ describe("duplicating a request", () => {
 		const sent = createRequest.mock.calls[0][0];
 		const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...expected } = source;
 		expect(sent).toEqual({ ...expected, name: "Get pet (Copy)" });
+	});
+
+	// Issue #1485: a list row can carry `truncatedFields` when the engine
+	// substituted a default for a column over its size cap. Copying it would
+	// silently persist the substitution as if it were the real value.
+	it("refuses to copy a row whose engine substituted a default for an oversized field", async () => {
+		const truncated: Request = { ...source, truncatedFields: ["body", "auth"] };
+		const { result } = renderCrud();
+
+		await act(async () => {
+			await result.current.rows.onDuplicateRequest(truncated);
+		});
+
+		expect(createRequest).not.toHaveBeenCalled();
+		const toasts = useToastStore.getState().toasts;
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0].variant).toBe("error");
+		expect(toasts[0].message).toContain("body, auth");
 	});
 });

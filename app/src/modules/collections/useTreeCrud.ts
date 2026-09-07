@@ -380,6 +380,16 @@ export function useTreeCrud({
 	const handleDuplicateRequest = useCallback(
 		async (request: Request) => {
 			if (createRequestMutation.isPending) return;
+			// The list row this came from substituted a default for a column over
+			// the engine's field cap (issue #1485) - spreading it below would copy
+			// the substitution, not the request, with no sign anything was lost.
+			if (request.truncatedFields?.length) {
+				showToast({
+					message: `Can't duplicate "${request.name}": its ${request.truncatedFields.join(", ")} is too large to copy. Open it to fix or reduce it first.`,
+					variant: "error",
+				});
+				return;
+			}
 			try {
 				// Spread the source record rather than a hand-written field list
 				// (#1519): a named list drops every field added after it was
@@ -399,7 +409,7 @@ export function useTreeCrud({
 				reportFailure(error, "Failed to duplicate request");
 			}
 		},
-		[createRequestMutation, openTab, reportFailure]
+		[createRequestMutation, openTab, reportFailure, showToast]
 	);
 
 	// Named, so the ⋯ menu's Delete and the row's hidden `data-tree-delete`
