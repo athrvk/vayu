@@ -14,6 +14,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <regex>
 #include <sstream>
@@ -35,9 +36,16 @@ namespace {
 class ScratchLogDir {
     public:
     ScratchLogDir () {
+        // The counter alone is not unique across processes: ctest runs each
+        // test as its own invocation of this binary, so two different tests'
+        // counters both start at 0 and would otherwise collide on the same
+        // path under parallel ctest - the exact race `logger_test.cpp`'s
+        // `ScratchLogDir` avoids by hashing in the test's own name too.
         static std::atomic<int> counter{ 0 };
         path_ = std::filesystem::temp_directory_path () /
-        ("vayu-request-log-test-" + std::to_string (counter.fetch_add (1)));
+        ("vayu-request-log-test-" + std::to_string (counter.fetch_add (1)) + "-" +
+        std::to_string (static_cast<unsigned long long> (std::hash<std::string>{}(
+        ::testing::UnitTest::GetInstance ()->current_test_info ()->name ()))));
         std::filesystem::create_directories (path_);
     }
     ~ScratchLogDir () {

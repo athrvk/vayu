@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -81,9 +82,17 @@ TEST (RequestLogFormatTest, RoundsDurationToOneDecimalPlace) {
 class ScratchLogDir {
     public:
     ScratchLogDir () {
+        // The counter alone is not unique across processes: ctest runs each
+        // test as its own invocation of this binary, so the two
+        // `RequestLogLevelTest` cases below both start their counter at 0 and
+        // would otherwise collide on the same path under parallel ctest -
+        // exactly what happened on Windows before this hashed the test name
+        // in too, the way `logger_test.cpp`'s `ScratchLogDir` already does.
         static std::atomic<int> counter{ 0 };
         path_ = std::filesystem::temp_directory_path () /
-        ("vayu-request-log-level-test-" + std::to_string (counter.fetch_add (1)));
+        ("vayu-request-log-level-test-" + std::to_string (counter.fetch_add (1)) + "-" +
+        std::to_string (static_cast<unsigned long long> (std::hash<std::string>{}(
+        ::testing::UnitTest::GetInstance ()->current_test_info ()->name ()))));
         std::filesystem::create_directories (path_);
     }
     ~ScratchLogDir () {
