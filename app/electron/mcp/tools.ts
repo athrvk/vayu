@@ -1764,9 +1764,10 @@ function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
  * when its own `config.inline` is set or the run's `elements.scripts`
  * override forces it; left `asMarked` with no per-element mark, it still
  * never runs (there is no pre-request replay to defer it to, unlike
- * `script.post`). `droppedPreRequestScripts` keeps counting the ones that are
- * not marked - the override that would save them lives on `args.elements`,
- * outside this function's reach, so the caller decides whether to still warn.
+ * `script.post`). `droppedPreRequestScripts` folds `args.elements.scripts`
+ * into the count itself - "allInline" drops it to 0, "allDeferred" counts
+ * every enabled `script.pre` regardless of its own mark - so the caller only
+ * has to check whether the count is non-zero, not re-read the override too.
  */
 async function composeLoadRunRequest(
 	args: Record<string, unknown>,
@@ -1806,17 +1807,29 @@ async function composeLoadRunRequest(
 
 	const payload = await composeViaEngine(ctx.client, composeBody, signal);
 
-	// Still not marked inline, so still silent unless the caller's own
-	// `elements.scripts` override forces every script inline for this run -
-	// see the doc comment above.
+	// Mirrors `RunContext::script_element_runs_inline` (engine-side): the
+	// run's own `elements.scripts` override, when present, decides for every
+	// `script.pre` element regardless of its own `config.inline` - "allInline"
+	// runs every one of them, "allDeferred" runs none, and only the absence of
+	// an override falls back to each element's own mark. Reading only
+	// `config.inline` here (as an earlier version of this function did) missed
+	// the "allDeferred" case: a request whose `script.pre` was individually
+	// marked inline would count as not dropped, when the override forces it
+	// deferred anyway - the caveat below would then say nothing about a script
+	// that, in fact, never ran.
+	const scriptsOverride =
+		isRecord(args.elements) && typeof args.elements.scripts === "string"
+			? args.elements.scripts
+			: undefined;
 	const droppedPreRequestScripts = Array.isArray(payload.elements)
-		? payload.elements.filter(
-				(el) =>
-					isRecord(el) &&
-					el.kind === SCRIPT_ELEMENT_KINDS.pre &&
-					el.enabled !== false &&
-					!(isRecord(el.config) && el.config.inline === true)
-			).length
+		? payload.elements.filter((el) => {
+				if (!isRecord(el) || el.kind !== SCRIPT_ELEMENT_KINDS.pre || el.enabled === false) {
+					return false;
+				}
+				if (scriptsOverride === "allInline") return false;
+				if (scriptsOverride === "allDeferred") return true;
+				return !(isRecord(el.config) && el.config.inline === true);
+			}).length
 		: 0;
 
 	// An agent-written validation script replaces every composed `script.post`
@@ -7245,13 +7258,13 @@ export const TOOLS: McpTool[] = [
 
 			// A saved request's unmarked pre-request script does not run under
 			// load unless this run's own `elements.scripts` forces every script
-			// inline (issue #1594) - and that override, once applied above, is
-			// what makes this caveat moot. Say so rather than let an agent
-			// believe the request was prepared the way a Send prepares it.
-			const scriptsForcedInline =
-				isRecord(args.elements) && args.elements.scripts === "allInline";
+			// inline (issue #1594) - `composeLoadRunRequest` already folds that
+			// override into `droppedPreRequestScripts` itself (0 whenever
+			// "allInline" applies), so a non-zero count here is always real. Say
+			// so rather than let an agent believe the request was prepared the
+			// way a Send prepares it.
 			const caveat =
-				composed.droppedPreRequestScripts > 0 && !scriptsForcedInline
+				composed.droppedPreRequestScripts > 0
 					? `\n\nNote: ${composed.droppedPreRequestScripts} pre-request script(s) on this saved request were NOT applied - they are not marked to run inline, and this run's own elements.scripts is not "allInline", so anything they sign or rewrite is missing from the requests this run sends.`
 					: "";
 

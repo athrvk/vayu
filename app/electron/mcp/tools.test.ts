@@ -3771,6 +3771,10 @@ describe("start_load_run scenario runs", () => {
 		>;
 		expect(shape.elements).toBeDefined();
 		expect(shape.elements.description).not.toMatch(/Scenario runs only/);
+		// The positive half: not merely "doesn't say scenario-only" (which an
+		// empty or unrelated description would also pass), but actually says
+		// the single-target case works.
+		expect(shape.elements.description).toMatch(/single target/i);
 	});
 
 	/**
@@ -5822,17 +5826,78 @@ describe("dispatchTool", () => {
 		);
 
 		expect(res.isError).toBeFalsy();
-		// The `script.pre` element stays on the payload (POST /runs has no
-		// pre-request hook, but nothing here strips what the engine's own
-		// warnings read)...
+		// The `script.pre` element stays on the payload, under `requestElements`
+		// (it does reach the wire now - just not this one, since it carries no
+		// `config.inline` mark and no override forces it)...
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		// POST /runs has no pre-request hook, so the script must not be sent
-		// pretending it will run - under either the retired name or `elements`...
+		// `preRequestScripts` is refused outright now (issue #1594's cut-over),
+		// so the retired name must never be sent regardless...
 		expect(payload.preRequestScripts).toBeUndefined();
+		// ...and `elements` is the run-level override object, not sent here
+		// since no override was passed.
 		expect(payload.elements).toBeUndefined();
 		// ...and the agent has to be told, or a request that signs itself goes
 		// out unsigned with nothing saying so. The count comes off the composed
 		// `script.pre` elements now, so a miscounted fold reddens here.
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).toMatch(/1 pre-request script\(s\).*NOT applied/i);
+	});
+
+	// The count folds `args.elements.scripts` in, not only each element's own
+	// `config.inline` - the run-level override decides every `script.pre`'s
+	// fate when it is set, regardless of the mark.
+	test("start_load_run suppresses the caveat when elements.scripts forces every script inline", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				requestId: "req_1",
+				duration: "30s",
+				confirmed: true,
+				elements: { scripts: "allInline" },
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.elements).toEqual({ scripts: "allInline" });
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).not.toMatch(/pre-request script\(s\)/i);
+	});
+
+	// The gap the count used to miss: a `script.pre` marked `config.inline`
+	// individually still does not run once the run's own override forces
+	// every script deferred - so it must count as dropped too, not be
+	// excluded because its own mark says otherwise.
+	test("start_load_run counts even a marked script.pre as dropped when elements.scripts forces every script deferred", async () => {
+		const client = fakeClient({
+			composeRequest: vi.fn().mockResolvedValue({
+				method: "GET",
+				url: "https://api.example.com/x",
+				requestId: "req_1",
+				elements: [
+					{
+						id: "el_sig",
+						kind: "script.pre",
+						enabled: true,
+						config: { script: "pm.request.headers['X-Sig'] = 'abc';", inline: true },
+					},
+				],
+			}),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				requestId: "req_1",
+				duration: "30s",
+				confirmed: true,
+				elements: { scripts: "allDeferred" },
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
 		const text = res.content.map((c) => c.text).join("\n");
 		expect(text).toMatch(/1 pre-request script\(s\).*NOT applied/i);
 	});
