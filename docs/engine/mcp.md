@@ -1131,9 +1131,14 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
     design-mode collection run). A single-target `start_load_run` call is
     **refused by name** for the same "written and read by nothing" reason the
     single-target fields above are refused beside a scenario: there is no
-    stored collection of elements on a lone target to override. The engine's
-    contract also carries `includeScriptTime` and `seed`, but neither the app
-    nor MCP exposes either yet, so this schema only names `timers`/`scripts`.
+    stored collection of elements on a lone target to override. This mirrors
+    `RunCollectionDialog`'s own load-test controls, not the engine's full
+    contract: `timers` also accepts a `{fixedMs}` / `{minMs, maxMs}` override
+    (issue #1498) replacing every timer's own span, and the block also takes
+    `includeScriptTime` and `seed`, but no control anywhere in the product -
+    app or MCP - sends any of the three today, so this schema only names the
+    two values `"asConfigured"`/`"off"` and `"asMarked"`/`"allInline"`/
+    `"allDeferred"`.
   - **The allowlist gate is all-or-nothing here**, unlike the smoke matrix's
     per-request skip: every step is composed by id and gated before the run is
     created, and one step the allowlist does not cover refuses the whole run

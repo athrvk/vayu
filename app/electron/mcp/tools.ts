@@ -2175,7 +2175,7 @@ const LOAD_RUN_SCHEMA_GATE_REFUSAL =
  * Why `elements` cannot override a single-target load run's timers/scripts
  * (issue #1559): there is no stored collection of `timer.*`/`script.*`
  * elements here to override - a single target's only script slot is
- * `postRequestScript`. The engine's own validator
+ * `postRequestScript`/`tests`. The engine's own validator
  * (`validate_elements_run_override`, `engine/src/core/load_strategy.cpp`)
  * accepts the block on every `POST /runs` call regardless of shape and simply
  * has nothing to apply it to here, so refusing it client-side is the same
@@ -2185,7 +2185,7 @@ const LOAD_RUN_SCHEMA_GATE_REFUSAL =
 const ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL =
 	`"elements" does not apply to a single-target load run: there is no stored collection of ` +
 	`timer.*/script.* elements here to override - the only script slot a single target has is ` +
-	`"postRequestScript". Nothing was started - the engine would have accepted the block and ` +
+	`"postRequestScript"/"tests". Nothing was started - the engine would have accepted the block and ` +
 	`read it from nothing. Remove it, or pass "scenario" to load-test a collection, where its ` +
 	`stored elements are what "asConfigured"/"asMarked" mean.`;
 
@@ -7066,18 +7066,21 @@ export const TOOLS: McpTool[] = [
 			// load path (`scenario_load.cpp`) - a single-target run has nothing
 			// stored to override, so it is refused there by name instead of
 			// silently accepted and read by nothing (see
-			// ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL). Only `timers`/`scripts`
-			// are exposed here: the engine's contract also takes
-			// `includeScriptTime` and `seed`, but no control anywhere in the
-			// product - app or MCP - sends either today, so they stay off this
-			// schema until something actually needs them.
+			// ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL). This mirrors exactly what
+			// issue #1559 asked for and what RunCollectionDialog's own load-test
+			// section sends (`RunCollectionDialog.tsx`), not the engine's full
+			// contract: `timers` also accepts `{fixedMs}` / `{minMs, maxMs}`
+			// (issue #1498) and the block also takes `includeScriptTime` and
+			// `seed`, but no control anywhere in the product - app or MCP - sends
+			// any of the three today, so they stay off this schema until
+			// something actually needs them.
 			elements: z
 				.object({
 					timers: z
 						.enum(["asConfigured", "off"])
 						.optional()
 						.describe(
-							'"off" silences every timer.pacing/timer.think wait for this run, across every element, without editing the collection. "asConfigured" (default) leaves each element\'s own configuration in effect.'
+							'"off" silences every timer.pacing/timer.think wait for this run, across every element, without editing the collection. "asConfigured" (default) leaves each element\'s own configuration in effect. The engine also accepts a {fixedMs} or {minMs, maxMs} override replacing every timer\'s own span, not offered here - no control sends it yet.'
 						),
 					scripts: z
 						.enum(["asMarked", "allInline", "allDeferred"])

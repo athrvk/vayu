@@ -3689,6 +3689,9 @@ describe("start_load_run scenario runs", () => {
 	});
 
 	test("declares elements so the single-target refusal survives schema validation", () => {
+		// An argument the schema does not declare is stripped by the SDK before
+		// the handler runs, which would drop the block in silence - the failure
+		// this refusal exists to prevent.
 		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
 			string,
 			z.ZodType
