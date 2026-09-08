@@ -391,8 +391,16 @@ const nlohmann::json& config) {
         }
     }
 
+    // Validated on a stamped copy, never on `*lifecycle` itself: `Registry::
+    // validate` refuses an id-less entry outright, and this array gets the
+    // same "the engine assigns one when the caller sends none" default every
+    // other `elements` write path gives (`apply_elements_field`,
+    // `routes.hpp`) - a client that names no id must not see a 400 asking it
+    // to invent one itself.
+    nlohmann::json stamped = *lifecycle;
+    vayu::core::stamp_default_element_ids (stamped);
     return vayu::core::Registry::instance ().validate (
-    *lifecycle, vayu::core::ElementOwner::Collection);
+    stamped, vayu::core::ElementOwner::Collection);
 }
 
 namespace {

@@ -16,6 +16,8 @@
 
 #include <random>
 
+#include "vayu/utils/id.hpp"
+
 namespace vayu::core {
 
 nlohmann::json ElementOutcome::to_json () const {
@@ -88,6 +90,19 @@ std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
         compiled.push_back (std::move (out));
     }
     return compiled;
+}
+
+void stamp_default_element_ids (nlohmann::json& elements) {
+    if (!elements.is_array ()) {
+        return;
+    }
+    for (auto& entry : elements) {
+        if (entry.is_object () &&
+        (!entry.contains ("id") || !entry["id"].is_string () ||
+        entry["id"].get<std::string> ().empty ())) {
+            entry["id"] = vayu::utils::generate_id ("el_");
+        }
+    }
 }
 
 std::optional<int64_t> apply_timers_override (const TimersOverride* override_,

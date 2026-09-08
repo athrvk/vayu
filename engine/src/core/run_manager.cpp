@@ -1591,7 +1591,14 @@ const nlohmann::json& config) {
     if (lifecycle == config.end () || !lifecycle->is_array ()) {
         return {};
     }
-    return vayu::core::compile_elements (*lifecycle);
+    // Stamped the same way `validate_lifecycle_elements_run_override`
+    // validated it: a caller that named no id gets one here too, rather than
+    // dispatching with the empty `CompiledElement::id` `compile_elements`
+    // would otherwise default to - which the report's `lifecycle.setup` /
+    // `.teardown` outcomes would then carry verbatim.
+    nlohmann::json stamped = *lifecycle;
+    vayu::core::stamp_default_element_ids (stamped);
+    return vayu::core::compile_elements (stamped);
 }
 
 /** The collection scope a single-request run's own `lifecycleElements`

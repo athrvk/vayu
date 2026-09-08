@@ -408,15 +408,7 @@ vayu::core::ElementOwner owner = vayu::core::ElementOwner::Request) {
     // gets one rather than a 400 asking it to invent one itself. A non-array
     // `value` is left alone; `validate` below is what names that refusal.
     nlohmann::json with_ids = value;
-    if (with_ids.is_array ()) {
-        for (auto& entry : with_ids) {
-            if (entry.is_object () &&
-            (!entry.contains ("id") || !entry["id"].is_string () ||
-            entry["id"].get<std::string> ().empty ())) {
-                entry["id"] = vayu::utils::generate_id ("el_");
-            }
-        }
-    }
+    vayu::core::stamp_default_element_ids (with_ids);
     if (auto reason = vayu::core::Registry::instance ().validate (with_ids, owner)) {
         return route_error (400, *reason);
     }

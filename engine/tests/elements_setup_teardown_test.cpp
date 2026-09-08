@@ -138,6 +138,20 @@ TEST (LifecycleElementsRunOverrideValidationTest, AcceptsSetupAndTeardown) {
     vayu::core::validate_lifecycle_elements_run_override (config).has_value ());
 }
 
+// `Registry::validate` refuses an id-less entry outright - the documented
+// example in api-reference.md's `lifecycleElements` section names no id, so
+// this must not 400 the same way `apply_elements_field` (routes.hpp) does
+// not for a stored request/collection's `elements`. Mutation check: drop the
+// `stamp_default_element_ids` call in `validate_lifecycle_elements_run_override`
+// and this reddens on `Registry::validate`'s own "'id' must be a non-empty
+// string" refusal.
+TEST (LifecycleElementsRunOverrideValidationTest, AcceptsAnEntryWithNoId) {
+    const json config{ { "lifecycleElements",
+    json::array ({ json{ { "kind", "script.setup" }, { "config", { { "script", "" } } } } }) } };
+    EXPECT_FALSE (
+    vayu::core::validate_lifecycle_elements_run_override (config).has_value ());
+}
+
 // The wire-shape rule the issue itself settles: a scenario collection already
 // has a real `elements` column for this, so the two must not both claim the
 // run's own setup/teardown.
@@ -606,6 +620,29 @@ TEST_F (ScriptLifecycleTest, SingleRequestWithNoLifecycleElementsRunsNormally) {
     vayu::RunStatus::Completed);
     EXPECT_EQ (server_->requests ().size (), 2u);
     EXPECT_FALSE (summary_of ("run_single").contains ("lifecycle"));
+}
+
+// `compile_run_lifecycle_elements` stamps an id the same way validation
+// already accepted an id-less entry (`AcceptsAnEntryWithNoId`, above) - this
+// proves the dispatched side of that default, not just the validated side:
+// a `script.teardown` declared with no `id` still dispatches and reports a
+// real, non-empty generated one. Mutation check: drop the
+// `stamp_default_element_ids` call in `compile_run_lifecycle_elements` and
+// `teardown[0]["id"]` reddens to `""`.
+TEST_F (ScriptLifecycleTest, SingleRequestLifecycleElementWithNoIdGetsAGeneratedIdInOutcomes) {
+    const json elements = json::array (
+    { json{ { "kind", "script.teardown" }, { "config", { { "script", "" } } } } });
+    EXPECT_EQ (run_single_request_load (elements, /*iterations=*/1, /*concurrency=*/1),
+    vayu::RunStatus::Completed);
+
+    auto summary = summary_of ("run_single");
+    ASSERT_TRUE (summary.contains ("lifecycle"));
+    ASSERT_TRUE (summary["lifecycle"].contains ("teardown"));
+    const auto& teardown = summary["lifecycle"]["teardown"];
+    ASSERT_EQ (teardown.size (), 1u);
+    const auto id = teardown[0]["id"].get<std::string> ();
+    EXPECT_FALSE (id.empty ());
+    EXPECT_NE (id.find ("el_"), std::string::npos) << id;
 }
 
 // The single-request half of the issue's own acceptance scenario. A
