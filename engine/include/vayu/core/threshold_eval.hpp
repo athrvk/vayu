@@ -112,4 +112,18 @@ evaluate_thresholds (const nlohmann::json& config, const RunSummaryInputs& input
  */
 [[nodiscard]] bool thresholds_fail_run (const nlohmann::json& config);
 
+/**
+ * @brief Serialize a verdict into the `thresholds` block a run's stored
+ *        summary carries.
+ *
+ * The one writer for both run modes' summaries (issue #1564): a load run's
+ * `RunSummaryInputs::thresholds` and a collection run's own
+ * `ScenarioSummaryInputs::thresholds` are both a `std::optional<ThresholdOutcome>`
+ * filled by the same `evaluate_thresholds`, so they read from one place
+ * rather than two hand-written copies of the same three keys that could
+ * drift - the report route's `apply_stored_summary` reads this shape off
+ * `summary["thresholds"]` however it got there.
+ */
+[[nodiscard]] nlohmann::json build_threshold_outcome_payload (const ThresholdOutcome& outcome);
+
 } // namespace vayu::core

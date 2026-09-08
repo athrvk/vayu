@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <deque>
 #include <optional>
 #include <stdexcept>
@@ -18,6 +19,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/status.hpp"
@@ -149,6 +151,42 @@ const vayu::ScriptResult& post_script_result) {
         return std::nullopt;
     }
     return tally;
+}
+
+/**
+ * @brief This run's own latency percentiles, from the steps it actually sent.
+ *
+ * A nearest-rank quantile over a plain sorted vector, not
+ * `MetricsCollector::calculate_percentiles` (issue #1564): that collector is
+ * shared and already ticking for the run's live SSE frames, sized and tuned
+ * for a concurrent load run's histogram, so feeding it here only to read a
+ * snapshot back at the very end would make its otherwise-idle live numbers
+ * start reflecting a design-mode run mid-flight - a behaviour nobody asked
+ * for. A collection run's sample count is bounded by iterations x steps
+ * rather than by a load run's duration, so a sort is cheap enough to redo once
+ * at the run's own finish point.
+ */
+MetricsCollector::Percentiles percentiles_from_latencies (std::vector<double> latencies) {
+    MetricsCollector::Percentiles result;
+    result.count = latencies.size ();
+    if (latencies.empty ()) {
+        return result;
+    }
+    std::sort (latencies.begin (), latencies.end ());
+    const auto at = [&latencies] (double pct) {
+        const auto rank = static_cast<size_t> (
+        std::ceil (pct / 100.0 * static_cast<double> (latencies.size ())));
+        return latencies[std::min (rank == 0 ? size_t{ 0 } : rank - 1, latencies.size () - 1)];
+    };
+    result.min  = latencies.front ();
+    result.max  = latencies.back ();
+    result.p50  = at (50.0);
+    result.p75  = at (75.0);
+    result.p90  = at (90.0);
+    result.p95  = at (95.0);
+    result.p99  = at (99.0);
+    result.p999 = at (99.9);
+    return result;
 }
 
 /**
@@ -481,6 +519,15 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
         validation["failOnSchemaError"] = inputs.fail_on_schema_error;
         summary["schemaValidation"]     = std::move (validation);
     }
+    // The run's verdict against the budgets its config declared (issue
+    // #1564), in the same shape and through the same writer a load run's
+    // summary uses - `GET /runs/:id/report`'s `apply_stored_summary` reads
+    // this key generically off either mode's stored summary. Omitted when
+    // the run declared no budgets, the same absent-not-zeroed rule every
+    // other optional section here follows.
+    if (inputs.thresholds.has_value ()) {
+        summary["thresholds"] = build_threshold_outcome_payload (*inputs.thresholds);
+    }
     return summary;
 }
 
@@ -789,11 +836,18 @@ ScenarioStepStore& store) {
     }
 
     ++summary.steps_executed;
-    // Only a step that actually sent counts towards coverage: a
-    // skipped step exercised no operation, and counting it would
-    // report a contract as covered by a request nobody made.
+    // Only a step that actually sent counts towards coverage - or, on the
+    // same terms, towards the run's threshold inputs (issue #1564): a
+    // skipped step exercised no operation and made no request, so it belongs
+    // in neither an error-rate denominator nor a latency percentile.
     if (exchange.sent) {
         coverage.record (step.index, record.status_code);
+        ++summary.status_codes[record.status_code];
+        summary.latencies.push_back (record.latency_ms);
+    }
+    if (record.tests) {
+        summary.assertions.passed += record.tests->passed;
+        summary.assertions.failed += record.tests->failed;
     }
     switch (record.outcome) {
     case StepOutcome::Passed: ++summary.passed; break;
@@ -918,6 +972,95 @@ ScenarioStepStore& store) {
         }
         position = next_position;
     }
+}
+
+/**
+ * `script.setup` (#1499): the collection's own once-per-run elements,
+ * dispatched here so a setup write lands in @p scopes before the first step
+ * reads it - visible exactly as a prior step's own write would be, through
+ * the same @p scopes and @p script_engine every step of the run already
+ * shares. Extracted out of `execute_scenario_run` (whose cognitive
+ * complexity this loop and its lambdas would otherwise push over the lint
+ * threshold), mirroring `run_manager.cpp`'s `run_collection_setup` for the
+ * load path.
+ *
+ * @return the failed outcome's message, or `nullopt` on success - the
+ *         caller throws to fail the run before any step runs.
+ */
+std::optional<std::string> run_scenario_setup (vayu::runtime::ScriptEngine& script_engine,
+vayu::http::routes::ScriptVariableScopes& scopes,
+const std::vector<vayu::core::CompiledElement>& collection_elements,
+std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
+    vayu::Request lifecycle_request;
+    vayu::ScriptResult unread_pre;
+    vayu::ScriptResult unread_post;
+    vayu::core::ElementContext setup_ctx{
+        .request        = lifecycle_request,
+        .response       = nullptr,
+        .run_pre_script = [] (
+                          const std::string&) { return vayu::ScriptResult{}; },
+        .run_post_script = [] (
+                           const std::string&) { return vayu::ScriptResult{}; },
+        .pre_script_result  = unread_pre,
+        .post_script_result = unread_post,
+        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
+        .should_stop = nullptr,
+        .run_setup_script =
+        [&] (const std::string& script) {
+            auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
+            vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            return vayu::http::routes::execute_script (
+            script_engine, script, script_ctx, "Setup");
+        },
+    };
+    vayu::core::ElementPipeline::run (
+    vayu::core::Phase::RunStart, setup_ctx, collection_elements, setup_outcomes);
+    for (const auto& outcome : setup_outcomes) {
+        if (outcome.status == "error" || outcome.status == "failed") {
+            return outcome.message.value_or ("unknown error");
+        }
+    }
+    return std::nullopt;
+}
+
+/**
+ * `script.teardown` (#1499): the same collection elements `run_scenario_setup`
+ * dispatched, run with @p run_summary_info as `pm.info.run`. Never throws out
+ * - `ElementPipeline::run` already turns one into this element's own
+ * `"error"` outcome rather than propagating - so a failing teardown is
+ * recorded, not fatal.
+ */
+std::vector<vayu::core::ElementOutcome> run_scenario_teardown (
+vayu::runtime::ScriptEngine& script_engine,
+vayu::http::routes::ScriptVariableScopes& scopes,
+const std::vector<vayu::core::CompiledElement>& collection_elements,
+const vayu::runtime::RunSummaryInfo& run_summary_info) {
+    std::vector<vayu::core::ElementOutcome> teardown_outcomes;
+    vayu::Request lifecycle_request;
+    vayu::ScriptResult unread_pre;
+    vayu::ScriptResult unread_post;
+    vayu::core::ElementContext teardown_ctx{
+        .request        = lifecycle_request,
+        .response       = nullptr,
+        .run_pre_script = [] (
+                          const std::string&) { return vayu::ScriptResult{}; },
+        .run_post_script = [] (
+                           const std::string&) { return vayu::ScriptResult{}; },
+        .pre_script_result  = unread_pre,
+        .post_script_result = unread_post,
+        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
+        .should_stop = nullptr,
+        .run_teardown_script =
+        [&] (const std::string& script) {
+            auto script_ctx = vayu::runtime::ScriptContext::for_teardown (run_summary_info);
+            vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            return vayu::http::routes::execute_script (
+            script_engine, script, script_ctx, "Teardown");
+        },
+    };
+    vayu::core::ElementPipeline::run (vayu::core::Phase::RunEnd, teardown_ctx,
+    collection_elements, teardown_outcomes);
+    return teardown_outcomes;
 }
 
 void execute_scenario_run (const std::shared_ptr<RunContext>& context,
@@ -1051,46 +1194,10 @@ RunManager& manager) {
             }
         }
 
-        vayu::Request lifecycle_request;
-        vayu::ScriptResult lifecycle_unread_pre;
-        vayu::ScriptResult lifecycle_unread_post;
-        vayu::runtime::RunSummaryInfo run_summary_info;
-        vayu::core::ElementContext lifecycle_ctx{
-            .request  = lifecycle_request,
-            .response = nullptr,
-            .run_pre_script =
-            [] (const std::string&) { return vayu::ScriptResult{}; },
-            .run_post_script =
-            [] (const std::string&) { return vayu::ScriptResult{}; },
-            .pre_script_result  = lifecycle_unread_pre,
-            .post_script_result = lifecycle_unread_post,
-            .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
-            .should_stop = nullptr,
-            .run_setup_script =
-            [&] (const std::string& script) {
-                auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
-                vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
-                return vayu::http::routes::execute_script (
-                script_engine, script, script_ctx, "Setup");
-            },
-            .run_teardown_script =
-            [&] (const std::string& script) {
-                auto script_ctx =
-                vayu::runtime::ScriptContext::for_teardown (run_summary_info);
-                vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
-                return vayu::http::routes::execute_script (
-                script_engine, script, script_ctx, "Teardown");
-            },
-        };
-
         std::vector<vayu::core::ElementOutcome> setup_outcomes;
-        vayu::core::ElementPipeline::run (vayu::core::Phase::RunStart,
-        lifecycle_ctx, collection_elements, setup_outcomes);
-        for (const auto& outcome : setup_outcomes) {
-            if (outcome.status == "error" || outcome.status == "failed") {
-                throw std::runtime_error ("script.setup failed: " +
-                outcome.message.value_or ("unknown error"));
-            }
+        if (auto setup_failure = run_scenario_setup (
+            script_engine, scopes, collection_elements, setup_outcomes)) {
+            throw std::runtime_error ("script.setup failed: " + *setup_failure);
         }
 
         for (size_t iteration = 0; iteration < asked.iterations; ++iteration) {
@@ -1146,6 +1253,7 @@ RunManager& manager) {
         // throwing teardown - `ElementPipeline::run` turns it into this
         // element's own "error" outcome rather than propagating - never
         // changes `final_status`, already decided above.
+        vayu::runtime::RunSummaryInfo run_summary_info;
         run_summary_info.requests_sent     = summary.steps_executed;
         run_summary_info.error_rate        = summary.steps_executed > 0 ?
                (static_cast<double> (summary.errored) / static_cast<double> (summary.steps_executed)) * 100.0 :
@@ -1153,9 +1261,8 @@ RunManager& manager) {
         run_summary_info.assertions_passed = summary.passed;
         run_summary_info.assertions_failed = summary.failed;
 
-        std::vector<vayu::core::ElementOutcome> teardown_outcomes;
-        vayu::core::ElementPipeline::run (vayu::core::Phase::RunEnd,
-        lifecycle_ctx, collection_elements, teardown_outcomes);
+        auto teardown_outcomes = run_scenario_teardown (
+        script_engine, scopes, collection_elements, run_summary_info);
         summary.lifecycle =
         vayu::core::build_lifecycle_node (setup_outcomes, teardown_outcomes);
     } catch (const std::exception& e) {
@@ -1169,6 +1276,41 @@ RunManager& manager) {
     std::chrono::duration<double> (std::chrono::steady_clock::now () - started_at)
     .count ();
     summary.coverage = coverage.build ();
+
+    // The run's verdict against its declared budgets (issue #1564), judged
+    // once off the numbers just tallied above - never re-derived later, on
+    // the same "decide once, from data already in hand" principle
+    // `engine/CLAUDE.md` states for a locked read-decide-write (there is no
+    // lock here: this whole function runs on the run's own single worker
+    // thread, so the principle is about not reading two different snapshots
+    // of the run's own tallies, not about concurrency). `RunSummaryInputs`
+    // is the load path's shape; a collection run builds one populated with
+    // only what `evaluate_thresholds`'s metric table actually reads
+    // (latency, status codes, throughput, assertions) rather than an
+    // adapter converting between the two summary shapes - no such adapter
+    // exists elsewhere in the engine, and most of `RunSummaryInputs`'
+    // fields (peak concurrency, dropped requests, a load run's queue wait)
+    // describe a concurrent load run this run mode has no counterpart for.
+    RunSummaryInputs threshold_inputs;
+    threshold_inputs.total_requests = summary.latencies.size ();
+    threshold_inputs.status_codes   = summary.status_codes;
+    threshold_inputs.latency = percentiles_from_latencies (summary.latencies);
+    threshold_inputs.throughput = summary.duration_s > 0 ?
+    static_cast<double> (threshold_inputs.total_requests) / summary.duration_s :
+    0.0;
+    if (summary.assertions.passed + summary.assertions.failed > 0) {
+        threshold_inputs.assertions = summary.assertions;
+    }
+    summary.thresholds = evaluate_thresholds (context->config, threshold_inputs);
+
+    // A stopped run keeps reporting Stopped regardless of verdict, and a run
+    // that already threw keeps Failed for the reason it threw - `failRun`
+    // judges only a run that reached its own natural end, the same guard
+    // `finish_load_test` applies (`run_manager.cpp`).
+    if (final_status == vayu::RunStatus::Completed && summary.thresholds &&
+    summary.thresholds->failed > 0 && thresholds_fail_run (context->config)) {
+        final_status = vayu::RunStatus::Failed;
+    }
 
     try {
         db.update_run_end_time (context->run_id);

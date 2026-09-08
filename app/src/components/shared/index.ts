@@ -69,6 +69,9 @@ export * from "./ScrollOnOverflow";
 // Truncated text that reveals the full value on hover, only when clipped
 export * from "./TruncatedText";
 
+// A labelled number input with its unit inside the field
+export * from "./NumberField";
+
 // Shared frame for the drawer views
 export * from "./DrawerPanel";
 

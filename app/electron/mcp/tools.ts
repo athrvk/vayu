@@ -2205,6 +2205,45 @@ const scenarioDataInput = z
 		'Data rows, one flat object per row (e.g. [{"id":"1"},{"id":"2"}]). Every {{data.column}} in a step\'s URL, headers, body and auth credentials is bound per iteration, and both scripts read the row as pm.iterationData. A step carrying a {{data.*}} token with no data set is refused by the engine before anything is sent, as is a present-but-empty array. The row set is not persisted - only its count is recorded on the run - but a bound value travels in the request that carried it, and the run stores each step\'s request and response until the run is pruned.'
 	);
 
+/**
+ * Pass/fail budgets, declared once and forwarded verbatim by both
+ * `run_collection` and `start_load_run` (issue #1564): the engine judges a
+ * design-mode collection run against them exactly as it always has a load
+ * run, so the schema and the report shape are the same on both tools rather
+ * than two hand-written copies that could drift. The bounds mirror the
+ * engine's, so a value this schema accepts is one `POST /runs` accepts; an
+ * empty object is rejected there rather than starting a run nothing will
+ * judge, so it is rejected here too, by name.
+ */
+const thresholdsInput = z
+	.object({
+		latencyP50Ms: z.number().positive().max(86_400_000).optional(),
+		latencyP95Ms: z.number().positive().max(86_400_000).optional(),
+		latencyP99Ms: z.number().positive().max(86_400_000).optional(),
+		maxErrorRatePct: z.number().min(0).max(100).optional(),
+		minThroughputRps: z.number().positive().max(1_000_000_000).optional(),
+		maxAssertionFailureRatePct: z.number().min(0).max(100).optional(),
+		// Not a budget - whether a missed one fails the run, not itself
+		// measured against anything, so it is excluded from the
+		// at-least-one-budget refinement below.
+		failRun: z
+			.boolean()
+			.optional()
+			.describe(
+				"When true, a missed budget sets this run's terminal status to failed rather than only reporting the verdict. Default false."
+			),
+	})
+	.refine((t) => Object.keys(t).filter((key) => key !== "failRun").length > 0, {
+		// `error`, not zod 3's `message`: v4 still reads the old key as a
+		// deprecated alias, and a deprecated alias is what the next major
+		// takes away.
+		error: "Declare at least one budget, or omit `thresholds` entirely.",
+	})
+	.optional()
+	.describe(
+		"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Omit for a run that is measured but not judged."
+	);
+
 const streamInput = z
 	.boolean()
 	.optional()
@@ -6629,7 +6668,7 @@ export const TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie"],
 		description:
-			"Run a collection as the product means collections to be run: its saved requests executed as an ordered sequence, one step at a time, by the engine's design-mode runner. Unlike run_collection_smoke this is ONE run with a run id - steps share a cookie jar, `pm.execution` flow control (setNextRequest, skipRequest) works, pre-request scripts run, and passing `data` repeats the sequence once per row with {{data.column}} bound and pm.iterationData set. Pass recursive: true to include sub-collections, in the sidebar's order. The collection tree IS the sequence: there is no step list to give. Every step's resolved host must be on the allowlist - unlike the smoke matrix, which skips an off-allowlist request and runs the rest, a scenario is one run, so a single step the allowlist does not cover refuses the whole run and nothing is sent. Returns the run id immediately; the run continues engine-side and get_run_report reads its outcome. For a collection bound to an OpenAPI document, pass failOnSchemaError: true to make that contract a gate, as the app's Run Collection checkbox does - off by default, the verdict is reported without deciding pass/fail. Sends real traffic but does not modify Vayu data. For a load test over the same sequence, use start_load_run's `scenario` argument.",
+			"Run a collection as the product means collections to be run: its saved requests executed as an ordered sequence, one step at a time, by the engine's design-mode runner. Unlike run_collection_smoke this is ONE run with a run id - steps share a cookie jar, `pm.execution` flow control (setNextRequest, skipRequest) works, pre-request scripts run, and passing `data` repeats the sequence once per row with {{data.column}} bound and pm.iterationData set. Pass recursive: true to include sub-collections, in the sidebar's order. The collection tree IS the sequence: there is no step list to give. Every step's resolved host must be on the allowlist - unlike the smoke matrix, which skips an off-allowlist request and runs the rest, a scenario is one run, so a single step the allowlist does not cover refuses the whole run and nothing is sent. Returns the run id immediately; the run continues engine-side and get_run_report reads its outcome. For a collection bound to an OpenAPI document, pass failOnSchemaError: true to make that contract a gate, as the app's Run Collection checkbox does - off by default, the verdict is reported without deciding pass/fail. Pass `thresholds` to judge the run against pass/fail budgets, the same way a load run can. Sends real traffic but does not modify Vayu data. For a load test over the same sequence, use start_load_run's `scenario` argument.",
 		annotations: {
 			title: "Run collection",
 			readOnlyHint: false,
@@ -6666,6 +6705,10 @@ export const TOOLS: McpTool[] = [
 				guidance:
 					"Set true to make the bound contract a gate, the way the app's Run Collection checkbox does: a step whose response does not match its schema fails, and the run's report records that it was judged that way. Only a step that passed everything else is demoted - one already failing keeps the error that named it. Left off, the verdict still rides every step and the report's schemaValidation totals; it just does not decide pass/fail.",
 			}),
+			// The engine now judges a design-mode run against declared budgets
+			// exactly as it always has a load run (issue #1564), so this tool
+			// takes the same `thresholds` argument `start_load_run` does.
+			thresholds: thresholdsInput,
 		},
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
@@ -6697,6 +6740,12 @@ export const TOOLS: McpTool[] = [
 				// way it always did.
 				...(args.failOnSchemaError === true ? { failOnSchemaError: true } : {}),
 			};
+			// Forwarded verbatim - the keys are the engine's own metric names,
+			// and they come back unchanged in get_run_report's
+			// `thresholdValidation`. Zod has already bounded every value.
+			if (args.thresholds && typeof args.thresholds === "object") {
+				payload.thresholds = args.thresholds;
+			}
 
 			let started: unknown;
 			try {
@@ -6874,38 +6923,7 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					`In-flight cap (constant_rps only), 1-${MAX_IN_FLIGHT_BOUND}. Default max(targetRps * 10, 1000).`
 				),
-			// Pass/fail budgets for the whole run. The bounds mirror the
-			// engine's, so a value this schema accepts is one POST /runs
-			// accepts; an empty object is rejected there rather than starting a
-			// run nothing will judge, so it is rejected here too, by name.
-			thresholds: z
-				.object({
-					latencyP50Ms: z.number().positive().max(86_400_000).optional(),
-					latencyP95Ms: z.number().positive().max(86_400_000).optional(),
-					latencyP99Ms: z.number().positive().max(86_400_000).optional(),
-					maxErrorRatePct: z.number().min(0).max(100).optional(),
-					minThroughputRps: z.number().positive().max(1_000_000_000).optional(),
-					maxAssertionFailureRatePct: z.number().min(0).max(100).optional(),
-					// Not a budget - whether a missed one fails the run, not itself
-					// measured against anything, so it is excluded from the
-					// at-least-one-budget refinement below.
-					failRun: z
-						.boolean()
-						.optional()
-						.describe(
-							"When true, a missed budget sets this run's terminal status to failed rather than only reporting the verdict. Default false."
-						),
-				})
-				.refine((t) => Object.keys(t).filter((key) => key !== "failRun").length > 0, {
-					// `error`, not zod 3's `message`: v4 still reads the old key as a
-					// deprecated alias, and a deprecated alias is what the next major
-					// takes away.
-					error: "Declare at least one budget, or omit `thresholds` entirely.",
-				})
-				.optional()
-				.describe(
-					"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Omit for a run that is measured but not judged."
-				),
+			thresholds: thresholdsInput,
 			// Shaped exactly as the engine's `monitor` block and forwarded
 			// verbatim. The value bounds are deliberately not mirrored here the
 			// way `thresholds`' are: `monitor.series`' ceiling is the
