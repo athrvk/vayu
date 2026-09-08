@@ -184,7 +184,7 @@ Auth parse_auth (const nlohmann::json& auth) {
         // warning, not a debug line: an unresolved 'inherit' leaking through
         // means a client-side regression, and the request is about to execute
         // unauthenticated - that must show up in default-level logs (#226).
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("http",
         "parse_auth: received unresolved 'inherit' auth; treating as none "
         "(compose the request via POST /compose first)");
         return NoAuth{};
@@ -238,8 +238,8 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
             return resolve_oauth2 (&req, a.config, db);
         } else {
             static_assert (std::is_same_v<T, UnsupportedAuth>, "unhandled Auth variant");
-            vayu::utils::log_debug ("apply_auth: mode '" + a.mode +
-            "' is not executable; sending request without auth");
+            vayu::utils::log_debug ("http",
+            "apply_auth: mode '" + a.mode + "' is not executable; sending request without auth");
             return {};
         }
     },

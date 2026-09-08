@@ -936,16 +936,16 @@ const ScenarioExecution& execution) {
         context->metrics_collector->configure_step_samples (sampled);
     }
 
-    vayu::utils::log_info ("Starting Scenario Load Test (" + mode + ")");
-    vayu::utils::log_info ("  Virtual users: " + std::to_string (vu_count));
-    vayu::utils::log_info ("  Steps per iteration: " + std::to_string (step_count));
+    vayu::utils::log_info ("run", "Starting Scenario Load Test (" + mode + ")");
+    vayu::utils::log_info ("run", "  Virtual users: " + std::to_string (vu_count));
+    vayu::utils::log_info ("run", "  Steps per iteration: " + std::to_string (step_count));
     if (max_iterations > 0) {
-        vayu::utils::log_info ("  Iterations: " + std::to_string (max_iterations));
+        vayu::utils::log_info ("run", "  Iterations: " + std::to_string (max_iterations));
     }
     if (config.contains ("maxInFlight")) {
         // Stated rather than silently ignored: in-flight is bounded by the VU
         // count by construction here, so the field cannot do anything.
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("run",
         "maxInFlight has no effect on a scenario run - in-flight requests are "
         "bounded by the virtual-user count ('concurrency')");
     }

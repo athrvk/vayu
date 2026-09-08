@@ -46,10 +46,13 @@ constexpr const char* ARG_PORT_LONG = "--port";
  * @brief Logging configuration
  */
 namespace logging {
-/// Directory where logs are stored
-constexpr const char* DIR = "engine/logs";
-/// Prefix for log filenames
-constexpr const char* FILE_PREFIX = "/vayu_";
+/// Prefix for the daemon's log filenames - `src="engine"` records.
+constexpr const char* ENGINE_FILE_PREFIX = "engine_";
+/// Prefix for `vayu-cli`'s log filenames - `src="cli"` records. A separate
+/// prefix, not a separate directory, is what lets `jq` read both with one
+/// glob (issue #1557) while `prune_old_logs` still only ever deletes the
+/// generation it was asked to.
+constexpr const char* CLI_FILE_PREFIX = "cli_";
 /// Timestamp format for log filenames
 constexpr const char* TIME_FORMAT = "%Y%m%d_%H%M%S";
 /// How many per-start log files survive a start; the rest are deleted oldest

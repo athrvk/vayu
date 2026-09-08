@@ -332,7 +332,7 @@ void register_spec_bind_routes (RouteContext& ctx) {
         try {
             body = nlohmann::json::parse (req.body);
         } catch (const std::exception& e) {
-            vayu::utils::log_warning (
+            vayu::utils::log_warning ("http",
             "POST /specs/bind - invalid JSON body: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON body");
             return;
@@ -340,11 +340,12 @@ void register_spec_bind_routes (RouteContext& ctx) {
         try {
             auto [status, response] = bind_spec_response (ctx.db, body);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs/bind - " +
-                std::to_string (status) + ": " + error_message_of (response));
+                vayu::utils::log_warning ("http",
+                "POST /specs/bind - " + std::to_string (status) + ": " +
+                error_message_of (response));
             } else {
-                vayu::utils::log_info ("Bound to spec " +
-                response["specId"].get<std::string> () + ": " +
+                vayu::utils::log_info ("http",
+                "Bound to spec " + response["specId"].get<std::string> () + ": " +
                 std::to_string (response["stamped"].get<size_t> ()) + " stamped, " +
                 std::to_string (response["cleared"].get<size_t> ()) + " cleared");
             }
@@ -356,11 +357,11 @@ void register_spec_bind_routes (RouteContext& ctx) {
             // conflict `POST /specs/sync` reports, and for the same reason:
             // nothing was written and re-reading is what the client should do.
             vayu::utils::log_warning (
-            "POST /specs/bind - 409: " + std::string (e.what ()));
+            "http", "POST /specs/bind - 409: " + std::string (e.what ()));
             send_error (res, 409, e.what ());
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "POST /specs/bind - Error: " + std::string (e.what ()));
+            "http", "POST /specs/bind - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

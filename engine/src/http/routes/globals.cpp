@@ -55,7 +55,7 @@ save_globals_response (vayu::db::Database& db, const nlohmann::json& json) {
         var_count = static_cast<int> (json["variables"].size ());
     }
 
-    vayu::utils::log_info (
+    vayu::utils::log_info ("http",
     "POST /globals - Saving global variables, count=" + std::to_string (var_count));
 
     db.save_globals (g);
@@ -123,7 +123,8 @@ void register_globals_routes (RouteContext& ctx) {
             res.status          = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /globals - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "http", "POST /globals - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });

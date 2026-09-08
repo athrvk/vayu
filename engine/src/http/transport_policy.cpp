@@ -253,7 +253,8 @@ const std::filesystem::path& directory) {
 
     std::filesystem::create_directories (dir, ec);
     if (!write_atomically (bundle, content)) {
-        vayu::utils::log_error ("Could not write the CA bundle to " + bundle.string () +
+        vayu::utils::log_error ("client",
+        "Could not write the CA bundle to " + bundle.string () +
         "; the certificates in 'customCaCertificates' are not in use");
         cached_pem.clear ();
         cached_path.clear ();
@@ -684,9 +685,10 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
         // behalf.
         const auto format = client_cert_format_from_string (row.cert_format);
         if (!format) {
-            vayu::utils::log_error ("Client certificate '" + row.id +
-            "' for host '" + row.host + "' declares an unknown format '" +
-            row.cert_format + "'; requests to that host will be sent without it");
+            vayu::utils::log_error ("client",
+            "Client certificate '" + row.id + "' for host '" + row.host +
+            "' declares an unknown format '" + row.cert_format +
+            "'; requests to that host will be sent without it");
             continue;
         }
         if (const auto rejection = client_cert_rejection (
@@ -696,9 +698,9 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
             // than swallowed, and named *now*: the alternative is a handshake
             // failure against the endpoint, which is precisely the "the API is
             // down" misdiagnosis this epic exists to end.
-            vayu::utils::log_error ("Client certificate '" + row.id +
-            "' for host '" + row.host + "' is unusable (" + *rejection +
-            "); requests to that host will be sent without it");
+            vayu::utils::log_error ("client",
+            "Client certificate '" + row.id + "' for host '" + row.host + "' is unusable (" +
+            *rejection + "); requests to that host will be sent without it");
             continue;
         }
         ClientCertRule rule;
@@ -721,7 +723,7 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
             // reaches it. Named rather than swallowed: a bundle silently
             // dropped would leave every request failing verification with no
             // line anywhere saying the certificates were never loaded.
-            vayu::utils::log_error (
+            vayu::utils::log_error ("client",
             "Config 'customCaCertificates' is unusable (" + *rejection +
             "); no custom CA certificates are in use");
         } else {
@@ -738,7 +740,7 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
         // Only reachable from a hand-edited row - `POST /config` rejects a
         // value outside the enum's options. Named rather than swallowed, as
         // read_sse_limits names an out-of-range limit.
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("client",
         "Config 'proxyMode' holds unrecognised value '" + mode_value +
         "'; using '" + to_string (policy.proxy_mode) + "'");
     }
@@ -759,8 +761,9 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
             // proxy support for reaches this. Named rather than swallowed, for
             // the reason the manual arm below is: the alternative is every
             // request going direct while Settings names a proxy.
-            vayu::utils::log_error ("Config 'proxySystemUrl' is unusable (" +
-            *rejection + "); falling back to the environment for 'system' proxy mode");
+            vayu::utils::log_error ("client",
+            "Config 'proxySystemUrl' is unusable (" + *rejection +
+            "); falling back to the environment for 'system' proxy mode");
             return policy;
         }
         policy.proxy_url = resolved;
@@ -780,7 +783,7 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
         // while Settings says otherwise, which is precisely the invisible
         // failure this issue exists to end. `Off` at least means what it says,
         // and the log names the setting to fix.
-        vayu::utils::log_error (
+        vayu::utils::log_error ("client",
         "Config 'proxyMode' is 'manual' but 'proxyUrl' is "
         "unusable (" +
         *rejection + "); no proxy will be used until it is corrected");

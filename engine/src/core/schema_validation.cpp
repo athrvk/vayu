@@ -437,7 +437,7 @@ const nlohmann::json& body) {
         // contract could not be read, so nothing was checked. Reported as
         // `no_index` - the index is there but unusable - with the reason in the
         // log, because the fix belongs to whoever wrote the index.
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("http",
         "Response schema rejected by the validator: " + std::string (e.what ()));
         verdict.checked = false;
         verdict.reason  = UncheckedReason::NoIndex;
@@ -451,7 +451,7 @@ const nlohmann::json& body) {
         validator.validate (parsed, target, &results);
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
-        "Response schema validation failed: " + std::string (e.what ()));
+        "http", "Response schema validation failed: " + std::string (e.what ()));
         verdict.checked = false;
         verdict.reason  = UncheckedReason::NoIndex;
         return verdict;

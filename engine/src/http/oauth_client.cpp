@@ -244,7 +244,8 @@ int64_t now) {
             req.form.emplace_back ("refresh_token", cached->refresh_token);
             apply_client_auth (req, config);
 
-            vayu::utils::log_info ("OAuth2: refreshing token via " + refresh_url);
+            vayu::utils::log_info (
+            "oauth", "OAuth2: refreshing token", { { "url", refresh_url } });
             auto refreshed = post_token_request (db, config, refresh_url, req, key);
             if (auto* token = std::get_if<vayu::db::OAuthToken> (&refreshed)) {
                 // Rotation: keep the previous refresh token when the provider
@@ -339,7 +340,8 @@ const std::optional<InteractiveExchange>& interactive) {
     }
 
 
-    vayu::utils::log_info ("OAuth2: requesting " + grant + " token from " + token_url);
+    vayu::utils::log_info ("oauth", "OAuth2: requesting token",
+    { { "grant", grant }, { "url", token_url } });
     return post_token_request (db, config, token_url, req, key);
 }
 

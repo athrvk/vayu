@@ -78,7 +78,7 @@ std::string list_requests_body (vayu::db::Database& db, const std::string& colle
         try {
             vayu::json::serialize_to_stream (r, item);
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "GET /requests - Error serializing request " + r.id + ": " +
             std::string (e.what ()));
             continue;
@@ -498,16 +498,17 @@ void register_request_routes (RouteContext& ctx) {
             if (req.has_param ("collectionId")) {
                 std::string collection_id =
                 req.get_param_value ("collectionId");
-                vayu::utils::log_info (
+                vayu::utils::log_info ("http",
                 "GET /requests - Fetching requests for collection: " + collection_id);
                 res.set_content (list_requests_body (ctx.db, collection_id), "application/json");
             } else {
                 vayu::utils::log_warning (
-                "GET /requests - Missing required param: collectionId");
+                "http", "GET /requests - Missing required param: collectionId");
                 send_error (res, 400, "collectionId required");
             }
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("GET /requests - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "http", "GET /requests - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -527,13 +528,13 @@ void register_request_routes (RouteContext& ctx) {
             auto [status, body] = get_request_response (ctx.db, request_id);
             if (status == 404) {
                 vayu::utils::log_warning (
-                "GET /requests/:id - Request not found: " + request_id);
+                "http", "GET /requests/:id - Request not found: " + request_id);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "GET /requests/:id - Error: " + std::string (e.what ()));
+            "http", "GET /requests/:id - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -559,10 +560,11 @@ void register_request_routes (RouteContext& ctx) {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = create_request_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /requests - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /requests - " + std::to_string (status) + ": " +
+                error_message_of (body));
             } else {
-                vayu::utils::log_info (
+                vayu::utils::log_info ("http",
                 "POST /requests - Created request: id=" + body["id"].get<std::string> () +
                 ", name=" + body["name"].get<std::string> () +
                 ", method=" + body["method"].get<std::string> () +
@@ -572,7 +574,8 @@ void register_request_routes (RouteContext& ctx) {
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /requests - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "http", "POST /requests - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });
@@ -592,10 +595,11 @@ void register_request_routes (RouteContext& ctx) {
             auto json = nlohmann::json::parse (req.body);
             auto [status, body] = update_request_response (ctx.db, request_id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("PUT /requests/:id - " + std::to_string (status) +
+                vayu::utils::log_warning ("http",
+                "PUT /requests/:id - " + std::to_string (status) +
                 " for id=" + request_id + ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info (
+                vayu::utils::log_info ("http",
                 "PUT /requests/:id - Updated request: id=" + request_id +
                 ", name=" + body["name"].get<std::string> ());
             }
@@ -603,7 +607,7 @@ void register_request_routes (RouteContext& ctx) {
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "PUT /requests/:id - Error: " + std::string (e.what ()));
+            "http", "PUT /requests/:id - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });
@@ -620,14 +624,14 @@ void register_request_routes (RouteContext& ctx) {
         try {
             auto request = ctx.db.get_request (request_id);
             if (!request) {
-                vayu::utils::log_warning (
+                vayu::utils::log_warning ("http",
                 "DELETE /requests/:id - Request not found: " + request_id);
                 send_error (res, 404, "Request not found");
                 return;
             }
 
             ctx.db.delete_request (request_id);
-            vayu::utils::log_info (
+            vayu::utils::log_info ("http",
             "DELETE /requests/:id - Successfully deleted request: " + request_id +
             ", name=" + request->name);
 
@@ -637,7 +641,7 @@ void register_request_routes (RouteContext& ctx) {
             res.set_content (response.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "DELETE /requests/:id - Error: " + std::string (e.what ()));
+            "http", "DELETE /requests/:id - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

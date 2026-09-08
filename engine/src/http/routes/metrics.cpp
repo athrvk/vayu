@@ -64,8 +64,9 @@ int64_t offset) {
             // A payload this engine wrote always parses; a corrupt one is a
             // damaged row, not a client error - skip it loudly rather than
             // failing the whole page.
-            vayu::utils::log_warning (std::string ("Skipping unreadable ") + kind + " for run " +
-            run_id + " (id=" + std::to_string (row.id) + "): " + e.what ());
+            vayu::utils::log_warning ("http",
+            std::string ("Skipping unreadable ") + kind + " for run " + run_id +
+            " (id=" + std::to_string (row.id) + "): " + e.what ());
         }
     }
     return time_series_envelope (
@@ -216,39 +217,39 @@ namespace {
 void handle_run_metrics (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
     vayu::utils::log_info (
-    "GET /runs/:id/metrics - Fetching time-series for run: " + run_id);
+    "http", "GET /runs/:id/metrics - Fetching time-series for run: " + run_id);
     auto [limit, offset] = parse_time_series_pagination (req);
     try {
         auto [status, body] = run_time_series_response (ctx.db, run_id, limit, offset);
         if (status == 404) {
             vayu::utils::log_warning (
-            "GET /runs/:id/metrics - Run not found: " + run_id);
+            "http", "GET /runs/:id/metrics - Run not found: " + run_id);
         }
         res.status = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error (
-        "GET /runs/:id/metrics - Error: " + std::string (e.what ()));
+        "http", "GET /runs/:id/metrics - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
 
 void handle_run_monitor (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
-    vayu::utils::log_info (
+    vayu::utils::log_info ("http",
     "GET /runs/:id/monitor - Fetching monitor samples for run: " + run_id);
     auto [limit, offset] = parse_time_series_pagination (req);
     try {
         auto [status, body] = run_monitor_series_response (ctx.db, run_id, limit, offset);
         if (status == 404) {
             vayu::utils::log_warning (
-            "GET /runs/:id/monitor - Run not found: " + run_id);
+            "http", "GET /runs/:id/monitor - Run not found: " + run_id);
         }
         res.status = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error (
-        "GET /runs/:id/monitor - Error: " + std::string (e.what ()));
+        "http", "GET /runs/:id/monitor - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -354,19 +355,19 @@ void send_run_stats_json (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res,
 const std::string& run_id) {
-    vayu::utils::log_info (
+    vayu::utils::log_info ("http",
     "GET /stats/:id?format=json - Fetching time-series for run: " + run_id);
 
     auto [limit, offset] = parse_time_series_pagination (req);
     try {
         auto [status, body] = run_time_series_response (ctx.db, run_id, limit, offset);
         if (status == 404) {
-            vayu::utils::log_warning ("GET /stats/:id - Run not found: " + run_id);
+            vayu::utils::log_warning ("http", "GET /stats/:id - Run not found: " + run_id);
         }
         res.status = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
+        vayu::utils::log_error ("http",
         "GET /stats/:id?format=json - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
@@ -384,17 +385,18 @@ void handle_run_stats (RouteContext& ctx, const httplib::Request& req, httplib::
     // SSE streaming mode (existing behavior). Debug, not info: which mode a
     // poll took is internal detail the centralised request line (issue
     // #1510) does not carry, not a state change worth `-v 1`.
-    vayu::utils::log_debug ("Starting SSE stream for run: " + run_id);
+    vayu::utils::log_debug ("http", "Starting SSE stream for run: " + run_id);
 
     try {
         auto run = ctx.db.get_run (run_id);
         if (!run) {
-            vayu::utils::log_warning ("GET /stats/:id - Run not found: " + run_id);
+            vayu::utils::log_warning ("http", "GET /stats/:id - Run not found: " + run_id);
             send_error (res, 404, "Run not found");
             return;
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("GET /stats/:id - Error: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "http", "GET /stats/:id - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
         return;
     }

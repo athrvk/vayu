@@ -164,7 +164,8 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
                     hdr_close (built);
                 }
                 phase_histograms_.fill (nullptr);
-                vayu::utils::log_warning ("Run " + run_id_ +
+                vayu::utils::log_warning ("run",
+                "Run " + run_id_ +
                 ": failed to initialize per-phase histograms; the report will "
                 "carry averages only");
                 break;
@@ -181,7 +182,8 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
             constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
             &stream_events_histogram_) != 0) {
             stream_events_histogram_ = nullptr;
-            vayu::utils::log_warning ("Run " + run_id_ +
+            vayu::utils::log_warning ("run",
+            "Run " + run_id_ +
             ": failed to initialize the stream event histogram; the report "
             "will "
             "carry event totals only");
@@ -693,8 +695,8 @@ const Response* capture_source) {
     // Log once, outside the lock, so a capped run leaves a trace instead of
     // silently truncating its error list.
     if (first_drop) {
-        vayu::utils::log_warning ("Run " + run_id_ + ": error store full at " +
-        std::to_string (config_.max_errors) +
+        vayu::utils::log_warning ("run",
+        "Run " + run_id_ + ": error store full at " + std::to_string (config_.max_errors) +
         " records; further errors are counted but not stored");
     }
 }

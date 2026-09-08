@@ -58,6 +58,8 @@ add_executable(vayu_tests
     sse_stream_test.cpp
     server_bind_test.cpp
     request_log_test.cpp
+    log_category_scan_test.cpp
+    log_record_schema_test.cpp
     numeric_flag_test.cpp
     high_resolution_timer_test.cpp
     argument_rules_test.cpp

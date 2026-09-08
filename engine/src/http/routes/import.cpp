@@ -1296,7 +1296,7 @@ namespace {
 void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     const bool streaming =
     req.get_header_value ("Accept").find ("text/event-stream") != std::string::npos;
-    vayu::utils::log_info (
+    vayu::utils::log_info ("http",
     std::string ("POST /import/fetch") + (streaming ? " (streaming)" : ""));
 
     if (!streaming) {
@@ -1351,7 +1351,7 @@ void handle_import_apply (RouteContext& ctx, const httplib::Request& req, httpli
     try {
         body = nlohmann::json::parse (req.body);
     } catch (const std::exception& e) {
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("http",
         "POST /import/apply - invalid JSON body: " + std::string (e.what ()));
         send_error (res, 400, "Invalid JSON body");
         return;
@@ -1361,16 +1361,18 @@ void handle_import_apply (RouteContext& ctx, const httplib::Request& req, httpli
     try {
         auto [status, response] = import_apply_response (ctx.db, body);
         if (status != 200) {
-            vayu::utils::log_warning ("POST /import/apply - " +
-            std::to_string (status) + ": " + error_message_of (response));
+            vayu::utils::log_warning ("http",
+            "POST /import/apply - " + std::to_string (status) + ": " +
+            error_message_of (response));
         } else {
-            vayu::utils::log_info (
+            vayu::utils::log_info ("http",
             "applied " + std::to_string (response["idMap"].size ()) + " items");
         }
         res.status = status;
         res.set_content (response.dump (), "application/json");
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("POST /import/apply - Error: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "http", "POST /import/apply - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -1380,7 +1382,7 @@ void handle_import_parse (RouteContext& ctx, const httplib::Request& req, httpli
     try {
         body = nlohmann::json::parse (req.body);
     } catch (const std::exception& e) {
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("http",
         "POST /import/parse - invalid JSON body: " + std::string (e.what ()));
         send_error (res, 400, "Invalid JSON body");
         return;
@@ -1388,10 +1390,12 @@ void handle_import_parse (RouteContext& ctx, const httplib::Request& req, httpli
     try {
         auto [status, response] = import_parse_response (ctx.db, body);
         if (status != 200) {
-            vayu::utils::log_warning ("POST /import/parse - " +
-            std::to_string (status) + ": " + error_message_of (response));
+            vayu::utils::log_warning ("http",
+            "POST /import/parse - " + std::to_string (status) + ": " +
+            error_message_of (response));
         } else {
-            vayu::utils::log_info (response["meta"]["format"].get<std::string> () + ", " +
+            vayu::utils::log_info ("http",
+            response["meta"]["format"].get<std::string> () + ", " +
             std::to_string (response["meta"]["requestCount"].get<int> ()) + " request(s)");
         }
         res.status = status;
@@ -1399,7 +1403,8 @@ void handle_import_parse (RouteContext& ctx, const httplib::Request& req, httpli
         response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
         "application/json");
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("POST /import/parse - Error: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "http", "POST /import/parse - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -1411,7 +1416,7 @@ httplib::Response& res) {
     try {
         body = nlohmann::json::parse (req.body);
     } catch (const std::exception& e) {
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("http",
         "POST /import/document - invalid JSON body: " + std::string (e.what ()));
         send_error (res, 400, "Invalid JSON body");
         return;
@@ -1419,8 +1424,9 @@ httplib::Response& res) {
     try {
         auto [status, response] = import_document_response (ctx.db, body);
         if (status != 200) {
-            vayu::utils::log_warning ("POST /import/document - " +
-            std::to_string (status) + ": " + error_message_of (response));
+            vayu::utils::log_warning ("http",
+            "POST /import/document - " + std::to_string (status) + ": " +
+            error_message_of (response));
         }
         res.status = status;
         res.set_content (
@@ -1428,7 +1434,7 @@ httplib::Response& res) {
         "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error (
-        "POST /import/document - Error: " + std::string (e.what ()));
+        "http", "POST /import/document - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -1439,18 +1445,18 @@ void handle_import_preview (RouteContext& ctx, const httplib::Request& req, http
         body = nlohmann::json::parse (req.body);
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
-        "POST /import - invalid JSON body: " + std::string (e.what ()));
+        "http", "POST /import - invalid JSON body: " + std::string (e.what ()));
         send_error (res, 400, "Invalid JSON body");
         return;
     }
     try {
         auto [status, response] = import_response (ctx.db, body);
         if (status != 200) {
-            vayu::utils::log_warning ("POST /import - " +
-            std::to_string (status) + ": " + error_message_of (response));
+            vayu::utils::log_warning ("http",
+            "POST /import - " + std::to_string (status) + ": " + error_message_of (response));
         } else {
-            vayu::utils::log_info ("imported " +
-            std::to_string (response["requests"].get<size_t> ()) +
+            vayu::utils::log_info ("http",
+            "imported " + std::to_string (response["requests"].get<size_t> ()) +
             " request(s) from " + response["meta"]["format"].get<std::string> ());
         }
         res.status = status;
@@ -1458,7 +1464,8 @@ void handle_import_preview (RouteContext& ctx, const httplib::Request& req, http
         response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
         "application/json");
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("POST /import - Error: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "http", "POST /import - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }

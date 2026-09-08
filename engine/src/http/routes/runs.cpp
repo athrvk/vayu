@@ -588,13 +588,15 @@ ReportExtras& extras) {
     try {
         summary = nlohmann::json::parse (summary_json);
     } catch (...) {
-        vayu::utils::log_warning ("Run summary is not valid JSON; reporting "
-                                  "from the sampled results alone");
+        vayu::utils::log_warning ("run",
+        "Run summary is not valid JSON; reporting "
+        "from the sampled results alone");
         return;
     }
     if (!summary.is_object ()) {
-        vayu::utils::log_warning ("Run summary is not an object; reporting "
-                                  "from the sampled results alone");
+        vayu::utils::log_warning ("run",
+        "Run summary is not an object; reporting "
+        "from the sampled results alone");
         return;
     }
 
@@ -901,7 +903,7 @@ int64_t stop_wait_ms) {
 
     if (auto context = run_manager.get_run (run_id)) {
         vayu::utils::log_info (
-        "DELETE /runs/:id - Run is active, stopping it first: " + run_id);
+        "run", "DELETE /runs/:id - Run is active, stopping it first: " + run_id);
         context->should_stop = true;
         // Wake the closed-loop controller so it observes should_stop without
         // waiting out its 50ms safety-net timeout.
@@ -914,7 +916,7 @@ int64_t stop_wait_ms) {
         std::chrono::milliseconds (stop_wait_ms);
         while (run_manager.get_run (run_id) != nullptr) {
             if (std::chrono::steady_clock::now () >= deadline) {
-                vayu::utils::log_warning (
+                vayu::utils::log_warning ("run",
                 "DELETE /runs/:id - Run did not settle within " +
                 std::to_string (stop_wait_ms) + "ms, refusing to delete: " + run_id);
                 return { 409,
@@ -1371,11 +1373,12 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
             for (const auto& run : runs) {
                 json_runs.push_back (vayu::json::serialize (run));
             }
-            vayu::utils::log_debug (
+            vayu::utils::log_debug ("run",
             "GET /runs - Returning " + std::to_string (runs.size ()) + " runs");
             res.set_content (json_runs.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "run", "GET /runs - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
         return;
@@ -1431,7 +1434,7 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
         res.status = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("GET /runs - Error: " + std::string (e.what ()));
+        vayu::utils::log_error ("run", "GET /runs - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -1441,8 +1444,9 @@ void handle_get_run (RouteContext& ctx, const httplib::Request& req, httplib::Re
     try {
         auto run = ctx.db.get_run (run_id);
         if (run) {
-            vayu::utils::log_debug ("Found run: " + run_id +
-            ", type=" + to_string (run->type) + ", status=" + to_string (run->status));
+            vayu::utils::log_debug ("run",
+            "Found run: " + run_id + ", type=" + to_string (run->type) +
+            ", status=" + to_string (run->status));
             auto payload = vayu::json::serialize (*run);
             // A design run is one exchange, so it travels with the run.
             // Load runs keep theirs in the report, where `results` means
@@ -1454,11 +1458,11 @@ void handle_get_run (RouteContext& ctx, const httplib::Request& req, httplib::Re
                 payload, *run, ctx.db.get_results (run_id));
             res.set_content (payload.dump (), "application/json");
         } else {
-            vayu::utils::log_warning ("GET /runs/:id - Run not found: " + run_id);
+            vayu::utils::log_warning ("run", "GET /runs/:id - Run not found: " + run_id);
             send_error (res, 404, "Run not found");
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
+        vayu::utils::log_error ("run",
         "GET /runs/:id - Error fetching run " + run_id + ": " + e.what ());
         send_error (res, 500, e.what ());
     }
@@ -1473,12 +1477,12 @@ void handle_delete_run (RouteContext& ctx, const httplib::Request& req, httplib:
         res.set_content (body.dump (), "application/json");
         if (status == 200) {
             vayu::utils::log_info (
-            "DELETE /runs/:id - Successfully deleted run: " + run_id);
+            "run", "DELETE /runs/:id - Successfully deleted run: " + run_id);
         } else if (status == 404) {
-            vayu::utils::log_warning ("DELETE /runs/:id - Run not found: " + run_id);
+            vayu::utils::log_warning ("run", "DELETE /runs/:id - Run not found: " + run_id);
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
+        vayu::utils::log_error ("run",
         "DELETE /runs/:id - Error deleting run " + run_id + ": " + e.what ());
         send_error (res, 500, e.what ());
     }
@@ -1492,10 +1496,10 @@ void handle_set_baseline (RouteContext& ctx, const httplib::Request& req, httpli
         res.set_content (body.dump (), "application/json");
         if (status == 404) {
             vayu::utils::log_warning (
-            "PUT /runs/:id/baseline - Run not found: " + run_id);
+            "run", "PUT /runs/:id/baseline - Run not found: " + run_id);
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
+        vayu::utils::log_error ("run",
         "PUT /runs/:id/baseline - Error for run " + run_id + ": " + e.what ());
         send_error (res, 500, e.what ());
     }
@@ -1506,7 +1510,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
     try {
         auto run = ctx.db.get_run (run_id);
         if (!run) {
-            vayu::utils::log_warning ("POST /runs/:id/stop - Run not found: " + run_id);
+            vayu::utils::log_warning ("run", "POST /runs/:id/stop - Run not found: " + run_id);
             send_error (res, 404, "Run not found");
             return;
         }
@@ -1514,7 +1518,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
         // Check if run is already completed or stopped
         if (run->status == vayu::RunStatus::Completed ||
         run->status == vayu::RunStatus::Stopped || run->status == vayu::RunStatus::Failed) {
-            vayu::utils::log_info (
+            vayu::utils::log_info ("run",
             "POST /runs/:id/stop - Run already finished: " + run_id +
             ", status=" + to_string (run->status));
             auto response = vayu::utils::MetricsHelper::create_already_stopped_response (
@@ -1535,7 +1539,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
         // which is also when the trace and the true event count land.
         if (ctx.sse_manager.request_stop (run_id)) {
             vayu::utils::log_info (
-            "POST /runs/:id/stop - Signaling stop for stream: " + run_id);
+            "run", "POST /runs/:id/stop - Signaling stop for stream: " + run_id);
             // Waited on rather than answered immediately, so the caller is
             // told what actually happened - the same budget the load path
             // gives a graceful stop. A transfer notices within one progress
@@ -1565,7 +1569,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
         // Try to find active run context
         auto context = ctx.run_manager.get_run (run_id);
         if (context) {
-            vayu::utils::log_info (
+            vayu::utils::log_info ("run",
             "POST /runs/:id/stop - Signaling stop for active run: " + run_id);
             // Signal the running thread to stop
             context->should_stop = true;
@@ -1578,7 +1582,8 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
 
             // Calculate summary metrics
             auto summary = vayu::utils::MetricsHelper::calculate_summary (*context);
-            vayu::utils::log_info ("Run stopped: " + run_id +
+            vayu::utils::log_info ("run",
+            "Run stopped: " + run_id +
             ", total_requests=" + std::to_string (summary.total_requests) +
             ", errors=" + std::to_string (summary.errors));
             auto response =
@@ -1587,7 +1592,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             res.set_content (response.dump (), "application/json");
         } else {
             // Run not active, just update DB
-            vayu::utils::log_info (
+            vayu::utils::log_info ("run",
             "POST /runs/:id/stop - Run not active, updating DB: " + run_id);
             ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Stopped);
 
@@ -1595,7 +1600,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             res.set_content (response.dump (), "application/json");
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
+        vayu::utils::log_error ("run",
         "POST /runs/:id/stop - Error stopping run " + run_id + ": " + e.what ());
         send_error (res, 500, e.what ());
     }
@@ -1604,11 +1609,12 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
 void handle_get_run_report (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
     vayu::utils::log_info (
-    "GET /runs/:id/report - Generating report for run: " + run_id);
+    "run", "GET /runs/:id/report - Generating report for run: " + run_id);
     try {
         auto [status, body] = run_report_response (ctx.db, run_id);
         if (status == 404) {
-            vayu::utils::log_warning ("GET /runs/:id/report - Run not found: " + run_id);
+            vayu::utils::log_warning (
+            "run", "GET /runs/:id/report - Run not found: " + run_id);
         }
         res.status = status;
         res.set_content (body.dump (2), "application/json");
@@ -1621,7 +1627,7 @@ void handle_get_run_samples (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
     std::string run_id = req.matches[1];
-    vayu::utils::log_info (
+    vayu::utils::log_info ("run",
     "GET /runs/:id/samples - Fetching captured samples for run: " + run_id);
 
     int64_t limit = 50;
@@ -1649,12 +1655,12 @@ httplib::Response& res) {
         auto [status, body] = run_samples_response (ctx.db, run_id, limit, offset);
         if (status == 404) {
             vayu::utils::log_warning (
-            "GET /runs/:id/samples - Run not found: " + run_id);
+            "run", "GET /runs/:id/samples - Run not found: " + run_id);
         }
         res.status = status;
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
+        vayu::utils::log_error ("run",
         "GET /runs/:id/samples - Error for run " + run_id + ": " + e.what ());
         send_error (res, 500, e.what ());
     }

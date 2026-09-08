@@ -74,7 +74,8 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
         try {
             entry_json["options"] = nlohmann::json::parse (*entry.options);
         } catch (const std::exception& e) {
-            vayu::utils::log_warning ("config entry '" + entry.key +
+            vayu::utils::log_warning ("config",
+            "config entry '" + entry.key +
             "' has malformed options JSON, omitting it: " + e.what ());
         }
     }
@@ -94,11 +95,12 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
         if (parsed.is_array ()) {
             keywords = std::move (parsed);
         } else {
-            vayu::utils::log_warning ("config entry '" + entry.key +
-            "' has non-array keywords JSON, sending an empty list");
+            vayu::utils::log_warning ("config",
+            "config entry '" + entry.key + "' has non-array keywords JSON, sending an empty list");
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_warning ("config entry '" + entry.key +
+        vayu::utils::log_warning ("config",
+        "config entry '" + entry.key +
         "' has malformed keywords JSON, sending an empty list: " + e.what ());
     }
     entry_json["keywords"]  = std::move (keywords);
@@ -344,7 +346,7 @@ const std::function<void ()>& before_write) {
         json = nlohmann::json::parse (body);
     } catch (const nlohmann::json::parse_error& e) {
         vayu::utils::log_error (
-        "POST /config - JSON parse error: " + std::string (e.what ()));
+        "config", "POST /config - JSON parse error: " + std::string (e.what ()));
         return { 400, config_error ("Invalid JSON: " + std::string (e.what ())) };
     }
 
@@ -410,7 +412,7 @@ const std::function<void ()>& before_write) {
         for (const auto& error : errors) {
             joined += (joined.empty () ? "" : "; ") + error;
         }
-        vayu::utils::log_error ("POST /config - Validation failed: " + joined);
+        vayu::utils::log_error ("config", "POST /config - Validation failed: " + joined);
         return { 400, config_error (joined) };
     }
 
@@ -419,7 +421,8 @@ const std::function<void ()>& before_write) {
     }
     db.save_config_entries (to_update);
 
-    vayu::utils::log_info ("Updated " + std::to_string (to_update.size ()) + " config entries");
+    vayu::utils::log_info ("config",
+    "Updated " + std::to_string (to_update.size ()) + " config entries");
 
     nlohmann::json response;
     response["entries"] = catalogued_config_entries_json (db);
@@ -553,7 +556,7 @@ void register_config_routes (RouteContext& ctx) {
             res.status = status;
             res.set_content (response_body.dump (2), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("config",
             "GET /request-defaults - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
@@ -569,7 +572,8 @@ void register_config_routes (RouteContext& ctx) {
             response["entries"] = catalogued_config_entries_json (ctx.db);
             res.set_content (response.dump (2), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("GET /config - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "config", "GET /config - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -586,7 +590,8 @@ void register_config_routes (RouteContext& ctx) {
             res.status = status;
             res.set_content (response_body.dump (2), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /config - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "config", "POST /config - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

@@ -446,7 +446,7 @@ void register_collection_routes (RouteContext& ctx) {
         for (const auto& c : collections) {
             response.push_back (vayu::json::serialize (c));
         }
-        vayu::utils::log_debug (
+        vayu::utils::log_debug ("http",
         "Returning " + std::to_string (collections.size ()) + " collections");
         res.set_content (response.dump (), "application/json");
     });
@@ -467,10 +467,11 @@ void register_collection_routes (RouteContext& ctx) {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = create_collection_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /collections - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /collections - " + std::to_string (status) + ": " +
+                error_message_of (body));
             } else {
-                vayu::utils::log_info (
+                vayu::utils::log_info ("http",
                 "POST /collections - Created collection: id=" + body["id"].get<std::string> () +
                 ", name=" + body["name"].get<std::string> ());
             }
@@ -478,7 +479,7 @@ void register_collection_routes (RouteContext& ctx) {
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "POST /collections - Error: " + std::string (e.what ()));
+            "http", "POST /collections - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });
@@ -498,10 +499,11 @@ void register_collection_routes (RouteContext& ctx) {
             auto json = nlohmann::json::parse (req.body);
             auto [status, body] = update_collection_response (ctx.db, collection_id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("PUT /collections/:id - " + std::to_string (status) +
+                vayu::utils::log_warning ("http",
+                "PUT /collections/:id - " + std::to_string (status) +
                 " for id=" + collection_id + ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info (
+                vayu::utils::log_info ("http",
                 "PUT /collections/:id - Updated collection: id=" + collection_id +
                 ", name=" + body["name"].get<std::string> ());
             }
@@ -509,7 +511,7 @@ void register_collection_routes (RouteContext& ctx) {
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "PUT /collections/:id - Error: " + std::string (e.what ()));
+            "http", "PUT /collections/:id - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });
@@ -523,19 +525,19 @@ void register_collection_routes (RouteContext& ctx) {
     ctx.server.Delete (R"(/collections/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string collection_id = req.matches[1];
-        vayu::utils::log_info (
+        vayu::utils::log_info ("http",
         "DELETE /collections/:id - Deleting collection: " + collection_id);
         try {
             auto collection = ctx.db.get_collection (collection_id);
             if (!collection) {
-                vayu::utils::log_warning (
+                vayu::utils::log_warning ("http",
                 "DELETE /collections/:id - Collection not found: " + collection_id);
                 send_error (res, 404, "Collection not found");
                 return;
             }
 
             ctx.db.delete_collection (collection_id);
-            vayu::utils::log_info (
+            vayu::utils::log_info ("http",
             "DELETE /collections/:id - Successfully deleted collection: " + collection_id +
             ", name=" + collection->name);
 
@@ -544,7 +546,7 @@ void register_collection_routes (RouteContext& ctx) {
             response["id"]      = collection_id;
             res.set_content (response.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "DELETE /collections/:id - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }

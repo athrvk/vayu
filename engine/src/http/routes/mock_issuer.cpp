@@ -736,7 +736,7 @@ MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
     out.authorize_url = issuer->authorize_url ();
     out.signing_key   = issuer->signing_key;
 
-    vayu::utils::log_info (
+    vayu::utils::log_info ("mock",
     "Mock OAuth2 issuer started at " + issuer->issuer_url + " (" + issuer->id + ")");
     {
         std::lock_guard<std::mutex> lock (mutex_);
@@ -759,7 +759,7 @@ bool MockIssuerManager::stop (const std::string& issuer_id) {
     // Torn down outside the manager lock: stop() joins the listener thread, and
     // a handler still in flight there would otherwise block every other caller.
     teardown (*issuer);
-    vayu::utils::log_info ("Mock OAuth2 issuer stopped (" + issuer_id + ")");
+    vayu::utils::log_info ("mock", "Mock OAuth2 issuer stopped (" + issuer_id + ")");
     return true;
 }
 

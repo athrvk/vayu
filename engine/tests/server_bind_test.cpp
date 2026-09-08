@@ -65,12 +65,12 @@ class ScratchLogDir {
     std::filesystem::path path_;
 };
 
-/// The file the logger is currently writing - the newest `vayu_*.log`.
+/// The file the logger is currently writing - the newest `engine_*.log`.
 std::string newest_log_contents (const std::filesystem::path& dir) {
     std::filesystem::path newest;
     for (const auto& entry : std::filesystem::directory_iterator (dir)) {
         const std::string name = entry.path ().filename ().string ();
-        if (name.starts_with ("vayu_") && name.ends_with (".log") && entry.path () > newest) {
+        if (name.starts_with ("engine_") && name.ends_with (".log") && entry.path () > newest) {
             newest = entry.path ();
         }
     }

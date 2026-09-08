@@ -11,6 +11,8 @@
 #include <iomanip>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::http {
@@ -33,12 +35,19 @@ std::string format_request_log_line (const RequestLogLine& line) {
 
 void log_request (const RequestLogLine& line) {
     const std::string text = format_request_log_line (line);
+    const nlohmann::json fields{
+        { "method", line.method },
+        { "path", line.path },
+        { "status", line.status },
+        { "ms", line.duration_ms },
+        { "bytes", line.response_bytes },
+    };
     if (line.status >= 500) {
-        vayu::utils::log_warning (text);
+        vayu::utils::log_warning ("http", text, fields);
     } else if (line.status >= 300) {
-        vayu::utils::log_info (text);
+        vayu::utils::log_info ("http", text, fields);
     } else {
-        vayu::utils::log_debug (text);
+        vayu::utils::log_debug ("http", text, fields);
     }
 }
 

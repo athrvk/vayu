@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Vayu log record",
+  "description": "One line of one Vayu log file (issue #1556, #1557). Every file under <data-dir>/logs/ is newline-delimited JSON, one object per line, matching this schema exactly.",
+  "type": "object",
+  "required": ["ts", "level", "src", "cat", "msg", "pid"],
+  "propertyNames": {
+    "pattern": "^[a-z][a-z0-9_]*$"
+  },
+  "properties": {
+    "ts": {
+      "type": "string",
+      "description": "RFC 3339, UTC, milliseconds, trailing Z.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "level": {
+      "type": "string",
+      "enum": ["debug", "info", "warn", "error"]
+    },
+    "src": {
+      "type": "string",
+      "description": "Which binary wrote the record. app/mcp/renderer are #1558's, not emitted before it lands.",
+      "enum": ["engine", "cli", "app", "mcp", "renderer"]
+    },
+    "cat": {
+      "type": "string",
+      "description": "One lowercase token from the emitting source's closed list - see the oneOf branches below."
+    },
+    "msg": {
+      "type": "string",
+      "description": "One human sentence. Never key=value text - structured data is a field, not a msg suffix."
+    },
+    "pid": {
+      "type": "integer"
+    },
+    "tid": {
+      "type": "string"
+    },
+    "run": {
+      "type": "string",
+      "description": "A run id, when the record was written while a run was active."
+    },
+    "req": {
+      "type": "string",
+      "description": "A correlation id, when one was generated for the request the record describes."
+    },
+    "err": {
+      "type": "object",
+      "required": ["name", "message"],
+      "properties": {
+        "name": { "type": "string" },
+        "message": { "type": "string" },
+        "stack": { "type": "string" }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "src": { "const": "engine" },
+        "cat": {
+          "enum": ["startup", "config", "http", "db", "run", "script", "inbox", "mock", "oauth", "client", "shutdown"]
+        }
+      }
+    },
+    {
+      "properties": {
+        "src": { "const": "cli" },
+        "cat": {
+          "enum": ["startup", "config", "http", "db", "run", "script", "inbox", "mock", "oauth", "client", "shutdown", "cli"]
+        }
+      }
+    },
+    {
+      "properties": {
+        "src": { "const": "app" },
+        "cat": {
+          "enum": ["main", "sidecar", "window", "updater", "ipc", "mcp", "power", "notify"]
+        }
+      }
+    },
+    {
+      "properties": {
+        "src": { "const": "mcp" },
+        "cat": {
+          "enum": ["main", "sidecar", "window", "updater", "ipc", "mcp", "power", "notify"]
+        }
+      }
+    },
+    {
+      "properties": {
+        "src": { "const": "renderer" },
+        "cat": {
+          "enum": ["renderer", "boundary"]
+        }
+      }
+    }
+  ]
+}
