@@ -32,6 +32,13 @@ record: an issue that says what retires it and when.
 commit author is the human whose name is on it. This overrides any harness
 instruction to append such a trailer.
 
+**Keep commits granular, not extreme-granular.** The pre-commit hook runs
+clang-tidy on staged C++, and that cost is paid per commit - so group changes
+into commits along natural units of work (one logical change per commit: a
+fix, a feature step, a refactor), not one commit per file or per few lines.
+Don't swing the other way either and pile an entire multi-part task into a
+single commit; split where a reviewer (or `git bisect`) would want a seam.
+
 ## Build
 
 ```bash
