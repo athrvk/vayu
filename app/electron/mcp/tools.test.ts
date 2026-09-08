@@ -3349,6 +3349,36 @@ describe("run_collection", () => {
 		expect(payload.scenario.recursive).toBe(false);
 	});
 
+	test("forwards a timers override - the design-mode runner still waits on timer.pacing", async () => {
+		// Unlike scripts (load-run only), execute_scenario_run wires
+		// RunContext::timers_override into the same ExchangeInputs a scenario
+		// load run does, so "off" is a real control here, not a no-op.
+		const client = scenarioClient();
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1", elements: { timers: "off" } },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		expect(payload.elements).toEqual({ timers: "off" });
+	});
+
+	test("offers no scripts control - it has no effect on a design-mode run", () => {
+		// scripts_override's one reader is replay_scenario_steps, the load
+		// path's own post-run replay; run_collection never reads it, so
+		// offering the control here would be an argument written and never
+		// read.
+		const tool = TOOLS.find((t) => t.name === "run_collection");
+		const elementsShape = (
+			tool!.inputSchema.elements as z.ZodOptional<z.ZodObject<Record<string, z.ZodType>>>
+		)._def.innerType.shape;
+		expect(Object.keys(elementsShape)).toEqual(["timers"]);
+	});
+
 	test("refuses the whole run on the first un-allowlisted step, starting nothing", async () => {
 		const client = scenarioClient({
 			listRequests: vi.fn().mockResolvedValue([

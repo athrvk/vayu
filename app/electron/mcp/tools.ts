@@ -2190,6 +2190,31 @@ const ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL =
 	`stored elements are what "asConfigured"/"asMarked" mean.`;
 
 /**
+ * `elements.timers`'s two enum values (issue #1495), shared between
+ * `run_collection` and `start_load_run` because - unlike `scripts` - it
+ * genuinely takes effect on **both** run shapes: `execute_scenario_run`
+ * (the design-mode runner `run_collection` drives) wires
+ * `RunContext::timers_override` into the same `ExchangeInputs` a scenario
+ * load run does (`scenario_runner.cpp`'s two call sites, `scenario_load.cpp`'s
+ * three), so a `timer.pacing`/`timer.think` wait fires - and can be silenced -
+ * during a plain `run_collection` call exactly as it does under load.
+ * `scripts_override` has no such reach: its one reader,
+ * `replay_scenario_steps`, is the load path's own post-run replay
+ * (`run_manager.cpp`), so `scripts` is offered on `start_load_run` only.
+ * Neither reaches a single-target load run - `load_strategy.cpp` wires
+ * neither override at all, which is what `ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL`
+ * states.
+ */
+function elementsTimersInput() {
+	return z
+		.enum(["asConfigured", "off"])
+		.optional()
+		.describe(
+			'"off" silences every timer.pacing/timer.think wait for this run, across every element, without editing the collection. "asConfigured" (default) leaves each element\'s own configuration in effect. The engine also accepts a {fixedMs} or {minMs, maxMs} override replacing every timer\'s own span, not offered here - no control sends it yet.'
+		);
+}
+
+/**
  * The two fields a scenario block carries besides its collection id, declared
  * here because both scenario surfaces take them and they must mean the same
  * thing on each (issue #754): `run_collection` runs the plan once through the
@@ -6688,6 +6713,19 @@ export const TOOLS: McpTool[] = [
 				guidance:
 					"Set true to make the bound contract a gate, the way the app's Run Collection checkbox does: a step whose response does not match its schema fails, and the run's report records that it was judged that way. Only a step that passed everything else is demoted - one already failing keeps the error that named it. Left off, the verdict still rides every step and the report's schemaValidation totals; it just does not decide pass/fail.",
 			}),
+			// Only `timers` - not `scripts` - from #1495's override block
+			// (issue #1559): unlike a scenario load run, this design-mode
+			// runner has no inline/deferred distinction for script.pre/
+			// script.post to make, but it does run timer.pacing/timer.think
+			// waits (`execute_scenario_run` wires `RunContext::timers_override`
+			// exactly as the load path does - see `elementsTimersInput`'s doc
+			// comment), so silencing them here is real, not a no-op control.
+			elements: z
+				.object({ timers: elementsTimersInput() })
+				.optional()
+				.describe(
+					"Silence this run's timer.pacing/timer.think waits without editing the collection (`timers: \"off\"`); \"asConfigured\" (default) leaves each element's own configuration in effect. Only `timers` applies to a design-mode run - `scripts`'s inline-vs-deferred distinction is a load-run concept only, so it belongs on start_load_run's `scenario` branch instead."
+				),
 		},
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
@@ -6718,6 +6756,12 @@ export const TOOLS: McpTool[] = [
 				// is what keeps a payload written before the flag existed reading the
 				// way it always did.
 				...(args.failOnSchemaError === true ? { failOnSchemaError: true } : {}),
+				// Also top-level, beside `scenario`, for the same reason -
+				// `validate_elements_run_override` reads it there on every
+				// `POST /runs` payload regardless of mode.
+				...(args.elements && typeof args.elements === "object"
+					? { elements: args.elements }
+					: {}),
 			};
 
 			let started: unknown;
@@ -7062,26 +7106,19 @@ export const TOOLS: McpTool[] = [
 					"Load-test a collection's ordered sequence instead of one target. Cannot be combined with url/requestId or any single-target field. `concurrency` is the number of virtual users, each walking the whole plan with its own cookies; `iterations` (top level) is the total passes across all of them in iterations mode. Modes: constant_concurrency (default), ramp_up, iterations - constant_rps and capacity are refused, with the engine's reasoning."
 				),
 			// The run-level override block issue #1495 defines on `POST /runs`
-			// (`validate_elements_run_override`), consumed only by the scenario
-			// load path (`scenario_load.cpp`) - a single-target run has nothing
-			// stored to override, so it is refused there by name instead of
-			// silently accepted and read by nothing (see
-			// ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL). This mirrors exactly what
-			// issue #1559 asked for and what RunCollectionDialog's own load-test
-			// section sends (`RunCollectionDialog.tsx`), not the engine's full
-			// contract: `timers` also accepts `{fixedMs}` / `{minMs, maxMs}`
-			// (issue #1498) and the block also takes `includeScriptTime` and
-			// `seed`, but no control anywhere in the product - app or MCP - sends
-			// any of the three today, so they stay off this schema until
-			// something actually needs them.
+			// (`validate_elements_run_override`). `scripts` reaches only the
+			// scenario load path; a single-target run has nothing stored to
+			// override for either key, so the whole block is refused there by
+			// name instead of silently accepted and read by nothing (see
+			// ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL and
+			// `elementsTimersInput`'s doc comment for the per-key reach). The
+			// engine's contract also takes `includeScriptTime` and `seed`, but
+			// no control anywhere in the product - app or MCP - sends either
+			// today, so they stay off this schema until something actually
+			// needs them.
 			elements: z
 				.object({
-					timers: z
-						.enum(["asConfigured", "off"])
-						.optional()
-						.describe(
-							'"off" silences every timer.pacing/timer.think wait for this run, across every element, without editing the collection. "asConfigured" (default) leaves each element\'s own configuration in effect. The engine also accepts a {fixedMs} or {minMs, maxMs} override replacing every timer\'s own span, not offered here - no control sends it yet.'
-						),
+					timers: elementsTimersInput(),
 					scripts: z
 						.enum(["asMarked", "allInline", "allDeferred"])
 						.optional()

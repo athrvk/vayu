@@ -1114,30 +1114,33 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
     declared on that tool for the refusal's sake - an argument the tool's schema
     does not name is stripped before the handler sees it, which would drop the
     flag in silence.
-  - **`elements: {timers, scripts}` overrides a scenario load run's stored
-    timer/script behaviour without editing the collection** (issue #1559,
-    exposing the block issue #1495 defines on `POST /runs`,
-    `validate_elements_run_override`). `timers: "off"` silences every
-    `timer.*` wait for the run; `scripts: "allInline"` / `"allDeferred"`
-    forces every `script.pre`/`script.post` element's inline-vs-deferred
-    execution regardless of its own marking; `"asConfigured"` / `"asMarked"`
-    (the defaults) leave each element's own configuration in effect. It is
-    **top-level, beside `scenario`** rather than inside it - the same place
-    `RunCollectionDialog`'s load-test section sends it - and only takes effect
-    on `start_load_run`'s scenario branch: `run_collection`'s design-mode
-    runner has no inline/deferred distinction to make, so it does not offer
-    the argument at all, the same call the app's own dialog makes (its
-    `elements` override is sent only from the load-test section, never from a
-    design-mode collection run). A single-target `start_load_run` call is
-    **refused by name** for the same "written and read by nothing" reason the
-    single-target fields above are refused beside a scenario: there is no
-    stored collection of elements on a lone target to override. This mirrors
+  - **`elements: {timers, scripts}` overrides a run's stored timer/script
+    behaviour without editing the collection** (issue #1559, exposing the
+    block issue #1495 defines on `POST /runs`, `validate_elements_run_override`).
+    `timers: "off"` silences every `timer.*` wait for the run;
+    `scripts: "allInline"` / `"allDeferred"` forces every `script.pre`/
+    `script.post` element's inline-vs-deferred execution regardless of its own
+    marking; `"asConfigured"` / `"asMarked"` (the defaults) leave each
+    element's own configuration in effect. It is **top-level, beside
+    `scenario`** rather than inside it, on both tools that read it - the same
+    place `RunCollectionDialog`'s load-test section sends it. The two keys do
+    not reach the same paths, though: `timers` genuinely fires on **both**
+    `run_collection`'s design-mode run and `start_load_run`'s scenario branch
+    (`execute_scenario_run` wires `RunContext::timers_override` into the same
+    `ExchangeInputs` a scenario load run does), while `scripts` only reaches
+    the load path (its one reader is the load path's own post-run script
+    replay) - so `run_collection` offers `elements: {timers}` only, and
+    `start_load_run`'s scenario branch offers both. A single-target
+    `start_load_run` call is **refused by name** for the same "written and
+    read by nothing" reason the single-target fields above are refused beside
+    a scenario: `load_strategy.cpp` wires neither override at all, so there is
+    nothing on a lone target for either key to change. This mirrors
     `RunCollectionDialog`'s own load-test controls, not the engine's full
     contract: `timers` also accepts a `{fixedMs}` / `{minMs, maxMs}` override
     (issue #1498) replacing every timer's own span, and the block also takes
     `includeScriptTime` and `seed`, but no control anywhere in the product -
-    app or MCP - sends any of the three today, so this schema only names the
-    two values `"asConfigured"`/`"off"` and `"asMarked"`/`"allInline"`/
+    app or MCP - sends any of the three today, so these schemas only name the
+    two enum values `"asConfigured"`/`"off"` and `"asMarked"`/`"allInline"`/
     `"allDeferred"`.
   - **The allowlist gate is all-or-nothing here**, unlike the smoke matrix's
     per-request skip: every step is composed by id and gated before the run is
