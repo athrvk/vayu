@@ -25,12 +25,15 @@
  * never receives this one's fixes.
  */
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -353,6 +356,13 @@ struct ExchangeInputs {
     /// Whether the scripts may redirect the sequence around this exchange -
     /// the scenario runner's alone, exactly as `iteration` is (issue #355).
     bool in_scenario = false;
+    /// Polled by a `step.before` kind's blocking wait (`timer.pacing`, issue
+    /// #1498) to abort it early - the same role `scenario_runner.cpp`'s own
+    /// `step.between` dispatch already gives `timer.think` via a lambda over
+    /// `RunContext::should_stop`. Null for a design send (a single exchange
+    /// has nothing to interrupt) and for anything that predates this field,
+    /// which is exactly the old, uninterruptible behaviour.
+    std::function<bool ()> should_stop;
     /// The data row this iteration binds to `pm.iterationData`, or null when
     /// the run has none. Borrowed for the length of the call and outlived by
     /// the run's `ScenarioExecution` (issue #356).
@@ -385,6 +395,17 @@ struct ExchangeInputs {
      * (`ClientConfig::truncate_over_limit`).
      */
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+
+    /// Bound onto `ElementContext::pacing_state` / `rng` / `timers_override`
+    /// (issue #1498), for a `timer.pacing` or gaussian `timer.think` element
+    /// this exchange's `step.before` / `step.between` dispatch runs. Null for
+    /// a design send (a one-off exchange has no run to be reproducible
+    /// against and no previous pass to measure a cadence from) - only the
+    /// scenario runner's `run_step_exchange` sets these, from the run's own
+    /// `RunContext`.
+    std::unordered_map<std::string, int64_t>* pacing_state = nullptr;
+    std::mt19937_64* rng                                   = nullptr;
+    const vayu::core::TimersOverride* timers_override      = nullptr;
 };
 
 /** What one exchange produced. */

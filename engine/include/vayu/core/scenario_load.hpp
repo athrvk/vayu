@@ -86,6 +86,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -126,6 +127,21 @@ struct RunContext;
  */
 [[nodiscard]] std::optional<std::string> validate_scenario_load_config (
 const nlohmann::json& config);
+
+/**
+ * @brief One virtual user's own generator, independent of every other VU's
+ *        and of the run's own `RunContext::rng` (issue #1498).
+ *
+ * A single shared generator drawn from by every event-loop worker would be a
+ * data race; a mutex around it would be a lock on the hot path for what a
+ * gaussian `timer.think` or `elements.timers`' `Range` override needs only
+ * rarely. Deriving one generator per VU from the run's seed instead costs
+ * nothing at the point of use and keeps a run reproducible: the same
+ * `elements.seed` and the same virtual user index always produce the same
+ * generator, regardless of which worker thread happens to run that VU's
+ * step.
+ */
+[[nodiscard]] std::mt19937_64 derive_vu_rng (uint64_t run_seed, size_t vu_index);
 
 /**
  * @brief One virtual user: where it is in the plan, and what session it holds.
@@ -194,6 +210,15 @@ struct VirtualUser {
      * paths section.
      */
     int64_t ready_at_ms = 0;
+    /// Per-node "when did this node last start" state for this VU's own
+    /// `timer.pacing` elements (issue #1498), keyed by element id - the
+    /// load-path sibling of `RunContext::pacing_state`'s sequential-run
+    /// version. Cleared at no boundary (unlike `cookies` / `scope_overlay`):
+    /// pacing measures across iterations by design, not within one.
+    std::unordered_map<std::string, int64_t> pacing_state;
+    /// This VU's own generator (issue #1498), derived once at construction
+    /// from the run's seed - see `derive_vu_rng`.
+    std::mt19937_64 rng;
     /// In flight (or retired) when true. See the struct comment.
     std::atomic<bool> busy{ false };
     /// Set once the VU may start no further iteration; it then never becomes
