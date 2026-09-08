@@ -3349,6 +3349,36 @@ describe("run_collection", () => {
 		expect(payload.scenario.recursive).toBe(false);
 	});
 
+	test("forwards a timers override - the design-mode runner still waits on timer.pacing", async () => {
+		// Unlike scripts (load-run only), execute_scenario_run wires
+		// RunContext::timers_override into the same ExchangeInputs a scenario
+		// load run does, so "off" is a real control here, not a no-op.
+		const client = scenarioClient();
+		const res = await dispatchTool(
+			"run_collection",
+			{ collectionId: "c1", elements: { timers: "off" } },
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		expect(payload.elements).toEqual({ timers: "off" });
+	});
+
+	test("offers no scripts control - it has no effect on a design-mode run", () => {
+		// scripts_override's one reader is replay_scenario_steps, the load
+		// path's own post-run replay; run_collection never reads it, so
+		// offering the control here would be an argument written and never
+		// read.
+		const tool = TOOLS.find((t) => t.name === "run_collection");
+		const elementsShape = (
+			tool!.inputSchema.elements as z.ZodOptional<z.ZodObject<Record<string, z.ZodType>>>
+		)._def.innerType.shape;
+		expect(Object.keys(elementsShape)).toEqual(["timers"]);
+	});
+
 	test("refuses the whole run on the first un-allowlisted step, starting nothing", async () => {
 		const client = scenarioClient({
 			listRequests: vi.fn().mockResolvedValue([
@@ -3670,6 +3700,76 @@ describe("start_load_run scenario runs", () => {
 			expect(firstText(res), key).toMatch(/do not apply to a scenario load run/);
 		}
 		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("forwards the timers/scripts override on a scenario run", async () => {
+		// The engine's validator owns the shape and the value ranges
+		// (issue #1495) - this layer only has to get the keys to it unchanged.
+		const client = scenarioLoadClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "c1" },
+				elements: { timers: "off", scripts: "allInline" },
+				confirmed: true,
+			},
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.elements).toEqual({ timers: "off", scripts: "allInline" });
+	});
+
+	test("sends no elements key when none was declared", () => {
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		const parsed = z.object(shape).parse({ scenario: { collectionId: "c1" } });
+		expect(parsed.elements).toBeUndefined();
+	});
+
+	test("rejects an elements value the engine does not accept", () => {
+		// The engine's set is closed (asConfigured|off, asMarked|allInline|
+		// allDeferred); a typo should be caught here rather than reaching
+		// POST /runs as an unrecognised value.
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		const schema = z.object(shape);
+		expect(() =>
+			schema.parse({ scenario: { collectionId: "c1" }, elements: { timers: "disabled" } })
+		).toThrow();
+		expect(() =>
+			schema.parse({ scenario: { collectionId: "c1" }, elements: { scripts: "inline" } })
+		).toThrow();
+	});
+
+	test("refuses an elements override on a single-target run", async () => {
+		const client = scenarioLoadClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com/x", elements: { timers: "off" }, confirmed: true },
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain('"elements"');
+		expect(firstText(res)).toMatch(/no stored collection of/);
+		expect(client.startRun).not.toHaveBeenCalled();
+		expect(client.composeRequest).not.toHaveBeenCalled();
+	});
+
+	test("declares elements so the single-target refusal survives schema validation", () => {
+		// An argument the schema does not declare is stripped by the SDK before
+		// the handler runs, which would drop the block in silence - the failure
+		// this refusal exists to prevent.
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		expect(shape.elements).toBeDefined();
+		expect(shape.elements.description).toMatch(/Scenario runs only/);
 	});
 
 	/**
