@@ -589,9 +589,44 @@ TEST (RunManager, ConstructorReadsDeferredPostScriptFromRequestElements) {
     EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});");
 }
 
+// A saved request composes the collection chain's `script.post` elements
+// before its own (issue #1514's `compose_elements` order), and both are
+// deferred by default - so a request whose collection also asserts
+// something must run both under load, not only the first, the way
+// `read_script` always joined every enabled part before this run shape had
+// elements at all.
+TEST (RunManager, ConstructorJoinsEveryDeferredPostScriptWithABlankLine) {
+    auto config = nlohmann::json::parse (R"({
+      "requestElements": [
+        { "kind": "script.post", "config": { "script": "pm.test(\"chain\",()=>{});" } },
+        { "kind": "script.post", "config": { "script": "pm.test(\"own\",()=>{});" } }
+      ]
+    })");
+
+    RunContext ctx ("r", config);
+    EXPECT_EQ (ctx.test_script, "pm.test(\"chain\",()=>{});\n\npm.test(\"own\",()=>{});");
+}
+
+// The inline one is left out of the join entirely - both because it must not
+// run twice and because it may sit between two deferred ones in compile
+// order, which must not leave a stray blank line where it was skipped.
+TEST (RunManager, ConstructorSkipsAnInlineScriptPostWhenJoiningTheRest) {
+    auto config = nlohmann::json::parse (R"({
+      "requestElements": [
+        { "kind": "script.post", "config": { "script": "pm.test(\"chain\",()=>{});" } },
+        { "kind": "script.post",
+          "config": { "script": "pm.test(\"inline\",()=>{});", "inline": true } },
+        { "kind": "script.post", "config": { "script": "pm.test(\"own\",()=>{});" } }
+      ]
+    })");
+
+    RunContext ctx ("r", config);
+    EXPECT_EQ (ctx.test_script, "pm.test(\"chain\",()=>{});\n\npm.test(\"own\",()=>{});");
+}
+
 // A `script.post` marked `inline` runs on the pipeline hooks instead
-// (`submit_one_request` / `handle_result`), so the deferred replay must not
-// run it a second time - `test_script` stays empty.
+// (`submit_one_request` / `run_request_elements_after_submission`), so the
+// deferred replay must not run it a second time - `test_script` stays empty.
 TEST (RunManager, ConstructorLeavesTestScriptEmptyForAnInlineScriptPost) {
     auto config = nlohmann::json::parse (R"({
       "requestElements": [

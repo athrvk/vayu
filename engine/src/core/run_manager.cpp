@@ -817,13 +817,15 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
 /**
  * `requestElements` (issue #1594), compiled once here into @ref
  * step_elements - refused beside a `scenario` block by the route, so this is
- * a no-op for that shape. A `script.post` element found here that is not
- * running inline has its script text copied into @ref test_script, for the
- * existing deferred replay (`validate_scripts`) to read exactly as it always
- * has; an inline one is left for the pipeline hooks (`submit_one_request` /
- * `handle_result`) to run, and the deferred replay must not run it a second
- * time. Split out of the constructor to keep its own cognitive complexity
- * down, not because anything else calls this.
+ * a no-op for that shape. Every `script.post` element found here that is not
+ * running inline has its script text folded into @ref test_script, joined
+ * with a blank line in compiled order exactly as `read_script` always joined
+ * multiple parts, for the existing deferred replay (`validate_scripts`) to
+ * read; an inline one is left for the pipeline hooks
+ * (`submit_one_request` / `run_request_elements_after_submission`,
+ * `load_strategy.cpp`) to run, and the deferred replay must not run it a
+ * second time. Split out of the constructor to keep its own cognitive
+ * complexity down, not because anything else calls this.
  */
 void RunContext::compile_step_elements (const nlohmann::json& run_config) {
     auto request_elements = run_config.find ("requestElements");
@@ -842,13 +844,22 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
         vayu::core::Phase::StepBefore) != kind->phases.end ()) {
             step_elements_have_step_before = true;
         }
-        if (element.kind != "script.post" || !test_script.empty () ||
+        if (element.kind != "script.post" ||
         RunContext::script_element_runs_inline (element.config, scripts_override)) {
             continue;
         }
+        // Every un-inlined `script.post` folds in here, not only the first:
+        // a saved request composes the collection chain's elements before its
+        // own (issue #1514's `compose_elements` order), and both are deferred
+        // by default, the same as `read_script` always joined every enabled
+        // part with a blank line before this run shape had elements at all.
         if (auto script = element.config.find ("script");
-        script != element.config.end () && script->is_string ()) {
-            test_script = script->get<std::string> ();
+        script != element.config.end () && script->is_string () &&
+        !script->get<std::string> ().empty ()) {
+            if (!test_script.empty ()) {
+                test_script += "\n\n";
+            }
+            test_script += script->get<std::string> ();
         }
     }
     element_tallies = vayu::core::RequestElementTallies (*compiled);
@@ -1772,6 +1783,22 @@ vayu::http::routes::ScriptVariableScopes& base_scopes) {
     };
     vayu::core::ElementPipeline::run (vayu::core::Phase::RunStart, setup_ctx,
     collection_elements, context->setup_outcomes);
+    // `run_setup_script` above binds `base_scopes` by reference and writes a
+    // `script.setup`'s `pm.environment.set`/`pm.collectionVariables.set` calls
+    // into it in place - so the copies taken before this call
+    // (`context->lifecycle_scopes`, `context->step_base_vars`) are stale the
+    // moment setup writes anything. Refreshed here, after the write, so a
+    // `requestElements` submission's residual pass and the teardown read
+    // what setup actually left rather than what existed before it ran. The
+    // scenario branch does not touch either field - its own caller re-reads
+    // `base_scopes` by reference once this function returns.
+    if (!context->scenario) {
+        context->lifecycle_scopes = base_scopes;
+        if (context->step_elements && !context->step_elements->empty ()) {
+            context->step_base_vars =
+            vayu::http::routes::flatten_variable_scopes (base_scopes);
+        }
+    }
     for (const auto& outcome : context->setup_outcomes) {
         if (outcome.status == "error" || outcome.status == "failed") {
             return outcome.message.value_or ("unknown error");

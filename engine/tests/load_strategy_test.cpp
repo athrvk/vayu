@@ -22,6 +22,8 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "echo_server.hpp"
 #include "mock_server.hpp"
@@ -1307,6 +1309,48 @@ TEST (RequestElementsRunOverrideValidationTest, AcceptsAScriptElementMarkedInlin
     const nlohmann::json config{ { "requestElements",
     nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" }, { "kind", "script.post" },
     { "config", { { "script", "pm.test('ok', function () {});" }, { "inline", true } } } } }) } };
+    EXPECT_FALSE (vayu::core::validate_request_elements_run_override (config).has_value ());
+}
+
+// A `control.*` kind, `timer.pacing` and `timer.throughput` all validate
+// against `ElementOwner::Request` (nothing marks them collection-only), so
+// without this check they would be silently accepted and then either no-op
+// or misbehave on this run shape - `control.once`, for one, treats a null
+// `controller_state` as "there is no later" and runs on every submission
+// instead of the first. Refused by name instead, naming the kind that has no
+// home here.
+TEST (RequestElementsRunOverrideValidationTest, RefusesAControllerKind) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" },
+    { "kind", "control.once" }, { "config", nlohmann::json::object () } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("control.once"), std::string::npos) << *reason;
+}
+
+TEST (RequestElementsRunOverrideValidationTest, RefusesTimerPacingAndThroughput) {
+    const std::vector<std::pair<std::string, nlohmann::json>> cases{
+        { "timer.pacing", { { "everyMs", 1000 } } },
+        { "timer.throughput", { { "targetPerMinute", 60 } } },
+    };
+    for (const auto& [kind, valid_config] : cases) {
+        const nlohmann::json config{ { "requestElements",
+        nlohmann::json::array ({ nlohmann::json{
+        { "id", "el_1" }, { "kind", kind }, { "config", valid_config } } }) } };
+        auto reason = vayu::core::validate_request_elements_run_override (config);
+        ASSERT_HAS_VALUE (reason) << kind;
+        EXPECT_NE (reason->find (kind), std::string::npos) << *reason;
+    }
+}
+
+// The companion to the two refusals above: every phase-0 kind - the ones
+// this run shape's own hooks actually dispatch - stays accepted.
+TEST (RequestElementsRunOverrideValidationTest, AcceptsEveryPhaseZeroExtractAndAssertKind) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" }, { "kind", "extract.json" },
+                             { "config", { { "path", "$.a" }, { "variable", "a" } } } },
+    nlohmann::json{ { "id", "el_2" }, { "kind", "assert.contains" },
+    { "config", { { "field", "body" }, { "text", "ok" } } } } }) } };
     EXPECT_FALSE (vayu::core::validate_request_elements_run_override (config).has_value ());
 }
 

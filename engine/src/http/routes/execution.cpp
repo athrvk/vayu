@@ -1861,8 +1861,14 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
     // `preRequestScript(s)` / `postRequestScript(s)` / `tests` are refused
     // here too now (issue #1594's cut-over): a single-request run's own
     // script slot is `requestElements`'s `script.pre` / `script.post` now,
-    // the same replacement every other route already points a caller at.
-    if (auto invalid = refuse_legacy_script_fields (json)) {
+    // so the refusal names that field rather than this endpoint's own
+    // `elements` (the run-level override, a different thing entirely) - a
+    // caller who followed the default message here would land on a second
+    // 400. A scenario run keeps the default: its scripts live on the bound
+    // collection's stored `elements`, which this refusal cannot name any
+    // more precisely than the other routes already do.
+    if (auto invalid = refuse_legacy_script_fields (
+        json, is_scenario ? "elements" : "requestElements")) {
         vayu::utils::log_warning ("http", "POST /runs - " + *invalid);
         return RouteError{ 400, error_body (400, *invalid) };
     }

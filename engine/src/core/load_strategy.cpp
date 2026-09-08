@@ -8,8 +8,10 @@
 #include "vayu/core/load_strategy.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
+#include <format>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -17,6 +19,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 
@@ -404,6 +407,38 @@ const nlohmann::json& config) {
     stamped, vayu::core::ElementOwner::Collection);
 }
 
+namespace {
+
+/**
+ * The kinds `run_request_elements_step_before` / `_after_submission`
+ * actually know how to run (issue #1594's own scope: `extract.*`, `assert.*`,
+ * `timer.think`, `script.pre`/`script.post` - the same phase-0 set #1514
+ * landed for the design send). Every other kind `Registry::validate` would
+ * otherwise accept under `ElementOwner::Request` needs state this run shape
+ * never binds - `control.*` needs `controller_state` /
+ * `SharedThroughputCounters` (a plan-wide scan neither `RunContext` nor
+ * `submit_one_request` ever builds for a lone request), `timer.pacing` /
+ * `timer.throughput` need `pacing_state` and the load path's own
+ * `scheduled_ready_delay_ms` dispatch (`ScenarioLoadDriver::finish_step`'s
+ * job, which has no single-request counterpart). Accepting one of these
+ * kinds here would not fail loudly: the pipeline would call `apply` with a
+ * null `controller_state`, most kinds no-op or run unconditionally against a
+ * null check, and the element would report `"ok"` in `summary["elements"]`
+ * for behaviour that never happened - `control.once` running on *every*
+ * submission being the sharpest example. Refusing the kind by name is the
+ * same "written and read by nothing" guard the single-target `elements`
+ * override refusal used before this issue existed; extending the set is a
+ * deliberate follow-up, not a schema oversight to work around.
+ */
+constexpr std::array<std::string_view, 10> REQUEST_ELEMENTS_SUPPORTED_KINDS{
+    "extract.json", "extract.regex", "extract.boundary", "assert.status",
+    "assert.jsonpath", "assert.contains", "assert.duration", "assert.size", "timer.think",
+    // script.pre / script.post checked separately below - HotPathClass::Script,
+    // not a literal comparison, per the extensibility contract's rule 1.
+};
+
+} // namespace
+
 std::optional<std::string> validate_request_elements_run_override (
 const nlohmann::json& config) {
     const auto elements = config.find ("requestElements");
@@ -425,8 +460,30 @@ const nlohmann::json& config) {
     // 400 asking it to invent one itself.
     nlohmann::json stamped = *elements;
     vayu::core::stamp_default_element_ids (stamped);
-    return vayu::core::Registry::instance ().validate (
-    stamped, vayu::core::ElementOwner::Request);
+    if (auto reason = vayu::core::Registry::instance ().validate (
+        stamped, vayu::core::ElementOwner::Request)) {
+        return reason;
+    }
+    for (size_t i = 0; i < stamped.size (); ++i) {
+        const auto& entry           = stamped[i];
+        const std::string kind_name = entry.value ("kind", "");
+        const auto* kind = vayu::core::Registry::instance ().find (kind_name);
+        const bool is_script =
+        kind != nullptr && kind->hot_path == vayu::core::HotPathClass::Script;
+        const bool is_supported = is_script ||
+        std::find (REQUEST_ELEMENTS_SUPPORTED_KINDS.begin (),
+        REQUEST_ELEMENTS_SUPPORTED_KINDS.end (),
+        kind_name) != REQUEST_ELEMENTS_SUPPORTED_KINDS.end ();
+        if (!is_supported) {
+            return std::format (
+            "requestElements[{}]: '{}' does not run on a single-target load "
+            "run - only extract.*, assert.*, timer.think and "
+            "script.pre/script.post do; run this as part of a \"scenario\" "
+            "instead",
+            i, kind_name);
+        }
+    }
+    return std::nullopt;
 }
 
 namespace {

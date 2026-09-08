@@ -448,10 +448,17 @@ logged as a warning: it means a client skipped composition.
   `run_request_elements_step_before` / `_after_submission` run
   `Phase::StepBefore` / `Phase::StepAfter` per submission, the same
   inline-vs-deferred `script.*` dispatch the scenario path uses
-  (`RunContext::script_element_runs_inline`); an un-inlined `script.post`
-  still defers to the run's own completion replay
-  (`RunContext::test_script`, folded from the element at compile time). There
-  is no persistent virtual user on this path, so the `ScopeOverlay` lives on
+  (`RunContext::script_element_runs_inline`); every un-inlined `script.post`
+  folds into the run's own completion replay (`RunContext::test_script`,
+  joined with a blank line in compile order, not only the first one - the
+  same join `read_script` always did before this run shape had elements).
+  Only the phase-0 kinds #1514 gave the design send run here at all -
+  `validate_request_elements_run_override` refuses a `control.*` kind,
+  `timer.pacing` and `timer.throughput` by name, because none of the state
+  they need (`controller_state`, `pacing_state`, a plan-wide throughput
+  scan) exists on this path; admitting one would report `"ok"` for behaviour
+  that never ran rather than failing loudly. There is no persistent virtual
+  user on this path, so the `ScopeOverlay` lives on
   the submission rather than a VU - built fresh from the run's flattened base
   scopes (`RunContext::step_base_vars`) and discarded once that submission
   settles - and `timer.think`'s wait is a run-level concurrency reservation
@@ -795,14 +802,21 @@ rules (absent or non-boolean `enabled` = enabled; non-string `value` = "") in
 the residual pass does not reverse), and script text is never interpolated
 (D16). MCP has no composition copy; a new engine client calls `POST /compose`.
 
-Script parts: clients on the inline path build the ordered `ScriptPart` list
-(`scriptParts` in `app/src/modules/request-builder/utils/script-parts.ts`, the
-only client-side copy); the by-id path builds it engine-side
-(`compose_script_parts`). The engine joins parts with `"\n\n"` and runs the
-result. `read_post_request_script` (`engine/src/http/script_parts.cpp`) owns
-every spelling the post-request script answers to (`postRequestScript`,
-`postRequestScript(s)` on `/execute`, `tests` on `/runs`), and both routes read
-through it; add a spelling to that table, never to a route.
+Scripts, since issue #1514's cut-over: `compose_elements` builds the
+resolved, ordered `elements` array (collection chain root-to-leaf, then the
+request's own, each stamped with its `origin`) engine-side for the by-id
+path; the renderer's inline path builds the same shape client-side
+(`elementsParts` in
+`app/src/modules/request-builder/utils/elements-parts.ts`, the one
+client-side copy). `elements` is the only script source `POST /execute`
+accepts - `preRequestScript(s)` / `postRequestScript(s)` / `tests` are all
+refused outright, naming `elements` as the replacement
+(`refuse_legacy_script_fields`, `routes.hpp`). `POST /runs` reads the same
+kinds under two different keys depending on shape: a scenario's steps carry
+their own resolved elements off the plan, and a single-request run's own
+request reads `requestElements` (issue #1594) - both refuse the legacy
+fields too. Add a script destination to `compose_elements` /
+`elements-parts.ts`, never a new legacy field to a route.
 
 ## Docs to keep in step
 
