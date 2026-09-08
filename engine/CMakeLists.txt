@@ -15,10 +15,17 @@ cmake_minimum_required(VERSION 3.25)
 # launch on every Mac older than the runner. Pinning it here makes the floor a
 # property of the source tree rather than of whatever machine built it.
 #
-# 13.0 is the floor Vayu documents (README.md, docs/index.md) - Electron sets
-# it app-side. Raising it is a user-visible support change: update those two
-# pages and engine/triplets/*.cmake in the same commit.
-set(VAYU_MACOS_DEPLOYMENT_TARGET "13.0" CACHE STRING
+# 13.3, not the 13.0 Electron sets app-side, and the extra .3 is not a
+# preference: libc++ ships `std::to_chars` for floating-point types in the
+# dylib and marks it introduced in macOS 13.3. Every `std::format` call
+# instantiates the floating-point formatter for `long double` whatever it is
+# actually formatting, so a deployment target below 13.3 fails to *compile*
+# any translation unit that formats anything at all ("'to_chars' is
+# unavailable: introduced in macOS 13.3"). 13.3 is therefore the lowest macOS
+# a C++23 engine can target, and README.md and docs/index.md state it.
+# Raising it further is a user-visible support change: update those two pages
+# and engine/triplets/*.cmake in the same commit.
+set(VAYU_MACOS_DEPLOYMENT_TARGET "13.3" CACHE STRING
     "Minimum macOS version the engine supports")
 if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "${VAYU_MACOS_DEPLOYMENT_TARGET}" CACHE STRING

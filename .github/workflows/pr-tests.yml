@@ -765,7 +765,7 @@ jobs:
       # a runner that is newer than the OS floor cannot tell a portable binary
       # from one that only runs here. Apple's clang defaults the deployment
       # target to the host, so an unpinned build on macos-latest links libc++
-      # symbols that dyld cannot resolve on macOS 13 - v0.26.0 shipped exactly
+      # symbols that dyld cannot resolve on macOS 13.3 - v0.26.0 shipped exactly
       # that and aborted at launch with "Symbol not found". Nothing else in CI
       # can see it, because CI never runs on the old OS.
       - name: Verify engine macOS deployment target

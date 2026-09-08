@@ -9,7 +9,7 @@
 # notices - only a user on an older macOS does. See engine/CMakeLists.txt.
 set -euo pipefail
 
-expected="${VAYU_MACOS_DEPLOYMENT_TARGET:-13.0}"
+expected="${VAYU_MACOS_DEPLOYMENT_TARGET:-13.3}"
 
 if [ $# -eq 0 ]; then
 	echo "usage: $0 <mach-o binary> [...]" >&2

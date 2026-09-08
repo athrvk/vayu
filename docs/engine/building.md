@@ -499,9 +499,18 @@ release's libc++, and every user on an older macOS got a dyld
 app then failed to start the engine.
 
 `engine/CMakeLists.txt` therefore sets `CMAKE_OSX_DEPLOYMENT_TARGET` from
-`VAYU_MACOS_DEPLOYMENT_TARGET` (13.0, the floor Electron sets app-side and the
-README documents) **before `project()`** - after it, the compiler probe has
-already baked the wrong value in. The vcpkg dependencies need the same floor,
+`VAYU_MACOS_DEPLOYMENT_TARGET` **before `project()`** - after it, the compiler
+probe has already baked the wrong value in.
+
+The value is **13.3**, not the 13.0 Electron sets for the app, and the extra
+.3 is forced rather than chosen: libc++ ships `std::to_chars` for
+floating-point types in the dylib and marks it introduced in macOS 13.3, while
+every `std::format` call instantiates the floating-point formatter for `long
+double` whatever it is actually formatting. Target 13.0 and the engine stops
+compiling - `error: 'to_chars' is unavailable: introduced in macOS 13.3`, from
+inside `<format>`, on any translation unit that formats a string. 13.3 is the
+lowest macOS a C++23 engine can target, which is why README.md and
+docs/index.md state it rather than Electron's floor. The vcpkg dependencies need the same floor,
 which triplets carry rather than cache variables, so `engine/triplets/` overlays
 `arm64-osx` and `x64-osx` with `VCPKG_OSX_DEPLOYMENT_TARGET`; the `macos-*`
 presets point `VCPKG_OVERLAY_TRIPLETS` at that directory. Both numbers move
