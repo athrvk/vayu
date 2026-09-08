@@ -825,10 +825,10 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
  * time. Split out of the constructor to keep its own cognitive complexity
  * down, not because anything else calls this.
  */
-void RunContext::compile_step_elements (const nlohmann::json& config) {
-    auto request_elements = config.find ("requestElements");
-    if (request_elements == config.end () || !request_elements->is_array () ||
-    request_elements->empty ()) {
+void RunContext::compile_step_elements (const nlohmann::json& run_config) {
+    auto request_elements = run_config.find ("requestElements");
+    if (request_elements == run_config.end () ||
+    !request_elements->is_array () || request_elements->empty ()) {
         return;
     }
     nlohmann::json stamped = *request_elements;

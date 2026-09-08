@@ -435,10 +435,10 @@ struct RunContext {
      */
     std::shared_ptr<const std::vector<vayu::core::CompiledElement>> step_elements;
 
-    /// Compiles @p config's `requestElements` into @ref step_elements, called
-    /// once by the constructor - split out to keep the constructor's own
-    /// cognitive complexity down, not because anything else calls this.
-    void compile_step_elements (const nlohmann::json& config);
+    /// Compiles @p run_config's `requestElements` into @ref step_elements,
+    /// called once by the constructor - split out to keep the constructor's
+    /// own cognitive complexity down, not because anything else calls this.
+    void compile_step_elements (const nlohmann::json& run_config);
 
     /// Whether @ref step_elements holds at least one `Phase::StepBefore` kind
     /// - computed once here, from the registry, rather than per submission:
