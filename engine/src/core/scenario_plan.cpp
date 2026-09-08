@@ -733,26 +733,4 @@ bool step_has_script (const ScenarioStep& step, std::string_view kind) {
     [&] (const CompiledElement& element) { return element.kind == kind; });
 }
 
-std::optional<std::string> refuse_shared_pacing_under_load (const ScenarioPlan& plan) {
-    for (const auto& step : plan.steps) {
-        if (!step.elements) {
-            continue;
-        }
-        for (const auto& element : *step.elements) {
-            if (element.kind != "timer.pacing" || !element.enabled) {
-                continue;
-            }
-            if (!element.config.value ("perUser", true)) {
-                return "step " + std::to_string (step.index) +
-                "'s 'timer.pacing' element sets 'perUser: false' - one "
-                "cadence shared across every virtual user is not yet "
-                "supported for a scenario load run (issue #1498's "
-                "follow-up); use 'perUser: true', or run this collection "
-                "sequentially.";
-            }
-        }
-    }
-    return std::nullopt;
-}
-
 } // namespace vayu::core

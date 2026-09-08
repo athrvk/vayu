@@ -83,8 +83,9 @@ are things Vayu plans to catch up on:
 - **Your load model needs logic controllers** - loops, conditionals,
   transactions. Vayu runs closed-loop constant concurrency and a linear
   scenario. Think time and pacing timers do work under load now (`timer.think`,
-  including a gaussian option, and `timer.pacing`), except a shared cadence
-  across every virtual user (`perUser: false`), which still doesn't. Correlation
+  including a gaussian option, and `timer.pacing`), including `timer.pacing`'s
+  shared-cadence case (`perUser: false`, JMeter's "All threads" pacing) - one
+  cadence held across every virtual user, not one per user. Correlation
   across a scenario's steps - a login's token reaching the next step's header,
   per virtual user - does work under load now too: mark the extracting element
   or script `inline` (or set the run's `elements.scripts` override), or let it
