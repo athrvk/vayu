@@ -1839,7 +1839,8 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
     // `script.teardown` (issue #1573) - refused outright beside `scenario`,
     // whose collection already has a real `elements` column for this.
     if (auto invalid = vayu::core::validate_lifecycle_elements_run_override (json)) {
-        vayu::utils::log_warning ("POST /runs - Invalid lifecycleElements: " + *invalid);
+        vayu::utils::log_warning (
+        "http", "POST /runs - Invalid lifecycleElements: " + *invalid);
         return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
     }
 
