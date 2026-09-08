@@ -692,9 +692,9 @@ export interface ElementDef {
  * One element as sent inline to `POST /compose` / `POST /execute` for an
  * ad-hoc send (issue #1512), stamped with where it came from - the
  * generalized, N-kind form of {@link ScriptPart}. Built by
- * `elements-parts.ts`, which walks the collection chain the way `scriptParts`
- * used to for scripts alone. Absent `origin` is an inline send with no
- * `requestId` chain to resolve from.
+ * `elements-parts.ts`, which walks the collection chain, root to leaf, then
+ * the request's own. Absent `origin` is an inline send with no `requestId`
+ * chain to resolve from.
  */
 export interface ResolvedElement extends ElementDef {
 	origin?: { kind: "collection" | "request"; id?: string; name?: string };

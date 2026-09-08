@@ -810,9 +810,14 @@ export default function LoadTestConfigDialog({
 					{/*
 					 * The `elements.scripts` run override (issue #1594), the same
 					 * control and the same three values `RunCollectionDialog`'s
-					 * Scripts toggle offers - no Timers control here, unlike that
-					 * dialog: a single-request run's `timer.*` elements are not
-					 * wired to a run-level override on this path.
+					 * Scripts toggle offers. No Timers control here, unlike that
+					 * dialog - not because the engine ignores `elements.timers` on
+					 * this path (it applies it the same way, `load_strategy.cpp`'s
+					 * `step.before` / `step.between` contexts), but because this
+					 * dialog offers nothing to override it with yet: a single
+					 * request's own `timer.think` is the only timer kind
+					 * `requestElements` accepts, and there is no UI here for it at
+					 * all, marked or not.
 					 */}
 					<div className="flex items-center justify-between gap-4">
 						<Label className="leading-snug">

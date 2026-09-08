@@ -17,13 +17,14 @@ import { generateId } from "@/lib/id";
 
 /**
  * The joined text of every enabled element of one script kind (`script.pre`
- * or `script.post`) in a list - what the load path's `tests`/pre-request
- * warning, and the variable-reference scanners, need: one flat string per
- * entity rather than the element list itself.
+ * or `script.post`) in a list - what a pre-request-script presence check
+ * (`LoadTestConfigDialog`'s warning) and the variable-reference scanners
+ * (`ColumnAudit`, `column-audit.ts`, `request-references.ts`) need: one flat
+ * string per entity rather than the element list itself.
  *
- * Joined with the engine's own separator (`"\n\n"`, `read_post_request_script`
- * / `compose_script_parts`) so a caller feeding this into `scriptParts()`
- * reproduces the single string a `script.post` column used to hold - the
+ * Joined with the engine's own separator (`"\n\n"`,
+ * `RunContext::compile_step_elements`) so it reproduces what a load run's
+ * deferred replay runs when more than one `script.post` element defers - the
  * common case is exactly one such element, and this degrades sensibly for
  * more than one rather than silently dropping every part past the first.
  */

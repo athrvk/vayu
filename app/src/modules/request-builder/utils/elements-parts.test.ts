@@ -6,12 +6,11 @@
  */
 
 /**
- * `elementsParts` generalizes `scriptParts` (`./script-parts.ts`, kept for the
- * load path's `tests` field alone) from scripts to every element kind, and
- * adds the one thing a script-only walk never needed: an `inherit.disable`
- * entry on the request's own list that suppresses one ancestor element by id
- * (issue #1512). `scriptTextFor` (re-exported from `@/lib/elements`) is
- * covered here too, since this is the one place both are consumed together.
+ * `elementsParts` walks the collection chain's elements, root to leaf, then
+ * the request's own (issue #1512), honouring an `inherit.disable` entry on
+ * the request's own list that suppresses one ancestor element by id.
+ * `scriptTextFor` (re-exported from `@/lib/elements`) is covered here too,
+ * since this is the one place both are consumed together.
  */
 
 import { describe, it, expect } from "vitest";

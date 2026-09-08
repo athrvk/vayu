@@ -529,8 +529,9 @@ export interface ComposeRequestRequest {
 
 /**
  * What `POST /compose` returns: an `ExecuteRequestRequest` plus whatever
- * extra fields rode through composition verbatim (e.g. the load path's
- * `tests` script parts - scripts are never interpolated).
+ * extra fields rode through composition verbatim (e.g. the resolved
+ * `elements` array a load run renames onto `requestElements` - scripts are
+ * never interpolated).
  */
 export type ComposedRequest = ExecuteRequestRequest & Record<string, unknown>;
 
@@ -676,8 +677,8 @@ export interface StartLoadTestRequest {
 	 * fields are separate and why sending both is a `400`.
 	 *
 	 * Every `{{data.column}}` in the URL, headers, body and auth credentials
-	 * binds per submission, and the deferred `tests` script reads the row its
-	 * sample carried as `pm.iterationData`. The set is never persisted - the run
+	 * binds per submission, and a deferred `script.post` element reads the row
+	 * its sample carried as `pm.iterationData`. The set is never persisted - the run
 	 * snapshot records `dataRowCount` alone - but a bound cell travels in the
 	 * request that carried it, which the run stores with its retained traces.
 	 */

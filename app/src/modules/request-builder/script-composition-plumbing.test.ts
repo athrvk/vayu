@@ -59,15 +59,22 @@ describe("load test's step-level elements are built from the collection chain", 
 		const callStart = src.indexOf("const requestElements = elementsParts(");
 		expect(callStart).toBeGreaterThan(-1);
 
+		// A window bounded well past any real call's argument list, not the
+		// rest of the file - `indexOf`'s `fromIndex` alone would find a match
+		// anywhere after `callStart`, including one that has nothing to do
+		// with this call, and still report a position "greater than"
+		// `callStart` by construction.
+		const CALL_WINDOW = 400;
+		const window = src.slice(callStart, callStart + CALL_WINDOW);
+
 		// The request's own elements, as the call's last argument. If the
 		// chain were dropped in favour of the request's own elements alone,
-		// this index would move outside (or disappear from) the call's
-		// argument block.
+		// this would disappear from the bounded window entirely.
 		const ownElementsCall = "pendingLoadTestRequest.elements";
-		const ownElementsIndex = src.indexOf(ownElementsCall, callStart);
-		expect(ownElementsIndex).toBeGreaterThan(callStart);
+		const ownElementsIndex = window.indexOf(ownElementsCall);
+		expect(ownElementsIndex).toBeGreaterThan(-1);
 
-		const callBlock = src.slice(callStart, ownElementsIndex + ownElementsCall.length);
+		const callBlock = window.slice(0, ownElementsIndex + ownElementsCall.length);
 		expect(callBlock).toContain("collectionAncestors");
 		expect(callBlock).toContain("fetchedRequest.id");
 	});
