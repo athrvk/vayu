@@ -631,7 +631,7 @@ TEST_F (ScriptLifecycleTest, SingleRequestWithNoLifecycleElementsRunsNormally) {
 // `teardown[0]["id"]` reddens to `""`.
 TEST_F (ScriptLifecycleTest, SingleRequestLifecycleElementWithNoIdGetsAGeneratedIdInOutcomes) {
     const json elements = json::array (
-    { json{ { "kind", "script.teardown" }, { "config", { { "script", "" } } } } });
+    { json{ { "kind", "script.teardown" }, { "config", { { "script", "1;" } } } } });
     EXPECT_EQ (run_single_request_load (elements, /*iterations=*/1, /*concurrency=*/1),
     vayu::RunStatus::Completed);
 

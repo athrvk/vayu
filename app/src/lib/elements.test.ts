@@ -25,9 +25,9 @@ describe("isBlankScriptElement", () => {
 	});
 
 	it("is false once the script has non-whitespace text", () => {
-		expect(
-			isBlankScriptElement({ kind: "script.post", config: { script: "pm.test()" } })
-		).toBe(false);
+		expect(isBlankScriptElement({ kind: "script.post", config: { script: "pm.test()" } })).toBe(
+			false
+		);
 	});
 
 	it("is false for a non-script kind, regardless of its config", () => {

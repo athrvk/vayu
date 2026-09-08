@@ -678,12 +678,39 @@ struct CompiledElement {
  *
  * One entry in, one `CompiledElement` out, in the same order. A kind with no
  * runnable behaviour - unknown to this registry (the DB held a row a newer
- * engine wrote), or validate-only like `test.echo` - compiles to a null
+ * engine wrote), validate-only like `test.echo`, or a blank `script.*`
+ * element (issue #1609, `is_blank_script_element`) - compiles to a null
  * `element`; with no phase to dispatch it at, `ElementPipeline::run` never
  * calls it and never reports an outcome for it, the same as a kind this build
  * has simply never heard of.
  */
 [[nodiscard]] std::vector<CompiledElement> compile_elements (const nlohmann::json& elements);
+
+/**
+ * Whether @p text is empty or holds only whitespace - the one rule "blank"
+ * means everywhere a script's own text is judged (issue #1609). Shared by
+ * `is_blank_script_element` below and by `Database::migrate_before_sync`'s
+ * fold of a pre-#1514 row's legacy script columns, which has no element to
+ * check and only ever has the raw text.
+ */
+[[nodiscard]] bool is_blank_script_text (const std::string& text);
+
+/**
+ * Whether @p kind is one of the four script kinds (`script.pre`,
+ * `.post`, `.setup`, `.teardown`) and @p config's `script` is blank by
+ * {@link is_blank_script_text} (absent counts as blank too - the kind's
+ * schema requires the property present, not non-empty). A blank script
+ * element is inert everywhere but storage (issue #1609): not composed
+ * (`request_composer.cpp`'s `emit_level`), not compiled into runnable
+ * behaviour (`compile_elements` below leaves it with no `element`, the same
+ * "nothing this build can run" shape an unknown kind gets, so
+ * `ElementPipeline::run` reports no outcome for it), not counted as "this
+ * step carries a script" (`scenario_plan.cpp`'s `step_has_script`,
+ * `run_manager.cpp`'s `find_step_post_script`). The stored row is untouched -
+ * a user mid-edit still sees and can edit it in its own Elements tab.
+ */
+[[nodiscard]] bool
+is_blank_script_element (const std::string& kind, const nlohmann::json& config);
 
 /**
  * Assigns an `el_` id to every object entry of @p elements missing one - the

@@ -314,7 +314,8 @@ RunContext::ScriptsOverrideMode scripts_mode) {
             return nullptr;
         }
         if (auto found = element.config.find ("script");
-        found != element.config.end () && found->is_string ()) {
+        found != element.config.end () && found->is_string () &&
+        !vayu::core::is_blank_script_text (found->get_ref<const std::string&> ())) {
             return &found->get_ref<const std::string&> ();
         }
     }

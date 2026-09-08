@@ -188,6 +188,14 @@ always made. The element's own outcome is whether the script ran without throwin
 `pm.test` assertions travel inside the same `vayu::ScriptResult` untouched, so a scripted step's
 trace shape is unchanged by this cut-over.
 
+A **blank** `script.pre` / `.post` / `.setup` / `.teardown` (its own `script` empty or
+whitespace-only, `is_blank_script_element`) is inert everywhere but storage (issue #1609): `POST
+/compose` does not emit it, `compile_elements` compiles it to no runnable behaviour the same way an
+unknown kind does, so `ElementPipeline::run` reports no outcome for it at all - not even `skipped` -
+and `scenario_plan.cpp`'s `step_has_script` (the pre-request-script-under-load warning, a step's
+`preRequestScript` breakdown field) does not count it as carrying one. The stored row is untouched, so
+it still lists and edits in its own request's or collection's Elements tab.
+
 `script.setup` / `script.teardown` are `collection_only` - refused (a `400` naming the index and
 kind) on a request's own `elements`, both at write time and in `GET /elements/kinds`'
 `collectionOnly` flag, because a once-per-run element attached to one request in the tree has no
