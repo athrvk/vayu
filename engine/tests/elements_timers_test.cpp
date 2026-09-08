@@ -10,11 +10,15 @@
  * @brief Issue #1498: `timer.pacing`, gaussian `timer.think`, the run-level
  *        `elements.timers` / `elements.seed` override, and the seeded
  *        generators (`apply_timers_override`, `derive_vu_rng`) both ride.
+ *        Issue #1571: `timer.throughput`, the rate-based sibling of
+ *        `timer.pacing`, and the shared budget its cross-user case runs on.
  *
- * Four layers, cheapest first: the registry's schema (no run at all), the
- * override's own branch logic (a direct call, no pipeline), a sequential
- * collection run's real wall-clock behaviour, and reproducibility of that
- * behaviour across two independent runs sharing an explicit seed.
+ * Five layers, cheapest first: the registry's schema (no run at all), the
+ * override's own branch logic (a direct call, no pipeline), the cross-user
+ * coordination primitives on their own (`SharedPacingClocks`,
+ * `SharedThroughputBudgets` - including under concurrency), a sequential
+ * collection run's real wall-clock behaviour, and a scenario load run's
+ * aggregate throughput across ten virtual users.
  */
 
 #include <gtest/gtest.h>
@@ -41,7 +45,9 @@
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/event_loop.hpp"
 
 using nlohmann::json;
 using vayu::core::Registry;
@@ -92,6 +98,64 @@ TEST (ElementsTimersRegistryTest, TimerPacingRefusesAClientSuppliedElementId) {
 TEST (ElementsTimersRegistryTest, TimerPacingRefusesAClientSuppliedScopeEntry) {
     const json elements = json::array ({ json{ { "id", "el_1" }, { "kind", "timer.pacing" },
     { "config", { { "everyMs", 300 }, { "_scopeEntry", true } } } } });
+    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
+}
+
+TEST (ElementsTimersRegistryTest, TimerThroughputIsRegisteredAsATimerThatTracksScopeOccurrence) {
+    const auto* kind = Registry::instance ().find ("timer.throughput");
+    ASSERT_NE (kind, nullptr)
+    << "timer.throughput is missing from the catalogue "
+       "GET /elements/kinds serves";
+    EXPECT_EQ (kind->category, "timer");
+    EXPECT_TRUE (kind->tracks_scope_occurrence)
+    << "an inherited throughput element must run once per pass through its "
+       "scope, which is what mark_scope_entries reads this flag for";
+    EXPECT_EQ (kind->hot_path, vayu::core::HotPathClass::Declarative);
+    ASSERT_EQ (kind->phases.size (), 1u);
+    EXPECT_EQ (kind->phases[0], vayu::core::Phase::StepBefore);
+}
+
+TEST (ElementsTimersRegistryTest, TimerThroughputConfigMissingTargetPerMinuteIsRejected) {
+    const json elements = json::array ({ json{ { "id", "el_1" },
+    { "kind", "timer.throughput" }, { "config", json::object () } } });
+    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
+}
+
+TEST (ElementsTimersRegistryTest, TimerThroughputTargetPerMinuteOfZeroIsRejected) {
+    const json elements = json::array ({ json{ { "id", "el_1" },
+    { "kind", "timer.throughput" }, { "config", { { "targetPerMinute", 0 } } } } });
+    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ())
+    << "the schema's exclusiveMinimum is 0 - a rate of nothing per minute is "
+       "not a rate";
+}
+
+TEST (ElementsTimersRegistryTest, TimerThroughputAcceptsAFractionalRateAndAnOptionalPerUser) {
+    const json rate_only = json::array ({ json{ { "id", "el_1" },
+    { "kind", "timer.throughput" }, { "config", { { "targetPerMinute", 0.5 } } } } });
+    EXPECT_FALSE (Registry::instance ().validate (rate_only).has_value ())
+    << "perUser is optional - it defaults to false, the shared rate this kind "
+       "exists for";
+
+    const json with_per_user =
+    json::array ({ json{ { "id", "el_1" }, { "kind", "timer.throughput" },
+    { "config", { { "targetPerMinute", 50 }, { "perUser", true } } } } });
+    EXPECT_FALSE (Registry::instance ().validate (with_per_user).has_value ());
+}
+
+TEST (ElementsTimersRegistryTest, TimerThroughputRefusesANonBooleanPerUser) {
+    const json elements =
+    json::array ({ json{ { "id", "el_1" }, { "kind", "timer.throughput" },
+    { "config", { { "targetPerMinute", 50 }, { "perUser", "yes" } } } } });
+    EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
+}
+
+// The same `additionalProperties: false` rule TimerPacingRefusesAClientSupplied*
+// above states: these two names are stamped by the plan compiler, never
+// written by a client.
+TEST (ElementsTimersRegistryTest, TimerThroughputRefusesAClientSuppliedScopeEntry) {
+    const json elements =
+    json::array ({ json{ { "id", "el_1" }, { "kind", "timer.throughput" },
+    { "config", { { "targetPerMinute", 50 }, { "_scopeEntry", true } } } } });
     EXPECT_TRUE (Registry::instance ().validate (elements).has_value ());
 }
 
@@ -272,6 +336,120 @@ TEST (SharedPacingClocksTest, ConcurrentClaimsNeverCollideOnTheSameSlot) {
     static_cast<long> (deadlines.size ()))
     << "two concurrent claims landed on the same deadline - the "
        "compare-exchange loop lost a race";
+}
+
+// ============================================================================
+// F. SharedThroughputBudgets - a direct call, no run needed (issue #1571).
+// ============================================================================
+
+TEST (SharedThroughputBudgetsTest, AFirstClaimIsNeverDelayed) {
+    vayu::core::SharedThroughputBudgets budgets ({ "a" });
+    EXPECT_EQ (budgets.claim ("a", 10.0, 1000), 0)
+    << "a name's first-ever claim must never be delayed";
+}
+
+// The whole point of debt accounting over a plain integer interval: 3 per
+// second is one slot every 333.33ms, so the slots have to land 334ms, 667ms,
+// 1000ms, 1334ms... after the first - never 333, 666, 999, which is what a
+// rate whose remainder is dropped every claim degenerates into.
+//
+// Mutation check: rounding the balance to a whole slot before computing the
+// wait (`budget.balance = std::trunc (budget.balance)`, or deriving the wait
+// from a precomputed integer interval instead of the balance) reds this at
+// the third claim and every third one after it.
+TEST (SharedThroughputBudgetsTest, ClaimsCarryTheFractionalRemainderAcrossSlots) {
+    vayu::core::SharedThroughputBudgets budgets ({ "a" });
+    const std::vector<int64_t> expected = { 0, 334, 667, 1000, 1334, 1667, 2000 };
+    std::vector<int64_t> actual;
+    actual.reserve (expected.size ());
+    for (size_t i = 0; i < expected.size (); ++i) {
+        actual.push_back (budgets.claim ("a", 3.0, 5000));
+    }
+    EXPECT_EQ (actual, expected)
+    << "seven slots at 3/s must span exactly two seconds - a drifting "
+       "remainder shortens or stretches that span";
+}
+
+// Accrual is what makes the rate a rate rather than a queue: half a second at
+// 10/s pays back five slots' worth of the debt the claims above ran up.
+TEST (SharedThroughputBudgetsTest, TimeElapsedBetweenClaimsPaysDownTheDebt) {
+    vayu::core::SharedThroughputBudgets budgets ({ "a" });
+    ASSERT_EQ (budgets.claim ("a", 10.0, 1000), 0);
+    ASSERT_EQ (budgets.claim ("a", 10.0, 1000), 100);
+    ASSERT_EQ (budgets.claim ("a", 10.0, 1000), 200);
+    // Three slots taken, the last of them booked for 1200ms; by 1300ms the
+    // rate has paid the whole debt off, so the fourth claim is due at once
+    // and the fifth is one slot behind it again.
+    EXPECT_EQ (budgets.claim ("a", 10.0, 1300), 0);
+    EXPECT_EQ (budgets.claim ("a", 10.0, 1300), 100);
+}
+
+TEST (SharedThroughputBudgetsTest, AnIdleStretchBanksAtMostOneSlot) {
+    vayu::core::SharedThroughputBudgets budgets ({ "a" });
+    ASSERT_EQ (budgets.claim ("a", 10.0, 1000), 0);
+    ASSERT_EQ (budgets.claim ("a", 10.0, 1000), 100);
+    // Five seconds of silence at 10/s would have accrued fifty slots.
+    EXPECT_EQ (budgets.claim ("a", 10.0, 6000), 0);
+    EXPECT_EQ (budgets.claim ("a", 10.0, 6000), 100)
+    << "an idle run released a burst it 'saved up' instead of resuming at "
+       "its configured rate";
+}
+
+TEST (SharedThroughputBudgetsTest, DifferentNamesHoldIndependentBudgets) {
+    vayu::core::SharedThroughputBudgets budgets ({ "a", "b" });
+    ASSERT_EQ (budgets.claim ("a", 10.0, 1000), 0);
+    ASSERT_EQ (budgets.claim ("a", 10.0, 1000), 100);
+    EXPECT_EQ (budgets.claim ("b", 10.0, 1000), 0)
+    << "b's first claim was delayed by a's history - the budgets are sharing "
+       "state that should be per-name";
+}
+
+TEST (SharedThroughputBudgetsTest, AnUnknownNameOrANonPositiveRateIsANoOp) {
+    vayu::core::SharedThroughputBudgets budgets ({ "a" });
+    EXPECT_EQ (budgets.claim ("never-registered", 10.0, 1000), 0);
+    EXPECT_EQ (budgets.claim ("a", 0.0, 1000), 0);
+    EXPECT_EQ (budgets.claim ("a", -5.0, 1000), 0);
+}
+
+// Eight threads race 25 claims each onto one shared 10-per-second budget.
+// Each claim takes exactly one slot, so the 200 of them must come back as the
+// 200 distinct slots that rate defines - 0ms through 19900ms, 100ms apart.
+//
+// Mutation check: dropping the lock_guard lets two threads read the same
+// balance and write back the same decrement, which collapses two slots into
+// one and reds this on both the duplicate and the missing tail.
+TEST (SharedThroughputBudgetsTest, ConcurrentClaimsNeverCollideOnTheSameSlot) {
+    vayu::core::SharedThroughputBudgets budgets ({ "shared" });
+    constexpr int kThreads      = 8;
+    constexpr int kPerThread    = 25;
+    constexpr int64_t kNow      = 5000;
+    constexpr double kTargetRps = 10.0;
+
+    std::vector<int64_t> waits (
+    static_cast<size_t> (kThreads) * static_cast<size_t> (kPerThread));
+    std::vector<std::thread> threads;
+    threads.reserve (kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back ([&, t] {
+            for (int i = 0; i < kPerThread; ++i) {
+                waits[(static_cast<size_t> (t) * kPerThread) + static_cast<size_t> (i)] =
+                budgets.claim ("shared", kTargetRps, kNow);
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join ();
+    }
+
+    std::sort (waits.begin (), waits.end ());
+    const auto unique_end = std::unique (waits.begin (), waits.end ());
+    EXPECT_EQ (std::distance (waits.begin (), unique_end),
+    static_cast<long> (waits.size ()))
+    << "two concurrent claims took the same slot - a lost update on the "
+       "shared balance";
+    EXPECT_EQ (waits.front (), 0);
+    EXPECT_EQ (waits.back (), 100 * (static_cast<int64_t> (waits.size ()) - 1))
+    << "the last slot did not land where 200 claims at 10/s put it";
 }
 
 // ============================================================================
@@ -580,6 +758,144 @@ TEST_F (ElementsTimersRunnerTest, TheSameSeedReproducesTheSameThinkWaitAcrossTwo
 
     EXPECT_EQ (waited_ms_of (run_1), waited_ms_of (run_2))
     << "the same elements.seed must draw the same gaussian wait on both runs";
+}
+
+// ============================================================================
+// G. Scenario load run behaviour - `timer.throughput`'s reason to exist
+// (issue #1571), driven through `execute_scenario_load` directly, the shape
+// `elements_controllers_test.cpp` and `scenario_load_test.cpp` both use for a
+// load-path element: a hand-built one-step plan is all the virtual-user state
+// machine needs, and it keeps the assertion on wall-clock throughput rather
+// than on a run row a `RunManager` worker writes asynchronously.
+// ============================================================================
+
+class ElementsTimersLoadTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_elements_timers_load.db";
+
+    void SetUp () override {
+        vayu::http::global_init ();
+        cleanup ();
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+        server_ = std::make_unique<TimersMockServer> ();
+    }
+    void TearDown () override {
+        server_.reset ();
+        db_.reset ();
+        vayu::http::global_cleanup ();
+        cleanup ();
+    }
+    static void cleanup () {
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    /// A one-step plan carrying @p elements - one step per iteration, so a
+    /// completed step and a completed pass through the timer's scope are the
+    /// same event and `steps_executed` is the aggregate request count.
+    [[nodiscard]] vayu::core::ScenarioExecution plan_with (std::vector<json> elements) const {
+        vayu::core::ScenarioExecution execution;
+        execution.request.source        = "collection";
+        execution.request.collection_id = "col_test";
+
+        vayu::core::ScenarioStep step;
+        step.index              = 0;
+        step.request_id         = "req_a";
+        step.name               = "a";
+        step.request.method     = vayu::HttpMethod::GET;
+        step.request.url        = server_->url ("/ok");
+        step.request.timeout_ms = 5000;
+        step.stored_url         = step.request.url;
+        step.elements = vayu::tests::compiled_elements (std::move (elements));
+        execution.plan.steps.push_back (std::move (step));
+        return execution;
+    }
+
+    std::shared_ptr<vayu::core::ScenarioLoadState>
+    run (const json& config, const vayu::core::ScenarioExecution& execution) {
+        auto context =
+        std::make_shared<vayu::core::RunContext> ("test-timers-load", config);
+        context->scenario =
+        std::make_shared<const vayu::core::ScenarioExecution> (execution);
+        vayu::http::EventLoopConfig loop_config;
+        loop_config.max_concurrent = 50;
+        loop_config.max_per_host   = 50;
+        context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+        context->event_loop->start ();
+
+        auto base_scopes = vayu::http::routes::load_script_variable_scopes (
+        *db_, std::nullopt, context->scenario->request.collection_id);
+        auto state = vayu::core::execute_scenario_load (
+        context, *db_, *context->scenario, std::move (base_scopes));
+        context->event_loop->stop (true, std::chrono::milliseconds (10000));
+        return state;
+    }
+
+    /// Ten virtual users against @p elements for @p duration - the "across
+    /// all users" half of the case this kind exists for needs more than one.
+    static json load_config (const std::string& duration) {
+        return json{ { "scenario", { { "collectionId", "col_test" } } },
+            { "mode", "constant_concurrency" }, { "concurrency", 10 },
+            { "duration", duration } };
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    std::unique_ptr<TimersMockServer> server_;
+};
+
+// The motivating case: 600 per minute is 10 per second *in total*, whatever
+// the virtual-user count is. Ten users free-running against a loopback mock
+// would send thousands over these four seconds, and ten users each holding
+// their own 10/s cadence (what `perUser: true` asks for, asserted below)
+// would send hundreds - so the ceiling here separates the shared budget from
+// both. The floor is what proves the debt accounting keeps issuing after the
+// first slots are spent rather than bursting once and stalling: a one-shot
+// burst would stop at the ten a fresh budget can pay for.
+TEST_F (ElementsTimersLoadTest, SharedThroughputHoldsTheWholeRunToTheTargetRate) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_throughput_element_json ("el_rate", 600.0) });
+
+    auto state = run (load_config ("4s"), execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    // Four seconds at 10/s is 40, plus the one unpaced pass each of the ten
+    // virtual users makes before it has ever claimed - the first entry is
+    // never delayed, exactly as `timer.pacing`'s is not. The bounds are wide
+    // on purpose: the suite runs eight tests at a time and a contended box
+    // measurably under-delivers a closed-loop run, so the floor has to be a
+    // number such a box still clears while staying above the ten a burst
+    // alone would produce.
+    EXPECT_GE (executed, 18u) << "the shared rate stalled instead of issuing "
+                                 "slots for the whole run";
+    EXPECT_LE (executed, 90u)
+    << "ten virtual users sent far more than 600/minute between them - the "
+       "budget is being applied per user rather than across the run";
+}
+
+// `perUser: true` is the opt-in that reads the same number as a per-user
+// cadence: ten users at 60/minute each is 10 per second in aggregate, ten
+// times what the same config shared would allow (six slots over this window,
+// plus the same ten unpaced first passes - about sixteen, and that is a hard
+// ceiling no scheduling can push past). The floor below sits well clear of
+// it, which is what pins the default down: a `perUser` default that flipped
+// would drop this run to that sixteen.
+//
+// The per-user rate is deliberately an order of magnitude below the shared
+// test's, and the window longer, because this is the assertion that needs
+// the box to actually *deliver* its requests rather than wait out a timer.
+TEST_F (ElementsTimersLoadTest, PerUserThroughputGivesEveryVirtualUserItsOwnRate) {
+    auto execution = plan_with ({ vayu::tests::timer_throughput_element_json (
+    "el_rate", 60.0, /*scope_entry=*/true, /*per_user=*/true) });
+
+    auto state = run (load_config ("6s"), execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    EXPECT_GE (executed, 25u)
+    << "ten users at 60/minute each should approach 10/s in aggregate - this "
+       "looks like one budget shared between them, not a per-user rate";
+    EXPECT_LE (executed, 120u) << "the per-user rate did not hold at all";
 }
 
 } // namespace

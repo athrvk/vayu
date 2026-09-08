@@ -114,6 +114,21 @@ bool per_user    = true) {
         { { "everyMs", every_ms }, { "perUser", per_user }, { "_scopeEntry", scope_entry } } } };
 }
 
+/// @copydoc timer_pacing_element_json, a `timer.throughput` entry (issue
+/// #1571). @p per_user carries this kind's own default rather than
+/// `timer_pacing_element_json`'s: a throughput target is a property of the
+/// system under test, so it is shared across every virtual user unless a
+/// caller says otherwise.
+inline nlohmann::json timer_throughput_element_json (const std::string& id,
+double target_per_minute,
+bool scope_entry = true,
+bool per_user    = false) {
+    return { { "id", id }, { "kind", "timer.throughput" }, { "enabled", true },
+        { "config",
+        { { "targetPerMinute", target_per_minute }, { "perUser", per_user },
+        { "_scopeEntry", scope_entry } } } };
+}
+
 /// Compile an arbitrary list of element JSON entries (@ref extract_json_element_json,
 /// @ref script_element_json) the same way plan resolution does.
 inline std::shared_ptr<const std::vector<vayu::core::CompiledElement>>

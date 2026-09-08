@@ -15,6 +15,7 @@
 #include "vayu/core/elements.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <random>
 
 #include "vayu/core/scenario_plan.hpp"
@@ -102,6 +103,53 @@ int64_t SharedPacingClocks::advance (const std::string& name, int64_t every_ms, 
     } while (!clock.compare_exchange_weak (
     prev, deadline, std::memory_order_relaxed, std::memory_order_relaxed));
     return std::max<int64_t> (0, deadline - now_ms);
+}
+
+SharedThroughputBudgets::SharedThroughputBudgets (const std::vector<std::string>& names) {
+    for (const auto& name : names) {
+        index_of_id_.try_emplace (name, index_of_id_.size ());
+    }
+    // Sized exactly once, from the count just discovered - a `std::mutex` is
+    // neither copyable nor movable, so this vector can never be grown.
+    budgets_ = std::vector<Budget> (index_of_id_.size ());
+}
+
+int64_t SharedThroughputBudgets::claim (const std::string& name, double target_rps, int64_t now_ms) {
+    const auto found = index_of_id_.find (name);
+    if (found == index_of_id_.end () || !(target_rps > 0.0)) {
+        return 0;
+    }
+    Budget& budget = budgets_[found->second];
+    const std::lock_guard<std::mutex> guard (budget.lock);
+
+    if (budget.last_tick_ms == 0) {
+        budget.last_tick_ms = now_ms;
+    } else if (now_ms > budget.last_tick_ms) {
+        budget.balance +=
+        target_rps * (static_cast<double> (now_ms - budget.last_tick_ms) / 1000.0);
+        budget.last_tick_ms = now_ms;
+    }
+
+    // At most one slot survives a stretch with no claims: a run that idled
+    // resumes at its rate rather than releasing everything it "saved up" at
+    // once, which is the burst this kind exists to prevent.
+    budget.balance = std::min (budget.balance, 1.0);
+    budget.balance -= 1.0;
+    // A balance this close to zero is a slot the accrual paid for, arrived at
+    // through a rate that does not divide the elapsed time evenly - releasing
+    // it now rather than charging a rounded-up millisecond for a billionth of
+    // a slot is what keeps the rate exact over a long run.
+    constexpr double kSettledSlot = 1e-9;
+    if (budget.balance >= -kSettledSlot) {
+        return 0;
+    }
+    // The fraction is carried, never rounded away: the wait is computed from
+    // the whole outstanding balance each time, so a rate that does not divide
+    // a millisecond evenly stays on rate instead of drifting one rounding
+    // error per slot. Milliseconds first, then the rate: an exact balance
+    // over an exact rate then divides exactly (3 slots at 10/s is 300ms, not
+    // 300.00000000000006 rounded up to 301).
+    return static_cast<int64_t> (std::ceil ((-budget.balance * 1000.0) / target_rps));
 }
 
 nlohmann::json ElementOutcome::to_json () const {

@@ -84,24 +84,6 @@ are things Vayu plans to catch up on:
   test from many machines. Vayu runs from one.
 - **You have existing `.jmx` test plans**, or a team fluent in them. There is no
   importer for them here.
-- **Your load model needs a constant-throughput shared-rate timer.** Think
-  time and pacing timers work under load now (`timer.think`, including a
-  gaussian option, and `timer.pacing`, including its shared-cadence case,
-  `perUser: false` - one cadence held across every virtual user, not one per
-  user), and logic controllers - conditionals, once-only, throughput, loops
-  and named transactions - are elements (`control.if` / `.once` / `.switch`
-  / `.throughput` / `.loop` / `.transaction`) that run fully both in a
-  sequential collection run and under load, including `control.switch` /
-  `.loop`'s own jump/repeat and `control.throughput`'s shared, cross-VU
-  budget (`perUser: false`, #1569). What still doesn't: `timer.throughput`
-  (a constant-throughput timer with a shared, cross-VU rate, JMeter's
-  Constant Throughput Timer - #1571, tracked to reuse the same
-  `SharedPacingClocks` primitive `timer.pacing`'s own shared cadence
-  introduced). Correlation across a scenario's steps - a login's token
-  reaching the next step's header, per virtual user - does work under load
-  now too: mark the extracting element or script `inline` (or set the run's
-  `elements.scripts` override), or let it stay in the post-run replay by
-  default.
 - **It has to be JVM-native** for your infrastructure, monitoring, or compliance
   reasons.
 

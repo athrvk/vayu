@@ -12,6 +12,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -230,19 +231,26 @@ MetricsCollector::Percentiles StepHistograms::percentiles (size_t step) const {
 }
 
 // ============================================================================
-// Cross-VU shared pacing clocks (issue #1570)
+// Cross-VU shared pacing clocks (issue #1570) and rate budgets (issue #1571)
 // ============================================================================
 
-std::vector<std::string> shared_pacing_element_ids (const ScenarioPlan& plan) {
+namespace {
+
+/// Every enabled element of @p kind in @p plan asking for cross-VU state
+/// rather than per-VU (`perUser: false`, whether stated or left to @p
+/// per_user_default), deduplicated and in plan order - the one scan both
+/// shared primitives are sized from.
+std::vector<std::string>
+shared_element_ids (const ScenarioPlan& plan, std::string_view kind, bool per_user_default) {
     std::vector<std::string> ids;
     for (const auto& step : plan.steps) {
         if (!step.elements) {
             continue;
         }
         for (const auto& element : *step.elements) {
-            if (element.kind != "timer.pacing" || !element.enabled ||
-            element.config.value ("perUser", true)) {
-                continue; // per-VU case (the default) needs no shared clock.
+            if (element.kind != kind || !element.enabled ||
+            element.config.value ("perUser", per_user_default)) {
+                continue; // per-VU case needs no shared state.
             }
             if (std::find (ids.begin (), ids.end (), element.id) == ids.end ()) {
                 ids.push_back (element.id);
@@ -250,6 +258,16 @@ std::vector<std::string> shared_pacing_element_ids (const ScenarioPlan& plan) {
         }
     }
     return ids;
+}
+
+} // namespace
+
+std::vector<std::string> shared_pacing_element_ids (const ScenarioPlan& plan) {
+    return shared_element_ids (plan, "timer.pacing", /*per_user_default=*/true);
+}
+
+std::vector<std::string> shared_throughput_element_ids (const ScenarioPlan& plan) {
+    return shared_element_ids (plan, "timer.throughput", /*per_user_default=*/false);
 }
 
 StepElementTallies::StepElementTallies (const ScenarioPlan& plan) {
@@ -1014,14 +1032,14 @@ class ScenarioLoadDriver {
      * Called here, before the VU can next be selected, because `step.before`
      * (where `timer.pacing` actually dispatches) only ever runs *after*
      * `take_ready_vu` has already chosen this VU - too late to defer without
-     * blocking the caller. @p shared_pacing (issue #1570) is the run's own
-     * cross-VU clock set, threaded through unconditionally: a `perUser: true`
-     * element never touches it, and a plan with no shared-pacing element at
-     * all leaves it empty.
+     * blocking the caller. @p shared (issues #1570, #1571) is the run's own
+     * cross-VU coordination state, threaded through unconditionally: a
+     * `perUser: true` element never touches it, and a plan with nothing
+     * shared in it leaves both members empty.
      */
     static void schedule_next_entry_wait (const ScenarioStep& next_step,
     VirtualUser& vu,
-    SharedPacingClocks& shared_pacing) {
+    const SharedScheduleState& shared) {
         if (!next_step.elements || next_step.elements->empty ()) {
             return;
         }
@@ -1031,7 +1049,7 @@ class ScenarioLoadDriver {
                 continue;
             }
             if (auto delay = compiled.element->scheduled_ready_delay_ms (
-                vu.pacing_state, &shared_pacing, now)) {
+                vu.pacing_state, shared, now)) {
                 vu.ready_at_ms = std::max (vu.ready_at_ms, now + *delay);
             }
         }
@@ -1154,7 +1172,9 @@ class ScenarioLoadDriver {
         // pacing must hold whether the pass that just ended succeeded or
         // not - "regardless of the folder's own duration" includes an
         // error's duration too.
-        schedule_next_entry_wait (plan.steps[vu->step], *vu, state->shared_pacing);
+        schedule_next_entry_wait (plan.steps[vu->step], *vu,
+        SharedScheduleState{ .pacing = &state->shared_pacing,
+        .throughput                  = &state->shared_throughput_budgets });
 
         // Released *before* handle_result, which is what increments the
         // completion count `in_flight()` is derived from: a VU that became

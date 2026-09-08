@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <random>
@@ -52,9 +53,12 @@ struct ScenarioPlan;
  * @brief Cross-instance shared clocks, one atomic per name (issue #1570) -
  *        `timer.pacing(perUser: false)`'s coordination for one cadence
  *        shared across every virtual user under a scenario load run, kept
- *        generic over what a "name" is so a future kind with the same
- *        shape (`timer.throughput`'s own shared-rate case, issue #1571,
- *        names this type as its intended reuse) never needs a second one.
+ *        generic over what a "name" is so a future kind holding one *fixed
+ *        interval* per name never needs a second one. A kind coordinating a
+ *        fractional *rate* wants `SharedThroughputBudgets` below instead
+ *        (issue #1571 expected to reuse this type and could not: a token
+ *        bucket's debt is a `double` beside a timestamp, and no single
+ *        compare-exchange swaps both).
  *
  * Sized once at construction from an explicit name list the caller already
  * knows - `std::atomic` is neither copyable nor movable, so growing this
@@ -83,6 +87,85 @@ class SharedPacingClocks {
     private:
     std::vector<std::atomic<int64_t>> clocks_;
     std::unordered_map<std::string, size_t> index_of_id_;
+};
+
+/**
+ * @brief Cross-instance shared rate budgets, one token bucket per name (issue
+ *        #1571) - `timer.throughput(perUser: false)`'s coordination for one
+ *        rate ("50 checkouts per minute across all users") shared by every
+ *        virtual user of a scenario load run.
+ *
+ * The sibling of `SharedPacingClocks` above and sized the same way, from an
+ * explicit name list the caller already knows, for the same reason: the scan
+ * for which names need a budget lives with whoever knows what a plan is
+ * (`shared_throughput_element_ids`, `scenario_load.cpp`), not here.
+ *
+ * Unlike that type this one is mutex-guarded rather than lock-free. Its state
+ * is a fractional `double` beside a timestamp, which no single
+ * compare-exchange can swap as a unit, and the alternatives - a seqlock, or
+ * packing both into one 128-bit word - buy nothing measurable for a critical
+ * section that is three arithmetic operations long and entered once per
+ * completed step, not once per request. Correctness of the debt arithmetic is
+ * what this type exists for; lock-freedom is not.
+ */
+class SharedThroughputBudgets {
+    public:
+    explicit SharedThroughputBudgets (const std::vector<std::string>& names);
+
+    /**
+     * Takes one slot of @p name's shared rate and returns how long the caller
+     * must hold off before using it, clamped to never negative.
+     *
+     * Tokens accrue at @p target_rps between calls and the *fraction* left
+     * over is carried, exactly as `take_due_requests` (`load_pacing.hpp`)
+     * carries it on the open-loop side - a rate of 3/s issues its slots 334ms,
+     * 333ms, 333ms apart rather than losing a third of a slot every time.
+     * Taking a slot the budget cannot yet afford drives the balance negative,
+     * which is the reservation: the next caller waits out that debt plus its
+     * own, so N virtual users claiming at once are spread across the rate
+     * rather than all released together.
+     *
+     * A stretch with no claims at all banks at most one slot, so a run that
+     * idles resumes at its configured rate instead of firing a burst it
+     * "saved up". Returns 0 for a name this instance was not sized for or a
+     * non-positive rate, on the same defensive-default rule
+     * `SharedPacingClocks::advance` states.
+     */
+    [[nodiscard]] int64_t claim (const std::string& name, double target_rps, int64_t now_ms);
+
+    private:
+    struct Budget {
+        std::mutex lock;
+        /// Whole and fractional slots available; negative once claims have
+        /// reserved further ahead than the rate has yet paid for.
+        double balance = 1.0; // One free slot, so the first claim never waits.
+        /// 0 until the first claim, which starts the clock rather than
+        /// accruing a run's worth of tokens from an epoch timestamp.
+        int64_t last_tick_ms = 0;
+    };
+    /// Sized exactly once at construction, like `SharedPacingClocks::clocks_`
+    /// and for the same reason: `std::mutex` is neither copyable nor movable,
+    /// so this vector can never be grown or reallocated afterwards.
+    std::vector<Budget> budgets_;
+    std::unordered_map<std::string, size_t> index_of_id_;
+};
+
+/**
+ * The run-scoped, cross-virtual-user state a scenario load run hands to
+ * `Element::scheduled_ready_delay_ms` (issues #1570, #1571). One struct rather
+ * than a parameter per primitive: every kind that needs none of them ignores
+ * one argument instead of gaining a new one each time a kind with its own
+ * coordination shape is added, and the single call site
+ * (`schedule_next_entry_wait`, `scenario_load.cpp`) fills it in once.
+ *
+ * Both members are null outside a scenario load run - no other caller reaches
+ * this hook at all today - and a kind reading one must say what it does
+ * without it (`timer.pacing` and `timer.throughput` both fall back to no
+ * wait, which is what a run with no shared coordination would produce).
+ */
+struct SharedScheduleState {
+    SharedPacingClocks* pacing          = nullptr;
+    SharedThroughputBudgets* throughput = nullptr;
 };
 
 /**
@@ -396,19 +479,20 @@ class Element {
      * sleeping inside `apply` (which the load path never lets block). @p
      * pacing_state is the same per-VU map `ElementContext::pacing_state`
      * would bind for this VU; a kind that writes through it here must leave
-     * `apply` free to run again without double-booking the wait. @p
-     * shared_pacing (issue #1570) is the cross-VU sibling for a kind whose
-     * own config asks for one cadence shared across every virtual user
-     * (`timer.pacing`'s `perUser: false`) instead of one per VU; never null
-     * on the load path, which always constructs one from the plan even when
-     * nothing in it needs it.
+     * `apply` free to run again without double-booking the wait. @p shared
+     * (issues #1570, #1571) carries the cross-VU coordination a kind whose
+     * own config asks for one cadence or one rate shared across every virtual
+     * user (`timer.pacing` / `timer.throughput` with `perUser: false`) uses
+     * instead of the per-VU map; its members are non-null on the load path,
+     * which always constructs both from the plan even when nothing in it
+     * needs either.
      */
     [[nodiscard]] virtual std::optional<int64_t> scheduled_ready_delay_ms (
     std::unordered_map<std::string, int64_t>& pacing_state,
-    SharedPacingClocks* shared_pacing,
+    const SharedScheduleState& shared,
     int64_t now_ms) const {
         (void)pacing_state;
-        (void)shared_pacing;
+        (void)shared;
         (void)now_ms;
         return std::nullopt;
     }
