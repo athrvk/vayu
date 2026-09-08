@@ -153,6 +153,57 @@ TEST (LogRecordSchemaTest, ACliRecordValidatesUnderTheCliBranch) {
     EXPECT_TRUE (validates (schema, records.back ())) << records.back ().dump ();
 }
 
+// Issue #1576: 51 call sites that used to concatenate "key=value" text into
+// `msg` were converted to a fixed sentence plus structured `fields`. These
+// two cases mirror real converted sites and assert both halves of the fix:
+// the fields land as their own top-level keys (validating against the
+// schema) and `msg` carries no leftover `=` from the old formatting.
+TEST (LogRecordSchemaTest, AConvertedCallSiteFieldsValidateAndMsgHasNoRawEquals) {
+    const nlohmann::json schema = load_schema ();
+    ScratchLogDir dir;
+    Logger::instance ().init (dir.string (), "engine");
+    Logger::instance ().set_max_file_bytes (0);
+    Logger::instance ().set_file_level (Logger::Level::DEBUG);
+
+    // Mirrors http/routes/cookies.cpp's converted call: "scope=" + scope +
+    // ", cleared=" + count is now a fixed sentence with two fields.
+    vayu::utils::log_info ("http", "Cleared cookies",
+    { { "scope", std::string ("all") }, { "cleared", size_t (3) } });
+    Logger::instance ().flush ();
+
+    const auto records = read_records (dir.path ());
+    ASSERT_EQ (records.size (), 1u);
+    const auto& record = records.front ();
+    EXPECT_TRUE (validates (schema, record)) << record.dump ();
+    EXPECT_EQ (record.at ("scope"), "all");
+    EXPECT_EQ (record.at ("cleared"), 3);
+    EXPECT_EQ (record.at ("msg").get<std::string> ().find ('='), std::string::npos)
+    << record.at ("msg");
+}
+
+TEST (LogRecordSchemaTest, AConvertedNumericFieldStaysNativeJsonNotAStringifiedSuffix) {
+    const nlohmann::json schema = load_schema ();
+    ScratchLogDir dir;
+    Logger::instance ().init (dir.string (), "engine");
+    Logger::instance ().set_max_file_bytes (0);
+    Logger::instance ().set_file_level (Logger::Level::DEBUG);
+
+    // Mirrors http/routes/globals.cpp's converted call: "count=" +
+    // std::to_string (n) is now a native JSON integer field, not text.
+    vayu::utils::log_info (
+    "http", "POST /globals - Saving global variables", { { "count", 5 } });
+    Logger::instance ().flush ();
+
+    const auto records = read_records (dir.path ());
+    ASSERT_EQ (records.size (), 1u);
+    const auto& record = records.front ();
+    EXPECT_TRUE (validates (schema, record)) << record.dump ();
+    EXPECT_TRUE (record.at ("count").is_number_integer ());
+    EXPECT_EQ (record.at ("count"), 5);
+    EXPECT_EQ (record.at ("msg").get<std::string> ().find ('='), std::string::npos)
+    << record.at ("msg");
+}
+
 // Mutation-check: change `record.at ("cat")` in the fixture below to a
 // category from the wrong branch (`"db"` under `src: "cli"` is fine since
 // `cli`'s enum is a superset, but `"boundary"`, `renderer`'s own, is not) and
