@@ -14,9 +14,38 @@
 
 #include "vayu/core/elements.hpp"
 
+#include <algorithm>
 #include <random>
 
 namespace vayu::core {
+
+SharedPacingClocks::SharedPacingClocks (const std::vector<std::string>& names) {
+    for (const auto& name : names) {
+        index_of_id_.try_emplace (name, index_of_id_.size ());
+    }
+    // Sized exactly once, from the count just discovered above - growing a
+    // `vector<atomic<...>>` afterwards would need to move-construct an
+    // atomic, which is neither copyable nor movable.
+    clocks_ = std::vector<std::atomic<int64_t>> (index_of_id_.size ());
+    for (auto& clock : clocks_) {
+        clock.store (0, std::memory_order_relaxed);
+    }
+}
+
+int64_t SharedPacingClocks::advance (const std::string& name, int64_t every_ms, int64_t now_ms) {
+    const auto found = index_of_id_.find (name);
+    if (found == index_of_id_.end ()) {
+        return 0;
+    }
+    std::atomic<int64_t>& clock = clocks_[found->second];
+    int64_t prev                = clock.load (std::memory_order_relaxed);
+    int64_t deadline            = 0;
+    do {
+        deadline = prev <= 0 ? now_ms : prev + every_ms;
+    } while (!clock.compare_exchange_weak (
+    prev, deadline, std::memory_order_relaxed, std::memory_order_relaxed));
+    return std::max<int64_t> (0, deadline - now_ms);
+}
 
 nlohmann::json ElementOutcome::to_json () const {
     nlohmann::json node;

@@ -34,14 +34,17 @@
  *
  * `perUser: false` (one shared cadence for every virtual user, JMeter's "All
  * threads" pacing) is accepted for the sequential run, where a single
- * virtual user makes it indistinguishable from `perUser: true`, but refused
- * for a scenario load run: coordinating a shared deadline across many VUs
- * without either blocking a producer thread or racing two VUs onto the same
- * slot is a materially different piece of work than the per-VU case this
- * issue's acceptance criteria ask for, and is tracked as its own follow-up
- * rather than rushed into this kind. `validate_scenario_load_config`
- * (`scenario_load.cpp`) is where that refusal lives, not here, because only
- * the plan resolver knows a run is a load run at all.
+ * virtual user makes it indistinguishable from `perUser: true` (both read
+ * and write the one map `ElementContext::pacing_state` binds there). Under a
+ * scenario load run (issue #1570) it instead advances a shared, run-scoped
+ * `SharedPacingClocks` entry through a compare-exchange retry rather than
+ * the per-VU `pacing_state` map `perUser: true` uses - the same "next
+ * deadline is the last one plus everyMs" math, just applied to one atomic so
+ * two VUs' concurrent completions never race onto the same slot and neither
+ * ever blocks the producer thread for a lock. `scheduled_ready_delay_ms`
+ * below is where that split is made; `apply`'s own `blocking_allowed` branch
+ * never runs under load at all (see its own comment), so it never needs to
+ * know which case it is.
  */
 
 #include "vayu/core/elements.hpp"
@@ -78,7 +81,8 @@ class TimerPacingElement final : public Element {
     : config_ (std::move (config)),
       element_id_ (config_.value ("_elementId", std::string{})),
       scope_entry_ (config_.value ("_scopeEntry", false)),
-      every_ms_ (config_.value ("everyMs", int64_t{ 0 })) {
+      every_ms_ (config_.value ("everyMs", int64_t{ 0 })),
+      per_user_ (config_.value ("perUser", true)) {
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -139,6 +143,7 @@ class TimerPacingElement final : public Element {
 
     [[nodiscard]] std::optional<int64_t> scheduled_ready_delay_ms (
     std::unordered_map<std::string, int64_t>& pacing_state,
+    SharedPacingClocks* shared_pacing,
     int64_t now_ms) const override {
         if (!scope_entry_) {
             return std::nullopt;
@@ -152,6 +157,14 @@ class TimerPacingElement final : public Element {
         // outcome truthfully once the (already-elapsed) wait is confirmed.
         // Disclosed in the PR as a known load-path limitation of the
         // override, not present on the sequential run.
+        if (!per_user_) {
+            // One cadence shared across every virtual user (issue #1570):
+            // `shared_pacing` is always non-null here, sized by the plan
+            // scan that found this very element's id in the first place.
+            return shared_pacing != nullptr ?
+            shared_pacing->advance (element_id_, every_ms_, now_ms) :
+            int64_t{ 0 };
+        }
         const int64_t last_started = pacing_state[element_id_];
         const int64_t deadline = last_started <= 0 ? now_ms : last_started + every_ms_;
         pacing_state[element_id_] = deadline;
@@ -163,6 +176,7 @@ class TimerPacingElement final : public Element {
     std::string element_id_;
     bool scope_entry_;
     int64_t every_ms_;
+    bool per_user_;
 };
 
 } // namespace

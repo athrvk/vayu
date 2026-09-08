@@ -19,12 +19,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <memory>
 #include <random>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -200,6 +202,76 @@ TEST (DeriveVuRngTest, DifferentVuIndexProducesADifferentFirstDraw) {
     << "two adjacent VU indices collided on their very first draw - "
        "astronomically unlikely unless derive_vu_rng regressed to something "
        "like a plain XOR of the seed and the index";
+}
+
+// ============================================================================
+// F. SharedPacingClocks - a direct call, no run needed (issue #1570).
+// ============================================================================
+
+TEST (SharedPacingClocksTest, AnUnstartedNameIsNeverDelayed) {
+    vayu::core::SharedPacingClocks clocks ({ "a" });
+    EXPECT_EQ (clocks.advance ("a", 100, 1000), 0)
+    << "a name's first-ever claim must never be delayed";
+}
+
+TEST (SharedPacingClocksTest, ASecondClaimWaitsOutTheFirstsInterval) {
+    vayu::core::SharedPacingClocks clocks ({ "a" });
+    ASSERT_EQ (clocks.advance ("a", 100, 1000), 0);
+    EXPECT_EQ (clocks.advance ("a", 100, 1010), 90)
+    << "10ms into a 100ms cadence should leave 90ms to wait";
+}
+
+TEST (SharedPacingClocksTest, DifferentNamesHoldIndependentClocks) {
+    vayu::core::SharedPacingClocks clocks ({ "a", "b" });
+    ASSERT_EQ (clocks.advance ("a", 100, 1000), 0);
+    EXPECT_EQ (clocks.advance ("b", 100, 1000), 0)
+    << "b's first claim was delayed by a's history - the clocks are sharing "
+       "state that should be per-name";
+}
+
+TEST (SharedPacingClocksTest, AnUnknownNameIsANoOp) {
+    vayu::core::SharedPacingClocks clocks ({ "a" });
+    EXPECT_EQ (clocks.advance ("never-registered", 100, 1000), 0);
+}
+
+// Eight threads race 50 claims each onto one shared 10ms clock. Every claim
+// must land on its own deadline - if the compare-exchange loop ever lost a
+// race, two threads would compute the same deadline from the same stale
+// `prev` and this collapses two distinct slots into one.
+//
+// Mutation check: replacing the `compare_exchange_weak` loop with a plain
+// (non-atomic) load-then-store reproduces exactly that collision, and this
+// test reds with duplicate deadlines.
+TEST (SharedPacingClocksTest, ConcurrentClaimsNeverCollideOnTheSameSlot) {
+    vayu::core::SharedPacingClocks clocks ({ "shared" });
+    constexpr int kThreads     = 8;
+    constexpr int kPerThread   = 50;
+    constexpr int64_t kNow     = 5000;
+    constexpr int64_t kEveryMs = 10;
+
+    std::vector<int64_t> deadlines (
+    static_cast<size_t> (kThreads) * static_cast<size_t> (kPerThread));
+    std::vector<std::thread> threads;
+    threads.reserve (kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back ([&, t] {
+            for (int i = 0; i < kPerThread; ++i) {
+                const int64_t wait = clocks.advance ("shared", kEveryMs, kNow);
+                deadlines[(static_cast<size_t> (t) * kPerThread) + static_cast<size_t> (i)] =
+                kNow + wait;
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join ();
+    }
+
+    std::sort (deadlines.begin (), deadlines.end ());
+    const auto unique_end = std::unique (deadlines.begin (), deadlines.end ());
+    EXPECT_EQ (std::distance (deadlines.begin (), unique_end),
+    static_cast<long> (deadlines.size ()))
+    << "two concurrent claims landed on the same deadline - the "
+       "compare-exchange loop lost a race";
 }
 
 // ============================================================================
