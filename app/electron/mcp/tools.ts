@@ -2233,6 +2233,12 @@ const thresholdsInput = z
 				"When true, a missed budget sets this run's terminal status to failed rather than only reporting the verdict. Default false."
 			),
 	})
+	// Zod's object() strips any key it doesn't name, which would
+	// silently drop a `custom.<name>.<stat>` budget (issue #1500)
+	// before it ever reached `POST /runs`. `catchall` accepts it
+	// instead and forwards it as-is; the engine's own
+	// `validate_thresholds` is the real gate on its shape.
+	.catchall(z.number())
 	.refine((t) => Object.keys(t).filter((key) => key !== "failRun").length > 0, {
 		// `error`, not zod 3's `message`: v4 still reads the old key as a
 		// deprecated alias, and a deprecated alias is what the next major
@@ -2241,7 +2247,7 @@ const thresholdsInput = z
 	})
 	.optional()
 	.describe(
-		"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Omit for a run that is measured but not judged."
+		"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Also accepts `custom.<name>.<stat>` for a declared metric.record name, `<stat>` one of p50/p95/p99/max/rate/value. Omit for a run that is measured but not judged."
 	);
 
 const streamInput = z

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/custom_metric_type.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/transport_policy.hpp"
@@ -356,6 +357,19 @@ struct ScriptContext {
      * unbounded, which is the state issue #1188 exists to end.
      */
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+
+    /**
+     * @brief `pm.metrics`'s write destination (issue #1500), or null to
+     *        refuse it.
+     *
+     * Null is the ordinary case for a context built by hand and for the
+     * deferred `tests` replay - a replayed sample is not the run, the same
+     * "not available here" reasoning `in_scenario` documents for
+     * `pm.execution`. Bound by the scenario runner and by the load path's
+     * inline `step.before` / `step.after` hooks (`scenario_load.cpp`), both
+     * to the run's own `MetricsCollector::record_custom_metric`.
+     */
+    std::function<void (const std::string& name, vayu::core::CustomMetricType type, double value)> record_metric;
 
     /**
      * @brief Expose @p req to the script as a mutable `pm.request`.

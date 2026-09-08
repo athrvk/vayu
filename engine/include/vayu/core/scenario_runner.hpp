@@ -379,6 +379,10 @@ struct ScenarioSummaryInputs {
     /// run stores its own copy here because it builds its own summary
     /// payload rather than a `RunSummaryInputs`.
     std::optional<ThresholdOutcome> thresholds;
+    /// This run's `metric.record` / `pm.metrics` values (issue #1500), read
+    /// off the run's `MetricsCollector` after the last iteration - the same
+    /// absent-when-none rule `coverage` follows.
+    std::optional<std::map<std::string, CustomMetricSummary>> custom_metrics;
 };
 
 /**

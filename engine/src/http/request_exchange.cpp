@@ -634,6 +634,9 @@ ExchangeInputs inputs) {
         // iteration, and a test script asserting against the row its request
         // was built from is the point of a data-driven run.
         ctx.iteration_data = inputs.iteration_data;
+        // `pm.metrics` (issue #1500), shared with `metric.record` below - see
+        // `ExchangeInputs::record_metric`.
+        ctx.record_metric = inputs.record_metric;
     };
 
     static const std::vector<vayu::core::CompiledElement> NO_ELEMENTS;
@@ -688,6 +691,7 @@ ExchangeInputs inputs) {
         .rng             = inputs.rng,
         .pacing_state    = inputs.pacing_state,
         .timers_override = inputs.timers_override,
+        .record_metric   = inputs.record_metric,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,

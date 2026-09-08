@@ -72,6 +72,7 @@ class ElementKindsTest : public ::testing::Test {
             .post_script_result = post_result_,
             .set_variable       = {},
             .should_stop        = {},
+            .record_metric      = {},
         };
         ctx.set_variable = [this] (std::string_view scope,
                            const std::string& name, const std::string& value) {
