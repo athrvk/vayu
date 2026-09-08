@@ -490,6 +490,10 @@ vayu::Request& request) {
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             script_ctx.cookie_read_lines = &vu.cookies;
             bind_step_identity (script_ctx, step, iteration, vu_index);
+            script_ctx.record_metric = [&context] (const std::string& name,
+                                       vayu::core::CustomMetricType type, double value) {
+                context->metrics_collector->record_custom_metric (name, type, value);
+            };
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Pre-request");
             vu.scope_overlay.replace_from (scopes);
@@ -516,6 +520,7 @@ vayu::Request& request) {
         .rng              = &vu.rng,
         .pacing_state     = &vu.pacing_state,
         .timers_override  = &context->timers_override,
+        .record_metric    = nullptr, // metric.record is step.after only.
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore, ctx,
@@ -592,6 +597,10 @@ const vayu::Response& response) {
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             script_ctx.cookie_read_lines = &vu.cookies;
             bind_step_identity (script_ctx, step, vu.iteration, vu.index);
+            script_ctx.record_metric = [&context] (const std::string& name,
+                                       vayu::core::CustomMetricType type, double value) {
+                context->metrics_collector->record_custom_metric (name, type, value);
+            };
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Post-request");
             vu.scope_overlay.replace_from (scopes);
@@ -617,6 +626,10 @@ const vayu::Response& response) {
         .rng              = &vu.rng,
         .pacing_state     = &vu.pacing_state,
         .timers_override  = &context->timers_override,
+        .record_metric =
+        [&context] (const std::string& name, vayu::core::CustomMetricType type, double value) {
+            context->metrics_collector->record_custom_metric (name, type, value);
+        },
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx, *step.elements,
@@ -914,6 +927,7 @@ class ScenarioLoadDriver {
             .rng              = &vu.rng,
             .pacing_state     = &vu.pacing_state,
             .timers_override  = &context->timers_override,
+            .record_metric    = nullptr, // metric.record is step.after only.
         };
         vayu::core::ElementPipeline::run (
         vayu::core::Phase::StepBetween, ctx, *completed_step.elements, outcomes);

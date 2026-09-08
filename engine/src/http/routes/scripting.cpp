@@ -1661,6 +1661,48 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_execution_skipRequest" } });
 
     // ========================================
+    // pm.metrics - custom trends, counters and rates (issue #1500)
+    // ========================================
+    completions.push_back ({ { "label", "pm.metrics" }, { "kind", KIND_VARIABLE },
+    { "insertText", "pm.metrics" }, { "detail", "Record a custom trend, counter or rate" },
+    { "documentation",
+    "Record a named value beside the run's built-in phases, so it shows up "
+    "in the report and can be used as a custom.<name>.<stat> threshold.\n\n"
+    "Only where a run's collector is reachable: a bare Send and the deferred "
+    "replay against a recorded sample have neither, so every method throws "
+    "there rather than being quietly dropped." },
+    { "sortText", "0_pm_metrics" } });
+
+    completions.push_back ({ { "label", "pm.metrics.trend" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.metrics.trend(\"${1:name}\", ${2:value})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.metrics.trend(name: string, value: number): void" },
+    { "documentation",
+    "Add one sample to a named distribution - the report carries its "
+    "count, p50, p95, p99 and max.\n\nExample:\npm.metrics.trend('ttfb', "
+    "pm.response.responseTime);" },
+    { "sortText", "1_pm_metrics_trend" } });
+
+    completions.push_back ({ { "label", "pm.metrics.counter" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.metrics.counter(\"${1:name}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.metrics.counter(name: string, increment?: number): void" },
+    { "documentation",
+    "Add to a named running total, 1 when no increment is given.\n\n"
+    "Example:\npm.metrics.counter('bytesOut', pm.response.size().total);" },
+    { "sortText", "1_pm_metrics_counter" } });
+
+    completions.push_back ({ { "label", "pm.metrics.rate" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.metrics.rate(\"${1:name}\", ${2:value})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.metrics.rate(name: string, value: boolean): void" },
+    { "documentation",
+    "Add one true/false sample toward a named percentage.\n\n"
+    "Example:\npm.metrics.rate('cacheHit', pm.response.headers.get('X-Cache') "
+    "=== 'HIT');" },
+    { "sortText", "1_pm_metrics_rate" } });
+
+    // ========================================
     // pm.crypto - Hashing, and the base64 globals that go with it
     // ========================================
     completions.push_back ({ { "label", "pm.crypto" }, { "kind", KIND_VARIABLE },

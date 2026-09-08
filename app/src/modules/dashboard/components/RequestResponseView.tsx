@@ -31,6 +31,7 @@ import {
 import {
 	SampleRetentionNote,
 	CapturedDataWarning,
+	CustomMetricsSummary,
 	ThresholdVerdict,
 	TestValidationSummary,
 } from "@/components/shared";
@@ -230,6 +231,11 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 			{/* The whole-run verdict, above the per-response one: a run can meet
 			    every assertion and still miss the budget it was run to check. */}
 			<ThresholdVerdict verdict={report.thresholdValidation} />
+
+			{/* The run's own named trends, counters and rates (issue #1500),
+			    reported rather than judged - absent for a run that never called
+			    pm.metrics or metric.record. */}
+			<CustomMetricsSummary customMetrics={report.customMetrics} />
 
 			{/* Test Validation Results - the aggregate card, shared with History's
 			    Overview so the numbers cannot drift. This view names each failure

@@ -763,6 +763,7 @@ through it; add a spelling to that table, never to a route.
 |-----|----------------------------|
 | `docs/engine/api-reference.md` | **Any** endpoint, payload, or status code |
 | `docs/engine/architecture.md` | Core engine structure, auth resolution |
+| `docs/engine/elements.md` | The element registry, a kind's config or phase, the pipeline |
 | `docs/engine/db-schema.md` | Schema, migrations, stored JSON |
 | `docs/engine/elements.md` | An element kind, its phase, or the pipeline that runs one |
 | `docs/engine/scripting.md` | Script globals, hooks, sandbox limits |

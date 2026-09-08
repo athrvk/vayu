@@ -94,6 +94,7 @@ shipping silently mismatched.
 | `control.throughput` | controller | `step.before` | #1515 |
 | `control.loop` | controller | `step.between` | #1515 |
 | `control.transaction` | transaction | `step.after` | #1515 |
+| `metric.record` | metric | `step.after` | #1500 |
 
 `extract.json` reads a JSONPath subset - `$.a.b`, `[n]`, `[*]`, `..name`; a filter (`[?...]`) is
 refused at validate. `extract.regex` compiles its `pattern` once, at plan-resolution time, and
@@ -136,6 +137,24 @@ yet implemented, for the same cross-VU coordination reason.
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
 step, through `ElementContext`'s lazily filled slot - a body over `maxElementBodyBytes` (default 1
 MiB) is not parsed, and every such kind on that step reports `skipped` with the reason.
+
+`metric.record` (issue #1500) reads a value off the response and records it as a custom `trend`
+(a distribution, reported as `count`/`p50`/`p95`/`p99`/`max`), `counter` (a running total) or `rate`
+(share of occurrences a `condition` matched, as a percentage). A trend or counter's `source` is one
+of `{jsonpath}` (the same subset `extract.json` reads), `{header}`, `{latency}`, `{status}` or
+`{size}`; a rate's is `{condition: {field, operator, value}}` - a small, self-contained comparison
+rather than the full `control.if` grammar #1515 defines, which is not yet part of this registry and
+would be a needless dependency for what a rate condition actually needs. `metric.record` writes
+through `ElementContext::record_metric`, a callback bound only when a run's `MetricsCollector` is
+reachable (the sequential run, a scenario load run, design mode's `script.pre`/`script.post`); a
+bare design send has none, and the element reports `skipped` there rather than recording nowhere
+silently. `pm.metrics.trend`/`.counter`/`.rate` (`docs/engine/scripting.md`) write through the same
+callback from a script, so both surfaces share one collector-side implementation
+(`MetricsCollector::record_custom_metric`). Every run is capped at
+`constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES` (32) distinct names, refused at
+`Registry::validate` time for a declared `metric.record` - see `api-reference.md`'s `customMetrics`
+and thresholds sections for how a recorded value reaches the report and a `custom.<name>.<stat>`
+budget.
 
 `script.pre` / `script.post`'s `apply` never touches `ScriptEngine` itself: it calls back into
 `ElementContext::run_pre_script` / `run_post_script`, which the caller (`execute_exchange`, and the
@@ -225,8 +244,8 @@ the same array under the same key - one object, two homes, on the `scripts` node
 A scenario load run's `submit_one` (the producer, one virtual user at a time) runs
 `step.before` before binding and submitting a request; its completion runs `step.after`
 once the response is in hand, before the virtual user (VU) is released back to the pool. A
-**declarative** kind (`extract.*`, `assert.*`) always runs at both points, read off the
-kind's registered `hotPath`, never a `kind ==` comparison (the extensibility contract's rule
+**declarative** kind (`extract.*`, `assert.*`, `metric.record`) always runs at both points, read
+off the kind's registered `hotPath`, never a `kind ==` comparison (the extensibility contract's rule
 1). A **script** kind (`script.pre`, `script.post`) runs there only when its own
 `config.inline` is `true` or the run's `elements.scripts` override forces it one way or the
 other; otherwise the step keeps its pre-#1495 behaviour, deferred to the post-run `tests`
@@ -334,7 +353,9 @@ gap, outside this page's Status callout.
 - #1569 - the follow-up disclosed by #1515: a scenario load run's own jump/repeat mechanism for
   `control.switch` / `control.loop`, `control.throughput`'s shared `perUser: false` budget, and
   `control.transaction`'s `includeTimers`.
-- #1500, #1501 - metrics and load-time cookies that round out the kind table.
+- #1500 - `metric.record` and the `pm.metrics` script binding: custom trends, counters and
+  rates, reported beside the built-in phases and usable as a `custom.<name>.<stat>` threshold.
+- #1501 - load-time cookies that round out the kind table.
 - #1516 - the app's `ElementList` primitive and editor.
 - #1517 - MCP's `elements` fields and the `vayu://elements/kinds` resource.
 - #1518 - Postman/OpenAPI round-trip and a JMeter `.jmx` importer.

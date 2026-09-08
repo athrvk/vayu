@@ -1471,6 +1471,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.latency_avg_ms = totals.latency_avg_ms;
     inputs.phases         = context->metrics_collector->phase_percentiles ();
     inputs.stream         = context->metrics_collector->stream_totals ();
+    inputs.custom_metrics = context->metrics_collector->custom_metric_summaries ();
     inputs.http_version_downgraded =
     context->metrics_collector->http_version_downgraded ();
     inputs.tests = validation.run;
@@ -1635,7 +1636,8 @@ vayu::http::routes::ScriptVariableScopes& base_scopes) {
         .pre_script_result  = unread_pre,
         .post_script_result = unread_post,
         .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
-        .should_stop = nullptr,
+        .should_stop   = nullptr,
+        .record_metric = nullptr, // metric.record is step.after only.
         .run_setup_script =
         [&] (const std::string& script) {
             auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
@@ -1694,7 +1696,8 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
         .pre_script_result  = unread_pre,
         .post_script_result = unread_post,
         .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
-        .should_stop = nullptr,
+        .should_stop   = nullptr,
+        .record_metric = nullptr, // metric.record is step.after only.
         .run_teardown_script =
         [&] (const std::string& script) {
             auto script_ctx = vayu::runtime::ScriptContext::for_teardown (run_summary_info);
@@ -2069,6 +2072,9 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     payload["latency_p50_ms"]      = sample.latency_p50_ms;
     payload["latency_p95_ms"]      = sample.latency_p95_ms;
     payload["latency_p99_ms"]      = sample.latency_p99_ms;
+    if (sample.custom_metrics.has_value ()) {
+        payload["custom_metrics"] = build_custom_metrics_payload (*sample.custom_metrics);
+    }
     return payload;
 }
 
@@ -2133,6 +2139,13 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // section can say the first.
     if (inputs.thresholds.has_value ()) {
         summary["thresholds"] = build_threshold_outcome_payload (*inputs.thresholds);
+    }
+    // This run's `metric.record` / `pm.metrics` values (issue #1500), by
+    // name. Omitted for a run that recorded none, the same rule `tests` and
+    // `thresholds` follow - an empty object would read as "measured and
+    // found nothing" rather than "never declared".
+    if (inputs.custom_metrics.has_value ()) {
+        summary["customMetrics"] = build_custom_metrics_payload (*inputs.custom_metrics);
     }
     // Per-phase latency distributions, keyed by wire name so a reader does not
     // have to know the enum's order. Omitted when the run recorded none - a
@@ -2338,6 +2351,7 @@ int64_t& first_tick_steady_ms) {
         sample.latency_p50_ms = window.p50;
         sample.latency_p95_ms = window.p95;
         sample.latency_p99_ms = window.p99;
+        sample.custom_metrics = mc.custom_metric_summaries ();
 
         db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
         build_metric_tick_payload (sample).dump () });

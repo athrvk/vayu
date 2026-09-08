@@ -399,3 +399,94 @@ TEST (ThresholdEval, AStoredBudgetOfTheWrongTypeIsSkippedRatherThanGuessed) {
     ASSERT_EQ (outcome->checks.size (), 1u);
     EXPECT_EQ (outcome->checks[0].metric, "minThroughputRps");
 }
+
+// --- custom.<name>.<stat> (issue #1500) -------------------------------------
+
+RunSummaryInputs run_with_custom_trend (const std::string& name, double p95, size_t count) {
+    RunSummaryInputs inputs = measured_run ();
+    vayu::core::CustomMetricSummary trend;
+    trend.type            = vayu::core::CustomMetricType::Trend;
+    trend.count           = count;
+    trend.p95             = p95;
+    inputs.custom_metrics = { { name, trend } };
+    return inputs;
+}
+
+TEST (ThresholdEval, ValidateAcceptsACustomMetricKey) {
+    EXPECT_FALSE (
+    validate_thresholds (config_with ({ { "custom.ttfb2.p95", 50 } })).has_value ());
+}
+
+TEST (ThresholdEval, ValidateRejectsAnUnknownStat) {
+    expect_rejected ({ { "custom.ttfb2.p999", 50 } }, "custom.ttfb2.p999");
+}
+
+TEST (ThresholdEval, ValidateRejectsANegativeCustomLimit) {
+    expect_rejected ({ { "custom.ttfb2.p95", -1 } }, "custom.ttfb2.p95");
+}
+
+TEST (ThresholdEval, ValidateRejectsAnUnknownKeyMentioningTheCustomPattern) {
+    auto reason = validate_thresholds (config_with ({ { "notARealBudget", 5 } }));
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("custom.<name>.<stat>"), std::string::npos) << *reason;
+}
+
+TEST (ThresholdEval, ACustomMetricTrendEvaluatesAgainstItsRecordedP95) {
+    auto outcome = evaluate_thresholds (config_with ({ { "custom.ttfb2.p95", 50.0 } }),
+    run_with_custom_trend ("ttfb2", 47.0, 10));
+    const auto check = only_check (outcome);
+    EXPECT_EQ (check.metric, "custom.ttfb2.p95");
+    EXPECT_TRUE (check.evaluated);
+    EXPECT_DOUBLE_EQ (check.actual, 47.0);
+    EXPECT_TRUE (check.passed);
+}
+
+TEST (ThresholdEval, ACustomMetricTrendCanFailTheRun) {
+    auto outcome = evaluate_thresholds (config_with ({ { "custom.ttfb2.p95", 20.0 } }),
+    run_with_custom_trend ("ttfb2", 47.0, 10));
+    const auto check = only_check (outcome);
+    EXPECT_FALSE (check.passed);
+    ASSERT_HAS_VALUE (outcome);
+    EXPECT_EQ (outcome->failed, 1u);
+}
+
+TEST (ThresholdEval, ACustomMetricNeverRecordedIsUnevaluatedRatherThanATrivialPass) {
+    // "custom.ttfb2.p95" declared, but this run's collector never recorded
+    // that name (a typo, or a metric.record on a step the run never
+    // reached) - not the same as a metric that measured 0.
+    auto outcome = evaluate_thresholds (
+    config_with ({ { "custom.ttfb2.p95", 50.0 } }), measured_run ());
+    const auto check = only_check (outcome);
+    EXPECT_FALSE (check.evaluated);
+    EXPECT_FALSE (check.passed);
+}
+
+TEST (ThresholdEval, ACustomCounterReadsItsRunningTotalUnderValueOrRate) {
+    RunSummaryInputs inputs = measured_run ();
+    vayu::core::CustomMetricSummary counter;
+    counter.type          = vayu::core::CustomMetricType::Counter;
+    counter.count         = 4;
+    counter.value         = 4096.0;
+    inputs.custom_metrics = { { "bytesOut", counter } };
+
+    auto outcome = evaluate_thresholds (
+    config_with ({ { "custom.bytesOut.value", 8192.0 } }), inputs);
+    const auto check = only_check (outcome);
+    EXPECT_DOUBLE_EQ (check.actual, 4096.0);
+    EXPECT_TRUE (check.passed);
+}
+
+TEST (ThresholdEval, ACustomRateReadsItsPercentageUnderRate) {
+    RunSummaryInputs inputs = measured_run ();
+    vayu::core::CustomMetricSummary rate;
+    rate.type             = vayu::core::CustomMetricType::Rate;
+    rate.count            = 10;
+    rate.value            = 30.0;
+    inputs.custom_metrics = { { "cacheHit", rate } };
+
+    auto outcome =
+    evaluate_thresholds (config_with ({ { "custom.cacheHit.rate", 50.0 } }), inputs);
+    const auto check = only_check (outcome);
+    EXPECT_DOUBLE_EQ (check.actual, 30.0);
+    EXPECT_TRUE (check.passed);
+}

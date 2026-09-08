@@ -1877,6 +1877,45 @@ summary, its own outcome on the step's `results` row and on the SSE `step` event
 Its row carries the request it would have sent and **no response**, because there
 was none; the app's step list shows that rather than an empty `200`.
 
+## Custom metrics (`pm.metrics`)
+
+A script can record a named value beside the run's built-in phases (issue
+#1500) - the scripted counterpart of the `metric.record` element
+(`elements.md`):
+
+```javascript
+pm.metrics.trend('ttfb', pm.response.responseTime);      // one distribution sample
+pm.metrics.counter('bytesOut', pm.response.size().total); // added to a running total
+pm.metrics.counter('hits');                                // increment defaults to 1
+pm.metrics.rate('cacheHit', pm.response.headers.get('X-Cache') === 'HIT'); // one true/false sample
+```
+
+`trend` reports as a distribution (`count`/`p50`/`p95`/`p99`/`max` in the report's
+`customMetrics.<name>`); `counter` is a running total, added to on every call; `rate` is the
+percentage of calls whose value was true. All three share the same 32-distinct-name cap the
+`metric.record` element does (`api-reference.md`'s `customMetrics` section), across every name
+either surface records under - a script that introduces a 33rd name past what the collection's own
+`metric.record` elements already declared has that call silently do nothing, since the cap is
+enforced loudly only where it can be, at `POST /collections` / `POST /requests` validate time for a
+*declared* `metric.record` name.
+
+### Where it throws
+
+The same false-success reasoning `pm.execution` documents: a call accepted and quietly dropped is
+worse than one that says why it cannot run.
+
+| Where | What happens |
+|-------|--------------|
+| A single Send (`POST /execute`) | Throws - there is no run to record into |
+| A load run's deferred `tests` script, and a scenario load run's deferred per-step script | Throws - a replayed sample is not the run itself |
+| `trend(name, value)` / `rate(name, value)` with fewer than two arguments, or an empty `name` | `TypeError` |
+| `counter(name)` with an empty `name` | `TypeError` |
+
+Everywhere else - the sequential run, a scenario load run's inline `step.before`/`step.after` hooks,
+and design mode's `script.pre`/`script.post` - all three methods record into that run's own
+collector, the same `MetricsCollector::record_custom_metric` the `metric.record` element writes
+through.
+
 ## Data rows (`pm.iterationData`)
 
 A run can be given a set of rows - a CSV, TSV, JSON or JSONL file the app parses
@@ -2535,7 +2574,7 @@ for `ElementPipeline` to run there.
 **A scenario load run's `elements` run inline now (issue #1495), opt-in per
 element.** `submit_one` (the producer, one virtual user at a time) runs
 `step.before` before binding and submitting; the completion runs `step.after`
-once the response is in hand. `extract.*` and `assert.*` always run there. A
+once the response is in hand. `extract.*`, `assert.*` and `metric.record` always run there. A
 `script.pre` / `script.post` element runs there only when its own
 `config.inline` is `true`, or the run's `elements.scripts` override
 (`"allInline"` / `"allDeferred"`, beside the default `"asMarked"`) forces it
