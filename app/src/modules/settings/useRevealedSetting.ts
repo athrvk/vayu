@@ -24,6 +24,7 @@
 
 import { useEffect } from "react";
 import { useSettingsStore } from "@/modules/settings/settings-store";
+import { scrollWithin } from "@/lib/scroll-within";
 
 /** How long the outline stays after the view scrolls to the setting. */
 export const HIGHLIGHT_MS = 2500;
@@ -48,8 +49,16 @@ export function useRevealedSetting(): void {
 		const reveal = () => {
 			target = document.querySelector(`[data-setting-anchor="${highlightedKey}"]`);
 			if (!target) return false;
-			// jsdom has no layout and does not implement this, hence the optional call.
-			target.scrollIntoView?.({ block: "center" });
+			/*
+			 * Scroll the pane's own scroller directly, never the native ancestor
+			 * walk: the settings column and the shell around it are
+			 * `overflow-hidden`, and Chromium treats those as scrollable too,
+			 * permanently pushing the category header off-screen (#1612). An
+			 * anchor outside a scroller is not a reveal target, so this does
+			 * nothing rather than guess one.
+			 */
+			const scroller = target.closest("[data-setting-scroller]");
+			if (scroller) scrollWithin(scroller, target, { block: "center" });
 			target.classList.add(...HIGHLIGHT_CLASSES);
 			return true;
 		};

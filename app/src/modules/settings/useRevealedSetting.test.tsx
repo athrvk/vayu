@@ -34,6 +34,20 @@ function Panel({ anchors = ["theme-mode", "color-scheme"] }: { anchors?: string[
 	);
 }
 
+/** A panel shaped like `SettingsMain` / `ClientSettingsPanel`: a scroller ancestor. */
+function PanelWithScroller({ anchors = ["theme-mode"] }: { anchors?: string[] }) {
+	useRevealedSetting();
+	return (
+		<div data-testid="scroller" data-setting-scroller>
+			{anchors.map((anchor) => (
+				<div key={anchor} data-setting-anchor={anchor} data-testid={anchor}>
+					{anchor}
+				</div>
+			))}
+		</div>
+	);
+}
+
 const isOutlined = (testId: string) =>
 	screen.getByTestId(testId).className.includes("ring-primary");
 
@@ -99,5 +113,38 @@ describe("useRevealedSetting", () => {
 		});
 
 		expect(useSettingsStore.getState().highlightedKey).toBeNull();
+	});
+
+	it("scrolls the ancestor scroller, not the anchor itself (#1612)", () => {
+		render(<PanelWithScroller />);
+		const scroller = screen.getByTestId("scroller");
+		scroller.scrollTo = vi.fn();
+		// jsdom has no layout, so both rects default to zero - which is already
+		// a "centred" position and scrollWithin would (correctly) call nothing.
+		// Stub a target below the scroller's viewport so there is an actual
+		// scroll for the assertion to catch.
+		scroller.getBoundingClientRect = () => ({ top: 0, height: 200 }) as DOMRect;
+		screen.getByTestId("theme-mode").getBoundingClientRect = () =>
+			({ top: 500, height: 40 }) as DOMRect;
+		const scrollIntoViewSpy = vi.spyOn(Element.prototype, "scrollIntoView");
+
+		act(() => useSettingsStore.getState().setSelectedCategory("appearance", "theme-mode"));
+
+		expect(scroller.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 420 });
+		expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+		scrollIntoViewSpy.mockRestore();
+	});
+
+	it("does nothing when the anchor has no [data-setting-scroller] ancestor", () => {
+		// A reveal target outside a scroller (none of today's panels, but the
+		// fallback matters): no scroller to scroll, so nothing is called.
+		render(<Panel />);
+		const scrollIntoViewSpy = vi.spyOn(Element.prototype, "scrollIntoView");
+
+		act(() => useSettingsStore.getState().setSelectedCategory("appearance", "theme-mode"));
+
+		expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+		expect(isOutlined("theme-mode")).toBe(true);
+		scrollIntoViewSpy.mockRestore();
 	});
 });

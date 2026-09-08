@@ -42,6 +42,7 @@ import { rowInsetPx } from "@/constants/layout";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
 import { useExplorerStore } from "@/lib/graphql/explorer-store";
+import { scrollWithin } from "@/lib/scroll-within";
 import {
 	buildSearchIndex,
 	groupSearchMatches,
@@ -255,7 +256,11 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 		// Absent only when the schema changed under the reveal; `revealFloor`
 		// holds the window open far enough for every row the tree can show.
 		if (!row) return;
-		row.scrollIntoView({ block: "center" });
+		// The pane's own overflow-hidden ancestors make scrollIntoView unsafe
+		// here too (#1612): it would keep scrolling past this scroller, which is
+		// the tree's own parent (the div carrying `ref={scrollerRef}` above).
+		const scroller = treeRef.current?.parentElement;
+		if (scroller) scrollWithin(scroller, row, { block: "center" });
 		row.focus();
 	}, [revealSeq]);
 
