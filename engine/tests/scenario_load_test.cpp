@@ -1776,6 +1776,48 @@ TEST_F (ScenarioLoadTest, ConcurrencyIsTheVirtualUserCountAndBoundsInFlight) {
 }
 
 // ============================================================================
+// Cross-VU shared pacing (issue #1570)
+// ============================================================================
+
+// `timer.pacing(perUser: false)` holds one cadence across every virtual
+// user, not one cadence per user (which `perUser: true` already gave under
+// load). Every VU's own first entry is unthrottled (the element has no
+// history yet), so ten VUs produce an initial burst of about ten
+// completions; every entry after that claims the next slot of the same
+// shared 200ms clock, however many VUs are contending for it. Over a 2s run
+// that is roughly ten (the burst) plus one more per 200ms tick - nowhere
+// near the ~110 ten *independently* paced 200ms cadences would produce in
+// the same window (each doing its own burst-of-one plus about nine ticks).
+//
+// Mutation check: making `TimerPacingElement::scheduled_ready_delay_ms`
+// ignore `per_user_` and always take the per-VU `pacing_state` branch
+// reproduces that old per-VU rate here too - completions clear 50 - and
+// this test reds.
+TEST_F (ScenarioLoadTest, SharedPacingHoldsOneCadenceAcrossEveryVirtualUser) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ vayu::tests::timer_pacing_element_json (
+    "el_pacing", /*every_ms=*/200, /*scope_entry=*/true, /*per_user=*/false) });
+
+    const size_t VUS  = 10;
+    const json config = { { "mode", "constant_concurrency" },
+        { "duration", "2s" }, { "concurrency", VUS } };
+    auto state        = run (config, execution);
+
+    const size_t completed = state->steps.completed (0);
+    EXPECT_GE (completed, VUS) << "not even the unthrottled first-entry burst "
+                                  "completed - the shared clock is holding "
+                                  "back requests it never saw before";
+    EXPECT_LT (completed, 50u)
+    << "completed " << completed
+    << " over 2s at a shared 200ms cadence - "
+       "looks like every virtual user paced itself independently instead "
+       "of sharing one clock (ten independent 200ms cadences would clear "
+       "100 in this window)";
+}
+
+// ============================================================================
 // Deferred schema validation over the sampled responses (issue #682)
 // ============================================================================
 
