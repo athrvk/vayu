@@ -158,6 +158,7 @@ add_executable(vayu_tests
     schema_validation_test.cpp
     elements_registry_test.cpp
     elements_timers_test.cpp
+    elements_controllers_test.cpp
     element_kinds_test.cpp
     metric_record_test.cpp
     version_isolation_test.cpp
@@ -325,6 +326,8 @@ set(vayu_scratch_database_suites
     DatabaseTest
     DbRecoveryTest
     DeleteRunTest
+    ElementsControllersTest
+    ElementsControllersLoadTest
     ElementsRouteTest
     ElementsTimersRunnerTest
     ErrorShapeRouteTest
