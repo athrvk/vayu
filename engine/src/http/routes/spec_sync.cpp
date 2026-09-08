@@ -1386,7 +1386,7 @@ void register_spec_sync_routes (RouteContext& ctx) {
         try {
             body = nlohmann::json::parse (req.body);
         } catch (const std::exception& e) {
-            vayu::utils::log_warning (
+            vayu::utils::log_warning ("http",
             "POST /specs/sync - invalid JSON body: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON body");
             return;
@@ -1394,14 +1394,15 @@ void register_spec_sync_routes (RouteContext& ctx) {
         try {
             auto [status, response] = spec_sync_response (ctx.db, body);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs/sync - " +
-                std::to_string (status) + ": " + error_message_of (response));
+                vayu::utils::log_warning ("http",
+                "POST /specs/sync - " + std::to_string (status) + ": " +
+                error_message_of (response));
             } else {
-                vayu::utils::log_info ("applied to spec " +
-                response["specId"].get<std::string> () + ": +" +
-                std::to_string (response["created"].get<size_t> ()) + " ~" +
-                std::to_string (response["updated"].get<size_t> ()) + " -" +
-                std::to_string (response["deleted"].get<size_t> ()));
+                vayu::utils::log_info ("http",
+                "applied to spec " + response["specId"].get<std::string> () +
+                ": +" + std::to_string (response["created"].get<size_t> ()) +
+                " ~" + std::to_string (response["updated"].get<size_t> ()) +
+                " -" + std::to_string (response["deleted"].get<size_t> ()));
             }
             res.status = status;
             res.set_content (response.dump (), "application/json");
@@ -1411,11 +1412,11 @@ void register_spec_sync_routes (RouteContext& ctx) {
             // conflict rather than a 500: nothing was written, and re-checking is
             // exactly what the client should do.
             vayu::utils::log_warning (
-            "POST /specs/sync - 409: " + std::string (e.what ()));
+            "http", "POST /specs/sync - 409: " + std::string (e.what ()));
             send_error (res, 409, e.what ());
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "POST /specs/sync - Error: " + std::string (e.what ()));
+            "http", "POST /specs/sync - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

@@ -254,7 +254,7 @@ const vayu::Environment& collectionVariables) {
                 }
             }
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "Persist environment variables failed: " + std::string (e.what ()));
         }
     }
@@ -269,7 +269,8 @@ const vayu::Environment& collectionVariables) {
             }
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("Persist globals failed: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "http", "Persist globals failed: " + std::string (e.what ()));
     }
 
     if (!collection_id.empty ()) {
@@ -284,7 +285,7 @@ const vayu::Environment& collectionVariables) {
                 }
             }
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "Persist collection variables failed: " + std::string (e.what ()));
         }
     }
@@ -302,7 +303,7 @@ const vayu::Environment& collectionVariables) {
                 collection_id = db_request->collection_id;
             }
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "Persist collection variables failed: " + std::string (e.what ()));
         }
     }
@@ -323,13 +324,14 @@ const std::string& script_type) {
     try {
         result = engine.execute (script, ctx);
         if (!result.success) {
-            vayu::utils::log_warning (script_type + " script failed: " + result.error_message);
+            vayu::utils::log_warning (
+            "http", script_type + " script failed: " + result.error_message);
         }
     } catch (const std::exception& e) {
         result.success       = false;
         result.error_message = std::string ("Script exception: ") + e.what ();
         vayu::utils::log_error (
-        script_type + " script exception: " + std::string (e.what ()));
+        "http", script_type + " script exception: " + std::string (e.what ()));
     }
     return result;
 }

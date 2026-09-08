@@ -41,7 +41,7 @@ bool Server::start () {
 
     bind_error_.clear ();
 
-    vayu::utils::log_info ("Vayu Engine " + std::string (vayu::Version::string));
+    vayu::utils::log_info ("startup", "Vayu Engine " + std::string (vayu::Version::string));
 
     // Load and display config
     auto entries = db_.get_all_config_entries ();
@@ -49,7 +49,7 @@ bool Server::start () {
     for (const auto& entry : entries) {
         config[entry.key] = entry.value;
     }
-    vayu::utils::log_info ("Configuration: " + config.dump ());
+    vayu::utils::log_info ("config", "Configuration loaded", { { "config", config } });
 
     // The engine's port is fixed by contract (docs/architecture.md), so this
     // listener must never *share* it - a second binder is a collision to
@@ -77,7 +77,7 @@ bool Server::start () {
     if (!server_.bind_to_port ("127.0.0.1", port_)) {
         bind_error_ = "Could not bind " +
         where + " - another process, possibly another Vayu engine, is already listening there";
-        vayu::utils::log_error (bind_error_);
+        vayu::utils::log_error ("startup", bind_error_);
         return false;
     }
 
@@ -93,7 +93,7 @@ bool Server::start () {
     // out for every other listener in the engine.
     server_.wait_until_ready ();
 
-    vayu::utils::log_info ("Listening on http://" + where);
+    vayu::utils::log_info ("startup", "Listening on http://" + where);
     return true;
 }
 
@@ -110,7 +110,7 @@ void Server::stop () {
                                .count ();
 
                 if (elapsed >= 3) {
-                    vayu::utils::log_warning (
+                    vayu::utils::log_warning ("shutdown",
                     "Server thread did not exit after 3 seconds, detaching...");
                     server_thread_.detach ();
                     break;

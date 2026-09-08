@@ -184,6 +184,17 @@ constexpr char path_separator () {
  */
 std::string path_join (const std::string& base, const std::string& component);
 
+/**
+ * @brief The data directory a binary uses when nothing names one.
+ * @return `./data`, adjacent to wherever the binary was started from.
+ *
+ * Shared by `vayu-engine` and `vayu-cli` (issue #1557) so a log file each
+ * writes with no `--data-dir` of its own lands under the same tree, telling
+ * `engine_<stamp>.log` and `cli_<stamp>.log` apart by prefix rather than by
+ * directory.
+ */
+std::string default_data_dir ();
+
 // ============================================================================
 // High-Resolution Timer
 // ============================================================================

@@ -46,7 +46,8 @@ enum class CliRequest : std::uint8_t {
     Continue,
     /// `-h` / `--help`: print the usage and stop, successfully.
     Help,
-    /// `-v` / `--version`.
+    /// `--version`. Long form only: `-v` is `--verbose` (issue #1557), the same
+    /// flag `vayu-engine` has always read it as.
     Version,
 };
 
@@ -117,11 +118,11 @@ read_cli_flags (std::span<char* const> args, CliOptions& options) {
 
         if (arg == "-h" || arg == "--help") {
             return CliRequest::Help;
-        } else if (arg == "-v" || arg == "--version") {
+        } else if (arg == "--version") {
             return CliRequest::Version;
         } else if (arg == "--no-color") {
             options.color = false;
-        } else if (arg == "--verbose") {
+        } else if (arg == "-v" || arg == "--verbose") {
             outcome = detail::read_verbose_flag (args, i, options);
         } else if (arg == "--daemon") {
             outcome = detail::read_daemon_flag (args, i, options);

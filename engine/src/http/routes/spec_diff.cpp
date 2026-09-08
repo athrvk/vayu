@@ -468,11 +468,13 @@ void register_spec_diff_routes (RouteContext& ctx) {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = diff_spec_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs/diff - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /specs/diff - " + std::to_string (status) + ": " +
+                error_message_of (body));
             } else {
-                vayu::utils::log_info (std::to_string (body["added"].size ()) +
-                " added, " + std::to_string (body["removed"].size ()) + " removed, " +
+                vayu::utils::log_info ("http",
+                std::to_string (body["added"].size ()) + " added, " +
+                std::to_string (body["removed"].size ()) + " removed, " +
                 std::to_string (body["changed"].size ()) + " changed, " +
                 std::to_string (body["unchanged"].get<size_t> ()) + " unchanged");
             }
@@ -480,7 +482,7 @@ void register_spec_diff_routes (RouteContext& ctx) {
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "POST /specs/diff - Error: " + std::string (e.what ()));
+            "http", "POST /specs/diff - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });

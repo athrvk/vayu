@@ -49,6 +49,43 @@ namespace vayu::core {
 struct ScenarioPlan;
 
 /**
+ * @brief Cross-instance shared clocks, one atomic per name (issue #1570) -
+ *        `timer.pacing(perUser: false)`'s coordination for one cadence
+ *        shared across every virtual user under a scenario load run, kept
+ *        generic over what a "name" is so a future kind with the same
+ *        shape (`timer.throughput`'s own shared-rate case, issue #1571,
+ *        names this type as its intended reuse) never needs a second one.
+ *
+ * Sized once at construction from an explicit name list the caller already
+ * knows - `std::atomic` is neither copyable nor movable, so growing this
+ * afterwards is not an option - which keeps this type decoupled from
+ * `ScenarioPlan` / `CompiledElement`: the scan for which names need a clock
+ * lives with whoever builds that list (`ScenarioLoadState`'s constructor,
+ * `scenario_load.cpp`), not here. `advance` is a compare-exchange retry
+ * loop, never a mutex: the load path's completion callback runs on every
+ * event-loop worker at once, and per `engine/CLAUDE.md`'s hot-path
+ * discipline nothing on it blocks for a lock.
+ */
+class SharedPacingClocks {
+    public:
+    explicit SharedPacingClocks (const std::vector<std::string>& names);
+
+    /// Advances @p name's shared deadline by @p every_ms from wherever it
+    /// currently stands (0 = never started - the first pass is never
+    /// delayed, the same convention a per-VU clock uses) and returns the
+    /// resulting wait, clamped to never negative. Returns 0 for a name this
+    /// instance was not sized for, which does not happen in practice - the
+    /// caller sizes this from exactly the names it will ever pass - but a
+    /// defensive default costs less than a crash on a future caller's
+    /// mistake.
+    [[nodiscard]] int64_t advance (const std::string& name, int64_t every_ms, int64_t now_ms);
+
+    private:
+    std::vector<std::atomic<int64_t>> clocks_;
+    std::unordered_map<std::string, size_t> index_of_id_;
+};
+
+/**
  * One scope-spanning kind's first and last position in the plan (issue
  * #1515's `control.loop` / `control.transaction`): an element inherited from
  * a folder compiles once per member request, so each member's own instance
@@ -359,12 +396,19 @@ class Element {
      * sleeping inside `apply` (which the load path never lets block). @p
      * pacing_state is the same per-VU map `ElementContext::pacing_state`
      * would bind for this VU; a kind that writes through it here must leave
-     * `apply` free to run again without double-booking the wait.
+     * `apply` free to run again without double-booking the wait. @p
+     * shared_pacing (issue #1570) is the cross-VU sibling for a kind whose
+     * own config asks for one cadence shared across every virtual user
+     * (`timer.pacing`'s `perUser: false`) instead of one per VU; never null
+     * on the load path, which always constructs one from the plan even when
+     * nothing in it needs it.
      */
     [[nodiscard]] virtual std::optional<int64_t> scheduled_ready_delay_ms (
     std::unordered_map<std::string, int64_t>& pacing_state,
+    SharedPacingClocks* shared_pacing,
     int64_t now_ms) const {
         (void)pacing_state;
+        (void)shared_pacing;
         (void)now_ms;
         return std::nullopt;
     }

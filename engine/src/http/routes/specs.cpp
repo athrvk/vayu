@@ -242,7 +242,7 @@ const vayu::Response& response) {
     } catch (const std::exception& e) {
         // A lookup failure costs the response its verdict, never the response.
         vayu::utils::log_warning (
-        "Schema validation lookup failed: " + std::string (e.what ()));
+        "http", "Schema validation lookup failed: " + std::string (e.what ()));
         return std::nullopt;
     }
     if (!resolved.bound) {
@@ -262,7 +262,8 @@ const vayu::Response& response) {
     } catch (const std::exception& e) {
         // Same rule as above: a validator that threw is not a response that
         // failed, and the exchange itself is not in question.
-        vayu::utils::log_warning ("Schema validation failed: " + std::string (e.what ()));
+        vayu::utils::log_warning (
+        "http", "Schema validation failed: " + std::string (e.what ()));
         return std::nullopt;
     }
 }
@@ -492,17 +493,18 @@ void register_spec_routes (RouteContext& ctx) {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = create_spec_document_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /specs - " + std::to_string (status) + ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info (
+                vayu::utils::log_info ("http",
                 "POST /specs - Stored spec: id=" + body["id"].get<std::string> () +
                 ", hash=" + body["hash"].get<std::string> ());
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /specs - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "http", "POST /specs - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });
@@ -523,13 +525,13 @@ void register_spec_routes (RouteContext& ctx) {
             auto [status, body] = get_spec_document_meta_response (ctx.db, spec_id);
             if (status != 200) {
                 vayu::utils::log_warning (
-                "GET /specs/:id/meta - Spec not found: " + spec_id);
+                "http", "GET /specs/:id/meta - Spec not found: " + spec_id);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "GET /specs/:id/meta - Error: " + std::string (e.what ()));
+            "http", "GET /specs/:id/meta - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -546,12 +548,14 @@ void register_spec_routes (RouteContext& ctx) {
         try {
             auto [status, body] = get_spec_document_response (ctx.db, spec_id);
             if (status != 200) {
-                vayu::utils::log_warning ("GET /specs/:id - Spec not found: " + spec_id);
+                vayu::utils::log_warning (
+                "http", "GET /specs/:id - Spec not found: " + spec_id);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("GET /specs/:id - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "http", "GET /specs/:id - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -569,14 +573,15 @@ void register_spec_routes (RouteContext& ctx) {
         try {
             auto [status, body] = delete_spec_document_response (ctx.db, spec_id);
             if (status != 200) {
-                vayu::utils::log_warning ("DELETE /specs/:id - " + std::to_string (status) +
+                vayu::utils::log_warning ("http",
+                "DELETE /specs/:id - " + std::to_string (status) +
                 " for id=" + spec_id + ": " + error_message_of (body));
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "DELETE /specs/:id - Error: " + std::string (e.what ()));
+            "http", "DELETE /specs/:id - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

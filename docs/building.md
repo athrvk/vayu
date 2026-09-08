@@ -262,8 +262,8 @@ there. Pass `-jN` to override. See
 ### Development
 - **All platforms**: `engine/data/`
   - Database: `engine/data/db/vayu.db`
-  - Logs: `engine/data/logs/` (one file per start, newest 10 kept - see
-    [Log retention, level and size](engine/architecture.md#log-retention-level-and-size))
+  - Logs: `engine/data/logs/` (`engine_<stamp>.log`, one per start, newest 10
+    kept - see [Engine Logging](engine/logging.md))
   - Lock file: `engine/data/vayu.lock`
 
 ### Production

@@ -443,19 +443,20 @@ void register_spec_export_routes (RouteContext& ctx) {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = export_spec_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs/export - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /specs/export - " + std::to_string (status) + ": " +
+                error_message_of (body));
             } else {
-                vayu::utils::log_info (body["notes"]["direction"].get<std::string> () +
-                ", " + std::to_string (body["notes"]["requestsExported"].get<int> ()) +
-                " request(s) exported, " +
+                vayu::utils::log_info ("http",
+                body["notes"]["direction"].get<std::string> () + ", " +
+                std::to_string (body["notes"]["requestsExported"].get<int> ()) + " request(s) exported, " +
                 std::to_string (body["text"].get<std::string> ().size ()) + " bytes");
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "POST /specs/export - Error: " + std::string (e.what ()));
+            "http", "POST /specs/export - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });

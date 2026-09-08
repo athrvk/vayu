@@ -153,7 +153,8 @@ void prune_quarantined_databases (const std::string& db_path, std::size_t keep) 
             std::error_code ec;
             std::filesystem::remove (sets[index] + suffix, ec);
         }
-        vayu::utils::log_info ("Pruned an older quarantined database at " + sets[index]);
+        vayu::utils::log_info (
+        "db", "Pruned an older quarantined database at " + sets[index]);
     }
 }
 
@@ -173,17 +174,19 @@ const std::optional<std::string>& quarantined_path) {
 
     std::ofstream out (marker, std::ios::binary | std::ios::trunc);
     if (!out) {
-        vayu::utils::log_warning ("Could not write the recovery marker at " +
-        marker + " - this startup's recovery will not be reported to the app.");
+        vayu::utils::log_warning ("db",
+        "Could not write the recovery marker at " + marker +
+        " - this startup's recovery will not be reported to the app.");
         return;
     }
     out << document.dump ();
     out.flush ();
     if (!out) {
-        vayu::utils::log_warning ("Recovery marker at " + marker + " was not fully written.");
+        vayu::utils::log_warning (
+        "db", "Recovery marker at " + marker + " was not fully written.");
         return;
     }
-    vayu::utils::log_info (
+    vayu::utils::log_info ("db",
     "Recorded startup recovery '" + to_string (outcome) + "' at " + marker);
 }
 

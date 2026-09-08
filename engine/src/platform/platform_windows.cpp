@@ -245,6 +245,10 @@ std::string path_join (const std::string& base, const std::string& component) {
     }
 }
 
+std::string default_data_dir () {
+    return path_join (".", "data");
+}
+
 // The 1 ms timer request used to live here, held for the process' whole life.
 // It is `HighResolutionTimerScope` in high_resolution_timer.cpp now, taken by
 // each run and released with it (issue #1161).

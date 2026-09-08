@@ -106,6 +106,7 @@ nav:
       - Elements: engine/elements.md
       - Command Line: engine/cli.md
       - MCP Server: engine/mcp.md
+      - Logging: engine/logging.md
       - Benchmarks: engine/benchmarks.md
   - Desktop App:
       - Overview: app/architecture.md

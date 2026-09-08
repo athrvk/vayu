@@ -727,8 +727,9 @@ const MockStartRequest& request) {
     }
     out.ok          = true;
     out.http_status = 200;
-    vayu::utils::log_info ("Mock server started: " + out.info.mock_id + " on " +
-    out.info.url + " (" + std::to_string (out.info.route_count) + " routes)");
+    vayu::utils::log_info ("mock",
+    "Mock server started: " + out.info.mock_id + " on " + out.info.url + " (" +
+    std::to_string (out.info.route_count) + " routes)");
     return out;
 }
 
@@ -742,7 +743,7 @@ bool MockServerManager::stop (const std::string& mock_id) {
     // nothing is still reading the record being erased.
     it->second->listener.stop ();
     servers_.erase (it);
-    vayu::utils::log_info ("Mock server stopped: " + mock_id);
+    vayu::utils::log_info ("mock", "Mock server stopped: " + mock_id);
     return true;
 }
 
@@ -796,20 +797,21 @@ void handle_start_mock (RouteContext& ctx, const httplib::Request& req, httplib:
     const auto start = parse_mock_start (body);
     if (!start) {
         const auto& refusal = start.error ();
-        vayu::utils::log_warning ("POST /mock/start - " + refusal.message);
+        vayu::utils::log_warning ("mock", "POST /mock/start - " + refusal.message);
         send_error (res, refusal.http_status, refusal.message, refusal.code);
         return;
     }
     try {
         auto result = ctx.mock_server_manager.start (ctx.db, *start);
         if (!result.ok) {
-            vayu::utils::log_warning ("POST /mock/start - " + result.error_message);
+            vayu::utils::log_warning ("mock", "POST /mock/start - " + result.error_message);
             send_error (res, result.http_status, result.error_message, result.error_code);
             return;
         }
         send_json (res, mock_server_info_json (result.info));
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("POST /mock/start - Error: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "mock", "POST /mock/start - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }

@@ -577,7 +577,7 @@ void register_reorder_routes (RouteContext& ctx) {
         try {
             body = nlohmann::json::parse (req.body);
         } catch (const std::exception& e) {
-            vayu::utils::log_warning (
+            vayu::utils::log_warning ("http",
             "POST /reorder - invalid JSON body: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON body");
             return;
@@ -587,17 +587,19 @@ void register_reorder_routes (RouteContext& ctx) {
         try {
             auto [status, response] = reorder_response (ctx.db, body);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /reorder - " +
-                std::to_string (status) + ": " + error_message_of (response));
+                vayu::utils::log_warning ("http",
+                "POST /reorder - " + std::to_string (status) + ": " +
+                error_message_of (response));
             } else {
-                vayu::utils::log_info ("wrote " +
-                std::to_string (response["collections"].size ()) + " collections, " +
+                vayu::utils::log_info ("http",
+                "wrote " + std::to_string (response["collections"].size ()) + " collections, " +
                 std::to_string (response["requests"].size ()) + " requests");
             }
             res.status = status;
             res.set_content (response.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("POST /reorder - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "http", "POST /reorder - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

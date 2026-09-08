@@ -14,6 +14,7 @@
 #include <future>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/sse_frame_counter.hpp"
@@ -67,6 +68,10 @@ struct TransferData {
     /// `body_limit_exceeded`, which stays an error: the byte cap is a refusal
     /// to buffer, the stream caps are the stream's intended end.
     bool stream_cap_reached = false;
+
+    /// The redacted, per-line collector for the one `cat=client` record this
+    /// transfer emits when verbosity reaches 2 (issue #1557); empty otherwise.
+    std::vector<std::string> debug_lines;
 
     CurlErrorBuffer errors;
     struct curl_slist* headers_list = nullptr;

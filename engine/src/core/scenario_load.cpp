@@ -229,6 +229,29 @@ MetricsCollector::Percentiles StepHistograms::percentiles (size_t step) const {
     return p;
 }
 
+// ============================================================================
+// Cross-VU shared pacing clocks (issue #1570)
+// ============================================================================
+
+std::vector<std::string> shared_pacing_element_ids (const ScenarioPlan& plan) {
+    std::vector<std::string> ids;
+    for (const auto& step : plan.steps) {
+        if (!step.elements) {
+            continue;
+        }
+        for (const auto& element : *step.elements) {
+            if (element.kind != "timer.pacing" || !element.enabled ||
+            element.config.value ("perUser", true)) {
+                continue; // per-VU case (the default) needs no shared clock.
+            }
+            if (std::find (ids.begin (), ids.end (), element.id) == ids.end ()) {
+                ids.push_back (element.id);
+            }
+        }
+    }
+    return ids;
+}
+
 StepElementTallies::StepElementTallies (const ScenarioPlan& plan) {
     counts_by_step_.reserve (plan.steps.size ());
     index_of_id_by_step_.reserve (plan.steps.size ());
@@ -991,9 +1014,14 @@ class ScenarioLoadDriver {
      * Called here, before the VU can next be selected, because `step.before`
      * (where `timer.pacing` actually dispatches) only ever runs *after*
      * `take_ready_vu` has already chosen this VU - too late to defer without
-     * blocking the caller.
+     * blocking the caller. @p shared_pacing (issue #1570) is the run's own
+     * cross-VU clock set, threaded through unconditionally: a `perUser: true`
+     * element never touches it, and a plan with no shared-pacing element at
+     * all leaves it empty.
      */
-    static void schedule_next_entry_wait (const ScenarioStep& next_step, VirtualUser& vu) {
+    static void schedule_next_entry_wait (const ScenarioStep& next_step,
+    VirtualUser& vu,
+    SharedPacingClocks& shared_pacing) {
         if (!next_step.elements || next_step.elements->empty ()) {
             return;
         }
@@ -1002,8 +1030,8 @@ class ScenarioLoadDriver {
             if (!compiled.element) {
                 continue;
             }
-            if (auto delay =
-                compiled.element->scheduled_ready_delay_ms (vu.pacing_state, now)) {
+            if (auto delay = compiled.element->scheduled_ready_delay_ms (
+                vu.pacing_state, &shared_pacing, now)) {
                 vu.ready_at_ms = std::max (vu.ready_at_ms, now + *delay);
             }
         }
@@ -1061,9 +1089,12 @@ class ScenarioLoadDriver {
         bool jump_failed = false;
         if (next_target && !errored) {
             if (vu->steps_this_iteration >= state->max_steps_per_iteration) {
-                vayu::utils::log_warning ("Scenario load run " +
-                context->run_id + ": iteration exceeded maxStepsPerIteration (" +
-                std::to_string (state->max_steps_per_iteration) + ") - a control.switch/control.loop cycle never reached its end");
+                vayu::utils::log_warning ("run",
+                "Scenario load run: iteration exceeded maxStepsPerIteration - "
+                "a "
+                "control.switch/control.loop cycle never reached its end",
+                { { "runId", context->run_id },
+                { "maxStepsPerIteration", state->max_steps_per_iteration } });
                 jump_failed = true;
             } else {
                 const auto resolution = resolve_next_step (state->step_index, *next_target);
@@ -1074,8 +1105,9 @@ class ScenarioLoadDriver {
                 case NextStepResolution::Kind::EndIteration:
                     break; // Ends below, on the same terms a natural last step does.
                 case NextStepResolution::Kind::Unresolved:
-                    vayu::utils::log_warning ("Scenario load run " +
-                    context->run_id + ": " + resolution.error);
+                    vayu::utils::log_warning ("run",
+                    "Scenario load run: " + resolution.error,
+                    { { "runId", context->run_id } });
                     jump_failed = true;
                     break;
                 }
@@ -1122,7 +1154,7 @@ class ScenarioLoadDriver {
         // pacing must hold whether the pass that just ended succeeded or
         // not - "regardless of the folder's own duration" includes an
         // error's duration too.
-        schedule_next_entry_wait (plan.steps[vu->step], *vu);
+        schedule_next_entry_wait (plan.steps[vu->step], *vu, state->shared_pacing);
 
         // Released *before* handle_result, which is what increments the
         // completion count `in_flight()` is derived from: a VU that became
@@ -1240,16 +1272,16 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
         context->metrics_collector->configure_step_samples (sampled);
     }
 
-    vayu::utils::log_info ("Starting Scenario Load Test (" + mode + ")");
-    vayu::utils::log_info ("  Virtual users: " + std::to_string (vu_count));
-    vayu::utils::log_info ("  Steps per iteration: " + std::to_string (step_count));
+    vayu::utils::log_info ("run", "Starting Scenario Load Test (" + mode + ")");
+    vayu::utils::log_info ("run", "  Virtual users: " + std::to_string (vu_count));
+    vayu::utils::log_info ("run", "  Steps per iteration: " + std::to_string (step_count));
     if (max_iterations > 0) {
-        vayu::utils::log_info ("  Iterations: " + std::to_string (max_iterations));
+        vayu::utils::log_info ("run", "  Iterations: " + std::to_string (max_iterations));
     }
     if (config.contains ("maxInFlight")) {
         // Stated rather than silently ignored: in-flight is bounded by the VU
         // count by construction here, so the field cannot do anything.
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("run",
         "maxInFlight has no effect on a scenario run - in-flight requests are "
         "bounded by the virtual-user count ('concurrency')");
     }

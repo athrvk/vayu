@@ -205,29 +205,51 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `script.*` element before #1514's pipeline existed; now that it does, the
   two columns are dead data and this is the real cut-over the #1513 comment
   above once deferred.
+- **A log call takes a category, never text alone** (#1557, full account in
+  `docs/engine/logging.md`). `LogRecord{level, cat, msg, fields}` is the whole
+  API - `log_debug`/`log_info`/`log_warning`/`log_error` (`utils/logger.hpp`)
+  are its only callers and `Logger::write` is the one place a record is
+  rendered; there is no message-only overload to fall back to, so a category
+  is never optional. `cat` is one lowercase token from a closed per-source
+  list (`startup`, `config`, `http`, `db`, `run`, `script`, `inbox`, `mock`,
+  `oauth`, `client`, `shutdown`, plus `cli` for `vayu-cli`);
+  `tests/log_category_scan_test.cpp` source-scans `engine/src` and fails the
+  build on a call with no category literal or one outside the list. A field
+  named from the secret set (`token`, `password`, `client_secret`, an
+  `Authorization`/`Cookie`-shaped header name, ...) is redacted to
+  `<redacted>` and a field whose name ends `url`/`Url` is stripped to
+  scheme/host/path, both in `Logger::write` before either sink sees the
+  record (`utils/log_redact.hpp`) - a caller never redacts its own fields.
+  The file sink writes one JSON line per record (validated in tests against
+  `docs/engine/log-record.schema.json`); the console renders the same record
+  as text. `vayu::utils::Logger` keeps its console verbosity (`-v 0|1|2`:
+  warnings and errors, info, debug) and its separate file level (`logLevel`,
+  default debug, with rotation under `maxLogFileBytes`); `Logger::init`'s
+  `source` parameter (`"engine"` or `"cli"`) sets both the record's `src`
+  field and the file name prefix (`engine_<stamp>.log`, `cli_<stamp>.log`),
+  so the two binaries' files sort apart under one directory.
 - **One request line per HTTP call, from one place** (#1510).
-  `vayu::utils::Logger` has a console verbosity (`-v 0|1|2`: warnings and
-  errors, info, debug) and a separate file level (`logLevel`, default debug,
-  with rotation under `maxLogFileBytes`). `vayu::http::install_request_logger`
-  (`http/request_log.hpp`) wires a `set_pre_routing_handler` timestamp and a
-  `set_logger` hook onto both `httplib::Server` instances the engine owns (the
-  management API in `Server::setup_routes`, the inbox listener in
-  `routes/inbox.cpp`) so every call gets one line - `"GET /inbox 200 1.3ms
-  412B"`, method, path, status, duration and response bytes, never the query
-  string, headers or body - at the level its status calls for: 2xx at DEBUG,
-  3xx/4xx at INFO, 5xx at WARNING. A hand-written per-route line is now only
-  for what that hook cannot know (a run starting or stopping, a count a
-  handler computed); `tests/request_log_test.cpp`'s source scan fails if a
-  route file brings the old per-route "METHOD /path" shape back. The daemon's
-  legacy `bool verbose` (threaded through `Server`, `RouteContext`,
-  `execute_exchange` and every load-run worker function down to
-  `client.cpp`'s curl transfer-debug frames) is retired in the same issue:
+  `vayu::http::install_request_logger` (`http/request_log.hpp`) wires a
+  `set_pre_routing_handler` timestamp and a `set_logger` hook onto both
+  `httplib::Server` instances the engine owns (the management API in
+  `Server::setup_routes`, the inbox listener in `routes/inbox.cpp`) so every
+  call gets one `cat: "http"` record whose `msg` is `"GET /inbox 200 1.3ms
+  412B"` and whose fields carry `method`/`path`/`status`/`ms`/`bytes` -
+  never the query string, headers or body - at the level its status calls
+  for: 2xx at DEBUG, 3xx/4xx at INFO, 5xx at WARNING. A hand-written
+  per-route line is now only for what that hook cannot know (a run starting
+  or stopping, a count a handler computed); `tests/request_log_test.cpp`'s
+  source scan fails if a route file brings the old per-route "METHOD /path"
+  shape back. The daemon's legacy `bool verbose` (threaded through `Server`,
+  `RouteContext`, `execute_exchange` and every load-run worker function down
+  to `client.cpp`'s curl transfer-debug frames) is retired in the same issue:
   everything that gated on it now reads `Logger::instance ()` directly - an
   unconditional DEBUG line for what used to be "log the tallies if verbose",
-  `get_verbosity () >= 2` for the curl frames. The per-run JSON `"verbose"`
-  key (`run_manager.cpp`'s `configure_event_loop`, a caller opting one load
-  run into curl debug frames on the event-loop path) is a different switch
-  and is untouched.
+  `get_verbosity () >= 2` for the curl frames, which land as one `cat:
+  "client"` record per transfer (`lines[]`, each redacted) rather than one
+  line per frame. The per-run JSON `"verbose"` key (`run_manager.cpp`'s
+  `configure_event_loop`, a caller opting one load run into curl debug frames
+  on the event-loop path) is a different switch and is untouched.
 - **vcpkg manages every C++ dependency**: add one in `engine/vcpkg.json`. In
   the cloud dev environment a port fetched by `vcpkg_from_github` fails on a
   cold cache with `curl operation failed with response code 403` (the egress
@@ -755,5 +777,6 @@ through it; add a spelling to that table, never to a route.
 | `docs/engine/scripting.md` | Script globals, hooks, sandbox limits |
 | `docs/engine/mcp.md` | MCP tools or their schemas (the server itself lives in `app/electron/mcp/`) |
 | `docs/engine/cli.md` | Flags or subcommands |
+| `docs/engine/logging.md` | The log record, categories, redaction, file names |
 | `docs/engine/benchmarks.md` | Load generation or measurement |
 | `docs/engine/building.md` | CMake presets, vcpkg deps, the lint and format gates |

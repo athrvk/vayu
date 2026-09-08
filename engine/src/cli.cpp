@@ -21,6 +21,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
@@ -41,7 +42,7 @@
 namespace {
 void print_version () {
     std::cout << "vayu-cli " << vayu::Version::string << "\n";
-    vayu::utils::log_info ("vayu-cli " + std::string (vayu::Version::string));
+    vayu::utils::log_info ("cli", "vayu-cli " + std::string (vayu::Version::string));
 }
 
 void print_help () {
@@ -56,11 +57,11 @@ COMMANDS:
     backup              Snapshot the workspace database and print the file path
 
 OPTIONS:
-    -h, --help          Show this help message
-    -v, --version       Show version information
-    --verbose [LEVEL]   Enable verbose output (0=warn/error, 1=info, 2=debug, default: 1)
-    --no-color          Disable colored output
-    --daemon <url>      Vayu Engine URL (default: http://127.0.0.1:9876)
+    -h, --help              Show this help message
+    -v, --verbose [LEVEL]   Enable verbose output (0=warn/error, 1=info, 2=debug, default: 1)
+    --version               Show version information
+    --no-color              Disable colored output
+    --daemon <url>          Vayu Engine URL (default: http://127.0.0.1:9876)
 
 EXAMPLES:
     vayu-cli run request.json
@@ -143,8 +144,8 @@ void print_error (const vayu::Error& error, bool color) {
     std::cerr << red << msg << reset << "\n";
     std::cerr << error.message << "\n";
 
-    vayu::utils::log_error (msg);
-    vayu::utils::log_error (error.message);
+    vayu::utils::log_error ("cli", msg);
+    vayu::utils::log_error ("cli", error.message);
 }
 
 vayu::Response parse_daemon_response (const std::string& json_str) {
@@ -182,7 +183,7 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
         content = read_file (filepath);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what () << "\n";
-        vayu::utils::log_error ("Error: " + std::string (e.what ()));
+        vayu::utils::log_error ("cli", "Error: " + std::string (e.what ()));
         return 1;
     }
 
@@ -201,7 +202,7 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
     cli.set_connection_timeout (5); // 5s connection timeout
 
     if (verbosity >= 1) {
-        vayu::utils::log_info ("Connecting to daemon at " + daemon_url + "...");
+        vayu::utils::log_info ("cli", "Connecting to daemon", { { "url", daemon_url } });
     }
 
     if (is_load_test) {
@@ -209,20 +210,21 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
         auto res = cli.Post ("/runs", content, "application/json");
 
         if (!res) {
-            vayu::utils::log_error ("Error: Failed to connect to daemon at " + daemon_url);
+            vayu::utils::log_error (
+            "cli", "Error: Failed to connect to daemon at " + daemon_url);
             return 1;
         }
 
         if (res->status == 202) {
             auto response_json = nlohmann::json::parse (res->body);
             std::string run_id = response_json["runId"];
-            vayu::utils::log_info ("Load test started successfully.");
+            vayu::utils::log_info ("cli", "Load test started successfully.");
             std::cout << "Run ID: " << run_id << "\n";
             // The live SSE stream, not the legacy /stats/:id poller. Served
             // from the in-memory collector; a finished run stays readable for
             // liveRetentionMs (default 60s), then 404s with a hint pointing
             // at /runs/:id/report.
-            vayu::utils::log_info (
+            vayu::utils::log_info ("cli",
             "Monitor status at: " + daemon_url + "/runs/" + run_id + "/live");
             return 0;
         } else {
@@ -230,8 +232,8 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
             "Error starting load test (Status " + std::to_string (res->status) + ")";
             std::cerr << msg << "\n";
             std::cerr << res->body << "\n";
-            vayu::utils::log_error (msg);
-            vayu::utils::log_error (res->body);
+            vayu::utils::log_error ("cli", msg);
+            vayu::utils::log_error ("cli", res->body);
             return 1;
         }
     } else {
@@ -242,7 +244,7 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
         if (!res) {
             std::string msg = "Error: Failed to connect to daemon at " + daemon_url;
             std::cerr << msg << "\n";
-            vayu::utils::log_error (msg);
+            vayu::utils::log_error ("cli", msg);
             return 1;
         }
 
@@ -255,7 +257,7 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
                 std::string msg =
                 "Error parsing daemon response: " + std::string (e.what ());
                 std::cerr << msg << "\n";
-                vayu::utils::log_error (msg);
+                vayu::utils::log_error ("cli", msg);
                 return 1;
             }
         } else {
@@ -263,8 +265,8 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
             "Request failed (Status " + std::to_string (res->status) + ")";
             std::cerr << msg << "\n";
             std::cerr << res->body << "\n";
-            vayu::utils::log_error (msg);
-            vayu::utils::log_error (res->body);
+            vayu::utils::log_error ("cli", msg);
+            vayu::utils::log_error ("cli", res->body);
             return 1;
         }
     }
@@ -292,7 +294,7 @@ int backup_via_daemon (const std::string& daemon_url) {
     if (!res) {
         const std::string msg = "Error: Failed to connect to daemon at " + daemon_url;
         std::cerr << msg << "\n";
-        vayu::utils::log_error (msg);
+        vayu::utils::log_error ("cli", msg);
         return 1;
     }
     if (res->status != 200) {
@@ -300,22 +302,23 @@ int backup_via_daemon (const std::string& daemon_url) {
         "Backup failed (Status " + std::to_string (res->status) + ")";
         std::cerr << msg << "\n";
         std::cerr << res->body << "\n";
-        vayu::utils::log_error (msg);
-        vayu::utils::log_error (res->body);
+        vayu::utils::log_error ("cli", msg);
+        vayu::utils::log_error ("cli", res->body);
         return 1;
     }
 
     try {
         const auto body = nlohmann::json::parse (res->body);
         std::cout << body.value ("path", std::string{}) << "\n";
-        vayu::utils::log_info ("Workspace backed up (" +
+        vayu::utils::log_info ("cli",
+        "Workspace backed up (" +
         std::to_string (body.value ("sizeBytes", int64_t{ 0 })) + " bytes)");
         return 0;
     } catch (const std::exception& e) {
         const std::string msg =
         "Error parsing daemon response: " + std::string (e.what ());
         std::cerr << msg << "\n";
-        vayu::utils::log_error (msg);
+        vayu::utils::log_error ("cli", msg);
         return 1;
     }
 }
@@ -333,8 +336,13 @@ int backup_via_daemon (const std::string& daemon_url) {
  * parse below index them instead of walking a raw pointer.
  */
 int run_cli (std::span<char* const> args) {
-    // Initialize logger
-    vayu::utils::Logger::instance ().init (vayu::core::constants::logging::DIR);
+    // Initialize logger. The CLI has no `--data-dir` of its own (it is a thin
+    // client, not a workspace owner) but defaults to the same directory the
+    // daemon does (issue #1557), so `cli_<stamp>.log` and `engine_<stamp>.log`
+    // land side by side when both run from the same shell with no flags.
+    const std::string log_dir =
+    vayu::platform::path_join (vayu::platform::default_data_dir (), "logs");
+    vayu::utils::Logger::instance ().init (log_dir, "cli");
 
     // Parse arguments
     if (args.size () < 2) {
@@ -350,7 +358,7 @@ int run_cli (std::span<char* const> args) {
         // with (#1028, #1031) - not dropped, which is what left a mistyped
         // flag indistinguishable from no flag at all.
         std::cerr << "vayu-cli: " << request.error () << "\n";
-        vayu::utils::log_error ("vayu-cli: " + request.error ());
+        vayu::utils::log_error ("cli", "vayu-cli: " + request.error ());
         return 1;
     }
     if (*request == vayu::core::CliRequest::Help) {
@@ -377,7 +385,7 @@ int run_cli (std::span<char* const> args) {
             std::string msg = "Error: Missing request file";
             std::cerr << msg << "\n";
             std::cerr << "Usage: vayu-cli run <request.json>\n";
-            vayu::utils::log_error (msg);
+            vayu::utils::log_error ("cli", msg);
             result = 1;
         } else {
             result = run_via_daemon (options.daemon_url, options.filepath,
@@ -392,7 +400,7 @@ int run_cli (std::span<char* const> args) {
         std::string msg = "Error: Unknown command '" + options.command + "'";
         std::cerr << msg << "\n";
         std::cerr << "Run 'vayu-cli --help' for usage information.\n";
-        vayu::utils::log_error (msg);
+        vayu::utils::log_error ("cli", msg);
         result = 1;
     }
 
@@ -411,11 +419,11 @@ int main (int argc, char* argv[]) {
         // Reported rather than terminated on: an escape from main aborts with
         // no message and a status no caller can distinguish from a crash.
         std::cerr << "vayu-cli: " << e.what () << "\n";
-        vayu::utils::log_error (std::string ("vayu-cli: ") + e.what ());
+        vayu::utils::log_error ("cli", std::string ("vayu-cli: ") + e.what ());
         return 1;
     } catch (...) {
         std::cerr << "vayu-cli: unknown error\n";
-        vayu::utils::log_error ("vayu-cli: unknown error");
+        vayu::utils::log_error ("cli", "vayu-cli: unknown error");
         return 1;
     }
 }

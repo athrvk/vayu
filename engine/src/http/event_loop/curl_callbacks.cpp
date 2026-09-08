@@ -16,30 +16,16 @@
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
-#include "vayu/utils/logger.hpp"
 
 namespace vayu::http::detail {
 
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
     (void)handle;
-    (void)userptr;
-
-    std::string text (data, size);
-    // Remove trailing newlines
-    while (!text.empty () && (text.back () == '\n' || text.back () == '\r')) {
-        text.pop_back ();
+    auto* transfer_data = static_cast<TransferData*> (userptr);
+    if (transfer_data == nullptr) {
+        return 0;
     }
-
-    switch (type) {
-    case CURLINFO_TEXT: vayu::utils::log_debug ("* " + text); break;
-    case CURLINFO_HEADER_OUT:
-        vayu::utils::log_debug ("> " + redact_header_line (text));
-        break;
-    case CURLINFO_HEADER_IN:
-        vayu::utils::log_debug ("< " + redact_header_line (text));
-        break;
-    default: break;
-    }
+    collect_debug_frame (transfer_data->debug_lines, type, std::string_view (data, size));
     return 0;
 }
 

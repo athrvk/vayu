@@ -83,7 +83,7 @@ void register_health_routes (RouteContext& ctx) {
      * 4. daemon.cpp then performs final cleanup (stop runs, release lock, flush logs)
      */
     ctx.server.Post ("/shutdown", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_info ("Graceful shutdown requested");
+        vayu::utils::log_info ("http", "Graceful shutdown requested");
         nlohmann::json response;
         response["status"]  = "ok";
         response["message"] = "Shutdown initiated";
@@ -93,8 +93,7 @@ void register_health_routes (RouteContext& ctx) {
         std::thread ([&ctx] () {
             std::this_thread::sleep_for (std::chrono::milliseconds (100));
             if (ctx.on_shutdown) {
-                vayu::utils::log_debug (
-                "POST /shutdown - Invoking shutdown callback");
+                vayu::utils::log_debug ("http", "Invoking shutdown callback");
                 ctx.on_shutdown ();
             }
         })

@@ -1208,8 +1208,9 @@ data/
 │   └── backups/
 │       └── vayu-<stamp>.db  # On-demand snapshots (UTC, %Y%m%d-%H%M%S-mmm)
 ├── logs/
-│   ├── vayu_<stamp>.log # One file per process start (local time, %Y%m%d_%H%M%S)
-│   └── vayu_<stamp>.log.1  # The rotated half of a file that reached the size cap
+│   ├── engine_<stamp>.log   # One file per daemon start (UTC timestamps inside, %Y%m%d_%H%M%S in the name)
+│   ├── engine_<stamp>.log.1 # The rotated half of a file that reached the size cap
+│   └── cli_<stamp>.log      # vayu-cli writes here too, under its own data directory
 └── vayu.lock            # Single-instance lock file
 ```
 
@@ -1247,72 +1248,19 @@ Restore by hand, with the engine stopped.
    its writes on top of the snapshot.
 4. Start Vayu again.
 
-### Log retention, level and size
+### Logging
 
-Three bounds, all applied by the engine itself (issue #985):
-
-- **Retention.** A start opens its own file and then deletes every
-  `vayu_*.log` beyond the newest 10, taking each pruned file's `.1` with it.
-  Newest is decided by the timestamp in the name, which is what makes those
-  names sortable. Nothing else in the directory is a candidate.
-- **Level.** The `logLevel` config entry (`debug` | `info` | `warn` | `error`,
-  default `debug`) is the lowest severity the **file** takes. The console is
-  separate and still follows the daemon's `-v` flag. The value is read once,
-  when the database opens, so the few lines a start writes before that always
-  land and a change needs a restart.
-- **Size.** `maxLogFileBytes` (default 64 MiB, `0` = unlimited) caps one file.
-  On reaching it the file is renamed to `<name>.1` - overwriting whatever that
-  held - and writing continues in a fresh one. One rotation generation is
-  enough because history is the per-start files, which retention already
-  bounds.
-
-### Request logging
-
-One line per HTTP call, from one place (issue #1510). Before this, a route's
-request line was hand-written per handler - about half the routes had none at
-all (`GET /inbox` and the mock listings among them), so an absent line was
-never evidence a route did not run, and none of the 48 lines that did exist
-carried a status code or a duration.
-
-`vayu::http::install_request_logger` (`http/request_log.hpp`) is the one hook:
-a `set_pre_routing_handler` stamps the start time onto the response's
-cpp-httplib-provided `user_data` slot, and `set_logger` reads it back once the
-response is built, to emit exactly one line:
-
-```
-GET /inbox 200 1.3ms 412B
-```
-
-Method, path, status, duration and response bytes, in that order, and nothing
-else - never the query string, headers or body, any of which can carry a
-token, an OAuth code or a credential. The line's level follows its status:
-2xx at DEBUG (so only `-v 2` shows the happy path), 3xx/4xx at INFO (`-v 1`
-shows a caller's own mistake), 5xx at WARNING (visible even at `-v 0`, because
-an engine failure is not something a quiet run should hide).
-
-The hook is installed on both `httplib::Server` instances the engine owns: the
-management API, in `Server::setup_routes`, and the webhook inbox's own
-listener, in `routes/inbox.cpp`. The mock server's listener is not one of
-them - it already installs its own `set_pre_routing_handler` to route an
-arbitrarily long mocked path (issue #1139), and that handler's return value
-decides whether cpp-httplib routes the request at all.
-
-A route handler still logs its own line where the hook cannot know something:
-a run starting or stopping, a count a handler computed, a config write. Those
-lines no longer repeat the method and path the centralised line already
-carries - `tests/request_log_test.cpp`'s source scan fails the build if a
-route file's `log_info`/`log_debug` call starts with a bare HTTP method name
-again, the exact shape the 48 original lines shared.
-
-The daemon's old `bool verbose` - threaded through `Server`, `RouteContext`,
-`execute_exchange`, every load-run worker function, and `client.cpp`'s curl
-transfer-debug frames - is retired in the same issue. Everything that used to
-gate on it now reads `vayu::utils::Logger::instance ()` directly: an
-unconditional DEBUG line where a function used to log only "if verbose", and
-`get_verbosity () >= 2` for the curl frames specifically. The per-run JSON
-`"verbose"` key (a caller opting one load run into curl debug frames on the
-event-loop path, read in `run_manager.cpp`'s `configure_event_loop`) is a
-different, independent switch and is unaffected.
+`vayu-engine` and `vayu-cli` each write one file under `<data-dir>/logs/`
+(`engine_<stamp>.log`, `cli_<stamp>.log`), one JSON record per line, plus a
+text rendering on the console. `logLevel` is the file's floor, `maxLogFileBytes`
+its rotation cap, and the newest 10 per-prefix files survive a start. Every
+route's request line comes from one hook, `install_request_logger`
+(`http/request_log.hpp`), installed on both `httplib::Server` instances the
+engine owns - the management API and the webhook inbox's listener, never the
+mock server's, which routes an arbitrarily long path through its own
+pre-routing handler (issue #1139). See [Engine Logging](logging.md) for the
+record shape, the category list, the redaction rule and the file layout
+(issues #1510, #1557).
 
 ## Security
 
@@ -1323,9 +1271,12 @@ different, independent switch and is unaffected.
 - **Single instance**: File lock prevents multiple daemon instances
 - **Secret handling (v1 posture)**: auth credentials and cached OAuth 2.0 tokens
   are stored in **plaintext** in SQLite; `runs.config_snapshot` redacts its
-  `auth` object to `{mode}` before persistence; and curl verbose logs redact the
-  values of sensitive headers (`Authorization`, cookies, etc.). Token request
-  bodies/responses are never logged. On-disk encryption (`safeStorage`) is
+  `auth` object to `{mode}` before persistence; and every log record is
+  redacted by key before either sink sees it - a secret-named field becomes
+  `<redacted>`, a URL-named field is stripped to scheme/host/path (issue
+  #1557, [Engine Logging](logging.md)), which is what curl verbose logs go
+  through too. Token request bodies/responses are never logged. On-disk
+  encryption (`safeStorage`) is
   still deferred, and so is OS-keychain storage (out of scope for the transport
   epic, #704 decision 6; the app runs Chromium with `use-mock-keychain`).
   Mid-run token refresh
