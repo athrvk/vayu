@@ -1051,26 +1051,39 @@ bool is_blank_script_text (const std::string& text) {
     return text.find_first_not_of (" \t\r\n") == std::string::npos;
 }
 
-/// Whether @p table's schema still carries `pre_request_script` (issue
-/// #1514's cut-over target). False for a fresh install (the table does not
-/// exist yet) and for a database this or an earlier engine build already
-/// migrated by some other means.
-bool table_has_script_columns (sqlite3* connection, const char* table) {
+/// @p table's current column names, read fresh so a caller never assumes a
+/// shape a genuinely pre-cutover database (older than #1513, no `elements`
+/// column at all) does not have.
+std::vector<std::string> table_columns (sqlite3* connection, const char* table) {
     const std::string sql   = std::string ("PRAGMA table_info(") + table + ");";
     sqlite3_stmt* statement = nullptr;
+    std::vector<std::string> columns;
     if (sqlite3_prepare_v2 (connection, sql.c_str (), -1, &statement, nullptr) != SQLITE_OK) {
-        return false;
+        return columns;
     }
-    bool found = false;
     while (sqlite3_step (statement) == SQLITE_ROW) {
         const auto* name = column_text (statement, 1);
-        if (name != nullptr && std::string_view (name) == "pre_request_script") {
-            found = true;
-            break;
+        if (name != nullptr) {
+            columns.emplace_back (name);
         }
     }
     sqlite3_finalize (statement);
-    return found;
+    return columns;
+}
+
+bool has_column (const std::vector<std::string>& columns, std::string_view name) {
+    return std::find (columns.begin (), columns.end (), name) != columns.end ();
+}
+
+/// Whether @p table's schema still carries `pre_request_script` or
+/// `post_request_script` (issue #1514's cut-over target) - either alone is
+/// enough to need the fold below, since a row can carry just one. False for a
+/// fresh install (the table does not exist yet) and for a database this or an
+/// earlier engine build already migrated by some other means.
+bool table_has_script_columns (sqlite3* connection, const char* table) {
+    const auto columns = table_columns (connection, table);
+    return has_column (columns, "pre_request_script") ||
+    has_column (columns, "post_request_script");
 }
 
 /**
@@ -1116,17 +1129,40 @@ const std::string& post) {
 /**
  * Fold @p table's `pre_request_script` / `post_request_script` into
  * `elements`, row by row, on the still-open @p connection. Returns false on
- * the first SQLite error, which aborts the whole migration (the caller rolls
- * the transaction back) rather than leaving some rows folded and others not.
+ * the first SQLite error (message left in @p error), which aborts the whole
+ * migration (the caller rolls the transaction back) rather than leaving some
+ * rows folded and others not.
+ *
+ * A genuinely pre-cutover database (older than #1513) has neither the
+ * `elements` column nor, on some rows, both script columns - only the
+ * migration this function runs ever adds `elements` for such a file, and it
+ * runs ahead of `sync_schema ()`. So the column set is read fresh here rather
+ * than assumed: a missing `elements` column is added first (the same shape
+ * `sync_schema` would create), and a missing script column reads as `''`
+ * instead of failing to prepare.
  */
-bool fold_table_scripts_into_elements (sqlite3* connection, const char* table) {
+bool fold_table_scripts_into_elements (sqlite3* connection, const char* table, std::string& error) {
+    const auto columns  = table_columns (connection, table);
+    const bool has_pre  = has_column (columns, "pre_request_script");
+    const bool has_post = has_column (columns, "post_request_script");
+
+    if (!has_column (columns, "elements")) {
+        const std::string alter_sql = std::string ("ALTER TABLE ") + table +
+        " ADD COLUMN elements TEXT NOT NULL DEFAULT '[]';";
+        if (sqlite3_exec (connection, alter_sql.c_str (), nullptr, nullptr, nullptr) != SQLITE_OK) {
+            error = sqlite3_errmsg (connection);
+            return false;
+        }
+    }
+
+    const std::string pre_expr  = has_pre ? "pre_request_script" : "''";
+    const std::string post_expr = has_post ? "post_request_script" : "''";
     const std::string select_sql =
-    std::string (
-    "SELECT id, pre_request_script, post_request_script, elements FROM ") +
-    table + ";";
+    "SELECT id, " + pre_expr + ", " + post_expr + ", elements FROM " + table + ";";
     sqlite3_stmt* select_statement = nullptr;
     if (sqlite3_prepare_v2 (connection, select_sql.c_str (), -1,
         &select_statement, nullptr) != SQLITE_OK) {
+        error = sqlite3_errmsg (connection);
         return false;
     }
     const std::string update_sql =
@@ -1134,6 +1170,7 @@ bool fold_table_scripts_into_elements (sqlite3* connection, const char* table) {
     sqlite3_stmt* update_statement = nullptr;
     if (sqlite3_prepare_v2 (connection, update_sql.c_str (), -1,
         &update_statement, nullptr) != SQLITE_OK) {
+        error = sqlite3_errmsg (connection);
         sqlite3_finalize (select_statement);
         return false;
     }
@@ -1150,7 +1187,8 @@ bool fold_table_scripts_into_elements (sqlite3* connection, const char* table) {
             break;
         }
         if (step != SQLITE_ROW) {
-            ok = false;
+            error = sqlite3_errmsg (connection);
+            ok    = false;
             break;
         }
         const std::string id       = select_column_text (0);
@@ -1167,7 +1205,8 @@ bool fold_table_scripts_into_elements (sqlite3* connection, const char* table) {
         sqlite3_bind_text (update_statement, 1, updated->c_str (), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text (update_statement, 2, id.c_str (), -1, SQLITE_TRANSIENT);
         if (sqlite3_step (update_statement) != SQLITE_DONE) {
-            ok = false;
+            error = sqlite3_errmsg (connection);
+            ok    = false;
         }
     }
 
@@ -1256,11 +1295,13 @@ void migrate_before_sync (const std::string& path) {
 
     sqlite3_exec (connection.get (), "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr);
     bool ok = true;
+    std::string fold_error;
     if (requests_need_fold) {
-        ok = ok && fold_table_scripts_into_elements (connection.get (), "requests");
+        ok = ok && fold_table_scripts_into_elements (connection.get (), "requests", fold_error);
     }
     if (collections_need_fold) {
-        ok = ok && fold_table_scripts_into_elements (connection.get (), "collections");
+        ok = ok &&
+        fold_table_scripts_into_elements (connection.get (), "collections", fold_error);
     }
     if (ok) {
         sqlite3_exec (connection.get (), "PRAGMA user_version = 1;", nullptr, nullptr, nullptr);
@@ -1268,7 +1309,8 @@ void migrate_before_sync (const std::string& path) {
     } else {
         sqlite3_exec (connection.get (), "ROLLBACK;", nullptr, nullptr, nullptr);
         throw std::runtime_error (
-        "Vayu could not migrate stored scripts into elements for " + path);
+        "Vayu could not migrate stored scripts into elements for " + path +
+        ": " + (fold_error.empty () ? "unknown error" : fold_error));
     }
 }
 

@@ -1981,6 +1981,38 @@ void add_legacy_script_columns (const std::string& path) {
     sqlite3_close (handle);
 }
 
+/// Drops `elements` from both tables - the shape a database genuinely older
+/// than issue #1513 has: it never ran the additive pass that added the
+/// column, so `elements` does not exist at all, not merely unpopulated.
+void drop_elements_column (const std::string& path) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path.c_str (), &handle), SQLITE_OK);
+    for (const char* table : { "requests", "collections" }) {
+        char* err = nullptr;
+        const std::string sql = std::string ("ALTER TABLE ") + table + " DROP COLUMN elements";
+        ASSERT_EQ (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, &err), SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+    }
+    sqlite3_close (handle);
+}
+
+/// Adds back only @p column (one of the two script columns) - the shape a
+/// row that predates the *other* script column carrying anything can have.
+void add_single_legacy_script_column (const std::string& path, const char* column) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path.c_str (), &handle), SQLITE_OK);
+    for (const char* table : { "requests", "collections" }) {
+        char* err             = nullptr;
+        const std::string sql = std::string ("ALTER TABLE ") + table +
+        " ADD COLUMN " + column + " TEXT DEFAULT ''";
+        ASSERT_EQ (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, &err), SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+    }
+    sqlite3_close (handle);
+}
+
 void set_legacy_scripts (const std::string& path,
 const std::string& table,
 const std::string& id,
@@ -2188,6 +2220,127 @@ TEST_F (DatabaseTest, ADatabaseFromANewerEngineIsRefused) {
     set_user_version (TEST_DB_PATH, 99);
 
     EXPECT_THROW ({ Database db (TEST_DB_PATH); }, std::runtime_error);
+}
+
+// Issue #1593: a database older than #1513 has no `elements` column at all,
+// not merely an unpopulated one - `fold_table_scripts_into_elements` used to
+// `SELECT ... elements` unconditionally and fail to prepare on exactly this
+// shape, which is what every 0.26 -> 0.27 upgrade hit. Mutation check: revert
+// the `ADD COLUMN elements` branch in `fold_table_scripts_into_elements` and
+// this reds with "no such column: elements" surfacing through the
+// `std::runtime_error` this test expects *not* to be thrown.
+TEST_F (DatabaseTest, MigratesADatabaseThatPredatesTheElementsColumn) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_1";
+        r.collection_id = "col_1";
+        r.name          = "R";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+
+    add_legacy_script_columns (TEST_DB_PATH);
+    set_legacy_scripts (TEST_DB_PATH, "requests", "req_1",
+    "pm.environment.set('x', 1);", "pm.test('ok', () => {});");
+    drop_elements_column (TEST_DB_PATH);
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "requests", "elements"))
+    << "test setup did not remove the elements column";
+    // See `MigratesPreCutoverScriptColumnsIntoElements`: the first open above
+    // already bumped `user_version` to 1.
+    set_user_version (TEST_DB_PATH, 0);
+
+    EXPECT_NO_THROW ({
+        Database db (TEST_DB_PATH);
+        db.init ();
+    });
+
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", "elements"));
+    EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
+    EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "post_request_script"));
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 1);
+    EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    << "no pre-migration backup was written";
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto folded = reopened.get_request ("req_1");
+    ASSERT_HAS_VALUE (folded);
+    const auto elements = nlohmann::json::parse (folded->elements);
+    ASSERT_EQ (elements.size (), 2u);
+    EXPECT_EQ (elements[0]["kind"], "script.pre");
+    EXPECT_EQ (elements[0]["config"]["script"], "pm.environment.set('x', 1);");
+    EXPECT_EQ (elements[1]["kind"], "script.post");
+    EXPECT_EQ (elements[1]["config"]["script"], "pm.test('ok', () => {});");
+}
+
+// A row can predate whichever script column never carried anything for it -
+// `fold_table_scripts_into_elements` used to `SELECT` both unconditionally,
+// so a table missing either one failed to prepare the same way a missing
+// `elements` column did. Mutation check: revert the literal-`''` fallback for
+// a missing script column and this reds the same way.
+TEST_F (DatabaseTest, MigratesWhenOnlyOneScriptColumnSurvives) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_1";
+        r.collection_id = "col_1";
+        r.name          = "R";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+
+    add_single_legacy_script_column (TEST_DB_PATH, "post_request_script");
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        sqlite3_stmt* stmt = nullptr;
+        ASSERT_EQ (sqlite3_prepare_v2 (handle, "UPDATE requests SET post_request_script = ?1 WHERE id = ?2",
+                   -1, &stmt, nullptr),
+        SQLITE_OK);
+        sqlite3_bind_text (stmt, 1, "pm.test('ok', () => {});", -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text (stmt, 2, "req_1", -1, SQLITE_TRANSIENT);
+        ASSERT_EQ (sqlite3_step (stmt), SQLITE_DONE);
+        sqlite3_finalize (stmt);
+        sqlite3_close (handle);
+    }
+    ASSERT_TRUE (table_has_column (TEST_DB_PATH, "requests", "post_request_script"));
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
+    set_user_version (TEST_DB_PATH, 0);
+
+    EXPECT_NO_THROW ({
+        Database db (TEST_DB_PATH);
+        db.init ();
+    });
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto folded = reopened.get_request ("req_1");
+    ASSERT_HAS_VALUE (folded);
+    const auto elements = nlohmann::json::parse (folded->elements);
+    ASSERT_EQ (elements.size (), 1u);
+    EXPECT_EQ (elements[0]["kind"], "script.post");
+    EXPECT_EQ (elements[0]["config"]["script"], "pm.test('ok', () => {});");
 }
 
 } // namespace
