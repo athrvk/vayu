@@ -5192,7 +5192,14 @@ own unknown-key rule uses, checked before the run row is created.
   same rule `scripts` above uses. `timer.think`'s `step.between` phase now
   dispatches on a scenario load run too (non-blocking, summed into
   `VirtualUser::ready_at_ms`), so this override reaches load runs as well as
-  the sequential run.
+  the sequential run. `timer.pacing` and `timer.throughput` schedule their
+  wait before that step's `ElementContext` exists at all
+  (`Element::scheduled_ready_delay_ms`, see
+  [Load paths](elements.md#load-paths)); `"off"` reaches
+  them there too, through the run's own copy of the override
+  (`SharedScheduleState::timers_override`), so a run with `timers: "off"`
+  defers neither kind under load - `"fixedMs"`/`{"minMs", "maxMs"}` are not
+  yet threaded through that same seam.
 - **`seed`** (issue #1498) is an optional non-negative integer that seeds this
   run's RNG, making a `timer.think` element's gaussian or uniform-random wait
   reproducible. A scenario load run derives one independent generator per

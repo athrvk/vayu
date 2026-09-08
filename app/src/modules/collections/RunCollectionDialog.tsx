@@ -136,9 +136,9 @@ const DEFAULT_DURATION_SECONDS = "30";
  * The `elements` run override (issue #1495), scenario-load-run only - a
  * design-mode collection run has no inline/deferred distinction to make.
  * Matches `docs/engine/api-reference.md`'s "elements" block exactly:
- * `timers` is engine-accepted but not yet wired to a kind (#1498 finishes
- * that), and `scripts` picks whether a `script.*` element runs inline on the
- * event-loop worker or stays deferred to the post-run replay.
+ * `timers` reaches every `timer.*` kind under load (`"off"` included, since
+ * #1498's reopen fix), and `scripts` picks whether a `script.*` element runs
+ * inline on the event-loop worker or stays deferred to the post-run replay.
  */
 const TIMERS_DEFAULT = "asConfigured";
 const SCRIPTS_DEFAULT = "asMarked";
