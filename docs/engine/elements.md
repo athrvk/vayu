@@ -230,8 +230,9 @@ gap, outside this page's Status callout.
 - #1495 - the pipeline on a scenario load run's producer/completion hooks (this page's Load
   paths section).
 - #1497 - the `maxAssertionFailureRatePct` run threshold and `thresholds.failRun`, over the
-  combined `assert.*` element and `pm.test` tally (load runs only; see `api-reference.md`'s
-  thresholds section).
+  combined `assert.*` element and `pm.test` tally (see `api-reference.md`'s thresholds section).
+- #1564 - the same `thresholds` block, evaluated for a collection (sequential) run too, not
+  only a load run.
 - #1498 - `timer.think`'s gaussian option, the `timer.pacing` kind, a per-run seeded RNG
   (`elements.seed`) and the `elements.timers` override wired end to end (this page's Timers
   paragraphs and Load paths section). `timer.pacing`'s `perUser: false` under load and
