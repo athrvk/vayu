@@ -85,9 +85,12 @@ are things Vayu plans to catch up on:
 - **You have existing `.jmx` test plans**, or a team fluent in them. There is no
   importer for them here.
 - **Your load model needs a load-run logic jump.** Think time and pacing
-  timers work under load now (`timer.think`, including a gaussian option,
-  and `timer.pacing`, including its shared-cadence case, `perUser: false` -
-  one cadence held across every virtual user, not one per user), and logic
+  timers work under load now (`timer.think`, including a gaussian option;
+  `timer.pacing`, including its shared-cadence case, `perUser: false` -
+  one cadence held across every virtual user, not one per user; and
+  `timer.throughput`, the analogue of JMeter's Constant Throughput Timer,
+  which targets a rate - N per minute - shared across every virtual user by
+  default rather than held per user), and logic
   controllers - conditionals, once-only, throughput, loops and named
   transactions - are elements (`control.if` / `.once` / `.switch` /
   `.throughput` / `.loop` / `.transaction`) that run fully in a sequential
