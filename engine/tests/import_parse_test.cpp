@@ -562,6 +562,44 @@ TEST (ImportParse, CountsEveryServerPastTheFirstAsDropped) {
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("servers_dropped"), 2);
 }
 
+/// `x-vayu-elements` (issue #1518) round-trips into the imported request's
+/// own `elements` array, validated against the same registry a stored
+/// request's write goes through.
+TEST (ImportParse, ReadsXVayuElementsIntoTheImportedRequest) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/pets":{"get":{"responses":{},
+        "x-vayu-elements":[{"id":"el_1","kind":"extract.json","enabled":true,
+        "config":{"path":"$.id","variable":"petId"}}]}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections")[0]);
+    ASSERT_TRUE (request.contains ("elements"));
+    EXPECT_EQ (request.at ("elements")[0].at ("kind"), "extract.json");
+}
+
+/// A hand-edited `x-vayu-elements` that fails the registry (an unknown kind,
+/// here) is dropped and counted rather than applied or refusing the whole
+/// document - the same "nothing dropped quietly, nothing invalid applied"
+/// rule the rest of this parser follows.
+TEST (ImportParse, DropsAndCountsAnInvalidXVayuElementsArray) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/pets":{"get":{"responses":{},
+        "x-vayu-elements":[{"id":"el_1","kind":"not.a.kind","enabled":true,"config":{}}]}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections")[0]);
+    EXPECT_FALSE (request.contains ("elements"));
+    const nlohmann::ordered_json& skipped =
+    parsed.result.at ("meta").at ("skipped");
+    const bool counted = std::any_of (
+    skipped.begin (), skipped.end (), [] (const nlohmann::ordered_json& item) {
+        return item.at ("kind") == "elements_invalid";
+    });
+    EXPECT_TRUE (counted);
+}
+
 TEST (ImportParse, ReportsA31DocumentApartFrom30) {
     const ImportParse v30 =
     parse_import (R"({"openapi":"3.0.3","info":{"title":"T"},"paths":{}})", {}, {});

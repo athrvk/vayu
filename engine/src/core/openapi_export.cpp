@@ -925,6 +925,14 @@ ExportNotes& notes) {
     count_undeclared_rows (entry, declared, notes);
     count_unwritten_body (entry, notes);
     count_edited_identity (entry, notes);
+    // `x-vayu-elements` (issue #1518): called only when `dialect.writable`
+    // (`patch_path_item` below), the same gate every other field this
+    // function patches already relies on - a vendor extension key added to an
+    // operation the document already declares is additive, never a rewrite of
+    // what the operation itself means.
+    if (entry.elements.is_array () && !entry.elements.empty ()) {
+        operation["x-vayu-elements"] = entry.elements;
+    }
     if (entry.examples.empty ()) {
         return;
     }
@@ -1540,8 +1548,14 @@ SecuritySchemeRegistry& schemes) {
         disposition_of (entry.auth), collection_disp, schemes, notes)) {
         operation["security"] = *security;
     }
-    if (!entry.pre_request_script.empty () || !entry.post_request_script.empty ()) {
-        notes.scripts_dropped += 1;
+    // `x-vayu-elements` (issue #1518): a vendor extension key, never a
+    // standard OpenAPI field, so writing it is never "rewriting the user's
+    // contract" - the same reasoning `x-vayu-enabled` already rests on
+    // (`parameter_object` above). It replaces the old script-only drop count:
+    // a script is one element kind among several, and every one of them now
+    // round-trips through this key rather than only being counted as lost.
+    if (entry.elements.is_array () && !entry.elements.empty ()) {
+        operation["x-vayu-elements"] = entry.elements;
     }
     if (!entry.follow_redirects || entry.max_redirects != 10 ||
     entry.http_version != "auto" || !entry.verify_ssl || entry.stream) {
@@ -1652,10 +1666,6 @@ const std::vector<ExportRequest>& requests) {
     if (collection_disp.kind == AuthDisposition::Kind::Unsupported) {
         assembly.notes.auth_dropped += 1;
     }
-    if (!collection.pre_request_script.empty () ||
-    !collection.post_request_script.empty ()) {
-        assembly.notes.scripts_dropped += 1;
-    }
     assembly.notes.variables_dropped += collection.other_variables;
 
     SecuritySchemeRegistry schemes;
@@ -1707,6 +1717,9 @@ const std::vector<ExportRequest>& requests) {
         { "info", std::move (info) } };
     write_servers_and_tags (assembly.document, servers, tag_order, collection);
     write_root_security (assembly.document, collection_disp, schemes);
+    if (collection.elements.is_array () && !collection.elements.empty ()) {
+        assembly.document["x-vayu-elements"] = collection.elements;
+    }
     assembly.document["paths"] = std::move (paths);
     return assembly;
 }

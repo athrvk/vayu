@@ -77,6 +77,7 @@ shipping silently mismatched.
 | `extract.json` | extract | `step.after` | #1514 |
 | `extract.regex` | extract | `step.after` | #1514 |
 | `extract.header` | extract | `step.after` | #1514 |
+| `extract.boundary` | extract | `step.after` | #1518 |
 | `assert.status` | assert | `step.after` | #1514 |
 | `assert.jsonpath` | assert | `step.after` | #1514 |
 | `assert.contains` | assert | `step.after` | #1514 |
@@ -98,13 +99,16 @@ shipping silently mismatched.
 
 `extract.json` reads a JSONPath subset - `$.a.b`, `[n]`, `[*]`, `..name`; a filter (`[?...]`) is
 refused at validate. `extract.regex` compiles its `pattern` once, at plan-resolution time, and
-writes a `$1$`-style template of the match's groups. Both, and `extract.header`, share `variable`,
-`scope` (`env` | `collection` | `globals`), `default` and the JMeter `matchNo` convention: `1`-based
-picks a match, `0` picks one at random, `-1` writes every match as `<variable>_1` ..
-`<variable>_N` plus a `<variable>_matchNr` count. A miss without a `default` reports `"missing"`,
-and only when `required: true` also fails the step - through the same `tests` list a `pm.test`
-assertion writes to, which is why the SSE frame's `tests` tally and `describe_failed_tests` count a
-declarative assertion exactly as they count a scripted one.
+writes a `$1$`-style template of the match's groups. `extract.boundary` (issue #1518, JMeter's
+Boundary Extractor) takes everything between the first occurrence of `leftBoundary` and the next
+occurrence of `rightBoundary` on the response body - no `field` selector, unlike `extract.regex`'s
+four, because JMeter's own Boundary Extractor has none either. All four - plus `extract.header` -
+share `variable`, `scope` (`env` | `collection` | `globals`), `default` and the JMeter `matchNo`
+convention: `1`-based picks a match, `0` picks one at random, `-1` writes every match as
+`<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr` count. A miss without a `default`
+reports `"missing"`, and only when `required: true` also fails the step - through the same `tests`
+list a `pm.test` assertion writes to, which is why the SSE frame's `tests` tally and
+`describe_failed_tests` count a declarative assertion exactly as they count a scripted one.
 
 `assert.status` takes an `in` list or a `range`; `assert.jsonpath` takes the same path subset with
 one of `expected`, `regex` or `exists`, plus `negate`; `assert.contains` compares a `field` (`body`

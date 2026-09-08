@@ -214,6 +214,21 @@ TEST (BoundExport, KeepsEveryMemberVayuDoesNotModel) {
     EXPECT_EQ (exported.notes.direction, "document");
 }
 
+TEST (BoundExport, WritesElementsOntoAnOperationTheDocumentDeclares) {
+    std::vector<ExportRequest> requests = bound_requests ();
+    requests[0].elements                = json::parse (
+    R"([{"id":"el_r1","kind":"extract.json","enabled":true,"config":{"path":"$.id","variable":"petId"}}])");
+
+    const Exported exported = export_json (requests, bound_fixture ());
+    EXPECT_EQ (
+    operation_of (exported.document, "/pets", "get")["x-vayu-elements"],
+    requests[0].elements);
+    // The other operation this bound document declares gets none - additive,
+    // never invented for a request that carries no elements of its own.
+    EXPECT_FALSE (
+    operation_of (exported.document, "/pets", "post").contains ("x-vayu-elements"));
+}
+
 TEST (BoundExport, CarriesAPerturbedMemberThroughRatherThanRegenerating) {
     // The mutation check for preservation: change something in the stored
     // document that Vayu has no concept of, and it must appear in the output. A
@@ -820,23 +835,41 @@ TEST (SkeletonExport, LeavesAnInheritingRequestsOperationWithNoSecurityOverride)
     EXPECT_FALSE (operation_of (exported.document, "/a", "get").contains ("security"));
 }
 
-TEST (SkeletonExport, CountsScriptsSettingsVariablesAndExampleHeadersItCannotCarry) {
-    ExportCollection collection   = named_collection ("Petstore");
-    collection.pre_request_script = "console.log('hi')";
-    collection.other_variables    = 2;
+TEST (SkeletonExport, CountsSettingsVariablesAndExampleHeadersItCannotCarry) {
+    ExportCollection collection = named_collection ("Petstore");
+    collection.other_variables  = 2;
 
     ExportRequest entry       = request ("GET", "{{baseUrl}}/pets");
-    entry.post_request_script = "pm.test('ok', () => {})";
     entry.follow_redirects    = false;
     ExportExample stamped     = example ();
     stamped.has_extra_headers = true;
     entry.examples            = { stamped };
 
     const Exported exported = export_json ({ entry }, std::nullopt, collection);
-    EXPECT_EQ (exported.notes.scripts_dropped, 2); // collection and request
+    // Scripts are elements now (issue #1518): they round-trip through
+    // `x-vayu-elements` rather than being counted as lost, so this count
+    // reverted to 0 is itself the mutation check - restore either dropped
+    // increment this test used to assert and it goes back to non-zero.
+    EXPECT_EQ (exported.notes.scripts_dropped, 0);
     EXPECT_EQ (exported.notes.settings_dropped, 1);
     EXPECT_EQ (exported.notes.variables_dropped, 2);
     EXPECT_EQ (exported.notes.example_headers_dropped, 1);
+}
+
+TEST (SkeletonExport, WritesElementsAsAVayuExtensionOnRequestAndCollection) {
+    ExportCollection collection = named_collection ("Petstore");
+    collection.elements         = json::parse (
+    R"json([{"id":"el_c1","kind":"script.pre","enabled":true,"config":{"script":"console.log('hi')"}}])json");
+
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    entry.elements      = json::parse (
+    R"json([{"id":"el_r1","kind":"script.post","enabled":true,"config":{"script":"pm.test('ok', () => {})"}}])json");
+
+    const Exported exported = export_json ({ entry }, std::nullopt, collection);
+    EXPECT_EQ (exported.notes.scripts_dropped, 0);
+    EXPECT_EQ (exported.document["x-vayu-elements"], collection.elements);
+    EXPECT_EQ (
+    operation_of (exported.document, "/pets", "get")["x-vayu-elements"], entry.elements);
 }
 
 TEST (SkeletonExport, WritesResponsesFromStoredExamplesAndNothingElse) {

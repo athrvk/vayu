@@ -7,7 +7,8 @@
 
 /**
  * @file extract_kinds.cpp
- * @brief `extract.json`, `extract.regex`, `extract.header` (issue #1514).
+ * @brief `extract.json`, `extract.regex`, `extract.header` (issue #1514),
+ *        `extract.boundary` (issue #1518, JMeter's Boundary Extractor).
  *
  * All three run in `step.after` (they read the response) and share one write
  * convention: `matchNo` picks among however many matches a step produced -
@@ -330,6 +331,74 @@ class ExtractHeaderElement final : public Element {
     bool required_ = false;
 };
 
+// ---------------------------------------------------------------------------
+// extract.boundary - JMeter's Boundary Extractor: everything between the
+// first occurrence of `leftBoundary` and the next occurrence of
+// `rightBoundary`, on the response body. Only `body` is a field here, unlike
+// `extract.regex`'s four: JMeter's own Boundary Extractor takes no field
+// selector either - it is a text-splice tool for a response body (or a JMeter
+// variable, which Vayu already generalizes to any prior extractor's output),
+// not a general-purpose field reader.
+// ---------------------------------------------------------------------------
+
+class ExtractBoundaryElement final : public Element {
+    public:
+    explicit ExtractBoundaryElement (nlohmann::json config)
+    : config_ (std::move (config)) {
+        left_     = config_.value ("leftBoundary", "");
+        right_    = config_.value ("rightBoundary", "");
+        variable_ = config_.value ("variable", "");
+        scope_    = config_.value ("scope", "collection");
+        match_no_ = config_.value ("matchNo", 1);
+        required_ = config_.value ("required", false);
+        if (config_.contains ("default") && config_["default"].is_string ()) {
+            fallback_ = config_["default"].get<std::string> ();
+        }
+    }
+
+    [[nodiscard]] Phase phase () const override {
+        return Phase::StepAfter;
+    }
+
+    void apply (ElementContext& ctx) override {
+        if (ctx.response == nullptr) {
+            ctx.outcome_status  = "error";
+            ctx.outcome_message = "no response";
+            return;
+        }
+        std::vector<std::string> matches;
+        const std::string& text = ctx.response->body;
+        size_t pos              = 0;
+        while (pos < text.size ()) {
+            const size_t left_at = left_.empty () ? pos : text.find (left_, pos);
+            if (left_at == std::string::npos) {
+                break;
+            }
+            const size_t content_at = left_at + left_.size ();
+            const size_t right_at =
+            right_.empty () ? text.size () : text.find (right_, content_at);
+            if (right_at == std::string::npos) {
+                break;
+            }
+            matches.push_back (text.substr (content_at, right_at - content_at));
+            pos = right_at + (right_.empty () ? 1 : right_.size ());
+        }
+        write_matches (ctx, matches, scope_, variable_, match_no_, fallback_,
+        required_, "no text between the given boundaries",
+        [] (const std::string& m) { return m; });
+    }
+
+    private:
+    nlohmann::json config_;
+    std::string left_;
+    std::string right_;
+    std::string variable_;
+    std::string scope_;
+    std::optional<std::string> fallback_;
+    long match_no_ = 1;
+    bool required_ = false;
+};
+
 nlohmann::json variable_scope_schema () {
     return { { "type", "string" }, { "enum", { "env", "collection", "globals" } } };
 }
@@ -412,6 +481,34 @@ ElementKind make_extract_header_kind () {
         { "scope", variable_scope_schema () }, { "default", { { "type", "string" } } },
         { "required", { { "type", "boolean" } } } } },
         { "required", nlohmann::json::array ({ "header", "variable" }) },
+        { "additionalProperties", false },
+    };
+    return kind;
+}
+
+ElementKind make_extract_boundary_kind () {
+    ElementKind kind;
+    kind.kind    = "extract.boundary";
+    kind.version = 1;
+    kind.phases  = { Phase::StepAfter };
+    kind.label   = "Extract between two boundaries";
+    kind.description =
+    "Reads the text between a left and a right boundary out of the "
+    "response body into a variable (JMeter's Boundary Extractor).";
+    kind.category = "extract";
+    kind.hot_path = HotPathClass::Declarative;
+    kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
+        return std::make_unique<ExtractBoundaryElement> (config);
+    };
+    kind.config_schema = {
+        { "type", "object" },
+        { "properties",
+        { { "leftBoundary", { { "type", "string" } } },
+        { "rightBoundary", { { "type", "string" } } },
+        { "variable", { { "type", "string" }, { "minLength", 1 } } },
+        { "scope", variable_scope_schema () }, { "default", { { "type", "string" } } },
+        { "matchNo", { { "type", "integer" } } }, { "required", { { "type", "boolean" } } } } },
+        { "required", nlohmann::json::array ({ "variable" }) },
         { "additionalProperties", false },
     };
     return kind;

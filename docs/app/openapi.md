@@ -557,17 +557,21 @@ sampled off a schema when the document was imported), the `$ref` responses and
 to express - a request body, a row the operation declares no parameter for, and
 a request whose method or path is no longer the operation it is stamped as.
 
-A free-form export states nine things of its own, because a collection holds
+A free-form export states eight things of its own, because a collection holds
 more than OpenAPI has names for: the auth it could not turn into a
-`securityScheme`, a request carrying a pre- or post-request script (OpenAPI has
-no operation-scoped hook for one), a collection variable besides `baseUrl` (a
+`securityScheme`, a collection variable besides `baseUrl` (a
 document has nowhere else to declare one), a folder nested more than one level
 (flattened to a single tag), a body in a mode this direction has no media type
 for (GraphQL today), a form body's field values (only the names are declared),
 a request holding a non-default execution setting (redirects, TLS verification,
 HTTP version, streaming - OpenAPI describes an API, not how to send to it), an
 example's header besides `Content-Type`, and a Params or Headers row sharing a
-key and location with one already declared (only the first is written).
+key and location with one already declared (only the first is written). A
+request's or the collection's own elements - a pre- or post-request script
+included - are not one of the eight: they carry through under `x-vayu-elements`,
+a vendor extension key beside `x-vayu-enabled` (issue #1518), rather than
+being dropped. A bound export writes it too, onto an operation the document
+already declares; nothing is written into a Swagger 2.0 document either way.
 
 A large document takes a moment to put together, and the dialog says so without
 moving anything: on the first read it holds the summary's shape until the

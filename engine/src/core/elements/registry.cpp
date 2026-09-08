@@ -30,6 +30,7 @@ ElementKind make_script_teardown_kind ();
 ElementKind make_extract_json_kind ();
 ElementKind make_extract_regex_kind ();
 ElementKind make_extract_header_kind ();
+ElementKind make_extract_boundary_kind ();
 ElementKind make_assert_status_kind ();
 ElementKind make_assert_jsonpath_kind ();
 ElementKind make_assert_contains_kind ();
@@ -222,6 +223,7 @@ Registry& Registry::instance () {
         registry.register_kind (make_extract_json_kind ());
         registry.register_kind (make_extract_regex_kind ());
         registry.register_kind (make_extract_header_kind ());
+        registry.register_kind (make_extract_boundary_kind ());
         registry.register_kind (make_assert_status_kind ());
         registry.register_kind (make_assert_jsonpath_kind ());
         registry.register_kind (make_assert_contains_kind ());
