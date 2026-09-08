@@ -22,6 +22,7 @@
  * well by it.
  */
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -83,6 +84,34 @@ bool inline_script = false) {
         config["inline"] = true;
     }
     return { { "id", id }, { "kind", kind }, { "enabled", true }, { "config", config } };
+}
+
+/// @copydoc extract_json_element_json, a gaussian `timer.think` entry (issue
+/// #1498) - the shape a wall-clock-bracketing test wants, as opposed to the
+/// plain `{"ms": N}` shape existing tests already build inline.
+inline nlohmann::json timer_think_gaussian_element_json (const std::string& id,
+double mean_ms,
+double deviation_ms) {
+    return { { "id", id }, { "kind", "timer.think" }, { "enabled", true },
+        { "config",
+        { { "gaussian", { { "meanMs", mean_ms }, { "deviationMs", deviation_ms } } } } } };
+}
+
+/// @copydoc extract_json_element_json, a `timer.pacing` entry (issue #1498).
+/// @p scope_entry mirrors the `config._scopeEntry` stamp `scenario_plan.cpp`'s
+/// `mark_scope_entries` writes onto a resolved plan - true for the one
+/// occurrence of this element's id that is its node's actual start. A caller
+/// that compiles through `resolve_scenario` gets the real stamp regardless of
+/// what is passed here (`mark_scope_entries` overwrites it); a caller that
+/// compiles this entry directly with @ref compiled_elements, bypassing that
+/// pass, has to state it.
+inline nlohmann::json timer_pacing_element_json (const std::string& id,
+int64_t every_ms,
+bool scope_entry = true,
+bool per_user    = true) {
+    return { { "id", id }, { "kind", "timer.pacing" }, { "enabled", true },
+        { "config",
+        { { "everyMs", every_ms }, { "perUser", per_user }, { "_scopeEntry", scope_entry } } } };
 }
 
 /// Compile an arbitrary list of element JSON entries (@ref extract_json_element_json,

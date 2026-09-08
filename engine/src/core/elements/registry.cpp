@@ -34,6 +34,7 @@ ElementKind make_assert_contains_kind ();
 ElementKind make_assert_duration_kind ();
 ElementKind make_assert_size_kind ();
 ElementKind make_timer_think_kind ();
+ElementKind make_timer_pacing_kind ();
 ElementKind make_metric_record_kind ();
 
 namespace {
@@ -207,6 +208,7 @@ Registry& Registry::instance () {
         registry.register_kind (make_assert_duration_kind ());
         registry.register_kind (make_assert_size_kind ());
         registry.register_kind (make_timer_think_kind ());
+        registry.register_kind (make_timer_pacing_kind ());
         registry.register_kind (make_metric_record_kind ());
         return true;
     }();

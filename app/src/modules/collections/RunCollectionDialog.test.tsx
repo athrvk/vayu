@@ -591,6 +591,60 @@ describe("the elements override", () => {
 	});
 });
 
+/**
+ * Pass/fail budgets (issue #1564): the engine now judges a collection run
+ * against `thresholds` the same way it always has a load run, so
+ * `RunCollectionDialog` reuses `LoadTestConfigDialog`'s own disclosure and
+ * `budgets.ts` helpers rather than a second copy. The budget rules themselves
+ * (range checks, the payload shape) are `budgets.test.ts`'s job; these pin the
+ * wiring - that a declared budget reaches the payload, that an invalid one
+ * blocks Run, and that neither is gated by the Load test switch.
+ */
+describe("pass/fail budgets", () => {
+	const openBudgets = () => fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
+
+	it("sends no thresholds at all when nothing is declared", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("thresholds");
+	});
+
+	it("sends every declared budget under the engine's own key", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		openBudgets();
+		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		fireEvent.change(screen.getByLabelText(/throughput/i), { target: { value: "1000" } });
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0].thresholds).toEqual({
+			maxErrorRatePct: 0.1,
+			minThroughputRps: 1000,
+		});
+	});
+
+	it("blocks Run on an out-of-range budget instead of dropping the field", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		openBudgets();
+		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "150" } });
+
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", true);
+		expect(screen.getByText(/budget is out of range/i)).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate).not.toHaveBeenCalled();
+	});
+
+	it("applies to a load run exactly as it does a design-mode run - not gated by Load test", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		openBudgets();
+		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0].thresholds).toEqual({ maxErrorRatePct: 0.1 });
+	});
+});
+
 /*
  * Pre-filling from the collection's declared data file (issue #599).
  *

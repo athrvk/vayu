@@ -3555,6 +3555,48 @@ describe("run_collection", () => {
 			expect(smoke).toContain("fails its request (default true)");
 		});
 	});
+
+	/**
+	 * Pass/fail budgets (issue #1564): the engine now judges a design-mode
+	 * collection run against `thresholds` exactly as it always has a load run,
+	 * so this tool takes the same argument `start_load_run` does and forwards
+	 * it verbatim.
+	 */
+	describe("thresholds", () => {
+		async function payloadFor(args: Record<string, unknown>) {
+			const client = scenarioClient();
+			const res = await dispatchTool(
+				"run_collection",
+				{ collectionId: "c1", ...args },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			return { res, client };
+		}
+
+		test("forwards a declared budget to POST /runs unchanged", async () => {
+			const { res, client } = await payloadFor({
+				thresholds: { maxErrorRatePct: 0.1, failRun: true },
+			});
+			expect(res.isError).toBeFalsy();
+			const payload = (client.startRun as ReturnType<typeof vi.fn>).mock
+				.calls[0][0] as Record<string, unknown>;
+			expect(payload.thresholds).toEqual({ maxErrorRatePct: 0.1, failRun: true });
+		});
+
+		test("is absent from the payload when the caller named none", async () => {
+			const { res, client } = await payloadFor({});
+			expect(res.isError).toBeFalsy();
+			const payload = (client.startRun as ReturnType<typeof vi.fn>).mock
+				.calls[0][0] as Record<string, unknown>;
+			expect(payload).not.toHaveProperty("thresholds");
+		});
+
+		test("shares its schema with start_load_run's own thresholds argument", () => {
+			const shapeOf = (name: string) =>
+				TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>;
+			expect(shapeOf("run_collection").thresholds).toBe(shapeOf("start_load_run").thresholds);
+		});
+	});
 });
 
 describe("start_load_run scenario runs", () => {

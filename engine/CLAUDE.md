@@ -391,7 +391,18 @@ logged as a warning: it means a client skipped composition.
   un-inlined script stays exactly where it always was, on the deferred
   `tests` replay, which now skips a step whose script already ran inline
   (`RunContext::script_element_runs_inline`, the one place that decision is
-  made, shared by both sides). A **single-request** load run
+  made, shared by both sides). Since #1498, `step.between` also dispatches on
+  the load path: `ScenarioLoadDriver::finish_step` (`scenario_load.cpp`) calls
+  the new `run_step_between` on the step that just completed, non-blocking
+  (`ElementContext::blocking_allowed = false`), and sums the outcomes'
+  `waited_ms` into `VirtualUser::ready_at_ms`. `timer.pacing` is a
+  `tracks_scope_occurrence` kind (`ElementKind::tracks_scope_occurrence`,
+  read through the registry, never a `kind ==` comparison): the same
+  folder- or collection-scoped element is inherited into every request under
+  its scope, so `scenario_plan.cpp`'s `mark_scope_entries` walks a resolved
+  plan's whole iteration and stamps `config._scopeEntry` on only the first
+  occurrence of that element's id, leaving every later occurrence a no-op. A
+  **single-request** load run
   (`load_strategy.cpp`) still runs no element - `POST /runs`'s single-request
   shape has no `elements` attachment point yet, only the legacy `tests`
   string (`RunContext::test_script`); wiring one is a separate gap, not

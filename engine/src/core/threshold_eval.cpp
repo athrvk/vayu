@@ -454,4 +454,22 @@ bool thresholds_fail_run (const nlohmann::json& config) {
     return value.is_boolean () && value.get<bool> ();
 }
 
+nlohmann::json build_threshold_outcome_payload (const ThresholdOutcome& outcome) {
+    nlohmann::json checks = nlohmann::json::array ();
+    for (const auto& check : outcome.checks) {
+        nlohmann::json row = { { "metric", check.metric }, { "limit", check.limit },
+            { "passed", check.passed }, { "evaluated", check.evaluated } };
+        // Omitted rather than zeroed when unevaluated, the same rule this
+        // report follows for a section the run never populated - a ceiling of
+        // 0ms next to "passed": false would read as a real measurement
+        // instead of the absence it is.
+        if (check.evaluated) {
+            row["actual"] = check.actual;
+        }
+        checks.push_back (std::move (row));
+    }
+    return { { "checks", checks }, { "passed", outcome.passed },
+        { "failed", outcome.failed } };
+}
+
 } // namespace vayu::core

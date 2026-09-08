@@ -778,7 +778,38 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
             scripts_override = ScriptsOverrideMode::AllDeferred;
         }
         include_script_time = elements->value ("includeScriptTime", false);
-        timers_disabled = elements->value ("timers", std::string{}) == "off";
+
+        // "asConfigured" | "off" | {fixedMs} | {minMs,maxMs} - the object
+        // shapes are issue #1498's; `validate_elements_run_override` already
+        // refused anything else, so an unrecognised shape here falls back to
+        // the default rather than throwing, on the same rule the block above
+        // follows.
+        if (auto timers = elements->find ("timers"); timers != elements->end ()) {
+            if (timers->is_string () && *timers == "off") {
+                timers_override.mode = vayu::core::TimersOverride::Mode::Off;
+            } else if (timers->is_object () && timers->contains ("fixedMs")) {
+                timers_override.mode = vayu::core::TimersOverride::Mode::Fixed;
+                timers_override.fixed_ms = timers->value ("fixedMs", int64_t{ 0 });
+            } else if (timers->is_object () &&
+            (timers->contains ("minMs") || timers->contains ("maxMs"))) {
+                timers_override.mode = vayu::core::TimersOverride::Mode::Range;
+                timers_override.min_ms = timers->value ("minMs", int64_t{ 0 });
+                timers_override.max_ms = timers->value ("maxMs", timers_override.min_ms);
+            }
+        }
+
+        // A run without an explicit seed still gets a real one (the default
+        // member initialiser above draws from `std::random_device`) - only a
+        // caller that wants *this* run reproducible supplies its own.
+        // `rng_seed` and `rng` are re-seeded together: a scenario load run
+        // derives its virtual users' generators from `rng_seed` alone, so
+        // the two must never disagree about which seed this run actually
+        // used.
+        if (auto seed = elements->find ("seed"); seed != elements->end () &&
+        seed->is_number_integer () && seed->get<int64_t> () >= 0) {
+            rng_seed = static_cast<uint64_t> (seed->get<int64_t> ());
+            rng.seed (rng_seed);
+        }
     }
 
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
@@ -1904,22 +1935,7 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // nothing was measured against" are different answers, and only the absent
     // section can say the first.
     if (inputs.thresholds.has_value ()) {
-        nlohmann::json checks = nlohmann::json::array ();
-        for (const auto& check : inputs.thresholds->checks) {
-            nlohmann::json row = { { "metric", check.metric }, { "limit", check.limit },
-                { "passed", check.passed }, { "evaluated", check.evaluated } };
-            // Omitted rather than zeroed when unevaluated, the same rule this
-            // report follows for a section the run never populated - a
-            // ceiling of 0ms next to "passed": false would read as a real
-            // measurement instead of the absence it is.
-            if (check.evaluated) {
-                row["actual"] = check.actual;
-            }
-            checks.push_back (std::move (row));
-        }
-        summary["thresholds"] = { { "checks", checks },
-            { "passed", inputs.thresholds->passed },
-            { "failed", inputs.thresholds->failed } };
+        summary["thresholds"] = build_threshold_outcome_payload (*inputs.thresholds);
     }
     // This run's `metric.record` / `pm.metrics` values (issue #1500), by
     // name. Omitted for a run that recorded none, the same rule `tests` and
