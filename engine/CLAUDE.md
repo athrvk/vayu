@@ -438,19 +438,36 @@ logged as a warning: it means a client skipped composition.
   folder- or collection-scoped element is inherited into every request under
   its scope, so `scenario_plan.cpp`'s `mark_scope_entries` walks a resolved
   plan's whole iteration and stamps `config._scopeEntry` on only the first
-  occurrence of that element's id, leaving every later occurrence a no-op. A
-  **single-request** load run
-  (`load_strategy.cpp`) still runs no *step-level* element - `POST /runs`'s
-  single-request shape has no `elements` attachment point on the request
-  itself, only the legacy `tests` string (`RunContext::test_script`); wiring
-  one is a separate gap, not #1495's. It does have its own place to declare
-  `script.setup` / `script.teardown` - the run-boundary kinds, not a step's -
-  through `POST /runs`'s `lifecycleElements` array (#1573), dispatched by the
-  same `run_collection_setup` / `run_collection_teardown` a collection-backed
-  run uses; a script written there cannot resolve into the run's own
-  submissions (no residual pass exists on this path), only reach the network
-  itself (`pm.sendRequest`) and gate or report on the run. Do not add another
-  behaviour column beside `elements`; a new behaviour is an element kind.
+  occurrence of that element's id, leaving every later occurrence a no-op.
+  Since #1594, a **single-request** load run (`load_strategy.cpp`) runs
+  step-level elements too, through its own array on `POST /runs`,
+  `requestElements` - a distinct key from that endpoint's own `elements`
+  (the run-level `timers`/`scripts` override, above), because a flat
+  single-target payload has no `request` sub-object to nest a request-shaped
+  `elements` array under the way a stored request's own column does.
+  `run_request_elements_step_before` / `_after_submission` run
+  `Phase::StepBefore` / `Phase::StepAfter` per submission, the same
+  inline-vs-deferred `script.*` dispatch the scenario path uses
+  (`RunContext::script_element_runs_inline`); an un-inlined `script.post`
+  still defers to the run's own completion replay
+  (`RunContext::test_script`, folded from the element at compile time). There
+  is no persistent virtual user on this path, so the `ScopeOverlay` lives on
+  the submission rather than a VU - built fresh from the run's flattened base
+  scopes (`RunContext::step_base_vars`) and discarded once that submission
+  settles - and `timer.think`'s wait is a run-level concurrency reservation
+  (`RunContext::reserve_think_wait`, folded into `in_flight()`) rather than a
+  per-VU `ready_at_ms`, since there is no VU to hold one on. It also has its
+  own place to declare `script.setup` / `script.teardown` - the run-boundary
+  kinds, not a step's - through `POST /runs`'s `lifecycleElements` array
+  (#1573), dispatched by the same `run_collection_setup` /
+  `run_collection_teardown` a collection-backed run uses; a script written
+  there resolves into the run's own submissions only when `requestElements`
+  is also declared (the residual pass on this path reads
+  `RunContext::step_base_vars`, populated whenever `step_elements` is
+  non-empty, not merely because `lifecycleElements` is) - otherwise it can
+  only reach the network itself (`pm.sendRequest`) and gate or report on the
+  run. Do not add another behaviour column beside `elements`; a new behaviour
+  is an element kind.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the
@@ -756,8 +773,11 @@ value one VU's step 1 sets reaches that same VU's step 2 `{{token}}` without
 two VUs' writes ever landing in one shared map. Never refused under load,
 only counted, on the same #1503 rule the load path has always followed: an
 unresolved name or a header-name collision the pass produces goes on the wire
-regardless. The single-request load path (`load_strategy.cpp`) is unchanged -
-see the element-pipeline bullet above for why.
+regardless. Since #1594, the single-request load path
+(`load_strategy.cpp`) runs the same pass too, against a per-submission
+`ScopeOverlay` rather than a per-VU one - see the element-pipeline bullet
+above - but only when the run declares `requestElements`; a bare URL run
+with no step-level elements at all skips it exactly as before.
 
 **The renderer's resolver is preview-only.** `useVariableResolver` /
 `app/src/lib/variable-resolution.ts` back tab titles, previews, unresolved-token
