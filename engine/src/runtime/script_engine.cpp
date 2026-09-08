@@ -185,6 +185,10 @@ struct ContextData {
     /// `ScriptContext::in_scenario`.
     bool in_scenario = false;
 
+    /// `pm.metrics`'s write destination, or null to refuse it - see
+    /// `ScriptContext::record_metric`.
+    std::function<void (const std::string& name, vayu::core::CustomMetricType type, double value)> record_metric;
+
     /// What `pm.execution` recorded, copied onto the `ScriptResult` at the end
     /// of the execution. Per-execution like the rest of this struct, so a
     /// pooled context cannot carry one script's jump into the next.
@@ -8308,6 +8312,127 @@ void setup_pm_execution (JSContext* ctx, JSValue pm) {
 }
 
 // ============================================================================
+// pm.metrics - custom trends, counters and rates (issue #1500)
+// ============================================================================
+
+// The context a metrics call may record on, or nullptr having thrown. A
+// context with no bound collector - a context built by hand, or the deferred
+// `tests` replay running against a recorded sample rather than the run - has
+// nowhere for the value to go, and the call is refused rather than accepted
+// and dropped, the same false-success reasoning `execution_context` documents.
+ContextData* metrics_context (JSContext* ctx, const char* member) {
+    auto* data = get_context_data (ctx);
+    if (!data) {
+        JS_ThrowInternalError (ctx, "No script context available");
+        return nullptr;
+    }
+    if (!data->record_metric) {
+        // Kept under 256 bytes for the reason `execution_context`'s message
+        // is (issue #1503's vendored `JS_MakeError` buffer).
+        JS_ThrowPlainError (ctx,
+        "pm.metrics.%s is not available here: this script has no run to "
+        "record into - a bare send, and the deferred replay against a "
+        "recorded sample, are not the run itself. See "
+        "docs/engine/scripting.md.",
+        member);
+        return nullptr;
+    }
+    return data;
+}
+
+// The `name` argument every pm.metrics call takes first: a non-empty string,
+// or a TypeError - an empty or missing name has nowhere to be reported under.
+std::optional<std::string>
+js_metric_name (JSContext* ctx, JSValueConst arg, const char* member) {
+    if (!JS_IsString (arg)) {
+        JS_ThrowTypeError (ctx, "pm.metrics.%s(name, ...) needs a metric name string", member);
+        return std::nullopt;
+    }
+    std::string name = js_to_string (ctx, arg);
+    if (name.empty ()) {
+        JS_ThrowTypeError (ctx, "pm.metrics.%s(name, ...) was given an empty name", member);
+        return std::nullopt;
+    }
+    return name;
+}
+
+// pm.metrics.trend(name, value) - one distribution sample.
+JSValue js_pm_metrics_trend (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto* data = metrics_context (ctx, "trend");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 2) {
+        return JS_ThrowTypeError (ctx, "pm.metrics.trend(name, value) needs both arguments");
+    }
+    const auto name = js_metric_name (ctx, argv[0], "trend");
+    double value    = 0.0;
+    if (!name || JS_ToFloat64 (ctx, &value, argv[1]) != 0) {
+        return name ?
+        JS_ThrowTypeError (ctx, "pm.metrics.trend(name, value) needs a numeric value") :
+        JS_EXCEPTION;
+    }
+    data->record_metric (*name, vayu::core::CustomMetricType::Trend, value);
+    return JS_UNDEFINED;
+}
+
+// pm.metrics.counter(name, increment = 1) - added to a running total.
+JSValue js_pm_metrics_counter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto* data = metrics_context (ctx, "counter");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "pm.metrics.counter(name, increment?) needs a name");
+    }
+    const auto name = js_metric_name (ctx, argv[0], "counter");
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    double increment = 1.0;
+    if (argc >= 2 && JS_ToFloat64 (ctx, &increment, argv[1]) != 0) {
+        return JS_ThrowTypeError (
+        ctx, "pm.metrics.counter(name, increment?) needs a numeric increment");
+    }
+    data->record_metric (*name, vayu::core::CustomMetricType::Counter, increment);
+    return JS_UNDEFINED;
+}
+
+// pm.metrics.rate(name, value) - one true/false sample toward a percentage.
+JSValue js_pm_metrics_rate (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    auto* data = metrics_context (ctx, "rate");
+    if (!data) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 2) {
+        return JS_ThrowTypeError (ctx, "pm.metrics.rate(name, value) needs both arguments");
+    }
+    const auto name = js_metric_name (ctx, argv[0], "rate");
+    if (!name) {
+        return JS_EXCEPTION;
+    }
+    const bool matched = JS_ToBool (ctx, argv[1]) != 0;
+    data->record_metric (*name, vayu::core::CustomMetricType::Rate, matched ? 1.0 : 0.0);
+    return JS_UNDEFINED;
+}
+
+// pm.metrics - always bound, like pm.execution, so a script that reaches for
+// it with no run behind it is told why rather than meeting "not a function".
+void setup_pm_metrics (JSContext* ctx, JSValue pm) {
+    JSValue metrics = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, metrics, "trend",
+    JS_NewCFunction (ctx, js_pm_metrics_trend, "trend", 2));
+    JS_SetPropertyStr (ctx, metrics, "counter",
+    JS_NewCFunction (ctx, js_pm_metrics_counter, "counter", 1));
+    JS_SetPropertyStr (
+    ctx, metrics, "rate", JS_NewCFunction (ctx, js_pm_metrics_rate, "rate", 2));
+    JS_SetPropertyStr (ctx, pm, "metrics", metrics);
+}
+
+// ============================================================================
 // pm.iterationData - the data row bound to this iteration (issue #356)
 // ============================================================================
 
@@ -8558,6 +8683,10 @@ void setup_pm_object (JSContext* ctx) {
     // being absent.
     setup_pm_execution (ctx, pm);
 
+    // pm.metrics - custom trends, counters and rates (issue #1500), bound the
+    // same way and for the same reason as pm.execution above.
+    setup_pm_metrics (ctx, pm);
+
     // pm.sendRequest - always bound, even when the capability is off, so a
     // script that calls it gets a sentence explaining why rather than
     // "not a function".
@@ -8743,6 +8872,7 @@ class ScriptEngine::Impl {
         ctx_data.default_headers     = ctx.default_headers;
         ctx_data.max_response_bytes  = ctx.max_response_bytes;
         ctx_data.in_scenario         = ctx.in_scenario;
+        ctx_data.record_metric       = ctx.record_metric;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response, pm.info and pm.iterationData with

@@ -559,6 +559,20 @@ constexpr bool DEFAULT_STREAM_METRICS = true;
 /// stream. Above `sse::STREAM_EVENTS_CEILING`, which is what a per-request cap
 /// can be set to, so the histogram can hold any completion the caps allow.
 constexpr int64_t HISTOGRAM_MAX_EVENTS = 10000000;
+
+/// Ceiling on distinct `metric.record` / `pm.metrics` names one run may
+/// declare (issue #1500). Each name backs its own HdrHistogram (trend) or
+/// atomic pair (counter, rate), so the bound is a memory guard the same way
+/// `max_exemplar_results` is - refused at validate time for a declared
+/// `metric.record` element, so a run never discovers the limit mid-flight.
+constexpr size_t MAX_CUSTOM_METRIC_NAMES = 32;
+/// A custom trend's value, scaled into the same fixed-point integer space
+/// `record_success` converts milliseconds into (x1000, for ~3 decimal
+/// digits), so one histogram range and significant-figure setting serves
+/// both. Values are clamped to zero before scaling - HdrHistogram cannot
+/// hold a negative count - and to `HISTOGRAM_MAX_LATENCY_US` after it, the
+/// same ceiling the latency histograms share.
+constexpr double CUSTOM_METRIC_VALUE_SCALE = 1000.0;
 } // namespace metrics_collector
 
 /**

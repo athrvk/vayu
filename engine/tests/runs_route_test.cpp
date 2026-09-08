@@ -1070,6 +1070,46 @@ TEST_F (RunsRouteTest, ReportCarriesTheThresholdVerdict) {
     body["summary"]["errorRate"].get<double> ());
 }
 
+// This run's custom trends, counters and rates (issue #1500), round-tripped
+// through the stored summary the same way `thresholdValidation` is.
+TEST_F (RunsRouteTest, ReportCarriesCustomMetrics) {
+    seed ({ .id = "run_custom_metrics", .start_time = 1000 });
+    auto inputs = summary_inputs ();
+    vayu::core::CustomMetricSummary trend;
+    trend.type            = vayu::core::CustomMetricType::Trend;
+    trend.count           = 42;
+    trend.p50             = 10.0;
+    trend.p95             = 40.0;
+    trend.p99             = 47.0;
+    trend.max             = 50.0;
+    inputs.custom_metrics = { { "ttfb2", trend } };
+    db_->update_run_summary ("run_custom_metrics",
+    vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_custom_metrics");
+    ASSERT_EQ (status, 200);
+
+    ASSERT_TRUE (body.contains ("customMetrics"));
+    const auto& ttfb2 = body["customMetrics"]["ttfb2"];
+    EXPECT_EQ (ttfb2["type"].get<std::string> (), "trend");
+    EXPECT_EQ (ttfb2["count"].get<size_t> (), 42u);
+    EXPECT_DOUBLE_EQ (ttfb2["p95"].get<double> (), 40.0);
+}
+
+// A run that recorded no custom metric leaves the section out entirely,
+// rather than reporting an empty object.
+TEST_F (RunsRouteTest, ReportOmitsCustomMetricsWhenNoneWereRecorded) {
+    seed ({ .id = "run_no_custom_metrics", .start_time = 1000 });
+    db_->update_run_summary ("run_no_custom_metrics",
+    vayu::core::build_run_summary_payload (summary_inputs ()).dump ());
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_no_custom_metrics");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("customMetrics"));
+}
+
 // Issue #1484: a run whose every request errored before completing has no
 // latency samples at all, and its stored `evaluated: false` / omitted
 // `actual` must survive the round trip through the summary column exactly
