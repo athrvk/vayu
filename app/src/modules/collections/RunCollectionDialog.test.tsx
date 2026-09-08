@@ -643,6 +643,68 @@ describe("pass/fail budgets", () => {
 
 		expect(mutate.mock.calls[0][0].thresholds).toEqual({ maxErrorRatePct: 0.1 });
 	});
+
+	/*
+	 * `custom.<name>.<stat>` (issue #1579) is judged for a design-mode collection
+	 * run exactly as the six fixed budgets above are (issue #1564,
+	 * `execute_scenario_run`) - not gated by Load test, same as those.
+	 */
+	describe("custom metric budgets", () => {
+		const addCustomRow = () =>
+			fireEvent.click(screen.getByRole("button", { name: /add custom metric budget/i }));
+
+		it("offers rows on a design-mode run, not only once Load test is on", () => {
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			openBudgets();
+
+			expect(
+				screen.getByRole("button", { name: /add custom metric budget/i })
+			).toBeInTheDocument();
+		});
+
+		it("sends a declared row under the engine's own key on a design-mode run", () => {
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			openBudgets();
+			addCustomRow();
+			fireEvent.change(screen.getByLabelText(/custom budget 1 metric name/i), {
+				target: { value: "checkout_ttfb" },
+			});
+			fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
+				target: { value: "120" },
+			});
+			fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+			expect(mutate.mock.calls[0][0].thresholds).toEqual({ "custom.checkout_ttfb.p50": 120 });
+		});
+
+		it("sends a declared row on a load run too", () => {
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			openBudgets();
+			addCustomRow();
+			fireEvent.change(screen.getByLabelText(/custom budget 1 metric name/i), {
+				target: { value: "checkout_ttfb" },
+			});
+			fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
+				target: { value: "120" },
+			});
+			fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+			fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+			expect(mutate.mock.calls[0][0].thresholds).toEqual({ "custom.checkout_ttfb.p50": 120 });
+		});
+
+		it("blocks Run on a half-filled row, the same way an out-of-range fixed budget does", () => {
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			openBudgets();
+			addCustomRow();
+			fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
+				target: { value: "120" },
+			});
+
+			expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", true);
+			expect(screen.getByText(/budget is out of range/i)).toBeInTheDocument();
+		});
+	});
 });
 
 /*

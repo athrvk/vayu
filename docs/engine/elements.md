@@ -85,6 +85,7 @@ shipping silently mismatched.
 | `assert.size` | assert | `step.after` | #1514 |
 | `timer.think` | timer | `step.between` | #1514 (fixed/uniform), #1498 (gaussian) |
 | `timer.pacing` | timer | `step.before` | #1498 |
+| `timer.throughput` | timer | `step.before` | #1571 |
 | `script.pre` | script | `step.before` | #1513 (validate-only), #1514 (runs) |
 | `script.post` | script | `step.after` | #1513 (validate-only), #1514 (runs) |
 | `script.setup` | script | `run.start` | #1499 |
@@ -136,9 +137,26 @@ every VU, JMeter's "All threads" pacing) works on the sequential run, where a si
 two indistinguishable, and, since issue #1570, on a scenario load run too: `SharedPacingClocks`
 (`elements.hpp`) holds one atomic deadline per shared-pacing element id, advanced by a
 compare-exchange retry rather than a mutex, so every VU's entry into the scope claims the next slot
-of the same clock without blocking the producer thread for a lock. `timer.throughput` (a
-constant-throughput, shared-rate timer) is not yet implemented; issue #1571 tracks it and names this
-same primitive as its intended reuse for the shared (`perUser: false`) case.
+of the same clock without blocking the producer thread for a lock.
+
+`timer.throughput` (issue #1571) is the rate-based sibling of `timer.pacing`: it holds a request, a
+folder or the whole collection to a target rate - `targetPerMinute` (required, exclusive minimum 0)
+"N per minute" - rather than to a fixed gap between passes, and shares `timer.pacing`'s
+`tracks_scope_occurrence` inheritance rule (`config._scopeEntry`, `step.before` phase and everything
+else `pacing_math.hpp` factors out for both kinds). `perUser` defaults the *opposite* way from
+`timer.pacing`: `false`, because a throughput target is a property of the system under test rather
+than of one user's journey - "50 checkouts per minute across all users" is the case this kind exists
+for. `perUser: true` divides the rate into a per-user interval (`60000 / targetPerMinute`, rounded to
+whole milliseconds and floored at 1ms) and runs the identical per-VU pacing arithmetic `timer.pacing`
+uses, so N users produce N times the rate. `perUser: false` (the default) shares one token-bucket
+budget across every virtual user of a scenario load run instead, through `SharedThroughputBudgets`
+(`elements.hpp`) - the closed-loop counterpart of `load_pacing.hpp`'s `take_due_requests`, carrying
+the fractional remainder between claims the same way so the rate holds exactly over a long run, and
+banking at most one slot during an idle stretch rather than letting a run catch up in a burst. Unlike
+`SharedPacingClocks`, this budget is mutex-guarded rather than lock-free: its state is a fractional
+balance beside a timestamp, which no single compare-exchange can swap as a unit. Under a sequential
+(non-load) run there is only one implicit user, so `perUser: true` and `perUser: false` behave
+identically, same as `timer.pacing`.
 
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
 step, through `ElementContext`'s lazily filled slot - a body over `maxElementBodyBytes` (default 1
@@ -176,7 +194,11 @@ answer to "once per run, or once per request that happens to carry it". Their `a
 same callback shape as `script.pre` / `script.post`, through the new `ElementContext::run_setup_script`
 / `run_teardown_script` pair: the sequential runner and the load path's `execute_load_test` compile the
 collection's own `elements` once (never a step's inherited copy) and dispatch `Phase::RunStart` /
-`Phase::RunEnd` against it directly, outside the step pipeline entirely. `run.start` runs before the
+`Phase::RunEnd` against it directly, outside the step pipeline entirely. A **single-request** load
+run has no collection row to compile that array from - it compiles `POST /runs`'s own top-level
+`lifecycleElements` array instead (issue #1573), the same two kinds only, checked the same
+`ElementOwner::Collection` way; `validate_lifecycle_elements_run_override` refuses it outright
+beside a `scenario` block, whose collection already has a real `elements` column for this. `run.start` runs before the
 sequential run's iteration loop, and before `execute_load_test` captures the load run's own
 `test_start` - so a setup script's own time is never folded into either mode's duration figures - and
 writes through the same `ScriptVariableScopes` (`scopes` / `base_scopes`) every other script of the
@@ -338,12 +360,17 @@ for the sequential run; a `perUser: false` element instead advances its own entr
 shared-pacing element id in the plan, so two VUs' concurrent completions claim distinct slots of
 the same clock rather than racing onto the same one.
 
-**Not yet wired: the single-request load path.** `load_strategy.cpp` is unchanged: a
-single-request `POST /runs` payload has no `elements` attachment point today (its script model
-is still the legacy `tests` string, `RunContext::test_script`, not a compiled `elements` list),
-so there is no element pipeline call there to gate on inline-vs-deferred - a `ScopeOverlay`
-would have no writer. Wiring a stored request's `elements` into that run shape is a separate
-gap, outside this page's Status callout.
+**Still not wired: step-level elements on the single-request load path.** `load_strategy.cpp`'s
+per-submission and per-completion hooks are unchanged: a single-request `POST /runs` payload's
+own request has no `elements` attachment point today (its script model is still the legacy
+`tests` string, `RunContext::test_script`, not a compiled `elements` list), so there is no
+element pipeline call there to gate on inline-vs-deferred - a `ScopeOverlay` would have no
+writer. Wiring a stored request's `elements` into that run shape is a separate gap, outside this
+page's Status callout. What issue #1573 *does* wire for this run shape is the two kinds that
+dispatch at a run's own boundary rather than a step's: `lifecycleElements` (previous paragraph)
+lets a single-request run declare `script.setup` / `script.teardown`, run once before the load
+starts and once after it ends, the same `Phase::RunStart` / `Phase::RunEnd` dispatch a
+collection-backed run uses.
 
 ## Related issues
 
@@ -360,16 +387,21 @@ gap, outside this page's Status callout.
 - #1498 - `timer.think`'s gaussian option, the `timer.pacing` kind, a per-run seeded RNG
   (`elements.seed`) and the `elements.timers` override wired end to end (this page's Timers
   paragraphs and Load paths section). `timer.pacing`'s `perUser: false` under load and
-  `timer.throughput` (a constant-throughput, shared-rate timer) were deliberately deferred to
-  follow-up issues.
+  `timer.throughput` were deliberately deferred to follow-up issues.
 - #1570 - `timer.pacing`'s `perUser: false` under a scenario load run (this page's `timer.pacing`
-  and Non-blocking waits paragraphs). `timer.throughput` (#1571) is still deferred, tracked to
-  reuse the same `SharedPacingClocks` primitive.
+  and Non-blocking waits paragraphs).
+- #1571 - the `timer.throughput` kind (this page's `timer.throughput` paragraph): a target-rate
+  timer sharing `timer.pacing`'s `step.before` inheritance machinery but defaulting `perUser` to
+  `false`, backed under load by the new `SharedThroughputBudgets` primitive rather than
+  `SharedPacingClocks`.
 - #1499 - `script.setup` / `script.teardown`, the `run.start` / `run.end` dispatch this page's
-  Kinds section describes, in both run modes. Deliberately does not wire a single-request load
-  run's `POST /runs` to declare either kind - that shape has no collection to declare them on and
-  is the same "separate gap" this page's Load paths section already names for single-request
-  elements generally; the wire-shape decision that gap needs is filed as #1573.
+  Kinds section describes, in both collection-backed run modes. Deliberately did not wire a
+  single-request load run's `POST /runs` to declare either kind - that shape has no collection to
+  declare them on; the wire-shape gap it left is #1573.
+- #1573 - `lifecycleElements`, a single-request `POST /runs` payload's own ephemeral place to
+  declare `script.setup` / `script.teardown` (this page's Kinds section and Load paths section).
+  Does not wire step-level elements (`extract.*`, `assert.*`, `timer.*`, `script.pre`/`.post`)
+  into the single-request load path - that remains the Load paths section's "still not wired" gap.
 - #1515 - the controller family (`control.if`, `.once`, `.switch`, `.throughput`, `.loop`,
   `.transaction`), the load path's own `steps_skipped` counter, and `scenario.transactions[]`
   (this page's Controllers section).

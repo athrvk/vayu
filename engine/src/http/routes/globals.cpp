@@ -55,8 +55,7 @@ save_globals_response (vayu::db::Database& db, const nlohmann::json& json) {
         var_count = static_cast<int> (json["variables"].size ());
     }
 
-    vayu::utils::log_info ("http",
-    "POST /globals - Saving global variables, count=" + std::to_string (var_count));
+    vayu::utils::log_info ("http", "Saving global variables", { { "count", var_count } });
 
     db.save_globals (g);
 

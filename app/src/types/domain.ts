@@ -1612,15 +1612,13 @@ export type LoadTestMode =
 	"constant_rps" | "constant_concurrency" | "iterations" | "ramp_up" | "capacity";
 
 /**
- * Pass/fail budgets a run declares up front, so the engine can judge it rather
- * than only measure it. Keys are the engine's own metric names (they travel
- * verbatim on `POST /runs` and come back in `RunReport.thresholdValidation`),
- * which is why they are camelCase where the rest of `LoadTestConfig` is not.
- *
- * Every key is optional and at least one must be present - the engine rejects
- * an empty object rather than starting a run nothing will judge.
+ * The fixed budget keys, split out from {@link RunThresholds} so they stay a
+ * closed set of named fields: `keyof` this is the six metrics and nothing else,
+ * which is what lets the dialogs drive their fields, their validation and their
+ * payload from one table (`budgets.ts`). `keyof RunThresholds` cannot say that,
+ * because that type also carries the dynamic `custom.*` family below.
  */
-export interface RunThresholds {
+export interface RunThresholdBudgets {
 	latencyP50Ms?: number;
 	latencyP95Ms?: number;
 	latencyP99Ms?: number;
@@ -1632,6 +1630,18 @@ export interface RunThresholds {
 	 * `pm.test` calls alike - allowed to fail, 0-100 (issue #1497).
 	 */
 	maxAssertionFailureRatePct?: number;
+}
+
+/**
+ * Pass/fail budgets a run declares up front, so the engine can judge it rather
+ * than only measure it. Keys are the engine's own metric names (they travel
+ * verbatim on `POST /runs` and come back in `RunReport.thresholdValidation`),
+ * which is why they are camelCase where the rest of `LoadTestConfig` is not.
+ *
+ * Every key is optional and at least one must be present - the engine rejects
+ * an empty object rather than starting a run nothing will judge.
+ */
+export interface RunThresholds extends RunThresholdBudgets {
 	/**
 	 * A budget this run missed changes its terminal status to `failed`
 	 * rather than only being reported (issue #1497). Not a budget itself, so
@@ -1639,6 +1649,21 @@ export interface RunThresholds {
 	 * engine rejects `{ failRun: true }` alone the same way it rejects `{}`.
 	 */
 	failRun?: boolean;
+	/**
+	 * `custom.<name>.<stat>` - a budget on a `metric.record` / `pm.metrics`
+	 * value (issue #1500), where `<name>` is the name it was recorded under and
+	 * `<stat>` one of `p50`, `p95`, `p99`, `max`, `value`, `rate`. Always a
+	 * ceiling, always a non-negative number.
+	 *
+	 * A *pattern* index signature rather than a blanket `[key: string]`: the six
+	 * fields above keep their own types, `failRun` keeps its `boolean` (it does
+	 * not match the pattern, so nothing has to be widened to accommodate it),
+	 * and a mistyped fixed key is still a type error rather than being swallowed
+	 * as "some other threshold". The engine checks the *shape* of these keys and
+	 * not that `<name>` is one this run records, so neither does this
+	 * (`docs/engine/api-reference.md`, the thresholds block).
+	 */
+	[key: `custom.${string}`]: number | undefined;
 }
 
 /**

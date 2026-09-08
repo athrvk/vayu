@@ -472,9 +472,9 @@ void register_collection_routes (RouteContext& ctx) {
                 "POST /collections - " + std::to_string (status) + ": " +
                 error_message_of (body));
             } else {
-                vayu::utils::log_info ("http",
-                "POST /collections - Created collection: id=" + body["id"].get<std::string> () +
-                ", name=" + body["name"].get<std::string> ());
+                vayu::utils::log_info ("http", "Created collection",
+                { { "id", body["id"].get<std::string> () },
+                { "name", body["name"].get<std::string> () } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
@@ -500,13 +500,12 @@ void register_collection_routes (RouteContext& ctx) {
             auto json = nlohmann::json::parse (req.body);
             auto [status, body] = update_collection_response (ctx.db, collection_id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("http",
-                "PUT /collections/:id - " + std::to_string (status) +
-                " for id=" + collection_id + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http", "PUT /collections/:id failed",
+                { { "status", status }, { "id", collection_id },
+                { "error", error_message_of (body) } });
             } else {
-                vayu::utils::log_info ("http",
-                "PUT /collections/:id - Updated collection: id=" + collection_id +
-                ", name=" + body["name"].get<std::string> ());
+                vayu::utils::log_info ("http", "Updated collection",
+                { { "id", collection_id }, { "name", body["name"].get<std::string> () } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
@@ -538,9 +537,8 @@ void register_collection_routes (RouteContext& ctx) {
             }
 
             ctx.db.delete_collection (collection_id);
-            vayu::utils::log_info ("http",
-            "DELETE /collections/:id - Successfully deleted collection: " + collection_id +
-            ", name=" + collection->name);
+            vayu::utils::log_info ("http", "Successfully deleted collection",
+            { { "id", collection_id }, { "name", collection->name } });
 
             nlohmann::json response;
             response["message"] = "Collection deleted successfully";

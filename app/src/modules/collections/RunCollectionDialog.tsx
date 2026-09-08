@@ -92,10 +92,16 @@ import type { Collection } from "@/types";
 import {
 	BUDGET_FIELDS,
 	type BudgetDraft,
+	type CustomBudgetDraft,
 	budgetError,
 	buildThresholds,
+	customBudgetsError,
 	emptyBudgetDraft,
 } from "@/modules/request-builder/components/LoadTestConfigDialog/budgets";
+import {
+	CustomBudgetHint,
+	CustomBudgetRows,
+} from "@/modules/request-builder/components/LoadTestConfigDialog/CustomBudgetRows";
 import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
 
 export interface RunCollectionDialogProps {
@@ -182,6 +188,14 @@ export default function RunCollectionDialog({
 	 * since a collection run is now judged against them too, load test or not.
 	 */
 	const [budgets, setBudgets] = useState<BudgetDraft>(emptyBudgetDraft);
+	/**
+	 * The `custom.<name>.<stat>` rows (issue #1579) - judged for a design-mode
+	 * collection run exactly as the six fixed budgets above are (issue #1564):
+	 * `execute_scenario_run` folds `summary.custom_metrics` into the same
+	 * `RunSummaryInputs` it evaluates thresholds against for every run mode,
+	 * load test or not (`scenario_runner.cpp`). Not gated on the switch.
+	 */
+	const [customBudgets, setCustomBudgets] = useState<CustomBudgetDraft[]>([]);
 	const [failRun, setFailRun] = useState(false);
 	const [budgetsOpen, setBudgetsOpen] = useState(false);
 
@@ -257,7 +271,7 @@ export default function RunCollectionDialog({
 	const durationValue = Number(durationSeconds);
 	const durationValid = Number.isFinite(durationValue) && durationValue > 0;
 
-	const budgetsError = budgetError(budgets);
+	const budgetsError = budgetError(budgets) ?? customBudgetsError(customBudgets);
 
 	const canRun = loadTest
 		? virtualUsersValid && durationValid && !dataFileError && !budgetsError
@@ -291,7 +305,7 @@ export default function RunCollectionDialog({
 
 	const handleRun = () => {
 		if (!canRun) return;
-		const thresholds = buildThresholds(budgets, failRun);
+		const thresholds = buildThresholds(budgets, failRun, customBudgets);
 		startRun.mutate(
 			{
 				/*
@@ -552,10 +566,12 @@ export default function RunCollectionDialog({
 					)}
 
 					{/*
-					 * Pass/fail budgets (issue #1564) - not gated by `loadTest`,
-					 * unlike Timers/Scripts above: the engine now judges a
-					 * design-mode collection run against them exactly as it
-					 * already judges a load run, so the control applies to both.
+					 * Pass/fail budgets (issue #1564) - the disclosure itself is
+					 * not gated by `loadTest`, unlike Timers/Scripts above: the
+					 * engine now judges a design-mode collection run against the
+					 * six fixed budgets exactly as it already judges a load run,
+					 * so those apply to both. The custom rows inside it are the
+					 * exception and carry their own gate; see there.
 					 * Same card treatment as `LoadTestConfigDialog`'s own
 					 * disclosure, for the reason that one gives: a section that
 					 * revealed loose fields on the dialog background would read
@@ -595,6 +611,32 @@ export default function RunCollectionDialog({
 									hint={field.hint}
 								/>
 							))}
+
+							{/*
+							 * Custom metric budgets - not gated by `loadTest`,
+							 * same as the six fixed budgets above and for the same
+							 * reason: `custom.<name>.<stat>` is judged for a
+							 * design-mode collection run exactly as it is for a
+							 * load run (`execute_scenario_run`, #1564's own
+							 * every-run-mode rule extends to #1500's custom
+							 * metrics too).
+							 */}
+							<div className="space-y-1.5">
+								<Label className="text-xs">
+									Custom metric budgets
+									<span className="ml-1 font-normal text-muted-foreground">
+										(optional)
+									</span>
+								</Label>
+								<CustomBudgetHint />
+								<CustomBudgetRows
+									rows={customBudgets}
+									onChange={setCustomBudgets}
+									idPrefix="run-collection"
+									disabled={startRun.isPending}
+								/>
+							</div>
+
 							<div className="flex items-start justify-between gap-3">
 								<Label
 									htmlFor="run-collection-fail-run"

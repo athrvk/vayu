@@ -866,6 +866,59 @@ describe("pass/fail budgets", () => {
 		expect(screen.getByText(/budget is out of range/i)).toBeInTheDocument();
 	});
 
+	/*
+	 * `custom.<name>.<stat>` rows (issue #1579). The rules are `budgets.ts`'s
+	 * and are tested there; these pin the wiring - that a row the user adds
+	 * reaches the payload under the engine's own key, and that a half-filled one
+	 * stops the run here rather than at the engine's 400.
+	 */
+	const addCustomRow = () =>
+		fireEvent.click(screen.getByRole("button", { name: /add custom metric budget/i }));
+
+	it("sends a custom metric budget under the engine's own key", () => {
+		const { onStart } = open();
+		openBudgets();
+		fireEvent.change(p99(), { target: { value: "" } });
+		addCustomRow();
+		fireEvent.change(screen.getByLabelText(/custom budget 1 metric name/i), {
+			target: { value: "checkout_ttfb" },
+		});
+		fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
+			target: { value: "120" },
+		});
+
+		expect(started(onStart).thresholds).toEqual({ "custom.checkout_ttfb.p50": 120 });
+	});
+
+	it("blocks Start on a half-filled custom row instead of dropping it", () => {
+		const { onStart } = open();
+		openBudgets();
+		addCustomRow();
+		fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
+			target: { value: "120" },
+		});
+
+		fireEvent.click(screen.getByRole("button", { name: "Start" }));
+		expect(onStart).not.toHaveBeenCalled();
+		expect(screen.getByText(/budget is out of range/i)).toBeInTheDocument();
+	});
+
+	it("drops a removed row rather than remembering what it held", () => {
+		const { onStart } = open();
+		openBudgets();
+		fireEvent.change(p99(), { target: { value: "" } });
+		addCustomRow();
+		fireEvent.change(screen.getByLabelText(/custom budget 1 metric name/i), {
+			target: { value: "checkout_ttfb" },
+		});
+		fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
+			target: { value: "120" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /remove custom budget 1/i }));
+
+		expect(started(onStart).thresholds).toBeUndefined();
+	});
+
 	it("keeps a cleared budget cleared across dialog opens", () => {
 		// The prefill seeds a first run only. Re-seeding from the setting every
 		// time would undo the user's decision to run without a latency budget,

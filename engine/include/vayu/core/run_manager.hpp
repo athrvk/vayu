@@ -37,6 +37,7 @@
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/request_exchange.hpp"
 #include "vayu/http/transport_policy.hpp"
 
 namespace vayu::http {
@@ -367,6 +368,17 @@ struct RunContext {
     /// before any other thread of this run exists, read on that same thread
     /// after every other one has joined.
     std::vector<vayu::core::ElementOutcome> setup_outcomes;
+
+    /// The scopes `run_collection_setup` loaded for a **single-request**
+    /// run's own `lifecycleElements` (issue #1573) - a scenario run keeps its
+    /// own copy on `ScenarioLoadState::base_scopes` instead, since a scenario
+    /// load run's VUs need it too; this member exists only so
+    /// `run_collection_teardown` can read back the same scopes `script.setup`
+    /// wrote into, for the one run shape with no `ScenarioLoadState` to hold
+    /// them. Safe unguarded for the same reason `setup_outcomes` above is:
+    /// written by `execute_load_test` before any other thread of this run
+    /// exists, read by `finish_load_test` after every other one has joined.
+    vayu::http::routes::ScriptVariableScopes lifecycle_scopes;
 
     /**
      * Whether a compiled `script.*` element runs inline on a load run's

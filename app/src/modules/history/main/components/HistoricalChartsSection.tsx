@@ -24,8 +24,10 @@ import {
 	ConnectionsChart,
 	StatusCodesOverTimeChart,
 	ServerVitalsChart,
+	CustomMetricsChart,
 	CHART_SYNC,
 } from "@/modules/dashboard/components/charts/uplot";
+import { hasCustomMetrics } from "@/modules/dashboard/utils/metricsTransforms";
 
 interface HistoricalChartsSectionProps {
 	data: LoadTestMetrics[];
@@ -146,6 +148,19 @@ export default function HistoricalChartsSection({
 							anomalies={anomalies}
 							sleeps={sleeps}
 						/>
+					</CardContent>
+				</Card>
+			)}
+
+			{/* Custom metrics - absent for a run that recorded no metric.record /
+			    pm.metrics value, same "no card" rule the vitals row above follows. */}
+			{data.some(hasCustomMetrics) && (
+				<Card>
+					<CardHeader className="pb-2">
+						<CardTitle>Custom Metrics</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<CustomMetricsChart history={data} isCompleted syncKey={SYNC_KEY} />
 					</CardContent>
 				</Card>
 			)}

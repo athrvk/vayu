@@ -496,9 +496,9 @@ void register_spec_routes (RouteContext& ctx) {
                 vayu::utils::log_warning ("http",
                 "POST /specs - " + std::to_string (status) + ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info ("http",
-                "POST /specs - Stored spec: id=" + body["id"].get<std::string> () +
-                ", hash=" + body["hash"].get<std::string> ());
+                vayu::utils::log_info ("http", "Stored spec",
+                { { "id", body["id"].get<std::string> () },
+                { "hash", body["hash"].get<std::string> () } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
@@ -573,9 +573,9 @@ void register_spec_routes (RouteContext& ctx) {
         try {
             auto [status, body] = delete_spec_document_response (ctx.db, spec_id);
             if (status != 200) {
-                vayu::utils::log_warning ("http",
-                "DELETE /specs/:id - " + std::to_string (status) +
-                " for id=" + spec_id + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http", "DELETE /specs/:id failed",
+                { { "status", status }, { "id", spec_id },
+                { "error", error_message_of (body) } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");

@@ -1509,9 +1509,9 @@ void handle_get_run (RouteContext& ctx, const httplib::Request& req, httplib::Re
     try {
         auto run = ctx.db.get_run (run_id);
         if (run) {
-            vayu::utils::log_debug ("run",
-            "Found run: " + run_id + ", type=" + to_string (run->type) +
-            ", status=" + to_string (run->status));
+            vayu::utils::log_debug ("run", "Found run",
+            { { "runId", run_id }, { "type", to_string (run->type) },
+            { "status", to_string (run->status) } });
             auto payload = vayu::json::serialize (*run);
             // A design run is one exchange, so it travels with the run.
             // Load runs keep theirs in the report, where `results` means
@@ -1583,9 +1583,8 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
         // Check if run is already completed or stopped
         if (run->status == vayu::RunStatus::Completed ||
         run->status == vayu::RunStatus::Stopped || run->status == vayu::RunStatus::Failed) {
-            vayu::utils::log_info ("run",
-            "POST /runs/:id/stop - Run already finished: " + run_id +
-            ", status=" + to_string (run->status));
+            vayu::utils::log_info ("run", "Run already finished",
+            { { "runId", run_id }, { "status", to_string (run->status) } });
             auto response = vayu::utils::MetricsHelper::create_already_stopped_response (
             run_id, to_string (run->status));
             res.set_content (response.dump (), "application/json");
@@ -1647,10 +1646,9 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
 
             // Calculate summary metrics
             auto summary = vayu::utils::MetricsHelper::calculate_summary (*context);
-            vayu::utils::log_info ("run",
-            "Run stopped: " + run_id +
-            ", total_requests=" + std::to_string (summary.total_requests) +
-            ", errors=" + std::to_string (summary.errors));
+            vayu::utils::log_info ("run", "Run stopped",
+            { { "runId", run_id }, { "totalRequests", summary.total_requests },
+            { "errors", summary.errors } });
             auto response =
             vayu::utils::MetricsHelper::create_stop_response (run_id, summary);
 

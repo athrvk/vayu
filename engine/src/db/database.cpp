@@ -1051,26 +1051,39 @@ bool is_blank_script_text (const std::string& text) {
     return text.find_first_not_of (" \t\r\n") == std::string::npos;
 }
 
-/// Whether @p table's schema still carries `pre_request_script` (issue
-/// #1514's cut-over target). False for a fresh install (the table does not
-/// exist yet) and for a database this or an earlier engine build already
-/// migrated by some other means.
-bool table_has_script_columns (sqlite3* connection, const char* table) {
+/// @p table's current column names, read fresh so a caller never assumes a
+/// shape a genuinely pre-cutover database (older than #1513, no `elements`
+/// column at all) does not have.
+std::vector<std::string> table_columns (sqlite3* connection, const char* table) {
     const std::string sql   = std::string ("PRAGMA table_info(") + table + ");";
     sqlite3_stmt* statement = nullptr;
+    std::vector<std::string> columns;
     if (sqlite3_prepare_v2 (connection, sql.c_str (), -1, &statement, nullptr) != SQLITE_OK) {
-        return false;
+        return columns;
     }
-    bool found = false;
     while (sqlite3_step (statement) == SQLITE_ROW) {
         const auto* name = column_text (statement, 1);
-        if (name != nullptr && std::string_view (name) == "pre_request_script") {
-            found = true;
-            break;
+        if (name != nullptr) {
+            columns.emplace_back (name);
         }
     }
     sqlite3_finalize (statement);
-    return found;
+    return columns;
+}
+
+bool has_column (const std::vector<std::string>& columns, std::string_view name) {
+    return std::find (columns.begin (), columns.end (), name) != columns.end ();
+}
+
+/// Whether @p table's schema still carries `pre_request_script` or
+/// `post_request_script` (issue #1514's cut-over target) - either alone is
+/// enough to need the fold below, since a row can carry just one. False for a
+/// fresh install (the table does not exist yet) and for a database this or an
+/// earlier engine build already migrated by some other means.
+bool table_has_script_columns (sqlite3* connection, const char* table) {
+    const auto columns = table_columns (connection, table);
+    return has_column (columns, "pre_request_script") ||
+    has_column (columns, "post_request_script");
 }
 
 /**
@@ -1116,17 +1129,40 @@ const std::string& post) {
 /**
  * Fold @p table's `pre_request_script` / `post_request_script` into
  * `elements`, row by row, on the still-open @p connection. Returns false on
- * the first SQLite error, which aborts the whole migration (the caller rolls
- * the transaction back) rather than leaving some rows folded and others not.
+ * the first SQLite error (message left in @p error), which aborts the whole
+ * migration (the caller rolls the transaction back) rather than leaving some
+ * rows folded and others not.
+ *
+ * A genuinely pre-cutover database (older than #1513) has neither the
+ * `elements` column nor, on some rows, both script columns - only the
+ * migration this function runs ever adds `elements` for such a file, and it
+ * runs ahead of `sync_schema ()`. So the column set is read fresh here rather
+ * than assumed: a missing `elements` column is added first (the same shape
+ * `sync_schema` would create), and a missing script column reads as `''`
+ * instead of failing to prepare.
  */
-bool fold_table_scripts_into_elements (sqlite3* connection, const char* table) {
+bool fold_table_scripts_into_elements (sqlite3* connection, const char* table, std::string& error) {
+    const auto columns  = table_columns (connection, table);
+    const bool has_pre  = has_column (columns, "pre_request_script");
+    const bool has_post = has_column (columns, "post_request_script");
+
+    if (!has_column (columns, "elements")) {
+        const std::string alter_sql = std::string ("ALTER TABLE ") + table +
+        " ADD COLUMN elements TEXT NOT NULL DEFAULT '[]';";
+        if (sqlite3_exec (connection, alter_sql.c_str (), nullptr, nullptr, nullptr) != SQLITE_OK) {
+            error = sqlite3_errmsg (connection);
+            return false;
+        }
+    }
+
+    const std::string pre_expr  = has_pre ? "pre_request_script" : "''";
+    const std::string post_expr = has_post ? "post_request_script" : "''";
     const std::string select_sql =
-    std::string (
-    "SELECT id, pre_request_script, post_request_script, elements FROM ") +
-    table + ";";
+    "SELECT id, " + pre_expr + ", " + post_expr + ", elements FROM " + table + ";";
     sqlite3_stmt* select_statement = nullptr;
     if (sqlite3_prepare_v2 (connection, select_sql.c_str (), -1,
         &select_statement, nullptr) != SQLITE_OK) {
+        error = sqlite3_errmsg (connection);
         return false;
     }
     const std::string update_sql =
@@ -1134,6 +1170,7 @@ bool fold_table_scripts_into_elements (sqlite3* connection, const char* table) {
     sqlite3_stmt* update_statement = nullptr;
     if (sqlite3_prepare_v2 (connection, update_sql.c_str (), -1,
         &update_statement, nullptr) != SQLITE_OK) {
+        error = sqlite3_errmsg (connection);
         sqlite3_finalize (select_statement);
         return false;
     }
@@ -1150,7 +1187,8 @@ bool fold_table_scripts_into_elements (sqlite3* connection, const char* table) {
             break;
         }
         if (step != SQLITE_ROW) {
-            ok = false;
+            error = sqlite3_errmsg (connection);
+            ok    = false;
             break;
         }
         const std::string id       = select_column_text (0);
@@ -1167,7 +1205,8 @@ bool fold_table_scripts_into_elements (sqlite3* connection, const char* table) {
         sqlite3_bind_text (update_statement, 1, updated->c_str (), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text (update_statement, 2, id.c_str (), -1, SQLITE_TRANSIENT);
         if (sqlite3_step (update_statement) != SQLITE_DONE) {
-            ok = false;
+            error = sqlite3_errmsg (connection);
+            ok    = false;
         }
     }
 
@@ -1256,11 +1295,13 @@ void migrate_before_sync (const std::string& path) {
 
     sqlite3_exec (connection.get (), "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr);
     bool ok = true;
+    std::string fold_error;
     if (requests_need_fold) {
-        ok = ok && fold_table_scripts_into_elements (connection.get (), "requests");
+        ok = ok && fold_table_scripts_into_elements (connection.get (), "requests", fold_error);
     }
     if (collections_need_fold) {
-        ok = ok && fold_table_scripts_into_elements (connection.get (), "collections");
+        ok = ok &&
+        fold_table_scripts_into_elements (connection.get (), "collections", fold_error);
     }
     if (ok) {
         sqlite3_exec (connection.get (), "PRAGMA user_version = 1;", nullptr, nullptr, nullptr);
@@ -1268,7 +1309,8 @@ void migrate_before_sync (const std::string& path) {
     } else {
         sqlite3_exec (connection.get (), "ROLLBACK;", nullptr, nullptr, nullptr);
         throw std::runtime_error (
-        "Vayu could not migrate stored scripts into elements for " + path);
+        "Vayu could not migrate stored scripts into elements for " + path +
+        ": " + (fold_error.empty () ? "unknown error" : fold_error));
     }
 }
 
@@ -1518,7 +1560,7 @@ void Database::init () {
 void Database::create_collection (const Collection& c) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
-    "db", "Creating collection: id=" + c.id + ", name=" + c.name);
+    "db", "Creating collection", { { "id", c.id }, { "name", c.name } });
     impl_->storage.replace (c);
 }
 
@@ -1629,7 +1671,7 @@ void Database::purge_request_locked (const std::string& id) {
 // what finally destroys it.
 void Database::delete_collection (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting collection (soft, cascade): id=" + id);
+    vayu::utils::log_debug ("db", "Deleting collection (soft, cascade)", { { "id", id } });
 
     const auto subtree = collection_subtree_locked (id);
 
@@ -1690,7 +1732,8 @@ void Database::delete_collection (const std::string& id) {
 
 void Database::save_request (const Request& r) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Saving request: id=" + r.id + ", name=" + r.name);
+    vayu::utils::log_debug (
+    "db", "Saving request", { { "id", r.id }, { "name", r.name } });
     impl_->storage.replace (r);
 }
 
@@ -1722,7 +1765,7 @@ std::vector<Request> Database::get_requests_in_collection (const std::string& co
 // is, and a restore that had to re-create them could not.
 void Database::delete_request (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting request (soft): id=" + id);
+    vayu::utils::log_debug ("db", "Deleting request (soft)", { { "id", id } });
     const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
                           .count ();
@@ -1869,7 +1912,7 @@ const TrashEntry& entry) {
         }
         return true; // Commit
     });
-    vayu::utils::log_info ("db", "Restored request from trash: id=" + entry.id);
+    vayu::utils::log_info ("db", "Restored request from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };
 }
 
@@ -1908,11 +1951,9 @@ TrashOutcome Database::restore_collection_locked (const TrashEntry& entry) {
         return true; // Commit
     });
 
-    vayu::utils::log_info ("db",
-    "Restored collection from trash: id=" + entry.id + ", +" +
-    std::to_string (entry.collections) + " sub-collection(s), +" +
-    std::to_string (entry.requests) + " request(s)" +
-    (reparented ? " (re-parented to the tree root)" : ""));
+    vayu::utils::log_info ("db", "Restored collection from trash",
+    { { "id", entry.id }, { "subCollections", entry.collections },
+    { "requests", entry.requests }, { "reparented", reparented } });
     return TrashOutcome{ entry, reparented };
 }
 
@@ -1949,7 +1990,8 @@ std::optional<TrashOutcome> Database::purge_deleted (const std::string& id) {
     } else {
         purge_request_locked (id);
     }
-    vayu::utils::log_info ("db", "Purged " + entry->kind + " from trash: id=" + id);
+    vayu::utils::log_info (
+    "db", "Purged item from trash", { { "kind", entry->kind }, { "id", id } });
     return TrashOutcome{ std::move (*entry), false };
 }
 
@@ -2009,8 +2051,8 @@ int64_t Database::purge_expired_trash_configured () {
 
 void Database::save_request_example (const RequestExample& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug (
-    "db", "Saving request example: id=" + e.id + ", request_id=" + e.request_id);
+    vayu::utils::log_debug ("db", "Saving request example",
+    { { "id", e.id }, { "requestId", e.request_id } });
     impl_->storage.replace (e);
 }
 
@@ -2075,7 +2117,7 @@ int64_t Database::count_request_examples (const std::string& request_id) {
 
 void Database::delete_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting request example: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting request example", { { "id", id } });
     impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
 }
 
@@ -2087,7 +2129,7 @@ void Database::delete_request_example (const std::string& id) {
  */
 void Database::suppress_request_example (const std::string& id, int64_t now) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Suppressing imported request example: id=" + id);
+    vayu::utils::log_debug ("db", "Suppressing imported request example", { { "id", id } });
     auto rows =
     impl_->storage.get_all<RequestExample> (where (c (&RequestExample::id) == id));
     if (rows.empty ()) {
@@ -2110,7 +2152,7 @@ void Database::suppress_request_example (const std::string& id, int64_t now) {
 void Database::save_spec_document (const SpecDocument& s) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
-    "db", "Saving spec document: id=" + s.id + ", hash=" + s.hash);
+    "db", "Saving spec document", { { "id", s.id }, { "hash", s.hash } });
     impl_->storage.replace (s);
 }
 
@@ -2153,7 +2195,7 @@ std::vector<Collection> Database::get_collections_bound_to_spec (const std::stri
 
 void Database::delete_spec_document (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting spec document: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting spec document", { { "id", id } });
     impl_->storage.remove_all<SpecDocument> (where (c (&SpecDocument::id) == id));
 }
 
@@ -2592,12 +2634,11 @@ void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
 void Database::spec_sync_apply (const SpecSyncBatch& batch) {
     // "spec write" rather than "sync": `POST /specs/bind` commits through this
     // same batch (issue #862), with its create and delete halves empty.
-    vayu::utils::log_debug ("db",
-    "Applying spec write: collection=" + batch.binding.id +
-    ", spec=" + batch.spec.id + ", +" + std::to_string (batch.created.size ()) +
-    " requests, ~" + std::to_string (batch.updated.size ()) + ", -" +
-    std::to_string (batch.deleted.size ()) + ", " +
-    std::to_string (batch.new_collections.size ()) + " new collections");
+    vayu::utils::log_debug ("db", "Applying spec write",
+    { { "collection", batch.binding.id }, { "spec", batch.spec.id },
+    { "created", batch.created.size () }, { "updated", batch.updated.size () },
+    { "deleted", batch.deleted.size () },
+    { "newCollections", batch.new_collections.size () } });
 
     retry_on_busy ("apply spec sync", 5, std::chrono::milliseconds (100), [&] {
         impl_->storage.transaction ([&] {
@@ -2642,9 +2683,8 @@ void Database::deactivate_other_environments_locked (const std::string& keep_id)
 
 void Database::save_environment (const Environment& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db",
-    "Saving environment: id=" + e.id + ", name=" + e.name +
-    ", is_active=" + (e.is_active ? "true" : "false"));
+    vayu::utils::log_debug ("db", "Saving environment",
+    { { "id", e.id }, { "name", e.name }, { "isActive", e.is_active } });
     impl_->storage.transaction ([&] {
         if (e.is_active) {
             deactivate_other_environments_locked (e.id);
@@ -2669,7 +2709,7 @@ std::optional<Environment> Database::get_environment (const std::string& id) {
 
 void Database::delete_environment (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting environment: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting environment", { { "id", id } });
     impl_->storage.remove_all<Environment> (where (c (&Environment::id) == id));
 }
 
@@ -2684,7 +2724,7 @@ void Database::delete_environment (const std::string& id) {
 void Database::save_client_certificate (const ClientCertificate& c) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
-    "db", "Saving client certificate: id=" + c.id + ", host=" + c.host);
+    "db", "Saving client certificate", { { "id", c.id }, { "host", c.host } });
     impl_->storage.replace (c);
 }
 
@@ -2704,7 +2744,7 @@ std::optional<ClientCertificate> Database::get_client_certificate (const std::st
 
 void Database::delete_client_certificate (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting client certificate: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting client certificate", { { "id", id } });
     impl_->storage.remove_all<ClientCertificate> (where (c (&ClientCertificate::id) == id));
 }
 
@@ -2756,8 +2796,8 @@ void Database::delete_oauth_token (const std::string& cache_key) {
 
 void Database::create_run (const Run& run) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db",
-    "Creating run: id=" + run.id + ", type=" + std::string (vayu::to_string (run.type)));
+    vayu::utils::log_debug ("db", "Creating run",
+    { { "id", run.id }, { "type", std::string (vayu::to_string (run.type)) } });
     impl_->storage.replace (run);
 }
 
@@ -2771,8 +2811,8 @@ std::optional<Run> Database::get_run (const std::string& id) {
 
 void Database::update_run_status (const std::string& id, RunStatus status) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db",
-    "Updating run status: id=" + id + ", status=" + std::string (vayu::to_string (status)));
+    vayu::utils::log_debug ("db", "Updating run status",
+    { { "id", id }, { "status", std::string (vayu::to_string (status)) } });
     auto run = get_run (id);
     if (run) {
         run->status   = status;
@@ -2785,7 +2825,7 @@ void Database::update_run_status (const std::string& id, RunStatus status) {
 
 void Database::update_run_end_time (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Updating run end_time: id=" + id);
+    vayu::utils::log_debug ("db", "Updating run end_time", { { "id", id } });
     auto run = get_run (id);
     if (run) {
         run->end_time = std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -3009,10 +3049,8 @@ void Database::prune_runs (int max_runs, int max_age_days) {
         });
     }
 
-    vayu::utils::log_info ("db",
-    "Pruned " + std::to_string (victims.size ()) +
-    " old run(s) (max_runs=" + std::to_string (max_runs) +
-    ", max_age_days=" + std::to_string (max_age_days) + ")");
+    vayu::utils::log_info ("db", "Pruned old runs",
+    { { "count", victims.size () }, { "maxRuns", max_runs }, { "maxAgeDays", max_age_days } });
 }
 
 size_t Database::reconcile_orphaned_runs () {

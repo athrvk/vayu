@@ -571,6 +571,34 @@
     "version": 1
   },
   {
+    "category": "timer",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "perUser": {
+          "type": "boolean"
+        },
+        "targetPerMinute": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "targetPerMinute"
+      ],
+      "type": "object"
+    },
+    "description": "Holds this request, folder or collection to a target rate - N per minute - shared across every virtual user unless perUser is set.",
+    "hotPathClass": "declarative",
+    "kind": "timer.throughput",
+    "label": "Throughput",
+    "phases": [
+      "step.before"
+    ],
+    "version": 1
+  },
+  {
     "category": "controller",
     "collectionOnly": false,
     "configSchema": {

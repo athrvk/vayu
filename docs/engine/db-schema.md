@@ -219,16 +219,23 @@ constructor's own validation probe) opens `path` with a raw `sqlite3` connection
    as "will not open" and quarantined the way a genuinely corrupt file is. Equal to `SCHEMA_VERSION`
    is a fast no-op. `0` (every database written before this issue, folded by #1513's pass or not)
    proceeds to fold.
-2. **Fold, if either table still has the script columns.** For each of `requests` and
-   `collections` that does: `<db>.pre-migration.bak` is written once, immediately before the first
-   row is rewritten (issue #1487's rule - the one on-disk copy of the exact pre-cutover script text
-   if the fold below were ever found wrong), then in one transaction, per row: parse `elements`,
+2. **Fold, if either table still has a script column.** For each of `requests` and `collections`
+   that does (either `pre_request_script` or `post_request_script` alone is enough - a table needs
+   folding for): `<db>.pre-migration.bak` is written once, immediately before the first row is
+   rewritten (issue #1487's rule - the one on-disk copy of the exact pre-cutover script text if the
+   fold below were ever found wrong), then in one transaction, per table: read its actual column set
+   fresh (`PRAGMA table_info`), `ALTER TABLE ... ADD COLUMN elements TEXT NOT NULL DEFAULT '[]'` when
+   the column is not there yet - a genuinely pre-cutover database (older than #1513) never ran the
+   additive pass that would have added it, so this migration is the first thing that does - and
+   select `''` for whichever script column the table does not carry, rather than a `SELECT` that
+   names a column absent from this row's table and fails to prepare. Then, per row: parse `elements`,
    append a `{"id": "el_...", "kind": "script.pre" | "script.post", "enabled": true, "config":
    {"script": "..."}}` for each non-blank script column *not already represented* in `elements` (the
    check that makes a database #1513's additive pass already folded safe to re-run through this
    migration without a duplicate), and write the row back. A database neither table needs folding
    for (a fresh install, or one some other path already brought to this shape) skips the backup and
-   the transaction.
+   the transaction. A fold failure rolls the transaction back and throws, naming the SQLite message
+   that caused it.
 3. **Set `user_version = 1`.** Only after this returns does `sync_schema ()` see a mapping with no
    `pre_request_script` / `post_request_script` columns and `ALTER TABLE ... DROP COLUMN` them -
    the ordering this migration exists to guarantee, per `engine/CLAUDE.md`'s "Removing a column"

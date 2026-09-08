@@ -73,10 +73,13 @@ import { describeDefaultHeaderDifference } from "./default-headers";
 import {
 	BUDGET_FIELDS,
 	type BudgetDraft,
+	type CustomBudgetDraft,
 	budgetError,
 	buildThresholds,
+	customBudgetsError,
 	emptyBudgetDraft,
 } from "./budgets";
+import { CustomBudgetHint, CustomBudgetRows } from "./CustomBudgetRows";
 import { type MonitorDraft, buildMonitor, emptyMonitorDraft, monitorError } from "./monitor";
 import { MONITOR_INTERVAL_MS } from "@/constants/monitor";
 import { useMonitorSettings } from "@/hooks/useMonitorSettings";
@@ -111,6 +114,14 @@ interface SavedLoadTestConfig {
 	 * undone by the next dialog open.
 	 */
 	budgets: BudgetDraft;
+	/**
+	 * The `custom.<name>.<stat>` rows (issue #1579), memoed for the same reason
+	 * and in the same shape as the fixed budgets above: a metric name is a
+	 * property of the plan, not of one run, so retyping it per run is friction
+	 * the memo exists to remove. Absent from a memo written before this field
+	 * existed, which restores as no rows.
+	 */
+	customBudgets: CustomBudgetDraft[];
 	/**
 	 * Whether a missed budget above should fail the run, not only report it -
 	 * memoed alongside `budgets` for the same reason.
@@ -262,6 +273,9 @@ export default function LoadTestConfigDialog({
 				latencyP99Ms: String(sloThresholdMs),
 			}
 	);
+	const [customBudgets, setCustomBudgets] = useState<CustomBudgetDraft[]>(
+		() => saved.customBudgets ?? []
+	);
 	const [failRun, setFailRun] = useState(saved.failRun ?? false);
 	const [budgetsOpen, setBudgetsOpen] = useState(false);
 	/**
@@ -367,7 +381,9 @@ export default function LoadTestConfigDialog({
 	const startFloorError = validateStartConcurrencyFloor(mode, startConcurrency);
 	const startConcurrencyError = validateStartConcurrency(mode, startConcurrency, concurrency);
 	const capacityRangeError = validateCapacityRange(mode, startConcurrency, concurrency);
-	const budgetsError = budgetError(budgets);
+	// One message slot for both budget families: a custom row is refused on the
+	// same terms a fixed field is, so the notice below reads the same either way.
+	const budgetsError = budgetError(budgets) ?? customBudgetsError(customBudgets);
 	const monitoringError = monitorError(monitor, monitorSettings.maxSeries);
 	const blockingError =
 		rampDurationError ??
@@ -518,6 +534,7 @@ export default function LoadTestConfigDialog({
 			streamDuration,
 			streamMaxEvents,
 			budgets,
+			customBudgets,
 			failRun,
 			monitor,
 		});
@@ -533,7 +550,7 @@ export default function LoadTestConfigDialog({
 			comment: comment || undefined,
 			// Absent when nothing was declared - the engine rejects an empty
 			// object rather than starting a run no verdict can be computed for.
-			thresholds: buildThresholds(budgets, failRun),
+			thresholds: buildThresholds(budgets, failRun, customBudgets),
 			// Absent when no endpoint was given, for the same reason.
 			monitor: buildMonitor(monitor),
 		};
@@ -990,6 +1007,29 @@ export default function LoadTestConfigDialog({
 									hint={field.hint}
 								/>
 							))}
+
+							{/*
+							 * The custom rows sit below the fixed six and above the
+							 * flag, which is the reading order of the section: the
+							 * six every run can declare, then the ones this plan
+							 * records, then what a miss does.
+							 */}
+							<div className="space-y-1.5">
+								<Label className="text-xs">
+									Custom metric budgets
+									<span className="ml-1 font-normal text-muted-foreground">
+										(optional)
+									</span>
+								</Label>
+								<CustomBudgetHint />
+								<CustomBudgetRows
+									rows={customBudgets}
+									onChange={setCustomBudgets}
+									idPrefix="lt"
+									disabled={isStarting}
+								/>
+							</div>
+
 							<div className="flex items-start justify-between gap-3">
 								<Label
 									htmlFor="lt-fail-run"
