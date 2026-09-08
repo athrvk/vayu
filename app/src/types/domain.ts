@@ -1914,6 +1914,28 @@ export interface LoadTestMetrics {
 	// Per-tick full status-code map (e.g. { "200": 1450, "404": 5 }). Same shape
 	// the live SSE and the stored time-series both carry.
 	status_codes?: Record<string, number>;
+	/**
+	 * Custom trends, counters and rates recorded so far, riding the same tick
+	 * as the built-in phases above (issue #1500). Absent until the run has
+	 * recorded at least one value - not `{}`. Same shape as
+	 * `RunReport.customMetrics`, but snake_case here like every other field on
+	 * this interface: the stored time-series wire shape is `custom_metrics`,
+	 * and the live SSE tick's own `customMetrics` is renamed into this one by
+	 * `sse-client.ts`, the same way it renames `statusCodes` into
+	 * `status_codes` above.
+	 */
+	custom_metrics?: Record<
+		string,
+		{
+			type: "trend" | "counter" | "rate";
+			count: number;
+			p50?: number;
+			p95?: number;
+			p99?: number;
+			max?: number;
+			value?: number;
+		}
+	>;
 }
 
 /**
@@ -2241,6 +2263,31 @@ export interface RunReport {
 		failed: number;
 		verdict: "passed" | "failed";
 	};
+	/**
+	 * Custom trends, counters and rates the run recorded through a
+	 * `metric.record` element or `pm.metrics.trend` / `.counter` / `.rate`
+	 * (issue #1500). Keyed by the name the script or element chose, which is
+	 * why the key set is open - there is no fixed label table the way
+	 * `thresholdValidation.checks[].metric` has one.
+	 *
+	 * `undefined`, never `{}`, when the run recorded no custom metric - the
+	 * same "absent means never happened" convention `thresholdValidation`
+	 * follows. For `type: "trend"` the percentile fields are present; for
+	 * `type: "counter"` (a running total) or `type: "rate"` (0-100 percent
+	 * true) only `value` is.
+	 */
+	customMetrics?: Record<
+		string,
+		{
+			type: "trend" | "counter" | "rate";
+			count: number;
+			p50?: number;
+			p95?: number;
+			p99?: number;
+			max?: number;
+			value?: number;
+		}
+	>;
 	/**
 	 * Which operations of the collection's bound contract this run exercised, and
 	 * which of their declared responses it saw (issue #629).

@@ -36,6 +36,19 @@ describe("mapSseMetrics", () => {
 		expect(m.bytes_received).toBe(0);
 		expect(m.status_codes).toBeUndefined();
 	});
+
+	it("renames customMetrics into custom_metrics (issue #1500)", () => {
+		const m = mapSseMetrics({
+			timestamp: 1,
+			customMetrics: { ttfb2: { type: "trend", count: 1, p95: 10 } },
+		});
+		expect(m.custom_metrics).toEqual({ ttfb2: { type: "trend", count: 1, p95: 10 } });
+	});
+
+	it("leaves custom_metrics undefined when absent", () => {
+		const m = mapSseMetrics({ timestamp: 1, totalRequests: 0 });
+		expect(m.custom_metrics).toBeUndefined();
+	});
 });
 
 describe("parseStepEvent", () => {

@@ -36,6 +36,9 @@ export * from "./ThresholdVerdict";
 export * from "./CapacitySummary";
 export * from "./ContractCoverage";
 
+// A run's custom trends, counters and rates - beside ThresholdVerdict
+export * from "./CustomMetricsSummary";
+
 // "30 of 36 sampled responses matched their schema" - beside the coverage block
 export * from "./SampledSchemaValidation";
 

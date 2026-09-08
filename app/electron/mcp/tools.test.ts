@@ -5005,6 +5005,26 @@ describe("dispatchTool", () => {
 		expect(payload.thresholds).toEqual({ latencyP99Ms: 50, maxErrorRatePct: 0.1 });
 	});
 
+	test("start_load_run forwards a custom.<name>.<stat> threshold key (issue #1500)", async () => {
+		// Zod's object() strips any key it doesn't name by default, which would
+		// silently drop this budget before it ever reached POST /runs. The
+		// engine's own validate_thresholds is the real gate on the key's shape.
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			parseArgs("start_load_run", {
+				url: "https://api.example.com",
+				confirmed: true,
+				thresholds: { "custom.ttfb2.p95": 50 },
+			}),
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.thresholds).toEqual({ "custom.ttfb2.p95": 50 });
+	});
+
 	test("start_load_run forwards the monitor block to /runs unchanged", async () => {
 		// The keys are the engine's own and `validate_run_config` is what judges
 		// them, so anything renamed or dropped on this path is a scrape the run

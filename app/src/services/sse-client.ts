@@ -41,6 +41,8 @@ interface RawSseMetrics {
 	bytesSent?: number;
 	bytesReceived?: number;
 	statusCodes?: Record<string, number>;
+	/** Issue #1500 - see `LoadTestMetrics.custom_metrics`. */
+	customMetrics?: LoadTestMetrics["custom_metrics"];
 }
 
 /** Map the engine's camelCase SSE blob to the frontend LoadTestMetrics shape. */
@@ -67,6 +69,7 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		requests_sent: m.requestsSent || 0,
 		requests_expected: m.requestsExpected || 0,
 		status_codes: m.statusCodes,
+		custom_metrics: m.customMetrics,
 	};
 }
 

@@ -18,6 +18,7 @@ import { formatNumber } from "@/utils";
 import {
 	CapacitySummary,
 	ContractCoverage,
+	CustomMetricsSummary,
 	RunWarnings,
 	SampledSchemaValidation,
 	TestValidationSummary,
@@ -59,6 +60,12 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			    question a stored run is opened to answer. Absent for a run that
 			    declared no budgets, which is every run recorded before them. */}
 			<ThresholdVerdict verdict={report.thresholdValidation} />
+
+			{/* The run's own named trends, counters and rates (issue #1500),
+			    directly under the budgets they are not judged against - these
+			    are reported, not scored. Absent for a run that never called
+			    pm.metrics or metric.record. */}
+			<CustomMetricsSummary customMetrics={report.customMetrics} />
 
 			{/* What the search found, for a capacity run. Beside the verdict
 			    rather than below the charts: "what can it take" is the question
