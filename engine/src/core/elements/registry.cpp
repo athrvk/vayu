@@ -25,6 +25,8 @@ namespace vayu::core {
 ElementKind make_inherit_disable_kind ();
 ElementKind make_script_pre_kind ();
 ElementKind make_script_post_kind ();
+ElementKind make_script_setup_kind ();
+ElementKind make_script_teardown_kind ();
 ElementKind make_extract_json_kind ();
 ElementKind make_extract_regex_kind ();
 ElementKind make_extract_header_kind ();
@@ -64,14 +66,15 @@ std::string hot_path_name (HotPathClass hot_path) {
 
 nlohmann::json kind_to_json (const ElementKind& kind) {
     nlohmann::json node;
-    node["kind"]          = kind.kind;
-    node["version"]       = kind.version;
-    node["label"]         = kind.label;
-    node["description"]   = kind.description;
-    node["category"]      = kind.category;
-    node["hotPathClass"]  = hot_path_name (kind.hot_path);
-    node["configSchema"]  = kind.config_schema;
-    nlohmann::json phases = nlohmann::json::array ();
+    node["kind"]           = kind.kind;
+    node["version"]        = kind.version;
+    node["label"]          = kind.label;
+    node["description"]    = kind.description;
+    node["category"]       = kind.category;
+    node["hotPathClass"]   = hot_path_name (kind.hot_path);
+    node["collectionOnly"] = kind.collection_only;
+    node["configSchema"]   = kind.config_schema;
+    nlohmann::json phases  = nlohmann::json::array ();
     for (const auto phase : kind.phases) {
         phases.push_back (phase_name (phase));
     }
@@ -125,17 +128,21 @@ size_t index) {
 }
 
 /**
- * One `elements[i]` entry's shape, id uniqueness and config schema - every
- * check `Registry::validate` needs except the cross-entry metric-name cap,
- * which stays in the caller's loop since it accumulates across entries.
+ * One `elements[index]` entry's whole validation, extracted out of
+ * `Registry::validate`'s own loop (#1499's placement check pushed that
+ * function's cognitive complexity over the linter's threshold - the fix is
+ * un-nesting these checks into their own top-level function, not paring any
+ * of them back).
  *
  * @param kind_name_out,config_out Filled on success, for the caller's own
- *        metric-name bookkeeping - split out so `validate` itself does not
- *        re-parse `entry["kind"]` / `entry["config"]` a second time.
+ *        cross-entry metric-name bookkeeping (issue #1500) - split out so
+ *        `validate` itself does not re-parse `entry["kind"]` /
+ *        `entry["config"]` a second time.
  */
-std::optional<std::string> validate_element_entry (const Registry& registry,
+std::optional<std::string> validate_one_element (const Registry& registry,
 const nlohmann::json& entry,
 size_t index,
+ElementOwner owner,
 std::unordered_set<std::string>& seen_ids,
 std::string& kind_name_out,
 nlohmann::json& config_out) {
@@ -160,6 +167,11 @@ nlohmann::json& config_out) {
                             "element kind - expected one of {}",
         index, kind_name_out, known_kinds_list (registry.kinds ()));
     }
+    if (kind->collection_only && owner != ElementOwner::Collection) {
+        return std::format ("elements[{}] (kind '{}') may only be added to "
+                            "a collection, not a request",
+        index, kind_name_out);
+    }
     if (entry.contains ("enabled") && !entry["enabled"].is_boolean ()) {
         return std::format (
         "elements[{}] ({}): 'enabled' must be a boolean", index, kind_name_out);
@@ -171,8 +183,8 @@ nlohmann::json& config_out) {
     return validate_config_against_schema (*kind, config_out, index);
 }
 
-/// The one cross-entry rule `validate_element_entry` cannot check on its
-/// own: the collector's cap on distinct `metric.record` names (issue #1500),
+/// The one cross-entry rule `validate_one_element` cannot check on its own:
+/// the collector's cap on distinct `metric.record` names (issue #1500),
 /// scoped to this one array - see `Registry::validate`'s own comment on why
 /// that scope is correct.
 std::optional<std::string> check_metric_record_cap (const std::string& kind_name,
@@ -205,6 +217,8 @@ Registry& Registry::instance () {
         registry.register_kind (make_inherit_disable_kind ());
         registry.register_kind (make_script_pre_kind ());
         registry.register_kind (make_script_post_kind ());
+        registry.register_kind (make_script_setup_kind ());
+        registry.register_kind (make_script_teardown_kind ());
         registry.register_kind (make_extract_json_kind ());
         registry.register_kind (make_extract_regex_kind ());
         registry.register_kind (make_extract_header_kind ());
@@ -249,7 +263,8 @@ const std::vector<ElementKind>& Registry::kinds () const {
     return kinds_;
 }
 
-std::optional<std::string> Registry::validate (const nlohmann::json& elements) const {
+std::optional<std::string>
+Registry::validate (const nlohmann::json& elements, ElementOwner owner) const {
     if (!elements.is_array ()) {
         return "'elements' must be an array";
     }
@@ -268,8 +283,8 @@ std::optional<std::string> Registry::validate (const nlohmann::json& elements) c
     for (size_t i = 0; i < elements.size (); ++i) {
         std::string kind_name;
         nlohmann::json config;
-        if (auto reason = validate_element_entry (
-            *this, elements[i], i, seen_ids, kind_name, config)) {
+        if (auto reason = validate_one_element (
+            *this, elements[i], i, owner, seen_ids, kind_name, config)) {
             return reason;
         }
         if (auto reason = check_metric_record_cap (kind_name, config, i, metric_names)) {

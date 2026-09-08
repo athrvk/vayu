@@ -1,6 +1,7 @@
 [
   {
     "category": "inherit",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -23,6 +24,7 @@
   },
   {
     "category": "script",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -46,6 +48,7 @@
   },
   {
     "category": "script",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -68,7 +71,56 @@
     "version": 1
   },
   {
+    "category": "script",
+    "collectionOnly": true,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "type": "object"
+    },
+    "description": "Runs once, on a collection, before the run starts.",
+    "hotPathClass": "script",
+    "kind": "script.setup",
+    "label": "Setup script",
+    "phases": [
+      "run.start"
+    ],
+    "version": 1
+  },
+  {
+    "category": "script",
+    "collectionOnly": true,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "type": "object"
+    },
+    "description": "Runs once, on a collection, after the run ends.",
+    "hotPathClass": "script",
+    "kind": "script.teardown",
+    "label": "Teardown script",
+    "phases": [
+      "run.end"
+    ],
+    "version": 1
+  },
+  {
     "category": "extract",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -115,6 +167,7 @@
   },
   {
     "category": "extract",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -173,6 +226,7 @@
   },
   {
     "category": "extract",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -216,6 +270,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -255,6 +310,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -288,6 +344,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -331,6 +388,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -355,6 +413,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -389,6 +448,7 @@
   },
   {
     "category": "timer",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -436,6 +496,7 @@
   },
   {
     "category": "timer",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -463,6 +524,7 @@
   },
   {
     "category": "controller",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -487,6 +549,7 @@
   },
   {
     "category": "controller",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "type": "object"
@@ -502,6 +565,7 @@
   },
   {
     "category": "controller",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -533,6 +597,7 @@
   },
   {
     "category": "controller",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -559,6 +624,7 @@
   },
   {
     "category": "controller",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -583,6 +649,7 @@
   },
   {
     "category": "transaction",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -607,6 +674,7 @@
   },
   {
     "category": "metric",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {

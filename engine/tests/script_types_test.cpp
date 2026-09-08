@@ -532,7 +532,7 @@ TEST (ScriptTypesTest, ACallInsideALabelDoesNotEmptyTheSignature) {
 // overlap.
 TEST (ScriptTypesTest, AStringLiteralUnionIsAType) {
     const std::string dts = generate_script_typedefs ();
-    EXPECT_TRUE (contains (dts, "eventName: 'prerequest' | 'test';"));
+    EXPECT_TRUE (contains (dts, "eventName: 'prerequest' | 'test' | 'setup' | 'teardown';"));
     // And prose is still not one: a getter restating its own dotted name must
     // not start being read as a type because it contains quotes. The example is
     // from `pm.response.to.have.status`, which is a different object with its

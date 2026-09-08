@@ -218,6 +218,18 @@ struct ElementContext {
     /// rather than recording nowhere silently.
     std::function<void (const std::string& name, CustomMetricType type, double value)> record_metric;
 
+    /// `script.setup` / `script.teardown` (#1499): runs @p script once, at
+    /// `run.start` / `run.end`, against the run's own scopes rather than any
+    /// step's. Trailing, like the `outcome_*` fields below, and for the same
+    /// reason: every step-phase dispatch site predates #1499 and so skips both
+    /// - only the two run-boundary dispatch sites bind either. `{}` is
+    /// load-bearing on the same `Variable::created_at` precedent those fields
+    /// cite.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::function<vayu::ScriptResult (const std::string& script)> run_setup_script{};
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::function<vayu::ScriptResult (const std::string& script)> run_teardown_script{};
+
     /// One JSON parse of the response body, shared by every `extract.*` /
     /// `assert.jsonpath` on the same step rather than paid per kind.
     /// `body_parse_attempted` distinguishes "not tried yet" from "tried and
@@ -323,6 +335,14 @@ struct ElementKind {
     std::string description;
     std::string category;
     HotPathClass hot_path = HotPathClass::Declarative;
+    // `script.setup` / `script.teardown` (#1499): true refuses the kind on a
+    // request's own `elements`, both at validate time and in the catalogue
+    // (`GET /elements/kinds`' `collectionOnly`), because a once-per-run
+    // element attached to one request in the tree would run once per request
+    // that happened to declare it rather than once per run - a question the
+    // model has no answer for. Every other kind stays request-and-collection,
+    // the default.
+    bool collection_only = false;
     /// Whether this kind needs to know its own first/last occurrence across
     /// the folder it is inherited into (issue #1515's `control.loop` /
     /// `control.transaction`, which each compile once per member request and
@@ -358,6 +378,13 @@ struct ElementKind {
     std::function<std::unique_ptr<Element> (const nlohmann::json& config)> compile;
 };
 
+/** Which stored row an `elements` array is being validated for (#1499): the
+ *  one fact `collection_only` is checked against. */
+enum class ElementOwner : std::uint8_t {
+    Request,
+    Collection,
+};
+
 /**
  * The one place a kind name maps to code (issue #1512's extensibility
  * contract, rule 1). A process-wide singleton behind a function-local static,
@@ -378,11 +405,13 @@ class Registry {
     /**
      * Validates the wire shape of an `elements` field: an array of objects,
      * each a known kind, each `config` against that kind's schema, with no
-     * duplicate `id`. Returns the first violation's message, or `nullopt` if
-     * the whole array is well-formed - the same "pure validator, route
-     * converts to a 400" split `core::validate_thresholds` uses.
+     * duplicate `id`, each honouring its kind's `collection_only` against
+     * @p owner. Returns the first violation's message, or `nullopt` if the
+     * whole array is well-formed - the same "pure validator, route converts
+     * to a 400" split `core::validate_thresholds` uses.
      */
-    [[nodiscard]] std::optional<std::string> validate (const nlohmann::json& elements) const;
+    [[nodiscard]] std::optional<std::string> validate (const nlohmann::json& elements,
+    ElementOwner owner = ElementOwner::Request) const;
 
     Registry (const Registry&)            = delete;
     Registry& operator= (const Registry&) = delete;
@@ -416,6 +445,18 @@ struct ElementOutcome {
 
     [[nodiscard]] nlohmann::json to_json () const;
 };
+
+/**
+ * `script.setup` / `script.teardown`'s outcomes (#1499), in the shape both run
+ * modes' summary stores under the `lifecycle` key: `{"setup": [...],
+ * "teardown": [...] }`, each key present only when that phase ran at least one
+ * element - an empty array would read as "a setup element ran and did
+ * nothing" rather than "this collection declared none". An empty object comes
+ * back when both are empty, which every caller treats as absent, the same
+ * `coverage` / `schema_validation` rule `RunSummaryInputs` already follows.
+ */
+[[nodiscard]] nlohmann::json build_lifecycle_node (const std::vector<ElementOutcome>& run_start,
+const std::vector<ElementOutcome>& run_end);
 
 /**
  * One entry of a resolved `elements` array, compiled once (issue #1512's

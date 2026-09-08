@@ -70,6 +70,21 @@ struct ScriptConfig {
 enum class ScriptEvent : std::uint8_t {
     PreRequest,
     Test,
+    Setup,
+    Teardown,
+};
+
+/**
+ * @brief `pm.info.run` - what a `script.teardown` script reads about the run
+ *        it is cleaning up after (#1499). Set only on a teardown context;
+ *        absent everywhere else, including `script.setup`'s own context,
+ *        which runs before any of these figures exist.
+ */
+struct RunSummaryInfo {
+    size_t requests_sent     = 0;
+    double error_rate        = 0.0;
+    size_t assertions_passed = 0;
+    size_t assertions_failed = 0;
 };
 
 /**
@@ -152,6 +167,8 @@ struct ScriptContext {
     std::optional<size_t> iteration;
     std::optional<size_t> vu;
     std::optional<size_t> iteration_count;
+    /// `pm.info.run`, set only by `for_teardown` (#1499).
+    std::optional<RunSummaryInfo> run_summary;
 
     /**
      * @brief The data row this iteration is bound to, read as
@@ -386,6 +403,28 @@ struct ScriptContext {
         ctx.request  = &req;
         ctx.response = &res;
         ctx.event    = ScriptEvent::Test;
+        return ctx;
+    }
+
+    /**
+     * @brief A `script.setup` context: no request or response of its own -
+     *        it runs once, at the run's own boundary, before any step has.
+     */
+    [[nodiscard]] static ScriptContext for_setup () {
+        ScriptContext ctx;
+        ctx.event = ScriptEvent::Setup;
+        return ctx;
+    }
+
+    /**
+     * @brief A `script.teardown` context, carrying @p summary as `pm.info.run`
+     *        - the one context that can report a run summary, because it is
+     *        the one that runs after there is one.
+     */
+    [[nodiscard]] static ScriptContext for_teardown (const RunSummaryInfo& summary) {
+        ScriptContext ctx;
+        ctx.event       = ScriptEvent::Teardown;
+        ctx.run_summary = summary;
         return ctx;
     }
 };

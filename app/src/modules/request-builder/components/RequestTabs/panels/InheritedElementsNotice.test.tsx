@@ -54,6 +54,7 @@ function kindSchema(kind: string, label: string): ElementKindSchema {
 		description: "",
 		category: "test",
 		hotPathClass: "declarative",
+		collectionOnly: false,
 		configSchema: { type: "object" },
 		phases: [],
 	};

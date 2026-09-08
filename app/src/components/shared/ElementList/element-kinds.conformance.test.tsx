@@ -103,10 +103,16 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 			.map((k) => k.kind);
 
 		expect(withBespoke.length + generic.length).toBe(fixture.length);
-		// `script.pre` / `script.post` are the one bespoke pair as of #1512 -
-		// this fails loudly if the catalogue ever drops them or the overrides
-		// map is edited without this suite noticing.
-		expect(withBespoke.sort()).toEqual(["script.post", "script.pre"]);
+		// Every `script.*` kind gets the bespoke Monaco form: `script.pre` /
+		// `script.post` since #1512, `script.setup` / `script.teardown` since
+		// #1499 - this fails loudly if the catalogue ever drops one or the
+		// overrides map is edited without this suite noticing.
+		expect(withBespoke.sort()).toEqual([
+			"script.post",
+			"script.pre",
+			"script.setup",
+			"script.teardown",
+		]);
 	});
 
 	it("renders a schema-driven field for a kind's own declared property, on the generic path", () => {

@@ -1150,10 +1150,11 @@ value is absent rather than `""`, so `typeof` is how a script tests for one:
 ```javascript
 pm.info.requestId      // string | undefined - the saved request this send is filed under
 pm.info.requestName    // string | undefined - its name, as the client sent it
-pm.info.eventName      // 'prerequest' in a pre-request script, 'test' in a test script
+pm.info.eventName      // 'prerequest' | 'test' | 'setup' | 'teardown'
 pm.info.iteration      // number | undefined - 0-based, in a run of any shape
 pm.info.vu             // number | undefined - 1-based, the virtual user that sent it
 pm.info.iterationCount // number | undefined - the run's iteration total
+pm.info.run            // object | undefined - a run summary, `script.teardown` only (see below)
 ```
 
 `eventName` is stamped by the engine at each hook (`ScriptContext::for_prerequest`
@@ -1201,6 +1202,60 @@ that send is row 0 of 1 and says so about `iteration` already (see
 `undefined`: a duration-bounded run has no iteration total to report, and a
 field readable from one load run and not another is worse than one that is
 never readable there at all.
+
+## Setup and teardown scripts
+
+`script.setup` and `script.teardown` are elements a collection carries directly
+(never a request), run once each at the run's own boundary rather than at any
+step - `run.start`, before the first step or submission of either run mode, and
+`run.end`, after the last one. They exist for the same reason k6's `setup()` /
+`teardown()` and JMeter's setUp / tearDown thread groups do: fetch a token or
+seed data once for the whole run, and clean up once after, without a script
+attached to every request paying for it. See
+[`elements.md`](elements.md#kinds) for the element mechanics (dispatch, phases,
+placement) - this section is what the two scripts see as scripts.
+
+Both read and write the same three variable scopes every other script does
+(`pm.environment`, `pm.globals`, `pm.collectionVariables`) - a name
+`script.setup` sets is visible to the very first step or submission of the run,
+because it writes through the same scopes object every other script of that
+run shares, before either run mode's own work begins. `pm.info.eventName` reads
+`'setup'` / `'teardown'`; neither script has a `pm.request` or a `pm.response`
+to read, since neither runs against a particular step. `pm.execution` throws
+the same "not available here" sentence a non-scenario script already gets:
+there is no sequence position to redirect from a run's own boundary.
+
+**`script.teardown` alone sees `pm.info.run`** - a summary of the run it is
+cleaning up after, since it is the one script that runs after there is one to
+report:
+
+```javascript
+pm.info.run.requestsSent      // number - completed submissions, whole run
+pm.info.run.errorRate         // number - percent, whole run
+pm.info.run.assertionsPassed  // number
+pm.info.run.assertionsFailed  // number
+```
+
+**A throwing `script.setup` fails the run before anything is sent.** Its
+outcome is checked the same way any element's is (`"error"` fails the check);
+the run reaches `Failed` before either run mode's strategy starts, so nothing
+is sent and no duration is measured. **A throwing `script.teardown` is
+recorded and does not change the run's status** - it appears under the
+report's `lifecycle.teardown`, exactly as a passing one does, just with an
+`"error"` outcome and the thrown message.
+
+**Neither script's own time counts toward the run's duration figures.** Setup
+runs, and is timed out of the way, before either run mode captures its own
+`test_start`; teardown runs after the load path's `test_end` is already
+captured, and after the sequential run's own step loop has finished.
+
+**`pm.sendRequest` follows the run's own gate, with no separate toggle.**
+Vayu's MCP target allowlist is what makes every script-issued request refuse
+by default (see [Sending a request from a script](#sending-a-request-from-a-script-pmsendrequest)); a
+setup or teardown script is bound to the same `ScriptEngine` instance, and
+therefore the same `allowScriptRequests` decision, every other script of the
+run already answers to - there is no `script.setup`-only opt-in to reach for,
+and the same **10 requests per script** cap applies.
 
 ## Environment Variables (`pm.environment`)
 

@@ -663,12 +663,12 @@ declare const pm: {
 	 */
 	info: {
 		/**
-		 * Which hook is running: 'prerequest' in the Pre-request tab, 'test' in the Tests tab. Lets one shared script branch on where it was invoked from.
+		 * Which hook is running: 'prerequest' in the Pre-request tab, 'test' in the Tests tab, 'setup' in a script.setup element, 'teardown' in a script.teardown element. Lets one shared script branch on where it was invoked from.
 		 * 
 		 * Example:
 		 * if (pm.info.eventName === 'prerequest') { /* sign the request *\/ }
 		 */
-		eventName: 'prerequest' | 'test';
+		eventName: 'prerequest' | 'test' | 'setup' | 'teardown';
 		/**
 		 * Which pass this response belongs to, 0-based: a collection run's pass, the iteration a load run's sampled response was sent in, or 0 for a send that bound a data row, since that send is row 0 of 1. undefined on an ordinary Send, which is one request rather than a pass of anything.
 		 * 
@@ -694,6 +694,30 @@ declare const pm: {
 		 * console.log('running ' + (pm.info.requestName || 'an unnamed request'));
 		 */
 		requestName: string | undefined;
+		/**
+		 * Set only on a script.teardown context - the one script that runs after there is a run to summarize. undefined everywhere else, including script.setup's own context, which runs before any of these figures exist.
+		 * 
+		 * Example:
+		 * console.log('sent ' + pm.info.run.requestsSent + ' requests');
+		 */
+		run?: {
+			/**
+			 * How many of the run's assertions failed, whole run.
+			 */
+			assertionsFailed: number;
+			/**
+			 * How many of the run's assertions passed, whole run.
+			 */
+			assertionsPassed: number;
+			/**
+			 * The run's error rate, as a percentage, whole run.
+			 */
+			errorRate: number;
+			/**
+			 * How many submissions the run completed, whole run.
+			 */
+			requestsSent: number;
+		};
 		/**
 		 * Which virtual user sent this request, 1-based. Spans the run's concurrency in a collection load run, where each user walks the sequence on its own; 1 for a single request repeated under load, which is one user's iterations however many are in flight, and 1 for a send that bound a data row, beside its iteration 0. undefined on an ordinary Send.
 		 * 

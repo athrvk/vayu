@@ -8,17 +8,24 @@
 /**
  * @file script_kinds.cpp
  * @brief `script.pre` / `script.post` (issue #1513's registration, issue
- *        #1514's `compile` / `apply`).
+ *        #1514's `compile` / `apply`), and `script.setup` / `script.teardown`
+ *        (issue #1499), the same shape at the run's own boundary instead of a
+ *        step's.
  *
  * `apply` never runs the script itself - it calls back into
- * `ElementContext::run_pre_script` / `run_post_script`, which the caller
- * (`execute_exchange`) binds to the exact `execute_script` call design mode
- * has always made. That keeps `ScriptEngine`, `ScriptContext` and the cookie-
- * write staging entirely out of `core/elements`, which knows nothing about
- * scripting beyond `vayu::ScriptResult`'s shape. The element's own outcome is
- * about whether the script ran without throwing; a script's own `pm.test`
- * assertions travel inside that same `ScriptResult` untouched, exactly as
- * they always have.
+ * `ElementContext::run_pre_script` / `run_post_script` (or, for the run-level
+ * pair, `run_setup_script` / `run_teardown_script`), which the caller
+ * (`execute_exchange`, or the run.start/run.end dispatch site) binds to the
+ * exact `execute_script` call design mode has always made. That keeps
+ * `ScriptEngine`, `ScriptContext` and the cookie-write staging entirely out of
+ * `core/elements`, which knows nothing about scripting beyond
+ * `vayu::ScriptResult`'s shape. The element's own outcome is about whether the
+ * script ran without throwing; a script's own `pm.test` assertions travel
+ * inside that same `ScriptResult` untouched, exactly as they always have.
+ *
+ * `script.setup` / `script.teardown` are `collection_only`: run once per run
+ * rather than once per step, attaching one to a request would run it once per
+ * request that happened to carry it, a question the model has no answer for.
  */
 
 #include "vayu/core/elements.hpp"
@@ -81,6 +88,60 @@ class ScriptPostElement final : public Element {
     std::string script_;
 };
 
+class ScriptSetupElement final : public Element {
+    public:
+    explicit ScriptSetupElement (const nlohmann::json& config)
+    : script_ (config.value ("script", "")) {
+    }
+
+    [[nodiscard]] Phase phase () const override {
+        return Phase::RunStart;
+    }
+
+    void apply (ElementContext& ctx) override {
+        if (!ctx.run_setup_script) {
+            ctx.outcome_status  = "error";
+            ctx.outcome_message = "no setup script runner bound";
+            return;
+        }
+        auto result        = ctx.run_setup_script (script_);
+        ctx.outcome_status = result.success ? "ok" : "error";
+        if (!result.success) {
+            ctx.outcome_message = result.error_message;
+        }
+    }
+
+    private:
+    std::string script_;
+};
+
+class ScriptTeardownElement final : public Element {
+    public:
+    explicit ScriptTeardownElement (const nlohmann::json& config)
+    : script_ (config.value ("script", "")) {
+    }
+
+    [[nodiscard]] Phase phase () const override {
+        return Phase::RunEnd;
+    }
+
+    void apply (ElementContext& ctx) override {
+        if (!ctx.run_teardown_script) {
+            ctx.outcome_status  = "error";
+            ctx.outcome_message = "no teardown script runner bound";
+            return;
+        }
+        auto result        = ctx.run_teardown_script (script_);
+        ctx.outcome_status = result.success ? "ok" : "error";
+        if (!result.success) {
+            ctx.outcome_message = result.error_message;
+        }
+    }
+
+    private:
+    std::string script_;
+};
+
 ElementKind
 make_script_kind (Phase phase, const char* kind, const char* label, const char* description) {
     ElementKind element_kind;
@@ -116,6 +177,26 @@ ElementKind make_script_post_kind () {
     "Post-request script", "Runs after the response is received.");
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ScriptPostElement> (config);
+    };
+    return kind;
+}
+
+ElementKind make_script_setup_kind () {
+    auto kind            = make_script_kind (Phase::RunStart, "script.setup",
+               "Setup script", "Runs once, on a collection, before the run starts.");
+    kind.collection_only = true;
+    kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
+        return std::make_unique<ScriptSetupElement> (config);
+    };
+    return kind;
+}
+
+ElementKind make_script_teardown_kind () {
+    auto kind            = make_script_kind (Phase::RunEnd, "script.teardown",
+               "Teardown script", "Runs once, on a collection, after the run ends.");
+    kind.collection_only = true;
+    kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
+        return std::make_unique<ScriptTeardownElement> (config);
     };
     return kind;
 }

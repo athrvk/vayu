@@ -1054,13 +1054,15 @@ nlohmann::json get_script_completions () {
     "(pm.info.requestName || 'an unnamed request'));" },
     { "sortText", "1_pm_info_requestName" } });
 
-    completions.push_back ({ { "label", "pm.info.eventName" }, { "kind", KIND_FIELD },
-    { "insertText", "pm.info.eventName" }, { "detail", "'prerequest' | 'test'" },
+    completions.push_back ({ { "label", "pm.info.eventName" },
+    { "kind", KIND_FIELD }, { "insertText", "pm.info.eventName" },
+    { "detail", "'prerequest' | 'test' | 'setup' | 'teardown'" },
     { "documentation",
     "Which hook is running: 'prerequest' in the Pre-request tab, 'test' in the "
-    "Tests tab. Lets one shared script branch on where it was invoked "
-    "from.\n\nExample:\nif (pm.info.eventName === 'prerequest') { /* sign the "
-    "request */ }" },
+    "Tests tab, 'setup' in a script.setup element, 'teardown' in a "
+    "script.teardown element. Lets one shared script branch on where it was "
+    "invoked from.\n\nExample:\nif (pm.info.eventName === 'prerequest') { /* "
+    "sign the request */ }" },
     { "sortText", "1_pm_info_eventName" } });
 
     completions.push_back ({ { "label", "pm.info.iteration" }, { "kind", KIND_FIELD },
@@ -1097,6 +1099,39 @@ nlohmann::json get_script_completions () {
     "\n\nExample:\nconsole.log("
     "'pass ' + (pm.info.iteration + 1) + ' of ' + pm.info.iterationCount);" },
     { "sortText", "1_pm_info_iterationCount" } });
+
+    // ========================================
+    // pm.info.run - a script.teardown script's run summary (#1499)
+    // ========================================
+    completions.push_back ({ { "label", "pm.info.run" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.run" }, { "detail", "This run's summary | undefined" },
+    { "documentation",
+    "Set only on a script.teardown context - the one script that runs after "
+    "there is a run to summarize. undefined everywhere else, including "
+    "script.setup's own context, which runs before any of these figures "
+    "exist.\n\nExample:\nconsole.log('sent ' + pm.info.run.requestsSent + "
+    "' requests');" },
+    { "sortText", "1_pm_info_run" } });
+
+    completions.push_back ({ { "label", "pm.info.run.requestsSent" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.run.requestsSent" }, { "detail", "number" },
+    { "documentation", "How many submissions the run completed, whole run." },
+    { "sortText", "1_pm_info_run_requestsSent" } });
+
+    completions.push_back ({ { "label", "pm.info.run.errorRate" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.run.errorRate" }, { "detail", "number" },
+    { "documentation", "The run's error rate, as a percentage, whole run." },
+    { "sortText", "1_pm_info_run_errorRate" } });
+
+    completions.push_back ({ { "label", "pm.info.run.assertionsPassed" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.run.assertionsPassed" }, { "detail", "number" },
+    { "documentation", "How many of the run's assertions passed, whole run." },
+    { "sortText", "1_pm_info_run_assertionsPassed" } });
+
+    completions.push_back ({ { "label", "pm.info.run.assertionsFailed" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.info.run.assertionsFailed" }, { "detail", "number" },
+    { "documentation", "How many of the run's assertions failed, whole run." },
+    { "sortText", "1_pm_info_run_assertionsFailed" } });
 
     completions.push_back (
     { { "label", "Check where the script is running" }, { "kind", KIND_SNIPPET },
