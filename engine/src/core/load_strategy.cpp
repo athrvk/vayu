@@ -781,10 +781,9 @@ class ConstantLoadStrategy : public LoadStrategy {
         const size_t max_pending = context->config.value ("maxInFlight",
         std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
 
-        vayu::utils::log_debug ("run",
-        "Submission config: tick_us=" + std::to_string (tick_us) +
-        ", max_in_flight=" + std::to_string (max_pending) +
-        ", expected_requests=" + std::to_string (expected));
+        vayu::utils::log_debug ("run", "Submission config",
+        { { "tickUs", tick_us }, { "maxInFlight", max_pending },
+        { "expectedRequests", expected } });
 
         const auto test_start = std::chrono::steady_clock::now ();
         const auto duration_end = test_start + std::chrono::milliseconds (duration_ms);

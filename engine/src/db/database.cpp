@@ -1518,7 +1518,7 @@ void Database::init () {
 void Database::create_collection (const Collection& c) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
-    "db", "Creating collection: id=" + c.id + ", name=" + c.name);
+    "db", "Creating collection", { { "id", c.id }, { "name", c.name } });
     impl_->storage.replace (c);
 }
 
@@ -1629,7 +1629,7 @@ void Database::purge_request_locked (const std::string& id) {
 // what finally destroys it.
 void Database::delete_collection (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting collection (soft, cascade): id=" + id);
+    vayu::utils::log_debug ("db", "Deleting collection (soft, cascade)", { { "id", id } });
 
     const auto subtree = collection_subtree_locked (id);
 
@@ -1690,7 +1690,8 @@ void Database::delete_collection (const std::string& id) {
 
 void Database::save_request (const Request& r) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Saving request: id=" + r.id + ", name=" + r.name);
+    vayu::utils::log_debug (
+    "db", "Saving request", { { "id", r.id }, { "name", r.name } });
     impl_->storage.replace (r);
 }
 
@@ -1722,7 +1723,7 @@ std::vector<Request> Database::get_requests_in_collection (const std::string& co
 // is, and a restore that had to re-create them could not.
 void Database::delete_request (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting request (soft): id=" + id);
+    vayu::utils::log_debug ("db", "Deleting request (soft)", { { "id", id } });
     const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
                           .count ();
@@ -1869,7 +1870,7 @@ const TrashEntry& entry) {
         }
         return true; // Commit
     });
-    vayu::utils::log_info ("db", "Restored request from trash: id=" + entry.id);
+    vayu::utils::log_info ("db", "Restored request from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };
 }
 
@@ -1908,11 +1909,9 @@ TrashOutcome Database::restore_collection_locked (const TrashEntry& entry) {
         return true; // Commit
     });
 
-    vayu::utils::log_info ("db",
-    "Restored collection from trash: id=" + entry.id + ", +" +
-    std::to_string (entry.collections) + " sub-collection(s), +" +
-    std::to_string (entry.requests) + " request(s)" +
-    (reparented ? " (re-parented to the tree root)" : ""));
+    vayu::utils::log_info ("db", "Restored collection from trash",
+    { { "id", entry.id }, { "subCollections", entry.collections },
+    { "requests", entry.requests }, { "reparented", reparented } });
     return TrashOutcome{ entry, reparented };
 }
 
@@ -1949,7 +1948,8 @@ std::optional<TrashOutcome> Database::purge_deleted (const std::string& id) {
     } else {
         purge_request_locked (id);
     }
-    vayu::utils::log_info ("db", "Purged " + entry->kind + " from trash: id=" + id);
+    vayu::utils::log_info (
+    "db", "Purged item from trash", { { "kind", entry->kind }, { "id", id } });
     return TrashOutcome{ std::move (*entry), false };
 }
 
@@ -2009,8 +2009,8 @@ int64_t Database::purge_expired_trash_configured () {
 
 void Database::save_request_example (const RequestExample& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug (
-    "db", "Saving request example: id=" + e.id + ", request_id=" + e.request_id);
+    vayu::utils::log_debug ("db", "Saving request example",
+    { { "id", e.id }, { "requestId", e.request_id } });
     impl_->storage.replace (e);
 }
 
@@ -2075,7 +2075,7 @@ int64_t Database::count_request_examples (const std::string& request_id) {
 
 void Database::delete_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting request example: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting request example", { { "id", id } });
     impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
 }
 
@@ -2087,7 +2087,7 @@ void Database::delete_request_example (const std::string& id) {
  */
 void Database::suppress_request_example (const std::string& id, int64_t now) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Suppressing imported request example: id=" + id);
+    vayu::utils::log_debug ("db", "Suppressing imported request example", { { "id", id } });
     auto rows =
     impl_->storage.get_all<RequestExample> (where (c (&RequestExample::id) == id));
     if (rows.empty ()) {
@@ -2110,7 +2110,7 @@ void Database::suppress_request_example (const std::string& id, int64_t now) {
 void Database::save_spec_document (const SpecDocument& s) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
-    "db", "Saving spec document: id=" + s.id + ", hash=" + s.hash);
+    "db", "Saving spec document", { { "id", s.id }, { "hash", s.hash } });
     impl_->storage.replace (s);
 }
 
@@ -2153,7 +2153,7 @@ std::vector<Collection> Database::get_collections_bound_to_spec (const std::stri
 
 void Database::delete_spec_document (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting spec document: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting spec document", { { "id", id } });
     impl_->storage.remove_all<SpecDocument> (where (c (&SpecDocument::id) == id));
 }
 
@@ -2592,12 +2592,11 @@ void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
 void Database::spec_sync_apply (const SpecSyncBatch& batch) {
     // "spec write" rather than "sync": `POST /specs/bind` commits through this
     // same batch (issue #862), with its create and delete halves empty.
-    vayu::utils::log_debug ("db",
-    "Applying spec write: collection=" + batch.binding.id +
-    ", spec=" + batch.spec.id + ", +" + std::to_string (batch.created.size ()) +
-    " requests, ~" + std::to_string (batch.updated.size ()) + ", -" +
-    std::to_string (batch.deleted.size ()) + ", " +
-    std::to_string (batch.new_collections.size ()) + " new collections");
+    vayu::utils::log_debug ("db", "Applying spec write",
+    { { "collection", batch.binding.id }, { "spec", batch.spec.id },
+    { "created", batch.created.size () }, { "updated", batch.updated.size () },
+    { "deleted", batch.deleted.size () },
+    { "newCollections", batch.new_collections.size () } });
 
     retry_on_busy ("apply spec sync", 5, std::chrono::milliseconds (100), [&] {
         impl_->storage.transaction ([&] {
@@ -2642,9 +2641,8 @@ void Database::deactivate_other_environments_locked (const std::string& keep_id)
 
 void Database::save_environment (const Environment& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db",
-    "Saving environment: id=" + e.id + ", name=" + e.name +
-    ", is_active=" + (e.is_active ? "true" : "false"));
+    vayu::utils::log_debug ("db", "Saving environment",
+    { { "id", e.id }, { "name", e.name }, { "isActive", e.is_active } });
     impl_->storage.transaction ([&] {
         if (e.is_active) {
             deactivate_other_environments_locked (e.id);
@@ -2669,7 +2667,7 @@ std::optional<Environment> Database::get_environment (const std::string& id) {
 
 void Database::delete_environment (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting environment: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting environment", { { "id", id } });
     impl_->storage.remove_all<Environment> (where (c (&Environment::id) == id));
 }
 
@@ -2684,7 +2682,7 @@ void Database::delete_environment (const std::string& id) {
 void Database::save_client_certificate (const ClientCertificate& c) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
-    "db", "Saving client certificate: id=" + c.id + ", host=" + c.host);
+    "db", "Saving client certificate", { { "id", c.id }, { "host", c.host } });
     impl_->storage.replace (c);
 }
 
@@ -2704,7 +2702,7 @@ std::optional<ClientCertificate> Database::get_client_certificate (const std::st
 
 void Database::delete_client_certificate (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Deleting client certificate: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting client certificate", { { "id", id } });
     impl_->storage.remove_all<ClientCertificate> (where (c (&ClientCertificate::id) == id));
 }
 
@@ -2756,8 +2754,8 @@ void Database::delete_oauth_token (const std::string& cache_key) {
 
 void Database::create_run (const Run& run) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db",
-    "Creating run: id=" + run.id + ", type=" + std::string (vayu::to_string (run.type)));
+    vayu::utils::log_debug ("db", "Creating run",
+    { { "id", run.id }, { "type", std::string (vayu::to_string (run.type)) } });
     impl_->storage.replace (run);
 }
 
@@ -2771,8 +2769,8 @@ std::optional<Run> Database::get_run (const std::string& id) {
 
 void Database::update_run_status (const std::string& id, RunStatus status) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db",
-    "Updating run status: id=" + id + ", status=" + std::string (vayu::to_string (status)));
+    vayu::utils::log_debug ("db", "Updating run status",
+    { { "id", id }, { "status", std::string (vayu::to_string (status)) } });
     auto run = get_run (id);
     if (run) {
         run->status   = status;
@@ -2785,7 +2783,7 @@ void Database::update_run_status (const std::string& id, RunStatus status) {
 
 void Database::update_run_end_time (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Updating run end_time: id=" + id);
+    vayu::utils::log_debug ("db", "Updating run end_time", { { "id", id } });
     auto run = get_run (id);
     if (run) {
         run->end_time = std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -3009,10 +3007,8 @@ void Database::prune_runs (int max_runs, int max_age_days) {
         });
     }
 
-    vayu::utils::log_info ("db",
-    "Pruned " + std::to_string (victims.size ()) +
-    " old run(s) (max_runs=" + std::to_string (max_runs) +
-    ", max_age_days=" + std::to_string (max_age_days) + ")");
+    vayu::utils::log_info ("db", "Pruned old runs",
+    { { "count", victims.size () }, { "maxRuns", max_runs }, { "maxAgeDays", max_age_days } });
 }
 
 size_t Database::reconcile_orphaned_runs () {

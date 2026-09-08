@@ -564,12 +564,12 @@ void register_request_routes (RouteContext& ctx) {
                 "POST /requests - " + std::to_string (status) + ": " +
                 error_message_of (body));
             } else {
-                vayu::utils::log_info ("http",
-                "POST /requests - Created request: id=" + body["id"].get<std::string> () +
-                ", name=" + body["name"].get<std::string> () +
-                ", method=" + body["method"].get<std::string> () +
-                ", url=" + body["url"].get<std::string> () +
-                ", collection_id=" + body["collectionId"].get<std::string> ());
+                vayu::utils::log_info ("http", "Created request",
+                { { "id", body["id"].get<std::string> () },
+                { "name", body["name"].get<std::string> () },
+                { "method", body["method"].get<std::string> () },
+                { "url", body["url"].get<std::string> () },
+                { "collectionId", body["collectionId"].get<std::string> () } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
@@ -595,13 +595,12 @@ void register_request_routes (RouteContext& ctx) {
             auto json = nlohmann::json::parse (req.body);
             auto [status, body] = update_request_response (ctx.db, request_id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("http",
-                "PUT /requests/:id - " + std::to_string (status) +
-                " for id=" + request_id + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http", "PUT /requests/:id failed",
+                { { "status", status }, { "id", request_id },
+                { "error", error_message_of (body) } });
             } else {
-                vayu::utils::log_info ("http",
-                "PUT /requests/:id - Updated request: id=" + request_id +
-                ", name=" + body["name"].get<std::string> ());
+                vayu::utils::log_info ("http", "Updated request",
+                { { "id", request_id }, { "name", body["name"].get<std::string> () } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
@@ -631,9 +630,8 @@ void register_request_routes (RouteContext& ctx) {
             }
 
             ctx.db.delete_request (request_id);
-            vayu::utils::log_info ("http",
-            "DELETE /requests/:id - Successfully deleted request: " + request_id +
-            ", name=" + request->name);
+            vayu::utils::log_info ("http", "Successfully deleted request",
+            { { "id", request_id }, { "name", request->name } });
 
             nlohmann::json response;
             response["message"] = "Request deleted successfully";

@@ -186,9 +186,9 @@ void register_environment_routes (RouteContext& ctx) {
                 "POST /environments - " + std::to_string (status) + ": " +
                 error_message_of (body));
             } else {
-                vayu::utils::log_info ("http",
-                "POST /environments - Created environment: id=" + body["id"].get<std::string> () +
-                ", name=" + body["name"].get<std::string> ());
+                vayu::utils::log_info ("http", "Created environment",
+                { { "id", body["id"].get<std::string> () },
+                { "name", body["name"].get<std::string> () } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
@@ -215,13 +215,12 @@ void register_environment_routes (RouteContext& ctx) {
             auto [status, body] =
             update_environment_response (ctx.db, environment_id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("http",
-                "PUT /environments/:id - " + std::to_string (status) +
-                " for id=" + environment_id + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http", "PUT /environments/:id failed",
+                { { "status", status }, { "id", environment_id },
+                { "error", error_message_of (body) } });
             } else {
-                vayu::utils::log_info ("http",
-                "PUT /environments/:id - Updated environment: id=" + environment_id +
-                ", name=" + body["name"].get<std::string> ());
+                vayu::utils::log_info ("http", "Updated environment",
+                { { "id", environment_id }, { "name", body["name"].get<std::string> () } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");

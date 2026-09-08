@@ -428,9 +428,8 @@ void register_request_example_routes (RouteContext& ctx) {
                 "POST /requests/:id/examples - " + std::to_string (status) +
                 ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info ("http",
-                "POST /requests/:id/examples - Created example: id=" +
-                body["id"].get<std::string> () + ", request=" + request_id);
+                vayu::utils::log_info ("http", "Created example",
+                { { "id", body["id"].get<std::string> () }, { "request", request_id } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
@@ -457,9 +456,9 @@ void register_request_example_routes (RouteContext& ctx) {
             auto [status, body] =
             update_request_example_response (ctx.db, request_id, example_id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("http",
-                "PUT /requests/:id/examples/:exampleId - " + std::to_string (status) +
-                " for id=" + example_id + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http", "PUT /requests/:id/examples/:exampleId failed",
+                { { "status", status }, { "id", example_id },
+                { "error", error_message_of (body) } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
@@ -482,14 +481,10 @@ void register_request_example_routes (RouteContext& ctx) {
             auto [status, body] =
             delete_request_example_response (ctx.db, request_id, example_id);
             if (status != 200) {
-                vayu::utils::log_warning ("http",
-                "DELETE /requests/:id/examples/:exampleId - " +
-                std::to_string (status) + " for id=" + example_id);
+                vayu::utils::log_warning ("http", "DELETE /requests/:id/examples/:exampleId failed",
+                { { "status", status }, { "id", example_id } });
             } else {
-                vayu::utils::log_info ("http",
-                "DELETE /requests/:id/examples/:exampleId - Deleted example: "
-                "id=" +
-                example_id);
+                vayu::utils::log_info ("http", "Deleted example", { { "id", example_id } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
