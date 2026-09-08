@@ -643,6 +643,91 @@ describe("pass/fail budgets", () => {
 
 		expect(mutate.mock.calls[0][0].thresholds).toEqual({ maxErrorRatePct: 0.1 });
 	});
+
+	/*
+	 * `custom.<name>.<stat>` (issue #1579) is the one budget family that *is*
+	 * gated by Load test, and the only place this disclosure diverges from
+	 * `LoadTestConfigDialog`'s: `docs/engine/api-reference.md` says a collection
+	 * run's config accepts the block but nothing evaluates it yet, so offering
+	 * the rows in design mode would take a budget and never judge it.
+	 */
+	describe("custom metric budgets", () => {
+		const enableLoadTest = () =>
+			fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+		const addCustomRow = () =>
+			fireEvent.click(screen.getByRole("button", { name: /add custom metric budget/i }));
+
+		it("offers no rows on a design-mode run, and says which switch turns them on", () => {
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			openBudgets();
+
+			expect(
+				screen.queryByRole("button", { name: /add custom metric budget/i })
+			).not.toBeInTheDocument();
+			expect(screen.getByText(/load runs only/i)).toBeInTheDocument();
+		});
+
+		it("offers them once Load test is on", () => {
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			openBudgets();
+			enableLoadTest();
+
+			expect(
+				screen.getByRole("button", { name: /add custom metric budget/i })
+			).toBeInTheDocument();
+			expect(screen.queryByText(/load runs only/i)).not.toBeInTheDocument();
+		});
+
+		it("sends a declared row under the engine's own key", () => {
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			openBudgets();
+			enableLoadTest();
+			addCustomRow();
+			fireEvent.change(screen.getByLabelText(/custom budget 1 metric name/i), {
+				target: { value: "checkout_ttfb" },
+			});
+			fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
+				target: { value: "120" },
+			});
+			fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+			expect(mutate.mock.calls[0][0].thresholds).toEqual({ "custom.checkout_ttfb.p50": 120 });
+		});
+
+		it("blocks Run on a half-filled row, the same way an out-of-range fixed budget does", () => {
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			openBudgets();
+			enableLoadTest();
+			addCustomRow();
+			fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
+				target: { value: "120" },
+			});
+
+			expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", true);
+			expect(screen.getByText(/budget is out of range/i)).toBeInTheDocument();
+		});
+
+		it("sends nothing custom once Load test goes back off, and stops blocking on it", () => {
+			// The row is kept in state so turning the switch back on restores it,
+			// but a design-mode run must neither carry the key nor be held back by
+			// a row that is no longer on screen to fix.
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+			openBudgets();
+			enableLoadTest();
+			addCustomRow();
+			fireEvent.change(screen.getByLabelText(/custom budget 1 ceiling/i), {
+				target: { value: "120" },
+			});
+			enableLoadTest();
+
+			expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty(
+				"disabled",
+				false
+			);
+			fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+			expect(mutate.mock.calls[0][0]).not.toHaveProperty("thresholds");
+		});
+	});
 });
 
 /*
