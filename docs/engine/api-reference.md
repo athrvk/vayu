@@ -5643,6 +5643,24 @@ its row count - plus `{index, requestId, name, method, url}` per step, where
 `Authorization` headers and, for an `apikey` auth with `in: "query"`, a live key
 in the URL; it lives in memory for the run's life and nowhere else.
 
+**Controller elements redirect the sequence too (issue #1515).** `control.if`,
+`control.once` and `control.throughput` skip a step the same way
+`pm.execution.skipRequest()` does; `control.switch` jumps to a named member the
+same way `setNextRequest(name)` does - one flow-control channel, not two, so
+the rules above (an unresolved target fails the step by name, a cycle trips
+`maxStepsPerIteration`) apply identically. `control.loop`, on a folder, walks
+its members a fixed number of times per iteration by looping back to the
+folder's first member. See [elements.md](elements.md#controllers) for the
+kind table and every config shape.
+
+**`control.transaction` reports its own percentiles.** A folder carrying one
+sums every member's own response latency into a named total per pass, and the
+run's summary gains
+`scenario.transactions[] = { name, count, errors, latency: { min, p50, p90,
+p95, p99, max } }`, omitted for a transaction the run never closed. The same
+shape reports on a scenario load run's summary, top-level rather than under
+`scenario` - see below.
+
 #### Scenario load runs
 
 Adding a load **`mode`** beside the `scenario` block runs the same plan as a
@@ -5672,6 +5690,7 @@ row exists:
 | `mode: "capacity"` with a `scenario` | The search judges one windowed p99 and a sequence has one per step, so which of them the knee is measured against is a question the mode does not answer. |
 | `rps` / `targetRps` above zero, on any mode | It is what selects the open-loop path regardless of the declared mode. |
 | An unknown `mode` | |
+| The plan carries a `control.switch` or `control.loop` element (issue #1515) | Both need to jump the plan; a scenario load run's virtual users only ever advance forward. Named in the error message. Real, disclosed follow-up work - issue #1569. |
 
 `maxInFlight` is **moot** and is ignored with a warning: in-flight requests are
 bounded by the virtual-user count by construction, so `concurrency` is the only
@@ -5695,10 +5714,14 @@ knob.
   its own overlay, never the run's shared scopes, so a name one user's step 1
   writes (an `extract.json`'s target, an inline script's
   `pm.environment.set`) is visible only to that same user's later steps, never
-  to another user's concurrent one. `pm.execution` still throws - an inline
-  element can write state and mutate the request, never redirect the
-  sequence; flow control stays design-mode only (and, eventually, a
-  `control.*` element's).
+  to another user's concurrent one. `pm.execution` still throws - a *script*
+  cannot redirect the sequence under load. A **controller** element can
+  (issue #1515): `control.if`, `control.once` and `control.throughput` skip a
+  step the way `pm.execution.skipRequest()` would, counted in the run's
+  summary `skipped` key rather than the `0` every scenario load run reported
+  before this; `control.switch` and `control.loop` need to jump, which a load
+  run's virtual users cannot do, so a plan carrying either is refused outright
+  (see the table above) rather than silently run once through.
 - **A script that did not run inline stays deferred, keyed per step.** After
   the run drains, that step's own post-request script is replayed against the
   responses that step produced, and the tallies appear on that step's entry in
@@ -5743,7 +5766,7 @@ knob.
 ```json
 "scenario": {
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
-  "stepsExecuted": 1422, "errored": 6, "virtualUsers": 50,
+  "stepsExecuted": 1422, "errored": 6, "skipped": 12, "virtualUsers": 50,
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 0, "unresolvedTokens": 0,
@@ -5773,6 +5796,22 @@ assertions" and "no failures" are different answers.
 ran at least once this run - **absent** for a step with no elements or none
 that ever ran, the same convention `tests` follows. `skipped` folds in both a
 disabled element and a `script.*` element left deferred to the replay above.
+
+**`transactions`** (issue #1515), a sibling of `steps` rather than a member of
+it - a `control.transaction` spans a folder, not one step:
+
+```json
+"transactions": [
+  { "name": "checkout", "count": 480, "errors": 0,
+    "latency": { "min": 8.1, "p50": 14.2, "p90": 22.0, "p95": 26.5,
+                 "p99": 33.0, "max": 55.4 } }
+]
+```
+
+One entry per declared `control.transaction` name that closed at least once
+this run, allocated up front from a scan of the plan - never discovered
+mid-run - so recording into it, like every other controller here, takes no
+lock.
 
 `unresolvedTokens` (issue #1503) counts, per step, how many of its executions
 sent a `{{token}}` composition the residual-token pass still could not answer

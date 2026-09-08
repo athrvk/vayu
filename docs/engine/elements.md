@@ -88,6 +88,12 @@ shipping silently mismatched.
 | `script.post` | script | `step.after` | #1513 (validate-only), #1514 (runs) |
 | `script.setup` | script | `run.start` | #1499 |
 | `script.teardown` | script | `run.end` | #1499 |
+| `control.if` | controller | `step.before` | #1515 |
+| `control.once` | controller | `step.before` | #1515 |
+| `control.switch` | controller | `step.before` | #1515 |
+| `control.throughput` | controller | `step.before` | #1515 |
+| `control.loop` | controller | `step.between` | #1515 |
+| `control.transaction` | transaction | `step.after` | #1515 |
 
 `extract.json` reads a JSONPath subset - `$.a.b`, `[n]`, `[*]`, `..name`; a filter (`[?...]`) is
 refused at validate. `extract.regex` compiles its `pattern` once, at plan-resolution time, and
@@ -161,6 +167,50 @@ baked into the `ScriptEngine` instance every script of the run already shares) a
 10 calls per script every other script gets - a second, per-element gate would be dead configuration
 next to a run-wide one that already decides the question.
 
+### Controllers
+
+JMeter's logic controllers, as element kinds rather than a nested sub-flow (issue #1515):
+`control.if` skips this step (or, inherited onto a folder, every member) when a condition against a
+resolved `{{variable}}` is false - `{{v}} == x`, `!=`, `matches /re/`, or `{{v}} exists`, refused at
+validate outside that grammar. `control.once` runs on this user's first iteration only. `control.throughput`
+runs a share of occurrences by `percent` (an exact integer-carry accumulator, not a random draw) or
+`everyN`, on the producer's own per-user counter - no lock, no body parse. All three write the same
+`ScriptControl::Skip` decision `pm.execution.skipRequest()` always has, so a skip is one mechanism
+end to end: `execute_exchange`'s pre-send check, `decide_next_step`, and `classify_step`'s
+`StepOutcome::Skipped` all read it exactly as they read a script's.
+
+`control.switch` (`variable`, `cases`, `default?`) routes to a named member by a resolved variable's
+value, through the same `ScriptControl::Next` / `resolve_next_step` a script's own
+`setNextRequest` uses - so a switch's dispatch is an ordinary jump to every reader of the step list,
+not a second flow-control channel.
+
+`control.loop` (`count`) and `control.transaction` (`name`) both sit on a folder and are inherited
+into every member beneath it, compiling once per member - so each member's own instance has to
+recognise its folder's first or last position independently rather than being told it.
+`compute_element_spans` (`scenario_plan.cpp`) answers that once per run, from a single pass over the
+resolved plan: a scope-spanning kind's `id` maps to the `{first, last}` position it occupies,
+read through the registry's `needs_span` flag. `control.loop` fires only at its folder's last
+member, on `step.between`; while its own per-iteration pass count (kept in
+`ElementContext::controller_state`, keyed by the element id and the iteration) is under `count`, it
+sets `ScriptControl::Next` back to the folder's first member - an ordinary loop-back, resolved the
+same way `control.switch`'s jump is. `control.transaction` sums every member's own response
+latency into a per-iteration accumulator (same keying) and, at the folder's last member, reports the
+closed sum as its `ElementOutcome::waitedMs` with the transaction's `name` in `message` - the two
+fields the runner (`scenario_runner.cpp` / `scenario_load.cpp`) reads to fold the value into
+`TransactionHistograms`, one HdrHistogram per declared name allocated up front from a plan scan, so
+recording it takes no lock either. The report gains `scenario.transactions[] = { name, count,
+errors, latency: { min, p50, p90, p95, p99, max } }`, omitted for a transaction the run never closed.
+
+**Sequential-only: `control.switch` and `control.loop`.** A scenario load run's virtual users
+advance through the plan strictly forward (`VirtualUser::step`), with no jump the way a repeat or a
+dispatch needs; `POST /runs` refuses a load run whose plan carries either kind with a `400` naming
+it (`vayu::core::find_load_incompatible_controller`), read through the registry's own
+`jumps_or_repeats` flag. `control.if`, `control.once`, `control.throughput` and
+`control.transaction` all run under load too - see Load paths below for `control.if`'s own skip
+there, which the load path had no equivalent of before this issue. A load-path jump mechanism, plus
+`control.throughput`'s shared `perUser: false` budget and `control.transaction`'s `includeTimers`,
+are real, disclosed follow-up work: issue #1569.
+
 ## The step trace
 
 A design send's and a sequential run step's stored trace gains an `elements` array beside the
@@ -213,6 +263,14 @@ elapsed time back in for anyone who wants the scripted cost in the figures.
 beside the existing `tests` node, one row per element that ran at least once this run -
 `StepElementTallies`, sized once from the plan's compiled elements so recording on the
 completion path is a lookup, never a lock or an allocation.
+
+**A controller's skip, under load too (issue #1515).** `control.if` / `control.once` /
+`control.throughput` write the same `ScriptControl::Skip` a script's own `skipRequest()` would -
+before #1515 the load path had nothing to read that decision at all (`pm.execution.*` is refused
+there outright). `submit_one` now checks it right after `step.before` runs: a skip never reaches
+`EventLoop::submit`, the VU still advances exactly as a sent step would, and the run's
+`steps_skipped` counter (`ScenarioLoadState`) feeds the summary's `skipped` key, which every
+scenario load run reported as a hardcoded `0` before this.
 
 **Timers, wired end to end (issue #1498).** `elements.timers` (`"asConfigured"` (default) |
 `"off"` | `{fixedMs: N}` | `{minMs, maxMs}`) is validated on `POST /runs`, parsed into
@@ -270,7 +328,13 @@ gap, outside this page's Status callout.
   run's `POST /runs` to declare either kind - that shape has no collection to declare them on and
   is the same "separate gap" this page's Load paths section already names for single-request
   elements generally; the wire-shape decision that gap needs is filed as #1573.
-- #1515, #1500, #1501 - controllers, metrics and load-time cookies that round out the kind table.
+- #1515 - the controller family (`control.if`, `.once`, `.switch`, `.throughput`, `.loop`,
+  `.transaction`), the load path's own `steps_skipped` counter, and `scenario.transactions[]`
+  (this page's Controllers section).
+- #1569 - the follow-up disclosed by #1515: a scenario load run's own jump/repeat mechanism for
+  `control.switch` / `control.loop`, `control.throughput`'s shared `perUser: false` budget, and
+  `control.transaction`'s `includeTimers`.
+- #1500, #1501 - metrics and load-time cookies that round out the kind table.
 - #1516 - the app's `ElementList` primitive and editor.
 - #1517 - MCP's `elements` fields and the `vayu://elements/kinds` resource.
 - #1518 - Postman/OpenAPI round-trip and a JMeter `.jmx` importer.
