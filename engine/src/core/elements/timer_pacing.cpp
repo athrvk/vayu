@@ -45,35 +45,19 @@
  * below is where that split is made; `apply`'s own `blocking_allowed` branch
  * never runs under load at all (see its own comment), so it never needs to
  * know which case it is.
+ *
+ * The interval arithmetic itself - the blocking wait, the per-VU deadline
+ * booking - lives in `pacing_math.hpp`, shared with `timer.throughput`
+ * (issue #1571), which states the same intent as a rate rather than a gap.
  */
 
 #include "vayu/core/elements.hpp"
 
-#include <algorithm>
-#include <chrono>
-#include <thread>
+#include "pacing_math.hpp"
 
 namespace vayu::core {
 
 namespace {
-
-constexpr auto POLL_INTERVAL = std::chrono::milliseconds (50);
-
-int64_t steady_now_ms () {
-    return std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now ().time_since_epoch ())
-    .count ();
-}
-
-/// `deadline - now`, clamped to never negative and never below `everyMs`
-/// having elapsed - "a step longer than everyMs continues at once" (issue
-/// #1498's acceptance criteria), not with a negative wait.
-int64_t remaining_wait_ms (int64_t last_started_ms, int64_t every_ms, int64_t now_ms) {
-    if (last_started_ms <= 0) {
-        return 0; // Never started before - the first pass is never delayed.
-    }
-    return std::max<int64_t> (0, last_started_ms + every_ms - now_ms);
-}
 
 class TimerPacingElement final : public Element {
     public:
@@ -97,53 +81,12 @@ class TimerPacingElement final : public Element {
             return;
         }
 
-        const auto overridden =
-        apply_timers_override (ctx.timers_override, every_ms_, ctx.rng);
-        if (!overridden) {
-            ctx.outcome_status    = "ok";
-            ctx.outcome_waited_ms = 0;
-            return;
-        }
-        const int64_t every_ms = *overridden;
-
-        if (!ctx.blocking_allowed) {
-            // The wait already happened through `scheduled_ready_delay_ms`
-            // deferring the VU before this step was ever dispatched - this
-            // call only confirms the outcome, and must not re-touch
-            // `pacing_state` or it would double-book the next pass's wait.
-            ctx.outcome_status    = "ok";
-            ctx.outcome_waited_ms = 0;
-            return;
-        }
-
-        const int64_t now = steady_now_ms ();
-        const int64_t last_started =
-        ctx.pacing_state ? (*ctx.pacing_state)[element_id_] : 0;
-        const int64_t wait_ms = remaining_wait_ms (last_started, every_ms, now);
-        const auto deadline =
-        std::chrono::steady_clock::now () + std::chrono::milliseconds (wait_ms);
-        while (wait_ms > 0) {
-            if (ctx.should_stop && ctx.should_stop ()) {
-                break;
-            }
-            const auto remaining = deadline - std::chrono::steady_clock::now ();
-            if (remaining <= std::chrono::steady_clock::duration::zero ()) {
-                break;
-            }
-            std::this_thread::sleep_for (
-            std::min<std::chrono::steady_clock::duration> (POLL_INTERVAL, remaining));
-        }
-
-        if (ctx.pacing_state) {
-            (*ctx.pacing_state)[element_id_] = steady_now_ms ();
-        }
-        ctx.outcome_status    = "ok";
-        ctx.outcome_waited_ms = wait_ms;
+        detail::apply_paced_wait (ctx, element_id_, every_ms_);
     }
 
     [[nodiscard]] std::optional<int64_t> scheduled_ready_delay_ms (
     std::unordered_map<std::string, int64_t>& pacing_state,
-    SharedPacingClocks* shared_pacing,
+    const SharedScheduleState& shared,
     int64_t now_ms) const override {
         if (!scope_entry_) {
             return std::nullopt;
@@ -159,16 +102,13 @@ class TimerPacingElement final : public Element {
         // override, not present on the sequential run.
         if (!per_user_) {
             // One cadence shared across every virtual user (issue #1570):
-            // `shared_pacing` is always non-null here, sized by the plan
+            // `shared.pacing` is always non-null here, sized by the plan
             // scan that found this very element's id in the first place.
-            return shared_pacing != nullptr ?
-            shared_pacing->advance (element_id_, every_ms_, now_ms) :
+            return shared.pacing != nullptr ?
+            shared.pacing->advance (element_id_, every_ms_, now_ms) :
             int64_t{ 0 };
         }
-        const int64_t last_started = pacing_state[element_id_];
-        const int64_t deadline = last_started <= 0 ? now_ms : last_started + every_ms_;
-        pacing_state[element_id_] = deadline;
-        return std::max<int64_t> (0, deadline - now_ms);
+        return detail::advance_per_user_pacing (pacing_state, element_id_, every_ms_, now_ms);
     }
 
     private:

@@ -311,6 +311,18 @@ class StepHistograms {
 [[nodiscard]] std::vector<std::string> shared_pacing_element_ids (const ScenarioPlan& plan);
 
 /**
+ * @brief Every `timer.throughput` element id in @p plan whose own `perUser`
+ *        is `false` (issue #1571) - what `ScenarioLoadState` sizes its
+ *        `SharedThroughputBudgets` from, the rate-based sibling of
+ *        `shared_pacing_element_ids` above and scoped here for the same
+ *        reason. Note the opposite default: `perUser` is absent on most
+ *        `timer.throughput` elements precisely because a shared rate is what
+ *        that kind is normally asked for.
+ */
+[[nodiscard]] std::vector<std::string> shared_throughput_element_ids (
+const ScenarioPlan& plan);
+
+/**
  * @brief Per-step, per-element pass/fail/skip tallies for a load run's report
  *        (issue #1495) - `scenario.steps[i].elements[] = { id, kind, passed,
  *        failed, skipped }`, the load-path sibling of the sequential run's
@@ -388,6 +400,7 @@ struct ScenarioLoadState {
     : steps (plan.steps.size ()), element_spans (compute_element_spans (plan)),
       transactions (plan), element_tallies (plan),
       shared_pacing (shared_pacing_element_ids (plan)),
+      shared_throughput (shared_throughput_element_ids (plan)),
       base_scopes (std::move (base_scopes)),
       base_vars (vayu::http::routes::flatten_variable_scopes (this->base_scopes)),
       script_config (script_config), coverage (std::move (coverage)),
@@ -415,6 +428,9 @@ struct ScenarioLoadState {
     /// This run's cross-VU pacing clocks (issue #1570) - empty (and free) for
     /// a plan with no `timer.pacing(perUser: false)` element at all.
     SharedPacingClocks shared_pacing;
+    /// This run's cross-VU throughput budgets (issue #1571) - empty (and
+    /// free) for a plan with no shared-rate `timer.throughput` element at all.
+    SharedThroughputBudgets shared_throughput;
     /// Combined pass/fail of every `pm.test` call an *inline* `script.pre` or
     /// `script.post` element made this run (issue #1497). `element_tallies`
     /// above already records that element's own outcome - did the script run
