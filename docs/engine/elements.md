@@ -129,10 +129,12 @@ sent. The same element is inherited into every request under its scope, so `scen
 in the iteration's step order; every later occurrence is a no-op, reported `skipped`. `perUser`
 (default `true`) gives each virtual user its own cadence; `perUser: false` (one cadence shared by
 every VU, JMeter's "All threads" pacing) works on the sequential run, where a single VU makes the
-two indistinguishable, but is refused with a `400` for a scenario load run - coordinating one
-shared deadline across many VUs without blocking a producer thread is a separate, harder problem,
-tracked as a follow-up issue. `timer.throughput` (a constant-throughput, shared-rate timer) is not
-yet implemented, for the same cross-VU coordination reason.
+two indistinguishable, and, since issue #1570, on a scenario load run too: `SharedPacingClocks`
+(`elements.hpp`) holds one atomic deadline per shared-pacing element id, advanced by a
+compare-exchange retry rather than a mutex, so every VU's entry into the scope claims the next slot
+of the same clock without blocking the producer thread for a lock. `timer.throughput` (a
+constant-throughput, shared-rate timer) is not yet implemented; issue #1571 tracks it and names this
+same primitive as its intended reuse for the shared (`perUser: false`) case.
 
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
 step, through `ElementContext`'s lazily filled slot - a body over `maxElementBodyBytes` (default 1
@@ -319,8 +321,11 @@ only once a VU has already been selected as ready - too late to defer non-blocki
 deciding which step comes next and before the VU can be selected again, and applies the returned
 delay to `VirtualUser::ready_at_ms`, which already gated VU selection but, before #1498, had
 nothing writing to it. Per-node "last started" timestamps live in `VirtualUser::pacing_state`
-(one map per VU, so VUs pacing the same folder run independent cadences) for load, and in
-`RunContext::pacing_state` for the sequential run.
+(one map per VU, so VUs pacing the same folder run independent cadences) for `perUser: true` and
+for the sequential run; a `perUser: false` element instead advances its own entry in
+`ScenarioLoadState::shared_pacing` (a `SharedPacingClocks`, issue #1570), one atomic per
+shared-pacing element id in the plan, so two VUs' concurrent completions claim distinct slots of
+the same clock rather than racing onto the same one.
 
 **Still not wired: step-level elements on the single-request load path.** `load_strategy.cpp`'s
 per-submission and per-completion hooks are unchanged: a single-request `POST /runs` payload's
@@ -349,8 +354,11 @@ collection-backed run uses.
 - #1498 - `timer.think`'s gaussian option, the `timer.pacing` kind, a per-run seeded RNG
   (`elements.seed`) and the `elements.timers` override wired end to end (this page's Timers
   paragraphs and Load paths section). `timer.pacing`'s `perUser: false` under load and
-  `timer.throughput` (a constant-throughput, shared-rate timer) are deliberately deferred to a
-  follow-up issue.
+  `timer.throughput` (a constant-throughput, shared-rate timer) were deliberately deferred to
+  follow-up issues.
+- #1570 - `timer.pacing`'s `perUser: false` under a scenario load run (this page's `timer.pacing`
+  and Non-blocking waits paragraphs). `timer.throughput` (#1571) is still deferred, tracked to
+  reuse the same `SharedPacingClocks` primitive.
 - #1499 - `script.setup` / `script.teardown`, the `run.start` / `run.end` dispatch this page's
   Kinds section describes, in both collection-backed run modes. Deliberately did not wire a
   single-request load run's `POST /runs` to declare either kind - that shape has no collection to

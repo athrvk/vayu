@@ -533,7 +533,8 @@ void apply_ca_options (CURL* curl, const TransportPolicy& policy) {
         static std::once_flag warned;
         std::call_once (warned, [ca_result] {
             const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
-            vayu::utils::log_error ("This build's TLS backend (" +
+            vayu::utils::log_error ("client",
+            "This build's TLS backend (" +
             std::string (info != nullptr && info->ssl_version != nullptr ? info->ssl_version : "unknown") +
             ") refused a custom CA bundle: " + std::string (curl_easy_strerror (ca_result)) +
             ". Custom CA certificates are not in use on this platform.");
@@ -985,6 +986,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     if (config.verbose) {
         set_opt<CURLOPT_VERBOSE> (curl, 1L);
         set_opt<CURLOPT_DEBUGFUNCTION> (curl, debug_callback);
+        set_opt<CURLOPT_DEBUGDATA> (curl, data);
     }
 
     // Store private data pointer
@@ -995,6 +997,16 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
 Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode result) {
     Response& response = data->response;
+
+    // The one `cat=client` record this transfer's debug frames collected
+    // (issue #1557), if `config.verbose` ever turned CURLOPT_DEBUGFUNCTION on
+    // for it - `extract_response` runs exactly once per finished transfer,
+    // which makes it the flush point.
+    if (!data->debug_lines.empty ()) {
+        nlohmann::json fields;
+        fields["lines"] = data->debug_lines;
+        vayu::utils::log_debug ("client", "curl exchange", fields);
+    }
 
     // Everything curl measured is read before the error branch: a failed
     // transfer still connected, still sent bytes, and still spent time doing
@@ -1040,7 +1052,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     double delta = perceived_ms - wire_ms;
     assert (delta > -1.0 && "perceived_ms - wire_ms below -1ms - clock issue?");
     if (delta < -1.0) {
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("client",
         "queue_wait clock skew: perceived_ms=" + std::to_string (perceived_ms) +
         " wire_ms=" + std::to_string (wire_ms) + " delta_ms=" + std::to_string (delta) +
         " - submitted_at stamp may be set after curl wire start");

@@ -109,7 +109,8 @@ void register_cookie_routes (RouteContext& ctx) {
         } else {
             scope_label = *scope;
         }
-        vayu::utils::log_info ("scope=" + scope_label +
+        vayu::utils::log_info ("http",
+        "scope=" + scope_label +
         ", cleared=" + std::to_string (response["cleared"].get<size_t> ()));
         res.set_content (response.dump (), "application/json");
     });

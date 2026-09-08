@@ -2172,6 +2172,49 @@ const LOAD_RUN_SCHEMA_GATE_REFUSAL =
 	`run_collection, which is where the gate takes effect.`;
 
 /**
+ * Why `elements` cannot override a single-target load run's timers/scripts
+ * (issue #1559): there is no stored collection of `timer.*`/`script.*`
+ * elements here to override - a single target's only script slot is
+ * `postRequestScript`/`tests`. The engine's own validator
+ * (`validate_elements_run_override`, `engine/src/core/load_strategy.cpp`)
+ * accepts the block on every `POST /runs` call regardless of shape and simply
+ * has nothing to apply it to here, so refusing it client-side is the same
+ * "written and read by nothing" guard `SINGLE_TARGET_LOAD_FIELDS` states for
+ * the opposite direction (a single-target field beside a scenario).
+ */
+const ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL =
+	`"elements" does not apply to a single-target load run: there is no stored collection of ` +
+	`timer.*/script.* elements here to override - the only script slot a single target has is ` +
+	`"postRequestScript"/"tests". Nothing was started - the engine would have accepted the block and ` +
+	`read it from nothing. Remove it, or pass "scenario" to load-test a collection, where its ` +
+	`stored elements are what "asConfigured"/"asMarked" mean.`;
+
+/**
+ * `elements.timers`'s two enum values (issue #1495), shared between
+ * `run_collection` and `start_load_run` because - unlike `scripts` - it
+ * genuinely takes effect on **both** run shapes: `execute_scenario_run`
+ * (the design-mode runner `run_collection` drives) wires
+ * `RunContext::timers_override` into the same `ExchangeInputs` a scenario
+ * load run does (`scenario_runner.cpp`'s two call sites, `scenario_load.cpp`'s
+ * three), so a `timer.pacing`/`timer.think` wait fires - and can be silenced -
+ * during a plain `run_collection` call exactly as it does under load.
+ * `scripts_override` has no such reach: its one reader,
+ * `replay_scenario_steps`, is the load path's own post-run replay
+ * (`run_manager.cpp`), so `scripts` is offered on `start_load_run` only.
+ * Neither reaches a single-target load run - `load_strategy.cpp` wires
+ * neither override at all, which is what `ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL`
+ * states.
+ */
+function elementsTimersInput() {
+	return z
+		.enum(["asConfigured", "off"])
+		.optional()
+		.describe(
+			'"off" silences every timer.pacing/timer.think wait for this run, across every element, without editing the collection. "asConfigured" (default) leaves each element\'s own configuration in effect. The engine also accepts a {fixedMs} or {minMs, maxMs} override replacing every timer\'s own span, not offered here - no control sends it yet.'
+		);
+}
+
+/**
  * The two fields a scenario block carries besides its collection id, declared
  * here because both scenario surfaces take them and they must mean the same
  * thing on each (issue #754): `run_collection` runs the plan once through the
@@ -3169,6 +3212,10 @@ async function startScenarioLoadRun(
 	if (args.thresholds && typeof args.thresholds === "object")
 		payload.thresholds = args.thresholds;
 	if (monitor && typeof monitor === "object") payload.monitor = monitor;
+	// The timers/scripts override (issue #1495), forwarded verbatim for the
+	// same reason as thresholds/monitor above: the engine's validator owns
+	// the shape and the value ranges.
+	if (args.elements && typeof args.elements === "object") payload.elements = args.elements;
 	// And for the same reason again: the recording knobs are read by the
 	// `RunContext` both executors share, so a scenario run keeps traces on the
 	// terms an agent stated exactly as a single-target run does.
@@ -6711,6 +6758,19 @@ export const TOOLS: McpTool[] = [
 				guidance:
 					"Set true to make the bound contract a gate, the way the app's Run Collection checkbox does: a step whose response does not match its schema fails, and the run's report records that it was judged that way. Only a step that passed everything else is demoted - one already failing keeps the error that named it. Left off, the verdict still rides every step and the report's schemaValidation totals; it just does not decide pass/fail.",
 			}),
+			// Only `timers` - not `scripts` - from #1495's override block
+			// (issue #1559): unlike a scenario load run, this design-mode
+			// runner has no inline/deferred distinction for script.pre/
+			// script.post to make, but it does run timer.pacing/timer.think
+			// waits (`execute_scenario_run` wires `RunContext::timers_override`
+			// exactly as the load path does - see `elementsTimersInput`'s doc
+			// comment), so silencing them here is real, not a no-op control.
+			elements: z
+				.object({ timers: elementsTimersInput() })
+				.optional()
+				.describe(
+					"Silence this run's timer.pacing/timer.think waits without editing the collection (`timers: \"off\"`); \"asConfigured\" (default) leaves each element's own configuration in effect. Only `timers` applies to a design-mode run - `scripts`'s inline-vs-deferred distinction is a load-run concept only, so it belongs on start_load_run's `scenario` branch instead."
+				),
 			// The engine now judges a design-mode run against declared budgets
 			// exactly as it always has a load run (issue #1564), so this tool
 			// takes the same `thresholds` argument `start_load_run` does.
@@ -6745,6 +6805,12 @@ export const TOOLS: McpTool[] = [
 				// is what keeps a payload written before the flag existed reading the
 				// way it always did.
 				...(args.failOnSchemaError === true ? { failOnSchemaError: true } : {}),
+				// Also top-level, beside `scenario`, for the same reason -
+				// `validate_elements_run_override` reads it there on every
+				// `POST /runs` payload regardless of mode.
+				...(args.elements && typeof args.elements === "object"
+					? { elements: args.elements }
+					: {}),
 			};
 			// Forwarded verbatim - the keys are the engine's own metric names,
 			// and they come back unchanged in get_run_report's
@@ -7063,6 +7129,31 @@ export const TOOLS: McpTool[] = [
 				.describe(
 					"Load-test a collection's ordered sequence instead of one target. Cannot be combined with url/requestId or any single-target field. `concurrency` is the number of virtual users, each walking the whole plan with its own cookies; `iterations` (top level) is the total passes across all of them in iterations mode. Modes: constant_concurrency (default), ramp_up, iterations - constant_rps and capacity are refused, with the engine's reasoning."
 				),
+			// The run-level override block issue #1495 defines on `POST /runs`
+			// (`validate_elements_run_override`). `scripts` reaches only the
+			// scenario load path; a single-target run has nothing stored to
+			// override for either key, so the whole block is refused there by
+			// name instead of silently accepted and read by nothing (see
+			// ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL and
+			// `elementsTimersInput`'s doc comment for the per-key reach). The
+			// engine's contract also takes `includeScriptTime` and `seed`, but
+			// no control anywhere in the product - app or MCP - sends either
+			// today, so they stay off this schema until something actually
+			// needs them.
+			elements: z
+				.object({
+					timers: elementsTimersInput(),
+					scripts: z
+						.enum(["asMarked", "allInline", "allDeferred"])
+						.optional()
+						.describe(
+							'Forces every script.pre/script.post element\'s inline-vs-deferred execution for this run, overriding each element\'s own setting: "allInline" or "allDeferred". "asMarked" (default) leaves each at what it declares.'
+						),
+				})
+				.optional()
+				.describe(
+					"Override how this run's stored timer.*/script.* elements execute, without editing the collection - the same block RunCollectionDialog's load-test section sends. Scenario runs only (\"scenario\" required); a single-target run is refused, since it has no stored elements for this to override."
+				),
 			// Declared only so it can be refused by name - see
 			// LOAD_RUN_SCHEMA_GATE_REFUSAL for why an undeclared key would be
 			// dropped in silence instead.
@@ -7087,6 +7178,10 @@ export const TOOLS: McpTool[] = [
 			// inside it.
 			const scenario = readScenarioArg(args);
 			if (scenario) return startScenarioLoadRun(args, scenario, ctx, signal);
+
+			if (args.elements !== undefined) {
+				return errorResult(ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL);
+			}
 
 			let composed;
 			try {

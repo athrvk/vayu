@@ -17,7 +17,9 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/log_redact.hpp"
 #include "vayu/utils/reentrant.hpp"
 
 namespace vayu::utils {
@@ -26,16 +28,22 @@ Logger& Logger::instance () {
     return logger;
 }
 
-void Logger::init (const std::string& log_dir) {
+std::string Logger::file_prefix () const {
+    return source_ == "cli" ? vayu::core::constants::logging::CLI_FILE_PREFIX :
+                              vayu::core::constants::logging::ENGINE_FILE_PREFIX;
+}
+
+void Logger::init (const std::string& log_dir, std::string_view source) {
     std::lock_guard<std::mutex> lock (mutex_);
     log_dir_ = log_dir;
+    source_  = source == "cli" ? "cli" : "engine";
     ensure_log_directory ();
 
     // Open log file with timestamp
     auto now  = std::chrono::system_clock::now ();
     auto time = std::chrono::system_clock::to_time_t (now);
 
-    log_file_path_ = log_dir_ + vayu::core::constants::logging::FILE_PREFIX +
+    log_file_path_ = log_dir_ + "/" + file_prefix () +
     format_local_time (time, vayu::core::constants::logging::TIME_FORMAT) + ".log";
     log_file_ = std::make_unique<std::ofstream> (log_file_path_, std::ios::app);
 
@@ -50,7 +58,7 @@ void Logger::init (const std::string& log_dir) {
     // Retention runs after the new file exists, so it is one of the N kept -
     // pruning first would keep N old files plus this one, which is N+1 on
     // disk for every value of N.
-    prune_old_logs (log_dir_,
+    prune_old_logs (log_dir_, file_prefix (),
     static_cast<std::size_t> (vayu::core::constants::logging::RETAINED_FILES));
 }
 
@@ -85,72 +93,105 @@ void Logger::rotate_locked () {
     }
 }
 
-void Logger::log (Level level, const std::string& message) {
+namespace {
+
+std::string format_ts (std::chrono::system_clock::time_point now) {
+    const auto time = std::chrono::system_clock::to_time_t (now);
+    const auto ms =
+    std::chrono::duration_cast<std::chrono::milliseconds> (now.time_since_epoch ()) % 1000;
+    std::ostringstream ts_stream;
+    ts_stream << format_utc_time (time, "%Y-%m-%dT%H:%M:%S") << '.'
+              << std::setfill ('0') << std::setw (3) << ms.count () << 'Z';
+    return ts_stream.str ();
+}
+
+// Console verbosity buys INFO and DEBUG; ERROR and WARNING are unconditional
+// so a quiet run still sees an engine failure. One expression rather than a
+// chain of branches that all assigned the same `true`, which said nothing
+// about which condition earned it.
+bool should_print_to_console (Logger::Level level, int verbosity) {
+    using Level = Logger::Level;
+    return level == Level::ERROR || level == Level::WARNING ||
+    (level == Level::INFO && verbosity >= 1) ||
+    (level == Level::DEBUG && verbosity >= 2);
+}
+
+} // namespace
+
+void Logger::write_to_file_locked (const LogRecord& record,
+const std::string& ts,
+const std::string& thread_id,
+int pid) {
+    if (!log_file_ || !log_file_->is_open ()) {
+        std::cerr << "Log file is not open." << "\n";
+        return;
+    }
+    nlohmann::json line;
+    line["ts"]    = ts;
+    line["level"] = level_wire_name (record.level);
+    line["src"]   = source_;
+    line["cat"]   = std::string (record.cat);
+    line["msg"]   = record.msg;
+    line["pid"]   = pid;
+    line["tid"]   = thread_id;
+    if (record.fields.is_object ()) {
+        line.update (record.fields);
+    }
+    const std::string log_message = line.dump ();
+
+    const auto line_bytes = static_cast<int64_t> (log_message.size ()) + 1;
+    // Rotate *before* the line that would cross the cap rather than after, so
+    // the cap bounds the file rather than being the point it is already past.
+    if (max_file_bytes_ > 0 && file_bytes_ > 0 && file_bytes_ + line_bytes > max_file_bytes_) {
+        rotate_locked ();
+    }
+    *log_file_ << log_message << "\n";
+    log_file_->flush ();
+    file_bytes_ += line_bytes;
+}
+
+void Logger::write_to_console_locked (const LogRecord& record, const std::string& ts) {
+    std::ostringstream console_line;
+    // "HH:MM:SS.mmm LEVEL cat      msg k=v ..." - the same shape on every
+    // console, engine or (once #1558 lands) app.
+    console_line << ts.substr (11, 12) << ' ' << std::left << std::setw (7)
+                 << level_console_name (record.level) << std::setw (9)
+                 << std::string (record.cat) << record.msg;
+    if (record.fields.is_object ()) {
+        for (const auto& [key, value] : record.fields.items ()) {
+            console_line
+            << ' ' << key << '='
+            << (value.is_string () ? value.get<std::string> () : value.dump ());
+        }
+    }
+    const std::string console_text = console_line.str ();
+
+    if (record.level == Level::ERROR) {
+        std::cerr << console_text << "\n";
+        std::cerr.flush (); // Flush immediately on Linux when stdout/stderr are pipes
+    } else {
+        std::cout << console_text << "\n";
+        std::cout.flush (); // Flush immediately on Linux when stdout/stderr are pipes
+    }
+}
+
+void Logger::write (LogRecord&& record) {
     std::lock_guard<std::mutex> lock (mutex_);
 
-    std::string timestamp = get_timestamp ();
-    std::string level_str = level_to_string (level);
-    std::string thread_id = get_thread_id ();
+    redact_fields (record.fields);
 
-    std::string log_message =
-    timestamp + " [" + level_str + "] [" + thread_id + "] " + message;
+    const std::string ts        = format_ts (std::chrono::system_clock::now ());
+    const std::string thread_id = get_thread_id ();
+    const int pid               = vayu::platform::get_process_id ();
 
     // The file takes everything at or above `logLevel`, which defaults to
     // DEBUG - the level the file used to take unconditionally.
-    if (level >= file_level_) {
-        if (log_file_ && log_file_->is_open ()) {
-            const auto line_bytes = static_cast<int64_t> (log_message.size ()) + 1;
-            // Rotate *before* the line that would cross the cap rather than
-            // after, so the cap bounds the file rather than being the point it
-            // is already past.
-            if (max_file_bytes_ > 0 && file_bytes_ > 0 &&
-            file_bytes_ + line_bytes > max_file_bytes_) {
-                rotate_locked ();
-            }
-            *log_file_ << log_message << "\n";
-            log_file_->flush ();
-            file_bytes_ += line_bytes;
-        } else {
-            std::cerr << "Log file is not open." << "\n";
-        }
+    if (record.level >= file_level_) {
+        write_to_file_locked (record, ts, thread_id, pid);
     }
-
-    // Console output based on verbosity level:
-    // Level 0: Only ERROR and WARNING
-    // Level 1: ERROR, WARNING, INFO
-    // Level 2: ERROR, WARNING, INFO, DEBUG
-    // Errors and warnings are unconditional; the other two are what verbosity
-    // buys. One expression rather than a chain of branches that all assigned
-    // the same `true`, which said nothing about which condition earned it.
-    const bool should_print_to_console = level == Level::ERROR ||
-    level == Level::WARNING || (level == Level::INFO && verbosity_level_ >= 1) ||
-    (level == Level::DEBUG && verbosity_level_ >= 2);
-
-    if (should_print_to_console) {
-        if (level == Level::ERROR) {
-            std::cerr << log_message << "\n";
-            std::cerr.flush (); // Flush immediately on Linux when stdout/stderr are pipes
-        } else {
-            std::cout << log_message << "\n";
-            std::cout.flush (); // Flush immediately on Linux when stdout/stderr are pipes
-        }
+    if (should_print_to_console (record.level, verbosity_level_)) {
+        write_to_console_locked (record, ts);
     }
-}
-
-void Logger::debug (const std::string& message) {
-    log (Level::DEBUG, message);
-}
-
-void Logger::info (const std::string& message) {
-    log (Level::INFO, message);
-}
-
-void Logger::warning (const std::string& message) {
-    log (Level::WARNING, message);
-}
-
-void Logger::error (const std::string& message) {
-    log (Level::ERROR, message);
 }
 
 void Logger::flush () {
@@ -178,7 +219,7 @@ Logger::~Logger () {
     }
 }
 
-std::string Logger::level_to_string (Level level) const {
+std::string Logger::level_console_name (Level level) const {
     switch (level) {
     case Level::DEBUG: return "DEBUG";
     case Level::INFO: return "INFO";
@@ -188,23 +229,20 @@ std::string Logger::level_to_string (Level level) const {
     }
 }
 
-std::string Logger::get_timestamp () const {
-    auto now  = std::chrono::system_clock::now ();
-    auto time = std::chrono::system_clock::to_time_t (now);
-    auto ms =
-    std::chrono::duration_cast<std::chrono::milliseconds> (now.time_since_epoch ()) % 1000;
-
-    std::stringstream ss;
-    ss << format_local_time (time, "%Y-%m-%d %H:%M:%S");
-    ss << '.' << std::setfill ('0') << std::setw (3) << ms.count ();
-
-    return ss.str ();
+std::string_view Logger::level_wire_name (Level level) const {
+    switch (level) {
+    case Level::DEBUG: return "debug";
+    case Level::INFO: return "info";
+    case Level::WARNING: return "warn";
+    case Level::ERROR: return "error";
+    default: return "unknown";
+    }
 }
 
 std::string Logger::get_thread_id () const {
     std::stringstream ss;
     ss << std::this_thread::get_id ();
-    return "T:" + ss.str ();
+    return ss.str ();
 }
 
 void Logger::ensure_log_directory () {
@@ -225,13 +263,10 @@ std::optional<Logger::Level> parse_log_level (std::string_view name) {
     return std::nullopt;
 }
 
-std::size_t prune_old_logs (const std::string& log_dir, std::size_t keep) {
+std::size_t
+prune_old_logs (const std::string& log_dir, std::string_view file_prefix, std::size_t keep) {
     namespace fs = std::filesystem;
 
-    // FILE_PREFIX leads with the separator it is concatenated onto a
-    // directory with; a filename does not carry it.
-    constexpr std::string_view PREFIX =
-    std::string_view (vayu::core::constants::logging::FILE_PREFIX).substr (1);
     constexpr std::string_view SUFFIX = ".log";
 
     std::error_code ec;
@@ -240,8 +275,8 @@ std::size_t prune_old_logs (const std::string& log_dir, std::size_t keep) {
         if (!entry.is_regular_file ())
             continue;
         const std::string name = entry.path ().filename ().string ();
-        if (name.size () > PREFIX.size () + SUFFIX.size () &&
-        name.starts_with (PREFIX) && name.ends_with (SUFFIX)) {
+        if (name.size () > file_prefix.size () + SUFFIX.size () &&
+        name.starts_with (file_prefix) && name.ends_with (SUFFIX)) {
             candidates.push_back (entry.path ());
         }
     }

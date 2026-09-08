@@ -220,6 +220,10 @@ std::string path_join (const std::string& base, const std::string& component) {
     }
 }
 
+std::string default_data_dir () {
+    return path_join (".", "data");
+}
+
 } // namespace vayu::platform
 
 #endif // !VAYU_PLATFORM_WINDOWS

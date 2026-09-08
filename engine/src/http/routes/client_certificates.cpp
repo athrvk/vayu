@@ -390,7 +390,8 @@ void register_client_certificate_routes (RouteContext& ctx) {
         for (const auto& row : rows) {
             response.push_back (vayu::json::serialize (row));
         }
-        vayu::utils::log_debug ("Returning " + std::to_string (rows.size ()) + " entries");
+        vayu::utils::log_debug (
+        "http", "Returning " + std::to_string (rows.size ()) + " entries");
         res.set_content (response.dump (), "application/json");
     });
 
@@ -409,17 +410,18 @@ void register_client_certificate_routes (RouteContext& ctx) {
             auto json = nlohmann::json::parse (req.body);
             auto [status, body] = create_client_certificate_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /client-certificates - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /client-certificates - " + std::to_string (status) +
+                ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info (
+                vayu::utils::log_info ("http",
                 "POST /client-certificates - Registered: id=" + body["id"].get<std::string> () +
                 ", host=" + body["host"].get<std::string> ());
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "POST /client-certificates - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
@@ -438,16 +440,17 @@ void register_client_certificate_routes (RouteContext& ctx) {
             auto json = nlohmann::json::parse (req.body);
             auto [status, body] = update_client_certificate_response (ctx.db, id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("PUT /client-certificates/:id - " +
-                std::to_string (status) + " for id=" + id + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "PUT /client-certificates/:id - " + std::to_string (status) +
+                " for id=" + id + ": " + error_message_of (body));
             } else {
                 vayu::utils::log_info (
-                "PUT /client-certificates/:id - Updated: id=" + id);
+                "http", "PUT /client-certificates/:id - Updated: id=" + id);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "PUT /client-certificates/:id - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }

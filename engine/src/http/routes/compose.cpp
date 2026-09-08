@@ -33,7 +33,7 @@ void register_compose_routes (RouteContext& ctx) {
             body = nlohmann::json::parse (req.body);
         } catch (const nlohmann::json::exception& e) {
             vayu::utils::log_warning (
-            "POST /compose - Invalid JSON: " + std::string (e.what ()));
+            "http", "POST /compose - Invalid JSON: " + std::string (e.what ()));
             send_error (res, 400, "Invalid JSON: " + std::string (e.what ()),
             "invalid_compose_request");
             return;
@@ -41,8 +41,8 @@ void register_compose_routes (RouteContext& ctx) {
 
         auto [status, payload] = compose_request_core (ctx.db, body);
         if (status != 200) {
-            vayu::utils::log_warning ("POST /compose - " +
-            std::to_string (status) + ": " + error_message_of (payload));
+            vayu::utils::log_warning ("http",
+            "POST /compose - " + std::to_string (status) + ": " + error_message_of (payload));
         }
         res.status = status;
         res.set_content (payload.dump (), "application/json");

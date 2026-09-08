@@ -161,11 +161,12 @@ void register_spec_match_routes (RouteContext& ctx) {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = match_spec_operations_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs/match - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /specs/match - " + std::to_string (status) + ": " +
+                error_message_of (body));
             } else {
-                vayu::utils::log_info ("Matched " +
-                std::to_string (body["matched"].size ()) + " request(s), " +
+                vayu::utils::log_info ("http",
+                "Matched " + std::to_string (body["matched"].size ()) + " request(s), " +
                 std::to_string (body["unmatchedRequests"].size ()) + " unmatched, " +
                 std::to_string (body["unmatchedOperations"].size ()) + " operation(s) unclaimed");
             }
@@ -173,7 +174,7 @@ void register_spec_match_routes (RouteContext& ctx) {
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "POST /specs/match - Error: " + std::string (e.what ()));
+            "http", "POST /specs/match - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });

@@ -116,7 +116,7 @@ std::string newest_log_contents (const std::filesystem::path& dir) {
     std::filesystem::path newest;
     for (const auto& entry : std::filesystem::directory_iterator (dir)) {
         const std::string name = entry.path ().filename ().string ();
-        if (name.starts_with ("vayu_") && name.ends_with (".log") && entry.path () > newest) {
+        if (name.starts_with ("engine_") && name.ends_with (".log") && entry.path () > newest) {
             newest = entry.path ();
         }
     }
@@ -183,12 +183,14 @@ bool is_identifier_char (char c) {
 }
 
 /**
- * Every `log_info ("GET ...` / `log_debug ("POST ...` call in @p code - the
- * exact shape #1510 centralised away into `install_request_logger`. Bounded
- * like `source_scan.hpp`'s `names_call` so a longer name (`log_info_verbose`,
- * hypothetically) cannot false-match, and past any run of spaces so the
- * repository's clang-format ("space before the argument list") does not
- * defeat a literal search.
+ * Every `log_info ("cat", "GET ...` / `log_debug ("cat", "POST ...` call in
+ * @p code - the exact shape #1510 centralised away into
+ * `install_request_logger`. Bounded like `source_scan.hpp`'s `names_call` so a
+ * longer name (`log_info_verbose`, hypothetically) cannot false-match, and past
+ * any run of spaces so the repository's clang-format ("space before the
+ * argument list") does not defeat a literal search. Since #1557 every call
+ * takes a category literal first; this skips exactly one quoted argument
+ * before looking at the message that would have been the whole call before.
  */
 std::vector<std::string> route_prefixed_calls (const std::string& code) {
     std::vector<std::string> offenders;
@@ -215,11 +217,25 @@ std::vector<std::string> route_prefixed_calls (const std::string& code) {
             if (after >= code.size () || code[after] != '"') {
                 continue;
             }
+            // Skip the category literal - the message argument, which is
+            // where the retired "METHOD /path ..." shape would appear, is the
+            // next quoted argument after it.
+            const size_t category_close = code.find ('"', after + 1);
+            if (category_close == std::string::npos) {
+                continue;
+            }
+            after = category_close + 1;
+            while (after < code.size () && (code[after] == ' ' || code[after] == ',')) {
+                ++after;
+            }
+            if (after >= code.size () || code[after] != '"') {
+                continue;
+            }
             ++after;
             for (const auto method : kMethods) {
                 if (code.compare (after, method.size (), method) == 0) {
                     std::string offender (logger);
-                    offender += " (\"";
+                    offender += " (\"...\", \"";
                     offender += method;
                     offenders.push_back (std::move (offender));
                     break;
@@ -284,20 +300,22 @@ TEST (RouteRequestLoggingScanTest, NoHandWrittenMethodPathLineRemains) {
  * of the 48 original lines back.
  */
 TEST (RouteRequestLoggingScanTest, TheGuardSeesTheShapeAndNotALongerNameOrAPlainMessage) {
-    EXPECT_EQ (
-    route_prefixed_calls (R"(vayu::utils::log_info ("GET /health - ok");)").size (), 1u);
-    EXPECT_EQ (
-    route_prefixed_calls (R"(vayu::utils::log_debug ("POST /runs - x");)").size (), 1u);
+    EXPECT_EQ (route_prefixed_calls (R"(vayu::utils::log_info ("http", "GET /health - ok");)")
+               .size (),
+    1u);
+    EXPECT_EQ (route_prefixed_calls (R"(vayu::utils::log_debug ("http", "POST /runs - x");)")
+               .size (),
+    1u);
 
-    EXPECT_TRUE (
-    route_prefixed_calls (R"(vayu::utils::log_info ("Returning 3 items");)").empty ());
-    EXPECT_TRUE (route_prefixed_calls (R"(vayu::utils::log_warning ("GET /health - refused");)")
+    EXPECT_TRUE (route_prefixed_calls (R"(vayu::utils::log_info ("http", "Returning 3 items");)")
     .empty ());
-    EXPECT_TRUE (
-    route_prefixed_calls (R"(vayu::utils::log_info_verbose ("GET /x");)").empty ());
-    EXPECT_TRUE (
-    route_prefixed_calls (vayu::tests::strip_comments (
-                          "// vayu::utils::log_info (\"GET /never\");\n"))
+    EXPECT_TRUE (route_prefixed_calls (R"(vayu::utils::log_warning ("http", "GET /health - refused");)")
+    .empty ());
+    EXPECT_TRUE (route_prefixed_calls (R"(vayu::utils::log_info_verbose ("http", "GET /x");)")
+    .empty ());
+    EXPECT_TRUE (route_prefixed_calls (
+    vayu::tests::strip_comments (
+    "// vayu::utils::log_info (\"http\", \"GET /never\");\n"))
     .empty ());
 }
 

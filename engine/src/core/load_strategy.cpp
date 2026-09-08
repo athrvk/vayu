@@ -657,10 +657,10 @@ class ConstantLoadStrategy : public LoadStrategy {
             size_t concurrency =
             static_cast<size_t> (config.value ("concurrency", 100));
 
+            vayu::utils::log_info ("run", "Starting Constant Load Test (Concurrency-Based)");
             vayu::utils::log_info (
-            "Starting Constant Load Test (Concurrency-Based)");
-            vayu::utils::log_info ("  Duration: " + std::to_string (duration_ms) + " ms");
-            vayu::utils::log_info ("  Concurrency: " + std::to_string (concurrency));
+            "run", "  Duration: " + std::to_string (duration_ms) + " ms");
+            vayu::utils::log_info ("run", "  Concurrency: " + std::to_string (concurrency));
 
             auto submit_one = [&context, &db, &live] () {
                 submit_one_request (context, db, live);
@@ -760,9 +760,9 @@ class ConstantLoadStrategy : public LoadStrategy {
     int64_t duration_ms,
     double target_rps) {
         // Rate-limited mode
-        vayu::utils::log_info ("Starting Constant Load Test (Rate-Limited)");
-        vayu::utils::log_info ("  Duration: " + std::to_string (duration_ms) + " ms");
-        vayu::utils::log_info ("  Target RPS: " + std::to_string (target_rps));
+        vayu::utils::log_info ("run", "Starting Constant Load Test (Rate-Limited)");
+        vayu::utils::log_info ("run", "  Duration: " + std::to_string (duration_ms) + " ms");
+        vayu::utils::log_info ("run", "  Target RPS: " + std::to_string (target_rps));
 
         // Calculate expected requests
         size_t expected = static_cast<size_t> (
@@ -781,7 +781,8 @@ class ConstantLoadStrategy : public LoadStrategy {
         const size_t max_pending = context->config.value ("maxInFlight",
         std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
 
-        vayu::utils::log_debug ("Submission config: tick_us=" + std::to_string (tick_us) +
+        vayu::utils::log_debug ("run",
+        "Submission config: tick_us=" + std::to_string (tick_us) +
         ", max_in_flight=" + std::to_string (max_pending) +
         ", expected_requests=" + std::to_string (expected));
 
@@ -816,7 +817,7 @@ class ConstantLoadStrategy : public LoadStrategy {
             context, accrued_through + std::chrono::microseconds (tick_us));
         }
 
-        vayu::utils::log_info ("Submitted " + std::to_string (submitted) + " requests");
+        vayu::utils::log_info ("run", "Submitted " + std::to_string (submitted) + " requests");
     }
 };
 
@@ -834,9 +835,9 @@ class IterationsLoadStrategy : public LoadStrategy {
         size_t iterations = static_cast<size_t> (config.value ("iterations", 1000));
         size_t concurrency = static_cast<size_t> (config.value ("concurrency", 10));
 
-        vayu::utils::log_info ("Starting Iterations Load Test");
-        vayu::utils::log_info ("  Iterations: " + std::to_string (iterations));
-        vayu::utils::log_info ("  Concurrency: " + std::to_string (concurrency));
+        vayu::utils::log_info ("run", "Starting Iterations Load Test");
+        vayu::utils::log_info ("run", "  Iterations: " + std::to_string (iterations));
+        vayu::utils::log_info ("run", "  Concurrency: " + std::to_string (concurrency));
 
         context->requests_expected = iterations;
 
@@ -854,8 +855,8 @@ class IterationsLoadStrategy : public LoadStrategy {
             return context->requests_sent.load () < iterations;
         });
 
-        vayu::utils::log_info ("Submitted " +
-        std::to_string (context->requests_sent.load ()) + " requests");
+        vayu::utils::log_info ("run",
+        "Submitted " + std::to_string (context->requests_sent.load ()) + " requests");
     }
 };
 
@@ -879,12 +880,15 @@ class RampUpLoadStrategy : public LoadStrategy {
         size_t target_concurrency =
         static_cast<size_t> (config.value ("concurrency", 100));
 
-        vayu::utils::log_info ("Starting Ramp Up Load Test");
-        vayu::utils::log_info ("  Total Duration: " + std::to_string (duration_ms) + " ms");
+        vayu::utils::log_info ("run", "Starting Ramp Up Load Test");
         vayu::utils::log_info (
+        "run", "  Total Duration: " + std::to_string (duration_ms) + " ms");
+        vayu::utils::log_info ("run",
         "  Ramp Up Duration: " + std::to_string (ramp_duration_ms) + " ms");
-        vayu::utils::log_info ("  Start Concurrency: " + std::to_string (start_concurrency));
-        vayu::utils::log_info ("  Target Concurrency: " + std::to_string (target_concurrency));
+        vayu::utils::log_info (
+        "run", "  Start Concurrency: " + std::to_string (start_concurrency));
+        vayu::utils::log_info (
+        "run", "  Target Concurrency: " + std::to_string (target_concurrency));
 
         auto submit_one = [&context, &db, &live] () {
             submit_one_request (context, db, live);
@@ -1071,15 +1075,15 @@ class CapacityLoadStrategy : public LoadStrategy {
         const CapacityConfig capacity_config =
         capacity_config_from (config, step_ms, deadline_ms);
 
-        vayu::utils::log_info ("Starting Capacity Discovery Load Test");
-        vayu::utils::log_info (
+        vayu::utils::log_info ("run", "Starting Capacity Discovery Load Test");
+        vayu::utils::log_info ("run",
         "  SLO: p99 < " + std::to_string (capacity_config.slo_ms) + " ms");
-        vayu::utils::log_info (
+        vayu::utils::log_info ("run",
         "  Step duration: " + std::to_string (capacity_config.step_duration_ms) + " ms");
-        vayu::utils::log_info (
+        vayu::utils::log_info ("run",
         "  Concurrency: " + std::to_string (capacity_config.start_concurrency) +
         " -> " + std::to_string (capacity_config.max_concurrency));
-        vayu::utils::log_info ("  Deadline: " + std::to_string (deadline_ms) + " ms");
+        vayu::utils::log_info ("run", "  Deadline: " + std::to_string (deadline_ms) + " ms");
 
         // Through `SubmissionRequest` like every other mode since #993: a
         // capacity search binds its data rows the same way, and picks up a
@@ -1103,8 +1107,9 @@ class CapacityLoadStrategy : public LoadStrategy {
         // the log line below reads the engaged optional rather than asking
         // whether the write it just made took.
         const CapacitySummary& capacity = context->capacity.emplace (search.finish ());
-        vayu::utils::log_info ("Capacity search stopped: " + capacity.stop_reason +
-        " (" + std::to_string (capacity.levels.size ()) + " levels measured)");
+        vayu::utils::log_info ("run",
+        "Capacity search stopped: " + capacity.stop_reason + " (" +
+        std::to_string (capacity.levels.size ()) + " levels measured)");
     }
 };
 

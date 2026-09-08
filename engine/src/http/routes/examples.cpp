@@ -389,13 +389,14 @@ void register_request_example_routes (RouteContext& ctx) {
         try {
             auto [status, body] = list_request_examples_response (ctx.db, request_id);
             if (status != 200) {
-                vayu::utils::log_warning ("GET /requests/:id/examples - " +
-                std::to_string (status) + " for request " + request_id);
+                vayu::utils::log_warning ("http",
+                "GET /requests/:id/examples - " + std::to_string (status) +
+                " for request " + request_id);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "GET /requests/:id/examples - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
@@ -423,17 +424,18 @@ void register_request_example_routes (RouteContext& ctx) {
             auto [status, body] =
             create_request_example_response (ctx.db, request_id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /requests/:id/examples - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /requests/:id/examples - " + std::to_string (status) +
+                ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info (
+                vayu::utils::log_info ("http",
                 "POST /requests/:id/examples - Created example: id=" +
                 body["id"].get<std::string> () + ", request=" + request_id);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "POST /requests/:id/examples - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
@@ -455,14 +457,14 @@ void register_request_example_routes (RouteContext& ctx) {
             auto [status, body] =
             update_request_example_response (ctx.db, request_id, example_id, json);
             if (status != 200) {
-                vayu::utils::log_warning (
+                vayu::utils::log_warning ("http",
                 "PUT /requests/:id/examples/:exampleId - " + std::to_string (status) +
                 " for id=" + example_id + ": " + error_message_of (body));
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "PUT /requests/:id/examples/:exampleId - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
@@ -480,11 +482,11 @@ void register_request_example_routes (RouteContext& ctx) {
             auto [status, body] =
             delete_request_example_response (ctx.db, request_id, example_id);
             if (status != 200) {
-                vayu::utils::log_warning (
+                vayu::utils::log_warning ("http",
                 "DELETE /requests/:id/examples/:exampleId - " +
                 std::to_string (status) + " for id=" + example_id);
             } else {
-                vayu::utils::log_info (
+                vayu::utils::log_info ("http",
                 "DELETE /requests/:id/examples/:exampleId - Deleted example: "
                 "id=" +
                 example_id);
@@ -492,7 +494,7 @@ void register_request_example_routes (RouteContext& ctx) {
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "DELETE /requests/:id/examples/:exampleId - Error: " +
             std::string (e.what ()));
             send_error (res, 500, e.what ());

@@ -37,24 +37,18 @@ namespace {
 std::atomic<bool> g_running{ true };
 vayu::platform::LockHandle g_lock_handle = vayu::platform::INVALID_LOCK_HANDLE;
 
-std::string get_default_data_dir () {
-    // Default to the repository data folder adjacent to the engine build
-    // ("../data"). This makes the daemon, logger and lock file default to the
-    // project's data directory when no --data-dir argument is provided.
-    return vayu::platform::path_join (".", "data");
-}
-
 bool acquire_lock (const std::string& lock_path) {
     if (!vayu::platform::acquire_file_lock (lock_path, g_lock_handle)) {
-        vayu::utils::log_error ("Error: Another instance of Vayu Engine is "
-                                "already running, or failed to create lock "
-                                "file: " +
+        vayu::utils::log_error ("startup",
+        "Error: Another instance of Vayu Engine is "
+        "already running, or failed to create lock "
+        "file: " +
         lock_path);
         return false;
     }
 
     if (!vayu::platform::write_pid_to_lock (g_lock_handle)) {
-        vayu::utils::log_warning ("Failed to write PID to lock file");
+        vayu::utils::log_warning ("startup", "Failed to write PID to lock file");
         // Not fatal, continue anyway
     }
 
@@ -85,7 +79,7 @@ void print_help () {
 int run_daemon (std::span<char* const> args) {
     // Parse arguments first (need data_dir for logging)
     vayu::core::DaemonArgs parsed;
-    parsed.data_dir = get_default_data_dir ();
+    parsed.data_dir = vayu::platform::default_data_dir ();
 
     const auto request = vayu::core::read_daemon_args (args, parsed);
     if (!request) {
@@ -124,7 +118,7 @@ int run_daemon (std::span<char* const> args) {
     }
 
     // Initialize logger
-    vayu::utils::Logger::instance ().init (log_dir);
+    vayu::utils::Logger::instance ().init (log_dir, "engine");
 
     // Check for single instance
     std::string lock_path = vayu::platform::path_join (data_dir, "vayu.lock");
@@ -137,8 +131,7 @@ int run_daemon (std::span<char* const> args) {
     // Setup signal handlers using platform abstraction
     vayu::platform::setup_signal_handlers ([] (bool force) {
         if (force) {
-            vayu::utils::log_warning (
-            "Force shutdown requested, exiting immediately");
+            vayu::utils::log_warning ("shutdown", "Force shutdown requested, exiting immediately");
             // `_Exit` and not `exit` (#945): this runs inside the signal
             // handler, and `exit` would run every atexit handler and static
             // destructor *while the worker threads are still using what they
@@ -148,7 +141,7 @@ int run_daemon (std::span<char* const> args) {
             // Ctrl-C's job, below.
             std::_Exit (1);
         }
-        vayu::utils::log_info ("Shutting down...");
+        vayu::utils::log_info ("shutdown", "Shutting down...");
         g_running.store (false);
     });
 
@@ -157,10 +150,10 @@ int run_daemon (std::span<char* const> args) {
     vayu::db::Database db (db_path);
     try {
         db.init ();
-        vayu::utils::log_info ("Database initialized at " + db_path);
+        vayu::utils::log_info ("startup", "Database initialized at " + db_path);
     } catch (const std::exception& e) {
         vayu::utils::log_error (
-        "Failed to initialize database: " + std::string (e.what ()));
+        "startup", "Failed to initialize database: " + std::string (e.what ()));
         return 1;
     }
 
@@ -174,8 +167,9 @@ int run_daemon (std::span<char* const> args) {
     if (auto level = vayu::utils::parse_log_level (configured_level)) {
         vayu::utils::Logger::instance ().set_file_level (*level);
     } else {
-        vayu::utils::log_warning ("Ignoring unrecognised logLevel '" +
-        configured_level + "' - the log file keeps its default level (" +
+        vayu::utils::log_warning ("config",
+        "Ignoring unrecognised logLevel '" + configured_level +
+        "' - the log file keeps its default level (" +
         vayu::core::constants::logging::DEFAULT_LEVEL + ")");
     }
     vayu::utils::Logger::instance ().set_max_file_bytes (db.get_config_int (
@@ -201,7 +195,7 @@ int run_daemon (std::span<char* const> args) {
     // trigger the graceful shutdown sequence in the main loop
     server.set_shutdown_callback ([&] () {
         vayu::utils::log_info (
-        "Shutdown callback invoked - signaling main loop to exit");
+        "shutdown", "Shutdown callback invoked - signaling main loop to exit");
         g_running.store (false);
     });
 
@@ -227,7 +221,7 @@ int run_daemon (std::span<char* const> args) {
     }
 
     // Graceful shutdown
-    vayu::utils::log_info ("Shutting down gracefully...");
+    vayu::utils::log_info ("shutdown", "Shutting down gracefully...");
 
     // Stop the HTTP server first (with timeout)
     auto server_stop_start = std::chrono::steady_clock::now ();
@@ -235,7 +229,7 @@ int run_daemon (std::span<char* const> args) {
     auto server_stop_elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now () - server_stop_start)
                                .count ();
-    vayu::utils::log_debug (
+    vayu::utils::log_debug ("shutdown",
     "Server stopped in " + std::to_string (server_stop_elapsed) + "ms");
 
     // Stop every active run and JOIN its worker before anything it holds a
@@ -254,7 +248,7 @@ int run_daemon (std::span<char* const> args) {
     // Release lock file
     vayu::platform::release_file_lock (g_lock_handle);
 
-    vayu::utils::log_info ("Goodbye!");
+    vayu::utils::log_info ("shutdown", "Goodbye!");
 
     // Force flush logs
     vayu::utils::Logger::instance ().flush ();
@@ -284,11 +278,11 @@ int main (int argc, char* argv[]) {
         // one reachable input justified. Defence in depth, said plainly,
         // rather than a fix advertised by a bug it no longer has.
         std::cerr << "vayu-engine: " << e.what () << "\n";
-        vayu::utils::log_error (std::string ("vayu-engine: ") + e.what ());
+        vayu::utils::log_error ("startup", std::string ("vayu-engine: ") + e.what ());
         return 1;
     } catch (...) {
         std::cerr << "vayu-engine: unknown error\n";
-        vayu::utils::log_error ("vayu-engine: unknown error");
+        vayu::utils::log_error ("startup", "vayu-engine: unknown error");
         return 1;
     }
 }

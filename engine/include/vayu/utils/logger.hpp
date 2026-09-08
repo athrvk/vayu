@@ -19,6 +19,8 @@
 #include <string_view>
 #include <thread>
 
+#include <nlohmann/json.hpp>
+
 #include "vayu/core/constants.hpp"
 
 // Windows headers define ERROR as a macro, undef it
@@ -29,6 +31,9 @@
 #endif
 
 namespace vayu::utils {
+
+struct LogRecord;
+
 class Logger {
     public:
     enum class Level : std::uint8_t {
@@ -50,8 +55,11 @@ class Logger {
     Logger (Logger&&)                 = delete;
     Logger& operator= (Logger&&)      = delete;
 
-    void init (const std::string& log_dir = vayu::core::constants::logging::DIR);
-    void log (Level level, const std::string& message);
+    /// @p source is `"engine"` or `"cli"` (issue #1557): both the value every
+    /// record's `src` field carries and the file name prefix
+    /// (`engine_<stamp>.log` / `cli_<stamp>.log`), so the two binaries' files
+    /// sort apart under one directory without a second `logDir` to configure.
+    void init (const std::string& log_dir, std::string_view source = "engine");
 
     // The file sink's own floor, separate from `verbosity_level_`, which is
     // what `-v` buys the console. The file used to take everything at DEBUG
@@ -62,10 +70,6 @@ class Logger {
     // Size one log file may reach before it is rotated once to `<name>.1`;
     // 0 means unlimited. Config entry `maxLogFileBytes`.
     void set_max_file_bytes (int64_t bytes);
-    void debug (const std::string& message);
-    void info (const std::string& message);
-    void warning (const std::string& message);
-    void error (const std::string& message);
 
     void set_verbosity (int level) {
         verbosity_level_ = level;
@@ -77,29 +81,65 @@ class Logger {
     // Force flush log file
     void flush ();
 
+    /// @brief The one entry point (issue #1557).
+    ///
+    /// Every `log_debug`/`log_info`/`log_warning`/`log_error` call below
+    /// builds a `LogRecord` and calls this. Adds `ts` (UTC), `pid`, `tid` and
+    /// `src`, redacts `record.fields` in place (`utils/log_redact.hpp`), then
+    /// renders the result to whichever sink is enabled for the level: a JSON
+    /// line to the file, one text line to the console.
+    void write (LogRecord&& record);
+
     private:
     Logger () = default;
     ~Logger ();
 
-    std::string level_to_string (Level level) const;
-    std::string get_timestamp () const;
+    std::string level_console_name (Level level) const;
+    std::string_view level_wire_name (Level level) const;
     std::string get_thread_id () const;
     void ensure_log_directory ();
     // Rotate the open file to `<path>.1` and continue in a fresh one. Called
-    // with `mutex_` held, from `log` only.
+    // with `mutex_` held, from `write_to_file_locked` only.
     void rotate_locked ();
+    // The prefix `write` opened the current file with (`engine_` or `cli_`),
+    // for `rotate_locked` and for the retention sweep in `init`.
+    std::string file_prefix () const;
+    // The two sinks `write` renders @p record to, split out to keep `write`
+    // itself a dispatch rather than both bodies at once. Both require
+    // `mutex_` held, and both read a `ts` `write` computed once for the pair.
+    void write_to_file_locked (const LogRecord& record,
+    const std::string& ts,
+    const std::string& thread_id,
+    int pid);
+    void write_to_console_locked (const LogRecord& record, const std::string& ts);
 
     std::unique_ptr<std::ofstream> log_file_;
     std::mutex mutex_;
     int verbosity_level_ = 0; // 0=warn/error, 1=info+, 2=debug+
     std::string log_dir_;
     std::string log_file_path_;
+    std::string source_     = "engine";
     Level file_level_       = Level::DEBUG;
     int64_t max_file_bytes_ = 0; // 0 = unlimited
     // Bytes in the open file, seeded from its size because it is opened for
     // append: a restart inside the same clock second reopens the file the
     // previous start wrote, and the cap is on the file, not on this process.
     int64_t file_bytes_ = 0;
+};
+
+/**
+ * @brief One log call's whole payload (issue #1557).
+ *
+ * `cat` is a `string_view` because every call site passes a string literal
+ * from its source-scanned category list (`tests/log_category_scan_test.cpp`);
+ * `fields` defaults to an empty object rather than nlohmann's default `null`,
+ * so `Logger::write` can merge it into a record unconditionally.
+ */
+struct LogRecord {
+    Logger::Level level;
+    std::string_view cat;
+    std::string msg;
+    nlohmann::json fields = nlohmann::json::object ();
 };
 
 /**
@@ -113,32 +153,52 @@ class Logger {
 std::optional<Logger::Level> parse_log_level (std::string_view name);
 
 /**
- * @brief Delete `vayu_*.log` files in @p log_dir beyond the newest @p keep.
+ * @brief Delete files matching `<file_prefix><stamp>.log` in @p log_dir beyond
+ *        the newest @p keep.
+ * @param file_prefix The filename prefix to match - `"engine_"` or `"cli_"` -
+ *        never a full path. Each source's files are pruned as their own
+ *        generation, so a busy CLI cannot evict the daemon's history or the
+ *        other way around.
  * @return How many files were deleted.
  *
  * Newest is decided by filename, not by modification time: the names embed
  * `%Y%m%d_%H%M%S`, so they sort chronologically, and a copied or touched
  * directory keeps sorting the way the log timestamps read. A file's `.1`
- * rotation goes with it, so a pruned generation leaves nothing behind, and
- * anything not named `vayu_<stamp>.log` is never a candidate.
+ * rotation goes with it, so a pruned generation leaves nothing behind.
  */
-std::size_t prune_old_logs (const std::string& log_dir, std::size_t keep);
+std::size_t
+prune_old_logs (const std::string& log_dir, std::string_view file_prefix, std::size_t keep);
 
-// Convenience functions
-inline void log_debug (const std::string& msg) {
-    Logger::instance ().debug (msg);
+// Convenience functions - the only way to log (issue #1557): `Logger::write`
+// is the one entry point these all route through, so a category is never
+// optional and a bad-value redaction path is not something a call site can
+// route around.
+inline void log_debug (std::string_view cat,
+std::string msg,
+nlohmann::json fields = nlohmann::json::object ()) {
+    Logger::instance ().write (
+    LogRecord{ Logger::Level::DEBUG, cat, std::move (msg), std::move (fields) });
 }
 
-inline void log_info (const std::string& msg) {
-    Logger::instance ().info (msg);
+inline void log_info (std::string_view cat,
+std::string msg,
+nlohmann::json fields = nlohmann::json::object ()) {
+    Logger::instance ().write (
+    LogRecord{ Logger::Level::INFO, cat, std::move (msg), std::move (fields) });
 }
 
-inline void log_warning (const std::string& msg) {
-    Logger::instance ().warning (msg);
+inline void log_warning (std::string_view cat,
+std::string msg,
+nlohmann::json fields = nlohmann::json::object ()) {
+    Logger::instance ().write (
+    LogRecord{ Logger::Level::WARNING, cat, std::move (msg), std::move (fields) });
 }
 
-inline void log_error (const std::string& msg) {
-    Logger::instance ().error (msg);
+inline void log_error (std::string_view cat,
+std::string msg,
+nlohmann::json fields = nlohmann::json::object ()) {
+    Logger::instance ().write (
+    LogRecord{ Logger::Level::ERROR, cat, std::move (msg), std::move (fields) });
 }
 
 } // namespace vayu::utils

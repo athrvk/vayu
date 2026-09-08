@@ -115,7 +115,8 @@ void register_trash_routes (RouteContext& ctx) {
         try {
             res.set_content (trash_list_body (ctx.db).dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("GET /trash - Error: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "http", "GET /trash - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });
@@ -133,13 +134,14 @@ void register_trash_routes (RouteContext& ctx) {
         try {
             auto [status, body] = trash_restore_response (ctx.db, id);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /trash/:id/restore - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /trash/:id/restore - " + std::to_string (status) + ": " +
+                error_message_of (body));
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "POST /trash/:id/restore - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
@@ -157,14 +159,15 @@ void register_trash_routes (RouteContext& ctx) {
         try {
             auto [status, body] = trash_purge_response (ctx.db, id);
             if (status != 200) {
-                vayu::utils::log_warning ("DELETE /trash/:id - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "DELETE /trash/:id - " + std::to_string (status) + ": " +
+                error_message_of (body));
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "DELETE /trash/:id - Error: " + std::string (e.what ()));
+            "http", "DELETE /trash/:id - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
     });

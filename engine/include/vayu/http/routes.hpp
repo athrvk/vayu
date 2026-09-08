@@ -237,8 +237,8 @@ inline void send_json (httplib::Response& res, const nlohmann::json& data) {
 inline httplib::Server::Handler deprecated_alias (httplib::Server::Handler handler) {
     return [handler = std::move (handler)] (
            const httplib::Request& req, httplib::Response& res) {
-        vayu::utils::log_info (req.method + " " + req.path +
-        " (deprecated alias) - prefer the canonical path");
+        vayu::utils::log_info ("http",
+        req.method + " " + req.path + " (deprecated alias) - prefer the canonical path");
         handler (req, res);
     };
 }

@@ -355,8 +355,9 @@ std::vector<std::string>& failure_messages) {
             continue;
         }
 
-        vayu::utils::log_debug ("Validating " + std::to_string (samples.size ()) +
-        " response samples for step " + std::to_string (i + 1) + " (" + step.name + ")...");
+        vayu::utils::log_debug ("run",
+        "Validating " + std::to_string (samples.size ()) + " response samples for step " +
+        std::to_string (i + 1) + " (" + step.name + ")...");
 
         ScriptReplay replay;
         replay.script = post_script;
@@ -439,8 +440,7 @@ vayu::db::Database& db) {
     }
 
     if (!per_step && context->metrics_collector->response_samples ().empty ()) {
-        vayu::utils::log_debug (
-        "No response samples collected for script validation");
+        vayu::utils::log_debug ("run", "No response samples collected for script validation");
         return validation;
     }
 
@@ -553,8 +553,8 @@ vayu::db::Database& db) {
         }
     } else {
         const auto& samples = context->metrics_collector->response_samples ();
-        vayu::utils::log_debug ("Validating " + std::to_string (samples.size ()) +
-        " response samples with test script...");
+        vayu::utils::log_debug ("run",
+        "Validating " + std::to_string (samples.size ()) + " response samples with test script...");
 
         ScriptReplay replay;
         replay.script  = &context->test_script;
@@ -586,8 +586,9 @@ vayu::db::Database& db) {
 
     store_validation_failures (db, context->run_id, failure_messages, passed, failed);
 
-    vayu::utils::log_debug ("  Script validation: " + std::to_string (passed) +
-    " passed, " + std::to_string (failed) + " failed");
+    vayu::utils::log_debug ("run",
+    "  Script validation: " + std::to_string (passed) + " passed, " +
+    std::to_string (failed) + " failed");
 
     validation.run = ScriptValidationTotals{ sampled, passed, failed };
     return validation;
@@ -647,15 +648,16 @@ const std::shared_ptr<RunContext>& context) {
                 // A validator that threw is not a response that failed, and it
                 // must not cost the run the rest of its samples. Same rule the
                 // design-mode hook applies to the same call.
-                vayu::utils::log_warning (
+                vayu::utils::log_warning ("run",
                 "Schema validation of a sample failed: " + std::string (e.what ()));
             }
         }
     }
 
     if (totals.sampled > 0) {
-        vayu::utils::log_debug ("  Schema validation: " + std::to_string (totals.checked) +
-        " of " + std::to_string (totals.sampled) + " samples checked, " +
+        vayu::utils::log_debug ("run",
+        "  Schema validation: " + std::to_string (totals.checked) + " of " +
+        std::to_string (totals.sampled) + " samples checked, " +
         std::to_string (totals.valid) + " valid, " +
         std::to_string (totals.failed) + " failed");
     }
@@ -1030,15 +1032,16 @@ void RunManager::shutdown (std::chrono::milliseconds grace) {
     }
 
     if (!active.empty ()) {
-        vayu::utils::log_info (
+        vayu::utils::log_info ("run",
         "Stopping " + std::to_string (active.size ()) + " active load test(s)...");
         auto deadline = std::chrono::steady_clock::now () + grace;
         while (active_count () > 0 && std::chrono::steady_clock::now () < deadline) {
             std::this_thread::sleep_for (std::chrono::milliseconds (10));
         }
         if (size_t remaining = active_count (); remaining > 0) {
-            vayu::utils::log_warning (std::to_string (remaining) +
-            " load test(s) had not settled after " + std::to_string (grace.count ()) +
+            vayu::utils::log_warning ("run",
+            std::to_string (remaining) + " load test(s) had not settled after " +
+            std::to_string (grace.count ()) +
             "ms; waiting for them anyway - abandoning a worker would leave it "
             "writing to a destroyed database");
         }
@@ -1060,7 +1063,7 @@ void RunManager::shutdown (std::chrono::milliseconds grace) {
     }
 
     if (!active.empty ()) {
-        vayu::utils::log_info ("All load tests stopped");
+        vayu::utils::log_info ("run", "All load tests stopped");
     }
 }
 
@@ -1084,7 +1087,7 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
     {
         std::lock_guard<std::mutex> workers_lock (workers_mtx_);
         if (shutting_down_) {
-            vayu::utils::log_warning (
+            vayu::utils::log_warning ("run",
             "Refusing to start run " + run_id + ": engine is shutting down");
             return false;
         }
@@ -1257,7 +1260,8 @@ int default_max_per_host) {
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);
 
-    vayu::utils::log_debug ("EventLoop config: workers=" + std::to_string (configured_workers) +
+    vayu::utils::log_debug ("run",
+    "EventLoop config: workers=" + std::to_string (configured_workers) +
     ", max_concurrent=" + std::to_string (loop_config.max_concurrent) +
     ", max_per_host=" + std::to_string (loop_config.max_per_host) +
     ", target_rps=" + std::to_string (target_rps) +
@@ -1316,9 +1320,9 @@ vayu::Request& request) {
     auto built = vayu::http::build_request (
     config, db_ptr, timeout_ms, context->load_auth.auth_resolution ());
     if (!built.ok) {
-        vayu::utils::log_error (built.parse_failed ?
-        std::string ("Load test: invalid request format") :
-        "Load test auth resolution failed: " + built.error_message);
+        vayu::utils::log_error ("run",
+        built.parse_failed ? std::string ("Load test: invalid request format") :
+                             "Load test auth resolution failed: " + built.error_message);
         return false;
     }
     request = std::move (built.request);
@@ -1794,11 +1798,11 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     try {
         size_t flushed = context->metrics_collector->flush_to_database (db);
         if (flushed > 0) {
-            vayu::utils::log_debug (
+            vayu::utils::log_debug ("run",
             "  Flushed " + std::to_string (flushed) + " results to database");
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
+        vayu::utils::log_error ("run",
         "Failed to flush results to database: " + std::string (e.what ()));
     }
 
@@ -1808,7 +1812,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     try {
         validation = validate_scripts (context, db);
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("Script validation failed: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "run", "Script validation failed: " + std::string (e.what ()));
     }
 
     // The other deferred pass over the same reservoirs (issue #682): what
@@ -1819,7 +1824,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     try {
         schema_totals = validate_sampled_responses (context);
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("Schema validation failed: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "run", "Schema validation failed: " + std::string (e.what ()));
     }
 
     // `script.teardown` (#1499): the same collection-level elements
@@ -1852,7 +1858,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         context->run_id, build_run_summary_payload (inputs).dump ());
         summary_stored = true;
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("Failed to store run summary: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "run", "Failed to store run summary: " + std::string (e.what ()));
     }
 
     // Update run status with retry logic to handle any remaining contention.
@@ -1873,20 +1880,21 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     try {
         db.prune_runs_configured ();
     } catch (const std::exception& e) {
-        vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
+        vayu::utils::log_warning ("run", "Run pruning failed: " + std::string (e.what ()));
     }
 
-    vayu::utils::log_debug (
+    vayu::utils::log_debug ("run",
     "Load test " + context->run_id + " " + vayu::to_string (final_status));
-    vayu::utils::log_debug ("  Total requests: " + std::to_string (completed));
-    vayu::utils::log_debug ("  Errors: " + std::to_string (errors) + " (" +
-    std::to_string (error_rate) + "%)");
-    vayu::utils::log_debug ("  Duration: " + std::to_string (total_duration_s) + " s");
-    vayu::utils::log_debug ("  Target RPS: " +
-    (target_rps > 0 ? std::to_string (target_rps) : "unlimited"));
-    vayu::utils::log_debug ("  Actual RPS: " + std::to_string (actual_rps));
-    vayu::utils::log_debug ("  Avg latency: " + std::to_string (avg_latency) + " ms");
-    vayu::utils::log_debug ("  P50/P95/P99: " + std::to_string (percentiles.p50) + "/" +
+    vayu::utils::log_debug ("run", "  Total requests: " + std::to_string (completed));
+    vayu::utils::log_debug ("run",
+    "  Errors: " + std::to_string (errors) + " (" + std::to_string (error_rate) + "%)");
+    vayu::utils::log_debug ("run", "  Duration: " + std::to_string (total_duration_s) + " s");
+    vayu::utils::log_debug ("run",
+    "  Target RPS: " + (target_rps > 0 ? std::to_string (target_rps) : "unlimited"));
+    vayu::utils::log_debug ("run", "  Actual RPS: " + std::to_string (actual_rps));
+    vayu::utils::log_debug ("run", "  Avg latency: " + std::to_string (avg_latency) + " ms");
+    vayu::utils::log_debug ("run",
+    "  P50/P95/P99: " + std::to_string (percentiles.p50) + "/" +
     std::to_string (percentiles.p95) + "/" + std::to_string (percentiles.p99) + " ms");
 }
 
@@ -1940,7 +1948,7 @@ RunManager& manager) {
         // load is sent.
         vayu::http::routes::ScriptVariableScopes base_scopes;
         if (auto setup_failure = run_collection_setup (db, context, base_scopes)) {
-            vayu::utils::log_error ("script.setup failed: " + *setup_failure);
+            vayu::utils::log_error ("run", "script.setup failed: " + *setup_failure);
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
@@ -1961,7 +1969,7 @@ RunManager& manager) {
                 strategy->execute (context, db, request);
             }
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("Load test failed: " + std::string (e.what ()));
+            vayu::utils::log_error ("run", "Load test failed: " + std::string (e.what ()));
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
@@ -2027,7 +2035,7 @@ RunManager& manager) {
         context->is_running = false;
         context->join_aux_threads ();
 
-        vayu::utils::log_error ("Load test error: " + std::string (e.what ()));
+        vayu::utils::log_error ("run", "Load test error: " + std::string (e.what ()));
 
         // A crashed run still gets a summary, with whatever the collector holds
         // and a wall-clock duration - without one the report route would take
@@ -2071,7 +2079,7 @@ RunManager& manager) {
             db.update_run_summary (
             context->run_id, build_run_summary_payload (inputs).dump ());
         } catch (const std::exception& ex) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("run",
             "Failed to store run summary for failed run: " + std::string (ex.what ()));
         }
 
@@ -2079,14 +2087,15 @@ RunManager& manager) {
             db.update_run_status_with_retry (context->run_id, vayu::RunStatus::Failed);
         } catch (const std::exception& ex) {
             vayu::utils::log_error (
-            "Failed to update run status: " + std::string (ex.what ()));
+            "run", "Failed to update run status: " + std::string (ex.what ()));
         }
 
         // Failed is terminal too - prune per the retention knobs, best-effort.
         try {
             db.prune_runs_configured ();
         } catch (const std::exception& ex) {
-            vayu::utils::log_warning ("Run pruning failed: " + std::string (ex.what ()));
+            vayu::utils::log_warning (
+            "run", "Run pruning failed: " + std::string (ex.what ()));
         }
     }
 
@@ -2357,9 +2366,10 @@ int64_t& first_tick_steady_ms) {
         }
     }
 
-    vayu::utils::log_debug ("Metrics: rps=" + std::to_string (current_rps) +
-    ", send_rate=" + std::to_string (send_rate) + ", throughput=" +
-    std::to_string (throughput) + ", backpressure=" + std::to_string (backpressure) +
+    vayu::utils::log_debug ("run",
+    "Metrics: rps=" + std::to_string (current_rps) + ", send_rate=" +
+    std::to_string (send_rate) + ", throughput=" + std::to_string (throughput) +
+    ", backpressure=" + std::to_string (backpressure) +
     ", error_rate=" + std::to_string (error_rate) + "%" + ", active=" +
     std::to_string (active_now) + ", sent=" + std::to_string (requests_sent));
 
@@ -2411,7 +2421,7 @@ int64_t& first_tick_steady_ms) {
         // fails the run: the live stream and the final report are
         // built from the collector, not from these rows. At most
         // one line per tick, and the tick gate is 1 Hz.
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("run",
         "Metric tick not persisted for run " + context->run_id + ": " + e.what ());
     }
 
@@ -2574,9 +2584,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // as the termination contract (last data before closed==true).
         emit_live_tick (nullptr, now_ms (), steady_now_ms ());
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("collect_metrics: " + std::string (e.what ()));
+        vayu::utils::log_error ("run", "collect_metrics: " + std::string (e.what ()));
     } catch (...) {
-        vayu::utils::log_error ("collect_metrics: unknown exception");
+        vayu::utils::log_error ("run", "collect_metrics: unknown exception");
     }
 
     // Unconditional: always signal consumers so they terminate cleanly,
@@ -2604,8 +2614,9 @@ int& interval_ms) {
     }
     if (consecutive_failures == constants::monitor::FAILURES_BEFORE_BACKOFF) {
         if (!backoff_logged) {
-            vayu::utils::log_warning ("Monitor scrape for run " + context->run_id +
-            " has failed " + std::to_string (consecutive_failures) + " times in a row (" +
+            vayu::utils::log_warning ("run",
+            "Monitor scrape for run " + context->run_id + " has failed " +
+            std::to_string (consecutive_failures) + " times in a row (" +
             config.url + "); backing off, the series will show gaps");
             backoff_logged = true;
         }
@@ -2638,8 +2649,8 @@ int& interval_ms) {
     } catch (const std::exception& e) {
         // The live frame below still goes out: a row this run could
         // not store is worth less than a series that stops drawing.
-        vayu::utils::log_warning ("Failed to store monitor sample for run " +
-        context->run_id + ": " + e.what ());
+        vayu::utils::log_warning ("run",
+        "Failed to store monitor sample for run " + context->run_id + ": " + e.what ());
     }
     context->append_event ("monitor", payload.dump ());
 }
@@ -2662,8 +2673,8 @@ const MonitorConfig& config) {
         // interval of *this* block, so a value that is fine for a slow run is
         // shortened on a fast one, and silence would look like the setting had
         // not taken.
-        vayu::utils::log_warning ("Monitor scrape timeout for run " +
-        context->run_id + " capped at the scrape interval (" +
+        vayu::utils::log_warning ("run",
+        "Monitor scrape timeout for run " + context->run_id + " capped at the scrape interval (" +
         std::to_string (timeout_ms) + "ms); 'monitorScrapeTimeoutMs' is " +
         std::to_string (config.scrape_timeout_ms) + "ms, which is longer than this run's " +
         std::to_string (config.interval_ms) + "ms cadence");
@@ -2724,9 +2735,9 @@ const MonitorConfig& config) {
             }
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("collect_monitor: " + std::string (e.what ()));
+        vayu::utils::log_error ("run", "collect_monitor: " + std::string (e.what ()));
     } catch (...) {
-        vayu::utils::log_error ("collect_monitor: unknown exception");
+        vayu::utils::log_error ("run", "collect_monitor: unknown exception");
     }
 }
 

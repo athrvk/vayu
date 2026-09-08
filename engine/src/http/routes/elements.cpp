@@ -24,8 +24,6 @@ void register_elements_routes (RouteContext& ctx) {
      * app/MCP/docs conformance tests have it without a running engine.
      */
     ctx.server.Get ("/elements/kinds", [] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_debug (
-        "GET /elements/kinds - Element catalogue requested");
         res.set_content (vayu::core::elements_catalogue ().dump (), "application/json");
     });
 }

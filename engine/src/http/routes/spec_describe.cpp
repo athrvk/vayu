@@ -146,17 +146,19 @@ void register_spec_describe_routes (RouteContext& ctx) {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = describe_spec_response (ctx.db, json);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /specs/describe - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /specs/describe - " + std::to_string (status) + ": " +
+                error_message_of (body));
             } else {
-                vayu::utils::log_info (body["format"].get<std::string> () + ", " +
+                vayu::utils::log_info ("http",
+                body["format"].get<std::string> () + ", " +
                 std::to_string (body["operations"].size ()) + " operation(s)");
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "POST /specs/describe - Error: " + std::string (e.what ()));
+            "http", "POST /specs/describe - Error: " + std::string (e.what ()));
             send_error (res, 400, e.what ());
         }
     });
