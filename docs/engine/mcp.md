@@ -1114,6 +1114,26 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
     declared on that tool for the refusal's sake - an argument the tool's schema
     does not name is stripped before the handler sees it, which would drop the
     flag in silence.
+  - **`elements: {timers, scripts}` overrides a scenario load run's stored
+    timer/script behaviour without editing the collection** (issue #1559,
+    exposing the block issue #1495 defines on `POST /runs`,
+    `validate_elements_run_override`). `timers: "off"` silences every
+    `timer.*` wait for the run; `scripts: "allInline"` / `"allDeferred"`
+    forces every `script.pre`/`script.post` element's inline-vs-deferred
+    execution regardless of its own marking; `"asConfigured"` / `"asMarked"`
+    (the defaults) leave each element's own configuration in effect. It is
+    **top-level, beside `scenario`** rather than inside it - the same place
+    `RunCollectionDialog`'s load-test section sends it - and only takes effect
+    on `start_load_run`'s scenario branch: `run_collection`'s design-mode
+    runner has no inline/deferred distinction to make, so it does not offer
+    the argument at all, the same call the app's own dialog makes (its
+    `elements` override is sent only from the load-test section, never from a
+    design-mode collection run). A single-target `start_load_run` call is
+    **refused by name** for the same "written and read by nothing" reason the
+    single-target fields above are refused beside a scenario: there is no
+    stored collection of elements on a lone target to override. The engine's
+    contract also carries `includeScriptTime` and `seed`, but neither the app
+    nor MCP exposes either yet, so this schema only names `timers`/`scripts`.
   - **The allowlist gate is all-or-nothing here**, unlike the smoke matrix's
     per-request skip: every step is composed by id and gated before the run is
     created, and one step the allowlist does not cover refuses the whole run

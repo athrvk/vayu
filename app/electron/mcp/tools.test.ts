@@ -3630,6 +3630,73 @@ describe("start_load_run scenario runs", () => {
 		expect(client.startRun).not.toHaveBeenCalled();
 	});
 
+	test("forwards the timers/scripts override on a scenario run", async () => {
+		// The engine's validator owns the shape and the value ranges
+		// (issue #1495) - this layer only has to get the keys to it unchanged.
+		const client = scenarioLoadClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "c1" },
+				elements: { timers: "off", scripts: "allInline" },
+				confirmed: true,
+			},
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.elements).toEqual({ timers: "off", scripts: "allInline" });
+	});
+
+	test("sends no elements key when none was declared", () => {
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		const parsed = z.object(shape).parse({ scenario: { collectionId: "c1" } });
+		expect(parsed.elements).toBeUndefined();
+	});
+
+	test("rejects an elements value the engine does not accept", () => {
+		// The engine's set is closed (asConfigured|off, asMarked|allInline|
+		// allDeferred); a typo should be caught here rather than reaching
+		// POST /runs as an unrecognised value.
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		const schema = z.object(shape);
+		expect(() =>
+			schema.parse({ scenario: { collectionId: "c1" }, elements: { timers: "disabled" } })
+		).toThrow();
+		expect(() =>
+			schema.parse({ scenario: { collectionId: "c1" }, elements: { scripts: "inline" } })
+		).toThrow();
+	});
+
+	test("refuses an elements override on a single-target run", async () => {
+		const client = scenarioLoadClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com/x", elements: { timers: "off" }, confirmed: true },
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain('"elements"');
+		expect(firstText(res)).toMatch(/no stored collection of/);
+		expect(client.startRun).not.toHaveBeenCalled();
+		expect(client.composeRequest).not.toHaveBeenCalled();
+	});
+
+	test("declares elements so the single-target refusal survives schema validation", () => {
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		expect(shape.elements).toBeDefined();
+		expect(shape.elements.description).toMatch(/Scenario runs only/);
+	});
+
 	/**
 	 * The schema gate is the design-mode runner's (issue #766): no load path
 	 * reads `failOnSchemaError`, so both of this tool's paths refuse it rather
