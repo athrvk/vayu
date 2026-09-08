@@ -26,11 +26,16 @@
  * reports `waited_ms` absent, which is what tells the two apart without a
  * second field.
  *
- * `includeTimers` (folding a between-member `timer.*` wait into the sum) is
- * real, disclosed follow-up work (issue #1569), not silently dropped: this
- * element sums each member's own response latency only, and does not accept
- * the field in its config schema, so a run cannot ask for behaviour this
- * build does not give it.
+ * `includeTimers` (issue #1569) folds a between-member `timer.*` wait into
+ * the running sum too: this element's own `apply` never changes for it -
+ * the fold is the caller's, done generically in `scenario_runner.cpp`'s and
+ * `scenario_load.cpp`'s own `step.between` dispatch, which reads this
+ * element's config by the registry's `category` (never a `kind ==`
+ * comparison outside `core/elements`, #1512's extensibility contract, rule
+ * 1) and adds the just-completed step's between-phase wait to the same
+ * `controller_state` sum key (`transaction_sum_key`) this file already
+ * accumulates into - skipped for the folder's *last* member, whose sum has
+ * already closed and reported by the time any wait after it could run.
  */
 
 #include "vayu/core/elements.hpp"
@@ -125,7 +130,9 @@ ElementKind make_control_transaction_kind () {
     };
     kind.config_schema = {
         { "type", "object" },
-        { "properties", { { "name", { { "type", "string" }, { "minLength", 1 } } } } },
+        { "properties",
+        { { "name", { { "type", "string" }, { "minLength", 1 } } },
+        { "includeTimers", { { "type", "boolean" } } } } },
         { "required", { "name" } },
         { "additionalProperties", false },
     };

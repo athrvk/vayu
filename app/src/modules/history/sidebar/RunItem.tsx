@@ -30,6 +30,7 @@ import {
 	FolderTree,
 	Pin,
 	PinOff,
+	AlertTriangle,
 } from "lucide-react";
 
 interface RunItemProps {
@@ -253,6 +254,17 @@ export default function RunItem({
 									<Pin className="w-2.5 h-2.5" />
 									{isLoadRun ? "Baseline" : "Pinned"}
 								</Badge>
+							)}
+							{/* #1527: the run finished with something to say - an
+							    unresolved variable, a pre-request script the load
+							    path skipped - that only its full report shows. No
+							    adjacent text carries this, so the icon names itself. */}
+							{run.summary?.hasWarnings && (
+								<AlertTriangle
+									className="w-3.5 h-3.5 shrink-0 text-warning-text"
+									role="img"
+									aria-label="This run has warnings - see its report"
+								/>
 							)}
 						</div>
 						{/* z-10: sits above the stretched activator below, so delete

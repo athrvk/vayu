@@ -46,6 +46,8 @@
 
 namespace vayu::core {
 
+struct ScenarioPlan;
+
 /**
  * @brief Cross-instance shared clocks, one atomic per name (issue #1570) -
  *        `timer.pacing(perUser: false)`'s coordination for one cadence
@@ -101,6 +103,44 @@ struct ElementSpan {
     /// resolves against, so a loop-back is an ordinary `Next` decision to
     /// every reader of the step list, not a second flow-control mechanism.
     std::string first_step_name;
+};
+
+/// The key `control.transaction`'s running-sum accumulator uses inside
+/// `ElementContext::controller_state` (issue #1515), keyed by this element's
+/// id and the current iteration so a later iteration - or an abandoned one -
+/// never adds onto a stale total. Exposed so a caller outside `core/elements`
+/// (`scenario_runner.cpp`'s and `scenario_load.cpp`'s own `step.between`
+/// dispatch) can fold a between-member `timer.*` wait into an *open*
+/// transaction's sum when its config asks to (`includeTimers`, issue #1569),
+/// without either side hardcoding the other's key format twice.
+[[nodiscard]] std::string transaction_sum_key (const std::string& element_id, size_t iteration);
+
+/**
+ * One shared counter pair per element whose registry kind declares
+ * `supports_shared_state` and whose own config asks to share it
+ * (`control.throughput`'s `perUser: false`, issue #1569 - JMeter's "All
+ * threads" throughput mode: one budget for every virtual user of a scenario
+ * load run, rather than one per user). Allocated up front from a scan of the
+ * plan - never discovered mid-run - so a lookup is a hash-map read (built
+ * once, at construction, and never mutated after, so concurrent reads need
+ * no lock) plus one or two atomic operations on the found slot - the same
+ * "no lock" bar `TransactionHistograms` holds itself to.
+ */
+class SharedThroughputCounters {
+    public:
+    explicit SharedThroughputCounters (const ScenarioPlan& plan);
+
+    struct Counters {
+        std::atomic<int64_t> count{ 0 };
+        std::atomic<int64_t> carry{ 0 };
+    };
+
+    /// This element's shared slot, or null when its own config kept a
+    /// per-VU counter instead - the caller falls back to `controller_state`.
+    [[nodiscard]] Counters* find (const std::string& element_id);
+
+    private:
+    std::unordered_map<std::string, std::unique_ptr<Counters>> counters_;
 };
 
 /**
@@ -216,6 +256,14 @@ struct ElementContext {
     /// unified with it - kept separate rather than merged in this PR to
     /// avoid widening either issue's own change.
     std::unordered_map<std::string, int64_t>* controller_state = nullptr;
+    /// Cross-VU counters for a kind whose config asked to share state across
+    /// every virtual user of a scenario load run (issue #1569's
+    /// `control.throughput` `perUser: false`), keyed by `element_id`. Null
+    /// for a design send, the sequential run (whose single implicit user
+    /// already makes `controller_state` above the "shared" instance) and any
+    /// load run whose plan declared no element that asked to share - a kind
+    /// that finds nothing here falls back to `controller_state`.
+    SharedThroughputCounters* shared_controller_state = nullptr;
 
     /// True for the design send and the sequential run, where a `timer.*`
     /// kind's wait blocks the calling thread exactly as it always has; false
@@ -418,6 +466,14 @@ struct ElementKind {
     /// first) rather than unified with it, for the same reason
     /// `controller_state` and `pacing_state` stay two fields above.
     bool tracks_scope_occurrence = false;
+    /// Whether a config value can ask this kind's occurrences to share one
+    /// counter across every virtual user of a scenario load run, rather than
+    /// one per user (issue #1569's `control.throughput` `perUser: false`).
+    /// Read by `SharedThroughputCounters`' own plan scan through the
+    /// registry, never a `kind ==` comparison outside `core/elements`
+    /// (#1512's extensibility contract, rule 1); the config key itself, not
+    /// this flag alone, decides whether a given occurrence actually shares.
+    bool supports_shared_state = false;
     // Absent for a kind that only validates (phase 0's `inherit.disable`);
     // present once a kind actually runs (#1514 onward).
     std::function<std::unique_ptr<Element> (const nlohmann::json& config)> compile;
@@ -552,6 +608,26 @@ struct CompiledElement {
  * `Registry::validate` / `compile_elements` are what name that refusal.
  */
 void stamp_default_element_ids (nlohmann::json& elements);
+
+/**
+ * Folds a just-completed step's `step.between` wait into every *open*
+ * `control.transaction` whose config asked to include it (issue #1569's
+ * `includeTimers`) - shared by the sequential run's `run_iteration` and a
+ * scenario load run's own `run_step_between`, so the rule (and the "never a
+ * `kind ==` comparison outside `core/elements`" way it finds a transaction,
+ * through the registry's `category`) is written once.
+ *
+ * "Open" means this step is not that transaction's own last member: the
+ * last member's `apply` already closed and reported the sum by the time its
+ * own `step.between` could run, so a wait after it belongs to whatever
+ * comes next, never back into a transaction that already finished.
+ */
+void fold_between_wait_into_open_transactions (const std::vector<CompiledElement>& elements,
+const std::unordered_map<std::string, ElementSpan>& spans,
+size_t step_index,
+size_t iteration,
+int64_t wait_ms,
+std::unordered_map<std::string, int64_t>& controller_state);
 
 /**
  * Applies the run's `elements.timers` override (issue #1498) to one

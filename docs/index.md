@@ -28,7 +28,7 @@ Coming from another tool? Read the honest comparison:
 
 ## Install
 
-Windows (x64), macOS 13+ (universal), and Linux (AppImage). No account, no sign-in.
+Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sign-in.
 
 <!-- This section is the canonical install copy (flipped from README.md in #631).
      The README carries the three one-liners only and links back here for the
@@ -46,8 +46,10 @@ Windows (x64), macOS 13+ (universal), and Linux (AppImage). No account, no sign-
     bash -c "$(curl -fsSL https://athrvk.github.io/vayu/install.sh)"
     ```
 
-    **macOS 13 (Ventura) or later.** The app is built on Electron, which sets
-    that floor; on macOS 12 the installed app will not launch.
+    **macOS 13.3 (Ventura) or later.** Electron sets a macOS 13 floor for the
+    app, and the engine raises it to 13.3: libc++ only ships floating-point
+    `std::to_chars` from that release, and the engine cannot be built without
+    it. On anything older the installed app will not launch.
 
     Installs the latest release to `/Applications`, and asks for your password
     once. Vayu ships unsigned, so the script ad-hoc signs the app and clears the
@@ -386,7 +388,7 @@ persists.
 
 ??? question "Which platforms are supported?"
 
-    Windows (x64), macOS 13 (Ventura) or later (Apple Silicon and Intel,
+    Windows (x64), macOS 13.3 (Ventura) or later (Apple Silicon and Intel,
     universal), and Linux (x86_64 AppImage).
 
 ## Contribute

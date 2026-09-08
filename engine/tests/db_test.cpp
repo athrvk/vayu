@@ -1849,6 +1849,59 @@ TEST_F (DatabaseTest, UpdateRunSummaryForMissingRunIsIgnored) {
     EXPECT_FALSE (db.get_run ("run_gone").has_value ());
 }
 
+// Issue #1527: `has_warnings` is derived from the same bytes `update_run_summary`
+// stores, never set anywhere else - these mutation-check the derivation both
+// ways, so a change that drops it (or that always sets it) reddens one of them.
+TEST_F (DatabaseTest, UpdateRunSummaryStampsHasWarningsWhenWarningsIsNonEmpty) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    vayu::db::Run run;
+    run.id              = "run_1";
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Completed;
+    run.start_time      = 1000;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    db.update_run_summary (
+    "run_1", R"({"warnings":[{"code":"unresolved_tokens","message":"x"}]})");
+
+    auto after = db.get_run ("run_1");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_TRUE (after->has_warnings);
+}
+
+TEST_F (DatabaseTest, UpdateRunSummaryLeavesHasWarningsFalseWhenWarningsIsAbsentOrEmpty) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    vayu::db::Run run;
+    run.id              = "run_1";
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Completed;
+    run.start_time      = 1000;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    db.update_run_summary ("run_1", R"({"total_requests":42})");
+    auto after_absent = db.get_run ("run_1");
+    ASSERT_HAS_VALUE (after_absent);
+    EXPECT_FALSE (after_absent->has_warnings);
+
+    db.update_run_summary ("run_1", R"({"total_requests":42,"warnings":[]})");
+    auto after_empty = db.get_run ("run_1");
+    ASSERT_HAS_VALUE (after_empty);
+    EXPECT_FALSE (after_empty->has_warnings);
+
+    // A summary a later write cannot parse must not crash and must not stamp
+    // a stale true forward.
+    db.update_run_summary ("run_1", "not json at all");
+    auto after_malformed = db.get_run ("run_1");
+    ASSERT_HAS_VALUE (after_malformed);
+    EXPECT_FALSE (after_malformed->has_warnings);
+}
+
 // ==================== Scratch-file cleanup ====================
 
 // `remove_database_files` is the single definition of what a scratch Database

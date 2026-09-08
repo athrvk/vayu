@@ -194,6 +194,15 @@ jobs:
           lipo -info engine/build-universal/vayu-engine
           chmod +x engine/build-universal/vayu-engine
 
+      # Guards the whole macOS release, both slices at once: an engine built
+      # against a newer SDK than it targets dies at launch on an older Mac with
+      # a dyld "Symbol not found", and every other step here would still pass.
+      # v0.26.0 shipped that way. See engine/CMakeLists.txt.
+      - name: Verify universal binary deployment target (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./scripts/check-macos-min-version.sh engine/build-universal/vayu-engine
+
       - name: Build engine (Non-macOS)
         if: runner.os != 'macOS'
         uses: lukka/run-cmake@v10

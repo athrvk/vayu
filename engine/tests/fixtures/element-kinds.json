@@ -605,6 +605,9 @@
           "minimum": 1,
           "type": "integer"
         },
+        "perUser": {
+          "type": "boolean"
+        },
         "percent": {
           "maximum": 100,
           "minimum": 0,
@@ -653,6 +656,9 @@
     "configSchema": {
       "additionalProperties": false,
       "properties": {
+        "includeTimers": {
+          "type": "boolean"
+        },
         "name": {
           "minLength": 1,
           "type": "string"

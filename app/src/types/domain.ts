@@ -1501,6 +1501,14 @@ export interface RunSummary {
 	 * show for one.
 	 */
 	scenario?: RunScenarioSummary;
+	/**
+	 * Whether the run's terminal report carries a non-empty `warnings` array
+	 * (issue #1527, extending #1503). Omitted, not `false`, for a run with
+	 * nothing to report - still running, or finished clean - which is what
+	 * lets the history row skip the glyph with a plain presence check rather
+	 * than an explicit `=== true`.
+	 */
+	hasWarnings?: boolean;
 }
 
 export interface Run {

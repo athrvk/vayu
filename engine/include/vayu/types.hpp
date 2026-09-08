@@ -1335,6 +1335,16 @@ struct Run {
     // sync_schema can ALTER TABLE ADD COLUMN it onto an existing runs table -
     // the same pattern as `summary` above and `requests.follow_redirects`.
     bool baseline = false; // INTEGER NOT NULL DEFAULT 0
+    // Whether the terminal `summary` above carries a non-empty `warnings`
+    // array (issue #1503). Derived and stamped by `Database::update_run_summary`
+    // itself, from the same JSON it is about to store, so the two can never
+    // disagree - never set anywhere else. Narrow and separate from `summary`
+    // (issue #1527) so the paginated list route can read it straight off the
+    // row already fetched for every page, with no cache and no per-row JSON
+    // parse: `RunSummaryCache` keys on the immutable `config_snapshot` and
+    // must never learn a completion-time fact, or a row cached while the run
+    // was still running would show no warnings forever.
+    bool has_warnings = false; // INTEGER NOT NULL DEFAULT 0
 };
 
 /**

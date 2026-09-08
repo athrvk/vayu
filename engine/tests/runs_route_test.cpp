@@ -408,6 +408,57 @@ TEST_F (RunsRouteTest, RepeatedPollsBuildEachSummaryOnce) {
     EXPECT_EQ (third["data"][0]["id"], "run_d");
 }
 
+// Issue #1527: a run with nothing to report carries no `hasWarnings` key at
+// all - "absent, not false" is this row's rule for every optional flag.
+TEST_F (RunsRouteTest, HasWarningsKeyOmittedWhenRunCarriesNone) {
+    seed ({ .id = "run_clean" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_FALSE (body["data"][0]["summary"].contains ("hasWarnings"));
+}
+
+// A run whose terminal summary carried warnings (#1503) surfaces that on its
+// list row, which is the whole of what this issue asks for.
+TEST_F (RunsRouteTest, HasWarningsTrueWhenTerminalSummaryCarriesWarnings) {
+    seed ({ .id = "run_warned" });
+    db_->update_run_summary ("run_warned",
+    R"({"warnings":[{"code":"unresolved_tokens","message":"x"}]})");
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (body["data"].size (), 1u);
+    EXPECT_EQ (body["data"][0]["summary"]["hasWarnings"], true);
+}
+
+// The case #1527 exists to prove: `hasWarnings` must never be trapped behind
+// the compact summary's cache. A row polled while still running is cached
+// with no warnings (correctly, none exist yet); the run then finishes with
+// warnings; the very next poll - against the same cache, with no new build -
+// must show them. Reverting the merge in `get_runs_response` to read
+// `hasWarnings` off the cached summary instead of the live `Run` row would
+// pass every other case here and fail only this one.
+TEST_F (RunsRouteTest, HasWarningsReflectsCompletionDespiteTheCachedSummary) {
+    seed ({ .id = "run_finishing", .status = vayu::RunStatus::Running });
+
+    auto [first_status, first] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    EXPECT_EQ (first_status, 200);
+    EXPECT_FALSE (first["data"][0]["summary"].contains ("hasWarnings"));
+    EXPECT_EQ (summaries_.build_count (), 1u);
+
+    db_->update_run_summary ("run_finishing",
+    R"({"warnings":[{"code":"unresolved_tokens","message":"x"}]})");
+    db_->update_run_status_with_retry ("run_finishing", vayu::RunStatus::Completed);
+
+    auto [second_status, second] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    EXPECT_EQ (second_status, 200);
+    EXPECT_EQ (second["data"][0]["summary"]["hasWarnings"], true);
+    // The compact summary itself was never rebuilt - only `hasWarnings`,
+    // merged in fresh every call, changed between the two polls.
+    EXPECT_EQ (summaries_.build_count (), 1u);
+}
+
 // A malformed snapshot reads as an empty summary on every call, not only the
 // first: the failure is cached like any other answer, and never becomes a 500.
 TEST_F (RunsRouteTest, MalformedSnapshotStaysEmptyAcrossPolls) {

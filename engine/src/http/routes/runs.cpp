@@ -120,7 +120,11 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
 // `scenario` on a collection run only, both omitted rather than defaulted
 // when the snapshot carries neither. A malformed config_snapshot yields an
 // empty object, never an error - the full snapshot stays available on
-// GET /runs/:id.
+// GET /runs/:id. `hasWarnings` (issue #1527) is not built here and never
+// cached with the rest of this object - it is a completion-time fact, not
+// part of the immutable config_snapshot this function reads, so it is
+// merged into the row by `get_runs_response` after this (possibly cached)
+// object is retrieved.
 nlohmann::json build_run_summary (const std::string& config_snapshot) {
     nlohmann::json summary = nlohmann::json::object ();
     try {
@@ -674,7 +678,10 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
  * `summary` (nine keys) instead of the full `config_snapshot`, wrapped in the
  * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86); a
  * design run's row also carries `resultSummary` (statusCode + latencyMs), which
- * is what a reader would otherwise fetch a report per row to learn.
+ * is what a reader would otherwise fetch a report per row to learn. A row
+ * whose run finished with warnings carries `summary.hasWarnings: true`
+ * (#1527), read fresh off this page's own `Run` rows rather than through
+ * `summaries` - see the comment at its call site below for why.
  *
  * `summaries` spares the poll the work it would otherwise repeat: this is the
  * endpoint a visible history surface re-asks every 5s, and each call used to
@@ -713,6 +720,16 @@ vayu::http::RunSummaryCache& summaries) {
         auto row = serialize_run_row (run, summaries.summary_for (run.id, [&run] {
             return build_run_summary (run.config_snapshot);
         }));
+        // `hasWarnings` (issue #1527) is read straight off the `Run` row this
+        // page already fetched, never through `summaries` - `has_warnings` is
+        // a completion-time fact (`Database::update_run_summary` stamps it),
+        // and that cache keys on the immutable `config_snapshot` alone. Merged
+        // into this call's own copy of the cached summary, never back into the
+        // cache entry, so a row polled while still running is never stuck
+        // reporting no warnings once the run finishes.
+        if (run.has_warnings) {
+            row["summary"]["hasWarnings"] = true;
+        }
         if (const auto found = outcomes.find (run.id); found != outcomes.end ()) {
             row["resultSummary"]["statusCode"] = found->second.status_code;
             row["resultSummary"]["latencyMs"]  = found->second.latency_ms;
@@ -900,7 +917,13 @@ const std::string& body) {
     if (!updated) {
         return { 404, error_body (404, "Run not found") };
     }
-    return { 200, serialize_run_row (*updated, build_run_summary (updated->config_snapshot)) };
+    auto row = serialize_run_row (*updated, build_run_summary (updated->config_snapshot));
+    // Same merge as get_runs_response, and for the same reason: this
+    // docstring promises the list's own row shape (#1527).
+    if (updated->has_warnings) {
+        row["summary"]["hasWarnings"] = true;
+    }
+    return { 200, row };
 }
 
 /**
