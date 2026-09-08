@@ -642,7 +642,7 @@
   {
     "advanced": false,
     "category": "general_engine",
-    "default_value": "4",
+    "default_value": "<core count>",
     "key": "workers",
     "max_value": "128",
     "min_value": "1",

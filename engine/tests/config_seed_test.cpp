@@ -48,6 +48,13 @@ class ConfigSeedTest : public ::testing::Test {
 // `config_route_test.cpp` already cover and which change too often (a label
 // reworded for voice, say) to belong in a fixture meant to catch a dropped or
 // duplicated entry.
+//
+// `workers` is normalized out of `default_value`: it seeds from
+// `std::thread::hardware_concurrency ()`, so its value is this machine's core
+// count, not a constant the split could have changed - comparing it verbatim
+// would fail on every runner whose core count differs from whichever one
+// captured the fixture, which is exactly the false failure this guard exists
+// to avoid producing.
 json catalogue_from (vayu::db::Database& db) {
     auto entries = db.get_all_config_entries ();
     std::sort (entries.begin (), entries.end (),
@@ -55,8 +62,10 @@ json catalogue_from (vayu::db::Database& db) {
 
     json out = json::array ();
     for (const auto& entry : entries) {
+        const bool machine_dependent = entry.key == "workers";
         out.push_back ({ { "key", entry.key }, { "category", entry.category },
-        { "type", entry.type }, { "default_value", entry.default_value },
+        { "type", entry.type },
+        { "default_value", machine_dependent ? "<core count>" : entry.default_value },
         { "min_value", entry.min_value.value_or ("") },
         { "max_value", entry.max_value.value_or ("") },
         { "requires_restart", entry.requires_restart }, { "advanced", entry.advanced } });
