@@ -391,6 +391,15 @@ one app instance may drive it:
   report itself listening. It never falls back to another port: the app and CLI
   both address the engine at a fixed one, so an engine on a different port would
   be a quieter failure than no engine at all.
+- **A database written by a newer engine refuses to open, the same way.**
+  `Database::migrate_before_sync` reads `PRAGMA user_version` before touching
+  anything else and, on a version newer than this build's `SCHEMA_VERSION`,
+  throws naming both versions instead of migrating (issue #1492) - the file is
+  never written to. The constructor throw crashes the daemon the same way a
+  bind failure does, so it takes the same path out: exit 1, and the spawn
+  failure's stderr tail (`describeSpawnFailure` in `sidecar.ts`) carries the
+  refusal message into the dialog the app already shows for a startup that
+  cannot succeed.
 - **A startup that cannot succeed fails immediately; one that is merely slow
   does not.** The readiness poll spends a 45-second budget watching the spawned
   child as well as the port: an engine that exits first - a missing shared
