@@ -116,13 +116,19 @@ TEST (ControllerRegistry, ControlOnceAcceptsAnEmptyConfig) {
     .has_value ());
 }
 
-TEST (ControllerRegistry, ControlThroughputRefusesPerUser) {
-    // Deferred, disclosed follow-up (this PR's PR body / docs/engine/elements.md):
-    // this kind's counter is always per-user, so the schema does not accept a
-    // key it cannot honour.
+TEST (ControllerRegistry, ControlThroughputAcceptsPerUser) {
+    // Issue #1569: `perUser: false` shares one budget across every virtual
+    // user of a scenario load run rather than keeping one per user.
     const auto reason = Registry::instance ().validate (json::array (
     { element ("el_1", "control.throughput", { { "perUser", false } }) }));
-    ASSERT_HAS_VALUE (reason);
+    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
+}
+
+TEST (ControllerRegistry, ControlTransactionAcceptsIncludeTimers) {
+    // Issue #1569: folds a between-member `timer.*` wait into the sum.
+    const auto reason = Registry::instance ().validate (json::array ({ element ("el_1",
+    "control.transaction", { { "name", "checkout" }, { "includeTimers", true } }) }));
+    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
 }
 
 TEST (ControllerRegistry, ControlLoopRequiresCount) {
@@ -150,32 +156,20 @@ vayu::core::ScenarioStep step_with (const std::string& name, std::vector<json> e
     return step;
 }
 
-TEST (LoadIncompatibleController, NamesControlLoop) {
-    vayu::core::ScenarioPlan plan;
-    plan.steps.push_back (
-    step_with ("a", { element ("el_1", "control.loop", { { "count", 2 } }) }));
-    const auto found = vayu::core::find_load_incompatible_controller (plan);
-    ASSERT_HAS_VALUE (found);
-    EXPECT_EQ (*found, "control.loop");
-}
-
-TEST (LoadIncompatibleController, NamesControlSwitch) {
-    vayu::core::ScenarioPlan plan;
-    plan.steps.push_back (step_with ("a",
-    { element ("el_1", "control.switch",
-    { { "variable", "v" }, { "cases", json::object () } }) }));
-    const auto found = vayu::core::find_load_incompatible_controller (plan);
-    ASSERT_HAS_VALUE (found);
-    EXPECT_EQ (*found, "control.switch");
-}
-
-TEST (LoadIncompatibleController, SilentOnEveryOtherController) {
+// Issue #1569: `control.loop` and `control.switch` gained their own
+// load-path jump/repeat mechanism, so neither sets `jumps_or_repeats`
+// any more and both run under a scenario load run instead of being
+// refused - see `ElementsControllersLoadTest` below for the behaviour.
+TEST (LoadIncompatibleController, SilentOnEveryController) {
     vayu::core::ScenarioPlan plan;
     plan.steps.push_back (step_with ("a",
     { element ("el_1", "control.if", { { "condition", "{{x}} exists" } }),
     element ("el_2", "control.once", json::object ()),
     element ("el_3", "control.throughput", { { "everyN", 2 } }),
-    element ("el_4", "control.transaction", { { "name", "t" } }) }));
+    element ("el_4", "control.transaction", { { "name", "t" } }),
+    element ("el_5", "control.loop", { { "count", 2 } }),
+    element ("el_6", "control.switch",
+    { { "variable", "v" }, { "cases", json::object () } }) }));
     EXPECT_FALSE (vayu::core::find_load_incompatible_controller (plan).has_value ());
 }
 
@@ -469,6 +463,49 @@ TEST_F (ElementsControllersTest, ControlTransactionReportsPercentilesOverTheFold
     EXPECT_TRUE (found) << transactions.dump ();
 }
 
+// Issue #1569: `includeTimers` folds a `timer.think` wait between two
+// members into the transaction's own sum - a folder identical to the test
+// above except for the timer and the flag, so the only variable is whether
+// the fold happened.
+double checkout_p50 (const json& summary) {
+    for (const auto& entry : summary["scenario"]["transactions"]) {
+        if (entry["name"] == "checkout") {
+            return entry["latency"]["p50"].get<double> ();
+        }
+    }
+    ADD_FAILURE () << "no 'checkout' transaction in " << summary.dump ();
+    return -1.0;
+}
+
+TEST_F (ElementsControllersTest, ControlTransactionIncludeTimersFoldsAWaitBetweenMembers) {
+    seed_root ();
+    seed_folder ("folder_1",
+    json::array ({ element ("el_txn", "control.transaction",
+    { { "name", "checkout" }, { "includeTimers", true } }) }));
+    seed_request ("req_a", "folder_1", 0, "/a",
+    json::array ({ element ("el_wait", "timer.think", { { "ms", 60 } }) }));
+    seed_request ("req_b", "folder_1", 1, "/b");
+
+    const std::string run_id = start (1);
+    EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    EXPECT_GE (checkout_p50 (summary_of (run_id)), 60.0)
+    << "the 60ms wait between the two members must be in the sum";
+}
+
+TEST_F (ElementsControllersTest, ControlTransactionExcludesTimersByDefault) {
+    seed_root ();
+    seed_folder ("folder_1",
+    json::array ({ element ("el_txn", "control.transaction", { { "name", "checkout" } }) }));
+    seed_request ("req_a", "folder_1", 0, "/a",
+    json::array ({ element ("el_wait", "timer.think", { { "ms", 60 } }) }));
+    seed_request ("req_b", "folder_1", 1, "/b");
+
+    const std::string run_id = start (1);
+    EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    EXPECT_LT (checkout_p50 (summary_of (run_id)), 60.0)
+    << "without includeTimers the wait must not reach the sum";
+}
+
 // ============================================================================
 // Scenario load run - `execute_scenario_load` directly, no DB collection tree
 // ============================================================================
@@ -481,7 +518,7 @@ class ControllerLoadMockServer {
             std::lock_guard<std::mutex> lock (mtx);
             hits.push_back (req.path);
         };
-        for (const char* path : { "/a", "/b" }) {
+        for (const char* path : { "/a", "/b", "/c" }) {
             svr.Get (path, [record] (const httplib::Request& req, httplib::Response& res) {
                 record (req);
                 res.set_content ("{}", "application/json");
@@ -573,6 +610,49 @@ class ElementsControllersLoadTest : public ::testing::Test {
         return execution;
     }
 
+    /// Three steps a/b/c, for `control.switch`'s own jump - proving it
+    /// actually skips the un-matched member rather than only ever landing on
+    /// the ordinary next step.
+    static vayu::core::ScenarioExecution
+    plan_over_three (ControllerLoadMockServer& server, std::vector<json> elements_a) {
+        vayu::core::ScenarioExecution execution;
+        execution.request.source        = "collection";
+        execution.request.collection_id = "col_test";
+
+        vayu::core::ScenarioStep a;
+        a.index              = 0;
+        a.request_id         = "req_a";
+        a.name               = "a";
+        a.request.method     = vayu::HttpMethod::GET;
+        a.request.url        = server.url ("/a");
+        a.request.timeout_ms = 5000;
+        a.stored_url         = a.request.url;
+        a.elements           = compiled_elements (std::move (elements_a));
+        execution.plan.steps.push_back (std::move (a));
+
+        vayu::core::ScenarioStep b;
+        b.index              = 1;
+        b.request_id         = "req_b";
+        b.name               = "b";
+        b.request.method     = vayu::HttpMethod::GET;
+        b.request.url        = server.url ("/b");
+        b.request.timeout_ms = 5000;
+        b.stored_url         = b.request.url;
+        execution.plan.steps.push_back (std::move (b));
+
+        vayu::core::ScenarioStep c;
+        c.index              = 2;
+        c.request_id         = "req_c";
+        c.name               = "c";
+        c.request.method     = vayu::HttpMethod::GET;
+        c.request.url        = server.url ("/c");
+        c.request.timeout_ms = 5000;
+        c.stored_url         = c.request.url;
+        execution.plan.steps.push_back (std::move (c));
+
+        return execution;
+    }
+
     std::shared_ptr<vayu::core::ScenarioLoadState> run (const json& config,
     const vayu::core::ScenarioExecution& execution,
     size_t pool_size = 50) {
@@ -589,6 +669,14 @@ class ElementsControllersLoadTest : public ::testing::Test {
         auto state = vayu::core::execute_scenario_load (context, *db_, *context->scenario);
         context->event_loop->stop (true, std::chrono::milliseconds (10000));
         return state;
+    }
+
+    /// Override a seeded config value, keeping the rest of its row intact.
+    void set_config (const std::string& key, const std::string& value) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_HAS_VALUE (entry) << key << " is not a seeded config key";
+        entry->value = value;
+        db_->save_config_entry (*entry);
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -633,6 +721,141 @@ TEST_F (ElementsControllersLoadTest, ControlIfSkipsUnderLoadAndNeverReachesTheWi
     EXPECT_EQ (server.hit_count ("/a"), 0u)
     << "an unresolved {{tier}} never equals 'gold', so every occurrence skips";
     EXPECT_GE (state->steps_skipped.load (), 4u);
+}
+
+// ============================================================================
+// Load-path jump/repeat (issue #1569)
+// ============================================================================
+
+TEST_F (ElementsControllersLoadTest, ControlSwitchJumpsPastTheUnmatchedMemberUnderLoad) {
+    ControllerLoadMockServer server;
+    // `{{which}}` resolves to nothing in this fixture (no collection row
+    // backs `col_test`), so it stays its own unresolved literal - matching
+    // that literal in `cases` is a deterministic way to pick a branch
+    // without needing a seeded variable (`ControlIfSkipsUnderLoad...` above
+    // uses the same trick).
+    auto execution = plan_over_three (server,
+    { element ("el_switch", "control.switch",
+    { { "variable", "which" }, { "cases", { { "{{which}}", "c" } } } }) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "iterations" }, { "concurrency", 2 }, { "iterations", 4 } };
+    auto state = run (config, execution);
+
+    ASSERT_NE (state, nullptr);
+    EXPECT_EQ (server.hit_count ("/a"), 4u);
+    EXPECT_EQ (server.hit_count ("/b"), 0u)
+    << "the switch must jump past the un-matched member";
+    EXPECT_EQ (server.hit_count ("/c"), 4u);
+}
+
+TEST_F (ElementsControllersLoadTest, ControlSwitchCycleIsCutOffByMaxStepsPerIteration) {
+    set_config ("maxStepsPerIteration", "5");
+    ControllerLoadMockServer server;
+    // Routes back to itself every time - without the cycle guard this would
+    // spin the one VU forever rather than complete the run.
+    auto execution = plan_over (server,
+    { element ("el_switch", "control.switch",
+    { { "variable", "which" }, { "cases", { { "{{which}}", "a" } } } }) },
+    {});
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "iterations" }, { "concurrency", 1 }, { "iterations", 1 } };
+    auto state = run (config, execution);
+
+    ASSERT_NE (state, nullptr);
+    EXPECT_GE (state->iterations_abandoned.load (), 1u)
+    << "a cycle that never reaches maxStepsPerIteration must abandon the "
+       "iteration rather than spin the VU forever";
+}
+
+TEST_F (ElementsControllersLoadTest, ControlLoopRepeatsUnderLoad) {
+    ControllerLoadMockServer server;
+    auto execution = plan_over (
+    server, { element ("el_loop", "control.loop", { { "count", 3 } }) }, {});
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "iterations" }, { "concurrency", 2 }, { "iterations", 4 } };
+    auto state = run (config, execution);
+
+    ASSERT_NE (state, nullptr);
+    EXPECT_EQ (server.hit_count ("/a"), 12u) << "3 passes x 4 iterations";
+    EXPECT_EQ (server.hit_count ("/b"), 4u)
+    << "one per completed iteration, once the loop closes";
+}
+
+// ============================================================================
+// control.throughput perUser: false, and control.transaction includeTimers
+// (issue #1569)
+// ============================================================================
+
+TEST_F (ElementsControllersLoadTest, ControlThroughputSharesABudgetAcrossVUsWhenPerUserIsFalse) {
+    ControllerLoadMockServer server;
+    auto execution = plan_over (server,
+    { element ("el_thr", "control.throughput", { { "everyN", 2 }, { "perUser", false } }) },
+    {});
+
+    // "iterations" is a run-wide total, claimed opportunistically by
+    // whichever VU is next ready - so a *shared* budget is what makes this
+    // exact: every 2nd of 20 occurrences fires, deterministically, no matter
+    // how the 20 iterations split across the 4 VUs. A `perUser` (default)
+    // counter could not be asserted this precisely, for the same reason.
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "iterations" }, { "concurrency", 4 }, { "iterations", 20 } };
+    auto state = run (config, execution);
+
+    ASSERT_NE (state, nullptr);
+    EXPECT_EQ (server.hit_count ("/a"), 10u);
+}
+
+TEST_F (ElementsControllersLoadTest, ControlTransactionIncludeTimersFoldsAWaitUnderLoad) {
+    ControllerLoadMockServer server;
+    auto execution = plan_over (server,
+    { element ("el_txn", "control.transaction",
+      { { "name", "checkout" }, { "includeTimers", true } }),
+    element ("el_wait", "timer.think", { { "ms", 60 } }) },
+    { element ("el_txn", "control.transaction",
+    { { "name", "checkout" }, { "includeTimers", true } }) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "iterations" }, { "concurrency", 2 }, { "iterations", 2 } };
+    auto state = run (config, execution);
+
+    ASSERT_NE (state, nullptr);
+    const json summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    double p50 = -1.0;
+    for (const auto& entry : summary["transactions"]) {
+        if (entry["name"] == "checkout") {
+            p50 = entry["latency"]["p50"].get<double> ();
+        }
+    }
+    EXPECT_GE (p50, 60.0) << "the 60ms between-member wait must be in the sum";
+}
+
+TEST_F (ElementsControllersLoadTest, ControlTransactionExcludesTimersByDefaultUnderLoad) {
+    ControllerLoadMockServer server;
+    auto execution = plan_over (server,
+    { element ("el_txn", "control.transaction", { { "name", "checkout" } }),
+    element ("el_wait", "timer.think", { { "ms", 60 } }) },
+    { element ("el_txn", "control.transaction", { { "name", "checkout" } }) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "iterations" }, { "concurrency", 2 }, { "iterations", 2 } };
+    auto state = run (config, execution);
+
+    ASSERT_NE (state, nullptr);
+    const json summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    double p50 = -1.0;
+    for (const auto& entry : summary["transactions"]) {
+        if (entry["name"] == "checkout") {
+            p50 = entry["latency"]["p50"].get<double> ();
+        }
+    }
+    EXPECT_GE (p50, 0.0);
+    EXPECT_LT (p50, 60.0)
+    << "without includeTimers the wait must not reach the sum";
 }
 
 } // namespace

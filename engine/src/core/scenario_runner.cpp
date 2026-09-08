@@ -893,6 +893,66 @@ ScenarioStepStore& store) {
 }
 
 /**
+ * `step.between` (issue #1514): `timer.think` and anything else phased here
+ * run after this step's own outcome is decided - so a wait never counts
+ * against the step's own latency - and before flow control reads it, so a
+ * `Stop` mid-wait ends the run promptly rather than after one more step.
+ * Called only for a step whose row bound and did not already error.
+ *
+ * `between_control` is read, not discarded: `control.loop` (issue #1515) is
+ * the one `step.between` kind that can decide where the iteration goes next,
+ * through `ScriptControl`, chronologically the latest decision of the step
+ * and so the one "last call wins" already gives priority to.
+ *
+ * `control.transaction`'s own `includeTimers` (issue #1569) folds this step's
+ * between-phase wait into an *open* transaction's running sum - see
+ * `fold_between_wait_into_open_transactions`'s own comment for why "open"
+ * excludes the folder's last member.
+ */
+void run_step_between (const StepContext& base,
+const ScenarioStep& step,
+vayu::http::routes::ExchangeOutcome& exchange,
+StepRecord& record) {
+    vayu::ScriptResult between_control;
+    vayu::ScriptResult unread_post;
+    vayu::core::ElementContext between_ctx{
+        .request        = exchange.request,
+        .response       = nullptr,
+        .run_pre_script = [] (
+                          const std::string&) { return vayu::ScriptResult{}; },
+        .run_post_script = [] (
+                           const std::string&) { return vayu::ScriptResult{}; },
+        .pre_script_result  = between_control,
+        .post_script_result = unread_post,
+        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
+        .should_stop = [&] { return base.context->should_stop.load (); },
+        .iteration        = base.iteration,
+        .step_position    = step.index,
+        .element_spans    = &base.element_spans,
+        .controller_state = &base.controller_state,
+        .rng              = &base.context->rng,
+        .pacing_state     = &base.context->pacing_state,
+        .timers_override  = &base.context->timers_override,
+    };
+    const size_t between_start = record.elements.size ();
+    vayu::core::ElementPipeline::run (vayu::core::Phase::StepBetween,
+    between_ctx, *step.elements, record.elements);
+    if (between_control.control.kind != vayu::ScriptControl::Kind::None) {
+        exchange.post_script_result.control = between_control.control;
+    }
+
+    int64_t between_wait_ms = 0;
+    for (size_t i = between_start; i < record.elements.size (); ++i) {
+        between_wait_ms += record.elements[i].waited_ms.value_or (0);
+    }
+    if (between_wait_ms > 0) {
+        vayu::core::fold_between_wait_into_open_transactions (*step.elements,
+        base.element_spans, step.index, base.iteration, between_wait_ms,
+        base.controller_state);
+    }
+}
+
+/**
  * One iteration: a walk over the plan rather than a pass through it.
  *
  * A script may send it backwards, forwards or out early, so the position is a
@@ -957,39 +1017,7 @@ TransactionHistograms& transactions) {
         // could not bind (no exchange ran) or that already errored.
         if (data_bind_error.empty () &&
         record.outcome != StepOutcome::Errored && step.elements) {
-            // `between_control` is read below, not discarded: `control.loop`
-            // (issue #1515) is the one `step.between` kind that can decide
-            // where the iteration goes next, and it says so exactly as a
-            // script's own `pm.execution.setNextRequest` would - through
-            // `ScriptControl`, chronologically the latest decision of the
-            // step and so the one "last call wins" already gives priority to.
-            vayu::ScriptResult between_control;
-            vayu::ScriptResult unread_post;
-            vayu::core::ElementContext between_ctx{
-                .request  = exchange.request,
-                .response = nullptr,
-                .run_pre_script =
-                [] (const std::string&) { return vayu::ScriptResult{}; },
-                .run_post_script =
-                [] (const std::string&) { return vayu::ScriptResult{}; },
-                .pre_script_result  = between_control,
-                .post_script_result = unread_post,
-                .set_variable       = [] (std::string_view, const std::string&,
-                                const std::string&) {},
-                .should_stop = [&] { return base.context->should_stop.load (); },
-                .iteration        = base.iteration,
-                .step_position    = step.index,
-                .element_spans    = &base.element_spans,
-                .controller_state = &base.controller_state,
-                .rng              = &base.context->rng,
-                .pacing_state     = &base.context->pacing_state,
-                .timers_override  = &base.context->timers_override,
-            };
-            vayu::core::ElementPipeline::run (vayu::core::Phase::StepBetween,
-            between_ctx, *step.elements, record.elements);
-            if (between_control.control.kind != vayu::ScriptControl::Kind::None) {
-                exchange.post_script_result.control = between_control.control;
-            }
+            run_step_between (base, step, exchange, record);
         }
 
         bool end_iteration = record.outcome == StepOutcome::Errored;

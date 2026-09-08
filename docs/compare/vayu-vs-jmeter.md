@@ -80,18 +80,19 @@ are things Vayu plans to catch up on:
   test from many machines. Vayu runs from one.
 - **You have existing `.jmx` test plans**, or a team fluent in them. There is no
   importer for them here.
-- **Your load model needs a shared cadence or a load-run logic jump.** Think
-  time and pacing timers work under load now (`timer.think`, including a
-  gaussian option, and `timer.pacing`), and logic controllers - conditionals,
-  once-only, throughput, loops and named transactions - are elements
-  (`control.if` / `.once` / `.switch` / `.throughput` / `.loop` /
-  `.transaction`) that run fully in a sequential collection run and, for
-  `control.if` / `.once` / `.throughput` / `.transaction`, under load too.
-  What still doesn't: a pacing cadence shared across every virtual user
-  (`perUser: false`), and `control.switch` / `.loop` under load, since both
-  need a load run's virtual users to jump, which they cannot do yet (#1569) -
-  a load run carrying either is refused rather than silently run once
-  through. Correlation across a scenario's steps - a login's token reaching
+- **Your load model needs a shared pacing cadence.** Think time and pacing
+  timers work under load now (`timer.think`, including a gaussian option, and
+  `timer.pacing`), and logic controllers - conditionals, once-only,
+  throughput, loops and named transactions - are elements (`control.if` /
+  `.once` / `.switch` / `.throughput` / `.loop` / `.transaction`) that run
+  fully both in a sequential collection run and under load, including
+  `control.switch` / `.loop`'s own jump/repeat and `control.throughput`'s
+  shared, cross-VU budget (`perUser: false`, #1569). What still doesn't: a
+  `timer.pacing` cadence shared across every virtual user rather than one per
+  user (`perUser: false` on the *timer*, not the throughput controller -
+  #1570) and a constant-throughput shared-rate timer (`timer.throughput`,
+  #1571), both sequenced after each other. Correlation across a scenario's
+  steps - a login's token reaching
   the next step's header, per virtual user - does work under load now too:
   mark the extracting element or script `inline` (or set the run's
   `elements.scripts` override), or let it stay in the post-run replay by
