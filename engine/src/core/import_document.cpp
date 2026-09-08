@@ -23,6 +23,8 @@
 #include "js_json.hpp"
 #include "openapi_walk.hpp"
 
+#include "vayu/core/elements.hpp"
+#include "vayu/core/jmeter_import.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -2409,7 +2411,7 @@ json draft_body (const DraftBody& body) {
     return json{ { "mode", body.mode }, { "content", body.content } };
 }
 
-json draft_request (const SpecRequestDraft& entry) {
+json draft_request (const SpecRequestDraft& entry, ImportTally& tally) {
     const DraftRequest& draft = entry.draft;
     json params               = json::array ();
     for (const DraftField& field : draft.params) {
@@ -2448,8 +2450,19 @@ json draft_request (const SpecRequestDraft& entry) {
     request["headers"]     = std::move (headers);
     request["body"]        = draft_body (draft.body);
     request["auth"]        = json{ { "mode", "inherit" } };
-    // OpenAPI has no script concept, so this request declares no elements -
-    // an absent key is the same "[]" default `""` used to mean.
+    // `x-vayu-elements` (issue #1518): a document a Vayu export wrote may
+    // carry elements (scripts included) back. Validated here, against the
+    // same registry a stored request's own write goes through, so a document
+    // hand-edited into an invalid array degrades the same way any other
+    // dropped import content does - counted, never silently applied - rather
+    // than failing the whole document at parse time.
+    if (entry.elements && entry.elements->is_array () && !entry.elements->empty ()) {
+        if (Registry::instance ().validate (*entry.elements, ElementOwner::Request)) {
+            tally.add ("elements_invalid");
+        } else {
+            request["elements"] = *entry.elements;
+        }
+    }
     if (!examples.empty ()) {
         request["examples"] = std::move (examples);
     }
@@ -2603,7 +2616,7 @@ walk::Dialect dialect) {
     OperationFolders folders (prop (&document, "tags"));
     const std::vector<SpecRequestDraft> drafts = import_drafts_of (document, tally);
     for (const SpecRequestDraft& entry : drafts) {
-        json request = draft_request (entry);
+        json request = draft_request (entry, tally);
         if (std::optional<json> auth = operation_auth_override (
             entry.security.has_value () ? &*entry.security : nullptr, schemes,
             scheme, v3, tally);
@@ -2856,6 +2869,33 @@ const ImportOptions& options,
 const ImportSource& source) {
     ImportParse parsed;
 
+    // Whether the parse already wrote each request's enabled query into its
+    // `url`. Only the OpenAPI path does - `SpecRequestDraft` promises a joined
+    // URL, because that is what the sync diff compares a stored request against
+    // - and running the join over one would append the same rows twice. Stated
+    // rather than derived from the format name, which would make a renamed
+    // dialect a silently doubled query.
+    bool query_joined = false;
+
+    // A `.jmx` test plan is XML, and would only fail both of `read_document`'s
+    // readers (JSON then YAML) the same way genuinely unrecognised bytes do -
+    // checked first, on the raw text, so a `.jmx` upload gets this parser
+    // rather than "Unrecognised format".
+    if (is_jmeter_document (text)) {
+        ImportTally tally;
+        try {
+            parsed.result = parse_jmeter (text, options, tally);
+        } catch (const MalformedJmeter& malformed) {
+            parsed.error = malformed.what ();
+            return parsed;
+        }
+        if (!source.file_name.empty ()) {
+            parsed.result["meta"]["fileName"] = source.file_name;
+        }
+        join_params_into_urls (parsed.result.at ("collections"));
+        return parsed;
+    }
+
     // One read, through the engine's one reader: JSON first and YAML second,
     // which is the order `parse-raw.ts` read the same bytes in.
     const DocumentRead read = read_document (text);
@@ -2864,14 +2904,6 @@ const ImportSource& source) {
         return parsed;
     }
     const nlohmann::ordered_json& document = read.root;
-
-    // Whether the parse already wrote each request's enabled query into its
-    // `url`. Only the OpenAPI path does - `SpecRequestDraft` promises a joined
-    // URL, because that is what the sync diff compares a stored request against
-    // - and running the join over one would append the same rows twice. Stated
-    // rather than derived from the format name, which would make a renamed
-    // dialect a silently doubled query.
-    bool query_joined = false;
 
     try {
         // Detection order is `factory.ts`'s `PARSERS`, most specific first, so

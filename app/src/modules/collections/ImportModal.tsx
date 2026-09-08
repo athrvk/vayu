@@ -1388,7 +1388,12 @@ function varCountLabel(n: number): string {
  * Insomnia binary body - which Vayu has no shape for, so the wording has to say
  * which of the two the reader is looking at.
  */
-const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: string]> = {
+// `Partial`, not the exhaustive `Record` this was before issue #1518: the
+// union now also accepts an arbitrary `.jmx` class name (open-ended - there
+// is no enumerating every JMeter plugin class), which an exhaustive Record
+// cannot type at all. `skippedLabel` below falls back to the raw kind for any
+// key with no entry, which is the intended rendering for one of those.
+const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>> = {
 	websocket: ["WebSocket request", "WebSocket requests"],
 	grpc: ["gRPC request", "gRPC requests"],
 	api_spec: ["API spec document", "API spec documents"],
@@ -1492,12 +1497,17 @@ const SKIPPED_LABELS: Record<SkippedItem["kind"], [singular: string, plural: str
 		"query value with an invalid % escape, changed when rejoined into the URL",
 		"query values with an invalid % escape, changed when rejoined into the URL",
 	],
+	elements_invalid: [
+		"element that failed validation and was not imported",
+		"elements that failed validation and were not imported",
+	],
 };
 
 function skippedLabel(kind: SkippedItem["kind"], count: number): string {
 	const label = SKIPPED_LABELS[kind];
-	// A kind with no entry still says something rather than nothing - the union
-	// is exhaustive today, and a new kind must not silently print `undefined`.
+	// A kind with no entry still says something rather than nothing - a JMeter
+	// class name (issue #1518) always lacks one, by design, and must not
+	// silently print `undefined`.
 	if (!label) return kind;
 	return count === 1 ? label[0] : label[1];
 }

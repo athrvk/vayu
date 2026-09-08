@@ -150,6 +150,7 @@ add_executable(vayu_tests
     operation_match_test.cpp
     openapi_document_test.cpp
     import_parse_test.cpp
+    jmeter_import_test.cpp
     openapi_drafts_test.cpp
     spec_diff_test.cpp
     openapi_export_test.cpp

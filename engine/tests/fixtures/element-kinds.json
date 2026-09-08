@@ -269,6 +269,54 @@
     "version": 1
   },
   {
+    "category": "extract",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "leftBoundary": {
+          "type": "string"
+        },
+        "matchNo": {
+          "type": "integer"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "rightBoundary": {
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "env",
+            "collection",
+            "globals"
+          ],
+          "type": "string"
+        },
+        "variable": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "variable"
+      ],
+      "type": "object"
+    },
+    "description": "Reads the text between a left and a right boundary out of the response body into a variable (JMeter's Boundary Extractor).",
+    "hotPathClass": "declarative",
+    "kind": "extract.boundary",
+    "label": "Extract between two boundaries",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
     "category": "assert",
     "collectionOnly": false,
     "configSchema": {

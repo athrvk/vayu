@@ -37,6 +37,7 @@ not import one. It can now (`import_document`, see
 | Insomnia Export v4 | `_type === "export"` && `__export_format === 4` | [insomnia-v4.md](./insomnia-v4.md) |
 | OpenAPI 3.0 | `openapi` starts with `3.` | [openapi-v3.md](./openapi-v3.md) |
 | OpenAPI 2.0 (Swagger) | `swagger` is `2.0` (string or number) | [openapi-v2.md](./openapi-v2.md) |
+| JMeter `.jmx` test plan | the raw text contains `<jmeterTestPlan` | [jmeter.md](./jmeter.md) |
 
 ---
 
@@ -555,7 +556,12 @@ All of it is engine-side (`engine/src/core/import_document.cpp`); nothing in
    ids, no persistence). Reuse what is there - `map_key_values`, `to_var_record`,
    `imported_file_part`, `with_required_content_type`, the OAuth mappers - rather
    than a second copy of a rule; the JavaScript semantics the drafts are held to
-   (`js_json.hpp`) are shared with the OpenAPI builder for the same reason.
+   (`js_json.hpp`) are shared with the OpenAPI builder for the same reason. A
+   format that is not JSON or YAML (JMeter's `.jmx` is XML) cannot go through
+   `core::read_document` at all and needs its own reader and its own
+   `is_<format>_document` raw-text check ahead of it in `parse_import`, in its
+   own file (`jmeter_import.cpp` beside `openapi_document.cpp`'s own YAML
+   reader) - see [jmeter.md](./jmeter.md) for the shape that took.
 2. Add its detector to `parse_import`'s chain at the correct
    **most-specific-first** position, so it does not shadow (or get shadowed by)
    another format.

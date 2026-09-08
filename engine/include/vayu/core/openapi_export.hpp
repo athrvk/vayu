@@ -185,6 +185,17 @@ struct ExportRequest {
     /// exported root down to this request, root excluded. Empty for a
     /// request the root owns directly.
     std::vector<std::string> folder_path;
+    /**
+     * The request's own `elements` array verbatim (issue #1518), scripts
+     * included - `pre_request_script`/`post_request_script` above stay
+     * derived from it (kept for the drop-count precedent this field
+     * replaces), this is what actually reaches `x-vayu-elements`.
+     *
+     * Appended last, never inserted among the fields above: several tests
+     * build an `ExportRequest` by positional aggregate initialization, and a
+     * field added in the middle would silently shift every value after it.
+     */
+    nlohmann::json elements = nlohmann::json::array ();
 };
 
 /** What a skeleton names the API after. */
@@ -202,6 +213,14 @@ struct ExportCollection {
     /// declare (a document's variables are server variables, scoped to the
     /// URL, not arbitrary named values).
     int other_variables = 0;
+    /**
+     * The collection's own `elements` array verbatim (issue #1518) - see
+     * `ExportRequest::elements`.
+     *
+     * Appended last for the same reason as there: positional aggregate
+     * initialization elsewhere must keep working unshifted.
+     */
+    nlohmann::json elements = nlohmann::json::array ();
 };
 
 /**

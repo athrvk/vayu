@@ -292,6 +292,18 @@ std::string exported_script_text (const std::string& elements_json, const char* 
     return "";
 }
 
+/**
+ * A row's whole `elements` array, parsed - `[]` for a row with none or with
+ * unparsable stored JSON, never a null (issue #1518: this is what actually
+ * reaches `x-vayu-elements`, scripts included; `exported_script_text` above
+ * stays only for the drop-count precedent it already served).
+ */
+nlohmann::json exported_elements (const std::string& elements_json) {
+    auto elements =
+    nlohmann::json::parse (elements_json, nullptr, /*allow_exceptions=*/false);
+    return elements.is_array () ? elements : nlohmann::json::array ();
+}
+
 /// One request, and the examples stored against it, as the exporter reads
 /// them - @p folder_collection_id is the collection it is directly filed
 /// under, which may differ from @p row's own `collection_id` on nothing here
@@ -313,6 +325,7 @@ const std::string& folder_collection_id) {
     entry.auth           = read_auth (row.auth);
     entry.pre_request_script = exported_script_text (row.elements, "script.pre");
     entry.post_request_script = exported_script_text (row.elements, "script.post");
+    entry.elements         = exported_elements (row.elements);
     entry.follow_redirects = row.follow_redirects;
     entry.max_redirects    = row.max_redirects;
     entry.http_version     = row.http_version;
@@ -412,6 +425,7 @@ export_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     exported_script_text (root->elements, "script.pre");
     export_collection.post_request_script =
     exported_script_text (root->elements, "script.post");
+    export_collection.elements = exported_elements (root->elements);
     std::tie (export_collection.base_url_value, export_collection.other_variables) =
     read_collection_variables (root->variables);
 

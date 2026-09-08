@@ -51,6 +51,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1171,6 +1172,10 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         if (const json* security = prop (operation, "security"); security != nullptr) {
             entry.security = *security;
         }
+        if (const json* elements = prop (operation, "x-vayu-elements");
+        elements != nullptr && elements->is_array ()) {
+            entry.elements = *elements;
+        }
 
         DraftRequest& draft = entry.draft;
         name_draft (operation, walked, draft);
@@ -1227,7 +1232,13 @@ void ImportTally::add (std::string_view kind, int count) {
 
 nlohmann::ordered_json ImportTally::items () const {
     // The order `SkippedItem["kind"]` declares, so that two walks of one
-    // document produce one list whatever order they met the losses in.
+    // document produce one list whatever order they met the losses in - for
+    // the closed, enumerable set of loss categories the app's own
+    // `SkippedItem["kind"]` union names. A kind outside that set (issue
+    // #1518: JMeter's own class names, open-ended by nature - there is no
+    // enumerating every JMeter plugin class in advance) is appended after,
+    // in `counts_`'s own insertion order, rather than the `nothing dropped
+    // quietly` rule silently losing it to a list it was never going to fit.
     static constexpr auto ORDER = std::to_array<const char*> (
     { "websocket", "grpc", "api_spec", "unit_test", "file_body",
     "malformed_item", "unsupported_method", "malformed_spec", "example_no_status",
@@ -1239,11 +1250,18 @@ nlohmann::ordered_json ImportTally::items () const {
     "url_without_raw", "invalid_percent_encoding", "variable_metadata" });
 
     nlohmann::ordered_json items = nlohmann::ordered_json::array ();
+    std::unordered_set<std::string> emitted;
     for (const char* kind : ORDER) {
         for (const auto& entry : counts_) {
             if (entry.first == kind) {
                 items.push_back ({ { "kind", entry.first }, { "count", entry.second } });
+                emitted.insert (entry.first);
             }
+        }
+    }
+    for (const auto& entry : counts_) {
+        if (emitted.insert (entry.first).second) {
+            items.push_back ({ { "kind", entry.first }, { "count", entry.second } });
         }
     }
     return items;

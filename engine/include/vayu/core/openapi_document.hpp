@@ -406,6 +406,18 @@ struct SpecRequestDraft {
      */
     std::optional<nlohmann::ordered_json> security;
     /**
+     * The operation's `x-vayu-elements` array (issue #1518), copied verbatim
+     * when the operation carries the key at all; absent when it does not.
+     *
+     * Deliberately not on @ref DraftRequest, for the same reason @ref security
+     * is not: an element carries a script, and the sync diff must never
+     * silently overwrite a user's locally-edited elements from a re-fetched
+     * document. Import-only, read by `parse_openapi` and validated against the
+     * element registry before it reaches a stored request; left unread by
+     * `spec_request_drafts_of`'s (sync/diff) callers.
+     */
+    std::optional<nlohmann::ordered_json> elements;
+    /**
      * Whether the `paths` key this hangs off is a path at all - see
      * `import_drafts_of`. Always true for a draft `spec_request_drafts_of`
      * returned, since a diff only ever sees identified operations.

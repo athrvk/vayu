@@ -189,7 +189,24 @@ export interface SkippedItem {
 		 * variable record has no field for either, unlike the value and the
 		 * secret flag, which both import.
 		 */
-		| "variable_metadata";
+		| "variable_metadata"
+		/**
+		 * An `x-vayu-elements` array (an OpenAPI document a Vayu export wrote) that
+		 * failed the element registry - an unknown kind, a config the wrong shape -
+		 * once the document was hand-edited (issue #1518). Dropped and counted
+		 * rather than applied: the alternative is a broken element reaching the
+		 * request unnoticed.
+		 */
+		| "elements_invalid"
+		/**
+		 * A `.jmx` test plan's own class name, for one this parser has no mapping
+		 * for at all (issue #1518) - JMeter's own class list is open-ended (every
+		 * third-party plugin adds more), so this is not a closed set the way every
+		 * kind above is. `skippedLabel` falls back to the class name itself for
+		 * any string here with no entry in `SKIPPED_LABELS` - "here is the class
+		 * JMeter used" is the whole label for one of these.
+		 */
+		| (string & Record<never, never>);
 	count: number;
 }
 
