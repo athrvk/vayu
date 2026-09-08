@@ -80,16 +80,22 @@ are things Vayu plans to catch up on:
   test from many machines. Vayu runs from one.
 - **You have existing `.jmx` test plans**, or a team fluent in them. There is no
   importer for them here.
-- **Your load model needs logic controllers** - loops, conditionals,
-  transactions. Vayu runs closed-loop constant concurrency and a linear
-  scenario. Think time and pacing timers do work under load now (`timer.think`,
-  including a gaussian option, and `timer.pacing`), including `timer.pacing`'s
-  shared-cadence case (`perUser: false`, JMeter's "All threads" pacing) - one
-  cadence held across every virtual user, not one per user. Correlation
-  across a scenario's steps - a login's token reaching the next step's header,
-  per virtual user - does work under load now too: mark the extracting element
-  or script `inline` (or set the run's `elements.scripts` override), or let it
-  stay in the post-run replay by default.
+- **Your load model needs a load-run logic jump.** Think time and pacing
+  timers work under load now (`timer.think`, including a gaussian option,
+  and `timer.pacing`, including its shared-cadence case, `perUser: false` -
+  one cadence held across every virtual user, not one per user), and logic
+  controllers - conditionals, once-only, throughput, loops and named
+  transactions - are elements (`control.if` / `.once` / `.switch` /
+  `.throughput` / `.loop` / `.transaction`) that run fully in a sequential
+  collection run and, for `control.if` / `.once` / `.throughput` /
+  `.transaction`, under load too. What still doesn't: `control.switch` /
+  `.loop` under load, since both need a load run's virtual users to jump,
+  which they cannot do yet (#1569) - a load run carrying either is refused
+  rather than silently run once through. Correlation across a scenario's
+  steps - a login's token reaching the next step's header, per virtual user -
+  does work under load now too: mark the extracting element or script
+  `inline` (or set the run's `elements.scripts` override), or let it stay in
+  the post-run replay by default.
 - **It has to be JVM-native** for your infrastructure, monitoring, or compliance
   reasons.
 

@@ -733,4 +733,34 @@ bool step_has_script (const ScenarioStep& step, std::string_view kind) {
     [&] (const CompiledElement& element) { return element.kind == kind; });
 }
 
+std::unordered_map<std::string, vayu::core::ElementSpan> compute_element_spans (
+const ScenarioPlan& plan) {
+    std::unordered_map<std::string, ElementSpan> spans;
+    const auto& registry = Registry::instance ();
+    for (size_t position = 0; position < plan.steps.size (); ++position) {
+        const auto& step = plan.steps[position];
+        if (!step.elements) {
+            continue;
+        }
+        for (const auto& element : *step.elements) {
+            // Read through the registry's own `needs_span`, never a `kind ==`
+            // comparison outside `core/elements` (#1512's extensibility
+            // contract, rule 1).
+            const auto* kind = registry.find (element.kind);
+            if (kind == nullptr || !kind->needs_span) {
+                continue;
+            }
+            auto [it, inserted] = spans.try_emplace (element.id, ElementSpan{});
+            if (inserted) {
+                it->second.first           = position;
+                it->second.last            = position;
+                it->second.first_step_name = step.name;
+            } else {
+                it->second.last = position;
+            }
+        }
+    }
+    return spans;
+}
+
 } // namespace vayu::core

@@ -94,6 +94,7 @@
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/threshold_eval.hpp"
+#include "vayu/core/transaction_histograms.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/types.hpp"
@@ -127,6 +128,22 @@ struct RunContext;
  */
 [[nodiscard]] std::optional<std::string> validate_scenario_load_config (
 const nlohmann::json& config);
+
+/**
+ * @brief The first element kind in @p plan that a scenario load run cannot
+ *        honour, or `nullopt` when it carries none.
+ *
+ * A scenario load run's virtual users advance through the plan strictly
+ * forward (`VirtualUser::step`); nothing there can jump the way
+ * `control.switch`'s dispatch or `control.loop`'s repeat needs (issue
+ * #1515; a load-path jump mechanism is real, disclosed follow-up work,
+ * issue #1569). The route refuses the run with a `400` naming the kind,
+ * before its row exists - the caller-facing sentence lives there, matching
+ * `validate_scenario_load_config`'s own split. The sequential run supports
+ * both fully; this check applies only to the load path.
+ */
+[[nodiscard]] std::optional<std::string> find_load_incompatible_controller (
+const ScenarioPlan& plan);
 
 /**
  * @brief One virtual user's own generator, independent of every other VU's
@@ -210,6 +227,18 @@ struct VirtualUser {
      * paths section.
      */
     int64_t ready_at_ms = 0;
+    /**
+     * This VU's own count for `control.once` / `control.throughput` /
+     * `control.transaction` (issue #1515), on the same isolation
+     * `scope_overlay` gives an inline `extract.*` write - one VU's count is
+     * never another's. Never cleared at an iteration boundary the way
+     * `scope_overlay` / `cookies` are: `control.once` must survive every
+     * iteration of this VU's life, and `control.transaction`'s own
+     * per-iteration accumulator keys itself with the iteration number
+     * instead, so a stale entry from an abandoned iteration is orphaned
+     * rather than misread.
+     */
+    std::unordered_map<std::string, int64_t> controller_state;
     /// Per-node "when did this node last start" state for this VU's own
     /// `timer.pacing` elements (issue #1498), keyed by element id - the
     /// load-path sibling of `RunContext::pacing_state`'s sequential-run
@@ -356,7 +385,8 @@ struct ScenarioLoadState {
     CoverageTally coverage,
     vayu::http::routes::ScriptVariableScopes base_scopes,
     vayu::runtime::ScriptConfig script_config)
-    : steps (plan.steps.size ()), element_tallies (plan),
+    : steps (plan.steps.size ()), element_spans (compute_element_spans (plan)),
+      transactions (plan), element_tallies (plan),
       shared_pacing (shared_pacing_element_ids (plan)),
       base_scopes (std::move (base_scopes)),
       base_vars (vayu::http::routes::flatten_variable_scopes (this->base_scopes)),
@@ -365,6 +395,20 @@ struct ScenarioLoadState {
     }
 
     StepHistograms steps;
+    /// The plan-wide first/last position of every scope-spanning element
+    /// (issue #1515's `control.transaction` - `control.loop` never reaches
+    /// this run mode, see `submit_one`'s own comment), computed once here.
+    std::unordered_map<std::string, ElementSpan> element_spans;
+    /// One histogram per declared `control.transaction` name (issue #1515),
+    /// allocated up front from the same plan scan `element_spans` is, so
+    /// recording into it takes no lock.
+    TransactionHistograms transactions;
+    /// Steps a `control.if` / `control.once` / `control.throughput` element
+    /// skipped before they reached the wire (issue #1515) - the load
+    /// path's own `StepOutcome::Skipped`, read into the summary's
+    /// `skipped` key in place of the constant `0` every scenario load run
+    /// reported before this.
+    std::atomic<size_t> steps_skipped{ 0 };
     /// Per-step, per-element pass/fail/skip tallies (issue #1495), written by
     /// the same completion that writes `steps` above - see the class comment.
     StepElementTallies element_tallies;
