@@ -2456,7 +2456,7 @@ operation only where a request's differs from it; an explicit no-auth request
 is `security: []`, one left to inherit gets no override, and a mode with no
 OpenAPI name (`digest`, `aws`, `ntlm`, an unrecognized one) is
 `authDropped`. What is left with nowhere to go is counted rather than
-guessed at: `scriptsDropped` (a pre- or post-request script), `variablesDropped`
+guessed at: `variablesDropped`
 (a collection variable besides `baseUrl`), `bodiesDropped` (a body in a mode
 this direction has no media type for - GraphQL today), `formValuesDropped` (a
 form body's field values, its names still declared), `settingsDropped` (a
@@ -2465,7 +2465,29 @@ non-default redirect, TLS, HTTP-version or streaming setting), and
 A Params or Headers row sharing a key and location with an earlier row would
 produce two Parameter Objects for the same name+location, which OpenAPI
 forbids - only the first is written and the rest are counted as
-`duplicateParameterRowsDropped`.
+`duplicateParameterRowsDropped`. `scriptsDropped` stays in the response - a
+zero is a statement too - but now always reads `0`: a request's or the
+collection's `elements` (scripts included) round-trip through
+`x-vayu-elements` instead (issue #1518, below), so nothing about them is
+dropped any more.
+
+**`x-vayu-elements`** carries a request's or the collection's whole `elements`
+array verbatim, the same vendor-extension convention `x-vayu-enabled` already
+established - never a standard OpenAPI field, so writing it is never
+"rewriting the user's contract". A skeleton export writes it on every
+operation and at the document root whenever the corresponding `elements` array
+is non-empty; a bound export writes it on an operation the document already
+declares (gated on `dialect.writable`, the same gate every other bound
+field this reference names above relies on - nothing is written into a
+Swagger 2.0 document's operations at all). The importer reads it back
+verbatim, validated against the live element registry - a document hand-edited
+into an invalid array is not applied and is counted under `elements_invalid`
+in `meta.skipped` (see [`POST /import/parse`](#post-importparse)) rather than
+reaching the stored request. Not read on the sync/diff path
+(`POST /specs/diff` / `POST /specs/sync`): `DraftRequest`, what that path
+compares a stored request against, deliberately excludes scripts and auth so a
+re-sync never silently overwrites what a user edited locally, and an element
+can carry a script.
 
 **Errors:** `400` for a missing or empty `collectionId`, or a `format` other
 than `json`/`yaml`. `404` when the collection does not exist. `409` when the
@@ -2820,12 +2842,17 @@ is claimed by the same one it always was:
 | `_type: "export"` + `__export_format: 4` | `Insomnia Export v4` |
 | `openapi` starting `3.` | `OpenAPI 3.0` |
 | `swagger` being `2.0` (string or number) | `OpenAPI 2.0 (Swagger)` |
+| the raw text contains `<jmeterTestPlan` | `JMeter <version> Test Plan` |
 
 The bytes are read once, JSON first and YAML second, through the same
 `core::read_document` behind [`POST /specs`](#post-specs) and
 [`POST /specs/describe`](#post-specsdescribe). **This is the only parser**: the
 renderer holds none, which is what makes "exactly one reader has an opinion
-about a document" true rather than nearly true.
+about a document" true rather than nearly true. JMeter's `.jmx` is the one
+exception to "read once through `read_document`": it is XML, checked on the
+raw text (issue #1518, `is_jmeter_document`) before that reader ever runs,
+since XML fails both of its formats the same way genuinely unrecognised bytes
+do - see `docs/app/import-collections/jmeter.md` for the class mapping.
 
 **Request:**
 ```json
@@ -2869,12 +2896,18 @@ per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
 `default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
 `unmapped_body`, `unresolved_base_url`, `unsupported_auth`, `path_variables`,
-`url_without_raw`, `variable_metadata`. Not every kind is a loss: `default_response`,
-`path_variables` and `url_without_raw` count a mapping the import made rather than
-something it dropped (see `docs/app/import-collections/postman.md`). An import
-that loses something and says nothing is the defect this list exists to
-prevent, so a format with nothing to report answers `[]` rather than omitting
-the field. `meta.folderStrategy`
+`url_without_raw`, `variable_metadata`, `elements_invalid`. Not every kind is a
+loss: `default_response`, `path_variables` and `url_without_raw` count a mapping
+the import made rather than something it dropped (see
+`docs/app/import-collections/postman.md`). An import that loses something and
+says nothing is the defect this list exists to prevent, so a format with
+nothing to report answers `[]` rather than omitting the field. **A JMeter
+import's `kind` is not limited to this list** (issue #1518): a `.jmx` class
+this parser has no element-kind mapping for is counted under its own literal
+class name (`ThreadGroup`, `CookieManager`, ...), since JMeter's own class list
+is open-ended - `ImportTally::items()` emits every kind it was given a count
+for, the enumerable ones first in the fixed order above, anything else after in
+first-encountered order. `meta.folderStrategy`
 (`tags` / `paths` / `mixed`) is present only when an OpenAPI import built
 folders, since a document that declares no operation tags gets a tree it never
 spelled out.
@@ -2889,6 +2922,8 @@ spelled out.
   the line named.
 - `400` `Malformed Insomnia export: <field> must be an array` - the one format
   whose export is a flat resource list, so a broken one leaves nothing to walk.
+- `400` `Malformed JMeter test plan: <detail>` - XML pugixml could not parse,
+  or well-formed XML with no `<jmeterTestPlan>` root.
 - `400` `Invalid 'importScripts': must be a boolean` (and the same for
   `importEnvironments`, `fileName`, `sourceUrl`, `unresolvedRefs`).
 - `413` `Import document is N bytes, over the limit of M (raise the 'maxSpecDocumentBytes' setting to allow more)`.

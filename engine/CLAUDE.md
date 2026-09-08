@@ -543,9 +543,12 @@ logged as a warning: it means a client skipped composition.
     collection gets a skeleton that invents nothing but, since #1441, carries
     what OpenAPI can name - folders as `tags`, auth as `securitySchemes` and
     `security`, a `{{baseUrl}}` with a known value as a declared server
-    variable default, a row's toggle as `x-vayu-enabled` - and counts what it
-    cannot (scripts, other variables, unmapped bodies, form values, execution
-    settings, extra example headers) in `ExportNotes`. The subtree walk stops at
+    variable default, a row's toggle as `x-vayu-enabled`, a request's or the
+    collection's own `elements` (scripts included) as `x-vayu-elements`
+    (#1518, read back by the importer and validated against the registry
+    before it reaches a stored request) - and counts what it cannot (other
+    variables, unmapped bodies, form values, execution settings, extra
+    example headers) in `ExportNotes`. The subtree walk stops at
     a collection bound to a *different* document and not at one bound to the
     same (#721), as a predicate on `collection_subtree_ids`. YAML output is
     `core::emit_yaml`, beside the reader on purpose: `plain_scalar` decides
@@ -600,7 +603,17 @@ logged as a warning: it means a client skipped composition.
   is the renderer's old order. `tests/fixtures/import-conformance.json` records
   what the renderer's retired parsers produced for a 15-document corpus and
   `import_parse_test.cpp` asserts this side matches, two normalisations aside.
-  `POST /import` is the parse plus `core::import_apply_payload` plus
+  A JMeter `.jmx` test plan (#1518, `core/jmeter_import.hpp`, pugixml - the
+  one XML dependency in one translation unit) is the one format that cannot
+  ride `core::read_document` at all: it is XML, checked on the raw text
+  (`is_jmeter_document`) before that reader ever runs a document through it,
+  since JSON and YAML would both fail on it the way genuinely unrecognised
+  bytes do. Its class-to-element-kind mapping is counted by JMeter's own class
+  name for anything unmapped, which is why `ImportTally::items()` falls back
+  to emitting a kind outside its fixed order list rather than dropping it -
+  the app's own closed `SkippedItem["kind"]` union (`types.ts`) is widened to
+  accept one for the same reason. `POST /import` is the parse plus
+  `core::import_apply_payload` plus
   `POST /import/apply`, **globals last and merged** because `POST /globals`
   replaces the whole set and must not run in front of a write that can still
   fail; the app's own flattening of a previewed result is pinned to it by

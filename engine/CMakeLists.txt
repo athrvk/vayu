@@ -324,6 +324,10 @@ endif()
 # YAML as often as JSON, and core/openapi_document.cpp is the only translation
 # unit that includes it - everything else reads the nlohmann DOM it produces.
 find_package(ryml CONFIG REQUIRED)
+# The one XML reader in the engine (issue #1518). A `.jmx` file is JMeter's own
+# hashTree/testElement XML dialect; core/jmeter_import.cpp is the only
+# translation unit that includes it.
+find_package(pugixml CONFIG REQUIRED)
 
 if(VAYU_BUILD_TESTS)
     find_package(GTest CONFIG REQUIRED)
@@ -514,6 +518,7 @@ add_library(vayu_core STATIC
     src/core/scenario_runner.cpp
     src/core/operation_match.cpp
     src/core/import_document.cpp
+    src/core/jmeter_import.cpp
     src/core/openapi_document.cpp
     src/core/openapi_drafts.cpp
     src/core/openapi_export.cpp
@@ -567,6 +572,8 @@ target_link_libraries(vayu_core PUBLIC
     # but vayu_core is linked into three binaries and the static lib carries the
     # symbols, so it rides with the rest.
     ryml::ryml
+    # Same reasoning: only jmeter_import.cpp includes pugixml.hpp.
+    pugixml::pugixml
     unofficial::sqlite3::sqlite3
     sqlite_orm::sqlite_orm
     hdrhistogram

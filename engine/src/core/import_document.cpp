@@ -24,6 +24,7 @@
 #include "openapi_walk.hpp"
 
 #include "vayu/core/elements.hpp"
+#include "vayu/core/jmeter_import.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -2875,6 +2876,25 @@ const ImportSource& source) {
     // rather than derived from the format name, which would make a renamed
     // dialect a silently doubled query.
     bool query_joined = false;
+
+    // A `.jmx` test plan is XML, and would only fail both of `read_document`'s
+    // readers (JSON then YAML) the same way genuinely unrecognised bytes do -
+    // checked first, on the raw text, so a `.jmx` upload gets this parser
+    // rather than "Unrecognised format".
+    if (is_jmeter_document (text)) {
+        ImportTally tally;
+        try {
+            parsed.result = parse_jmeter (text, options, tally);
+        } catch (const MalformedJmeter& malformed) {
+            parsed.error = malformed.what ();
+            return parsed;
+        }
+        if (!source.file_name.empty ()) {
+            parsed.result["meta"]["fileName"] = source.file_name;
+        }
+        join_params_into_urls (parsed.result.at ("collections"));
+        return parsed;
+    }
 
     // One read, through the engine's one reader: JSON first and YAML second,
     // which is the order `parse-raw.ts` read the same bytes in.

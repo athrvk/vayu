@@ -30,6 +30,7 @@ the request in.
 | **Proxy / custom CA / client certs** | In Settings - four proxy modes, additive CAs, per-host certs\* | JVM properties and the Java keystore |
 | **Postman collection import** | Yes (v2.0 + v2.1) | No |
 | **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | No |
+| **JMeter `.jmx` import** | Yes - samplers, extractors, assertions, timers and logic controllers, an unmapped class counted rather than dropped\*\* | N/A |
 | **Open source** | Yes (dual-license) | Yes (Apache 2.0) |
 
 \* **One asterisk that row has earned.** `system` proxy mode resolves a PAC
@@ -41,6 +42,15 @@ in both PEM-pair and PKCS#12 form. Detail:
 [proxy settings](../engine/api-reference.md#proxy-settings),
 [TLS trust](../engine/api-reference.md#tls-trust-settings) and
 [client certificates](../engine/api-reference.md#client-certificates).
+
+\*\* **Common, not complete.** JMeter's own class list is open-ended - plugins
+add more of them - so this is a mapping table, not a JMeter-compatibility
+claim: HTTP samplers, JSON/regex/boundary extractors, the five assertion
+kinds, all four timer kinds and the six logic controllers map onto Vayu's
+element model, and a class this importer has no mapping for (a listener, a
+cookie manager, a protocol Vayu's HTTP engine does not speak) is counted by
+its own class name rather than silently dropped. Detail:
+[the JMeter import doc](../app/import-collections/jmeter.md).
 
 ## The engine, and what it does not cost you
 
@@ -82,8 +92,13 @@ are things Vayu plans to catch up on:
   Vayu's HTTP engine does not speak at all.
 - **You need distributed load.** JMeter's controller-and-workers model drives a
   test from many machines. Vayu runs from one.
-- **You have existing `.jmx` test plans**, or a team fluent in them. There is no
-  importer for them here.
+- **Your `.jmx` plans lean on what the importer does not map** - a protocol
+  other than HTTP, distributed execution, a plugin sampler, `SwitchController`,
+  or a JSR223/BeanShell script (imported disabled, since Groovy and BeanShell
+  are not JavaScript). A plan built from the common element set (HTTP samplers,
+  the extractors, assertions, timers and logic controllers in the table above)
+  imports and runs; a team fluent in JMeter's full plugin ecosystem is still
+  better served staying there.
 - **Your load model needs a constant-throughput shared-rate timer.** Think
   time and pacing timers work under load now (`timer.think`, including a
   gaussian option, and `timer.pacing`, including its shared-cadence case,

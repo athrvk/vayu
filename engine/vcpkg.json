@@ -17,6 +17,7 @@
     "nlohmann-json",
     "ryml",
     "valijson",
+    "pugixml",
     {
       "name": "cpp-httplib",
       "features": [
