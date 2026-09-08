@@ -5099,9 +5099,10 @@ collection itself.
 ```jsonc
 {
   "elements": {
-    "timers": "asConfigured",     // "asConfigured" (default) | "off"
+    "timers": "asConfigured",     // "asConfigured" (default) | "off" | {"fixedMs": N} | {"minMs": N, "maxMs": N}
     "scripts": "asMarked",        // "asMarked" (default) | "allInline" | "allDeferred"
-    "includeScriptTime": false    // default false
+    "includeScriptTime": false,   // default false
+    "seed": 42                    // Optional, non-negative integer - seeds this run's RNG
   }
 }
 ```
@@ -5120,10 +5121,28 @@ own unknown-key rule uses, checked before the run row is created.
 - **`includeScriptTime`** folds the element pipeline's own elapsed time into
   a step's recorded latency when `true`; by default (`false`) a step's
   latency is its transfer alone, exactly as before this issue.
-- **`timers`** is accepted and stored but not yet wired to anything: no
-  kind reads it yet, since `timer.think`'s current phase (`step.between`) and
-  blocking wait are sequential-run-only. Issue #1498 ("the timer family")
-  owns finishing this.
+- **`timers`** (issue #1498) is wired end to end: `"asConfigured"` (default)
+  runs every `timer.*` element's own stored config unchanged; `"off"`
+  silences every `timer.*` element for the run (`waitedMs: 0`, no sleep);
+  `{"fixedMs": N}` or `{"minMs": N, "maxMs": N}` replace every `timer.*`
+  element's own computed wait with the same fixed value or uniform range,
+  whatever that element's own config says - "replaced, not merged", the
+  same rule `scripts` above uses. `timer.think`'s `step.between` phase now
+  dispatches on a scenario load run too (non-blocking, summed into
+  `VirtualUser::ready_at_ms`), so this override reaches load runs as well as
+  the sequential run.
+- **`seed`** (issue #1498) is an optional non-negative integer that seeds this
+  run's RNG, making a `timer.think` element's gaussian or uniform-random wait
+  reproducible. A scenario load run derives one independent generator per
+  virtual user from this seed rather than sharing one across worker threads.
+  Omitted, the run seeds from `std::random_device` as before, and every draw
+  is non-reproducible.
+
+Not reported at the run-summary level: there is no `summary.timers`
+aggregate. What a `timer.*` element waited is per-step, per-element -
+`waitedMs` on that element's entry in the step trace's `elements` array (see
+[The step trace](elements.md#the-step-trace)) - not rolled up into
+`GET /runs/:runId` / the completion report's `summary` object.
 
 Not part of this block: a **single-request** `POST /runs` payload has no
 `elements` attachment point at all (see `tests` above), so this block is

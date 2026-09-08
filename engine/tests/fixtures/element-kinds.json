@@ -392,6 +392,24 @@
     "configSchema": {
       "additionalProperties": false,
       "properties": {
+        "gaussian": {
+          "additionalProperties": false,
+          "properties": {
+            "deviationMs": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "meanMs": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "meanMs",
+            "deviationMs"
+          ],
+          "type": "object"
+        },
         "maxMs": {
           "minimum": 0,
           "type": "integer"
@@ -407,12 +425,39 @@
       },
       "type": "object"
     },
-    "description": "Waits a fixed or uniformly random span before the next step, outside this step's own latency.",
+    "description": "Waits a fixed, uniformly random or gaussian-random span before the next step, outside this step's own latency.",
     "hotPathClass": "declarative",
     "kind": "timer.think",
     "label": "Think time",
     "phases": [
       "step.between"
+    ],
+    "version": 1
+  },
+  {
+    "category": "timer",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "everyMs": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "perUser": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "everyMs"
+      ],
+      "type": "object"
+    },
+    "description": "Holds this request, folder or collection to a steady start-to-start cadence across iterations, whatever its own duration was.",
+    "hotPathClass": "declarative",
+    "kind": "timer.pacing",
+    "label": "Pacing",
+    "phases": [
+      "step.before"
     ],
     "version": 1
   }

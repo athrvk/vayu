@@ -7,20 +7,25 @@
 
 /**
  * @file timer_think.cpp
- * @brief `timer.think` (issue #1514): a fixed or uniform-random wait between
+ * @brief `timer.think` (issue #1514, gaussian and the run override added by
+ *        #1498): a fixed, uniform-random or gaussian-random wait between
  *        this step and the next.
  *
  * Runs in `step.between`, never `step.before` - the whole point is that the
- * wait does not count against this step's own latency. The wait polls
- * `ElementContext::should_stop` on a short interval rather than sleeping the
- * whole span in one call, so a run stop lands within that interval instead of
- * at the end of a multi-second think time.
+ * wait does not count against this step's own latency. The sequential run's
+ * wait polls `ElementContext::should_stop` on a short interval rather than
+ * sleeping the whole span in one call, so a run stop lands within that
+ * interval instead of at the end of a multi-second think time. A scenario
+ * load run never blocks a thread for this wait at all: it reads
+ * `scheduled_ready_delay_ms` instead and defers the VU through
+ * `VirtualUser::ready_at_ms`, so `apply` there only records the outcome.
  */
 
 #include "vayu/core/elements.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <random>
 #include <thread>
 
@@ -41,32 +46,53 @@ class TimerThinkElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
-        const long wait_ms = resolve_wait_ms ();
-        if (wait_ms <= 0) {
+        const auto wait_ms = apply_timers_override (
+        ctx.timers_override, resolve_own_wait_ms (ctx.rng), ctx.rng);
+        if (!wait_ms || *wait_ms <= 0) {
             ctx.outcome_status    = "ok";
             ctx.outcome_waited_ms = 0;
             return;
         }
 
-        const auto deadline =
-        std::chrono::steady_clock::now () + std::chrono::milliseconds (wait_ms);
-        while (true) {
-            if (ctx.should_stop && ctx.should_stop ()) {
-                break;
+        if (ctx.blocking_allowed) {
+            const auto deadline = std::chrono::steady_clock::now () +
+            std::chrono::milliseconds (*wait_ms);
+            while (true) {
+                if (ctx.should_stop && ctx.should_stop ()) {
+                    break;
+                }
+                const auto now = std::chrono::steady_clock::now ();
+                if (now >= deadline) {
+                    break;
+                }
+                std::this_thread::sleep_for (std::min<std::chrono::steady_clock::duration> (
+                POLL_INTERVAL, deadline - now));
             }
-            const auto now = std::chrono::steady_clock::now ();
-            if (now >= deadline) {
-                break;
-            }
-            std::this_thread::sleep_for (std::min<std::chrono::steady_clock::duration> (
-            POLL_INTERVAL, deadline - now));
         }
+        // Under load (`!ctx.blocking_allowed`) the wait already happened
+        // through `scheduled_ready_delay_ms` deferring the VU before this
+        // step was dispatched at all - this call reports the outcome only.
         ctx.outcome_status    = "ok";
         ctx.outcome_waited_ms = wait_ms;
     }
 
+    // No `scheduled_ready_delay_ms` override: unlike `timer.pacing`,
+    // `timer.think` runs at `step.between`, which the load path dispatches
+    // (with `blocking_allowed = false`) at the same point it would need to
+    // pre-schedule anyway - `finish_step` sums the `StepBetween` outcomes'
+    // `waited_ms` straight into `VirtualUser::ready_at_ms` itself, so no
+    // kind-specific pre-scheduling hook is needed for this one.
+
     private:
-    [[nodiscard]] long resolve_wait_ms () const {
+    [[nodiscard]] long resolve_own_wait_ms (std::mt19937_64* rng) const {
+        if (config_.contains ("gaussian")) {
+            const auto& gaussian  = config_["gaussian"];
+            const double mean_ms  = gaussian.value ("meanMs", 0.0);
+            const double stdev_ms = gaussian.value ("deviationMs", 0.0);
+            std::normal_distribution<double> dist (mean_ms, stdev_ms);
+            const double drawn = rng != nullptr ? dist (*rng) : dist (fallback_rng ());
+            return std::lround (std::max (0.0, drawn));
+        }
         if (config_.contains ("minMs") || config_.contains ("maxMs")) {
             long min_ms = config_.value ("minMs", 0);
             long max_ms = config_.value ("maxMs", min_ms);
@@ -76,11 +102,18 @@ class TimerThinkElement final : public Element {
             if (max_ms == min_ms) {
                 return min_ms;
             }
-            static thread_local std::mt19937 rng{ std::random_device{}() };
             std::uniform_int_distribution<long> dist (min_ms, max_ms);
-            return dist (rng);
+            return rng != nullptr ? dist (*rng) : dist (fallback_rng ());
         }
         return config_.value ("ms", 0L);
+    }
+
+    /// Unseeded, thread-local fallback for a caller with no run to be
+    /// reproducible against (a design send) - the behaviour every draw here
+    /// had before #1498 added `ElementContext::rng`.
+    static std::mt19937& fallback_rng () {
+        static thread_local std::mt19937 rng{ std::random_device{}() };
+        return rng;
     }
 
     nlohmann::json config_;
@@ -95,8 +128,8 @@ ElementKind make_timer_think_kind () {
     kind.phases  = { Phase::StepBetween };
     kind.label   = "Think time";
     kind.description =
-    "Waits a fixed or uniformly random span before the next step, "
-    "outside this step's own latency.";
+    "Waits a fixed, uniformly random or gaussian-random span before the "
+    "next step, outside this step's own latency.";
     kind.category = "timer";
     kind.hot_path = HotPathClass::Declarative;
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
@@ -107,7 +140,13 @@ ElementKind make_timer_think_kind () {
         { "properties",
         { { "ms", { { "type", "integer" }, { "minimum", 0 } } },
         { "minMs", { { "type", "integer" }, { "minimum", 0 } } },
-        { "maxMs", { { "type", "integer" }, { "minimum", 0 } } } } },
+        { "maxMs", { { "type", "integer" }, { "minimum", 0 } } },
+        { "gaussian",
+        { { "type", "object" },
+        { "properties",
+        { { "meanMs", { { "type", "number" }, { "minimum", 0 } } },
+        { "deviationMs", { { "type", "number" }, { "minimum", 0 } } } } },
+        { "required", { "meanMs", "deviationMs" } }, { "additionalProperties", false } } } } },
         { "additionalProperties", false },
     };
     return kind;

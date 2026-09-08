@@ -1842,9 +1842,11 @@ column still binds if the run's file carries it, so this is "check this", not
 The `{{` autocomplete offers declared columns as a **Data columns** group beside
 Variables and Dynamic.
 
-**This chip row is retired pending a port to the element model (issue #1512).**
-Through issue #1075, both the request builder's script panel and the
-collection's Script tab painted a **"Names mentioned:"** row above their
+**This chip row lives beside a `script.pre` / `script.post` element's editor
+now** (issue #1553), as `ScriptReferencesRow` (`components/shared/`) - split
+out rather than restored, because the row now has two hosts and used to have
+two copies. Through issue #1075, both the request builder's script panel and
+the collection's Script tab painted a **"Names mentioned:"** row above their
 Monaco editor - `referencedVariables` (`lib/referenced-variables.ts`) split
 `pm` reads from `{{template}}` mentions (issue #659, decision D16: the engine
 never interpolates script source, so a green `{{base_url}}` chip promised a
@@ -1853,15 +1855,21 @@ substitution that never happens), and `describeDataToken` /
 `DATA_TOKEN_TONE_CLASS` (`lib/data-token-tone.ts`) both the URL bar and the
 Data tab's column audit use (issue #604), so a column one surface calls
 declared is the one every other surface calls declared. Both script panels
-are gone: a script is a `script.pre` / `script.post` element now, edited
-through `ElementList`'s bespoke form (`ScriptElementForm`,
-`components/shared/ElementList/`), which is a primitive under
-`components/shared/` and therefore cannot depend on either host's
-context - the same rule that keeps it out of `InheritedElementsNotice` too.
-Reintroducing this row (as a wrapper `ElementsPanel.tsx` /
-`ElementsTab.tsx` render around a `script.*` element, using the same
-functions) is real, disclosed follow-up work, not done in the migration that
-retired the two script panels.
+were retired for a `script.pre` / `script.post` element edited through
+`ElementList`'s bespoke form (`ScriptElementForm`,
+`components/shared/ElementList/`) - a primitive under `components/shared/`
+that cannot depend on either host's context, the same rule that keeps this
+row out of it. `ScriptReferencesRow` instead takes the resolved answers
+(`script`, `allVariables`, `getVariableOrigins`, `dataColumns`) as props, and
+each host - `ElementsPanel.tsx`, `ElementsTab.tsx` - supplies its own
+context's answers through `ElementList`'s `renderAboveForm`, a plain
+per-element render callback that keeps `ElementList` itself as
+context-free as before. One deliberate behaviour change from the two retired
+panels: an ordinary `pm.*.get()` read now paints the resolved/unresolved
+(`secondary`/`destructive`) pair on both hosts, where the collection's
+`ScriptTab` previously painted every such read with a flat accent regardless
+of whether anything defined it - the two panels had quietly drifted apart on
+this one state, and a single shared implementation cannot paint it two ways.
 
 **A reference carries what its accessor can see, not only how it was spelled**
 (issue #1063). `referencedVariables` matched three accessors and left
