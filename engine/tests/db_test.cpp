@@ -1981,6 +1981,24 @@ void add_legacy_script_columns (const std::string& path) {
     sqlite3_close (handle);
 }
 
+/// Drops `elements` from both tables - the half of the pre-cutover shape
+/// `add_legacy_script_columns` cannot express on its own. A database written
+/// before issue #1513 has the two script columns and no `elements` at all;
+/// re-adding the script columns to a *current* schema leaves `elements`
+/// standing and so exercises a shape no real upgrade ever has.
+void drop_elements_columns (const std::string& path) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path.c_str (), &handle), SQLITE_OK);
+    for (const char* table : { "requests", "collections" }) {
+        char* err = nullptr;
+        const std::string sql = std::string ("ALTER TABLE ") + table + " DROP COLUMN elements";
+        ASSERT_EQ (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, &err), SQLITE_OK)
+        << (err != nullptr ? err : "(no message)");
+        sqlite3_free (err);
+    }
+    sqlite3_close (handle);
+}
+
 void set_legacy_scripts (const std::string& path,
 const std::string& table,
 const std::string& id,
@@ -2106,6 +2124,122 @@ TEST_F (DatabaseTest, MigratesPreCutoverScriptColumnsIntoElements) {
     EXPECT_EQ (elements[0]["config"]["script"], "pm.environment.set('x', 1);");
     EXPECT_EQ (elements[1]["kind"], "script.post");
     EXPECT_EQ (elements[1]["config"]["script"], "pm.test('ok', () => {});");
+}
+
+// The shape every 0.26 -> 0.27 upgrade actually has (issue #1593): the two
+// script columns and no `elements` column at all, because `sync_schema` - the
+// only thing that ever adds it - does not run until after this fold. The
+// engine refused to start on it ("could not migrate stored scripts into
+// elements"), which is a failed upgrade for every existing install.
+//
+// Mutation check: drop the `ALTER TABLE ... ADD COLUMN elements` from
+// `fold_table_scripts_into_elements` and the `Database` open below throws.
+TEST_F (DatabaseTest, MigratesADatabaseThatPredatesTheElementsColumn) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_1";
+        r.collection_id = "col_1";
+        r.name          = "R";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+
+    add_legacy_script_columns (TEST_DB_PATH);
+    set_legacy_scripts (TEST_DB_PATH, "requests", "req_1",
+    "pm.environment.set('x', 1);", "pm.test('ok', () => {});");
+    set_legacy_scripts (TEST_DB_PATH, "collections", "col_1", "pm.collectionPre();", "");
+    drop_elements_columns (TEST_DB_PATH);
+    ASSERT_FALSE (table_has_column (TEST_DB_PATH, "requests", "elements"))
+    << "test setup did not reach the pre-cutover shape";
+    set_user_version (TEST_DB_PATH, 0);
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 1);
+    EXPECT_FALSE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto folded = reopened.get_request ("req_1");
+    ASSERT_HAS_VALUE (folded);
+    const auto elements = nlohmann::json::parse (folded->elements);
+    ASSERT_EQ (elements.size (), 2u) << folded->elements;
+    EXPECT_EQ (elements[0]["kind"], "script.pre");
+    EXPECT_EQ (elements[0]["config"]["script"], "pm.environment.set('x', 1);");
+    EXPECT_EQ (elements[1]["kind"], "script.post");
+
+    auto collection = reopened.get_collection ("col_1");
+    ASSERT_HAS_VALUE (collection);
+    const auto collection_elements = nlohmann::json::parse (collection->elements);
+    ASSERT_EQ (collection_elements.size (), 1u) << collection->elements;
+    EXPECT_EQ (collection_elements[0]["kind"], "script.pre");
+    EXPECT_EQ (collection_elements[0]["config"]["script"], "pm.collectionPre();");
+}
+
+// Only one of the pair present is still a fold, not a refusal: the missing
+// column reads as an empty script rather than failing the `SELECT`.
+TEST_F (DatabaseTest, MigratesWhenOnlyOneScriptColumnSurvives) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_1";
+        r.collection_id = "col_1";
+        r.name          = "R";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+
+    add_legacy_script_columns (TEST_DB_PATH);
+    set_legacy_scripts (TEST_DB_PATH, "requests", "req_1", "", "pm.test('ok', () => {});");
+    {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        for (const char* table : { "requests", "collections" }) {
+            const std::string sql =
+            std::string ("ALTER TABLE ") + table + " DROP COLUMN pre_request_script";
+            ASSERT_EQ (sqlite3_exec (handle, sql.c_str (), nullptr, nullptr, nullptr), SQLITE_OK);
+        }
+        sqlite3_close (handle);
+    }
+    set_user_version (TEST_DB_PATH, 0);
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto folded = reopened.get_request ("req_1");
+    ASSERT_HAS_VALUE (folded);
+    const auto elements = nlohmann::json::parse (folded->elements);
+    ASSERT_EQ (elements.size (), 1u) << folded->elements;
+    EXPECT_EQ (elements[0]["kind"], "script.post");
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 1);
 }
 
 // A database the additive #1513 repair pass already folded (elements already
