@@ -8697,6 +8697,24 @@ void setup_pm_object (JSContext* ctx) {
     JS_FreeValue (ctx, global);
 }
 
+// expect_class_id / response_chain_class_id / request_url_class_id /
+// request_body_class_id are process-wide: every native callback looks one up
+// by name (JS_GetOpaque (ctx, ..., xxx_class_id)) rather than through the
+// JSRuntime that happens to own its JSContext, since each OS thread owns a
+// wholly separate JSRuntime (QuickJS's own is not thread-safe) but the four
+// ids must still agree across all of them. The zero-check-then-JS_NewClassID
+// sequence that assigns each one is neither atomic nor idempotent under a
+// race - two threads creating their first JSRuntime concurrently can
+// interleave the read and the write, corrupting the id one native callback
+// later dereferences (root cause of #1589's intermittent segfault). This
+// mutex makes that one-time assignment, plus the JS_NewClass registration
+// that depends on the id being final, happen under one lock; it is not on
+// any per-request hot path, only on first JSRuntime creation per thread.
+std::mutex& class_id_registration_mutex () {
+    static std::mutex mutex;
+    return mutex;
+}
+
 } // anonymous namespace
 
 // ============================================================================
@@ -8763,31 +8781,40 @@ class ScriptEngine::Impl {
         JS_SetRuntimeOpaque (rt, rt_state);
         JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
 
-        // Register Expectation class
-        if (expect_class_id == 0) {
-            JS_NewClassID (rt, &expect_class_id);
-        }
-        JS_NewClass (rt, expect_class_id, &expect_class);
+        // The four ids below are process-wide (see class_id_registration_mutex's
+        // comment); this lock is what makes their first assignment, and the
+        // JS_NewClass calls that depend on the final value, safe across the
+        // per-thread JSRuntimes that race to create their first context.
+        {
+            std::lock_guard<std::mutex> id_lock (class_id_registration_mutex ());
 
-        // Register the pm.response.to.* chain class, whose exotic hook makes an
-        // unknown assertion throw instead of silently evaluating to undefined.
-        if (response_chain_class_id == 0) {
-            JS_NewClassID (rt, &response_chain_class_id);
-        }
-        JS_NewClass (rt, response_chain_class_id, &response_chain_class);
+            // Register Expectation class
+            if (expect_class_id == 0) {
+                JS_NewClassID (rt, &expect_class_id);
+            }
+            JS_NewClass (rt, expect_class_id, &expect_class);
 
-        // Register the pm.request.url class - see setup_pm_object for the
-        // prototype that keeps it usable as the string it replaced.
-        if (request_url_class_id == 0) {
-            JS_NewClassID (rt, &request_url_class_id);
-        }
-        JS_NewClass (rt, request_url_class_id, &request_url_class);
+            // Register the pm.response.to.* chain class, whose exotic hook makes
+            // an unknown assertion throw instead of silently evaluating to
+            // undefined.
+            if (response_chain_class_id == 0) {
+                JS_NewClassID (rt, &response_chain_class_id);
+            }
+            JS_NewClass (rt, response_chain_class_id, &response_chain_class);
 
-        // Register the pm.request.body class - same story, same prototype.
-        if (request_body_class_id == 0) {
-            JS_NewClassID (rt, &request_body_class_id);
+            // Register the pm.request.url class - see setup_pm_object for the
+            // prototype that keeps it usable as the string it replaced.
+            if (request_url_class_id == 0) {
+                JS_NewClassID (rt, &request_url_class_id);
+            }
+            JS_NewClass (rt, request_url_class_id, &request_url_class);
+
+            // Register the pm.request.body class - same story, same prototype.
+            if (request_body_class_id == 0) {
+                JS_NewClassID (rt, &request_body_class_id);
+            }
+            JS_NewClass (rt, request_body_class_id, &request_body_class);
         }
-        JS_NewClass (rt, request_body_class_id, &request_body_class);
 
         JSContext* ctx = JS_NewContext (rt);
         if (ctx) {
