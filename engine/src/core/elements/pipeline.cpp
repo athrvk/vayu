@@ -92,6 +92,26 @@ nlohmann::json ElementOutcome::to_json () const {
     return node;
 }
 
+nlohmann::json build_lifecycle_node (const std::vector<ElementOutcome>& run_start,
+const std::vector<ElementOutcome>& run_end) {
+    nlohmann::json node = nlohmann::json::object ();
+    if (!run_start.empty ()) {
+        nlohmann::json setup = nlohmann::json::array ();
+        for (const auto& outcome : run_start) {
+            setup.push_back (outcome.to_json ());
+        }
+        node["setup"] = std::move (setup);
+    }
+    if (!run_end.empty ()) {
+        nlohmann::json teardown = nlohmann::json::array ();
+        for (const auto& outcome : run_end) {
+            teardown.push_back (outcome.to_json ());
+        }
+        node["teardown"] = std::move (teardown);
+    }
+    return node;
+}
+
 std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
     std::vector<CompiledElement> compiled;
     if (!elements.is_array ()) {

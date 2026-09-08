@@ -1129,7 +1129,8 @@ class ScenarioLoadDriver {
 std::shared_ptr<ScenarioLoadState> execute_scenario_load (
 const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
-const ScenarioExecution& execution) {
+const ScenarioExecution& execution,
+vayu::http::routes::ScriptVariableScopes base_scopes) {
     const ScenarioPlan& plan = execution.plan;
     const size_t step_count  = plan.steps.size ();
     const auto& config       = context->config;
@@ -1164,17 +1165,10 @@ const ScenarioExecution& execution) {
     std::max<size_t> (1, static_cast<size_t> (config.value ("iterations", 1000))) :
     0;
 
-    // The run's shared variable scopes (issue #1495), loaded once here on the
-    // same terms `validate_scripts`' replay already loads them for this same
-    // run: the collection being run, since a scenario has no single request
-    // row to derive one from.
-    std::optional<std::string> environment_id;
-    if (auto it = config.find ("environmentId");
-    it != config.end () && it->is_string () && !it->get<std::string> ().empty ()) {
-        environment_id = it->get<std::string> ();
-    }
-    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
-    db, environment_id, execution.request.collection_id);
+    // The run's shared variable scopes (issue #1495) - loaded and, since
+    // #1499, run through `script.setup` by `execute_load_test` before this
+    // function was even called, so a setup script's writes are already in
+    // `base_scopes` by the time it is handed in.
 
     vayu::runtime::ScriptConfig script_config;
     script_config.timeout_ms = static_cast<uint64_t> (

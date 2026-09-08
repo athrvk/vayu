@@ -387,8 +387,11 @@ apply_key_value_field (const nlohmann::json& json, const char* key, std::string&
  * and each entry's config-schema validation, so this stays a thin wrapper
  * rather than a second copy of any of that.
  */
-[[nodiscard]] inline RouteResult
-apply_elements_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {
+[[nodiscard]] inline RouteResult apply_elements_field (const nlohmann::json& json,
+const char* key,
+std::string& out,
+bool is_create,
+vayu::core::ElementOwner owner = vayu::core::ElementOwner::Request) {
     if (!json.contains (key)) {
         if (is_create) {
             out = "[]";
@@ -414,7 +417,7 @@ apply_elements_field (const nlohmann::json& json, const char* key, std::string& 
             }
         }
     }
-    if (auto reason = vayu::core::Registry::instance ().validate (with_ids)) {
+    if (auto reason = vayu::core::Registry::instance ().validate (with_ids, owner)) {
         return route_error (400, *reason);
     }
     out = with_ids.dump ();

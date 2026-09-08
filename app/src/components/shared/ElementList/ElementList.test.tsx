@@ -60,6 +60,7 @@ function kindSchema(overrides: Partial<ElementKindSchema> & { kind: string }): E
 		description: `${overrides.kind} description`,
 		category: "test",
 		hotPathClass: "declarative",
+		collectionOnly: false,
 		configSchema: { type: "object", properties: {} },
 		phases: [],
 		...overrides,

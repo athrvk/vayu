@@ -20,6 +20,7 @@ import {
 	ContractCoverage,
 	RunWarnings,
 	SampledSchemaValidation,
+	ScriptLifecycleSummary,
 	TestValidationSummary,
 	ThresholdVerdict,
 } from "@/components/shared";
@@ -79,6 +80,11 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			    same document - what was exercised, and what it returned. Absent
 			    for a run that checked nothing. */}
 			<SampledSchemaValidation validation={report.schemaValidation} />
+
+			{/* What script.setup / script.teardown did, once each, at the run's
+			    own boundary. Absent for a run whose collection declared
+			    neither. */}
+			<ScriptLifecycleSummary lifecycle={report.lifecycle} />
 
 			{/* Whether the run's own assertions passed, and which failed. The
 			    schema block above judges the response against a contract; this
