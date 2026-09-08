@@ -739,6 +739,29 @@ TEST_F (ScenarioLoadTest, AScenarioLoadRunRunsNoInlineScriptsAndSamplesOnlyScrip
        "read";
 }
 
+// Issue #1500's acceptance criterion, the load-path half: a metric.record
+// trend runs inline on every VU's `step.after` - declarative kinds always
+// run there, unlike script.* - and lands in the run's own MetricsCollector,
+// with a count equal to that step's completions.
+TEST_F (ScenarioLoadTest, MetricRecordProducesCustomMetricsWithTheStepsCompletionCount) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { nlohmann::json{ { "id", "el_metric" }, { "kind", "metric.record" },
+    { "config",
+    { { "name", "ttfb2" }, { "type", "trend" }, { "source", { { "latency", true } } } } } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 5 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    const auto summaries = context_->metrics_collector->custom_metric_summaries ();
+    ASSERT_HAS_VALUE (summaries);
+    ASSERT_EQ (summaries->count ("ttfb2"), 1u);
+    EXPECT_EQ (summaries->at ("ttfb2").type, vayu::core::CustomMetricType::Trend);
+    EXPECT_EQ (summaries->at ("ttfb2").count, 5u);
+}
+
 // A plan whose steps assert nothing gets no stores at all, which is what keeps
 // the report's section absent rather than showing zeros.
 TEST_F (ScenarioLoadTest, APlanWithNoScriptsSamplesNothing) {

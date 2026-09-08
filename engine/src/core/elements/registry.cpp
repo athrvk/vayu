@@ -7,6 +7,8 @@
 
 #include "vayu/core/elements.hpp"
 
+#include "vayu/core/constants.hpp"
+
 #include <valijson/adapters/nlohmann_json_adapter.hpp>
 #include <valijson/schema.hpp>
 #include <valijson/schema_parser.hpp>
@@ -32,6 +34,7 @@ ElementKind make_assert_contains_kind ();
 ElementKind make_assert_duration_kind ();
 ElementKind make_assert_size_kind ();
 ElementKind make_timer_think_kind ();
+ElementKind make_metric_record_kind ();
 
 namespace {
 
@@ -114,6 +117,75 @@ size_t index) {
     "elements[{}] ({}): does not match its config schema", index, kind.kind);
 }
 
+/**
+ * One `elements[i]` entry's shape, id uniqueness and config schema - every
+ * check `Registry::validate` needs except the cross-entry metric-name cap,
+ * which stays in the caller's loop since it accumulates across entries.
+ *
+ * @param kind_name_out,config_out Filled on success, for the caller's own
+ *        metric-name bookkeeping - split out so `validate` itself does not
+ *        re-parse `entry["kind"]` / `entry["config"]` a second time.
+ */
+std::optional<std::string> validate_element_entry (const Registry& registry,
+const nlohmann::json& entry,
+size_t index,
+std::unordered_set<std::string>& seen_ids,
+std::string& kind_name_out,
+nlohmann::json& config_out) {
+    if (!entry.is_object ()) {
+        return std::format ("elements[{}] must be a JSON object", index);
+    }
+    if (!entry.contains ("id") || !entry["id"].is_string () ||
+    entry["id"].get<std::string> ().empty ()) {
+        return std::format ("elements[{}]: 'id' must be a non-empty string", index);
+    }
+    const auto id = entry["id"].get<std::string> ();
+    if (!seen_ids.insert (id).second) {
+        return std::format ("elements[{}]: duplicate id '{}'", index, id);
+    }
+    if (!entry.contains ("kind") || !entry["kind"].is_string ()) {
+        return std::format ("elements[{}]: 'kind' must be a string", index);
+    }
+    kind_name_out    = entry["kind"].get<std::string> ();
+    const auto* kind = registry.find (kind_name_out);
+    if (kind == nullptr) {
+        return std::format ("elements[{}] (kind '{}') is not a known "
+                            "element kind - expected one of {}",
+        index, kind_name_out, known_kinds_list (registry.kinds ()));
+    }
+    if (entry.contains ("enabled") && !entry["enabled"].is_boolean ()) {
+        return std::format (
+        "elements[{}] ({}): 'enabled' must be a boolean", index, kind_name_out);
+    }
+    if (entry.contains ("name") && !entry["name"].is_null () && !entry["name"].is_string ()) {
+        return std::format ("elements[{}] ({}): 'name' must be a string", index, kind_name_out);
+    }
+    config_out = entry.contains ("config") ? entry["config"] : nlohmann::json::object ();
+    return validate_config_against_schema (*kind, config_out, index);
+}
+
+/// The one cross-entry rule `validate_element_entry` cannot check on its
+/// own: the collector's cap on distinct `metric.record` names (issue #1500),
+/// scoped to this one array - see `Registry::validate`'s own comment on why
+/// that scope is correct.
+std::optional<std::string> check_metric_record_cap (const std::string& kind_name,
+const nlohmann::json& config,
+size_t index,
+std::unordered_set<std::string>& metric_names) {
+    if (kind_name != "metric.record" || !config.contains ("name") ||
+    !config["name"].is_string ()) {
+        return std::nullopt;
+    }
+    metric_names.insert (config["name"].get<std::string> ());
+    if (metric_names.size () <= constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES) {
+        return std::nullopt;
+    }
+    return std::format (
+    "elements[{}] (metric.record): this declares more than {} "
+    "distinct custom metric names, the collector's cap",
+    index, constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES);
+}
+
 } // namespace
 
 Registry& Registry::instance () {
@@ -135,6 +207,7 @@ Registry& Registry::instance () {
         registry.register_kind (make_assert_duration_kind ());
         registry.register_kind (make_assert_size_kind ());
         registry.register_kind (make_timer_think_kind ());
+        registry.register_kind (make_metric_record_kind ());
         return true;
     }();
     (void)registered;
@@ -168,40 +241,24 @@ std::optional<std::string> Registry::validate (const nlohmann::json& elements) c
     }
 
     std::unordered_set<std::string> seen_ids;
+    // Every distinct `metric.record` name this one array declares (issue
+    // #1500), so a client learns it has spent the collector's cap before a
+    // run ever starts rather than discovering it mid-flight - the same
+    // "refuse loudly, before the locked write" rule every other bound in
+    // this engine follows. Scoped to this one array: a name repeated by
+    // inheriting the same element onto several levels is one declaration,
+    // and it appears here once because `validate` is called with exactly
+    // this collection's or request's own stored `elements` field, never the
+    // chain-merged list `compose_elements` builds for a run.
+    std::unordered_set<std::string> metric_names;
     for (size_t i = 0; i < elements.size (); ++i) {
-        const auto& entry = elements[i];
-        if (!entry.is_object ()) {
-            return std::format ("elements[{}] must be a JSON object", i);
+        std::string kind_name;
+        nlohmann::json config;
+        if (auto reason = validate_element_entry (
+            *this, elements[i], i, seen_ids, kind_name, config)) {
+            return reason;
         }
-        if (!entry.contains ("id") || !entry["id"].is_string () ||
-        entry["id"].get<std::string> ().empty ()) {
-            return std::format ("elements[{}]: 'id' must be a non-empty string", i);
-        }
-        const auto id = entry["id"].get<std::string> ();
-        if (!seen_ids.insert (id).second) {
-            return std::format ("elements[{}]: duplicate id '{}'", i, id);
-        }
-        if (!entry.contains ("kind") || !entry["kind"].is_string ()) {
-            return std::format ("elements[{}]: 'kind' must be a string", i);
-        }
-        const auto kind_name = entry["kind"].get<std::string> ();
-        const auto* kind     = find (kind_name);
-        if (kind == nullptr) {
-            return std::format ("elements[{}] (kind '{}') is not a known "
-                                "element kind - expected one of {}",
-            i, kind_name, known_kinds_list (kinds_));
-        }
-        if (entry.contains ("enabled") && !entry["enabled"].is_boolean ()) {
-            return std::format (
-            "elements[{}] ({}): 'enabled' must be a boolean", i, kind_name);
-        }
-        if (entry.contains ("name") && !entry["name"].is_null () &&
-        !entry["name"].is_string ()) {
-            return std::format ("elements[{}] ({}): 'name' must be a string", i, kind_name);
-        }
-        const auto config =
-        entry.contains ("config") ? entry["config"] : nlohmann::json::object ();
-        if (auto reason = validate_config_against_schema (*kind, config, i)) {
+        if (auto reason = check_metric_record_cap (kind_name, config, i, metric_names)) {
             return reason;
         }
     }

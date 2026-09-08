@@ -935,6 +935,11 @@ struct RunSummaryInputs {
     // rather than reporting a run that passed zero checks. Sibling of `tests`,
     // and the aggregate answer a per-response script structurally cannot give.
     std::optional<ThresholdOutcome> thresholds;
+    // This run's `metric.record` / `pm.metrics` values, under the summary's
+    // `customMetrics` key (issue #1500), by name. Absent when the run
+    // declared or recorded none, which keeps the report's section out
+    // entirely rather than reporting an empty object.
+    std::optional<std::map<std::string, CustomMetricSummary>> custom_metrics;
     // What a capacity run's adaptive search found. Absent for every other mode,
     // which keeps the report's `capacity` section out rather than showing a
     // fixed-target run a knee it never looked for.

@@ -415,5 +415,101 @@
       "step.between"
     ],
     "version": 1
+  },
+  {
+    "category": "metric",
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        "source": {
+          "additionalProperties": false,
+          "properties": {
+            "condition": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "enum": [
+                    "status",
+                    "header",
+                    "jsonpath",
+                    "latency",
+                    "size"
+                  ],
+                  "type": "string"
+                },
+                "header": {
+                  "type": "string"
+                },
+                "jsonpath": {
+                  "type": "string"
+                },
+                "operator": {
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "lt",
+                    "lte",
+                    "gt",
+                    "gte",
+                    "contains"
+                  ],
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "field",
+                "operator",
+                "value"
+              ],
+              "type": "object"
+            },
+            "header": {
+              "type": "string"
+            },
+            "jsonpath": {
+              "type": "string"
+            },
+            "latency": {
+              "type": "boolean"
+            },
+            "size": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "type": {
+          "enum": [
+            "trend",
+            "counter",
+            "rate"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "source"
+      ],
+      "type": "object"
+    },
+    "description": "Records a named trend, counter or rate from the response, reported beside the built-in phases and usable as a custom.<name>.<stat> threshold.",
+    "hotPathClass": "declarative",
+    "kind": "metric.record",
+    "label": "Record a custom metric",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
   }
 ]

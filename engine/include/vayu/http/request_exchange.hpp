@@ -385,6 +385,12 @@ struct ExchangeInputs {
      * (`ClientConfig::truncate_over_limit`).
      */
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
+    /// `metric.record`'s and `pm.metrics`'s write destination (issue #1500).
+    /// Null for a context with no run behind it - a bare design send - which
+    /// is what makes both report "not available here" rather than silently
+    /// recording nowhere; the scenario runner is the one caller that binds
+    /// this, to its run's `MetricsCollector`.
+    std::function<void (const std::string& name, vayu::core::CustomMetricType type, double value)> record_metric;
 };
 
 /** What one exchange produced. */

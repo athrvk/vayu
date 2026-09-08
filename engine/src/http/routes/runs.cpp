@@ -181,6 +181,12 @@ struct ReportExtras {
     // Per-budget rows verbatim from the summary, already in the report's
     // camelCase shape - the evaluator writes the wire keys.
     nlohmann::json threshold_checks = nlohmann::json::array ();
+    // This run's `metric.record` / `pm.metrics` values (issue #1500).
+    // `has_custom_metrics` false is a run that recorded none, which leaves
+    // the report's `customMetrics` section out entirely rather than an
+    // empty object.
+    bool has_custom_metrics       = false;
+    nlohmann::json custom_metrics = nlohmann::json::object ();
     // Whether the run's OAuth 2.0 credential was refreshed while it ran.
     // `has_auth` false is a run that could not refresh at all (no oauth2 auth,
     // a non-expiring or query-placed token, or an engine older than mid-run
@@ -565,6 +571,16 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
             read_number (thresholds, "passed", extras.thresholds_passed);
             read_number (thresholds, "failed", extras.thresholds_failed);
         }
+    }
+
+    // Pass-through, same shape both run modes wrote it in
+    // (`build_custom_metrics_payload`, issue #1500). An empty object is a
+    // run that recorded no custom metric, treated as absent the same way
+    // `coverage` is.
+    if (summary.contains ("customMetrics") &&
+    summary["customMetrics"].is_object () && !summary["customMetrics"].empty ()) {
+        extras.has_custom_metrics = true;
+        extras.custom_metrics     = summary["customMetrics"];
     }
 }
 
@@ -1142,6 +1158,12 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
         json_report["thresholdValidation"] = { { "checks", extras.threshold_checks },
             { "passed", extras.thresholds_passed }, { "failed", extras.thresholds_failed },
             { "verdict", extras.thresholds_failed == 0 ? "passed" : "failed" } };
+    }
+
+    // This run's custom trends, counters and rates (issue #1500), by name -
+    // absent for a run that recorded none.
+    if (extras.has_custom_metrics) {
+        json_report["customMetrics"] = extras.custom_metrics;
     }
 
     // When the run's credential was renewed under it, and what stopped a

@@ -841,6 +841,27 @@ TEST_F (ScenarioRunnerTest, TimerThinkWaitsBetweenStepsAndReportsHowLong) {
     EXPECT_LT (rows[0].latency_ms, 100.0);
 }
 
+// Issue #1500's acceptance criterion: a metric.record trend on one step
+// produces `customMetrics.<name>` in the sequential run's own summary
+// section, with a count equal to that step's completions.
+TEST_F (ScenarioRunnerTest, MetricRecordProducesCustomMetricsWithTheStepsCompletionCount) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/ok",
+    json::array ({ json{ { "id", "el_metric" }, { "kind", "metric.record" },
+    { "config",
+    { { "name", "ttfb2" }, { "type", "trend" }, { "source", { { "latency", true } } } } } } }));
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto custom_metrics = summary_of (run_id)["customMetrics"];
+    ASSERT_TRUE (custom_metrics.contains ("ttfb2"));
+    EXPECT_EQ (custom_metrics["ttfb2"]["type"], "trend");
+    EXPECT_EQ (custom_metrics["ttfb2"]["count"].get<size_t> (), 3u)
+    << "one recording per iteration of the step it is attached to";
+}
+
 TEST_F (ScenarioRunnerTest, AStopIsHonouredBetweenStepsNotAfterTheIteration) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/slow");

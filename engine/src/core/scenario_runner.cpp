@@ -455,6 +455,13 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     if (!inputs.coverage.empty ()) {
         summary["coverage"] = inputs.coverage;
     }
+    // This run's custom metrics (issue #1500), under the same top-level
+    // `customMetrics` key the load path writes - one report section for
+    // both run modes, in `run_manager.cpp::build_run_summary_payload`'s
+    // shape, so `GET /runs/:id/report` reads it identically either way.
+    if (inputs.custom_metrics.has_value ()) {
+        summary["customMetrics"] = build_custom_metrics_payload (*inputs.custom_metrics);
+    }
     // Beside coverage rather than inside it, and on the same absent-when-not-
     // measured terms: the two answer different questions about one contract -
     // coverage says which of it the run touched, this says whether what came
@@ -540,6 +547,13 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     // everywhere else, because nowhere else has a sequence to
     // redirect (issue #355).
     inputs.in_scenario = true;
+    // `metric.record` and `pm.metrics` (issue #1500) record into this run's
+    // own collector - a design send binds neither and reports "not
+    // available here" instead.
+    inputs.record_metric = [&ctx] (const std::string& name,
+                           vayu::core::CustomMetricType type, double value) {
+        ctx.context->metrics_collector->record_custom_metric (name, type, value);
+    };
 
     // The data pass, per iteration and before the send: composition
     // left every `{{data.column}}` written as it stands, because
@@ -876,6 +890,7 @@ ScenarioStepStore& store) {
                 .set_variable       = [] (std::string_view, const std::string&,
                                 const std::string&) {},
                 .should_stop = [&] { return base.context->should_stop.load (); },
+                .record_metric = nullptr, // metric.record is step.after only.
             };
             vayu::core::ElementPipeline::run (vayu::core::Phase::StepBetween,
             between_ctx, *step.elements, record.elements);
@@ -1080,6 +1095,7 @@ RunManager& manager) {
     std::chrono::duration<double> (std::chrono::steady_clock::now () - started_at)
     .count ();
     summary.coverage = coverage.build ();
+    summary.custom_metrics = context->metrics_collector->custom_metric_summaries ();
 
     try {
         db.update_run_end_time (context->run_id);

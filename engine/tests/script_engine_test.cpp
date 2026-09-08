@@ -5426,6 +5426,95 @@ TEST_F (ScriptEngineTest, SetNextRequestsRefusalIsNeverTruncatedMidWord) {
     << "the message's own last sentence must survive whole: " << result.error_message;
 }
 
+// ============================================================================
+// pm.metrics - custom trends, counters and rates (issue #1500)
+// ============================================================================
+//
+// Bound the same way pm.execution is: refuse loudly with no run behind it
+// (a context built by hand, or the deferred replay against a recorded
+// sample) rather than silently recording nowhere.
+
+TEST_F (ScriptEngineTest, MetricsTrendRecordsThroughTheBoundCollector) {
+    std::vector<std::tuple<std::string, vayu::core::CustomMetricType, double>> recorded;
+    auto ctx          = scenario_test (request, response, env);
+    ctx.record_metric = [&recorded] (const std::string& name,
+                        vayu::core::CustomMetricType type, double value) {
+        recorded.emplace_back (name, type, value);
+    };
+
+    auto result = engine.execute ("pm.metrics.trend('ttfb', 42.5);", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (recorded.size (), 1u);
+    EXPECT_EQ (std::get<0> (recorded[0]), "ttfb");
+    EXPECT_EQ (std::get<1> (recorded[0]), vayu::core::CustomMetricType::Trend);
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 42.5);
+}
+
+TEST_F (ScriptEngineTest, MetricsCounterDefaultsItsIncrementToOne) {
+    std::vector<std::tuple<std::string, vayu::core::CustomMetricType, double>> recorded;
+    auto ctx          = scenario_test (request, response, env);
+    ctx.record_metric = [&recorded] (const std::string& name,
+                        vayu::core::CustomMetricType type, double value) {
+        recorded.emplace_back (name, type, value);
+    };
+
+    auto result = engine.execute ("pm.metrics.counter('hits');", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (recorded.size (), 1u);
+    EXPECT_EQ (std::get<1> (recorded[0]), vayu::core::CustomMetricType::Counter);
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 1.0);
+}
+
+TEST_F (ScriptEngineTest, MetricsRateRecordsTheBooleanAsOneOrZero) {
+    std::vector<std::tuple<std::string, vayu::core::CustomMetricType, double>> recorded;
+    auto ctx          = scenario_test (request, response, env);
+    ctx.record_metric = [&recorded] (const std::string& name,
+                        vayu::core::CustomMetricType type, double value) {
+        recorded.emplace_back (name, type, value);
+    };
+
+    auto result = engine.execute ("pm.metrics.rate('cacheHit', true);", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (recorded.size (), 1u);
+    EXPECT_EQ (std::get<1> (recorded[0]), vayu::core::CustomMetricType::Rate);
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 1.0);
+}
+
+// The false-success rule #188 exists for: with no collector bound, the call
+// must throw rather than accept a value and drop it on the floor.
+TEST_F (ScriptEngineTest, MetricsThrowsWithNoRunToRecordInto) {
+    auto result =
+    engine.execute_prerequest ("pm.metrics.trend('ttfb', 1);", request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("not available here"), std::string::npos)
+    << result.error_message;
+}
+
+// The deferred `tests` replay's own shape: `for_test` with no `record_metric`
+// bound, because a replayed sample is not the run (acceptance criterion 3).
+TEST_F (ScriptEngineTest, MetricsThrowsInALoadRunsDeferredTestScript) {
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = engine.execute ("pm.metrics.counter('hits');", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("not available here"), std::string::npos)
+    << result.error_message;
+}
+
+TEST_F (ScriptEngineTest, MetricsTrendRequiresAName) {
+    auto ctx = scenario_test (request, response, env);
+    ctx.record_metric = [] (const std::string&, vayu::core::CustomMetricType, double) {};
+    auto result = engine.execute ("pm.metrics.trend('', 1);", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("empty name"), std::string::npos)
+    << result.error_message;
+}
+
 // The load-mode contract, and it is a decision rather than an omission: a
 // deferred `tests` script has already run against a recorded response and
 // cannot redirect a sequence that already happened. `validate_scripts` builds

@@ -744,6 +744,34 @@ declare const pm: {
 		toObject(): object;
 	};
 	/**
+	 * Record a named value beside the run's built-in phases, so it shows up in the report and can be used as a custom.<name>.<stat> threshold.
+	 * 
+	 * Only where a run's collector is reachable: a bare Send and the deferred replay against a recorded sample have neither, so every method throws there rather than being quietly dropped.
+	 */
+	metrics: {
+		/**
+		 * Add to a named running total, 1 when no increment is given.
+		 * 
+		 * Example:
+		 * pm.metrics.counter('bytesOut', pm.response.responseSize);
+		 */
+		counter(name: string, increment?: number): void;
+		/**
+		 * Add one true/false sample toward a named percentage.
+		 * 
+		 * Example:
+		 * pm.metrics.rate('cacheHit', pm.response.headers.get('X-Cache') === 'HIT');
+		 */
+		rate(name: string, value: boolean): void;
+		/**
+		 * Add one sample to a named distribution - the report carries its count, p50, p95, p99 and max.
+		 * 
+		 * Example:
+		 * pm.metrics.trend('ttfb', pm.response.responseTime);
+		 */
+		trend(name: string, value: number): void;
+	};
+	/**
 	 * Access the HTTP request data including URL, method, headers, and body.
 	 * 
 	 * In a **pre-request** script these are writable: whatever pm.request holds when the script ends is what is sent, and a script-set header overrides the one the Auth tab applied. A value the engine cannot send - an empty URL, an unrecognised method - rejects the whole edit rather than part of it: the request goes out exactly as it was before the script ran, and the reason is reported in the Console tab. In a **test** script it is a read-only record of what was already sent - a write to it does nothing, the script's own copy changes but nothing carries it back to the request that was sent.

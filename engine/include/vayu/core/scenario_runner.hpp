@@ -341,6 +341,10 @@ struct ScenarioSummaryInputs {
     /// depending on it: with the flag off, `failed` steps and schema failures
     /// are disjoint facts about the run rather than one.
     bool fail_on_schema_error = false;
+    /// This run's `metric.record` / `pm.metrics` values (issue #1500), read
+    /// off the run's `MetricsCollector` after the last iteration - the same
+    /// absent-when-none rule `coverage` follows.
+    std::optional<std::map<std::string, CustomMetricSummary>> custom_metrics;
 };
 
 /**

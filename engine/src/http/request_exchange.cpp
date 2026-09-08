@@ -634,6 +634,9 @@ ExchangeInputs inputs) {
         // iteration, and a test script asserting against the row its request
         // was built from is the point of a data-driven run.
         ctx.iteration_data = inputs.iteration_data;
+        // `pm.metrics` (issue #1500), shared with `metric.record` below - see
+        // `ExchangeInputs::record_metric`.
+        ctx.record_metric = inputs.record_metric;
     };
 
     static const std::vector<vayu::core::CompiledElement> NO_ELEMENTS;
@@ -670,7 +673,8 @@ ExchangeInputs inputs) {
         [&] (std::string_view scope, const std::string& name, const std::string& value) {
             set_scope_variable (scopes, scope, name, value);
         },
-        .should_stop = nullptr, // A single exchange has nothing to interrupt.
+        .should_stop   = nullptr, // A single exchange has nothing to interrupt.
+        .record_metric = inputs.record_metric,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,

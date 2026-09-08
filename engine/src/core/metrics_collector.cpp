@@ -782,6 +782,137 @@ MetricsCollector::phase_percentiles () const {
     return result;
 }
 
+MetricsCollector::CustomMetricSlot*
+MetricsCollector::find_or_create_custom_metric_slot (const std::string& name,
+CustomMetricType type) {
+    std::lock_guard<std::mutex> lock (custom_metrics_mutex_);
+    if (auto it = custom_metrics_.find (name); it != custom_metrics_.end ()) {
+        return it->second->type == type ? it->second.get () : nullptr;
+    }
+    if (custom_metrics_.size () >= constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES) {
+        return nullptr;
+    }
+    auto slot = std::make_unique<CustomMetricSlot> (type);
+    if (type == CustomMetricType::Trend) {
+        if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
+            constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
+            &slot->histogram) != 0 ||
+        slot->histogram == nullptr) {
+            vayu::utils::log_warning ("Run " + run_id_ +
+            ": failed to initialize the '" + name + "' custom metric histogram");
+            return nullptr;
+        }
+    }
+    auto [inserted, ok] = custom_metrics_.emplace (name, std::move (slot));
+    (void)ok; // emplace on a fresh key always succeeds; nothing to branch on.
+    return inserted->second.get ();
+}
+
+bool MetricsCollector::register_custom_metric (const std::string& name, CustomMetricType type) {
+    return find_or_create_custom_metric_slot (name, type) != nullptr;
+}
+
+void MetricsCollector::record_custom_metric (const std::string& name,
+CustomMetricType type,
+double value) {
+    CustomMetricSlot* slot = find_or_create_custom_metric_slot (name, type);
+    if (slot == nullptr) {
+        return; // Cap spent, or a type mismatch - nowhere left to record.
+    }
+    switch (type) {
+    case CustomMetricType::Trend: {
+        const double clamped = std::max (value, 0.0);
+        const auto scaled    = static_cast<int64_t> (
+        std::min (clamped * constants::metrics_collector::CUSTOM_METRIC_VALUE_SCALE,
+           static_cast<double> (constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US)));
+        hdr_record_value_atomic (slot->histogram, std::max<int64_t> (scaled, 1));
+        break;
+    }
+    case CustomMetricType::Counter:
+        atomic_add_double (slot->counter_total, value);
+        break;
+    case CustomMetricType::Rate:
+        slot->rate_total.fetch_add (1, std::memory_order_relaxed);
+        if (value != 0.0) {
+            slot->rate_true.fetch_add (1, std::memory_order_relaxed);
+        }
+        break;
+    }
+}
+
+std::optional<std::map<std::string, CustomMetricSummary>>
+MetricsCollector::custom_metric_summaries () const {
+    std::lock_guard<std::mutex> lock (custom_metrics_mutex_);
+    if (custom_metrics_.empty ()) {
+        return std::nullopt;
+    }
+    std::map<std::string, CustomMetricSummary> result;
+    for (const auto& [name, slot] : custom_metrics_) {
+        CustomMetricSummary summary;
+        summary.type = slot->type;
+        switch (slot->type) {
+        case CustomMetricType::Trend:
+            if (slot->histogram != nullptr && slot->histogram->total_count > 0) {
+                summary.count = static_cast<size_t> (slot->histogram->total_count);
+                const double scale = constants::metrics_collector::CUSTOM_METRIC_VALUE_SCALE;
+                summary.p50 =
+                static_cast<double> (hdr_value_at_percentile (slot->histogram, 50.0)) / scale;
+                summary.p95 =
+                static_cast<double> (hdr_value_at_percentile (slot->histogram, 95.0)) / scale;
+                summary.p99 =
+                static_cast<double> (hdr_value_at_percentile (slot->histogram, 99.0)) / scale;
+                summary.max = static_cast<double> (hdr_max (slot->histogram)) / scale;
+            }
+            break;
+        case CustomMetricType::Counter:
+            summary.value = slot->counter_total.load (std::memory_order_relaxed);
+            summary.count = static_cast<size_t> (summary.value);
+            break;
+        case CustomMetricType::Rate: {
+            const uint64_t total = slot->rate_total.load (std::memory_order_relaxed);
+            const uint64_t made_true = slot->rate_true.load (std::memory_order_relaxed);
+            summary.count = static_cast<size_t> (total);
+            summary.value = total > 0 ?
+            static_cast<double> (made_true) * 100.0 / static_cast<double> (total) :
+            0.0;
+            break;
+        }
+        }
+        result.emplace (name, summary);
+    }
+    return result;
+}
+
+namespace {
+const char* custom_metric_type_name (CustomMetricType type) {
+    switch (type) {
+    case CustomMetricType::Trend: return "trend";
+    case CustomMetricType::Counter: return "counter";
+    case CustomMetricType::Rate: return "rate";
+    }
+    return "trend"; // Unreachable for a value the enum actually holds.
+}
+} // namespace
+
+nlohmann::json build_custom_metrics_payload (
+const std::map<std::string, CustomMetricSummary>& metrics) {
+    nlohmann::json out = nlohmann::json::object ();
+    for (const auto& [name, metric] : metrics) {
+        nlohmann::json row = { { "type", custom_metric_type_name (metric.type) },
+            { "count", metric.count } };
+        if (metric.type == CustomMetricType::Trend) {
+            row["p50"] = metric.p50;
+            row["p95"] = metric.p95;
+            row["p99"] = metric.p99;
+            row["max"] = metric.max;
+        } else {
+            row["value"] = metric.value;
+        }
+        out[name] = std::move (row);
+    }
+    return out;
+}
+
 void MetricsCollector::record_stream_completion (size_t events, bool capped) {
     if (!config_.stream_metrics) {
         // Off means the report has no `stream` section at all, not a section of
@@ -1109,6 +1240,14 @@ const Percentiles* window_percentiles) const {
     stats["status5xx"] = s5xx;
     stats["droppedRequests"] = dropped_requests_.load (std::memory_order_relaxed);
     stats["avgQueueWaitMs"] = average_queue_wait ();
+
+    // This run's custom metrics so far (issue #1500), on the same tick the
+    // built-in phases ride rather than a second endpoint - they advance on
+    // the same cadence. Absent for a run that has recorded none yet, the
+    // same rule the report's section follows.
+    if (auto custom = custom_metric_summaries ()) {
+        stats["customMetrics"] = build_custom_metrics_payload (*custom);
+    }
 
     // Per-tick latency percentiles. When the caller supplies windowed (rolling)
     // percentiles - the live producer samples the interval recorder each tick -

@@ -158,6 +158,7 @@ add_executable(vayu_tests
     schema_validation_test.cpp
     elements_registry_test.cpp
     element_kinds_test.cpp
+    metric_record_test.cpp
     version_isolation_test.cpp
     reentrant_test.cpp
     ascii_case_test.cpp

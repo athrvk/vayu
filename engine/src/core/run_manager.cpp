@@ -1436,6 +1436,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.latency_avg_ms = totals.latency_avg_ms;
     inputs.phases         = context->metrics_collector->phase_percentiles ();
     inputs.stream         = context->metrics_collector->stream_totals ();
+    inputs.custom_metrics = context->metrics_collector->custom_metric_summaries ();
     inputs.http_version_downgraded =
     context->metrics_collector->http_version_downgraded ();
     inputs.tests = validation.run;
@@ -1916,6 +1917,13 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
         summary["thresholds"] = { { "checks", checks },
             { "passed", inputs.thresholds->passed },
             { "failed", inputs.thresholds->failed } };
+    }
+    // This run's `metric.record` / `pm.metrics` values (issue #1500), by
+    // name. Omitted for a run that recorded none, the same rule `tests` and
+    // `thresholds` follow - an empty object would read as "measured and
+    // found nothing" rather than "never declared".
+    if (inputs.custom_metrics.has_value ()) {
+        summary["customMetrics"] = build_custom_metrics_payload (*inputs.custom_metrics);
     }
     // Per-phase latency distributions, keyed by wire name so a reader does not
     // have to know the enum's order. Omitted when the run recorded none - a

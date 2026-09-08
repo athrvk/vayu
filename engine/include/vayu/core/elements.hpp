@@ -38,6 +38,7 @@
 #include <string_view>
 #include <vector>
 
+#include "vayu/core/custom_metric_type.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::core {
@@ -84,6 +85,13 @@ struct ElementContext {
     /// design send has none - a single exchange has nothing to stop mid-wait -
     /// so only the sequential run's plan walk binds this).
     std::function<bool ()> should_stop;
+
+    /// `metric.record`'s write (issue #1500): records one named custom
+    /// metric value into the run's `MetricsCollector`. Unset in a context
+    /// with no run behind it - a bare design send has no collector to write
+    /// into - which is what makes `metric.record` report `"skipped"` there
+    /// rather than recording nowhere silently.
+    std::function<void (const std::string& name, CustomMetricType type, double value)> record_metric;
 
     /// One JSON parse of the response body, shared by every `extract.*` /
     /// `assert.jsonpath` on the same step rather than paid per kind.
