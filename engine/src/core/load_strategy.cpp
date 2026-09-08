@@ -540,6 +540,25 @@ vayu::http::routes::ScopeOverlay& overlay) {
     [context] (const vayu::core::CompiledElement& element) {
         return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
+    // Tallied here and not only on the completion side: this is the only
+    // phase a `step.before` kind ever reports in, so an outcome dropped here
+    // is one the report can never show - `summary["elements"]` would simply
+    // have no entry for a `script.pre`, whether it ran or was deferred. The
+    // scenario path's `run_step_before` (scenario_load.cpp) records on the
+    // same edge.
+    for (const auto& outcome : outcomes) {
+        context->element_tallies.record (outcome.id, outcome.status);
+    }
+    // `pre_result.tests` is populated only when `script.pre` actually ran
+    // inline (a deferred one never invokes `run_pre_script`), the same inline
+    // half of issue #1497's assertion tally the scenario path folds in.
+    for (const auto& test : pre_result.tests) {
+        if (test.passed) {
+            context->inline_script_tests_passed.fetch_add (1, std::memory_order_relaxed);
+        } else {
+            context->inline_script_tests_failed.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
 }
 
 /**
