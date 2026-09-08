@@ -131,6 +131,7 @@ const std::function<std::optional<std::string> (const CompiledElement&)>& skip_r
         ctx.outcome_message.reset ();
         ctx.outcome_waited_ms.reset ();
         ctx.outcome_wrote.reset ();
+        ctx.element_id = compiled.id;
 
         std::optional<std::string> skipped;
         if (!compiled.enabled) {
