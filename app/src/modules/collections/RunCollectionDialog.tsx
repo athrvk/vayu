@@ -92,10 +92,16 @@ import type { Collection } from "@/types";
 import {
 	BUDGET_FIELDS,
 	type BudgetDraft,
+	type CustomBudgetDraft,
 	budgetError,
 	buildThresholds,
+	customBudgetsError,
 	emptyBudgetDraft,
 } from "@/modules/request-builder/components/LoadTestConfigDialog/budgets";
+import {
+	CustomBudgetHint,
+	CustomBudgetRows,
+} from "@/modules/request-builder/components/LoadTestConfigDialog/CustomBudgetRows";
 import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
 
 export interface RunCollectionDialogProps {
@@ -182,6 +188,15 @@ export default function RunCollectionDialog({
 	 * since a collection run is now judged against them too, load test or not.
 	 */
 	const [budgets, setBudgets] = useState<BudgetDraft>(emptyBudgetDraft);
+	/**
+	 * The `custom.<name>.<stat>` rows (issue #1579) - unlike the six fixed
+	 * budgets above, a **load run only** capability: `docs/engine/api-reference.md`
+	 * says a collection run's config accepts the block but nothing evaluates it
+	 * yet, so a design-mode run declaring one would be told it is judged and
+	 * never be. They are kept in state across a toggle of the switch, and simply
+	 * not offered or sent while it is off.
+	 */
+	const [customBudgets, setCustomBudgets] = useState<CustomBudgetDraft[]>([]);
 	const [failRun, setFailRun] = useState(false);
 	const [budgetsOpen, setBudgetsOpen] = useState(false);
 
@@ -257,7 +272,14 @@ export default function RunCollectionDialog({
 	const durationValue = Number(durationSeconds);
 	const durationValid = Number.isFinite(durationValue) && durationValue > 0;
 
-	const budgetsError = budgetError(budgets);
+	/*
+	 * The custom rows are only offered on a load run, so only a load run can be
+	 * blocked by one: a half-filled row left behind by turning the switch off is
+	 * neither on screen nor in the payload, and blocking Run over it would be an
+	 * error with nothing to fix.
+	 */
+	const activeCustomBudgets = loadTest ? customBudgets : [];
+	const budgetsError = budgetError(budgets) ?? customBudgetsError(activeCustomBudgets);
 
 	const canRun = loadTest
 		? virtualUsersValid && durationValid && !dataFileError && !budgetsError
@@ -291,7 +313,7 @@ export default function RunCollectionDialog({
 
 	const handleRun = () => {
 		if (!canRun) return;
-		const thresholds = buildThresholds(budgets, failRun);
+		const thresholds = buildThresholds(budgets, failRun, activeCustomBudgets);
 		startRun.mutate(
 			{
 				/*
@@ -552,10 +574,12 @@ export default function RunCollectionDialog({
 					)}
 
 					{/*
-					 * Pass/fail budgets (issue #1564) - not gated by `loadTest`,
-					 * unlike Timers/Scripts above: the engine now judges a
-					 * design-mode collection run against them exactly as it
-					 * already judges a load run, so the control applies to both.
+					 * Pass/fail budgets (issue #1564) - the disclosure itself is
+					 * not gated by `loadTest`, unlike Timers/Scripts above: the
+					 * engine now judges a design-mode collection run against the
+					 * six fixed budgets exactly as it already judges a load run,
+					 * so those apply to both. The custom rows inside it are the
+					 * exception and carry their own gate; see there.
 					 * Same card treatment as `LoadTestConfigDialog`'s own
 					 * disclosure, for the reason that one gives: a section that
 					 * revealed loose fields on the dialog background would read
@@ -595,6 +619,46 @@ export default function RunCollectionDialog({
 									hint={field.hint}
 								/>
 							))}
+
+							{/*
+							 * Custom metric budgets, and the one place this
+							 * disclosure diverges from `LoadTestConfigDialog`'s:
+							 * `custom.<name>.<stat>` is evaluated for load runs
+							 * only (#1500, and `docs/engine/api-reference.md` says
+							 * so in as many words), where the six fixed budgets are
+							 * now judged for a design-mode collection run too
+							 * (#1564). Offering the rows in design mode would
+							 * accept a budget the engine stores and never
+							 * evaluates - so the switch decides, and the sentence
+							 * says which switch, rather than leaving a greyed row
+							 * to be guessed at.
+							 */}
+							<div className="space-y-1.5">
+								<Label className="text-xs">
+									Custom metric budgets
+									<span className="ml-1 font-normal text-muted-foreground">
+										(optional)
+									</span>
+								</Label>
+								{loadTest ? (
+									<>
+										<CustomBudgetHint />
+										<CustomBudgetRows
+											rows={customBudgets}
+											onChange={setCustomBudgets}
+											idPrefix="run-collection"
+											disabled={startRun.isPending}
+										/>
+									</>
+								) : (
+									<p className="text-[11px] leading-relaxed text-muted-foreground">
+										Load runs only. Turn on Load test above to budget a metric
+										this run records itself - a design-mode collection run
+										measures those metrics but is not yet judged against them.
+									</p>
+								)}
+							</div>
+
 							<div className="flex items-start justify-between gap-3">
 								<Label
 									htmlFor="run-collection-fail-run"

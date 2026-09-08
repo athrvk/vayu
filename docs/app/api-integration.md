@@ -1413,6 +1413,22 @@ rendering apply whichever executor ran the sequence. See
 how a collection run's error rate, latency percentiles and throughput are
 derived from the steps it actually sent.
 
+**`custom.<name>.<stat>` budgets** (issue #1579) are the seventh thing the
+block can carry, and the only dynamic one: a ceiling on a value the run records
+itself through a `metric.record` element or a `pm.metrics` call, keyed by the
+name it was recorded under and one of `p50`, `p95`, `p99`, `max`, `value`,
+`rate`. `RunThresholds` holds them as a *pattern* index signature
+(`` [key: `custom.${string}`]: number | undefined ``), so the six fixed fields
+keep their own types and `failRun` keeps its `boolean`. Both dialogs declare
+them as free-text rows (`CustomBudgetRows.tsx`) rather than as a picker of
+recorded names: the engine checks the key's shape and the value's sign and does
+**not** cross-check the name against the run's own `metric.record` elements - an
+unmatched name is reported `evaluated: false` rather than refused - which is the
+call MCP's `thresholdsInput` already made for this family (`catchall`). The one
+place the two dialogs differ: these budgets are evaluated for **load runs
+only**, so `RunCollectionDialog` offers the rows only while its Load test switch
+is on and sends none while it is off.
+
 The engine range-checks this payload before it creates the run row and answers a
 violation with `400 invalid_run_config` (accepted ranges are tabulated under
 [POST /runs](../engine/api-reference.md#post-runs)). The renderer's own limits

@@ -17,14 +17,25 @@
 import { describe, it, expect } from "vitest";
 import {
 	BUDGET_FIELDS,
+	CUSTOM_BUDGET_STATS,
+	MAX_CUSTOM_METRIC_NAME_LENGTH,
 	budgetError,
 	buildThresholds,
+	customBudgetRowError,
+	customBudgetsError,
 	emptyBudgetDraft,
+	emptyCustomBudgetRow,
 	type BudgetDraft,
+	type CustomBudgetDraft,
 } from "./budgets";
 
 const draft = (values: Partial<BudgetDraft> = {}): BudgetDraft => ({
 	...emptyBudgetDraft(),
+	...values,
+});
+
+const customRow = (values: Partial<CustomBudgetDraft> = {}): CustomBudgetDraft => ({
+	...emptyCustomBudgetRow(),
 	...values,
 });
 
@@ -85,6 +96,84 @@ describe("budget validation", () => {
 	});
 });
 
+/**
+ * `custom.<name>.<stat>` rows (issue #1579). The engine checks the key's shape
+ * and the value's sign and nothing else - it does not know whether the name is
+ * one this run records - so these mirror exactly that, and no more: a stricter
+ * client rule would refuse a budget the engine would have accepted.
+ */
+describe("custom metric budget rows", () => {
+	it("treats an untouched row as an unused slot, not a mistake", () => {
+		expect(customBudgetRowError(emptyCustomBudgetRow())).toBeUndefined();
+		expect(customBudgetsError([emptyCustomBudgetRow(), emptyCustomBudgetRow()])).toBeNull();
+	});
+
+	it("accepts a name and a ceiling", () => {
+		expect(
+			customBudgetRowError(customRow({ name: "checkout_ttfb", stat: "p95", value: "120" }))
+		).toBeUndefined();
+		// Zero is a real ask here for the same reason it is on the error rate:
+		// "this metric never rises above nothing" is a budget, not a typo.
+		expect(customBudgetRowError(customRow({ name: "retries", value: "0" }))).toBeUndefined();
+	});
+
+	it("refuses half a budget rather than dropping the half that was typed", () => {
+		expect(customBudgetRowError(customRow({ value: "120" }))).toMatch(/needs the name/i);
+		expect(customBudgetRowError(customRow({ name: "checkout_ttfb" }))).toMatch(
+			/must be a number/i
+		);
+	});
+
+	it("refuses a name longer than metric.record could have recorded", () => {
+		const name = "m".repeat(MAX_CUSTOM_METRIC_NAME_LENGTH + 1);
+		expect(customBudgetRowError(customRow({ name, value: "1" }))).toMatch(/at most 100/i);
+		expect(
+			customBudgetRowError(
+				customRow({ name: name.slice(0, MAX_CUSTOM_METRIC_NAME_LENGTH), value: "1" })
+			)
+		).toBeUndefined();
+	});
+
+	it("refuses a negative ceiling and text, naming the budget it means", () => {
+		expect(customBudgetRowError(customRow({ name: "ttfb", stat: "p99", value: "-1" }))).toMatch(
+			/custom\.ttfb\.p99 must be zero or greater/i
+		);
+		expect(
+			customBudgetRowError(customRow({ name: "ttfb", stat: "p99", value: "fast" }))
+		).toMatch(/custom\.ttfb\.p99 must be a number/i);
+	});
+
+	it("refuses two rows that would collapse into one key", () => {
+		// Same name, same stat, two values: the payload is an object, so the
+		// second would silently overwrite the first - a budget typed and never
+		// judged, the failure this whole file exists to prevent.
+		expect(
+			customBudgetsError([
+				customRow({ name: "ttfb", stat: "p95", value: "100" }),
+				customRow({ name: "ttfb", stat: "p95", value: "200" }),
+			])
+		).toMatch(/declared twice/i);
+		// The same metric under two stats is two budgets, not a duplicate.
+		expect(
+			customBudgetsError([
+				customRow({ name: "ttfb", stat: "p95", value: "100" }),
+				customRow({ name: "ttfb", stat: "max", value: "200" }),
+			])
+		).toBeNull();
+	});
+
+	it("reads the name as typed once trimmed, in the message and in the key", () => {
+		expect(customBudgetRowError(customRow({ name: "  ttfb  ", value: "-1" }))).toMatch(
+			/custom\.ttfb\.p50/
+		);
+		expect(
+			buildThresholds(emptyBudgetDraft(), false, [
+				customRow({ name: "  ttfb  ", value: "5" }),
+			])
+		).toEqual({ "custom.ttfb.p50": 5 });
+	});
+});
+
 describe("the payload the dialog builds", () => {
 	it("sends every declared budget under the engine's own key", () => {
 		expect(
@@ -126,6 +215,57 @@ describe("the payload the dialog builds", () => {
 		// An empty `thresholds` is a 400 from POST /runs, which the user would
 		// meet as "the run would not start" with no field to blame.
 		expect(buildThresholds(draft({ latencyP99Ms: "   " }))).toBeUndefined();
+	});
+
+	it("folds a custom row in beside the fixed keys", () => {
+		expect(
+			buildThresholds(draft({ latencyP99Ms: "50" }), false, [
+				customRow({ name: "checkout_ttfb", stat: "p95", value: "120" }),
+			])
+		).toEqual({ latencyP99Ms: 50, "custom.checkout_ttfb.p95": 120 });
+	});
+
+	it("sends a custom budget under the engine's own key shape, stat included", () => {
+		for (const stat of CUSTOM_BUDGET_STATS) {
+			expect(
+				buildThresholds(emptyBudgetDraft(), false, [
+					customRow({ name: "m", stat, value: "1" }),
+				])
+			).toEqual({ [`custom.m.${stat}`]: 1 });
+		}
+	});
+
+	it("counts a custom budget as a declared one, for failRun and for the empty case", () => {
+		// The engine rejects `{ failRun: true }` alone; a custom budget is a
+		// budget, so the flag has something to judge and rides along.
+		expect(
+			buildThresholds(emptyBudgetDraft(), true, [
+				customRow({ name: "checkout_ttfb", stat: "max", value: "300" }),
+			])
+		).toEqual({ "custom.checkout_ttfb.max": 300, failRun: true });
+	});
+
+	it("skips a half-filled or blank custom row rather than sending a broken key", () => {
+		// The UI refuses these (see `customBudgetRowError`); what this pins is
+		// that nothing reaches the payload as `custom..p50` or as `NaN` if it
+		// somehow does.
+		expect(
+			buildThresholds(emptyBudgetDraft(), false, [emptyCustomBudgetRow()])
+		).toBeUndefined();
+		expect(
+			buildThresholds(emptyBudgetDraft(), false, [customRow({ name: "ttfb" })])
+		).toBeUndefined();
+		expect(
+			buildThresholds(emptyBudgetDraft(), false, [customRow({ value: "10" })])
+		).toBeUndefined();
+	});
+
+	it("leaves the six-key payload exactly as it was when custom rows are present", () => {
+		// The issue's own acceptance criterion: the addition regresses nothing.
+		const fixed = draft({ maxErrorRatePct: "0.1", minThroughputRps: "1000" });
+		expect(buildThresholds(fixed, true, [emptyCustomBudgetRow()])).toEqual(
+			buildThresholds(fixed, true)
+		);
 	});
 
 	it("keys every field to a real threshold, so none can be typed and dropped", () => {
