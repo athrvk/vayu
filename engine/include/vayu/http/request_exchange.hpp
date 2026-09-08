@@ -409,6 +409,14 @@ struct ExchangeInputs {
      */
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
 
+    /**
+     * @brief `ElementContext::max_body_bytes` (issue #1514's reopen): the
+     *        `maxElementBodyBytes` config entry, resolved once per run for
+     *        the same reason @ref max_response_bytes is - `execute_exchange`
+     *        holds no `Database` to read it from itself.
+     */
+    size_t max_element_body_bytes = vayu::core::constants::elements::MAX_BODY_BYTES;
+
     /// Bound onto `ElementContext::pacing_state` / `rng` / `timers_override`
     /// (issue #1498), for a `timer.pacing` or gaussian `timer.think` element
     /// this exchange's `step.before` / `step.between` dispatch runs. Null for
@@ -583,6 +591,15 @@ ExchangeInputs inputs);
  * though it worked. This is what a test can call.
  */
 [[nodiscard]] size_t design_response_body_bound (vayu::db::Database& db);
+
+/**
+ * What this database is configured to let an `extract.json` / `assert.jsonpath`
+ * element parse as JSON (`maxElementBodyBytes`, issue #1514's reopen), for the
+ * same reason its `maxDesignResponseBodyBytes` sibling above is one function:
+ * every call site that resolves `ElementContext::max_body_bytes` shares one
+ * spelling of the key.
+ */
+[[nodiscard]] size_t element_body_bound (vayu::db::Database& db);
 
 /**
  * What this database is configured to let a load-run transfer read

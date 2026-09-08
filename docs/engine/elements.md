@@ -155,8 +155,9 @@ balance beside a timestamp, which no single compare-exchange can swap as a unit.
 identically, same as `timer.pacing`.
 
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
-step, through `ElementContext`'s lazily filled slot - a body over `maxElementBodyBytes` (default 1
-MiB) is not parsed, and every such kind on that step reports `skipped` with the reason.
+step, through `ElementContext`'s lazily filled slot - a body over the
+[`maxElementBodyBytes`](api-reference.md#get-config) config entry (default 1 MiB, restart-free)
+is not parsed, and every such kind on that step reports `skipped` with the reason.
 
 `metric.record` (issue #1500) reads a value off the response and records it as a custom `trend`
 (a distribution, reported as `count`/`p50`/`p95`/`p99`/`max`), `counter` (a running total) or `rate`

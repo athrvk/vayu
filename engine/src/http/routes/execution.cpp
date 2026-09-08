@@ -1435,6 +1435,11 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // takes the design bound the buffered path's scripts take - resolved once
     // here for the same reason `transport` is.
     const size_t script_response_bound = design_response_body_bound (ctx.db);
+    // `ElementContext::max_body_bytes` for this stream's own elements (issue
+    // #1514's reopen), resolved once here for the same reason
+    // `script_response_bound` is: the post-request element pass runs on the
+    // worker thread, long after this handler's frame.
+    const size_t element_body_bytes = element_body_bound (ctx.db);
     // Loaded whether or not this send carries a script, because the
     // residual-token pass below reads them too (issue #1008): a `{{token}}`
     // that resolves on the buffered path and stays literal here would be one
@@ -1544,9 +1549,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     [&db = ctx.db, &jar = ctx.cookie_jar, id = run_id, cookie_scope = send.cookie_scope,
     run = send.run, script_config = send.script_config, elements = send.elements,
     request_name = send.script_request_name, scopes, iteration_data = send.data_row,
-    transport, default_headers, script_response_bound, pre_script_result,
-    pre_element_outcomes] (const vayu::Request& sent, const vayu::Response& response,
-    const vayu::http::SseStreamContext& context) mutable {
+    transport, default_headers, script_response_bound, element_body_bytes,
+    pre_script_result, pre_element_outcomes] (const vayu::Request& sent,
+    const vayu::Response& response, const vayu::http::SseStreamContext& context) mutable {
         StreamRecord record;
         nlohmann::json scripts = nlohmann::json::object ();
         std::vector<vayu::core::ElementOutcome> element_outcomes =
@@ -1620,6 +1625,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                         },
                         .should_stop = nullptr,
                         .record_metric = nullptr, // A streaming send has no run to record into.
+                        .max_body_bytes = element_body_bytes,
                     };
                     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter,
                     element_ctx, *elements, element_outcomes);
@@ -1689,7 +1695,8 @@ void run_buffered_execution (RouteContext& ctx, httplib::Response& res, DesignSe
     inputs.transport       = vayu::http::resolve_transport_policy (ctx.db);
     inputs.default_headers = vayu::http::resolve_default_header_policy (
     ctx.db, vayu::http::DefaultHeaderScope::Design);
-    inputs.max_response_bytes = design_response_body_bound (ctx.db);
+    inputs.max_response_bytes     = design_response_body_bound (ctx.db);
+    inputs.max_element_body_bytes = element_body_bound (ctx.db);
     if (send.data_row) {
         inputs.iteration_data = &*send.data_row;
         // Row 0 of 1: a send-with-row *is* an iteration, and the one it is

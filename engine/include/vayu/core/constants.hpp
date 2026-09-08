@@ -1033,6 +1033,17 @@ constexpr int VACUUM_MIN_FREELIST_PERCENT = 25;
  */
 constexpr int64_t VACUUM_MIN_RECLAIMABLE_BYTES = 10LL * 1024 * 1024;
 } // namespace database
+
+/**
+ * @brief Element pipeline configuration
+ */
+namespace elements {
+/// Default value of the `maxElementBodyBytes` config entry (issue #1514). A
+/// response past this is not parsed as JSON, and every JSON-reading kind on
+/// that step (`extract.json`, `assert.jsonpath`, ...) reports `skipped`
+/// rather than paying for - or failing on - a parse of an oversized body.
+constexpr size_t MAX_BODY_BYTES = size_t{ 1024 } * 1024;
+} // namespace elements
 } // namespace vayu::core::constants
 
 /**
