@@ -27,7 +27,6 @@ import type {
 	RequestAuth,
 	OAuth2Config,
 	LoadTestMode,
-	ScriptPart,
 	ElementDef,
 	ResolvedElement,
 	HttpVersion,
@@ -610,7 +609,27 @@ export interface StartLoadTestRequest {
 	success_sample_rate?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
-	tests?: ScriptPart[];
+	/**
+	 * This run's own step-level elements (issue #1594): the collection chain
+	 * root to leaf, then the request's own, the same resolved list
+	 * {@link ExecuteRequestRequest.elements} carries and `POST /compose`
+	 * echoes back. A distinct key from `elements` below - the run payload is
+	 * flat, so one key cannot be both a request-shaped array and the
+	 * run-level override object. Replaces the retired `tests` field, which
+	 * `POST /runs` now refuses by name alongside `postRequestScript(s)` /
+	 * `preRequestScript(s)`.
+	 */
+	requestElements?: ResolvedElement[];
+	/**
+	 * The `elements` run override (issue #1594), single-target runs only now
+	 * too: `scripts` picks whether a `script.*` element in
+	 * {@link requestElements} runs inline on the event-loop worker or stays
+	 * deferred to the post-run replay. Accepted (and validated) beside a
+	 * `scenario` block as well, since the validator does not distinguish the
+	 * two shapes - see {@link StartScenarioRunRequest.elements} for `timers`,
+	 * which this dialog has no control for.
+	 */
+	elements?: { scripts?: "asMarked" | "allInline" | "allDeferred" };
 
 	// Pass/fail budgets for the whole run. camelCase because these are the
 	// engine's own metric names, which come back unchanged in the report's

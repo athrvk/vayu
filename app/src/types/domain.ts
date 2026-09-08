@@ -1759,6 +1759,17 @@ export interface LoadTestConfig {
 	 * `ParsedDataFile` has already answered. Absent exactly when `data` is.
 	 */
 	dataColumns?: string[];
+	/**
+	 * The `elements` run override (issue #1594), single-request runs only:
+	 * whether an inherited `script.*` element's own `config.inline` decides
+	 * ("asMarked"), or every one runs inline / stays deferred regardless of
+	 * its own marking. The same override {@link StartScenarioRunRequest}
+	 * sends, restricted to `scripts` here - a load run has no per-run
+	 * `timers` control on this dialog. Absent means "asMarked", the engine's
+	 * own default, so the field is only sent when the user actually changed
+	 * it.
+	 */
+	elements?: { scripts: "asMarked" | "allInline" | "allDeferred" };
 }
 
 /**

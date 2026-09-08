@@ -518,11 +518,61 @@ describe("notices", () => {
 		expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
 	});
 
+	// Issue #1594: before the single-request load path ran any element, the
+	// warning was unconditional - true at every Scripts setting, since none of
+	// them could make a pre-request script reach the wire. `elements.scripts:
+	// "allInline"` closes that gap, so this is the one setting where the
+	// warning is no longer true.
+	it("hides the pre-request warning once Scripts is set to All inline", () => {
+		open({ hasPreRequestScript: true });
+		expect(screen.getByText("Pre-request script will not run")).toBeInTheDocument();
+
+		fireEvent.click(
+			within(screen.getByRole("radiogroup", { name: /^scripts$/i })).getByRole("radio", {
+				name: "All inline",
+			})
+		);
+
+		expect(screen.queryByText("Pre-request script will not run")).toBeNull();
+	});
+
 	it("disables Start while a blocking notice is live", () => {
 		open();
 		pickProfile("Ramp-Up");
 		fireEvent.change(screen.getByLabelText(/total duration/i), { target: { value: "1" } });
 		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+	});
+});
+
+/**
+ * `elements.scripts` (issue #1594): the same control and the same
+ * absent-at-default contract `RunCollectionDialog`'s Scripts toggle has -
+ * the engine's own default is "asMarked", so the field is sent only when
+ * the user picked something else, and dropped again if they pick "As
+ * marked" back.
+ */
+describe("the Scripts override (issue #1594)", () => {
+	const scripts = () => screen.getByRole("radiogroup", { name: /^scripts$/i });
+
+	it("sends no elements override at the default Scripts value", () => {
+		const { onStart } = open();
+		const config = started(onStart);
+		expect(config.elements).toBeUndefined();
+	});
+
+	it("sends the override when Scripts is changed", () => {
+		const { onStart } = open();
+		fireEvent.click(within(scripts()).getByRole("radio", { name: "All inline" }));
+		const config = started(onStart);
+		expect(config.elements).toEqual({ scripts: "allInline" });
+	});
+
+	it("picking As marked back drops the field again", () => {
+		const { onStart } = open();
+		fireEvent.click(within(scripts()).getByRole("radio", { name: "All deferred" }));
+		fireEvent.click(within(scripts()).getByRole("radio", { name: "As marked" }));
+		const config = started(onStart);
+		expect(config.elements).toBeUndefined();
 	});
 });
 
