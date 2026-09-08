@@ -211,6 +211,20 @@ class ControlThroughputElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
+        // `perUser: false` (issue #1569) - a shared, cross-VU budget, kept
+        // in the run's own `SharedThroughputCounters` slot rather than this
+        // VU's `controller_state`. Under the sequential run and a design
+        // send `ctx.shared_controller_state` is always null (the single
+        // implicit user already makes `controller_state` below the
+        // "shared" instance), so `perUser` changes nothing there.
+        if (!config_.value ("perUser", true) && ctx.shared_controller_state != nullptr) {
+            if (auto* shared = ctx.shared_controller_state->find (ctx.element_id);
+            shared != nullptr) {
+                apply_shared (ctx, *shared);
+                return;
+            }
+        }
+
         if (ctx.controller_state == nullptr) {
             ctx.outcome_status = "ok"; // no counter to keep - never skips.
             return;
@@ -248,6 +262,39 @@ class ControlThroughputElement final : public Element {
     }
 
     private:
+    /// The `perUser: false` path: the same `everyN` / `percent` math as the
+    /// per-VU one above, against one atomic pair every virtual user shares -
+    /// `everyN` a plain `fetch_add`, `percent` a CAS loop so two VUs racing
+    /// to spend the last of the budget never both win it. No lock either way.
+    void apply_shared (ElementContext& ctx, SharedThroughputCounters::Counters& shared) {
+        bool run = true;
+        if (config_.contains ("everyN")) {
+            const int64_t every_n = config_.value ("everyN", int64_t{ 1 });
+            const int64_t count =
+            shared.count.fetch_add (1, std::memory_order_relaxed) + 1;
+            run = every_n <= 1 || count % every_n == 0;
+        } else if (config_.contains ("percent")) {
+            const int64_t percent_milli =
+            static_cast<int64_t> (config_.value ("percent", 100.0) * 1000.0);
+            int64_t old_carry = shared.carry.load (std::memory_order_relaxed);
+            int64_t new_carry = 0;
+            do {
+                new_carry = old_carry + percent_milli;
+                run       = new_carry >= 100000;
+                if (run) {
+                    new_carry -= 100000;
+                }
+            } while (!shared.carry.compare_exchange_weak (
+            old_carry, new_carry, std::memory_order_relaxed));
+        }
+
+        if (!run) {
+            mark_skip (ctx, "throughput budget for this occurrence was spent");
+            return;
+        }
+        ctx.outcome_status = "ok";
+    }
+
     nlohmann::json config_;
 };
 
@@ -306,9 +353,8 @@ ElementKind make_control_switch_kind () {
     kind.label   = "Switch";
     kind.description =
     "Routes to a named folder member by a variable's resolved value.";
-    kind.category         = "controller";
-    kind.hot_path         = HotPathClass::Declarative;
-    kind.jumps_or_repeats = true;
+    kind.category = "controller";
+    kind.hot_path = HotPathClass::Declarative;
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ControlSwitchElement> (config);
     };
@@ -337,16 +383,18 @@ ElementKind make_control_throughput_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ControlThroughputElement> (config);
     };
-    // `perUser` (a shared, cross-VU budget) is real follow-up work, not
-    // silently dropped: this kind always keeps its counter per user - the
-    // sequential run has only one, and a scenario load run keeps one per
-    // virtual user - so the schema does not accept a key this build cannot
-    // honour. Follow-up: issue #1569.
-    kind.config_schema = {
+    // `perUser: false` (issue #1569, JMeter's "All threads" throughput mode)
+    // asks the run to keep one shared budget across every virtual user
+    // rather than one per user - `supports_shared_state` below is what lets
+    // `SharedThroughputCounters` find this occurrence generically, without
+    // the scan naming this kind (#1512's extensibility contract, rule 1).
+    kind.supports_shared_state = true;
+    kind.config_schema         = {
         { "type", "object" },
         { "properties",
-        { { "percent", { { "type", "number" }, { "minimum", 0 }, { "maximum", 100 } } },
-        { "everyN", { { "type", "integer" }, { "minimum", 1 } } } } },
+                { { "percent", { { "type", "number" }, { "minimum", 0 }, { "maximum", 100 } } },
+                { "everyN", { { "type", "integer" }, { "minimum", 1 } } },
+                { "perUser", { { "type", "boolean" } } } } },
         { "additionalProperties", false },
     };
     return kind;

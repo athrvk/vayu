@@ -892,6 +892,7 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `end_time`        | INTEGER | Unix ms; `0` = no end recorded (readers guard on `> 0`)      |
 | `summary`         | TEXT    | JSON: whole-run results, written once at terminal status (`""` = not written) |
 | `baseline`        | INTEGER | `1` when the run is pinned as a baseline. NOT NULL DEFAULT `0`               |
+| `has_warnings`    | INTEGER | `1` when `summary.warnings` is non-empty. NOT NULL DEFAULT `0`               |
 
 **`end_time`** is stamped on every terminal status write (`update_run_status`), and refined
 mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
@@ -911,6 +912,16 @@ which is what lets `sync_schema` `ALTER TABLE ADD COLUMN` it onto an existing
 `runs` table (the same pattern as `summary` and `requests.follow_redirects`);
 rows written before the column read as unpinned. **Retention reads it** - see
 below.
+
+**`has_warnings`** (issue #1527) is derived, never written directly: every
+`Database::update_run_summary` call parses the JSON it is about to store into
+`summary` and sets this column to whether that JSON's `warnings` array (issue
+#1503) is non-empty, in the same row write. The two columns are stamped
+together and can never disagree. It exists apart from `summary` so
+[`GET /runs`](api-reference.md#get-runs)'s paginated list can read it straight
+off the row it already fetched for every page - no extra query, and no risk
+of the compact-summary cache (`RunSummaryCache`, keyed on the immutable
+`config_snapshot`) ever caching a completion-time fact.
 
 **`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,

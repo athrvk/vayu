@@ -5678,9 +5678,12 @@ kind table and every config shape.
 sums every member's own response latency into a named total per pass, and the
 run's summary gains
 `scenario.transactions[] = { name, count, errors, latency: { min, p50, p90,
-p95, p99, max } }`, omitted for a transaction the run never closed. The same
-shape reports on a scenario load run's summary, top-level rather than under
-`scenario` - see below.
+p95, p99, max } }`, omitted for a transaction the run never closed.
+`includeTimers: true` (issue #1569) also folds a between-member `timer.*`
+wait into that sum - excluded by default, and always excluded for a wait
+after the folder's own last member, which is outside the transaction's span.
+The same shape reports on a scenario load run's summary, top-level rather
+than under `scenario` - see below.
 
 #### Scenario load runs
 
@@ -5711,7 +5714,6 @@ row exists:
 | `mode: "capacity"` with a `scenario` | The search judges one windowed p99 and a sequence has one per step, so which of them the knee is measured against is a question the mode does not answer. |
 | `rps` / `targetRps` above zero, on any mode | It is what selects the open-loop path regardless of the declared mode. |
 | An unknown `mode` | |
-| The plan carries a `control.switch` or `control.loop` element (issue #1515) | Both need to jump the plan; a scenario load run's virtual users only ever advance forward. Named in the error message. Real, disclosed follow-up work - issue #1569. |
 
 `maxInFlight` is **moot** and is ignored with a warning: in-flight requests are
 bounded by the virtual-user count by construction, so `concurrency` is the only
@@ -5740,9 +5742,13 @@ knob.
   (issue #1515): `control.if`, `control.once` and `control.throughput` skip a
   step the way `pm.execution.skipRequest()` would, counted in the run's
   summary `skipped` key rather than the `0` every scenario load run reported
-  before this; `control.switch` and `control.loop` need to jump, which a load
-  run's virtual users cannot do, so a plan carrying either is refused outright
-  (see the table above) rather than silently run once through.
+  before this; `control.switch` and `control.loop` jump the plan (issue
+  #1569), resolved the same way a script's own `setNextRequest` would be and
+  guarded by the same `maxStepsPerIteration` cycle limit the sequential run
+  uses. `control.throughput`'s `perUser: false` shares one budget across
+  every virtual user instead of one per user, and `control.transaction`'s
+  `includeTimers` folds a between-member `timer.*` wait into its reported
+  sum - both issue #1569 too.
 - **A script that did not run inline stays deferred, keyed per step.** After
   the run drains, that step's own post-request script is replayed against the
   responses that step produced, and the tallies appear on that step's entry in
@@ -6599,6 +6605,17 @@ Its row instead carries a tenth key, `scenario`, present on scenario runs only:
 itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
 four keys is omitted when the stored snapshot has no such key.
+
+**`hasWarnings`** (issue #1527) is `summary`'s eleventh key, `true` on a run
+whose stored `summary.warnings` array (issue #1503) is non-empty and
+**omitted** otherwise - a run still in progress, one whose terminal write
+failed, or one that finished with nothing to say. Unlike the other keys
+above, it is not read out of `config_snapshot` and not part of the cached
+compact summary: it is a completion-time fact, read fresh off the row on
+every poll, so a history surface that polled a still-running run sees the
+glyph appear on the next poll after it finishes, never stuck at the answer
+its first poll cached. The full `warnings` array itself stays on
+`GET /runs/:runId`'s `summary`.
 
 **`baseline`** is on every row, `true` only for a run pinned through
 [PUT /runs/:runId/baseline](#put-runsrunidbaseline). It is also on

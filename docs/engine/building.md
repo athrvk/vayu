@@ -488,6 +488,57 @@ All platforms script with the same vendored engine: QuickJS-NG
   `brew install llvm` clang-tidy and clang-format are found without touching
   `PATH` yourself
 
+#### The deployment target is pinned, and must stay pinned
+
+Apple's clang defaults the deployment target to the **host** macOS version, so
+an unpinned build is only guaranteed to run on the machine that produced it.
+That is a release bug, not a local one: v0.26.0 was built on a macOS 26 runner,
+linked `std::exception_ptr::__from_native_exception_pointer` out of that
+release's libc++, and every user on an older macOS got a dyld
+`Symbol not found` abort at launch - the installer reported success, and the
+app then failed to start the engine.
+
+`engine/CMakeLists.txt` therefore sets `CMAKE_OSX_DEPLOYMENT_TARGET` from
+`VAYU_MACOS_DEPLOYMENT_TARGET` **before `project()`** - after it, the compiler
+probe has already baked the wrong value in.
+
+The value is **13.3**, not the 13.0 Electron sets for the app, and the extra
+.3 is forced rather than chosen: libc++ ships `std::to_chars` for
+floating-point types in the dylib and marks it introduced in macOS 13.3, while
+every `std::format` call instantiates the floating-point formatter for `long
+double` whatever it is actually formatting. Target 13.0 and the engine stops
+compiling - `error: 'to_chars' is unavailable: introduced in macOS 13.3`, from
+inside `<format>`, on any translation unit that formats a string. 13.3 is the
+lowest macOS a C++23 engine can target, which is why README.md and
+docs/index.md state it rather than Electron's floor. The vcpkg dependencies need the same floor,
+which triplets carry rather than cache variables, so `engine/triplets/` overlays
+`arm64-osx` and `x64-osx` with `VCPKG_OSX_DEPLOYMENT_TARGET`; the `macos-*`
+presets point `VCPKG_OVERLAY_TRIPLETS` at that directory. Both numbers move
+together, with `README.md` and `docs/index.md`.
+
+The same availability rule bites through a dependency, and the cure is
+different. valijson decides whether to call `std::from_chars` by asking whether
+libc++ is recent enough, which on Apple is the wrong question: the header is
+present, but the **floating-point** overloads are marked introduced in macOS
+**26.0**, so `parseDouble` fails to compile for any target below it. So
+`engine/CMakeLists.txt` puts `VALIJSON_HAS_STD_FROM_CHARS=0` on the imported
+`valijson` target under `if(APPLE)`, selecting the `std::istringstream`
+fallback valijson already ships for standard libraries without it. Our own
+`utils/parse.hpp` is unaffected: every `parse_number<T>` instantiation is
+integral, and integer `from_chars` carries no availability marker. ryml's
+c4core defaults to fast_float rather than `std::from_chars`, and nlohmann has
+its own parser, so valijson is the only dependency that needed this.
+
+Note the asymmetry, since it is what pins the floor at 13.3 exactly:
+`std::to_chars` for floating point arrived in macOS 13.3, `std::from_chars`
+for floating point not until 26.0. The engine needs the first (`<format>`, and
+`js_json.hpp` directly) and can route around the second.
+
+`scripts/check-macos-min-version.sh` reads `minos` back out of the built binary
+(every slice of a universal one) and is what fails CI if any of that comes
+undone - `pr-tests.yml` runs it on the macOS engine leg, `release.yml` on the
+universal binary. Nothing else can catch this: CI never runs on the old OS.
+
 ### Windows
 
 - Requires Visual Studio 2022 or later

@@ -93,6 +93,7 @@
 
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/scenario_plan.hpp"
+#include "vayu/core/scenario_runner.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/core/transaction_histograms.hpp"
 #include "vayu/db/database.hpp"
@@ -133,14 +134,14 @@ const nlohmann::json& config);
  * @brief The first element kind in @p plan that a scenario load run cannot
  *        honour, or `nullopt` when it carries none.
  *
- * A scenario load run's virtual users advance through the plan strictly
- * forward (`VirtualUser::step`); nothing there can jump the way
- * `control.switch`'s dispatch or `control.loop`'s repeat needs (issue
- * #1515; a load-path jump mechanism is real, disclosed follow-up work,
- * issue #1569). The route refuses the run with a `400` naming the kind,
- * before its row exists - the caller-facing sentence lives there, matching
- * `validate_scenario_load_config`'s own split. The sequential run supports
- * both fully; this check applies only to the load path.
+ * `control.switch` and `control.loop` (issue #1515) needed this refusal
+ * until #1569 gave the load path its own jump/repeat mechanism
+ * (`ScenarioLoadState::step_index`, `VirtualUser::steps_this_iteration`);
+ * neither kind sets the registry's `jumps_or_repeats` flag any more, so this
+ * reads as "nothing today" and exists for a future kind that jumps in a way
+ * the load path genuinely cannot support yet - refusing such a plan with a
+ * `400` naming the kind, before its row exists, rather than silently running
+ * it once and ignoring what it asked for.
  */
 [[nodiscard]] std::optional<std::string> find_load_incompatible_controller (
 const ScenarioPlan& plan);
@@ -186,6 +187,15 @@ struct VirtualUser {
     size_t index = 1;
     /// Next step of the plan this VU will send.
     size_t step = 0;
+    /// Whether `step` is 0 because this VU is *starting* a new iteration, as
+    /// opposed to a `control.loop` jump that landed back on plan position 0
+    /// mid-iteration (issue #1569) - `take_ready_vu` claims a new iteration
+    /// (the run-wide budget, a fresh data row) only when this is true, and
+    /// `finish_step` is the only writer: `true` only in its own
+    /// "end this iteration" branch, so a mid-iteration jump - to position 0
+    /// or anywhere else - never claims a second iteration for the one it is
+    /// still inside of.
+    bool iteration_boundary = true;
     /// 0-based, and only ever advanced by this VU.
     size_t iteration = 0;
     /**
@@ -239,6 +249,12 @@ struct VirtualUser {
      * rather than misread.
      */
     std::unordered_map<std::string, int64_t> controller_state;
+    /// How many steps this VU has executed within its current iteration
+    /// (issue #1569) - the load path's own guard against a `control.switch`
+    /// cycle or a misconfigured `control.loop`, mirroring the sequential
+    /// run's `maxStepsPerIteration`. Reset to 0 at the same iteration
+    /// boundary `cookies` is.
+    size_t steps_this_iteration = 0;
     /// Per-node "when did this node last start" state for this VU's own
     /// `timer.pacing` elements (issue #1498), keyed by element id - the
     /// load-path sibling of `RunContext::pacing_state`'s sequential-run
@@ -399,8 +415,9 @@ struct ScenarioLoadState {
     vayu::runtime::ScriptConfig script_config)
     : steps (plan.steps.size ()), element_spans (compute_element_spans (plan)),
       transactions (plan), element_tallies (plan),
+      step_index (build_step_index (plan)), shared_throughput (plan),
       shared_pacing (shared_pacing_element_ids (plan)),
-      shared_throughput (shared_throughput_element_ids (plan)),
+      shared_throughput_budgets (shared_throughput_element_ids (plan)),
       base_scopes (std::move (base_scopes)),
       base_vars (vayu::http::routes::flatten_variable_scopes (this->base_scopes)),
       script_config (script_config), coverage (std::move (coverage)),
@@ -409,8 +426,8 @@ struct ScenarioLoadState {
 
     StepHistograms steps;
     /// The plan-wide first/last position of every scope-spanning element
-    /// (issue #1515's `control.transaction` - `control.loop` never reaches
-    /// this run mode, see `submit_one`'s own comment), computed once here.
+    /// (issue #1515's `control.transaction` and, since #1569, `control.loop`
+    /// too), computed once here.
     std::unordered_map<std::string, ElementSpan> element_spans;
     /// One histogram per declared `control.transaction` name (issue #1515),
     /// allocated up front from the same plan scan `element_spans` is, so
@@ -425,12 +442,31 @@ struct ScenarioLoadState {
     /// Per-step, per-element pass/fail/skip tallies (issue #1495), written by
     /// the same completion that writes `steps` above - see the class comment.
     StepElementTallies element_tallies;
+    /// Resolves a `control.switch` target or a `control.loop`'s own
+    /// folder-start name to a plan position (issue #1569) - the same index
+    /// the sequential run's own `resolve_next_step` reads, built once here.
+    ScenarioStepIndex step_index;
+    /// `maxStepsPerIteration`, resolved once here (issue #1569): a scenario
+    /// load run's own guard against a `control.switch` cycle or a
+    /// `control.loop` that never reaches its close, on the same config entry
+    /// and the same `resolve_max_steps_per_iteration` the sequential run
+    /// uses - set by `execute_scenario_load` once `db` is in scope.
+    size_t max_steps_per_iteration = 0;
+    /// One shared counter pair per `control.throughput` element whose config
+    /// asked to share it across every virtual user (issue #1569's
+    /// `perUser: false`), allocated up front from the same plan scan
+    /// `element_spans` is.
+    SharedThroughputCounters shared_throughput;
     /// This run's cross-VU pacing clocks (issue #1570) - empty (and free) for
     /// a plan with no `timer.pacing(perUser: false)` element at all.
     SharedPacingClocks shared_pacing;
     /// This run's cross-VU throughput budgets (issue #1571) - empty (and
-    /// free) for a plan with no shared-rate `timer.throughput` element at all.
-    SharedThroughputBudgets shared_throughput;
+    /// free) for a plan with no shared-rate `timer.throughput` element at
+    /// all. Named apart from `shared_throughput` above (issue #1569's
+    /// `control.throughput` counters): a percentage-of-passes budget and a
+    /// token-bucket rate are different primitives that happen to share a
+    /// kind-name prefix.
+    SharedThroughputBudgets shared_throughput_budgets;
     /// Combined pass/fail of every `pm.test` call an *inline* `script.pre` or
     /// `script.post` element made this run (issue #1497). `element_tallies`
     /// above already records that element's own outcome - did the script run
