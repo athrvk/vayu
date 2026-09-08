@@ -2563,13 +2563,16 @@ every element at a step shares the one `Request` object being sent - only the
 JavaScript variable scope is per-element. The same holds for `script.post`
 elements and `pm.response`.
 
-**A single-request `POST /runs` is unchanged, and still joins.** It calls
-neither `refuse_legacy_script_fields` nor the element pipeline: its own
-deferred validation script still reads `tests` (or `postRequestScripts` /
-`postRequestScript`, tried in that order) exactly as before - a list of parts
-joined with a blank line and run as one script in one shared scope. That
-payload shape has no `elements` attachment point at all, so there is nothing
-for `ElementPipeline` to run there.
+**A single-request `POST /runs` runs the element pipeline too now (issue
+#1594), and no longer joins.** It calls `refuse_legacy_script_fields` the
+same as `POST /execute` - `tests` / `postRequestScripts` / `postRequestScript`
+/ `preRequestScript(s)` are all refused with a `400` naming `elements` - and
+reads its own step-level elements off a new field, `requestElements`, a
+distinct key from this endpoint's own `elements` (the run-level
+`timers`/`scripts` override, below). Each `script.pre` / `script.post`
+element there runs its own script independently, opening a fresh
+`ScriptContext` per element, exactly like a design send's or a sequential
+step's compiled list above - there is no blank-line join here either.
 
 **A scenario load run's `elements` run inline now (issue #1495), opt-in per
 element.** `submit_one` (the producer, one virtual user at a time) runs
@@ -2595,10 +2598,30 @@ and, eventually, a `control.*` element's job, neither of which runs inline.
 The overlay is cleared at the same iteration boundary `pm.cookies`' per-VU
 jar is, for the same reason: a new iteration is a new user.
 
+**A single-request load run's `requestElements` dispatch the same way, per
+submission rather than per VU (issue #1594) - there is no persistent VU
+object on this path to hold state across submissions.** `submit_one_request`
+runs `step.before` immediately before the transfer and `step.after` once the
+response is in; `extract.*` / `assert.*` run there unconditionally, and a
+`script.pre` / `script.post` element runs inline only when its own
+`config.inline` is `true` or the run's `elements.scripts` override forces it,
+`RunContext::script_element_runs_inline` deciding exactly as it does for a
+scenario step. An unmarked `script.post` still defers - to this run's own
+completion replay, not a scenario's - and an unmarked `script.pre` simply
+never runs, because there is no pre-request replay to defer it to. Each
+submission gets its own fresh `ScopeOverlay`, discarded after, so a
+`pm.environment.set` one submission's inline script makes is visible to that
+same submission's own residual-token pass and later steps, never to a
+concurrent submission's. `timer.think` costs no new thread here either:
+`RunContext::reserve_think_wait` folds its wait into the same
+`maintain_concurrency` in-flight accounting every load strategy already
+polls, rather than blocking a worker.
+
 See [`elements.md`](elements.md#load-paths) for the full mechanics -
 `ScopeOverlay`, the per-thread `ScriptEngine`, `elements.includeScriptTime`,
-and what is deliberately still unwired (`elements.timers`, the
-single-request path).
+and what remains deliberately unwired on the single-request path
+(`control.*` - a lone request has no sequence for a controller to jump or
+gate).
 
 ## Error Handling
 

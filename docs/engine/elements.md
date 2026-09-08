@@ -18,8 +18,8 @@ shape both sides of the wire agree on; it is generated from, or checked against,
 > `post_request_script` are gone, cut over by a one-shot migration (see
 > [`db-schema.md`](db-schema.md#the-script-to-elements-migration-issue-1514)); no transitional
 > alias, per the owner's decision. Issue #1495 lands the pipeline on a **scenario** load run's
-> producer/completion hooks (below) - a **single-request** load run still executes no element; see
-> that section for why. Issue #1499 lands the first kinds to run at a run's own boundary rather
+> producer/completion hooks (below); issue #1594 lands it on a **single-request** load run's own
+> submission too, through `requestElements` - see that section. Issue #1499 lands the first kinds to run at a run's own boundary rather
 > than at a step's - `script.setup` / `script.teardown`, dispatched at `Phase::RunStart` /
 > `Phase::RunEnd` outside the step pipeline entirely, in both run modes a collection can run in.
 
@@ -365,17 +365,43 @@ for the sequential run; a `perUser: false` element instead advances its own entr
 shared-pacing element id in the plan, so two VUs' concurrent completions claim distinct slots of
 the same clock rather than racing onto the same one.
 
-**Still not wired: step-level elements on the single-request load path.** `load_strategy.cpp`'s
-per-submission and per-completion hooks are unchanged: a single-request `POST /runs` payload's
-own request has no `elements` attachment point today (its script model is still the legacy
-`tests` string, `RunContext::test_script`, not a compiled `elements` list), so there is no
-element pipeline call there to gate on inline-vs-deferred - a `ScopeOverlay` would have no
-writer. Wiring a stored request's `elements` into that run shape is a separate gap, outside this
-page's Status callout. What issue #1573 *does* wire for this run shape is the two kinds that
-dispatch at a run's own boundary rather than a step's: `lifecycleElements` (previous paragraph)
-lets a single-request run declare `script.setup` / `script.teardown`, run once before the load
-starts and once after it ends, the same `Phase::RunStart` / `Phase::RunEnd` dispatch a
-collection-backed run uses.
+**Step-level elements on the single-request load path, wired (issue #1594).**
+A single-request `POST /runs` payload's own request now has an `elements`
+attachment point - `requestElements`, a distinct key from this endpoint's own
+run-level `elements` override (above) - compiled once at run start into
+`RunContext::step_elements`. `load_strategy.cpp`'s `submit_one_request` runs
+`Phase::StepBefore` immediately before the transfer and `handle_result` runs
+`Phase::StepAfter` once the response is in, the same phases a design send
+uses; `extract.*` / `assert.*` always run there, and a `script.pre` /
+`script.post` element runs inline only when its own `config.inline` is
+`true` or the run's `elements.scripts` override forces it -
+`RunContext::script_element_runs_inline` deciding exactly as it does for a
+scenario step. An unmarked `script.post` defers to this run's own completion
+replay (`RunContext::test_script`, folded from the un-inlined element at
+compile time so the replay does not need to know `elements` exist); an
+unmarked `script.pre` simply never runs, since there is no pre-request replay
+on this path to defer it to.
+
+There is no persistent virtual-user object on this path to carry a
+`ScopeOverlay` across submissions the way a scenario's does, so each
+submission gets its own, built fresh from the run's flattened base scopes
+(`RunContext::step_base_vars`) and discarded once that submission settles -
+proportional to one request's writes, never shared with a concurrent
+submission. An inline `script.pre`'s edits and any `pm.environment.set` it
+makes reach the residual-token pass (`resolve_residual_tokens`) run against
+that same overlay before the transfer, so a value one script writes resolves
+a `{{token}}` later in the same request. `timer.think`'s wait costs no new
+thread: `RunContext::reserve_think_wait` / `purge_expired_think_reservations`
+hold a mutex-guarded multiset of release deadlines folded into
+`RunContext::in_flight()`, so the existing `maintain_concurrency` closed-loop
+poll throttles a reserved-but-not-yet-released submission the same way it
+already throttles an in-flight one - no new thread, no change to any load
+strategy's own polling loop. What issue #1573 wires for this run shape stays
+separate: `lifecycleElements` (previous paragraph) is a run's own boundary,
+not a step's, and a `control.*` element is accepted on `requestElements`
+syntactically (nothing marks it collection-only) but a lone request has no
+sequence for a jump, skip or transaction to act on - the controller family
+stays a scenario-only concern in practice.
 
 ## Related issues
 
@@ -405,8 +431,14 @@ collection-backed run uses.
   declare them on; the wire-shape gap it left is #1573.
 - #1573 - `lifecycleElements`, a single-request `POST /runs` payload's own ephemeral place to
   declare `script.setup` / `script.teardown` (this page's Kinds section and Load paths section).
-  Does not wire step-level elements (`extract.*`, `assert.*`, `timer.*`, `script.pre`/`.post`)
-  into the single-request load path - that remains the Load paths section's "still not wired" gap.
+  Left step-level elements (`extract.*`, `assert.*`, `timer.*`, `script.pre`/`.post`) unwired on
+  the single-request load path - that gap is #1594's.
+- #1594 - `requestElements`, wiring step-level elements into the single-request load path (this
+  page's Load paths section): the run pipeline's per-submission `Phase::StepBefore` /
+  `Phase::StepAfter` dispatch, inline-vs-deferred `script.*` dispatch shared with the scenario
+  path, a per-submission `ScopeOverlay`, and non-blocking `timer.think` backpressure via
+  `RunContext::reserve_think_wait`. `preRequestScript(s)` / `postRequestScript(s)` / `tests` are
+  refused on `POST /runs` now too, the same as every other route since #1514.
 - #1515 - the controller family (`control.if`, `.once`, `.switch`, `.throughput`, `.loop`,
   `.transaction`), the load path's own `steps_skipped` counter, and `scenario.transactions[]`
   (this page's Controllers section).

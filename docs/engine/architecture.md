@@ -778,22 +778,23 @@ scenarios**; **distributed load**; **the engine reading data files from disk** (
 sandbox has no filesystem, and a user-supplied path would be a new trust
 boundary); **parallel steps within an iteration** (an iteration is ordered -
 that is the whole primitive); **a scenario-level test script** asserting
-across steps; **replacing `run_collection_smoke`** (an unordered,
-share-nothing, agent-facing matrix is a different tool and stays); and
-**inline elements on the single-request load path**. As of #1495, a scenario
-load run's producer and completion hooks run every declarative kind
-(`extract.*`, `assert.*`, `timer.*`) inline, per virtual user, through a
-per-user scope overlay and the residual-token pass; a `script.*` element
-stays deferred - replayed against the sampled responses after the run drains,
-exactly as it did before elements existed - unless it is marked `inline` or
-the run's `elements.scripts` override says so, in which case it runs at
-completion time on a per-worker QuickJS engine (no shared pool, no lock). A
-single-target `POST /runs` (no `scenario` block) still runs no element
-pipeline at all: the compiled `elements` on the one request it sends are
-inspected only to decide whether to warn and whether to sample it. Wiring the
-pipeline into that path, so a load run of one saved request gets the same
-inline extractors, assertions and timers a scenario load run already has, is
-#1594's job.
+across steps; and **replacing `run_collection_smoke`** (an unordered,
+share-nothing, agent-facing matrix is a different tool and stays). As of
+#1495, a scenario load run's producer and completion hooks run every
+declarative kind (`extract.*`, `assert.*`, `timer.*`) inline, per virtual
+user, through a per-user scope overlay and the residual-token pass; a
+`script.*` element stays deferred - replayed against the sampled responses
+after the run drains, exactly as it did before elements existed - unless it
+is marked `inline` or the run's `elements.scripts` override says so, in
+which case it runs at completion time on a per-worker QuickJS engine (no
+shared pool, no lock). Since #1594, a single-target `POST /runs` (no
+`scenario` block) runs the same pipeline on its own request, per submission,
+through `requestElements` - the mechanism is the same shape, a per-submission
+`ScopeOverlay` standing in for the scenario path's per-VU one, since a single
+target has no persistent virtual-user object to hold state on between
+submissions. `control.*` is the one family that stays a scenario-only
+concern in practice: nothing rejects it on `requestElements`, but a lone
+request has no sequence for a jump, skip or transaction to act on.
 
 Two things were deliberately left open: whether a **stored scenario entity**
 ever lands (the seam exists; the demand does not), and **retry /

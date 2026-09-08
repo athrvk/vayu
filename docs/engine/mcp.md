@@ -837,24 +837,25 @@ reads them, folds each into an ad-hoc `script.pre` / `script.post` element,
 and appends both after compose - alongside any ad-hoc `elements` argument the
 agent gave directly - so they run in addition to whatever the composed
 request already carried, never replacing it. `start_load_run`'s ad-hoc
-`postRequestScript` / `tests` is the one survivor of the pre-#1514 shape:
-`POST /runs` never cut over (it runs no element yet, issue #1495), so it is
-still placed under `tests` on the run payload exactly as before.
+`postRequestScript` / `tests` folds the same way now (issue #1594):
+`POST /runs` reads a single target's step-level elements under
+`requestElements`, a key distinct from `elements` there (see below), so the
+composed chain rides under that key too - `composeLoadRunRequest` renames the
+compose response's `elements` onto `requestElements` rather than folding it
+into a flat `tests` string.
 
 **One validation script, one name - except where the engine still keeps two.**
 The post-response script is one field in the app - the request builder's
 **Tests** tab - and MCP declares it identically on `run_request` and
 `start_load_run` (`postRequestScript`, with `tests` accepted as an alias) so a
-script an agent writes for one reads the same on the other. What each tool
-*does* with it now differs (issue #1517): `run_request` folds it into an
-ad-hoc `script.post` element, since `/execute` refuses the raw
-`postRequestScript` field; `start_load_run` still places it under `tests` on
-the run payload (`tools.ts::readValidationScript` + `composeLoadRunRequest`),
-because `POST /runs` never cut over to `elements` and `tests` is the name a
-run's own composed elements do not use - which is what lets an explicit
-script replace them rather than sit beside them (the composed `script.post`
-elements are inert on this path either way, since a load run runs no element
-yet). `tests` stays accepted on both as the engine's own spelling for the run
+script an agent writes for one reads the same on the other. Both tools now
+fold it the same way too (issue #1594 caught `start_load_run` up to #1517's
+`run_request` shape): an ad-hoc `script.post` element, appended to
+`requestElements`. `start_load_run` **replaces** rather than joins - the
+composed chain's own `script.post` elements are filtered out first
+(`tools.ts::composeLoadRunRequest`), because with no way to know which
+assertions the agent meant, running both would add ones they never asked for.
+`tests` stays accepted on both as the engine's own spelling for the run
 tool - a Zod object strips keys it does not declare, so removing it would turn
 a script the agent believes is running into silence. Passing both names is
 rejected with a `ToolArgError` rather than resolved by precedence: they are
@@ -881,17 +882,19 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   (oauth2 uses its token cache).
 - **Scripts** - composing by id attaches the collection chain's + the
   request's own `script.pre` / `script.post` elements engine-side (issue
-  #1514), so a saved request's assertions execute in the design send and the
-  sequential collection run; under load they ride along on `payload.elements`
-  but are not executed yet (issue #1495). `run_request` takes an ad-hoc
-  `preRequestScript` / `postRequestScript` instead (folded into elements,
-  above), since an ad-hoc call has no chain to compose from; `start_load_run`
-  takes the same `postRequestScript` for a URL-only run, placed under `tests`
-  as described above. Those two are supplied per call and are not stored -
-  `create_request` and `update_request` take the same two names as sugar for a
-  `script.pre` / `script.post` element stored on the request itself, which is
-  what lets an agent-authored script outlive the call that wrote it (see
-  *Storing a request's elements* below).
+  #1514), so a saved request's assertions execute in the design send, the
+  sequential collection run, and now `start_load_run`'s single-target path
+  too (issue #1594 - the composed `elements` become the run's own
+  `requestElements`, a step-level pipeline `POST /runs` now runs per
+  submission). `run_request` takes an ad-hoc `preRequestScript` /
+  `postRequestScript` instead (folded into elements, above), since an ad-hoc
+  call has no chain to compose from; `start_load_run` takes the same
+  `postRequestScript` for a URL-only run, folded into `requestElements` the
+  same way, as described above. Those two are supplied per call and are not
+  stored - `create_request` and `update_request` take the same two names as
+  sugar for a `script.pre` / `script.post` element stored on the request
+  itself, which is what lets an agent-authored script outlive the call that
+  wrote it (see *Storing a request's elements* below).
 - **Bodies** - `body` is a string and `bodyType` names the mode
   (`json` | `text` | `graphql` | `jsonrpc` | `xml` | `form-data` |
   `x-www-form-urlencoded`,
@@ -1007,21 +1010,24 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   compose body's `request` overlay, like any other agent-stated field. On a
   URL-only call there is no saved row behind the request, so `httpVersion` is
   forwarded only when the caller actually supplies it.
-- **One post-response script, two names now, not three.** Before issue #1514
-  it was stored as `postRequestScript` (on a request and on a collection),
-  sent as `postRequestScripts` / `postRequestScript` to `POST /execute`, and
-  as `tests` to `POST /runs` - three spellings `read_post_request_script` read
-  on both routes. The cut-over ends two of them: it is stored as a
-  `script.post` element now (`create_request` / `update_request` /
-  `create_collection` / `update_collection`'s `preRequestScript` /
-  `postRequestScript` sugar folds a string into one, issue #1517), and
-  `POST /execute` refuses `postRequestScripts` / `postRequestScript` outright
-  - `elements` is its only script source. `POST /runs` alone kept the old
-  alias (it runs no element yet, issue #1495): `tests` / `postRequestScript`
-  there still means an ad-hoc validation script, read through
-  `read_post_request_script` exactly as before. MCP still shows the agent a
-  single name (see *One validation script, one name* above) for whichever of
-  the two very different things it now does.
+- **One post-response script, one name on the wire, not three.** Before issue
+  #1514 it was stored as `postRequestScript` (on a request and on a
+  collection), sent as `postRequestScripts` / `postRequestScript` to
+  `POST /execute`, and as `tests` to `POST /runs` - three spellings
+  `read_post_request_script` read on both routes. The cut-over ended all
+  three: it is stored as a `script.post` element now (`create_request` /
+  `update_request` / `create_collection` / `update_collection`'s
+  `preRequestScript` / `postRequestScript` sugar folds a string into one,
+  issue #1517), and both `POST /execute` and `POST /runs` refuse
+  `postRequestScripts` / `postRequestScript` / `tests` outright since issue
+  #1594 gave the single-target load path the same element pipeline the
+  design send already had - `elements` (`run_request`) /
+  `requestElements` (`start_load_run`) is each route's only script source
+  now, and `read_post_request_script` itself is retired. MCP still shows the
+  agent a single argument name, `postRequestScript` with `tests` accepted as
+  an alias (see *One validation script, one name* above), and folds it into
+  an ad-hoc element client-side before either route ever sees a legacy
+  field.
 - **Storing a request's elements** - `create_request` and `update_request`
   take `elements` (the whole list) plus `preRequestScript` /
   `postRequestScript` sugar (strings, optional) that fold a script into a
@@ -1049,19 +1055,24 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
 - **Load-testing a saved request** - `start_load_run` with a `requestId`
   composes it by id, exactly as `run_collection_smoke` and the app do:
   variables resolved, stored auth applied through the collection chain, and
-  the chain's + its own elements attached under `elements` (issue #1514). Any
-  field stated explicitly (url, method, headers, body, auth, httpVersion)
-  rides in the compose body's `request` overlay and replaces the stored one
-  *before* resolution; an explicit `postRequestScript` / `tests` *replaces*
-  the run's validation script rather than joining it - though since
-  `POST /runs` runs no element yet (issue #1495), the composed `elements`
-  were never the run's validation script to begin with, ad-hoc or not.
-  Without a `requestId` the run is ad-hoc and `url` is required. A saved
-  request's **pre-request** script cannot run under load - `POST /runs` has
-  no such hook - so the count of `script.pre` elements among the composed
-  `elements` is reported in the tool's result rather than passing silently;
-  the entries themselves are left on the payload, since the engine still
-  reads `elements` for its own warnings.
+  the chain's + its own elements attached under `elements`, which the tool
+  renames onto `requestElements` - `POST /runs` runs an element pipeline per
+  submission on a single target too now (issue #1594), and reads its
+  step-level elements under that key, distinct from the run-level `elements`
+  override below. Any field stated explicitly (url, method, headers, body,
+  auth, httpVersion) rides in the compose body's `request` overlay and
+  replaces the stored one *before* resolution; an explicit
+  `postRequestScript` / `tests` *replaces* the composed chain's
+  `script.post` elements in `requestElements` rather than joining them - with
+  no way to know which assertions the agent meant, running both would add
+  ones they never asked for. Without a `requestId` the run is ad-hoc and
+  `url` is required. A saved request's **pre-request** script runs only when
+  marked inline (`config.inline`) or this run's own `elements.scripts`
+  override is `"allInline"` - left `asMarked` with no per-element mark, it
+  still never runs, since there is no pre-request replay to defer it to the
+  way `script.post` gets one. The count of `script.pre` elements that will
+  *not* run is reported in the tool's result rather than passing silently,
+  unless the override already covers them.
 - **Scenario runs - a collection as the unit of work** (issue #754, reversing
   #454's deferral). A collection's ordered sequence of requests can be run from
   MCP in both of the engine's modes, over the one `POST /runs` route that takes
@@ -1123,25 +1134,25 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
     marking; `"asConfigured"` / `"asMarked"` (the defaults) leave each
     element's own configuration in effect. It is **top-level, beside
     `scenario`** rather than inside it, on both tools that read it - the same
-    place `RunCollectionDialog`'s load-test section sends it. The two keys do
-    not reach the same paths, though: `timers` genuinely fires on **both**
-    `run_collection`'s design-mode run and `start_load_run`'s scenario branch
-    (`execute_scenario_run` wires `RunContext::timers_override` into the same
-    `ExchangeInputs` a scenario load run does), while `scripts` only reaches
-    the load path (its one reader is the load path's own post-run script
-    replay) - so `run_collection` offers `elements: {timers}` only, and
-    `start_load_run`'s scenario branch offers both. A single-target
-    `start_load_run` call is **refused by name** for the same "written and
-    read by nothing" reason the single-target fields above are refused beside
-    a scenario: `load_strategy.cpp` wires neither override at all, so there is
-    nothing on a lone target for either key to change. This mirrors
-    `RunCollectionDialog`'s own load-test controls, not the engine's full
-    contract: `timers` also accepts a `{fixedMs}` / `{minMs, maxMs}` override
-    (issue #1498) replacing every timer's own span, and the block also takes
-    `includeScriptTime` and `seed`, but no control anywhere in the product -
-    app or MCP - sends any of the three today, so these schemas only name the
-    two enum values `"asConfigured"`/`"off"` and `"asMarked"`/`"allInline"`/
-    `"allDeferred"`.
+    place `RunCollectionDialog`'s load-test section sends it. `run_collection`
+    offers `elements: {timers}` only, since `scripts` has no reader on the
+    design-mode path it drives. `start_load_run` offers both keys, on **either**
+    shape it can start: `timers` fires on the scenario branch's
+    `execute_scenario_run` (`RunContext::timers_override` wired into the same
+    `ExchangeInputs` a scenario load run does) and, since issue #1594, on a
+    single target's own submission pipeline too
+    (`load_strategy.cpp`'s per-step hooks); `scripts` reaches the scenario
+    load path's post-run replay and, since #1594, a single target's own
+    inline-vs-deferred dispatch (`RunContext::script_element_runs_inline`) -
+    the mechanism that makes `"allInline"` the thing that gets a single
+    target's `script.pre` to actually run under load (see *Load-testing a
+    saved request* above). This mirrors `RunCollectionDialog`'s own load-test
+    controls, not the engine's full contract: `timers` also accepts a
+    `{fixedMs}` / `{minMs, maxMs}` override (issue #1498) replacing every
+    timer's own span, and the block also takes `includeScriptTime` and `seed`,
+    but no control anywhere in the product - app or MCP - sends any of the
+    three today, so these schemas only name the two enum values
+    `"asConfigured"`/`"off"` and `"asMarked"`/`"allInline"`/`"allDeferred"`.
   - **The allowlist gate is all-or-nothing here**, unlike the smoke matrix's
     per-request skip: every step is composed by id and gated before the run is
     created, and one step the allowlist does not cover refuses the whole run
@@ -1164,9 +1175,13 @@ How each tool uses `POST /compose` (`tools.ts::composeViaEngine`):
   `run_collection_smoke`. The write-back is engine-side
   ([scripting.md](scripting.md#mutating-the-request-pre-request-scripts)), so
   both tools get it without composing anything extra. A rejected edit comes back
-  as `preScriptError` in the response. `start_load_run` has no pre-request hook
-  at all - `POST /runs` runs only the deferred `tests` script - so it does not
-  offer the field rather than accepting one that would never run.
+  as `preScriptError` in the response. `start_load_run` did not offer the field
+  at all before issue #1594 - `POST /runs` ran no pre-request hook on its
+  single-target path. It still does not accept an ad-hoc `preRequestScript`
+  argument (a saved request's own `script.pre` element is the only source),
+  and a composed one only mutates the request when it is marked to run inline
+  or this run's own `elements.scripts` override forces it - see *Load-testing
+  a saved request* above.
 
 `run_request` / `start_load_run` take optional `environmentId` and
 `collectionId` to scope resolution; both are forwarded to `POST /compose`.
