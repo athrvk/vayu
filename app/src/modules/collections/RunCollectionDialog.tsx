@@ -189,12 +189,11 @@ export default function RunCollectionDialog({
 	 */
 	const [budgets, setBudgets] = useState<BudgetDraft>(emptyBudgetDraft);
 	/**
-	 * The `custom.<name>.<stat>` rows (issue #1579) - unlike the six fixed
-	 * budgets above, a **load run only** capability: `docs/engine/api-reference.md`
-	 * says a collection run's config accepts the block but nothing evaluates it
-	 * yet, so a design-mode run declaring one would be told it is judged and
-	 * never be. They are kept in state across a toggle of the switch, and simply
-	 * not offered or sent while it is off.
+	 * The `custom.<name>.<stat>` rows (issue #1579) - judged for a design-mode
+	 * collection run exactly as the six fixed budgets above are (issue #1564):
+	 * `execute_scenario_run` folds `summary.custom_metrics` into the same
+	 * `RunSummaryInputs` it evaluates thresholds against for every run mode,
+	 * load test or not (`scenario_runner.cpp`). Not gated on the switch.
 	 */
 	const [customBudgets, setCustomBudgets] = useState<CustomBudgetDraft[]>([]);
 	const [failRun, setFailRun] = useState(false);
@@ -272,14 +271,7 @@ export default function RunCollectionDialog({
 	const durationValue = Number(durationSeconds);
 	const durationValid = Number.isFinite(durationValue) && durationValue > 0;
 
-	/*
-	 * The custom rows are only offered on a load run, so only a load run can be
-	 * blocked by one: a half-filled row left behind by turning the switch off is
-	 * neither on screen nor in the payload, and blocking Run over it would be an
-	 * error with nothing to fix.
-	 */
-	const activeCustomBudgets = loadTest ? customBudgets : [];
-	const budgetsError = budgetError(budgets) ?? customBudgetsError(activeCustomBudgets);
+	const budgetsError = budgetError(budgets) ?? customBudgetsError(customBudgets);
 
 	const canRun = loadTest
 		? virtualUsersValid && durationValid && !dataFileError && !budgetsError
@@ -313,7 +305,7 @@ export default function RunCollectionDialog({
 
 	const handleRun = () => {
 		if (!canRun) return;
-		const thresholds = buildThresholds(budgets, failRun, activeCustomBudgets);
+		const thresholds = buildThresholds(budgets, failRun, customBudgets);
 		startRun.mutate(
 			{
 				/*
@@ -621,17 +613,13 @@ export default function RunCollectionDialog({
 							))}
 
 							{/*
-							 * Custom metric budgets, and the one place this
-							 * disclosure diverges from `LoadTestConfigDialog`'s:
-							 * `custom.<name>.<stat>` is evaluated for load runs
-							 * only (#1500, and `docs/engine/api-reference.md` says
-							 * so in as many words), where the six fixed budgets are
-							 * now judged for a design-mode collection run too
-							 * (#1564). Offering the rows in design mode would
-							 * accept a budget the engine stores and never
-							 * evaluates - so the switch decides, and the sentence
-							 * says which switch, rather than leaving a greyed row
-							 * to be guessed at.
+							 * Custom metric budgets - not gated by `loadTest`,
+							 * same as the six fixed budgets above and for the same
+							 * reason: `custom.<name>.<stat>` is judged for a
+							 * design-mode collection run exactly as it is for a
+							 * load run (`execute_scenario_run`, #1564's own
+							 * every-run-mode rule extends to #1500's custom
+							 * metrics too).
 							 */}
 							<div className="space-y-1.5">
 								<Label className="text-xs">
@@ -640,23 +628,13 @@ export default function RunCollectionDialog({
 										(optional)
 									</span>
 								</Label>
-								{loadTest ? (
-									<>
-										<CustomBudgetHint />
-										<CustomBudgetRows
-											rows={customBudgets}
-											onChange={setCustomBudgets}
-											idPrefix="run-collection"
-											disabled={startRun.isPending}
-										/>
-									</>
-								) : (
-									<p className="text-[11px] leading-relaxed text-muted-foreground">
-										Load runs only. Turn on Load test above to budget a metric
-										this run records itself - a design-mode collection run
-										measures those metrics but is not yet judged against them.
-									</p>
-								)}
+								<CustomBudgetHint />
+								<CustomBudgetRows
+									rows={customBudgets}
+									onChange={setCustomBudgets}
+									idPrefix="run-collection"
+									disabled={startRun.isPending}
+								/>
 							</div>
 
 							<div className="flex items-start justify-between gap-3">

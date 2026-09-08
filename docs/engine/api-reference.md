@@ -5093,9 +5093,11 @@ actually declares - a `metric.record` on a step the run never reaches, or a
 plain typo, is not distinguishable from a not-yet-recorded metric at validate
 time. Evaluated the same way an unmeasured latency percentile is: `evaluated:
 false` when this run's collector never recorded that name, counted toward
-`failed` rather than a silent pass. **Load runs only**, the same limit
-`maxAssertionFailureRatePct` carries and for the same reason (#1564): a
-collection run's config accepts the block but nothing evaluates it yet.
+`failed` rather than a silent pass. **Every run mode is judged**, the same
+rule the six fixed keys follow (#1564): `execute_scenario_run` folds
+`summary.custom_metrics` into the same `RunSummaryInputs` it evaluates
+thresholds against for a collection (sequential, design-mode) run, not only a
+load run.
 
 The verdict is the run's, not the process's: a run **stopped early** is judged on
 what it measured up to that point, and its status stays `stopped` whatever the
