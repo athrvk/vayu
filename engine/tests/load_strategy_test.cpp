@@ -23,12 +23,14 @@
 #include <string>
 #include <thread>
 
+#include "echo_server.hpp"
 #include "mock_server.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/routes.hpp"
 
 namespace {
 
@@ -1235,4 +1237,392 @@ TEST (TickPacing, SleepLegLeavesTheSpinTail) {
     // Never negative, whatever a caller hands it.
     EXPECT_EQ (tick_sleep_leg_us (0, tail), 0);
     EXPECT_EQ (tick_sleep_leg_us (-100, tail), 0);
+}
+
+// ============================================================================
+// A single-request run's own `requestElements` (issue #1594)
+// ============================================================================
+
+// Validation: the `POST /runs` payload gate, mirroring
+// `LifecycleElementsRunOverrideValidationTest` (elements_setup_teardown_test.cpp)
+// for the sibling key #1573 added.
+
+TEST (RequestElementsRunOverrideValidationTest, AbsentIsFine) {
+    const nlohmann::json config = nlohmann::json::object ();
+    EXPECT_FALSE (vayu::core::validate_request_elements_run_override (config).has_value ());
+}
+
+TEST (RequestElementsRunOverrideValidationTest, NullIsFine) {
+    const nlohmann::json config{ { "requestElements", nullptr } };
+    EXPECT_FALSE (vayu::core::validate_request_elements_run_override (config).has_value ());
+}
+
+TEST (RequestElementsRunOverrideValidationTest, MustBeAnArray) {
+    const nlohmann::json config{ { "requestElements", nlohmann::json::object () } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("must be an array"), std::string::npos) << *reason;
+}
+
+// Unlike `lifecycleElements`, this key restricts no kind of its own - the
+// whole refusal comes from the shared `Registry::validate`, so an unknown
+// kind has to be refused here rather than compiled into a null element.
+TEST (RequestElementsRunOverrideValidationTest, RefusesAnUnknownKind) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" },
+    { "kind", "assert.nothing" }, { "config", nlohmann::json::object () } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("assert.nothing"), std::string::npos) << *reason;
+}
+
+// The config half of the same delegation: `assert.status` declares
+// `additionalProperties: false` over `in` / `range`, so a caller reaching for
+// a key that kind does not have is told at the payload gate rather than at
+// the first submission, where the run is already going.
+TEST (RequestElementsRunOverrideValidationTest, RefusesAConfigItsKindsSchemaRejects) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" },
+    { "kind", "assert.status" }, { "config", { { "expected", 200 } } } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("assert.status"), std::string::npos) << *reason;
+}
+
+TEST (RequestElementsRunOverrideValidationTest, AcceptsAScriptPreAndAnAssertStatus) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array (
+    { nlohmann::json{ { "id", "el_1" }, { "kind", "script.pre" },
+      { "config", { { "script", "pm.request.headers['X-A'] = '1';" } } } },
+    nlohmann::json{ { "id", "el_2" }, { "kind", "assert.status" },
+    { "config", { { "in", nlohmann::json::array ({ 200 }) } } } } }) } };
+    EXPECT_FALSE (vayu::core::validate_request_elements_run_override (config).has_value ());
+}
+
+// `config.inline` is the per-element opt-in `RunContext::script_element_runs_inline`
+// reads (issue #1495, documented in docs/engine/elements.md), so the payload
+// gate has to accept it - a `script.*` schema that refused it would leave the
+// marking unreachable through every validated write path there is.
+TEST (RequestElementsRunOverrideValidationTest, AcceptsAScriptElementMarkedInline) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" }, { "kind", "script.post" },
+    { "config", { { "script", "pm.test('ok', function () {});" }, { "inline", true } } } } }) } };
+    EXPECT_FALSE (vayu::core::validate_request_elements_run_override (config).has_value ());
+}
+
+// The same `stamp_default_element_ids` default `lifecycleElements` gets:
+// `Registry::validate` refuses an id-less entry outright, and a caller that
+// names no id must get one rather than a 400 asking it to invent one.
+// Mutation check: drop the `stamp_default_element_ids` call in
+// `validate_request_elements_run_override` and this reddens on
+// `Registry::validate`'s own "'id' must be a non-empty string" refusal.
+TEST (RequestElementsRunOverrideValidationTest, AcceptsAnEntryWithNoId) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "kind", "assert.status" },
+    { "config", { { "in", nlohmann::json::array ({ 200 }) } } } } }) } };
+    EXPECT_FALSE (vayu::core::validate_request_elements_run_override (config).has_value ());
+}
+
+// The wire-shape rule the issue settles: a scenario's steps already carry
+// their own resolved elements off the plan, so the two must not both claim
+// what a step runs.
+TEST (RequestElementsRunOverrideValidationTest, RefusedBesideAScenarioBlock) {
+    const nlohmann::json config{ { "scenario",
+                                 nlohmann::json{ { "source", "collection" },
+                                 { "collectionId", "col_1" } } },
+        { "requestElements",
+        nlohmann::json::array ({ nlohmann::json{ { "id", "el_1" }, { "kind", "assert.status" },
+        { "config", { { "in", nlohmann::json::array ({ 200 }) } } } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("single-request run"), std::string::npos) << *reason;
+}
+
+// `refuse_legacy_script_fields` (routes.hpp) is the other half of the same
+// gate - `POST /runs` runs it in front of both run shapes now that
+// `requestElements` is the single-request path's only script slot. The route
+// tests reach it through three of its five spellings on the resource routes;
+// these read the rule itself, which is the only place the plural forms and
+// the explicit-null case are stated.
+
+TEST (LegacyScriptFieldRefusalTest, RefusesEveryRetiredSpellingCarryingAScript) {
+    for (const char* key : { "preRequestScript", "preRequestScripts",
+         "postRequestScript", "postRequestScripts", "tests" }) {
+        const nlohmann::json json{ { key, "pm.test('ok', () => {});" } };
+        auto reason = vayu::http::routes::refuse_legacy_script_fields (json);
+        ASSERT_HAS_VALUE (reason) << key;
+        EXPECT_NE (reason->find (key), std::string::npos) << *reason;
+        EXPECT_NE (reason->find ("elements"), std::string::npos) << *reason;
+    }
+}
+
+// An explicit `null` is what a client sends for "this request has no script",
+// which is a payload the cut-over must keep accepting - refusing it would
+// break every caller that spells absence rather than omitting the key.
+TEST (LegacyScriptFieldRefusalTest, AcceptsAnExplicitNullForEveryRetiredSpelling) {
+    for (const char* key : { "preRequestScript", "preRequestScripts",
+         "postRequestScript", "postRequestScripts", "tests" }) {
+        const nlohmann::json json{ { key, nullptr } };
+        EXPECT_FALSE (vayu::http::routes::refuse_legacy_script_fields (json).has_value ())
+        << key;
+    }
+}
+
+TEST (LegacyScriptFieldRefusalTest, AcceptsAPayloadCarryingNoneOfThem) {
+    const nlohmann::json json{ { "mode", "iterations" }, { "iterations", 1 },
+        { "requestElements", nlohmann::json::array () } };
+    EXPECT_FALSE (vayu::http::routes::refuse_legacy_script_fields (json).has_value ());
+}
+
+namespace {
+
+/// A single-request load run driven the way `POST /runs` drives one, through
+/// `RunManager::start_run` against a real database - the row, the wait for a
+/// terminal status, and the parsed summary every case below reads its answer
+/// out of. A non-void helper cannot use `ASSERT_*`, so a run that never
+/// finished or stored nothing fails the caller and answers an empty object.
+nlohmann::json run_single_request_summary (vayu::db::Database& db,
+const std::string& run_id,
+const nlohmann::json& config) {
+    vayu::db::Run row;
+    row.id              = run_id;
+    row.type            = vayu::RunType::Load;
+    row.status          = vayu::RunStatus::Pending;
+    row.config_snapshot = "{}";
+    row.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                     .count ();
+    row.end_time = 0;
+    db.create_run (row);
+
+    vayu::core::RunManager run_manager;
+    if (!run_manager.start_run (run_id, config, db)) {
+        ADD_FAILURE () << "start_run refused the payload";
+        return nlohmann::json::object ();
+    }
+
+    const auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (30);
+    while (std::chrono::steady_clock::now () < deadline) {
+        const auto stored = db.get_run (run_id);
+        if (stored && stored->status != vayu::RunStatus::Running &&
+        stored->status != vayu::RunStatus::Pending) {
+            break;
+        }
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+    run_manager.shutdown (std::chrono::milliseconds (15000));
+
+    const auto stored = db.get_run (run_id);
+    if (!stored || stored->summary.empty ()) {
+        ADD_FAILURE () << "the run stored no summary";
+        return nlohmann::json::object ();
+    }
+    return nlohmann::json::parse (stored->summary);
+}
+
+/// The `summary["elements"]` entry for @p element_id, or a null json when the
+/// run reported none for it.
+nlohmann::json element_entry (const nlohmann::json& summary, const std::string& element_id) {
+    if (!summary.contains ("elements")) {
+        return {};
+    }
+    for (const auto& entry : summary["elements"]) {
+        if (entry.value ("id", std::string ()) == element_id) {
+            return entry;
+        }
+    }
+    return {};
+}
+
+/// The single-request payload every case below starts from, with
+/// @p elements attached as its `requestElements`.
+nlohmann::json request_elements_payload (const std::string& url,
+size_t iterations,
+size_t concurrency,
+const nlohmann::json& elements) {
+    return { { "mode", "iterations" }, { "iterations", iterations },
+        { "concurrency", concurrency }, { "url", url }, { "method", "GET" },
+        { "timeout", 5000 }, { "requestElements", elements } };
+}
+
+} // namespace
+
+// The headline: a declarative `step.after` kind runs on every submission of a
+// single-request run and its verdict reaches the stored report. Mutation
+// check: drop the `run_request_elements_after_submission` call from
+// `submit_to_loop`'s completion lambda (load_strategy.cpp) and this reddens -
+// `summary["elements"]` disappears entirely, because nothing ever tallied.
+TEST_F (LoadStrategyTest, AnAssertStatusElementTalliesOnePassPerIteration) {
+    const size_t ITERATIONS = 4;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-assert-pass",
+    request_elements_payload (mock_server->fast_url (), ITERATIONS, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_status" }, { "kind", "assert.status" },
+    { "config", { { "in", nlohmann::json::array ({ 200 }) } } } } })));
+
+    const auto entry = element_entry (summary, "el_status");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["kind"], "assert.status");
+    EXPECT_EQ (entry["passed"], ITERATIONS);
+    EXPECT_EQ (entry["failed"], 0u);
+}
+
+// The mirror. `/fast` answers 200, so an element expecting anything else
+// fails on every submission - which is what separates "the element ran" from
+// "the element ran and its verdict was read", the shape a tally that always
+// reported a pass would still satisfy above.
+TEST_F (LoadStrategyTest, AnAssertStatusElementTalliesOneFailurePerIteration) {
+    const size_t ITERATIONS = 4;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-assert-fail",
+    request_elements_payload (mock_server->fast_url (), ITERATIONS, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_status" }, { "kind", "assert.status" },
+    { "config", { { "in", nlohmann::json::array ({ 500 }) } } } } })));
+
+    const auto entry = element_entry (summary, "el_status");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["failed"], ITERATIONS);
+    EXPECT_EQ (entry["passed"], 0u);
+}
+
+// An inline `script.pre` mutates the request the submission actually sends,
+// not a copy that is then thrown away - asserted off the listener, because a
+// header written onto the wrong copy still reaches `pm.request` and would
+// satisfy any assertion made inside the script itself.
+TEST_F (LoadStrategyTest, AnInlineScriptPreElementsHeaderEditReachesTheWire) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-inline-pre",
+    request_elements_payload (echo.url (), 2, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
+    { "config", { { "script", "pm.request.headers['X-Signed'] = 'yes';" }, { "inline", true } } } } })));
+
+    EXPECT_EQ (echo.header ("X-Signed"), "yes") << summary.dump ();
+}
+
+// The same element left unmarked runs nowhere: `script.pre` has no deferred
+// replay to fall back to (only `script.post` does), so an un-inlined one is
+// skipped and its edit never reaches the wire. This is the contrast that
+// makes the `allInline` case below an assertion about the override rather
+// than about scripts running at all.
+TEST_F (LoadStrategyTest, AnUnmarkedScriptPreElementIsSkippedRatherThanRun) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-deferred-pre",
+    request_elements_payload (echo.url (), 2, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
+    { "config", { { "script", "pm.request.headers['X-Signed'] = 'yes';" } } } } })));
+
+    EXPECT_FALSE (echo.has_header ("X-Signed")) << summary.dump ();
+    const auto entry = element_entry (summary, "el_pre");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["skipped"], 2u);
+}
+
+// `elements.scripts: "allInline"` (issue #1495's run-level override, read by
+// `RunContext::script_element_runs_inline`) forces the element above to run
+// after all, off the run payload's own `elements` object rather than any
+// marking inside `requestElements`.
+TEST_F (LoadStrategyTest, TheAllInlineScriptsOverrideForcesAnUnmarkedScriptPreInline) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    auto config        = request_elements_payload (echo.url (), 2, 1,
+           nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
+           { "config", { { "script", "pm.request.headers['X-Signed'] = 'yes';" } } } } }));
+    config["elements"] = { { "scripts", "allInline" } };
+
+    const auto summary =
+    run_single_request_summary (db, "run-elements-all-inline", config);
+
+    EXPECT_EQ (echo.header ("X-Signed"), "yes") << summary.dump ();
+}
+
+// An unmarked `script.post` is left to the run's completion replay, exactly
+// where a `tests` string used to go: skipped on every submission, and counted
+// once per sampled response by `validate_scripts` under `summary["tests"]`.
+TEST_F (LoadStrategyTest, AnUnmarkedScriptPostElementDefersToTheCompletionReplay) {
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-deferred-post",
+    request_elements_payload (mock_server->fast_url (), 3, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_post" }, { "kind", "script.post" },
+    { "config",
+    { { "script",
+    "pm.test('status', function () { "
+    "pm.expect(pm.response.code).to.equal(200); });" } } } } })));
+
+    ASSERT_TRUE (summary.contains ("tests")) << summary.dump ();
+    EXPECT_GT (summary["tests"]["passed"].get<size_t> (), 0u) << summary.dump ();
+    EXPECT_EQ (summary["tests"]["failed"], 0u) << summary.dump ();
+
+    const auto entry = element_entry (summary, "el_post");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["skipped"], 3u)
+    << "the pipeline hook must leave it to the replay";
+    EXPECT_EQ (entry["passed"], 0u);
+}
+
+// The same element marked `inline` runs per submission instead - and must not
+// then run a second time on the deferred replay. `compile_step_elements`
+// prevents that by folding only an *un-inlined* `script.post` into
+// `RunContext::test_script`, which is what the absent `tests` node below
+// reads: fold an inline one in too and this run would report both an
+// `elements` tally and a `tests` tally for one script.
+TEST_F (LoadStrategyTest, AnInlineScriptPostElementRunsPerSubmissionAndIsNotReplayed) {
+    const size_t ITERATIONS = 3;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-inline-post",
+    request_elements_payload (mock_server->fast_url (), ITERATIONS, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_post" }, { "kind", "script.post" },
+    { "config",
+    { { "script",
+      "pm.test('status', function () { "
+      "pm.expect(pm.response.code).to.equal(200); });" },
+    { "inline", true } } } } })));
+
+    const auto entry = element_entry (summary, "el_post");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["passed"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (entry["skipped"], 0u) << summary.dump ();
+    EXPECT_FALSE (summary.contains ("tests"))
+    << "an inline script.post must not be replayed deferred as well: "
+    << summary.dump ();
+}
+
+// `timer.think` holds a completed submission's concurrency slot for its wait
+// without blocking the event-loop worker that completed it
+// (`RunContext::reserve_think_wait`, counted back by `in_flight`). With N
+// slots and M iterations the run cannot finish faster than the (M/N - 1)
+// waits that separate the batches - a lower bound with slack, the way the
+// concurrency tests above bound their own timings, not an exact figure.
+TEST_F (LoadStrategyTest, AThinkTimerHoldsTheRunBackByItsWait) {
+    const size_t ITERATIONS  = 6;
+    const size_t CONCURRENCY = 2;
+    const int WAIT_MS        = 250;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-think",
+    request_elements_payload (mock_server->fast_url (), ITERATIONS, CONCURRENCY,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_think" },
+    { "kind", "timer.think" }, { "config", { { "ms", WAIT_MS } } } } })));
+
+    // Two waits' worth, minus generous slack: /fast itself costs about a
+    // millisecond per submission, so anything near this figure can only be
+    // the timer. The batch count is an integer division on purpose - it is
+    // how many full N-wide batches the M submissions fall into.
+    const size_t BATCHES = ITERATIONS / CONCURRENCY;
+    const double floor_s =
+    (static_cast<double> (BATCHES) - 1.0) * (WAIT_MS / 1000.0) * 0.75;
+    ASSERT_TRUE (summary.contains ("test_duration")) << summary.dump ();
+    EXPECT_GE (summary["test_duration"].get<double> (), floor_s) << summary.dump ();
+
+    const auto entry = element_entry (summary, "el_think");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["passed"], ITERATIONS) << summary.dump ();
 }
