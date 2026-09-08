@@ -1540,11 +1540,21 @@ no screen. `seed_default_config` is the only writer, and two guards pin the two
 lists against each other from opposite sides:
 `ConfigRouteTest.EverySeededEntrySitsInADeclaredCategory` reads the seeded rows
 against a set copied into the C++ test, and `engine-categories.test.ts` reads
-`database.cpp` itself against the renderer's registry - so a category added to
-the seed and to the C++ set but forgotten in the app still fails. Reseeding rewrites an existing row's metadata while keeping
-its value, which is how a retired category (`database_performance`, folded into
-`general_engine` in #586) carries an upgraded database across with nothing to
-migrate by hand.
+the seven `engine/src/db/config_seeds/*.cpp` files (#1611) against the
+renderer's registry - so a category added to the seed and to the C++ set but
+forgotten in the app still fails. Reseeding rewrites an existing row's metadata
+while keeping its value, which is how a retired category
+(`database_performance`, folded into `general_engine` in #586) carries an
+upgraded database across with nothing to migrate by hand.
+
+**The seed itself is one file per category** (issue #1611):
+`Database::seed_default_config` (`engine/src/db/database.cpp`) is the ordered
+list of seven calls, one per `engine/src/db/config_seeds/{general, network,
+services, observability, data_retention, limits, scripting}.cpp` - each file
+holding exactly the `ConfigEntry` literals for the category its name says, over
+the shared `ConfigSeeder` and helpers in `config_seeds/seed.hpp`. Adding a
+setting is editing the one category file it belongs to; adding a category is
+one new file and one call.
 
 **requires_restart / advanced / keywords** are NOT NULL with a `default_value`
 (false, false and `"[]"`), so
@@ -1586,7 +1596,8 @@ were considered and rejected as a place to carry the option list - they are
 engine-side validation only and unread by the app, whereas `options` is part of
 the client contract: the renderer cannot draw the dropdown without it.
 
-Three entries are seeded as `enum` today (`upsert_config` in `database.cpp`).
+Three entries are seeded as `enum` today (via `ConfigSeeder` in
+`engine/src/db/config_seeds/`).
 Two of them derive their `options` from the C++ enumeration that gives the
 values meaning, rather than from a literal list, so the picker cannot offer a
 value the engine rejects or omit one it accepts.
