@@ -153,6 +153,26 @@ duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t
 const nlohmann::json& config);
 
 /**
+ * @brief Why a run payload's top-level `lifecycleElements` cannot run, or
+ *        `nullopt` if it can (issue #1573).
+ *
+ * A single-request `POST /runs` payload's own place to declare `script.setup`
+ * / `script.teardown`: it has no collection row to declare them on, and the
+ * top-level `elements` key is already the load-run override object
+ * `validate_elements_run_override` reads. An array of element descriptors,
+ * the same shape a collection's own `elements` column holds - every entry
+ * `{id?, kind, config, enabled?}` - restricted by name to the two kinds that
+ * dispatch at a run's own boundary rather than a step's; any other kind is
+ * refused naming the index and kind, not silently ignored or run as if it
+ * were one of the two. Refused outright beside a `scenario` block, whose
+ * collection already has a real `elements` column for this. Placement is
+ * checked with `ElementOwner::Collection`, the same owner
+ * `script.setup`/`.teardown`'s `collection_only` flag already expects.
+ */
+[[nodiscard]] std::optional<std::string>
+validate_lifecycle_elements_run_override (const nlohmann::json& config);
+
+/**
  * @brief How long a `constant_rps` tick sleeps before it spins out the rest of
  *        @p remainder_us, in microseconds. 0 means spin the whole remainder.
  *

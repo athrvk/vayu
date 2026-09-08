@@ -597,6 +597,19 @@ struct CompiledElement {
 [[nodiscard]] std::vector<CompiledElement> compile_elements (const nlohmann::json& elements);
 
 /**
+ * Assigns an `el_` id to every object entry of @p elements missing one - the
+ * same default the engine has always given a caller who names no id
+ * (`apply_elements_field`, `routes.hpp`). Shared rather than copied a third
+ * time (issue #1573): a validator that skips this and hands the raw,
+ * possibly id-less array straight to `Registry::validate` refuses a payload
+ * this default was meant to accept, so validating and compiling must stamp
+ * ids the same way `apply_elements_field` already does for a stored
+ * request/collection. A non-array or non-object entry is left alone -
+ * `Registry::validate` / `compile_elements` are what name that refusal.
+ */
+void stamp_default_element_ids (nlohmann::json& elements);
+
+/**
  * Folds a just-completed step's `step.between` wait into every *open*
  * `control.transaction` whose config asked to include it (issue #1569's
  * `includeTimers`) - shared by the sequential run's `run_iteration` and a

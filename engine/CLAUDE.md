@@ -440,11 +440,17 @@ logged as a warning: it means a client skipped composition.
   plan's whole iteration and stamps `config._scopeEntry` on only the first
   occurrence of that element's id, leaving every later occurrence a no-op. A
   **single-request** load run
-  (`load_strategy.cpp`) still runs no element - `POST /runs`'s single-request
-  shape has no `elements` attachment point yet, only the legacy `tests`
-  string (`RunContext::test_script`); wiring one is a separate gap, not
-  #1495's. Do not add another behaviour column beside `elements`; a new
-  behaviour is an element kind.
+  (`load_strategy.cpp`) still runs no *step-level* element - `POST /runs`'s
+  single-request shape has no `elements` attachment point on the request
+  itself, only the legacy `tests` string (`RunContext::test_script`); wiring
+  one is a separate gap, not #1495's. It does have its own place to declare
+  `script.setup` / `script.teardown` - the run-boundary kinds, not a step's -
+  through `POST /runs`'s `lifecycleElements` array (#1573), dispatched by the
+  same `run_collection_setup` / `run_collection_teardown` a collection-backed
+  run uses; a script written there cannot resolve into the run's own
+  submissions (no residual pass exists on this path), only reach the network
+  itself (`pm.sendRequest`) and gate or report on the run. Do not add another
+  behaviour column beside `elements`; a new behaviour is an element kind.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the
