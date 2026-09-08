@@ -1931,22 +1931,7 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // nothing was measured against" are different answers, and only the absent
     // section can say the first.
     if (inputs.thresholds.has_value ()) {
-        nlohmann::json checks = nlohmann::json::array ();
-        for (const auto& check : inputs.thresholds->checks) {
-            nlohmann::json row = { { "metric", check.metric }, { "limit", check.limit },
-                { "passed", check.passed }, { "evaluated", check.evaluated } };
-            // Omitted rather than zeroed when unevaluated, the same rule this
-            // report follows for a section the run never populated - a
-            // ceiling of 0ms next to "passed": false would read as a real
-            // measurement instead of the absence it is.
-            if (check.evaluated) {
-                row["actual"] = check.actual;
-            }
-            checks.push_back (std::move (row));
-        }
-        summary["thresholds"] = { { "checks", checks },
-            { "passed", inputs.thresholds->passed },
-            { "failed", inputs.thresholds->failed } };
+        summary["thresholds"] = build_threshold_outcome_payload (*inputs.thresholds);
     }
     // Per-phase latency distributions, keyed by wire name so a reader does not
     // have to know the enum's order. Omitted when the run recorded none - a

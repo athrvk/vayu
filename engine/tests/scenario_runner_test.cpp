@@ -326,6 +326,14 @@ class ScenarioRunnerTest : public ::testing::Test {
         return start_scenario (iterations, "", json (), /*fail_on_schema_error=*/true);
     }
 
+    /// As `start`, with a `thresholds` block on the run's config - issue
+    /// #1564's collection-run wiring, exercised the same way `start_gated`
+    /// exercises `failOnSchemaError`.
+    std::string start_with_thresholds (size_t iterations, const json& thresholds) {
+        return start_scenario (
+        iterations, "", json (), /*fail_on_schema_error=*/false, thresholds);
+    }
+
     /// As `start`, with a `data` block. Pass no @p iterations to leave the key
     /// off the payload entirely, which is how "the row count is the default"
     /// is exercised rather than assumed.
@@ -338,7 +346,8 @@ class ScenarioRunnerTest : public ::testing::Test {
     std::string start_scenario (std::optional<size_t> iterations,
     const std::string& environment_id,
     const json& data,
-    bool fail_on_schema_error = false) {
+    bool fail_on_schema_error = false,
+    const json& thresholds    = json ()) {
         json scenario{ { "source", "collection" }, { "collectionId", "col_1" } };
         if (iterations) {
             scenario["iterations"] = *iterations;
@@ -373,6 +382,9 @@ class ScenarioRunnerTest : public ::testing::Test {
         }
         if (fail_on_schema_error) {
             config["failOnSchemaError"] = true;
+        }
+        if (!thresholds.is_null ()) {
+            config["thresholds"] = thresholds;
         }
 
         const std::string run_id = "run_scenario_1";
@@ -1791,6 +1803,89 @@ TEST_F (ScenarioRunnerTest, TheRunTalliesItsVerdictsForTheReport) {
     // the tally is given one.
     ASSERT_FALSE (validation["failures"].empty ());
     EXPECT_EQ (validation["failures"][0]["step"].get<std::string> (), "Step req_bad");
+}
+
+// Issue #1564: a collection run judges itself against the same `thresholds`
+// block a load run does, rather than accepting and silently ignoring it.
+TEST_F (ScenarioRunnerTest, ACollectionRunIsJudgedAgainstItsDeclaredBudgets) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start_with_thresholds (
+    /*iterations=*/1, json{ { "maxErrorRatePct", 0 }, { "latencyP99Ms", 60000 } });
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto thresholds = summary_of (run_id)["thresholds"];
+    ASSERT_FALSE (thresholds.is_null ()) << "two passing steps against two "
+                                            "declared budgets must be judged";
+    EXPECT_EQ (thresholds["passed"].get<size_t> (), 2u);
+    EXPECT_EQ (thresholds["failed"].get<size_t> (), 0u);
+    ASSERT_EQ (thresholds["checks"].size (), 2u);
+    for (const auto& check : thresholds["checks"]) {
+        EXPECT_TRUE (check["evaluated"].get<bool> ()) << check.dump ();
+        EXPECT_TRUE (check["passed"].get<bool> ()) << check.dump ();
+    }
+}
+
+// A run whose config declares no `thresholds` block stores no verdict at all -
+// not a verdict of zero checks, on the same absent-not-zeroed rule every other
+// optional summary section here follows. Mutation check: comment out the
+// `if (inputs.thresholds.has_value ())` guard `build_scenario_summary_payload`
+// wraps its `summary["thresholds"] = ...` write in, and this reds.
+TEST_F (ScenarioRunnerTest, ACollectionRunWithNoDeclaredBudgetsStoresNoVerdict) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_FALSE (summary_of (run_id).contains ("thresholds"));
+}
+
+// The combined `assert.*` and `pm.test` tally (#1497's metric) works for a
+// collection run too: a failing declarative assertion is exactly what
+// `maxAssertionFailureRatePct: 0` is declared to catch.
+TEST_F (ScenarioRunnerTest, AFailingAssertionFailsTheAssertionFailureRateBudget) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/ok",
+    json::array ({ json{ { "id", "el_assert" }, { "kind", "assert.status" },
+    { "config", { { "in", json::array ({ 999 }) } } } } }));
+
+    const auto run_id = start_with_thresholds (
+    /*iterations=*/1, json{ { "maxAssertionFailureRatePct", 0 } });
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed)
+    << "a missed budget with no failRun still lets the run complete normally";
+
+    const auto thresholds = summary_of (run_id)["thresholds"];
+    ASSERT_FALSE (thresholds.is_null ());
+    EXPECT_EQ (thresholds["failed"].get<size_t> (), 1u);
+    ASSERT_EQ (thresholds["checks"].size (), 1u);
+    EXPECT_EQ (thresholds["checks"][0]["metric"].get<std::string> (),
+    "maxAssertionFailureRatePct");
+    EXPECT_FALSE (thresholds["checks"][0]["passed"].get<bool> ());
+}
+
+// `thresholds.failRun: true` sets a collection run's terminal status to
+// Failed on a missed budget, the same terminal-status gate `finish_load_test`
+// applies for a load run. Mutation check: revert the `final_status ==
+// vayu::RunStatus::Completed && summary.thresholds && ...` gate in
+// `execute_scenario_run`, and this reds (the run would stay Completed).
+TEST_F (ScenarioRunnerTest, FailRunEndsTheCollectionRunFailedOnAMissedBudget) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/ok",
+    json::array ({ json{ { "id", "el_assert" }, { "kind", "assert.status" },
+    { "config", { { "in", json::array ({ 999 }) } } } } }));
+
+    const auto run_id = start_with_thresholds (/*iterations=*/1,
+    json{ { "maxAssertionFailureRatePct", 0 }, { "failRun", true } });
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Failed);
+
+    // The run still reports what it measured - `failRun` changes the
+    // terminal status, never the verdict it was computed from.
+    const auto thresholds = summary_of (run_id)["thresholds"];
+    ASSERT_FALSE (thresholds.is_null ());
+    EXPECT_EQ (thresholds["failed"].get<size_t> (), 1u);
 }
 
 TEST_F (ScenarioRunnerTest, StepEventsCarryTheVerdictOnTheSameTermsAsTheStoredRow) {
