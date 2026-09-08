@@ -1052,10 +1052,8 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     double delta = perceived_ms - wire_ms;
     assert (delta > -1.0 && "perceived_ms - wire_ms below -1ms - clock issue?");
     if (delta < -1.0) {
-        vayu::utils::log_warning ("client",
-        "queue_wait clock skew: perceived_ms=" + std::to_string (perceived_ms) +
-        " wire_ms=" + std::to_string (wire_ms) + " delta_ms=" + std::to_string (delta) +
-        " - submitted_at stamp may be set after curl wire start");
+        vayu::utils::log_warning ("client", "queue_wait clock skew - submitted_at stamp may be set after curl wire start",
+        { { "perceivedMs", perceived_ms }, { "wireMs", wire_ms }, { "deltaMs", delta } });
     }
     double queue_wait_ms = std::max (0.0, delta);
 

@@ -414,9 +414,9 @@ void register_client_certificate_routes (RouteContext& ctx) {
                 "POST /client-certificates - " + std::to_string (status) +
                 ": " + error_message_of (body));
             } else {
-                vayu::utils::log_info ("http",
-                "POST /client-certificates - Registered: id=" + body["id"].get<std::string> () +
-                ", host=" + body["host"].get<std::string> ());
+                vayu::utils::log_info ("http", "Registered client certificate",
+                { { "id", body["id"].get<std::string> () },
+                { "host", body["host"].get<std::string> () } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
@@ -440,12 +440,11 @@ void register_client_certificate_routes (RouteContext& ctx) {
             auto json = nlohmann::json::parse (req.body);
             auto [status, body] = update_client_certificate_response (ctx.db, id, json);
             if (status != 200) {
-                vayu::utils::log_warning ("http",
-                "PUT /client-certificates/:id - " + std::to_string (status) +
-                " for id=" + id + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http", "PUT /client-certificates/:id failed",
+                { { "status", status }, { "id", id }, { "error", error_message_of (body) } });
             } else {
-                vayu::utils::log_info (
-                "http", "PUT /client-certificates/:id - Updated: id=" + id);
+                vayu::utils::log_info ("http",
+                "PUT /client-certificates/:id - Updated", { { "id", id } });
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");

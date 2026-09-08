@@ -1260,12 +1260,10 @@ int default_max_per_host) {
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);
 
-    vayu::utils::log_debug ("run",
-    "EventLoop config: workers=" + std::to_string (configured_workers) +
-    ", max_concurrent=" + std::to_string (loop_config.max_concurrent) +
-    ", max_per_host=" + std::to_string (loop_config.max_per_host) +
-    ", target_rps=" + std::to_string (target_rps) +
-    ", timeout=" + std::to_string (timeout_ms) + "ms");
+    vayu::utils::log_debug ("run", "EventLoop config",
+    { { "workers", configured_workers }, { "maxConcurrent", loop_config.max_concurrent },
+    { "maxPerHost", loop_config.max_per_host }, { "targetRps", target_rps },
+    { "timeoutMs", timeout_ms } });
 
     // Create, start, and only then publish the event loop. The metrics
     // thread has been ticking since before this thread first ran (both are
@@ -2366,12 +2364,10 @@ int64_t& first_tick_steady_ms) {
         }
     }
 
-    vayu::utils::log_debug ("run",
-    "Metrics: rps=" + std::to_string (current_rps) + ", send_rate=" +
-    std::to_string (send_rate) + ", throughput=" + std::to_string (throughput) +
-    ", backpressure=" + std::to_string (backpressure) +
-    ", error_rate=" + std::to_string (error_rate) + "%" + ", active=" +
-    std::to_string (active_now) + ", sent=" + std::to_string (requests_sent));
+    vayu::utils::log_debug ("run", "Metrics",
+    { { "rps", current_rps }, { "sendRate", send_rate }, { "throughput", throughput },
+    { "backpressure", backpressure }, { "errorRate", error_rate },
+    { "active", active_now }, { "sent", requests_sent } });
 
     // Persist the tick: one wide row, built here rather than
     // reassembled from ~18 EAV rows by every reader.

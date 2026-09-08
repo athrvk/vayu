@@ -64,9 +64,9 @@ int64_t offset) {
             // A payload this engine wrote always parses; a corrupt one is a
             // damaged row, not a client error - skip it loudly rather than
             // failing the whole page.
-            vayu::utils::log_warning ("http",
-            std::string ("Skipping unreadable ") + kind + " for run " + run_id +
-            " (id=" + std::to_string (row.id) + "): " + e.what ());
+            vayu::utils::log_warning ("http", "Skipping unreadable row",
+            { { "kind", kind }, { "runId", run_id }, { "id", row.id },
+            { "error", e.what () } });
         }
     }
     return time_series_envelope (
