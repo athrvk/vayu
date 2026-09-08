@@ -51,7 +51,7 @@ export default function ClientSettingsPanel({
 			</div>
 
 			{/* Content */}
-			<div className="flex-1 overflow-auto p-6" data-settings-scroller>
+			<div className="flex-1 overflow-auto p-6" data-setting-scroller>
 				<div className="grid gap-6 max-w-3xl mx-auto">{children}</div>
 			</div>
 		</div>

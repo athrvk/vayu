@@ -50,13 +50,14 @@ export function useRevealedSetting(): void {
 			target = document.querySelector(`[data-setting-anchor="${highlightedKey}"]`);
 			if (!target) return false;
 			/*
-			 * Scroll the pane's own scroller, never scrollIntoView: the settings
-			 * column and the shell around it are `overflow-hidden`, and Chromium
-			 * treats those as scrollable ancestors too, permanently pushing the
-			 * category header off-screen (#1612). An anchor outside a scroller is
-			 * not a reveal target, so this does nothing rather than guess one.
+			 * Scroll the pane's own scroller directly, never the native ancestor
+			 * walk: the settings column and the shell around it are
+			 * `overflow-hidden`, and Chromium treats those as scrollable too,
+			 * permanently pushing the category header off-screen (#1612). An
+			 * anchor outside a scroller is not a reveal target, so this does
+			 * nothing rather than guess one.
 			 */
-			const scroller = target.closest("[data-settings-scroller]");
+			const scroller = target.closest("[data-setting-scroller]");
 			if (scroller) scrollWithin(scroller, target, { block: "center" });
 			target.classList.add(...HIGHLIGHT_CLASSES);
 			return true;

@@ -828,7 +828,7 @@ export default function SettingsMain() {
 			</div>
 
 			{/* Settings Grid */}
-			<div className="flex-1 overflow-auto p-6" data-settings-scroller>
+			<div className="flex-1 overflow-auto p-6" data-setting-scroller>
 				<div className="grid gap-4 max-w-3xl mx-auto">
 					{/* Engine surfaces this category owns that are not config
 					    entries - the client-certificate registry (#707), the

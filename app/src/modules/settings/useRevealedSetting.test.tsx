@@ -38,7 +38,7 @@ function Panel({ anchors = ["theme-mode", "color-scheme"] }: { anchors?: string[
 function PanelWithScroller({ anchors = ["theme-mode"] }: { anchors?: string[] }) {
 	useRevealedSetting();
 	return (
-		<div data-testid="scroller" data-settings-scroller>
+		<div data-testid="scroller" data-setting-scroller>
 			{anchors.map((anchor) => (
 				<div key={anchor} data-setting-anchor={anchor} data-testid={anchor}>
 					{anchor}
@@ -135,7 +135,7 @@ describe("useRevealedSetting", () => {
 		scrollIntoViewSpy.mockRestore();
 	});
 
-	it("does nothing when the anchor has no [data-settings-scroller] ancestor", () => {
+	it("does nothing when the anchor has no [data-setting-scroller] ancestor", () => {
 		// A reveal target outside a scroller (none of today's panels, but the
 		// fallback matters): no scroller to scroll, so nothing is called.
 		render(<Panel />);
