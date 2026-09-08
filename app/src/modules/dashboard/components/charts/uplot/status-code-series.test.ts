@@ -54,6 +54,7 @@ const CHART_FILES = [
 	"StatusCodesOverTimeChart.tsx",
 	"TimeSeriesCharts.tsx",
 	"ScatterAndDistribution.tsx",
+	"CustomMetricsChart.tsx",
 ];
 
 describe("chart series colours", () => {

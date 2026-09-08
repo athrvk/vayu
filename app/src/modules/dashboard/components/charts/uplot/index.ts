@@ -27,3 +27,4 @@ export { ResponseTimeVsConcurrencyChart, HdrPercentileChart } from "./ScatterAnd
 // beside a line has to spell its peak the way the line's tooltip does.
 export { fmtVitals } from "./formatters";
 export { StatusCodesOverTimeChart } from "./StatusCodesOverTimeChart";
+export { CustomMetricsChart } from "./CustomMetricsChart";

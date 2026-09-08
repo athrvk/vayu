@@ -223,6 +223,103 @@ export function buildRampOverlay(
 export const hasStatusCodes = (m: LoadTestMetrics): boolean => Boolean(m.status_codes);
 
 /**
+ * Custom trends, counters and rates over time - `metric.record` / `pm.metrics`
+ * names a run declared, plotted on the run's own timeline (issue #1579).
+ *
+ * Modeled on {@link JoinedMonitorSeries} (`monitorSeries.ts`): a shared x column
+ * plus one column per declared name. Unlike server vitals, there is nothing to
+ * join here - `custom_metrics` already rides the same tick each name is read
+ * from, the same situation `buildStatusOverTime` is in for `status_codes` - so
+ * this reads directly off `history`, no resampling.
+ */
+export interface CustomMetricSeries {
+	/** Elapsed seconds, one entry per bucket - the shared x column. */
+	times: number[];
+	/** Custom-metric names, sorted, in the order `columns`/`types` hold them. */
+	names: string[];
+	/** Each name's declared type, as first seen - trend, counter or rate. */
+	types: ("trend" | "counter" | "rate")[];
+	/** One column per name; `null` where no tick in that bucket recorded it. */
+	columns: (number | null)[][];
+}
+
+const EMPTY_CUSTOM_METRICS: CustomMetricSeries = { times: [], names: [], types: [], columns: [] };
+
+/** Every custom-metric name declared across `history`, sorted for stable series order/coloring. */
+export function customMetricNames(history: LoadTestMetrics[]): string[] {
+	const names = new Set<string>();
+	for (const m of history) {
+		for (const name of Object.keys(m.custom_metrics ?? {})) names.add(name);
+	}
+	return [...names].sort();
+}
+
+/** A tick carrying at least one custom metric. */
+export const hasCustomMetrics = (m: LoadTestMetrics): boolean =>
+	Boolean(m.custom_metrics && Object.keys(m.custom_metrics).length > 0);
+
+/**
+ * Build one representative value per declared custom-metric name per 0.5s
+ * bucket, last tick in the bucket wins - the same bucketing
+ * `buildPercentileChartData` uses for the other per-tick (non-cumulative)
+ * numbers this engine reports.
+ *
+ * One value per name per tick, not one line per stat: a `trend` metric carries
+ * up to four numbers (p50/p95/p99/max) and charting all of them would multiply
+ * unpredictably against the 32-name cap - a run with 8 trend metrics would need
+ * 32 lines on one chart. The representative is **p95 for a `trend`** (this
+ * dashboard's other percentile-focused charts, e.g. `LatencyPercentilesChart`,
+ * already treat p95 as the headline number) and **`value` for a `counter` or
+ * `rate`** (the only number either type has).
+ *
+ * A tick whose `custom_metrics` map has no entry for a name yet is a gap
+ * (`null`), not `0` - a run's other metrics may still be recording while this
+ * one hasn't fired, and `0` would misrepresent "not recorded" as "recorded and
+ * zero", the same distinction `joinMonitorToTimeline` draws for a stale
+ * reading.
+ */
+export function buildCustomMetricsOverTime(history: LoadTestMetrics[]): CustomMetricSeries {
+	const names = customMetricNames(history);
+	if (names.length === 0) return EMPTY_CUSTOM_METRICS;
+
+	const types: ("trend" | "counter" | "rate")[] = names.map(() => "counter");
+	const typeSeen = new Array<boolean>(names.length).fill(false);
+	const byBucket = new Map<number, (number | null)[]>();
+
+	for (const m of history) {
+		const t = halfSecondBucket(m.elapsed_seconds);
+		const row = names.map((name, i) => {
+			const metric = m.custom_metrics?.[name];
+			if (!metric) return null;
+			if (!typeSeen[i]) {
+				types[i] = metric.type;
+				typeSeen[i] = true;
+			}
+			const value = metric.type === "trend" ? metric.p95 : metric.value;
+			return typeof value === "number" ? value : null;
+		});
+		byBucket.set(t, row);
+	}
+
+	const buckets = Array.from(byBucket.entries()).sort(([a], [b]) => a - b);
+	const times = buckets.map(([t]) => t);
+	const columns: (number | null)[][] = names.map((_, i) => buckets.map(([, row]) => row[i]));
+
+	return { times, names, types, columns };
+}
+
+/**
+ * The series label a chart shows for one declared custom-metric name.
+ *
+ * A trend's plotted line is not the metric itself but its p95 (see
+ * {@link buildCustomMetricsOverTime}), so its label says so; a counter or rate
+ * has only one number, so its name alone is unambiguous.
+ */
+export function customMetricSeriesLabel(name: string, type: "trend" | "counter" | "rate"): string {
+	return type === "trend" ? `${name} (p95)` : name;
+}
+
+/**
  * True when `history` covers more than one 0.5s bucket - i.e. when the series
  * transforms above would return more than one point.
  *

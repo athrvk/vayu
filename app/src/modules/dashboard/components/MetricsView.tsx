@@ -37,6 +37,7 @@ import {
 	buildRampOverlay,
 	hasPercentileSignal,
 	hasStatusCodes,
+	hasCustomMetrics,
 	latestThroughputMbps,
 	spansMultipleBuckets,
 } from "../utils/metricsTransforms";
@@ -51,6 +52,7 @@ import {
 	ResponseTimeVsConcurrencyChart,
 	HdrPercentileChart,
 	ServerVitalsChart,
+	CustomMetricsChart,
 	CHART_SYNC,
 } from "./charts/uplot";
 import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
@@ -92,6 +94,11 @@ function MetricsView({
 		() => spansMultipleBuckets(chartWindow, hasStatusCodes),
 		[chartWindow]
 	);
+	// Presence, not "spans multiple buckets" - mirrors `ServerVitalsChart`'s own
+	// gate below (`monitorSamples.length > 0 && chartWindow.length > 1`) rather
+	// than `hasStatusData`'s bucket-count question, since a custom metric's tick
+	// cadence is whatever the script chose to record at, not the engine's.
+	const hasCustomMetricsData = useMemo(() => chartWindow.some(hasCustomMetrics), [chartWindow]);
 	const liveMbps = useMemo(() => latestThroughputMbps(chartWindow), [chartWindow]);
 
 	const rampOverlay = useMemo(
@@ -491,6 +498,27 @@ function MetricsView({
 						syncKey={CHART_SYNC.live}
 						anomalies={anomalies}
 						sleeps={hostSleeps}
+					/>
+				</div>
+			)}
+
+			{/* Custom metrics - only for a run that declared metric.record / pm.metrics
+			    names, so a run that recorded none keeps the dashboard it always had. */}
+			{hasCustomMetricsData && chartWindow.length > 1 && (
+				<div className="bg-card border border-border rounded-md p-3.5">
+					<div className="flex items-baseline justify-between mb-3">
+						<h3 className="text-xs font-semibold text-foreground">
+							Custom metrics
+							<InfoChip tip={TOOLTIPS.customMetrics} />
+						</h3>
+						<span className="text-[10px] font-mono text-muted-foreground">
+							metric.record / pm.metrics
+						</span>
+					</div>
+					<CustomMetricsChart
+						history={chartWindow}
+						isCompleted={isCompleted}
+						syncKey={CHART_SYNC.live}
 					/>
 				</div>
 			)}

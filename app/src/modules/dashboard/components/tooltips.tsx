@@ -99,6 +99,9 @@ export const TOOLTIPS = {
 	serverVitals:
 		"Metrics scraped from the target itself during the run, drawn on the run's own timeline so a climb in p99 can be read against the server's CPU, memory or connection count. Each reading holds until the next scrape; a break in a line is a scrape that failed. Configure the endpoint under Server monitoring when starting the run.",
 
+	customMetrics:
+		"Custom trends, counters and rates a metric.record element or pm.metrics.trend / .counter / .rate call recorded, on the run's own timeline. A trend metric plots its p95; a counter or rate plots its one value. A gap is a bucket the metric never fired in, not a recorded zero.",
+
 	// ---- Other existing cards ----
 	rampDeviation:
 		"Mean absolute gap between achieved (measured) and configured concurrency, as a percent of target. Counts both undershoot and overshoot, so a ramp that runs over target reads high.",

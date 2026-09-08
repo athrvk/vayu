@@ -6,8 +6,12 @@ import {
 	buildRampOverlay,
 	buildPercentileChartData,
 	buildStatusOverTime,
+	buildCustomMetricsOverTime,
+	customMetricNames,
+	customMetricSeriesLabel,
 	hasPercentileSignal,
 	hasStatusCodes,
+	hasCustomMetrics,
 	latestThroughputMbps,
 	spansMultipleBuckets,
 } from "./metricsTransforms";
@@ -288,6 +292,127 @@ describe("hasPercentileSignal", () => {
 			}
 		}
 		expect(sawTrue).toBeGreaterThan(20);
+	});
+});
+
+describe("buildCustomMetricsOverTime", () => {
+	it("uses p95 for a trend metric's series, not p50/p99/max", () => {
+		const history = [
+			tick({
+				elapsed_seconds: 1,
+				custom_metrics: {
+					latency: { type: "trend", count: 3, p50: 10, p95: 42, p99: 90, max: 120 },
+				},
+			}),
+		];
+		const built = buildCustomMetricsOverTime(history);
+		expect(built.names).toEqual(["latency"]);
+		expect(built.types).toEqual(["trend"]);
+		expect(built.columns[0]).toEqual([42]);
+	});
+
+	// Mutation check: swapping p95 for p50 above must fail this case. It does -
+	// `columns[0]` would read `[10]` instead of `[42]` - confirming the assertion
+	// actually exercises the p95 choice rather than passing regardless.
+
+	it("uses value for a counter or rate metric's series", () => {
+		const history = [
+			tick({
+				elapsed_seconds: 1,
+				custom_metrics: {
+					orders: { type: "counter", count: 5, value: 17 },
+					cacheHitRate: { type: "rate", count: 5, value: 63.5 },
+				},
+			}),
+		];
+		const built = buildCustomMetricsOverTime(history);
+		expect(built.names).toEqual(["cacheHitRate", "orders"]);
+		expect(built.types).toEqual(["rate", "counter"]);
+		expect(built.columns).toEqual([[63.5], [17]]);
+	});
+
+	it("gaps a name a tick's custom_metrics does not carry, rather than 0", () => {
+		const history = [
+			tick({
+				elapsed_seconds: 1,
+				custom_metrics: { orders: { type: "counter", count: 1, value: 5 } },
+			}),
+			tick({
+				elapsed_seconds: 2,
+				custom_metrics: { latency: { type: "trend", count: 1, p95: 30 } },
+			}),
+		];
+		const built = buildCustomMetricsOverTime(history);
+		expect(built.names).toEqual(["latency", "orders"]);
+		// latency: absent at t=1, recorded at t=2. orders: recorded at t=1, absent at t=2.
+		expect(built.columns[built.names.indexOf("latency")]).toEqual([null, 30]);
+		expect(built.columns[built.names.indexOf("orders")]).toEqual([5, null]);
+	});
+
+	it("returns no series when no tick carries custom_metrics", () => {
+		const history = [tick({ elapsed_seconds: 1 }), tick({ elapsed_seconds: 2 })];
+		const built = buildCustomMetricsOverTime(history);
+		expect(built).toEqual({ times: [], names: [], types: [], columns: [] });
+	});
+
+	it("returns no series for an empty history, without throwing", () => {
+		expect(buildCustomMetricsOverTime([])).toEqual({
+			times: [],
+			names: [],
+			types: [],
+			columns: [],
+		});
+	});
+
+	it("buckets ticks to 0.5s, last tick in the bucket wins", () => {
+		const history = [
+			tick({
+				elapsed_seconds: 1.0,
+				custom_metrics: { orders: { type: "counter", count: 1, value: 1 } },
+			}),
+			tick({
+				elapsed_seconds: 1.2,
+				custom_metrics: { orders: { type: "counter", count: 2, value: 2 } },
+			}),
+		];
+		const built = buildCustomMetricsOverTime(history);
+		expect(built.times).toEqual([1]);
+		expect(built.columns[0]).toEqual([2]);
+	});
+});
+
+describe("customMetricNames", () => {
+	it("is the sorted union of names across every tick", () => {
+		const history = [
+			tick({ elapsed_seconds: 1, custom_metrics: { zeta: { type: "counter", count: 1 } } }),
+			tick({ elapsed_seconds: 2, custom_metrics: { alpha: { type: "rate", count: 1 } } }),
+		];
+		expect(customMetricNames(history)).toEqual(["alpha", "zeta"]);
+	});
+
+	it("is empty when no tick declares custom_metrics", () => {
+		expect(customMetricNames([tick({ elapsed_seconds: 1 })])).toEqual([]);
+	});
+});
+
+describe("hasCustomMetrics", () => {
+	it("is true only for a tick with a non-empty custom_metrics map", () => {
+		expect(
+			hasCustomMetrics(tick({ custom_metrics: { orders: { type: "counter", count: 1 } } }))
+		).toBe(true);
+		expect(hasCustomMetrics(tick({ custom_metrics: {} }))).toBe(false);
+		expect(hasCustomMetrics(tick({}))).toBe(false);
+	});
+});
+
+describe("customMetricSeriesLabel", () => {
+	it("suffixes a trend's label with its plotted stat", () => {
+		expect(customMetricSeriesLabel("latency", "trend")).toBe("latency (p95)");
+	});
+
+	it("leaves a counter or rate's label plain", () => {
+		expect(customMetricSeriesLabel("orders", "counter")).toBe("orders");
+		expect(customMetricSeriesLabel("cacheHitRate", "rate")).toBe("cacheHitRate");
 	});
 });
 
