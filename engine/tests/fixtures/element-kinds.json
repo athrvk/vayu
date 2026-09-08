@@ -392,6 +392,24 @@
     "configSchema": {
       "additionalProperties": false,
       "properties": {
+        "gaussian": {
+          "additionalProperties": false,
+          "properties": {
+            "deviationMs": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "meanMs": {
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "required": [
+            "meanMs",
+            "deviationMs"
+          ],
+          "type": "object"
+        },
         "maxMs": {
           "minimum": 0,
           "type": "integer"
@@ -407,7 +425,7 @@
       },
       "type": "object"
     },
-    "description": "Waits a fixed or uniformly random span before the next step, outside this step's own latency.",
+    "description": "Waits a fixed, uniformly random or gaussian-random span before the next step, outside this step's own latency.",
     "hotPathClass": "declarative",
     "kind": "timer.think",
     "label": "Think time",
@@ -417,146 +435,29 @@
     "version": 1
   },
   {
-    "category": "controller",
+    "category": "timer",
     "configSchema": {
       "additionalProperties": false,
       "properties": {
-        "condition": {
-          "pattern": "^\\s*\\{\\{[^}]+\\}\\}\\s*(==|!=|matches)\\s*\\S.*$|^\\s*\\{\\{[^}]+\\}\\}\\s*exists\\s*$",
-          "type": "string"
-        }
-      },
-      "required": [
-        "condition"
-      ],
-      "type": "object"
-    },
-    "description": "Skips this step, or every step of a folder it sits on, when a condition against a resolved variable is false.",
-    "hotPathClass": "declarative",
-    "kind": "control.if",
-    "label": "If",
-    "phases": [
-      "step.before"
-    ],
-    "version": 1
-  },
-  {
-    "category": "controller",
-    "configSchema": {
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "description": "Runs on this user's first iteration only.",
-    "hotPathClass": "declarative",
-    "kind": "control.once",
-    "label": "Once only",
-    "phases": [
-      "step.before"
-    ],
-    "version": 1
-  },
-  {
-    "category": "controller",
-    "configSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "cases": {
-          "type": "object"
-        },
-        "default": {
-          "type": "string"
-        },
-        "variable": {
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "variable",
-        "cases"
-      ],
-      "type": "object"
-    },
-    "description": "Routes to a named folder member by a variable's resolved value.",
-    "hotPathClass": "declarative",
-    "kind": "control.switch",
-    "label": "Switch",
-    "phases": [
-      "step.before"
-    ],
-    "version": 1
-  },
-  {
-    "category": "controller",
-    "configSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "everyN": {
+        "everyMs": {
           "minimum": 1,
           "type": "integer"
         },
-        "percent": {
-          "maximum": 100,
-          "minimum": 0,
-          "type": "number"
+        "perUser": {
+          "type": "boolean"
         }
       },
+      "required": [
+        "everyMs"
+      ],
       "type": "object"
     },
-    "description": "Runs only a share of this occurrence's calls, by percentage or every Nth one, decided on the producer's own counter.",
+    "description": "Holds this request, folder or collection to a steady start-to-start cadence across iterations, whatever its own duration was.",
     "hotPathClass": "declarative",
-    "kind": "control.throughput",
-    "label": "Throughput",
+    "kind": "timer.pacing",
+    "label": "Pacing",
     "phases": [
       "step.before"
-    ],
-    "version": 1
-  },
-  {
-    "category": "controller",
-    "configSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "count": {
-          "minimum": 1,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "count"
-      ],
-      "type": "object"
-    },
-    "description": "Walks a folder's members a fixed number of times per iteration.",
-    "hotPathClass": "declarative",
-    "kind": "control.loop",
-    "label": "Loop",
-    "phases": [
-      "step.between"
-    ],
-    "version": 1
-  },
-  {
-    "category": "transaction",
-    "configSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "type": "object"
-    },
-    "description": "Sums a folder's own member latencies into one named transaction, reported with its own percentiles.",
-    "hotPathClass": "declarative",
-    "kind": "control.transaction",
-    "label": "Transaction",
-    "phases": [
-      "step.after"
     ],
     "version": 1
   }

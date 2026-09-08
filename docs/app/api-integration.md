@@ -1399,10 +1399,19 @@ the run's combined `assert.*` element and `pm.test` tally rather than against
 `BUDGET_FIELDS` - it is a flag over the budgets, not one itself) changes what a
 missed budget *does*: the run's terminal status becomes `"failed"` instead of
 `"completed"`, so the history list and the taskbar failure cue pick it up, not
-only the verdict section. Load runs only, today - see
-[POST /runs](../engine/api-reference.md#post-runs)'s thresholds section for the
-collection-run gap this is tracked against
-([#1564](https://github.com/athrvk/vayu/issues/1564)).
+only the verdict section.
+
+**A collection (design-mode) run is judged too** (issue #1564):
+`RunCollectionDialog`'s own Pass/fail budgets disclosure sends the identical
+`thresholds` block, top-level on the payload beside `failOnSchemaError` and
+`elements`, reusing `budgets.ts`'s field table and payload builder rather than
+a second copy. It is **not** gated by the dialog's Load test switch - the
+engine evaluates `thresholds` for a design-mode run and a load run of the same
+folder alike - so the same `thresholdValidation` section and `ThresholdVerdict`
+rendering apply whichever executor ran the sequence. See
+[POST /runs](../engine/api-reference.md#post-runs)'s thresholds section for
+how a collection run's error rate, latency percentiles and throughput are
+derived from the steps it actually sent.
 
 The engine range-checks this payload before it creates the run row and answers a
 violation with `400 invalid_run_config` (accepted ranges are tabulated under

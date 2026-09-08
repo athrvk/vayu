@@ -153,6 +153,18 @@ compute_element_spans (const ScenarioPlan& plan);
 [[nodiscard]] bool step_has_script (const ScenarioStep& step, std::string_view kind);
 
 /**
+ * `nullopt` if @p plan can run under load, or the caller-facing refusal
+ * naming why not (issue #1498): a `timer.pacing` element whose own
+ * `config.perUser` is `false` asks for one cadence shared across every
+ * virtual user, which needs cross-VU coordination this engine does not yet
+ * have on the load path - see `timer_pacing.cpp`'s file comment. The
+ * sequential run never calls this: a single virtual user makes
+ * `perUser: false` and `perUser: true` the same thing.
+ */
+[[nodiscard]] std::optional<std::string> refuse_shared_pacing_under_load (
+const ScenarioPlan& plan);
+
+/**
  * The validated `scenario` block of a `POST /runs` payload.
  *
  * `data` rows themselves are deliberately absent, and their absence here is

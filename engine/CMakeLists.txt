@@ -485,6 +485,7 @@ add_library(vayu_core STATIC
     src/core/elements/extract_kinds.cpp
     src/core/elements/assert_kinds.cpp
     src/core/elements/timer_think.cpp
+    src/core/elements/timer_pacing.cpp
     src/core/elements/controller_kinds.cpp
     src/core/elements/control_loop.cpp
     src/core/elements/control_transaction.cpp

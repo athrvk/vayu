@@ -364,6 +364,16 @@ ScenarioResolution& resolution) {
  * nothing in this run could bind.
  *
  * @return the reason this scenario cannot run, or nothing.
+ *
+ * @param raw_elements_out This step's resolved `elements` array exactly as
+ *        `POST /compose` returned it, uncompiled. Issue #1498's
+ *        `timer.pacing` needs a second pass over every step's array before
+ *        any of them can be compiled - it marks, per element id across the
+ *        *whole* iteration, which single occurrence is that node's actual
+ *        start - so compiling here (as every kind before `timer.pacing`
+ *        could) would compile a pacing element before it knew whether this
+ *        was its node's first occurrence. `resolve_scenario` compiles every
+ *        step's array only after that pass, from this output.
  */
 std::optional<std::string> resolve_step (vayu::db::Database& db,
 const ScenarioResolveOptions& options,
@@ -372,7 +382,8 @@ bool has_data,
 const vayu::http::BoundColumnNames& bound_columns,
 size_t index,
 const vayu::db::Request& row,
-ScenarioPlan& plan) {
+ScenarioPlan& plan,
+nlohmann::json& raw_elements_out) {
     // The by-id compose path: the same resolution a Send of this request
     // performs, so a step's request and scripts cannot drift from it.
     nlohmann::json compose_body{ { "requestId", row.id } };
@@ -483,10 +494,11 @@ ScenarioPlan& plan) {
     // The only script source since issue #1514's cut-over: `elements`
     // resolved the collection chain's and the request's own script.pre /
     // script.post entries beside every declarative kind, the same list
-    // `POST /compose` returns. Compiled once, here, rather than per
-    // iteration - every executor reuses this shared list.
-    step.elements = std::make_shared<const std::vector<vayu::core::CompiledElement>> (
-    vayu::core::compile_elements (payload.value ("elements", nlohmann::json::array ())));
+    // `POST /compose` returns. Left uncompiled here - see this function's
+    // doc comment - and compiled once by `resolve_scenario` after every
+    // step's array has been marked for #1498's `timer.pacing`; every
+    // executor then reuses that one compiled list.
+    raw_elements_out    = payload.value ("elements", nlohmann::json::array ());
     step.stored_url     = row.url;
     step.spec_operation = row.spec_operation.value_or (std::string ());
     step.data_template  = std::move (data_template);
@@ -503,6 +515,48 @@ ScenarioPlan& plan) {
     }
     plan.steps.push_back (std::move (step));
     return std::nullopt;
+}
+
+/**
+ * Stamps `config._scopeEntry` onto every element, across every step, whose
+ * kind the registry marks `tracks_scope_occurrence` (issue #1498's
+ * `timer.pacing` only, today): `true` on the first occurrence of that
+ * element's id in plan order, `false` on every later one - the folder- or
+ * collection-scoped element compose_elements inherits into more than one
+ * step is only ever *that node's own start* at the first of them.
+ *
+ * A registry lookup, never a `kind ==` comparison (the extensibility
+ * contract's rule 1): a future kind that needs the same tracking opts in
+ * through the same registry field, with no change here.
+ */
+void mark_scope_entries (std::vector<nlohmann::json>& raw_elements_per_step) {
+    std::unordered_map<std::string, size_t> first_seen_at_step;
+    for (size_t index = 0; index < raw_elements_per_step.size (); ++index) {
+        for (const auto& entry : raw_elements_per_step[index]) {
+            if (!entry.is_object () || !entry.contains ("id")) {
+                continue;
+            }
+            const auto* kind = vayu::core::Registry::instance ().find (
+            entry.value ("kind", std::string{}));
+            if (kind == nullptr || !kind->tracks_scope_occurrence) {
+                continue;
+            }
+            first_seen_at_step.try_emplace (entry["id"].get<std::string> (), index);
+        }
+    }
+
+    for (size_t index = 0; index < raw_elements_per_step.size (); ++index) {
+        for (auto& entry : raw_elements_per_step[index]) {
+            if (!entry.is_object () || !entry.contains ("id") || !entry.contains ("config")) {
+                continue;
+            }
+            const auto found = first_seen_at_step.find (entry["id"].get<std::string> ());
+            if (found == first_seen_at_step.end ()) {
+                continue; // Not a scope-tracked kind.
+            }
+            entry["config"]["_scopeEntry"] = found->second == index;
+        }
+    }
 }
 
 } // namespace
@@ -598,11 +652,18 @@ const ScenarioResolveOptions& options) {
     bound_columns_of (resolution.data_rows);
 
     resolution.plan.steps.reserve (rows.size ());
+    std::vector<nlohmann::json> raw_elements (rows.size ());
     for (size_t index = 0; index < rows.size (); ++index) {
-        if (auto reason = resolve_step (db, options, *collection, has_data,
-            bound_columns, index, rows[index], resolution.plan)) {
+        if (auto reason = resolve_step (db, options, *collection, has_data, bound_columns,
+            index, rows[index], resolution.plan, raw_elements[index])) {
             return invalid (*reason);
         }
+    }
+    mark_scope_entries (raw_elements);
+    for (size_t index = 0; index < raw_elements.size (); ++index) {
+        resolution.plan.steps[index].elements =
+        std::make_shared<const std::vector<vayu::core::CompiledElement>> (
+        vayu::core::compile_elements (raw_elements[index]));
     }
 
     resolution.ok = true;
@@ -700,6 +761,28 @@ const ScenarioPlan& plan) {
         }
     }
     return spans;
+}
+
+std::optional<std::string> refuse_shared_pacing_under_load (const ScenarioPlan& plan) {
+    for (const auto& step : plan.steps) {
+        if (!step.elements) {
+            continue;
+        }
+        for (const auto& element : *step.elements) {
+            if (element.kind != "timer.pacing" || !element.enabled) {
+                continue;
+            }
+            if (!element.config.value ("perUser", true)) {
+                return "step " + std::to_string (step.index) +
+                "'s 'timer.pacing' element sets 'perUser: false' - one "
+                "cadence shared across every virtual user is not yet "
+                "supported for a scenario load run (issue #1498's "
+                "follow-up); use 'perUser: true', or run this collection "
+                "sequentially.";
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace vayu::core

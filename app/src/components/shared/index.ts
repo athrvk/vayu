@@ -66,6 +66,9 @@ export * from "./ScrollOnOverflow";
 // Truncated text that reveals the full value on hover, only when clipped
 export * from "./TruncatedText";
 
+// A labelled number input with its unit inside the field
+export * from "./NumberField";
+
 // Shared frame for the drawer views
 export * from "./DrawerPanel";
 
@@ -86,6 +89,10 @@ export * from "./DetailSkeleton";
 
 // The insertable templates under a script editor, for both script hosts
 export * from "./ScriptSnippets";
+
+// "Names mentioned:" - the variable-reference chip row above a script.pre/
+// script.post element's editor, for both script hosts
+export * from "./ScriptReferencesRow";
 
 // The same row actions on right-click, for rows that carry a "⋯" menu
 export * from "./RowContextMenu";
