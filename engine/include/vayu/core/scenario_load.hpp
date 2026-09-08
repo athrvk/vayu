@@ -517,10 +517,16 @@ build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan&
  * and the VU starts the next one rather than being stranded - a stranded VU
  * permanently shrinks effective concurrency, the same failure `handle_result`'s
  * error branch already guards against.
+ *
+ * @param base_scopes The run's scopes, already loaded and already run through
+ *        `script.setup` (#1499) by `execute_load_test` - loaded there rather
+ *        than here so a setup script's own time is spent before `test_start`
+ *        is captured, never inside the run's own duration figures.
  */
 [[nodiscard]] std::shared_ptr<ScenarioLoadState> execute_scenario_load (
 const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
-const ScenarioExecution& execution);
+const ScenarioExecution& execution,
+vayu::http::routes::ScriptVariableScopes base_scopes);
 
 } // namespace vayu::core

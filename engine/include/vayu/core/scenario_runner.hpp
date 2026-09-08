@@ -346,6 +346,10 @@ struct ScenarioSummaryInputs {
     /// depending on it: with the flag off, `failed` steps and schema failures
     /// are disjoint facts about the run rather than one.
     bool fail_on_schema_error = false;
+    /// `script.setup` / `script.teardown` outcomes (#1499), `{}` for a
+    /// collection that declares neither - the report then omits the section
+    /// entirely rather than showing an empty one.
+    nlohmann::json lifecycle = nlohmann::json::object ();
     /// Every sent step's status code, kept in the same shape
     /// `RunSummaryInputs::status_codes` is (issue #1564): the denominator
     /// `evaluate_thresholds`'s error-rate metric reads. A step the plan

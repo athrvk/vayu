@@ -40,6 +40,12 @@ export default function ElementsPanel() {
 		dataColumns,
 	} = useRequestBuilderContext();
 	const { data: kinds } = useElementKindsQuery();
+	// `script.setup` / `script.teardown` are collection-only (issue #1499):
+	// the engine refuses them on a request's own `elements`, so a request's
+	// Add menu never offers them - `InheritedElementsNotice` below still shows
+	// them when a collection above declares one, unfiltered, since that is
+	// display rather than an offer to add.
+	const addableKinds = (kinds ?? []).filter((kind) => !kind.collectionOnly);
 
 	return (
 		<div className="space-y-4">
@@ -57,7 +63,7 @@ export default function ElementsPanel() {
 			<ElementList
 				elements={request.elements}
 				onChange={(elements) => updateField("elements", elements)}
-				kinds={kinds ?? []}
+				kinds={addableKinds}
 				emptyLabel="No elements yet. Add an extractor, assertion, timer or script from the menu below."
 				renderAboveForm={(element) => {
 					if (element.kind !== "script.pre" && element.kind !== "script.post")
