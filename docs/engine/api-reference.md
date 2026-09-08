@@ -6579,6 +6579,17 @@ itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
 four keys is omitted when the stored snapshot has no such key.
 
+**`hasWarnings`** (issue #1527) is `summary`'s eleventh key, `true` on a run
+whose stored `summary.warnings` array (issue #1503) is non-empty and
+**omitted** otherwise - a run still in progress, one whose terminal write
+failed, or one that finished with nothing to say. Unlike the other keys
+above, it is not read out of `config_snapshot` and not part of the cached
+compact summary: it is a completion-time fact, read fresh off the row on
+every poll, so a history surface that polled a still-running run sees the
+glyph appear on the next poll after it finishes, never stuck at the answer
+its first poll cached. The full `warnings` array itself stays on
+`GET /runs/:runId`'s `summary`.
+
 **`baseline`** is on every row, `true` only for a run pinned through
 [PUT /runs/:runId/baseline](#put-runsrunidbaseline). It is also on
 `GET /runs/:runId`, so a client that opened a run directly can draw the pin

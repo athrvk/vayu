@@ -369,7 +369,10 @@ inline auto make_storage (const std::string& path) {
     // finished; report from the sampled results alone".
     make_column ("summary", &Run::summary, default_value ("")),
     // Pinned-as-baseline flag; see Run::baseline for why retention reads it.
-    make_column ("baseline", &Run::baseline, default_value (false))),
+    make_column ("baseline", &Run::baseline, default_value (false)),
+    // Whether `summary` carries warnings; see Run::has_warnings. Same
+    // ADD-COLUMN-onto-an-existing-table shape as `baseline` above.
+    make_column ("has_warnings", &Run::has_warnings, default_value (false))),
 
     // Metric ticks: one wide row per persisted tick (the time series)
     make_table ("metric_ticks",
@@ -2893,6 +2896,14 @@ void Database::update_run_summary (const std::string& id, const std::string& sum
             return;
         }
         run->summary = summary;
+        // Derived here, from the same bytes about to be stored, rather than
+        // taken as a second parameter every caller would have to keep in sync
+        // by hand (issue #1527). A summary that fails to parse or carries no
+        // `warnings` array leaves the flag false.
+        const auto parsed =
+        nlohmann::json::parse (summary, nullptr, /*allow_exceptions=*/false);
+        run->has_warnings = parsed.is_object () && parsed.contains ("warnings") &&
+        parsed["warnings"].is_array () && !parsed["warnings"].empty ();
         impl_->storage.update (*run);
     });
 }
