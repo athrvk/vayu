@@ -991,6 +991,19 @@ deadline; only the flag's spelling is shared, through `read_stream_flag`.
 loop driven by a pure `compute_refill_deficit` primitive: each tick, refill exactly
 `target − in_flight` new requests (where `in_flight = requests_sent − completed`). On stop the
 controller is notified for prompt cancellation rather than waiting for in-flight requests to drain.
+Between ticks the loop blocks on `refill_cv` with a 50ms safety-net timeout, woken early by a
+completion (`notify_refill`) - the actual wait, not a poll, so a run with headroom to fill sends
+again within the tick rather than a full 50ms later.
+
+A scenario run's virtual users add a second reason `in_flight` can sit below target: a VU a
+`timer.pacing` or `timer.think` element deferred (issue #1498) is not in flight either, so the
+plain `target − in_flight` predicate above cannot tell "wait for a completion" and "wait for this
+VU's deferral to end" apart - both look identical. Left alone that reads as permanent headroom and
+the loop spins the 50ms wait away on every tick, pinning a full core for a run whose own request
+rate is a handful a second (issue #1596). `ScenarioLoadDriver::deferred_wait_ms` answers which case
+it is: when the last scan found only deferred VUs (as opposed to none ready because everyone is
+already in flight or retired, which the plain predicate already handles), the wait is bounded to
+the soonest deferral instead, on a predicate that only a real completion or `should_stop` satisfies.
 
 **The `target_fn` invariant, restated.** Every mode but `capacity` passes a
 `target_fn` that is a pure function of `elapsed_ms` and constants fixed when the

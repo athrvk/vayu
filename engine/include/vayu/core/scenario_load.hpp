@@ -228,12 +228,13 @@ struct VirtualUser {
     vayu::http::routes::ScopeOverlay scope_overlay;
     /**
      * Steady-clock milliseconds before which `take_ready_vu` will not select
-     * this VU (issue #1495). Plumbing for a `timer.pacing` / gaussian
-     * `timer.think` to schedule a VU's next submission without blocking the
-     * producer thread; nothing writes a value past 0 yet - `timer.think`'s
-     * existing `apply` blocks the calling thread instead and runs only at
-     * `step.between`, which this load path does not invoke, so it is not
-     * reachable here even by accident. See `docs/engine/elements.md`'s Load
+     * this VU (issue #1495): `run_step_between`'s `timer.think` wait and
+     * `schedule_next_entry_wait`'s `timer.pacing` schedule (both issue #1498)
+     * are its two writers, both running on the strategy thread rather than
+     * blocking a worker one. While this holds a future value the VU is
+     * deferred, not in flight - `maintain_concurrency`'s `deferred_wait_ms`
+     * bounds the producer's wait to the soonest such deadline instead of
+     * busy-spinning on it (issue #1596). See `docs/engine/elements.md`'s Load
      * paths section.
      */
     int64_t ready_at_ms = 0;

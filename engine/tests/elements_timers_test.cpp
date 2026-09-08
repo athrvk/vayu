@@ -35,6 +35,12 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/resource.h>
+#endif
+
 #include "optional_assert.hpp"
 #include "step_elements_test_helper.hpp"
 #include "task_queue.hpp"
@@ -53,6 +59,38 @@ using nlohmann::json;
 using vayu::core::Registry;
 
 namespace {
+
+/// This process's own CPU time (user + system, every thread), in
+/// milliseconds - what `APacedRunDoesNotBusySpinTheProducer` samples before
+/// and after a run to catch issue #1596's regression (a producer that spins
+/// its wait away instead of sleeping it). `getrusage (RUSAGE_SELF)` sums
+/// every thread on Unix; `GetProcessTimes` is its Windows equivalent.
+int64_t process_cpu_ms () {
+#ifdef _WIN32
+    FILETIME creation{};
+    FILETIME exit{};
+    FILETIME kernel{};
+    FILETIME user{};
+    if (!GetProcessTimes (GetCurrentProcess (), &creation, &exit, &kernel, &user)) {
+        return 0;
+    }
+    auto to_ms = [] (const FILETIME& ft) -> int64_t {
+        // FILETIME is a 64-bit count of 100ns intervals split across two
+        // 32-bit words.
+        const uint64_t ticks =
+        (static_cast<uint64_t> (ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+        return static_cast<int64_t> (ticks / 10000);
+    };
+    return to_ms (kernel) + to_ms (user);
+#else
+    struct rusage usage{};
+    getrusage (RUSAGE_SELF, &usage);
+    return (static_cast<int64_t> (usage.ru_utime.tv_sec) * 1000) +
+    (usage.ru_utime.tv_usec / 1000) +
+    (static_cast<int64_t> (usage.ru_stime.tv_sec) * 1000) +
+    (usage.ru_stime.tv_usec / 1000);
+#endif
+}
 
 // ============================================================================
 // A. Registry / schema level - no run needed.
@@ -896,6 +934,44 @@ TEST_F (ElementsTimersLoadTest, PerUserThroughputGivesEveryVirtualUserItsOwnRate
     << "ten users at 60/minute each should approach 10/s in aggregate - this "
        "looks like one budget shared between them, not a per-user rate";
     EXPECT_LE (executed, 120u) << "the per-user rate did not hold at all";
+}
+
+// Issue #1596: a virtual user `timer.pacing` defers is not in flight, so the
+// producer's `in_flight() < target` wait predicate stayed true for as long as
+// any user was paced and `wait_for` returned at once regardless of the
+// duration it was given - a run sending a handful of requests over two
+// seconds cost the same full core as one sending thousands. Mutation check:
+// reverting `maintain_concurrency`'s wait to the plain predicate (dropping
+// the `deferred_wait_ms` bound) reds this on the CPU assertion alone, since
+// the step counts either side of the fix are identical - it is purely a wait
+// discipline bug, not a throughput one.
+TEST_F (ElementsTimersLoadTest, APacedRunDoesNotBusySpinTheProducer) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_pacing_element_json ("el_pacing", 500) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "constant_concurrency" }, { "concurrency", 1 }, { "duration", "2s" } };
+
+    const int64_t cpu_before = process_cpu_ms ();
+    auto state               = run (config, execution);
+    const int64_t cpu_after  = process_cpu_ms ();
+    ASSERT_NE (state, nullptr);
+
+    // Loose on purpose - the mock server and the worker pool share this
+    // process, so a tight bound is not credible - but two orders of
+    // magnitude under the roughly 2,000ms a busy-spun 2s run cost before the
+    // fix, and comfortably clear of scheduler jitter on a loaded box.
+    EXPECT_LT (cpu_after - cpu_before, 300)
+    << "the producer spun instead of waiting out the pacing interval - "
+       "consumed "
+    << (cpu_after - cpu_before) << "ms of CPU over a 2s run";
+
+    // Pacing precision must not regress: one unpaced first pass plus three or
+    // four more 500ms apart over 2s.
+    const size_t executed = state->steps_executed.load ();
+    EXPECT_GE (executed, 4u) << "the pacing interval grew - the bounded wait "
+                                "is overshooting the deferral";
+    EXPECT_LE (executed, 6u) << "the pacing interval shrank or vanished";
 }
 
 } // namespace

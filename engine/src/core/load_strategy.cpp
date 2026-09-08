@@ -15,6 +15,7 @@
 #include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <unordered_set>
@@ -580,10 +581,11 @@ SubmissionRequest& live) {
 // Declared in load_strategy.hpp - the scenario load executor drives the same
 // loop with a different submit_one. See the header for the contract.
 void maintain_concurrency (std::shared_ptr<RunContext> context,
-const std::function<void ()>& submit_one,
+const std::function<bool ()>& submit_one,
 const std::function<size_t (int64_t)>& target_fn,
 const std::function<size_t ()>& budget_fn,
-const std::function<bool (int64_t)>& should_continue) {
+const std::function<bool (int64_t)>& should_continue,
+const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn) {
     using clock     = std::chrono::steady_clock;
     auto start      = clock::now ();
     auto elapsed_ms = [&start] () {
@@ -610,12 +612,38 @@ const std::function<bool (int64_t)>& should_continue) {
     update_peak (context);
 
     while (!context->should_stop) {
+        // `deferred_wait_ms_fn` answers only right after a cycle where
+        // `submit_one` returned false because every eligible candidate was
+        // deferred (issue #1596) - not merely because none had budget, which
+        // the plain `in_flight() < target` predicate below already handles by
+        // blocking until a completion raises it. A deferred user is never
+        // in flight, so while one is outstanding that predicate is true the
+        // whole time and `wait_for` would return at once no matter what
+        // duration it is given - the timeout has to come from the wait call
+        // itself, and the predicate has to become something a deferral does
+        // not already satisfy: a real completion, tracked here as
+        // `in_flight()` changing from its value when the wait began (the
+        // strategy thread is `requests_sent`'s only writer, so between here
+        // and the wait returning it can only fall, never rise).
+        const size_t in_flight_before = context->in_flight ();
+        std::optional<int64_t> defer_wait_ms =
+        deferred_wait_ms_fn ? deferred_wait_ms_fn () : std::nullopt;
+
         {
             std::unique_lock<std::mutex> lk (context->refill_mtx);
-            context->refill_cv.wait_for (lk, std::chrono::milliseconds (50), [&] () {
-                return context->should_stop.load () ||
-                context->in_flight () < target_fn (elapsed_ms ());
-            });
+            if (defer_wait_ms) {
+                const auto bound =
+                std::chrono::milliseconds (std::min<int64_t> (50, *defer_wait_ms));
+                context->refill_cv.wait_for (lk, bound, [&] () {
+                    return context->should_stop.load () ||
+                    context->in_flight () != in_flight_before;
+                });
+            } else {
+                context->refill_cv.wait_for (lk, std::chrono::milliseconds (50), [&] () {
+                    return context->should_stop.load () ||
+                    context->in_flight () < target_fn (elapsed_ms ());
+                });
+            }
         }
 
         int64_t el = elapsed_ms ();
@@ -626,7 +654,12 @@ const std::function<bool (int64_t)>& should_continue) {
         size_t deficit =
         compute_refill_deficit (target_fn (el), context->in_flight (), budget_fn ());
         for (size_t i = 0; i < deficit && !context->should_stop; ++i) {
-            submit_one ();
+            // A false return means the remaining candidates are all deferred
+            // or busy; retrying immediately just re-scans the same VUs for
+            // the same answer; `deferred_wait_ms_fn` picks it up next cycle.
+            if (!submit_one ()) {
+                break;
+            }
         }
         update_peak (context);
     }
@@ -664,6 +697,7 @@ class ConstantLoadStrategy : public LoadStrategy {
 
             auto submit_one = [&context, &db, &live] () {
                 submit_one_request (context, db, live);
+                return true;
             };
 
             maintain_concurrency (
@@ -842,6 +876,7 @@ class IterationsLoadStrategy : public LoadStrategy {
 
         auto submit_one = [&context, &db, &live] () {
             submit_one_request (context, db, live);
+            return true;
         };
 
         maintain_concurrency (
@@ -891,6 +926,7 @@ class RampUpLoadStrategy : public LoadStrategy {
 
         auto submit_one = [&context, &db, &live] () {
             submit_one_request (context, db, live);
+            return true;
         };
 
         // target(t): linear from start_concurrency to target_concurrency over
@@ -1091,6 +1127,7 @@ class CapacityLoadStrategy : public LoadStrategy {
         SubmissionRequest live (context, request);
         auto submit_one = [&context, &db, &live] () {
             submit_one_request (context, db, live);
+            return true;
         };
 
         CapacitySearch search (capacity_config, context);
