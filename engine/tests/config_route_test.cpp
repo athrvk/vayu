@@ -89,6 +89,27 @@ TEST_F (ConfigRouteTest, TheDesignReadBoundFollowsTheSetting) {
     EXPECT_EQ (vayu::http::routes::design_response_body_bound (*db_), 4096U);
 }
 
+// Its element-pipeline sibling (issue #1514's reopen): before this,
+// `maxElementBodyBytes` named a real config entry in `docs/engine/elements.md`
+// and in two error-message strings, but no caller ever read it - the bound
+// `ElementContext::max_body_bytes` gates on was always the compiled-in
+// default. `element_body_bound` is the one place the key is spelled now, on
+// the same "drive it through the config route rather than assert the string"
+// reasoning as the design bound above.
+
+TEST_F (ConfigRouteTest, TheElementBodyBoundDefaultsToTheCompiledInLimit) {
+    EXPECT_EQ (vayu::http::routes::element_body_bound (*db_),
+    vayu::core::constants::elements::MAX_BODY_BYTES);
+}
+
+TEST_F (ConfigRouteTest, TheElementBodyBoundFollowsTheSetting) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"maxElementBodyBytes":"4096"}})");
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    EXPECT_EQ (vayu::http::routes::element_body_bound (*db_), 4096U);
+}
+
 // Its load-path sibling, on the same reasoning (issue #1188): the deferred
 // `tests` pass reads `maxResponseBodyBytes` for what a script's own
 // `pm.sendRequest` may pull, so a mistyped key there would silently leave that

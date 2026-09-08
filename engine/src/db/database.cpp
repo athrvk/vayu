@@ -4713,6 +4713,19 @@ void Database::seed_default_config () {
     "1073741824", // 1GB
     std::nullopt, now }));
 
+    upsert_config (unit ("bytes") (ConfigEntry{ "maxElementBodyBytes",
+    std::to_string (vayu::core::constants::elements::MAX_BODY_BYTES), "integer", "Max Element Body",
+    "Largest response body an extract.json or assert.jsonpath element will "
+    "parse as JSON. A larger response is not parsed at all: every "
+    "JSON-reading element on that step reports skipped, with the reason, "
+    "instead of paying for - or failing on - a parse of an oversized body. "
+    "The one shared parse is reused by every such element on the same step, "
+    "so this is a per-step cost, not a per-element one.",
+    "limits", std::to_string (vayu::core::constants::elements::MAX_BODY_BYTES),
+    "1024",       // 1KB
+    "1073741824", // 1GB
+    std::nullopt, now }));
+
     upsert_config (advanced (keywords ({ "infinite loop" }) (
     ConfigEntry{ "maxStepsPerIteration", "0", "integer", "Max Steps Per Iteration",
     "How many requests one iteration of a collection run may send before it is "

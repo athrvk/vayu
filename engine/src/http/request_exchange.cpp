@@ -61,6 +61,11 @@ size_t design_response_body_bound (vayu::db::Database& db) {
     static_cast<int> (vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES)));
 }
 
+size_t element_body_bound (vayu::db::Database& db) {
+    return static_cast<size_t> (db.get_config_int ("maxElementBodyBytes",
+    static_cast<int> (vayu::core::constants::elements::MAX_BODY_BYTES)));
+}
+
 size_t load_response_body_bound (vayu::db::Database& db) {
     return static_cast<size_t> (std::max (0,
     db.get_config_int ("maxResponseBodyBytes",
@@ -694,6 +699,7 @@ ExchangeInputs inputs) {
         .pacing_state    = inputs.pacing_state,
         .timers_override = inputs.timers_override,
         .record_metric   = inputs.record_metric,
+        .max_body_bytes  = inputs.max_element_body_bytes,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,

@@ -177,6 +177,12 @@ struct EngineDefaults {
     /// (issue #576).
     int64_t stream_max_duration_ms = constants::sse::MAX_STREAM_DURATION_MS;
     int64_t stream_max_events      = constants::sse::MAX_STREAM_EVENTS;
+
+    /// Config key `maxElementBodyBytes` (issue #1514's reopen):
+    /// `ElementContext::max_body_bytes` for a scenario load run's own
+    /// `step.after` elements, which - like everything else in this struct -
+    /// `RunContext` cannot read for itself.
+    size_t max_element_body_bytes = constants::elements::MAX_BODY_BYTES;
 };
 
 struct RunContext {
@@ -337,6 +343,13 @@ struct RunContext {
     /// computation through `ElementContext::timers_override`
     /// (`apply_timers_override`).
     vayu::core::TimersOverride timers_override;
+
+    /// `EngineDefaults::max_element_body_bytes`, copied in by the constructor
+    /// (issue #1514's reopen) - the same `EngineDefaults` fields other than
+    /// this are consumed into `MetricsCollectorConfig` are, and this one is
+    /// read directly by every scenario load `step.after` element through
+    /// `ElementContext::max_body_bytes`.
+    size_t max_element_body_bytes = constants::elements::MAX_BODY_BYTES;
 
     /// The raw seed behind @ref rng (issue #1498's `elements.seed`): from the
     /// payload when given, else drawn once from `std::random_device`. Kept

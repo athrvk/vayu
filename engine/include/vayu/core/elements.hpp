@@ -42,6 +42,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/custom_metric_type.hpp"
 #include "vayu/types.hpp"
 
@@ -409,8 +410,12 @@ struct ElementContext {
     bool body_parse_attempted = false;
     /// `maxElementBodyBytes` - a response past this is not parsed, and every
     /// JSON-reading kind on the step reports `skipped` rather than paying for
-    /// (or failing on) a parse of an oversized body.
-    size_t max_body_bytes = size_t{ 1024 } * 1024;
+    /// (or failing on) a parse of an oversized body. The default is the
+    /// config entry's own default; a caller that resolves the live setting
+    /// (`EngineDefaults::max_element_body_bytes`, `ExchangeInputs::max_element_body_bytes`)
+    /// overwrites it, the way every other config-backed `ElementContext`
+    /// field here does.
+    size_t max_body_bytes = vayu::core::constants::elements::MAX_BODY_BYTES;
 
     /// Filled by `Element::apply`, reset by `ElementPipeline::run` before each
     /// call and read back into the pushed `ElementOutcome` afterwards - the

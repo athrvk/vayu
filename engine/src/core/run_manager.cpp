@@ -745,6 +745,7 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     static_cast<size_t> (config.value ("max_exemplar_results",
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
     capture_response_bodies = mc_config.capture_response_bodies;
+    max_element_body_bytes  = engine_defaults.max_element_body_bytes;
 
     // Configure response sampling for script validation. Bounded twice: in
     // count here, and in bytes by the budget below - a retained sample holds a
@@ -1104,6 +1105,9 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         engine_defaults.max_sample_body_bytes =
         static_cast<size_t> (db.get_config_int ("maxSampleBodyBytes",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES)));
+        engine_defaults.max_element_body_bytes =
+        static_cast<size_t> (db.get_config_int ("maxElementBodyBytes",
+        static_cast<int> (vayu::core::constants::elements::MAX_BODY_BYTES)));
         engine_defaults.phase_histograms =
         db.get_config_bool ("phaseHistograms",
         vayu::core::constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS);

@@ -712,6 +712,7 @@ governs what a run measures rather than what it keeps:
 | `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
 | `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory, and what a `pm.sendRequest` from that run's deferred `tests` script may read. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
 | `maxDesignResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **design-mode** send - `POST /execute`, and each step of a collection run - reads into memory, and what a `pm.sendRequest` from that send's scripts may read. A bigger response is read up to this point and answered with `bodyCapped: true` (see `POST /execute`) rather than failing, because someone is watching for it - a script's own fetch is the exception and refuses, having no way to tell the script its body was cut (see [scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)). Separate from `maxResponseBodyBytes` above, which is the load path's and refuses in every case. |
+| `maxElementBodyBytes` | `1048576` | 1024–1073741824 | Largest response body an `extract.json` or `assert.jsonpath` [element](elements.md) will parse as JSON, in a design send, a collection run and a scenario load run alike. A bigger response is not parsed at all: every JSON-reading element on that step reports `skipped`, with the reason, instead of paying for - or failing on - a parse of an oversized body. The one shared parse per step is reused by every such element, so this is a per-step cost, not a per-element one. |
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
@@ -5957,15 +5958,21 @@ assertions are now actually checked under load - previously only the
 request's own `tests` string was ever sent, so a collection-level assertion
 passed in design mode and was silently never validated by a load run.
 
-**`tests` and `postRequestScript(s)` are the same field.** The post-request
-script is stored as `postRequestScript`, `POST /execute` grew up calling it
-`postRequestScript(s)`, and this endpoint calls it `tests`. All three names are
-accepted on **both** endpoints, so a payload composed for one can start the
-other kind of run unchanged - which is how a saved request's composed test
-scripts reach a load run. The names are tried in a fixed order
-(`postRequestScripts`, `postRequestScript`, then `tests`) and the first that
-yields a non-blank script wins; they are never merged. Previously each route
-knew only its own spelling and silently dropped the other.
+**`tests` and `postRequestScript(s)` are the same field, still accepted here.**
+The post-request script is stored as `postRequestScript`, `POST /execute` grew
+up calling it `postRequestScript(s)`, and this endpoint calls it `tests`. This
+single-target `POST /runs` still accepts all three names - the names are tried
+in a fixed order (`postRequestScripts`, `postRequestScript`, then `tests`) and
+the first that yields a non-blank script wins; they are never merged. **`POST
+/execute`, `PUT /requests/:id` and `PUT /collections/:id` no longer do**: since
+issue #1514, `elements` is the only script source there and a payload carrying
+any of the three (a real value, not `null`) is refused with a `400` naming
+`elements`. A payload composed for one of those and sent to this endpoint
+unchanged still starts a load run - which is how a saved request's composed
+test scripts reach one - but the reverse no longer holds. Wiring this
+endpoint's own single-target request onto the element pipeline and refusing
+the three names here too is issue #1594, not yet landed; until it does, this
+is deliberately the one route that still reads them.
 
 **There is no pre-request hook on this endpoint.** `preRequestScript(s)` in a
 run payload is not an error, but nothing runs it - only `POST /execute` executes

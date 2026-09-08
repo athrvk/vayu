@@ -565,6 +565,11 @@ struct StepContext {
     size_t max_trace_body_bytes = 0;
     /// `maxDesignResponseBodyBytes`, read once for the run (issue #1157).
     size_t max_response_bytes = 0;
+    /// `maxElementBodyBytes`, read once for the run the same way (issue
+    /// #1514's reopen) - a step of a collection run is a design-mode send,
+    /// so it reads the same bound `ExchangeInputs::max_element_body_bytes`
+    /// carries on that path.
+    size_t max_element_body_bytes = 0;
     /// The plan-wide first/last position of every scope-spanning element
     /// (issue #1515's `control.loop` / `control.transaction`), computed
     /// once before the run's first iteration.
@@ -611,11 +616,12 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.controller_state = &ctx.controller_state;
     // One user walking the sequence, which is what a collection run in design
     // mode is - the same number `{{$vu}}` binds into its requests (issue #994).
-    inputs.vu                 = SOLE_VIRTUAL_USER;
-    inputs.iteration_count    = ctx.iteration_count;
-    inputs.transport          = ctx.transport;
-    inputs.default_headers    = ctx.default_headers;
-    inputs.max_response_bytes = ctx.max_response_bytes;
+    inputs.vu                     = SOLE_VIRTUAL_USER;
+    inputs.iteration_count        = ctx.iteration_count;
+    inputs.transport              = ctx.transport;
+    inputs.default_headers        = ctx.default_headers;
+    inputs.max_response_bytes     = ctx.max_response_bytes;
+    inputs.max_element_body_bytes = ctx.max_element_body_bytes;
     // The one caller that sets it: `pm.execution` throws
     // everywhere else, because nowhere else has a sequence to
     // redirect (issue #355).
@@ -1248,6 +1254,10 @@ RunManager& manager) {
         // so it reads the design-mode bound (issue #1157).
         const auto max_response_bytes =
         vayu::http::routes::design_response_body_bound (db);
+        // Same reason, same read-once-for-the-run rule (issue #1514's
+        // reopen): a step's `extract.json` / `assert.jsonpath` must not read
+        // a different bound because Settings changed mid-sequence.
+        const auto max_element_body_bytes = vayu::http::routes::element_body_bound (db);
         ScenarioStepStore store (
         static_cast<size_t> (db.get_config_int ("maxScenarioStoredSteps",
         static_cast<int> (constants::scenario::MAX_STORED_STEPS))));
@@ -1321,10 +1331,11 @@ RunManager& manager) {
             // it: a script may send it backwards, forwards or out early, so the
             // position is a variable and the loop is bounded by the budget
             // above rather than by the plan's length.
-            const StepContext step_ctx{ context, execution, schema_index, transport,
-                default_headers, cookie_scope, data_rows, data_row_index, iteration,
-                asked.iterations, fail_on_schema_error, max_trace_body_bytes,
-                max_response_bytes, element_spans, controller_state };
+            const StepContext step_ctx{ context, execution, schema_index,
+                transport, default_headers, cookie_scope, data_rows,
+                data_row_index, iteration, asked.iterations,
+                fail_on_schema_error, max_trace_body_bytes, max_response_bytes,
+                max_element_body_bytes, element_spans, controller_state };
             run_iteration (script_engine, cookie_jar, cookie_scope, scopes,
             step_ctx, plan, step_index, max_steps_per_iteration, coverage,
             summary, store, transactions);
