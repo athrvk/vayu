@@ -26,7 +26,12 @@ import type { RequestBuilderContextValue } from "../../../types";
 import type { ElementDef, ElementKindSchema } from "@/types";
 
 /** A minimal catalogue entry - only what `ElementList` and its forms read. */
-function kindSchema(kind: string, label: string, category = "test"): ElementKindSchema {
+function kindSchema(
+	kind: string,
+	label: string,
+	category = "test",
+	collectionOnly = false
+): ElementKindSchema {
 	return {
 		kind,
 		version: 1,
@@ -34,6 +39,7 @@ function kindSchema(kind: string, label: string, category = "test"): ElementKind
 		description: `${label} description`,
 		category,
 		hotPathClass: "declarative",
+		collectionOnly,
 		configSchema: { type: "object", properties: {} },
 		phases: [],
 	};
@@ -44,6 +50,9 @@ const KINDS: ElementKindSchema[] = [
 	kindSchema("assert.status", "Assert Status", "assert"),
 	kindSchema("script.pre", "Pre-request Script", "script"),
 	kindSchema("script.post", "Test Script", "script"),
+	// script.setup / script.teardown (issue #1499): collection-only, so a
+	// request's own Add menu must never offer them.
+	kindSchema("script.setup", "Setup Script", "script", /* collectionOnly */ true),
 ];
 
 vi.mock("@/queries", async (importOriginal) => ({
@@ -168,6 +177,21 @@ describe("ElementsPanel", () => {
 			"elements",
 			expect.arrayContaining([expect.objectContaining({ kind: "extract.json" })])
 		);
+	});
+
+	// Mutation check: drop the `!kind.collectionOnly` filter in ElementsPanel
+	// and this reddens - "Setup Script" would appear beside the others.
+	it("hides a collection-only kind from the Add-element menu", async () => {
+		setContext();
+
+		render(<ElementsPanel />);
+
+		fireEvent.pointerDown(screen.getByRole("button", { name: /add element/i }), {
+			button: 0,
+		});
+		await screen.findByRole("menuitem", { name: /extract json/i });
+
+		expect(screen.queryByRole("menuitem", { name: /setup script/i })).not.toBeInTheDocument();
 	});
 
 	it('calls updateField("elements", ...) when an existing element is toggled off', () => {

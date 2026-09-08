@@ -1,6 +1,7 @@
 [
   {
     "category": "inherit",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -23,6 +24,7 @@
   },
   {
     "category": "script",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -46,6 +48,7 @@
   },
   {
     "category": "script",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -68,7 +71,56 @@
     "version": 1
   },
   {
+    "category": "script",
+    "collectionOnly": true,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "type": "object"
+    },
+    "description": "Runs once, on a collection, before the run starts.",
+    "hotPathClass": "script",
+    "kind": "script.setup",
+    "label": "Setup script",
+    "phases": [
+      "run.start"
+    ],
+    "version": 1
+  },
+  {
+    "category": "script",
+    "collectionOnly": true,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "type": "object"
+    },
+    "description": "Runs once, on a collection, after the run ends.",
+    "hotPathClass": "script",
+    "kind": "script.teardown",
+    "label": "Teardown script",
+    "phases": [
+      "run.end"
+    ],
+    "version": 1
+  },
+  {
     "category": "extract",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -115,6 +167,7 @@
   },
   {
     "category": "extract",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -173,6 +226,7 @@
   },
   {
     "category": "extract",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -216,6 +270,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -255,6 +310,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -288,6 +344,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -331,6 +388,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -355,6 +413,7 @@
   },
   {
     "category": "assert",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -389,6 +448,7 @@
   },
   {
     "category": "timer",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -436,6 +496,7 @@
   },
   {
     "category": "timer",
+    "collectionOnly": false,
     "configSchema": {
       "additionalProperties": false,
       "properties": {
@@ -458,6 +519,156 @@
     "label": "Pacing",
     "phases": [
       "step.before"
+    ],
+    "version": 1
+  },
+  {
+    "category": "controller",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "pattern": "^\\s*\\{\\{[^}]+\\}\\}\\s*(==|!=|matches)\\s*\\S.*$|^\\s*\\{\\{[^}]+\\}\\}\\s*exists\\s*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "condition"
+      ],
+      "type": "object"
+    },
+    "description": "Skips this step, or every step of a folder it sits on, when a condition against a resolved variable is false.",
+    "hotPathClass": "declarative",
+    "kind": "control.if",
+    "label": "If",
+    "phases": [
+      "step.before"
+    ],
+    "version": 1
+  },
+  {
+    "category": "controller",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "description": "Runs on this user's first iteration only.",
+    "hotPathClass": "declarative",
+    "kind": "control.once",
+    "label": "Once only",
+    "phases": [
+      "step.before"
+    ],
+    "version": 1
+  },
+  {
+    "category": "controller",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "cases": {
+          "type": "object"
+        },
+        "default": {
+          "type": "string"
+        },
+        "variable": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "variable",
+        "cases"
+      ],
+      "type": "object"
+    },
+    "description": "Routes to a named folder member by a variable's resolved value.",
+    "hotPathClass": "declarative",
+    "kind": "control.switch",
+    "label": "Switch",
+    "phases": [
+      "step.before"
+    ],
+    "version": 1
+  },
+  {
+    "category": "controller",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "everyN": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "percent": {
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "description": "Runs only a share of this occurrence's calls, by percentage or every Nth one, decided on the producer's own counter.",
+    "hotPathClass": "declarative",
+    "kind": "control.throughput",
+    "label": "Throughput",
+    "phases": [
+      "step.before"
+    ],
+    "version": 1
+  },
+  {
+    "category": "controller",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "type": "object"
+    },
+    "description": "Walks a folder's members a fixed number of times per iteration.",
+    "hotPathClass": "declarative",
+    "kind": "control.loop",
+    "label": "Loop",
+    "phases": [
+      "step.between"
+    ],
+    "version": 1
+  },
+  {
+    "category": "transaction",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "description": "Sums a folder's own member latencies into one named transaction, reported with its own percentiles.",
+    "hotPathClass": "declarative",
+    "kind": "control.transaction",
+    "label": "Transaction",
+    "phases": [
+      "step.after"
     ],
     "version": 1
   }

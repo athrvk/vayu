@@ -58,6 +58,7 @@ import {
 	EmptyState,
 	Callout,
 	SampledSchemaValidation,
+	ScriptLifecycleSummary,
 	StopRunButton,
 	StoredExchangeWarning,
 } from "@/components/shared";
@@ -433,6 +434,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				    answer, so it sits under coverage here exactly as it does in
 				    the history detail's Overview. Absent on the same terms. */}
 				<SampledSchemaValidation validation={report?.schemaValidation} />
+
+				{/* What script.setup / script.teardown did, once each, at the
+				    run's own boundary rather than at any step. Absent for a
+				    run whose collection declared neither. */}
+				<ScriptLifecycleSummary lifecycle={report?.lifecycle} />
 
 				{steps.length === 0 ? (
 					/*

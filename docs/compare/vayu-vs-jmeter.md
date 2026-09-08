@@ -66,7 +66,11 @@ engine-side, and its `pm.*` scripts, is what the load run drives. Collections ru
 as ordered scenarios with per-step results and threshold verdicts, driven from a
 CSV, TSV, JSON or JSONL file when you need each virtual user to send different
 data. Existing work comes across too - Postman v2.0/v2.1, Insomnia v4, and
-OpenAPI 3.1/3.0 or Swagger 2.0 specs generate a ready-to-use collection.
+OpenAPI 3.1/3.0 or Swagger 2.0 specs generate a ready-to-use collection. JMeter's
+setUp / tearDown thread groups, which run once before or once after the whole
+test, are `script.setup` / `script.teardown` here - elements on the collection
+itself, run once at the run's own start or end in either run mode, rather than
+a thread group of their own.
 
 ## When to choose JMeter
 
