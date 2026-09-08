@@ -278,6 +278,10 @@ wrote? }`. `outcome` is one of `ok` | `failed` | `missing` | `skipped` | `error`
 is reported `skipped` without its `apply` ever running. `POST /execute`'s live response body carries
 the same array under the same key - one object, two homes, on the `scripts` node's own precedent.
 
+`assert.*` outcomes join `pm.test` results in one assertion tally the run's `maxAssertionFailureRatePct`
+threshold reads; a failed budget flips the run's terminal status to `Failed` when the run also asks for
+`thresholds.failRun: true` (`api-reference.md`'s thresholds section, #1497).
+
 ## Load paths
 
 A scenario load run's `submit_one` (the producer, one virtual user at a time) runs
