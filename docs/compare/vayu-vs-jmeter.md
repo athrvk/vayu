@@ -75,7 +75,10 @@ end: the saved request, with its environment variables, its auth resolved
 engine-side, and its `pm.*` scripts, is what the load run drives. Collections run
 as ordered scenarios with per-step results and threshold verdicts, driven from a
 CSV, TSV, JSON or JSONL file when you need each virtual user to send different
-data. Existing work comes across too - Postman v2.0/v2.1, Insomnia v4, and
+data. As in JMeter, a failed assertion can fail the run, not just the sample it
+ran on: `assert.*` element outcomes and `pm.test` results share one failure-rate
+budget (`maxAssertionFailureRatePct`), and `thresholds.failRun` turns a missed
+budget into a `Failed` run. Existing work comes across too - Postman v2.0/v2.1, Insomnia v4, and
 OpenAPI 3.1/3.0 or Swagger 2.0 specs generate a ready-to-use collection. JMeter's
 setUp / tearDown thread groups, which run once before or once after the whole
 test, are `script.setup` / `script.teardown` here - elements on the collection
