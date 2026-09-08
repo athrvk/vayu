@@ -1838,6 +1838,9 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     payload["latency_p50_ms"]      = sample.latency_p50_ms;
     payload["latency_p95_ms"]      = sample.latency_p95_ms;
     payload["latency_p99_ms"]      = sample.latency_p99_ms;
+    if (sample.custom_metrics.has_value ()) {
+        payload["custom_metrics"] = build_custom_metrics_payload (*sample.custom_metrics);
+    }
     return payload;
 }
 
@@ -2122,6 +2125,7 @@ int64_t& first_tick_steady_ms) {
         sample.latency_p50_ms = window.p50;
         sample.latency_p95_ms = window.p95;
         sample.latency_p99_ms = window.p99;
+        sample.custom_metrics = mc.custom_metric_summaries ();
 
         db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
         build_metric_tick_payload (sample).dump () });

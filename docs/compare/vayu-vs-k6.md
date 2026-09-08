@@ -94,8 +94,10 @@ are not close:
   parked decision rather than a pending one -
   [#473](https://github.com/athrvk/vayu/issues/473) was closed unimplemented.
 - **You want tests as reviewable code.** A k6 script is a file in your repo with
-  a rich ecosystem around it - executors, scenarios, custom metrics, extensions,
-  and output integrations to Prometheus, Grafana and others.
+  a rich ecosystem around it - executors, scenarios, extensions, and output
+  integrations to Prometheus, Grafana and others. (Vayu's own custom trends,
+  counters and rates - `metric.record`, `pm.metrics` - cover the metrics half;
+  it is the ecosystem around them k6 still leads on.)
 - **You are load testing beyond HTTP** - gRPC, WebSockets, or a real browser.
   Vayu's engine is an HTTP engine.
 - **You need sophisticated arrival-rate modelling** (ramping executors, staged

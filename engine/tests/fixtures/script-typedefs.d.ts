@@ -753,7 +753,7 @@ declare const pm: {
 		 * Add to a named running total, 1 when no increment is given.
 		 * 
 		 * Example:
-		 * pm.metrics.counter('bytesOut', pm.response.responseSize);
+		 * pm.metrics.counter('bytesOut', pm.response.size().total);
 		 */
 		counter(name: string, increment?: number): void;
 		/**
