@@ -82,13 +82,14 @@ void register_workspace_routes (RouteContext& ctx) {
                              .count ();
             auto [status, body] = workspace_backup_response (ctx.db, now);
             if (status != 200) {
-                vayu::utils::log_warning ("POST /workspace/backup - " +
-                std::to_string (status) + ": " + error_message_of (body));
+                vayu::utils::log_warning ("http",
+                "POST /workspace/backup - " + std::to_string (status) + ": " +
+                error_message_of (body));
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("http",
             "POST /workspace/backup - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }

@@ -2261,14 +2261,14 @@ void register_scripting_routes (RouteContext& ctx) {
      */
     ctx.server.Get ("/scripting/completions",
     [] (const httplib::Request&, httplib::Response& res) {
-        vayu::utils::log_info (
+        vayu::utils::log_info ("script",
         "GET /scripting/completions - Fetching script API completions");
         try {
             nlohmann::json response = { { "version", "1.0.0" }, { "engine", "quickjs" },
                 { "completions", get_script_completions () } };
             send_json (res, response);
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("script",
             "GET /scripting/completions - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }
@@ -2286,14 +2286,14 @@ void register_scripting_routes (RouteContext& ctx) {
      */
     ctx.server.Get ("/scripting/types", [] (const httplib::Request&, httplib::Response& res) {
         vayu::utils::log_info (
-        "GET /scripting/types - Generating script type declarations");
+        "script", "GET /scripting/types - Generating script type declarations");
         try {
             const std::string dts = generate_script_typedefs ();
             nlohmann::json response = { { "version", "1.0.0" }, { "engine", "quickjs" },
                 { "libUri", "ts:vayu/pm.d.ts" }, { "typeDefinitions", dts } };
             send_json (res, response);
         } catch (const std::exception& e) {
-            vayu::utils::log_error (
+            vayu::utils::log_error ("script",
             "GET /scripting/types - Error: " + std::string (e.what ()));
             send_error (res, 500, e.what ());
         }

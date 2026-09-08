@@ -171,8 +171,8 @@ const AuthRefreshTuning& tuning) {
             // say what happened.
             const std::string message = err->code + ": " + err->message;
             state->record_failure (message);
-            vayu::utils::log_warning ("OAuth2 mid-run refresh failed for run " +
-            context->run_id + " - " + message);
+            vayu::utils::log_warning ("oauth",
+            "OAuth2 mid-run refresh failed for run " + context->run_id + " - " + message);
             if (!wait_while_running (context, retry_ms, tuning.poll_interval_ms)) {
                 return;
             }
@@ -188,7 +188,8 @@ const AuthRefreshTuning& tuning) {
         state->publish (
         vayu::http::oauth2_header_value (state->config (), token.access_token), at_seconds,
         token.expires_in > 0 ? token.created_at + (token.expires_in * 1000) : 0);
-        vayu::utils::log_info ("OAuth2: refreshed the token for run " + context->run_id);
+        vayu::utils::log_info (
+        "oauth", "OAuth2: refreshed the token for run " + context->run_id);
     }
 }
 

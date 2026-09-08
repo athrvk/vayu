@@ -112,6 +112,8 @@ TEST (ArgumentRulesTest, CliRefusesAValueFlagWithNothingAfterIt) {
 TEST (ArgumentRulesTest, AnOptionalLevelIsNotAMissingValue) {
     // `--verbose` takes its level optionally, so rule 1 must not reach it -
     // `-v` last on the line is verbose at the default, as it has always been.
+    // `vayu-cli` reads `-v` the same way as of #1557 (it used to be
+    // `--version`'s short form), so both binaries loop the same two spellings.
     for (const auto* flag : { "-v", "--verbose" }) {
         auto parsed = seeded_daemon_args ();
         const ArgumentVector args ({ flag });
@@ -121,10 +123,12 @@ TEST (ArgumentRulesTest, AnOptionalLevelIsNotAMissingValue) {
         EXPECT_EQ (parsed.verbosity, 1);
     }
 
-    core::CliOptions options;
-    const ArgumentVector cli_args ({ "--verbose" });
-    ASSERT_HAS_VALUE (core::read_cli_flags (cli_args.span (), options));
-    EXPECT_EQ (options.verbosity, 1);
+    for (const auto* flag : { "-v", "--verbose" }) {
+        core::CliOptions options;
+        const ArgumentVector cli_args ({ flag });
+        ASSERT_HAS_VALUE (core::read_cli_flags (cli_args.span (), options));
+        EXPECT_EQ (options.verbosity, 1);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +270,22 @@ TEST (ArgumentRulesTest, HelpAndVersionAreRequestsRatherThanOutput) {
     const auto cli_request = core::read_cli_flags (version.span (), options);
     ASSERT_HAS_VALUE (cli_request) << cli_request.error ();
     EXPECT_EQ (*cli_request, core::CliRequest::Version);
+}
+
+// Issue #1557: `-v` used to be `vayu-cli`'s short form of `--version`, so
+// `vayu-cli run x.json -v 2` printed the version and refused "2" as an unknown
+// argument. Made consistent with the daemon, where `-v` has always been
+// `--verbose`'s short form.
+TEST (ArgumentRulesTest, CliShortVIsVerboseNotVersion) {
+    core::CliOptions options;
+    options.command = "run";
+    const ArgumentVector args ({ "run", "x.json", "-v", "2" });
+    const auto request = core::read_cli_flags (args.span (), options);
+
+    ASSERT_HAS_VALUE (request) << request.error ();
+    EXPECT_EQ (*request, core::CliRequest::Continue)
+    << "-v was still read as the short form of --version";
+    EXPECT_EQ (options.verbosity, 2);
 }
 
 TEST (ArgumentRulesTest, AnEmptyValueIsAValueRatherThanAMissingOne) {

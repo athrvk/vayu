@@ -571,7 +571,7 @@ struct Database::Impl {
             int rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
             if (rc != SQLITE_OK && err_msg) {
                 vayu::utils::log_warning (
-                "Failed to set cache_size: " + std::string (err_msg));
+                "db", "Failed to set cache_size: " + std::string (err_msg));
                 sqlite3_free (err_msg);
                 err_msg = nullptr;
             }
@@ -595,7 +595,7 @@ struct Database::Impl {
             rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
             if (rc != SQLITE_OK && err_msg) {
                 vayu::utils::log_warning (
-                "Failed to set temp_store: " + std::string (err_msg));
+                "db", "Failed to set temp_store: " + std::string (err_msg));
                 sqlite3_free (err_msg);
                 err_msg = nullptr;
             }
@@ -605,7 +605,7 @@ struct Database::Impl {
             rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
             if (rc != SQLITE_OK && err_msg) {
                 vayu::utils::log_warning (
-                "Failed to set mmap_size: " + std::string (err_msg));
+                "db", "Failed to set mmap_size: " + std::string (err_msg));
                 sqlite3_free (err_msg);
                 err_msg = nullptr;
             }
@@ -614,7 +614,7 @@ struct Database::Impl {
             sql << "PRAGMA wal_autocheckpoint = " << wal_checkpoint << ";";
             rc = sqlite3_exec (db, sql.str ().c_str (), nullptr, nullptr, &err_msg);
             if (rc != SQLITE_OK && err_msg) {
-                vayu::utils::log_warning (
+                vayu::utils::log_warning ("db",
                 "Failed to set wal_autocheckpoint: " + std::string (err_msg));
                 sqlite3_free (err_msg);
             }
@@ -663,7 +663,7 @@ bool copy_db_files (const fs::path& src, const fs::path& dst) {
     // Copy main file
     fs::copy_file (src, dst, fs::copy_options::overwrite_existing, ec);
     if (ec) {
-        vayu::utils::log_warning ("Backup copy failed: " + ec.message ());
+        vayu::utils::log_warning ("db", "Backup copy failed: " + ec.message ());
         return false;
     }
 
@@ -750,8 +750,9 @@ std::optional<fs::path> quarantine_db_files (const fs::path& original) {
 
     fs::rename (original, quarantined, ec);
     if (ec) {
-        vayu::utils::log_error ("Could not move the corrupt database aside (" +
-        ec.message () + "); it will be deleted so the engine can start.");
+        vayu::utils::log_error ("db",
+        "Could not move the corrupt database aside (" + ec.message () +
+        "); it will be deleted so the engine can start.");
         return std::nullopt;
     }
     for (const char* suffix : { "-wal", "-shm" }) {
@@ -761,7 +762,8 @@ std::optional<fs::path> quarantine_db_files (const fs::path& original) {
             fs::rename (from, quarantined.string () + suffix, sidecar_ec);
         }
     }
-    vayu::utils::log_warning ("Corrupt database moved to " + quarantined.string () +
+    vayu::utils::log_warning ("db",
+    "Corrupt database moved to " + quarantined.string () +
     " - recover rows from it with: sqlite3 " + quarantined.string () + " .recover");
     return quarantined;
 }
@@ -786,7 +788,8 @@ const std::function<bool (const std::string&)>& probe) {
     const bool backup_valid  = backup_exists &&
     has_sqlite_header (backup_file) && probe (backup_file.string ());
     if (backup_exists && !backup_valid) {
-        vayu::utils::log_error ("The backup at " + backup_file.string () +
+        vayu::utils::log_error ("db",
+        "The backup at " + backup_file.string () +
         " does not open either; it is left in place and will not be restored.");
     }
 
@@ -812,12 +815,12 @@ const std::function<bool (const std::string&)>& probe) {
         RecoveryOutcome outcome = quarantined ? RecoveryOutcome::StartedFreshQuarantined :
                                                 RecoveryOutcome::DeletedCorrupt;
         if (backup_valid && copy_db_files (backup_file, db_file)) {
-            vayu::utils::log_info (
-            "Database restored from backup. Retrying...");
+            vayu::utils::log_info ("db", "Database restored from backup. Retrying...");
             outcome = RecoveryOutcome::RestoredFromBackup;
         } else if (backup_valid) {
-            vayu::utils::log_error ("The backup validated but could not be "
-                                    "copied back; starting fresh.");
+            vayu::utils::log_error ("db",
+            "The backup validated but could not be "
+            "copied back; starting fresh.");
         } else if (backup_exists && quarantined) {
             outcome = RecoveryOutcome::BackupAlsoCorrupt;
         }
@@ -1011,26 +1014,28 @@ ReclaimOutcome reclaim_freed_pages (const std::string& path) {
 void log_reclaim_outcome (const ReclaimOutcome& outcome) {
     if (!outcome.error.empty ()) {
         vayu::utils::log_warning (
-        "Startup database reclamation failed: " + outcome.error);
+        "db", "Startup database reclamation failed: " + outcome.error);
         return;
     }
     if (!outcome.ran) {
-        vayu::utils::log_debug ("Database reclamation skipped: too few freed "
-                                "pages to be worth the rewrite");
+        vayu::utils::log_debug ("db",
+        "Database reclamation skipped: too few freed "
+        "pages to be worth the rewrite");
         return;
     }
     if (outcome.after_bytes < 0) {
-        vayu::utils::log_info ("Reclaimed the freed pages of a " +
-        std::to_string (outcome.before_bytes / 1024) +
+        vayu::utils::log_info ("db",
+        "Reclaimed the freed pages of a " + std::to_string (outcome.before_bytes / 1024) +
         " KB database; its size afterwards could not be read");
         return;
     }
     const int64_t freed = outcome.after_bytes < outcome.before_bytes ?
     outcome.before_bytes - outcome.after_bytes :
     0;
-    vayu::utils::log_info ("Reclaimed " + std::to_string (freed / 1024) +
-    " KB of freed database pages (" + std::to_string (outcome.before_bytes / 1024) +
-    " KB -> " + std::to_string (outcome.after_bytes / 1024) + " KB)");
+    vayu::utils::log_info ("db",
+    "Reclaimed " + std::to_string (freed / 1024) + " KB of freed database pages (" +
+    std::to_string (outcome.before_bytes / 1024) + " KB -> " +
+    std::to_string (outcome.after_bytes / 1024) + " KB)");
 }
 
 /// The schema version this engine understands (issue #1514). `PRAGMA
@@ -1303,7 +1308,7 @@ Database::Database (const std::string& db_path) {
             return true;
         } catch (const std::exception& e) {
             vayu::utils::log_error (
-            "Database validation failed for " + path + ": " + e.what ());
+            "db", "Database validation failed for " + path + ": " + e.what ());
             return false;
         }
     };
@@ -1313,8 +1318,7 @@ Database::Database (const std::string& db_path) {
         // 2. The database is valid. Update the backup for *next* time - only
         // ever from a database that validated, so a bad one cannot overwrite a
         // good backup.
-        vayu::utils::log_debug (
-        "Database validation successful. Updating backup...");
+        vayu::utils::log_debug ("db", "Database validation successful. Updating backup...");
         copy_db_files (db_file, backup_file);
     } else {
         recover_database (db_file, backup_file, db_path, probe_database);
@@ -1353,7 +1357,7 @@ void Database::init () {
     // We just verify it here or perform post-init operations
 
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Initializing database...");
+    vayu::utils::log_debug ("db", "Initializing database...");
 
     // Ensure schema is synced (idempotent)
     impl_->storage.sync_schema ();
@@ -1401,10 +1405,9 @@ void Database::init () {
     // Both values are read back from the connection rather than echoed from the
     // config row: what the engine asked for and what SQLite holds are two
     // different statements, and only the second one is worth logging.
-    vayu::utils::log_debug ("Database initialized with WAL mode (cache=" +
-    std::to_string (applied_cache_size_bytes () / 1024) + "KB, " +
-    "busy_timeout=" + std::to_string (busy_timeout) + "ms, " +
-    "synchronous=" + std::to_string (applied_synchronous ()) + ")");
+    vayu::utils::log_debug ("db", "Database initialized with WAL mode",
+    { { "cacheKb", applied_cache_size_bytes () / 1024 },
+    { "busyTimeoutMs", busy_timeout }, { "synchronous", applied_synchronous () } });
 
     // Close out runs abandoned by a previous process before pruning, so an
     // orphan becomes a terminal (and therefore prunable) row in the same
@@ -1413,7 +1416,7 @@ void Database::init () {
         reconcile_orphaned_runs ();
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
-        "Startup run reconciliation failed: " + std::string (e.what ()));
+        "db", "Startup run reconciliation failed: " + std::string (e.what ()));
     }
 
     // Bindings written before the engine stamped them (issue #709) name a
@@ -1423,12 +1426,13 @@ void Database::init () {
     // not cost the user their engine.
     try {
         if (const int64_t stamped = stamp_hashless_spec_bindings (); stamped > 0) {
-            vayu::utils::log_info ("Stamped " + std::to_string (stamped) +
+            vayu::utils::log_info ("db",
+            "Stamped " + std::to_string (stamped) +
             " OpenAPI binding(s) with the version of the document they name");
         }
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
-        "Startup spec-binding repair failed: " + std::string (e.what ()));
+        "db", "Startup spec-binding repair failed: " + std::string (e.what ()));
     }
 
     // The headers a pre-#1229 client saved into the request document itself
@@ -1436,11 +1440,12 @@ void Database::init () {
     // fails must not cost the user their engine.
     try {
         if (const int64_t stripped = strip_stored_managed_headers (); stripped > 0) {
-            vayu::utils::log_info ("Disabled Vayu's own headers on " +
-            std::to_string (stripped) + " stored request(s); they are added at send time");
+            vayu::utils::log_info ("db",
+            "Disabled Vayu's own headers on " + std::to_string (stripped) +
+            " stored request(s); they are added at send time");
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("db",
         "Startup managed-header cleanup failed: " + std::string (e.what ()));
     }
 
@@ -1449,11 +1454,11 @@ void Database::init () {
     // two passes around it.
     try {
         if (const int64_t dropped = clear_inbox_requests_all (); dropped > 0) {
-            vayu::utils::log_info ("Cleared " + std::to_string (dropped) +
-            " inbox capture(s) left by a previous process");
+            vayu::utils::log_info ("db",
+            "Cleared " + std::to_string (dropped) + " inbox capture(s) left by a previous process");
         }
     } catch (const std::exception& e) {
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("db",
         "Startup inbox capture cleanup failed: " + std::string (e.what ()));
     }
 
@@ -1464,7 +1469,7 @@ void Database::init () {
         prune_runs_configured ();
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
-        "Startup run pruning failed: " + std::string (e.what ()));
+        "db", "Startup run pruning failed: " + std::string (e.what ()));
     }
 
     // Destroy what has sat in the trash past its retention (issue #988). Here
@@ -1476,7 +1481,7 @@ void Database::init () {
         purge_expired_trash_configured ();
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
-        "Startup trash purge failed: " + std::string (e.what ()));
+        "db", "Startup trash purge failed: " + std::string (e.what ()));
     }
 
     // Give the pages the sweeps above freed back to the filesystem (issue
@@ -1499,7 +1504,7 @@ void Database::init () {
         log_reclaim_outcome (reclaim_freed_pages (impl_->opened_file));
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
-        "Startup database reclamation failed: " + std::string (e.what ()));
+        "db", "Startup database reclamation failed: " + std::string (e.what ()));
     }
 }
 
@@ -1509,7 +1514,8 @@ void Database::init () {
 
 void Database::create_collection (const Collection& c) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Creating collection: id=" + c.id + ", name=" + c.name);
+    vayu::utils::log_debug (
+    "db", "Creating collection: id=" + c.id + ", name=" + c.name);
     impl_->storage.replace (c);
 }
 
@@ -1620,7 +1626,7 @@ void Database::purge_request_locked (const std::string& id) {
 // what finally destroys it.
 void Database::delete_collection (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Deleting collection (soft, cascade): id=" + id);
+    vayu::utils::log_debug ("db", "Deleting collection (soft, cascade): id=" + id);
 
     const auto subtree = collection_subtree_locked (id);
 
@@ -1681,7 +1687,7 @@ void Database::delete_collection (const std::string& id) {
 
 void Database::save_request (const Request& r) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Saving request: id=" + r.id + ", name=" + r.name);
+    vayu::utils::log_debug ("db", "Saving request: id=" + r.id + ", name=" + r.name);
     impl_->storage.replace (r);
 }
 
@@ -1713,7 +1719,7 @@ std::vector<Request> Database::get_requests_in_collection (const std::string& co
 // is, and a restore that had to re-create them could not.
 void Database::delete_request (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Deleting request (soft): id=" + id);
+    vayu::utils::log_debug ("db", "Deleting request (soft): id=" + id);
     const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
                           .count ();
@@ -1860,7 +1866,7 @@ const TrashEntry& entry) {
         }
         return true; // Commit
     });
-    vayu::utils::log_info ("Restored request from trash: id=" + entry.id);
+    vayu::utils::log_info ("db", "Restored request from trash: id=" + entry.id);
     return TrashOutcome{ entry, false };
 }
 
@@ -1899,8 +1905,9 @@ TrashOutcome Database::restore_collection_locked (const TrashEntry& entry) {
         return true; // Commit
     });
 
-    vayu::utils::log_info ("Restored collection from trash: id=" + entry.id +
-    ", +" + std::to_string (entry.collections) + " sub-collection(s), +" +
+    vayu::utils::log_info ("db",
+    "Restored collection from trash: id=" + entry.id + ", +" +
+    std::to_string (entry.collections) + " sub-collection(s), +" +
     std::to_string (entry.requests) + " request(s)" +
     (reparented ? " (re-parented to the tree root)" : ""));
     return TrashOutcome{ entry, reparented };
@@ -1939,7 +1946,7 @@ std::optional<TrashOutcome> Database::purge_deleted (const std::string& id) {
     } else {
         purge_request_locked (id);
     }
-    vayu::utils::log_info ("Purged " + entry->kind + " from trash: id=" + id);
+    vayu::utils::log_info ("db", "Purged " + entry->kind + " from trash: id=" + id);
     return TrashOutcome{ std::move (*entry), false };
 }
 
@@ -1977,8 +1984,9 @@ int64_t Database::purge_expired_trash (int retention_days, int64_t now) {
         ++purged;
     }
     if (purged > 0) {
-        vayu::utils::log_info ("Purged " + std::to_string (purged) +
-        " item(s) deleted more than " + std::to_string (retention_days) + " day(s) ago");
+        vayu::utils::log_info ("db",
+        "Purged " + std::to_string (purged) + " item(s) deleted more than " +
+        std::to_string (retention_days) + " day(s) ago");
     }
     return purged;
 }
@@ -1999,7 +2007,7 @@ int64_t Database::purge_expired_trash_configured () {
 void Database::save_request_example (const RequestExample& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
-    "Saving request example: id=" + e.id + ", request_id=" + e.request_id);
+    "db", "Saving request example: id=" + e.id + ", request_id=" + e.request_id);
     impl_->storage.replace (e);
 }
 
@@ -2064,7 +2072,7 @@ int64_t Database::count_request_examples (const std::string& request_id) {
 
 void Database::delete_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Deleting request example: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting request example: id=" + id);
     impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
 }
 
@@ -2076,7 +2084,7 @@ void Database::delete_request_example (const std::string& id) {
  */
 void Database::suppress_request_example (const std::string& id, int64_t now) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Suppressing imported request example: id=" + id);
+    vayu::utils::log_debug ("db", "Suppressing imported request example: id=" + id);
     auto rows =
     impl_->storage.get_all<RequestExample> (where (c (&RequestExample::id) == id));
     if (rows.empty ()) {
@@ -2098,7 +2106,8 @@ void Database::suppress_request_example (const std::string& id, int64_t now) {
 
 void Database::save_spec_document (const SpecDocument& s) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Saving spec document: id=" + s.id + ", hash=" + s.hash);
+    vayu::utils::log_debug (
+    "db", "Saving spec document: id=" + s.id + ", hash=" + s.hash);
     impl_->storage.replace (s);
 }
 
@@ -2141,7 +2150,7 @@ std::vector<Collection> Database::get_collections_bound_to_spec (const std::stri
 
 void Database::delete_spec_document (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Deleting spec document: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting spec document: id=" + id);
     impl_->storage.remove_all<SpecDocument> (where (c (&SpecDocument::id) == id));
 }
 
@@ -2258,14 +2267,15 @@ size_t Database::sweep_orphaned_spec_documents () {
             return true; // Commit
         });
 
-        vayu::utils::log_info ("Swept " + std::to_string (candidates.size ()) +
+        vayu::utils::log_info ("db",
+        "Swept " + std::to_string (candidates.size ()) +
         " OpenAPI document(s) no collection binds and no retained run names");
         return candidates.size ();
     } catch (const std::exception& e) {
         // Best-effort by contract - see the header for why a caller must not
         // fail over this.
         vayu::utils::log_warning (
-        "OpenAPI document sweep failed: " + std::string (e.what ()));
+        "db", "OpenAPI document sweep failed: " + std::string (e.what ()));
         return 0;
     }
 }
@@ -2420,7 +2430,8 @@ const std::vector<SpecDocument>& specs) {
         return;
     }
 
-    vayu::utils::log_debug ("Applying import: " + std::to_string (collections.size ()) +
+    vayu::utils::log_debug ("db",
+    "Applying import: " + std::to_string (collections.size ()) +
     " collections, " + std::to_string (requests.size ()) + " requests, " +
     std::to_string (environments.size ()) + " environments, " +
     std::to_string (examples.size ()) + " examples, " +
@@ -2480,7 +2491,8 @@ const std::vector<Request>& requests) {
         return;
     }
 
-    vayu::utils::log_debug ("Applying reorder: " + std::to_string (collections.size ()) +
+    vayu::utils::log_debug ("db",
+    "Applying reorder: " + std::to_string (collections.size ()) +
     " collections, " + std::to_string (requests.size ()) + " requests");
 
     retry_on_busy ("apply reorder", 5, std::chrono::milliseconds (100), [&] {
@@ -2577,7 +2589,8 @@ void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
 void Database::spec_sync_apply (const SpecSyncBatch& batch) {
     // "spec write" rather than "sync": `POST /specs/bind` commits through this
     // same batch (issue #862), with its create and delete halves empty.
-    vayu::utils::log_debug ("Applying spec write: collection=" + batch.binding.id +
+    vayu::utils::log_debug ("db",
+    "Applying spec write: collection=" + batch.binding.id +
     ", spec=" + batch.spec.id + ", +" + std::to_string (batch.created.size ()) +
     " requests, ~" + std::to_string (batch.updated.size ()) + ", -" +
     std::to_string (batch.deleted.size ()) + ", " +
@@ -2626,8 +2639,9 @@ void Database::deactivate_other_environments_locked (const std::string& keep_id)
 
 void Database::save_environment (const Environment& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Saving environment: id=" + e.id +
-    ", name=" + e.name + ", is_active=" + (e.is_active ? "true" : "false"));
+    vayu::utils::log_debug ("db",
+    "Saving environment: id=" + e.id + ", name=" + e.name +
+    ", is_active=" + (e.is_active ? "true" : "false"));
     impl_->storage.transaction ([&] {
         if (e.is_active) {
             deactivate_other_environments_locked (e.id);
@@ -2652,7 +2666,7 @@ std::optional<Environment> Database::get_environment (const std::string& id) {
 
 void Database::delete_environment (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Deleting environment: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting environment: id=" + id);
     impl_->storage.remove_all<Environment> (where (c (&Environment::id) == id));
 }
 
@@ -2667,7 +2681,7 @@ void Database::delete_environment (const std::string& id) {
 void Database::save_client_certificate (const ClientCertificate& c) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
-    "Saving client certificate: id=" + c.id + ", host=" + c.host);
+    "db", "Saving client certificate: id=" + c.id + ", host=" + c.host);
     impl_->storage.replace (c);
 }
 
@@ -2687,7 +2701,7 @@ std::optional<ClientCertificate> Database::get_client_certificate (const std::st
 
 void Database::delete_client_certificate (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Deleting client certificate: id=" + id);
+    vayu::utils::log_debug ("db", "Deleting client certificate: id=" + id);
     impl_->storage.remove_all<ClientCertificate> (where (c (&ClientCertificate::id) == id));
 }
 
@@ -2697,7 +2711,7 @@ void Database::delete_client_certificate (const std::string& id) {
 
 void Database::save_globals (const Globals& g) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Saving globals");
+    vayu::utils::log_debug ("db", "Saving globals");
     impl_->storage.replace (g);
 }
 
@@ -2739,8 +2753,8 @@ void Database::delete_oauth_token (const std::string& cache_key) {
 
 void Database::create_run (const Run& run) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Creating run: id=" + run.id +
-    ", type=" + std::string (vayu::to_string (run.type)));
+    vayu::utils::log_debug ("db",
+    "Creating run: id=" + run.id + ", type=" + std::string (vayu::to_string (run.type)));
     impl_->storage.replace (run);
 }
 
@@ -2754,8 +2768,8 @@ std::optional<Run> Database::get_run (const std::string& id) {
 
 void Database::update_run_status (const std::string& id, RunStatus status) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Updating run status: id=" + id +
-    ", status=" + std::string (vayu::to_string (status)));
+    vayu::utils::log_debug ("db",
+    "Updating run status: id=" + id + ", status=" + std::string (vayu::to_string (status)));
     auto run = get_run (id);
     if (run) {
         run->status   = status;
@@ -2768,7 +2782,7 @@ void Database::update_run_status (const std::string& id, RunStatus status) {
 
 void Database::update_run_end_time (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("Updating run end_time: id=" + id);
+    vayu::utils::log_debug ("db", "Updating run end_time: id=" + id);
     auto run = get_run (id);
     if (run) {
         run->end_time = std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -2889,7 +2903,7 @@ void Database::update_run_summary (const std::string& id, const std::string& sum
         auto run = get_run (id);
         if (!run) {
             vayu::utils::log_warning (
-            "Run summary write skipped, run not found: " + id);
+            "db", "Run summary write skipped, run not found: " + id);
             return;
         }
         run->summary = summary;
@@ -2984,7 +2998,8 @@ void Database::prune_runs (int max_runs, int max_age_days) {
         });
     }
 
-    vayu::utils::log_info ("Pruned " + std::to_string (victims.size ()) +
+    vayu::utils::log_info ("db",
+    "Pruned " + std::to_string (victims.size ()) +
     " old run(s) (max_runs=" + std::to_string (max_runs) +
     ", max_age_days=" + std::to_string (max_age_days) + ")");
 }
@@ -3012,7 +3027,8 @@ size_t Database::reconcile_orphaned_runs () {
         return true; // Commit
     });
 
-    vayu::utils::log_info ("Reconciled " + std::to_string (orphans.size ()) +
+    vayu::utils::log_info ("db",
+    "Reconciled " + std::to_string (orphans.size ()) +
     " run(s) left in-flight by a previous process (marked failed)");
     return orphans.size ();
 }
@@ -3158,8 +3174,8 @@ int64_t prune_backup_files (const fs::path& directory, int keep) {
             // still has, which is the safe direction for this feature to fail
             // in. It is said out loud rather than swallowed, because a
             // retention setting that silently stops applying grows a disk.
-            vayu::utils::log_warning ("Could not prune the backup " +
-            oldest.string () + ": " + remove_ec.message ());
+            vayu::utils::log_warning ("db",
+            "Could not prune the backup " + oldest.string () + ": " + remove_ec.message ());
         }
     }
     return removed;
@@ -3259,10 +3275,11 @@ std::expected<BackupRecord, BackupFailure> Database::backup_workspace (int64_t n
         vayu::core::constants::database::MAX_BACKUPS_RETAINED));
     } catch (const std::exception& e) {
         vayu::utils::log_warning (
-        "Backup retention did not run: " + std::string (e.what ()));
+        "db", "Backup retention did not run: " + std::string (e.what ()));
     }
 
-    vayu::utils::log_info ("Workspace backed up to " + record.path + " (" +
+    vayu::utils::log_info ("db",
+    "Workspace backed up to " + record.path + " (" +
     std::to_string (record.size_bytes) + " bytes" +
     (record.pruned > 0 ? ", pruned " + std::to_string (record.pruned) + " older snapshot(s)" : "") +
     ")");
@@ -3548,12 +3565,14 @@ const std::function<void ()>& fn) {
             }
             if (attempt == attempts - 1) {
                 // Busy persisted through every attempt - log and rethrow.
-                vayu::utils::log_error (std::string ("Failed to ") + what +
-                " after " + std::to_string (attempts) + " attempts: " + error_msg);
+                vayu::utils::log_error ("db",
+                std::string ("Failed to ") + what + " after " +
+                std::to_string (attempts) + " attempts: " + error_msg);
                 throw;
             }
-            vayu::utils::log_debug (std::string ("Database locked during ") + what +
-            ", retrying in " + std::to_string (base.count () * (attempt + 1)) + "ms (attempt " +
+            vayu::utils::log_debug ("db",
+            std::string ("Database locked during ") + what + ", retrying in " +
+            std::to_string (base.count () * (attempt + 1)) + "ms (attempt " +
             std::to_string (attempt + 1) + "/" + std::to_string (attempts) + ")");
         }
         // The lock_guard scope above has ended: we sleep *without* holding the
@@ -3635,7 +3654,7 @@ int Database::get_config_int (const std::string& key, int default_value) {
     try {
         return std::stoi (entry->value);
     } catch (...) {
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("db",
         "Database: Failed to parse int for key " + key + ", using default");
         return default_value;
     }
@@ -3669,7 +3688,7 @@ double Database::get_config_double (const std::string& key, double default_value
     try {
         return std::stod (entry->value);
     } catch (...) {
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("db",
         "Database: Failed to parse double for key " + key + ", using default");
         return default_value;
     }
@@ -4703,9 +4722,10 @@ void Database::seed_default_config () {
     seed_transaction.commit ();
 
     if (existing.empty ()) {
-        vayu::utils::log_info ("Seeded default configuration values");
+        vayu::utils::log_info ("db", "Seeded default configuration values");
     } else {
-        vayu::utils::log_info ("Updated configuration metadata for " +
+        vayu::utils::log_info ("db",
+        "Updated configuration metadata for " +
         std::to_string (existing.size ()) + " existing entries");
     }
 }

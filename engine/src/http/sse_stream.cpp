@@ -567,7 +567,7 @@ namespace {
  */
 void log_unrecoverable (std::string_view what, std::string_view detail) noexcept {
     try {
-        vayu::utils::log_error (std::string (what) + ": " + std::string (detail));
+        vayu::utils::log_error ("http", std::string (what) + ": " + std::string (detail));
     } catch (...) {
         // @deliberate the logger failed while reporting a failure in a frame
         // that terminates if anything escapes it. There is nowhere left to
@@ -656,7 +656,7 @@ std::shared_ptr<SseStreamContext> SseStreamManager::start (SseStreamRequest requ
                 // A worker thread has no handler above it, and a stream that
                 // threw must still reach a terminal state or its run is
                 // stranded running forever.
-                vayu::utils::log_error (
+                vayu::utils::log_error ("http",
                 "SSE stream failed: " + context->run_id + ": " + e.what ());
                 response.status_code   = 0;
                 response.status_text   = vayu::http::status_text (0);
@@ -668,7 +668,7 @@ std::shared_ptr<SseStreamContext> SseStreamManager::start (SseStreamRequest requ
                 try {
                     spec.on_complete (spec.request, response, *context);
                 } catch (const std::exception& e) {
-                    vayu::utils::log_error (
+                    vayu::utils::log_error ("http",
                     "Failed to record SSE stream result: " + context->run_id +
                     ": " + e.what ());
                 }

@@ -582,8 +582,8 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
             // The sender is told the truth: nothing was recorded. Answering the
             // canned response here would make a dropped capture invisible on
             // both sides.
-            vayu::utils::log_error ("Inbox " + raw->id +
-            " could not store a capture: " + std::string (e.what ()));
+            vayu::utils::log_error ("inbox",
+            "Inbox " + raw->id + " could not store a capture: " + std::string (e.what ()));
             res.status = 500;
             res.set_content (routes::error_body (500, "Inbox capture could not be stored", "inbox_store_failed")
                              .dump (),
@@ -658,7 +658,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     out.ok          = true;
     out.http_status = 200;
     vayu::utils::log_info (
-    "Inbox started: " + out.info.inbox_id + " on " + out.info.url);
+    "inbox", "Inbox started: " + out.info.inbox_id + " on " + out.info.url);
     return out;
 }
 
@@ -669,7 +669,7 @@ bool InboxManager::stop (const std::string& inbox_id) {
         return false;
     }
     teardown_locked (*it->second);
-    vayu::utils::log_info ("Inbox stopped: " + inbox_id);
+    vayu::utils::log_info ("inbox", "Inbox stopped: " + inbox_id);
     return true;
 }
 
@@ -686,7 +686,7 @@ InboxManager::remove (vayu::db::Database& db, const std::string& inbox_id) {
     teardown_locked (*it->second);
     const int64_t deleted = db.clear_inbox_requests (inbox_id);
     inboxes_.erase (it);
-    vayu::utils::log_info (
+    vayu::utils::log_info ("inbox",
     "Inbox deleted: " + inbox_id + " (" + std::to_string (deleted) + " captures)");
     return deleted;
 }
@@ -893,7 +893,7 @@ const std::function<void ()>& before_write) {
         return { 404, error_body (404, "Inbox not found") };
     }
     if (result.error) {
-        vayu::utils::log_warning ("PUT /inbox/:id - " + result.error->message);
+        vayu::utils::log_warning ("inbox", "PUT /inbox/:id - " + result.error->message);
         return { result.error->http_status,
             error_body (result.error->http_status, result.error->message,
             result.error->code) };
@@ -953,20 +953,22 @@ void handle_start_inbox (RouteContext& ctx, const httplib::Request& req, httplib
     }
     const auto start = parse_inbox_start (body);
     if (!start) {
-        vayu::utils::log_warning ("POST /inbox/start - " + start.error ().message);
+        vayu::utils::log_warning (
+        "inbox", "POST /inbox/start - " + start.error ().message);
         send_parse_error (res, start.error ());
         return;
     }
     try {
         auto result = ctx.inbox_manager.start (ctx.db, *start);
         if (!result.ok) {
-            vayu::utils::log_warning ("POST /inbox/start - " + result.error_message);
+            vayu::utils::log_warning ("inbox", "POST /inbox/start - " + result.error_message);
             send_error (res, result.http_status, result.error_message, result.error_code);
             return;
         }
         send_json (res, inbox_json (ctx.db, result.info));
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("POST /inbox/start - Error: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "inbox", "POST /inbox/start - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -996,7 +998,8 @@ void handle_delete_inbox (RouteContext& ctx, const httplib::Request& req, httpli
         send_json (res,
         nlohmann::json{ { "inboxId", inbox_id }, { "capturesDeleted", *deleted } });
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("DELETE /inbox/:id - Error: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "inbox", "DELETE /inbox/:id - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -1041,7 +1044,7 @@ httplib::Response& res) {
         res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error (
-        "GET /inbox/:id/requests - Error: " + std::string (e.what ()));
+        "inbox", "GET /inbox/:id/requests - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -1058,7 +1061,7 @@ httplib::Response& res) {
         const int64_t cleared = ctx.db.clear_inbox_requests (inbox_id);
         send_json (res, nlohmann::json{ { "inboxId", inbox_id }, { "cleared", cleared } });
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
+        vayu::utils::log_error ("inbox",
         "DELETE /inbox/:id/requests - Error: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
@@ -1091,7 +1094,8 @@ httplib::DataSink& sink) {
     try {
         fresh = ctx.db.get_inbox_requests_since (inbox_id, last_id);
     } catch (const std::exception& e) {
-        vayu::utils::log_warning ("GET /inbox/:id/live - " + std::string (e.what ()));
+        vayu::utils::log_warning (
+        "inbox", "GET /inbox/:id/live - " + std::string (e.what ()));
         return InboxStep::Ended;
     }
     for (const auto& capture : fresh) {

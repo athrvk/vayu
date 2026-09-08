@@ -295,7 +295,7 @@ const std::string& mode) {
         reap_timed_out_locked ();
         attempts_[attempt_id] = std::move (attempt);
     }
-    vayu::utils::log_info ("OAuth2 authorize started (" + mode + "): " + attempt_id);
+    vayu::utils::log_info ("oauth", "OAuth2 authorize started (" + mode + "): " + attempt_id);
     return out;
 }
 

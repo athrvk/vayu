@@ -39,6 +39,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
 
@@ -69,6 +71,9 @@ struct TransferDebug {
     /// followed redirect reports the request that produced the response the
     /// caller is looking at.
     std::string last_header_out;
+    /// The redacted, per-line collector for the one `cat=client` record this
+    /// transfer emits (issue #1557) - empty when verbosity never reached 2.
+    std::vector<std::string> debug_lines;
 };
 
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
@@ -87,23 +92,21 @@ int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, v
         return 0;
     }
 
-    std::string text (data, size);
-    // Remove trailing newlines
-    while (!text.empty () && (text.back () == '\n' || text.back () == '\r')) {
-        text.pop_back ();
-    }
-
-    switch (type) {
-    case CURLINFO_TEXT: vayu::utils::log_debug ("* " + text); break;
-    case CURLINFO_HEADER_OUT:
-        vayu::utils::log_debug ("> " + vayu::http::detail::redact_header_line (text));
-        break;
-    case CURLINFO_HEADER_IN:
-        vayu::utils::log_debug ("< " + vayu::http::detail::redact_header_line (text));
-        break;
-    default: break;
-    }
+    vayu::http::detail::collect_debug_frame (
+    debug->debug_lines, type, std::string_view (data, size));
     return 0;
+}
+
+/// Emits @p debug's collected lines as one `cat=client` record, if verbosity
+/// ever reached 2 for this transfer. Called once, after the transfer this
+/// `TransferDebug` was set up for has finished.
+void flush_transfer_debug (TransferDebug& debug) {
+    if (debug.debug_lines.empty ()) {
+        return;
+    }
+    nlohmann::json fields;
+    fields["lines"] = debug.debug_lines;
+    vayu::utils::log_debug ("client", "curl exchange", fields);
 }
 
 /**
@@ -571,6 +574,7 @@ Result<Response> Client::send (const Request& request) {
     auto submitted_at = std::chrono::steady_clock::now ();
     CURLcode res      = curl_easy_perform (curl);
     auto completion   = std::chrono::steady_clock::now ();
+    flush_transfer_debug (transfer_debug);
 
     // Cleanup headers and the multipart body, both of which had to outlive the
     // transfer that just finished.
@@ -620,7 +624,7 @@ Result<Response> Client::send (const Request& request) {
         // `http://` request never attempts it. Naming that is why this is one
         // message with a suffix and not two call sites.
         const bool cleartext = request.url.rfind ("http://", 0) == 0;
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("client",
         "HTTP/2 was requested but the connection negotiated " +
         response.http_version + " - " + request.url +
         (cleartext ?
@@ -742,8 +746,9 @@ TlsBackendSelection pin_tls_backend () {
             // about a backend it did not choose, so it is said once and loudly
             // rather than discovered by a user whose mTLS stopped working.
             const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
-            vayu::utils::log_error ("Could not select the OpenSSL TLS backend "
-                                    "(curl_global_sslset returned " +
+            vayu::utils::log_error ("client",
+            "Could not select the OpenSSL TLS backend "
+            "(curl_global_sslset returned " +
             std::to_string (static_cast<int> (result)) + "); this build verifies with '" +
             std::string (info != nullptr && info->ssl_version != nullptr ? info->ssl_version : "unknown") +
             "'. On a MultiSSL build that means CURL_SSL_BACKEND in the "

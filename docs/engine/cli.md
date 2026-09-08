@@ -70,8 +70,8 @@ is a manual copy with the engine stopped, described in
 | Option | Description |
 |--------|-------------|
 | `-h, --help` | Show help message |
-| `-v, --version` | Show version information |
-| `--verbose [LEVEL]` | Enable verbose output. LEVEL is 0 (warn/error), 1 (info) or 2 (debug); `--verbose` on its own means 1. A level outside 0-2, or one that is not a whole number, is refused with exit code 1 |
+| `-v, --verbose [LEVEL]` | Enable verbose output. LEVEL is 0 (warn/error), 1 (info) or 2 (debug); `-v`/`--verbose` on its own means 1. A level outside 0-2, or one that is not a whole number, is refused with exit code 1. The same flag `vayu-engine` has always read `-v` as |
+| `--version` | Show version information (long form only - `-v` is `--verbose`) |
 | *(anything else)* | Refused, naming the argument, with exit code 1 |
 | `--no-color` | Disable colored output |
 | `--daemon <url>` | Vayu Engine URL (default: http://127.0.0.1:9876) |

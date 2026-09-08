@@ -98,7 +98,7 @@ const std::optional<std::string>& request_id) {
             }
         } catch (const std::exception& e) {
             // A lookup failure costs the script a name, never the request.
-            vayu::utils::log_warning (
+            vayu::utils::log_warning ("http",
             "pm.info.requestName lookup failed: " + std::string (e.what ()));
         }
     }
@@ -923,16 +923,17 @@ const nlohmann::json& elements) {
         try {
             db.prune_runs_configured ();
         } catch (const std::exception& e) {
-            vayu::utils::log_warning ("Run pruning failed: " + std::string (e.what ()));
+            vayu::utils::log_warning (
+            "http", "Run pruning failed: " + std::string (e.what ()));
         }
 
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("Failed to save result: " + std::string (e.what ()));
+        vayu::utils::log_error (
+        "http", "Failed to save result: " + std::string (e.what ()));
         try {
             db.update_run_status_with_retry (*run_id, vayu::RunStatus::Failed);
         } catch (...) {
-            vayu::utils::log_error (
-            "Failed to update run status after save error");
+            vayu::utils::log_error ("http", "Failed to update run status after save error");
         }
     }
 }
@@ -1133,7 +1134,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
         json = nlohmann::json::parse (req.body);
     } catch (const nlohmann::json::exception& e) {
         vayu::utils::log_warning (
-        "POST /execute - Invalid JSON: " + std::string (e.what ()));
+        "http", "POST /execute - Invalid JSON: " + std::string (e.what ()));
         return "Invalid JSON: " + std::string (e.what ());
     }
 
@@ -1142,7 +1143,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // believed would leave no trace.
     const auto transient = read_transient_flag (json);
     if (!transient.ok) {
-        vayu::utils::log_warning ("POST /execute - " + transient.error);
+        vayu::utils::log_warning ("http", "POST /execute - " + transient.error);
         return transient.error;
     }
 
@@ -1151,7 +1152,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // is built or written rather than a send the caller did not ask for.
     auto stream = read_stream_flag (json);
     if (!stream.ok) {
-        vayu::utils::log_warning ("POST /execute - " + stream.error);
+        vayu::utils::log_warning ("http", "POST /execute - " + stream.error);
         return stream.error;
     }
 
@@ -1160,7 +1161,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // / `tests` is refused before anything is built or written, exactly as
     // the two write routes refuse them.
     if (auto refusal = refuse_legacy_script_fields (json)) {
-        vayu::utils::log_warning ("POST /execute - " + *refusal);
+        vayu::utils::log_warning ("http", "POST /execute - " + *refusal);
         return refusal;
     }
 
@@ -1172,7 +1173,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
     static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES))));
     if (!data_row.ok) {
-        vayu::utils::log_warning ("POST /execute - " + data_row.error);
+        vayu::utils::log_warning ("http", "POST /execute - " + data_row.error);
         return data_row.error;
     }
 
@@ -1189,7 +1190,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     vayu::http::BoundColumnNames{};
     auto row_auth          = plan_send_row_auth (json, row_columns);
     if (!row_auth.ok) {
-        vayu::utils::log_warning ("POST /execute - " + row_auth.error);
+        vayu::utils::log_warning ("http", "POST /execute - " + row_auth.error);
         return row_auth.error;
     }
 
@@ -1203,7 +1204,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     auto built =
     vayu::http::build_request (json, &ctx.db, request_timeout_ms, row_auth.resolution);
     if (built.parse_failed) {
-        vayu::utils::log_warning ("POST /execute - Invalid request format");
+        vayu::utils::log_warning ("http", "POST /execute - Invalid request format");
         return built.error_message;
     }
 
@@ -1233,7 +1234,7 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     vayu::core::tokenize_bindable_fields (built.request), row_auth.auth,
     row_auth.credentials, binding);
     if (!bound.ok) {
-        vayu::utils::log_warning ("POST /execute - " + bound.error);
+        vayu::utils::log_warning ("http", "POST /execute - " + bound.error);
         return bound.error;
     }
     out.json      = std::move (json);
@@ -1291,7 +1292,7 @@ DesignSend& send) {
     // 400 before any run row exists.
     auto resolved_name = resolve_script_request_name (ctx.db, json, send.run.request_id);
     if (!resolved_name.ok) {
-        vayu::utils::log_warning ("POST /execute - " + resolved_name.error);
+        vayu::utils::log_warning ("http", "POST /execute - " + resolved_name.error);
         return resolved_name.error;
     }
     send.script_request_name = std::move (resolved_name.name);
@@ -1311,18 +1312,19 @@ DesignSend& send) {
     }
 
     // Log request details
-    vayu::utils::log_info (
-    "POST /execute - Design Mode: run_id=" + send.run_id.value_or ("none (transient)") +
-    ", method=" + json.value ("method", "UNKNOWN") + ", url=" + json.value ("url", "UNKNOWN") +
-    ", request_id=" + send.run.request_id.value_or ("none") +
-    ", environment_id=" + send.run.environment_id.value_or ("none") +
-    ", elements=" + std::to_string (send.elements ? send.elements->size () : 0));
+    vayu::utils::log_info ("http", "Design Mode send",
+    { { "runId", send.run_id.value_or ("none (transient)") },
+    { "method", json.value ("method", "UNKNOWN") }, { "url", json.value ("url", "UNKNOWN") },
+    { "requestId", send.run.request_id.value_or ("none") },
+    { "environmentId", send.run.environment_id.value_or ("none") },
+    { "elements", send.elements ? send.elements->size () : 0 } });
 
     if (send.run_id) {
         try {
             ctx.db.create_run (send.run);
         } catch (const std::exception& e) {
-            vayu::utils::log_error ("Failed to create run: " + std::string (e.what ()));
+            vayu::utils::log_error (
+            "http", "Failed to create run: " + std::string (e.what ()));
             return "Failed to create run record";
         }
     }
@@ -1375,12 +1377,12 @@ const std::string& run_id,
 int status,
 const std::string& reason,
 std::string_view code = {}) {
-    vayu::utils::log_warning (
+    vayu::utils::log_warning ("http",
     "POST /execute - Stream refused for run: " + run_id + " - " + reason);
     try {
         ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
+        vayu::utils::log_error ("http",
         "Failed to fail a refused stream run: " + std::string (e.what ()));
     }
     send_error (res, status, reason, code);
@@ -1627,7 +1629,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                 }
                 scripts = build_script_result_node (pre_script_result, post_script_result);
             } catch (const std::exception& e) {
-                vayu::utils::log_error (
+                vayu::utils::log_error ("http",
                 "Stream post-request script failed: " + std::string (e.what ()));
             }
             // Best-effort and after both scripts, so one `set()` per
@@ -1817,7 +1819,7 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
     if (is_scenario_load) {
         if (auto invalid = vayu::core::validate_scenario_load_config (json)) {
             vayu::utils::log_warning (
-            "POST /runs - Invalid scenario load config: " + *invalid);
+            "http", "POST /runs - Invalid scenario load config: " + *invalid);
             return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
         }
     }
@@ -1828,22 +1830,22 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
     // to apply it to yet (see `docs/engine/elements.md`'s Load paths
     // section), so this accepts the key there without it doing anything.
     if (auto invalid = vayu::core::validate_elements_run_override (json)) {
-        vayu::utils::log_warning ("POST /runs - Invalid elements override: " + *invalid);
+        vayu::utils::log_warning (
+        "http", "POST /runs - Invalid elements override: " + *invalid);
         return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
     }
 
     // Validate required fields
     if (!is_scenario) {
         if (!json.contains ("method") || !json.contains ("url")) {
-            vayu::utils::log_warning (
-            "POST /runs - Missing required fields: method, url");
+            vayu::utils::log_warning ("http", "POST /runs - Missing required fields: method, url");
             return RouteError{ 400, error_body (400, "Missing required fields: method, url") };
         }
 
         if (!json.contains ("mode") && !json.contains ("duration") &&
         !json.contains ("iterations")) {
             vayu::utils::log_warning (
-            "POST /runs - Missing mode/duration/iterations config");
+            "http", "POST /runs - Missing mode/duration/iterations config");
             return RouteError{ 400,
                 error_body (400, "Must specify either 'mode' with 'duration' or 'iterations'") };
         }
@@ -1854,7 +1856,7 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
     // specific code this failure carries in place of the per-status default.
     if (auto invalid =
         validate_run_config (json, vayu::core::read_monitor_limits (ctx.db))) {
-        vayu::utils::log_warning ("POST /runs - Invalid run config: " + *invalid);
+        vayu::utils::log_warning ("http", "POST /runs - Invalid run config: " + *invalid);
         return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
     }
 
@@ -1864,7 +1866,7 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
     // still reflects the raw client body (sanitize_config_snapshot reads
     // req.body directly, not this normalized `json`).
     if (auto outcome = normalize_run_http_version (json); !outcome) {
-        vayu::utils::log_warning (
+        vayu::utils::log_warning ("http",
         "POST /runs - Invalid httpVersion: " + outcome.error ().body.dump ());
         return outcome.error ();
     }
@@ -1903,7 +1905,8 @@ nlohmann::json& scenario_manifest) {
 
     auto resolved = vayu::core::resolve_scenario (ctx.db, json["scenario"], options);
     if (!resolved.ok) {
-        vayu::utils::log_warning ("POST /runs - Invalid scenario: " + resolved.error);
+        vayu::utils::log_warning (
+        "http", "POST /runs - Invalid scenario: " + resolved.error);
         return RouteError{ 400, error_body (400, resolved.error, "invalid_scenario") };
     }
     if (vayu::core::is_scenario_load_run (json)) {
@@ -1929,10 +1932,10 @@ nlohmann::json& scenario_manifest) {
     execution->spec    = std::move (resolved.spec);
     scenario_execution = std::move (execution);
 
-    vayu::utils::log_info (
-    "POST /runs - Scenario: collection=" + scenario_execution->request.collection_id +
-    ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
-    ", iterations=" + std::to_string (scenario_execution->request.iterations));
+    vayu::utils::log_info ("run", "Scenario resolved",
+    { { "collection", scenario_execution->request.collection_id },
+    { "steps", scenario_execution->plan.steps.size () },
+    { "iterations", scenario_execution->request.iterations } });
     return std::nullopt;
 }
 
@@ -1984,7 +1987,7 @@ std::optional<RouteError> preflight_run_auth (RouteContext& ctx, const nlohmann:
     vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db);
     if (!preflight.ok) {
         vayu::utils::log_warning (
-        "POST /runs - Auth pre-flight failed: " + preflight.message);
+        "http", "POST /runs - Auth pre-flight failed: " + preflight.message);
         const int status = (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
         return RouteError{ status,
             error_body (status, preflight.message, preflight.detail_code) };
@@ -2009,21 +2012,21 @@ const vayu::core::ScenarioExecution* scenario_execution) {
     }
 
     if (scenario_execution != nullptr) {
-        vayu::utils::log_info ("Collection run started: run_id=" + run_id +
-        ", collection=" + scenario_execution->request.collection_id +
-        ", steps=" + std::to_string (scenario_execution->plan.steps.size ()) +
-        ", iterations=" + std::to_string (scenario_execution->request.iterations) +
-        ", environment_id=" + run.environment_id.value_or ("none"));
+        vayu::utils::log_info ("run", "Collection run started",
+        { { "runId", run_id }, { "collection", scenario_execution->request.collection_id },
+        { "steps", scenario_execution->plan.steps.size () },
+        { "iterations", scenario_execution->request.iterations },
+        { "environmentId", run.environment_id.value_or ("none") } });
     } else {
-        vayu::utils::log_info ("Load test started: run_id=" + run_id +
-        ", mode=" + json.value ("mode", "unspecified") +
-        ", method=" + json.value ("method", "UNKNOWN") +
-        ", url=" + json.value ("url", "UNKNOWN") + ", duration=" + duration_str +
-        ", iterations=" + std::to_string (json.value ("iterations", 0)) +
-        ", rps=" + std::to_string (json.value ("rps", json.value ("targetRps", 0))) +
-        ", concurrency=" + std::to_string (json.value ("concurrency", 1)) +
-        ", request_id=" + run.request_id.value_or ("none") +
-        ", environment_id=" + run.environment_id.value_or ("none"));
+        vayu::utils::log_info ("run", "Load test started",
+        { { "runId", run_id }, { "mode", json.value ("mode", "unspecified") },
+        { "method", json.value ("method", "UNKNOWN") },
+        { "url", json.value ("url", "UNKNOWN") }, { "duration", duration_str },
+        { "iterations", json.value ("iterations", 0) },
+        { "rps", json.value ("rps", json.value ("targetRps", 0)) },
+        { "concurrency", json.value ("concurrency", 1) },
+        { "requestId", run.request_id.value_or ("none") },
+        { "environmentId", run.environment_id.value_or ("none") } });
     }
 }
 
@@ -2035,7 +2038,8 @@ httplib::Response& res) {
     try {
         json = nlohmann::json::parse (req.body);
     } catch (const nlohmann::json::exception& e) {
-        vayu::utils::log_warning ("POST /runs - Invalid JSON: " + std::string (e.what ()));
+        vayu::utils::log_warning (
+        "http", "POST /runs - Invalid JSON: " + std::string (e.what ()));
         send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
         return;
     }
@@ -2075,7 +2079,7 @@ httplib::Response& res) {
     // engine cannot read must leave no run row behind.
     auto load_data = read_load_data_set (json, load_data_limits (ctx.db), is_scenario);
     if (!load_data.ok) {
-        vayu::utils::log_warning ("POST /runs - " + load_data.error);
+        vayu::utils::log_warning ("http", "POST /runs - " + load_data.error);
         send_error (res, 400, load_data.error, "invalid_run_config");
         return;
     }
@@ -2126,7 +2130,7 @@ httplib::Response& res) {
         ctx.db.create_run (run);
     } catch (const std::exception& e) {
         vayu::utils::log_error (
-        "POST /runs - Failed to create run: " + std::string (e.what ()));
+        "http", "POST /runs - Failed to create run: " + std::string (e.what ()));
         send_error (res, 400, "Failed to create run record");
         return;
     }
