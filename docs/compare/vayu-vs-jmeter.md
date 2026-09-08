@@ -66,7 +66,11 @@ engine-side, and its `pm.*` scripts, is what the load run drives. Collections ru
 as ordered scenarios with per-step results and threshold verdicts, driven from a
 CSV, TSV, JSON or JSONL file when you need each virtual user to send different
 data. Existing work comes across too - Postman v2.0/v2.1, Insomnia v4, and
-OpenAPI 3.1/3.0 or Swagger 2.0 specs generate a ready-to-use collection.
+OpenAPI 3.1/3.0 or Swagger 2.0 specs generate a ready-to-use collection. JMeter's
+setUp / tearDown thread groups, which run once before or once after the whole
+test, are `script.setup` / `script.teardown` here - elements on the collection
+itself, run once at the run's own start or end in either run mode, rather than
+a thread group of their own.
 
 ## When to choose JMeter
 
@@ -80,13 +84,22 @@ are things Vayu plans to catch up on:
   test from many machines. Vayu runs from one.
 - **You have existing `.jmx` test plans**, or a team fluent in them. There is no
   importer for them here.
-- **Your load model is elaborate** - think time and pacing timers, logic
-  controllers (loops, conditionals, transactions). Vayu runs closed-loop
-  constant concurrency and a linear scenario. Correlation across a scenario's
-  steps - a login's token reaching the next step's header, per virtual user -
-  does work under load now: mark the extracting element or script `inline`
-  (or set the run's `elements.scripts` override), or let it stay in the
-  post-run replay by default.
+- **Your load model needs a shared cadence or a load-run logic jump.** Think
+  time and pacing timers work under load now (`timer.think`, including a
+  gaussian option, and `timer.pacing`), and logic controllers - conditionals,
+  once-only, throughput, loops and named transactions - are elements
+  (`control.if` / `.once` / `.switch` / `.throughput` / `.loop` /
+  `.transaction`) that run fully in a sequential collection run and, for
+  `control.if` / `.once` / `.throughput` / `.transaction`, under load too.
+  What still doesn't: a pacing cadence shared across every virtual user
+  (`perUser: false`), and `control.switch` / `.loop` under load, since both
+  need a load run's virtual users to jump, which they cannot do yet (#1569) -
+  a load run carrying either is refused rather than silently run once
+  through. Correlation across a scenario's steps - a login's token reaching
+  the next step's header, per virtual user - does work under load now too:
+  mark the extracting element or script `inline` (or set the run's
+  `elements.scripts` override), or let it stay in the post-run replay by
+  default.
 - **It has to be JVM-native** for your infrastructure, monitoring, or compliance
   reasons.
 

@@ -403,9 +403,16 @@ logged as a warning: it means a client skipped composition.
   for good - the two columns are gone (`Database::migrate_before_sync`
   folds a pre-cutover row's scripts into `elements` first), and
   `preRequestScript` / `postRequestScript` / `tests` are refused wherever
-  `elements` is now the only script source. The pipeline runs in the design
-  send, the sequential (single-VU) collection run, and - since #1495 - a
-  scenario **load** run's own producer/completion hooks
+  `elements` is now the only script source. #1515 landed the controller
+  family (`control.if`, `.once`, `.switch`, `.throughput`, `.loop`,
+  `.transaction`) - JMeter-parity logic controllers that decide whether a
+  step sends at all, jump to a named member, or sum a folder's members into
+  a named transaction with its own percentiles; `control.switch` /
+  `control.loop` run only in the sequential run today, since a scenario load
+  run's virtual users cannot jump the way either needs (issue #1569 tracks
+  that gap). The pipeline runs in the design send, the sequential (single-VU)
+  collection run, and - since #1495 - a scenario **load** run's own
+  producer/completion hooks
   (`scenario_load.cpp`'s `run_step_before` / `run_step_after`): a declarative
   kind always runs there, and a `script.*` kind runs there only when its own
   `config.inline` is set or the run's `elements.scripts` override forces it,
@@ -413,7 +420,18 @@ logged as a warning: it means a client skipped composition.
   un-inlined script stays exactly where it always was, on the deferred
   `tests` replay, which now skips a step whose script already ran inline
   (`RunContext::script_element_runs_inline`, the one place that decision is
-  made, shared by both sides). A **single-request** load run
+  made, shared by both sides). Since #1498, `step.between` also dispatches on
+  the load path: `ScenarioLoadDriver::finish_step` (`scenario_load.cpp`) calls
+  the new `run_step_between` on the step that just completed, non-blocking
+  (`ElementContext::blocking_allowed = false`), and sums the outcomes'
+  `waited_ms` into `VirtualUser::ready_at_ms`. `timer.pacing` is a
+  `tracks_scope_occurrence` kind (`ElementKind::tracks_scope_occurrence`,
+  read through the registry, never a `kind ==` comparison): the same
+  folder- or collection-scoped element is inherited into every request under
+  its scope, so `scenario_plan.cpp`'s `mark_scope_entries` walks a resolved
+  plan's whole iteration and stamps `config._scopeEntry` on only the first
+  occurrence of that element's id, leaving every later occurrence a no-op. A
+  **single-request** load run
   (`load_strategy.cpp`) still runs no element - `POST /runs`'s single-request
   shape has no `elements` attachment point yet, only the legacy `tests`
   string (`RunContext::test_script`); wiring one is a separate gap, not
@@ -746,6 +764,7 @@ through it; add a spelling to that table, never to a route.
 | `docs/engine/api-reference.md` | **Any** endpoint, payload, or status code |
 | `docs/engine/architecture.md` | Core engine structure, auth resolution |
 | `docs/engine/db-schema.md` | Schema, migrations, stored JSON |
+| `docs/engine/elements.md` | An element kind, its phase, or the pipeline that runs one |
 | `docs/engine/scripting.md` | Script globals, hooks, sandbox limits |
 | `docs/engine/mcp.md` | MCP tools or their schemas (the server itself lives in `app/electron/mcp/`) |
 | `docs/engine/cli.md` | Flags or subcommands |

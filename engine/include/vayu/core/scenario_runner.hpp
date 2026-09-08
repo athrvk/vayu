@@ -336,11 +336,49 @@ struct ScenarioSummaryInputs {
      * there - and the payload says which rather than leaving it to the mode.
      */
     SampledValidationTotals validation;
+    /// `control.transaction`'s own percentiles (issue #1515), already in
+    /// the report's shape (`TransactionHistograms::build`). Empty for a run
+    /// that declared no transaction, which leaves the section out of the
+    /// summary entirely - the same convention `coverage` follows.
+    nlohmann::json transactions = nlohmann::json::array ();
     /// Whether this run asked a schema failure to fail its step. Recorded
     /// beside the tally because the same counts mean two different things
     /// depending on it: with the flag off, `failed` steps and schema failures
     /// are disjoint facts about the run rather than one.
     bool fail_on_schema_error = false;
+    /// `script.setup` / `script.teardown` outcomes (#1499), `{}` for a
+    /// collection that declares neither - the report then omits the section
+    /// entirely rather than showing an empty one.
+    nlohmann::json lifecycle = nlohmann::json::object ();
+    /// Every sent step's status code, kept in the same shape
+    /// `RunSummaryInputs::status_codes` is (issue #1564): the denominator
+    /// `evaluate_thresholds`'s error-rate metric reads. A step the plan
+    /// skipped (a script's decision, or a row that would not bind) sent no
+    /// request and is not in this map, on the same terms it is left out of
+    /// `coverage` above.
+    std::map<int, size_t> status_codes;
+    /// Every sent step's latency, in the order steps ran. Kept as a plain
+    /// list rather than through `MetricsCollector`: that collector is
+    /// shared, already ticking for the run's SSE frames, and built for a
+    /// concurrent load run's histogram - feeding it here only to read a
+    /// snapshot back at the very end would make its *live* numbers (which
+    /// nothing reads today) start reflecting a design-mode run mid-flight,
+    /// a behaviour nobody asked for. `percentiles_from_latencies` turns this
+    /// into the same `MetricsCollector::Percentiles` shape the threshold
+    /// table already reads.
+    std::vector<double> latencies;
+    /// This run's combined `assert.*` element and `pm.test` tally (issue
+    /// #1497's metric, extended to this run mode by #1564): every step's
+    /// `StepTestTally`, summed. Assertion outcomes fold into `record.tests`
+    /// already (see `tally_tests`), so this is the one place that needs to
+    /// sum across steps rather than read one.
+    AssertionTotals assertions;
+    /// The verdict on the budgets this run's config declared, filled once at
+    /// the run's own finish point - absent for every run that declared none.
+    /// Sibling of `RunSummaryInputs::thresholds` (issue #1564): a collection
+    /// run stores its own copy here because it builds its own summary
+    /// payload rather than a `RunSummaryInputs`.
+    std::optional<ThresholdOutcome> thresholds;
 };
 
 /**

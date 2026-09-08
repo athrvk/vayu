@@ -19,7 +19,9 @@ shape both sides of the wire agree on; it is generated from, or checked against,
 > [`db-schema.md`](db-schema.md#the-script-to-elements-migration-issue-1514)); no transitional
 > alias, per the owner's decision. Issue #1495 lands the pipeline on a **scenario** load run's
 > producer/completion hooks (below) - a **single-request** load run still executes no element; see
-> that section for why.
+> that section for why. Issue #1499 lands the first kinds to run at a run's own boundary rather
+> than at a step's - `script.setup` / `script.teardown`, dispatched at `Phase::RunStart` /
+> `Phase::RunEnd` outside the step pipeline entirely, in both run modes a collection can run in.
 
 ## Shape
 
@@ -80,9 +82,18 @@ shipping silently mismatched.
 | `assert.contains` | assert | `step.after` | #1514 |
 | `assert.duration` | assert | `step.after` | #1514 |
 | `assert.size` | assert | `step.after` | #1514 |
-| `timer.think` | timer | `step.between` | #1514 |
+| `timer.think` | timer | `step.between` | #1514 (fixed/uniform), #1498 (gaussian) |
+| `timer.pacing` | timer | `step.before` | #1498 |
 | `script.pre` | script | `step.before` | #1513 (validate-only), #1514 (runs) |
 | `script.post` | script | `step.after` | #1513 (validate-only), #1514 (runs) |
+| `script.setup` | script | `run.start` | #1499 |
+| `script.teardown` | script | `run.end` | #1499 |
+| `control.if` | controller | `step.before` | #1515 |
+| `control.once` | controller | `step.before` | #1515 |
+| `control.switch` | controller | `step.before` | #1515 |
+| `control.throughput` | controller | `step.before` | #1515 |
+| `control.loop` | controller | `step.between` | #1515 |
+| `control.transaction` | transaction | `step.after` | #1515 |
 
 `extract.json` reads a JSONPath subset - `$.a.b`, `[n]`, `[*]`, `..name`; a filter (`[?...]`) is
 refused at validate. `extract.regex` compiles its `pattern` once, at plan-resolution time, and
@@ -98,10 +109,29 @@ declarative assertion exactly as they count a scripted one.
 one of `expected`, `regex` or `exists`, plus `negate`; `assert.contains` compares a `field` (`body`
 | `headers` | `url` | `status`) against `text` in `contains` | `equals` | `matches` mode;
 `assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
-an `op`. `timer.think` takes `ms`, or `minMs`/`maxMs` for a uniform random wait; it runs in
-`step.between`, after this step's own outcome is decided and before the next step begins, so the
-wait never counts against either step's latency, and it polls the run's stop signal every 50ms so a
-`Stop` mid-wait lands promptly rather than at the end of a multi-second think.
+an `op`. `timer.think` takes `ms`, `minMs`/`maxMs` for a uniform random wait, or `gaussian:
+{meanMs, deviationMs}` (both required, issue #1498) for a normally-distributed one, drawn from
+`std::normal_distribution` and clamped to zero (a draw below it would be a negative wait, which
+means nothing) then rounded to the nearest millisecond - `gaussian` is checked first, so it and
+`ms`/`minMs`/`maxMs` are mutually exclusive in practice even though the schema does not enforce it.
+It runs in `step.between`, after this step's own outcome is decided and before the next step
+begins, so the wait never counts against either step's latency, and it polls the run's stop signal
+every 50ms so a `Stop` mid-wait lands promptly rather than at the end of a multi-second think. A
+run's `elements.seed` (below) makes the random draw reproducible.
+
+`timer.pacing` (issue #1498) holds a request, a folder or the whole collection to a steady
+start-to-start cadence across iterations - `everyMs` (required) between one pass's entry into that
+scope and the next, whatever the node's own duration was - and runs in `step.before`, not
+`step.between`, because the wait belongs to the *next* pass and must land before that entry step is
+sent. The same element is inherited into every request under its scope, so `scenario_plan.cpp`'s
+`mark_scope_entries` stamps `config._scopeEntry` on only the first occurrence of that element's id
+in the iteration's step order; every later occurrence is a no-op, reported `skipped`. `perUser`
+(default `true`) gives each virtual user its own cadence; `perUser: false` (one cadence shared by
+every VU, JMeter's "All threads" pacing) works on the sequential run, where a single VU makes the
+two indistinguishable, but is refused with a `400` for a scenario load run - coordinating one
+shared deadline across many VUs without blocking a producer thread is a separate, harder problem,
+tracked as a follow-up issue. `timer.throughput` (a constant-throughput, shared-rate timer) is not
+yet implemented, for the same cross-VU coordination reason.
 
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
 step, through `ElementContext`'s lazily filled slot - a body over `maxElementBodyBytes` (default 1
@@ -113,6 +143,73 @@ streaming send's own inline pipeline calls) binds to the exact `execute_script` 
 always made. The element's own outcome is whether the script ran without throwing; the script's own
 `pm.test` assertions travel inside the same `vayu::ScriptResult` untouched, so a scripted step's
 trace shape is unchanged by this cut-over.
+
+`script.setup` / `script.teardown` are `collection_only` - refused (a `400` naming the index and
+kind) on a request's own `elements`, both at write time and in `GET /elements/kinds`'
+`collectionOnly` flag, because a once-per-run element attached to one request in the tree has no
+answer to "once per run, or once per request that happens to carry it". Their `apply` follows the
+same callback shape as `script.pre` / `script.post`, through the new `ElementContext::run_setup_script`
+/ `run_teardown_script` pair: the sequential runner and the load path's `execute_load_test` compile the
+collection's own `elements` once (never a step's inherited copy) and dispatch `Phase::RunStart` /
+`Phase::RunEnd` against it directly, outside the step pipeline entirely. `run.start` runs before the
+sequential run's iteration loop, and before `execute_load_test` captures the load run's own
+`test_start` - so a setup script's own time is never folded into either mode's duration figures - and
+writes through the same `ScriptVariableScopes` (`scopes` / `base_scopes`) every other script of the
+run shares, so its writes are visible from the very first step or submission. A throwing setup fails
+the run - `Failed`, nothing sent - before either mode's strategy starts; a throwing teardown is
+recorded under the report's `lifecycle.teardown` and never changes the run's terminal status, since
+`ElementPipeline::run` already turns a throw into that element's own `"error"` outcome rather than
+propagating one. Teardown's script sees `pm.info.run` (`requestsSent`, `errorRate`,
+`assertionsPassed`, `assertionsFailed`) - the one context that can report a run summary, because it is
+the one that runs after there is one. Neither kind gets a per-element `allowRequests` toggle: `pm.sendRequest`
+inside either script is gated by the run's own `allowScriptRequests` (`ScriptConfig::allow_send_request`,
+baked into the `ScriptEngine` instance every script of the run already shares) and capped at the same
+10 calls per script every other script gets - a second, per-element gate would be dead configuration
+next to a run-wide one that already decides the question.
+
+### Controllers
+
+JMeter's logic controllers, as element kinds rather than a nested sub-flow (issue #1515):
+`control.if` skips this step (or, inherited onto a folder, every member) when a condition against a
+resolved `{{variable}}` is false - `{{v}} == x`, `!=`, `matches /re/`, or `{{v}} exists`, refused at
+validate outside that grammar. `control.once` runs on this user's first iteration only. `control.throughput`
+runs a share of occurrences by `percent` (an exact integer-carry accumulator, not a random draw) or
+`everyN`, on the producer's own per-user counter - no lock, no body parse. All three write the same
+`ScriptControl::Skip` decision `pm.execution.skipRequest()` always has, so a skip is one mechanism
+end to end: `execute_exchange`'s pre-send check, `decide_next_step`, and `classify_step`'s
+`StepOutcome::Skipped` all read it exactly as they read a script's.
+
+`control.switch` (`variable`, `cases`, `default?`) routes to a named member by a resolved variable's
+value, through the same `ScriptControl::Next` / `resolve_next_step` a script's own
+`setNextRequest` uses - so a switch's dispatch is an ordinary jump to every reader of the step list,
+not a second flow-control channel.
+
+`control.loop` (`count`) and `control.transaction` (`name`) both sit on a folder and are inherited
+into every member beneath it, compiling once per member - so each member's own instance has to
+recognise its folder's first or last position independently rather than being told it.
+`compute_element_spans` (`scenario_plan.cpp`) answers that once per run, from a single pass over the
+resolved plan: a scope-spanning kind's `id` maps to the `{first, last}` position it occupies,
+read through the registry's `needs_span` flag. `control.loop` fires only at its folder's last
+member, on `step.between`; while its own per-iteration pass count (kept in
+`ElementContext::controller_state`, keyed by the element id and the iteration) is under `count`, it
+sets `ScriptControl::Next` back to the folder's first member - an ordinary loop-back, resolved the
+same way `control.switch`'s jump is. `control.transaction` sums every member's own response
+latency into a per-iteration accumulator (same keying) and, at the folder's last member, reports the
+closed sum as its `ElementOutcome::waitedMs` with the transaction's `name` in `message` - the two
+fields the runner (`scenario_runner.cpp` / `scenario_load.cpp`) reads to fold the value into
+`TransactionHistograms`, one HdrHistogram per declared name allocated up front from a plan scan, so
+recording it takes no lock either. The report gains `scenario.transactions[] = { name, count,
+errors, latency: { min, p50, p90, p95, p99, max } }`, omitted for a transaction the run never closed.
+
+**Sequential-only: `control.switch` and `control.loop`.** A scenario load run's virtual users
+advance through the plan strictly forward (`VirtualUser::step`), with no jump the way a repeat or a
+dispatch needs; `POST /runs` refuses a load run whose plan carries either kind with a `400` naming
+it (`vayu::core::find_load_incompatible_controller`), read through the registry's own
+`jumps_or_repeats` flag. `control.if`, `control.once`, `control.throughput` and
+`control.transaction` all run under load too - see Load paths below for `control.if`'s own skip
+there, which the load path had no equivalent of before this issue. A load-path jump mechanism, plus
+`control.throughput`'s shared `perUser: false` budget and `control.transaction`'s `includeTimers`,
+are real, disclosed follow-up work: issue #1569.
 
 ## The step trace
 
@@ -167,13 +264,40 @@ beside the existing `tests` node, one row per element that ran at least once thi
 `StepElementTallies`, sized once from the plan's compiled elements so recording on the
 completion path is a lookup, never a lock or an allocation.
 
-**Not yet wired: timers.** `elements.timers` (`"asConfigured"` | `"off"`) is accepted and
-validated on `POST /runs` and stored on `RunContext`, but nothing reads it to suppress
-`timer.think` under load yet - #1498 ("the timer family... the run-level Timers override end
-to end") owns finishing that wiring, since `timer.think`'s current `step.between` phase and
-blocking wait are sequential-run-only and unreachable from the load hooks above by
-construction. `ready_at` plumbing (`VirtualUser::ready_at_ms`, a `take_ready_vu` skip) exists
-for #1498's `timer.pacing` to write into; nothing writes it yet.
+**A controller's skip, under load too (issue #1515).** `control.if` / `control.once` /
+`control.throughput` write the same `ScriptControl::Skip` a script's own `skipRequest()` would -
+before #1515 the load path had nothing to read that decision at all (`pm.execution.*` is refused
+there outright). `submit_one` now checks it right after `step.before` runs: a skip never reaches
+`EventLoop::submit`, the VU still advances exactly as a sent step would, and the run's
+`steps_skipped` counter (`ScenarioLoadState`) feeds the summary's `skipped` key, which every
+scenario load run reported as a hardcoded `0` before this.
+
+**Timers, wired end to end (issue #1498).** `elements.timers` (`"asConfigured"` (default) |
+`"off"` | `{fixedMs: N}` | `{minMs, maxMs}`) is validated on `POST /runs`, parsed into
+`RunContext::timers_override` (a `vayu::core::TimersOverride`), and applied through the one
+function every `timer.*` kind calls, `vayu::core::apply_timers_override` (`elements/pipeline.cpp`)
+- `"off"` silences the wait entirely (`waitedMs: 0`, no sleep), `fixedMs`/`{minMs,maxMs}` replace a
+kind's own computed wait with the run-wide one, whatever that kind's own config says. This also
+fixed a pre-existing dead-code bug: `RunContext::timers_disabled` was parsed from `"off"` since
+#1495 but nothing read it, because `timer.think`'s `step.between` phase was never dispatched on the
+load path at all. It is now: `ScenarioLoadDriver::run_step_between` (`scenario_load.cpp`) dispatches
+`Phase::StepBetween` on the step that just completed, non-blocking, and sums the outcomes'
+`waited_ms` into `VirtualUser::ready_at_ms`. `elements.seed` (a non-negative integer) seeds the
+run's own `std::mt19937_64` (`RunContext::rng`); a scenario load run derives one independent
+generator per virtual user off it (`vayu::core::derive_vu_rng`) rather than sharing one across
+worker threads, so a seeded run's random waits are reproducible.
+
+**Non-blocking waits: `scheduled_ready_delay_ms`.** `Element::scheduled_ready_delay_ms` (issue
+#1498) is how a kind that needs to wait tells a scenario load run to hold its VU back without
+blocking a worker thread: `timer.think` (whose wait already lands through `step.between`'s own
+dispatch above) needs no override, but `timer.pacing` does, since its phase (`step.before`) fires
+only once a VU has already been selected as ready - too late to defer non-blockingly.
+`ScenarioLoadDriver::finish_step` calls the override on the VU's *upcoming* step, right after
+deciding which step comes next and before the VU can be selected again, and applies the returned
+delay to `VirtualUser::ready_at_ms`, which already gated VU selection but, before #1498, had
+nothing writing to it. Per-node "last started" timestamps live in `VirtualUser::pacing_state`
+(one map per VU, so VUs pacing the same folder run independent cadences) for load, and in
+`RunContext::pacing_state` for the sequential run.
 
 **Not yet wired: the single-request load path.** `load_strategy.cpp` is unchanged: a
 single-request `POST /runs` payload has no `elements` attachment point today (its script model
@@ -191,10 +315,26 @@ gap, outside this page's Status callout.
 - #1495 - the pipeline on a scenario load run's producer/completion hooks (this page's Load
   paths section).
 - #1497 - the `maxAssertionFailureRatePct` run threshold and `thresholds.failRun`, over the
-  combined `assert.*` element and `pm.test` tally (load runs only; see `api-reference.md`'s
-  thresholds section).
-- #1515, #1498, #1500, #1499, #1501 - controllers, timers, metrics, setup/teardown and
-  load-time cookies that round out the kind table.
+  combined `assert.*` element and `pm.test` tally (see `api-reference.md`'s thresholds section).
+- #1564 - the same `thresholds` block, evaluated for a collection (sequential) run too, not
+  only a load run.
+- #1498 - `timer.think`'s gaussian option, the `timer.pacing` kind, a per-run seeded RNG
+  (`elements.seed`) and the `elements.timers` override wired end to end (this page's Timers
+  paragraphs and Load paths section). `timer.pacing`'s `perUser: false` under load and
+  `timer.throughput` (a constant-throughput, shared-rate timer) are deliberately deferred to a
+  follow-up issue.
+- #1499 - `script.setup` / `script.teardown`, the `run.start` / `run.end` dispatch this page's
+  Kinds section describes, in both run modes. Deliberately does not wire a single-request load
+  run's `POST /runs` to declare either kind - that shape has no collection to declare them on and
+  is the same "separate gap" this page's Load paths section already names for single-request
+  elements generally; the wire-shape decision that gap needs is filed as #1573.
+- #1515 - the controller family (`control.if`, `.once`, `.switch`, `.throughput`, `.loop`,
+  `.transaction`), the load path's own `steps_skipped` counter, and `scenario.transactions[]`
+  (this page's Controllers section).
+- #1569 - the follow-up disclosed by #1515: a scenario load run's own jump/repeat mechanism for
+  `control.switch` / `control.loop`, `control.throughput`'s shared `perUser: false` budget, and
+  `control.transaction`'s `includeTimers`.
+- #1500, #1501 - metrics and load-time cookies that round out the kind table.
 - #1516 - the app's `ElementList` primitive and editor.
 - #1517 - MCP's `elements` fields and the `vayu://elements/kinds` resource.
 - #1518 - Postman/OpenAPI round-trip and a JMeter `.jmx` importer.

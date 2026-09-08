@@ -672,7 +672,24 @@ ExchangeInputs inputs) {
         [&] (std::string_view scope, const std::string& name, const std::string& value) {
             set_scope_variable (scopes, scope, name, value);
         },
-        .should_stop = nullptr, // A single exchange has nothing to interrupt.
+        .should_stop = inputs.should_stop,
+        // `values_from_scopes` is what `resolve_residual_tokens` above
+        // already reads @p scopes through; a controller kind's condition or
+        // dispatch variable resolves against the same view (issue #1515).
+        .resolve_template =
+        [&] (const std::string& text) {
+            return vayu::http::resolve_template (text, values_from_scopes (scopes));
+        },
+        .iteration        = inputs.iteration.value_or (0),
+        .step_position    = inputs.step_position,
+        .element_spans    = inputs.element_spans,
+        .controller_state = inputs.controller_state,
+        // `blocking_allowed` stays true (the default): a design send and the
+        // sequential run both call this function on a thread that may block,
+        // never on the load path's own event-loop worker.
+        .rng             = inputs.rng,
+        .pacing_state    = inputs.pacing_state,
+        .timers_override = inputs.timers_override,
     };
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,

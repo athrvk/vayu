@@ -124,6 +124,9 @@ struct ContextData {
     /// The virtual user `pm.info.vu` reads, 1-based - see `ScriptContext::vu`.
     std::optional<size_t> vu;
     std::optional<size_t> iteration_count;
+    /// `pm.info.run` - see `ScriptContext::run_summary`, which owns the
+    /// rationale.
+    std::optional<RunSummaryInfo> run_summary;
     /// The row `pm.iterationData` reads, or null - see
     /// `ScriptContext::iteration_data`, which owns the rationale.
     const nlohmann::json* iteration_data = nullptr;
@@ -5934,8 +5937,14 @@ void setup_pm_info (JSContext* ctx, JSValue pm) {
             JS_NewString (ctx, data->request_name->c_str ()));
         }
         if (data->event) {
-            JS_SetPropertyStr (ctx, info, "eventName",
-            JS_NewString (ctx, *data->event == ScriptEvent::PreRequest ? "prerequest" : "test"));
+            const char* event_name = "test";
+            switch (*data->event) {
+            case ScriptEvent::PreRequest: event_name = "prerequest"; break;
+            case ScriptEvent::Test: event_name = "test"; break;
+            case ScriptEvent::Setup: event_name = "setup"; break;
+            case ScriptEvent::Teardown: event_name = "teardown"; break;
+            }
+            JS_SetPropertyStr (ctx, info, "eventName", JS_NewString (ctx, event_name));
         }
         if (data->vu) {
             JS_SetPropertyStr (ctx, info, "vu",
@@ -5948,6 +5957,18 @@ void setup_pm_info (JSContext* ctx, JSValue pm) {
         if (data->iteration_count) {
             JS_SetPropertyStr (ctx, info, "iterationCount",
             JS_NewInt64 (ctx, static_cast<int64_t> (*data->iteration_count)));
+        }
+        if (data->run_summary) {
+            JSValue run = JS_NewObject (ctx);
+            JS_SetPropertyStr (ctx, run, "requestsSent",
+            JS_NewInt64 (ctx, static_cast<int64_t> (data->run_summary->requests_sent)));
+            JS_SetPropertyStr (ctx, run, "errorRate",
+            JS_NewFloat64 (ctx, data->run_summary->error_rate));
+            JS_SetPropertyStr (ctx, run, "assertionsPassed",
+            JS_NewInt64 (ctx, static_cast<int64_t> (data->run_summary->assertions_passed)));
+            JS_SetPropertyStr (ctx, run, "assertionsFailed",
+            JS_NewInt64 (ctx, static_cast<int64_t> (data->run_summary->assertions_failed)));
+            JS_SetPropertyStr (ctx, info, "run", run);
         }
     }
 
@@ -8705,6 +8726,7 @@ class ScriptEngine::Impl {
         ctx_data.iteration           = ctx.iteration;
         ctx_data.vu                  = ctx.vu;
         ctx_data.iteration_count     = ctx.iteration_count;
+        ctx_data.run_summary         = ctx.run_summary;
         ctx_data.iteration_data      = ctx.iteration_data;
         ctx_data.response_events     = ctx.response_events;
         // Both per-execution: the capability is this caller's, and the request

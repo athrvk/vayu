@@ -663,6 +663,8 @@ export interface ElementKindSchema {
 	description: string;
 	category: string;
 	hotPathClass: "declarative" | "script";
+	/** True for a kind valid only on a collection (`script.setup` / `script.teardown`, issue #1499) - refused engine-side on a request; the app's Add menu hides it there too. */
+	collectionOnly: boolean;
 	configSchema: ElementConfigSchema;
 	phases: string[];
 }
@@ -2278,6 +2280,20 @@ export interface RunReport {
 	 * them has to say so. A collection run checks every step it executed.
 	 */
 	schemaValidation?: RunSchemaValidation;
+	/**
+	 * `script.setup` / `script.teardown` outcomes (issue #1499): what ran once
+	 * at `run.start` / `run.end` on the collection itself, never per step.
+	 *
+	 * Each key is present only when that phase ran at least one element - an
+	 * empty array would read as "a setup element ran and did nothing" rather
+	 * than "this collection declared none". `undefined` for a run whose
+	 * collection declared neither, and for a single-request run, which has no
+	 * collection to declare them on.
+	 */
+	lifecycle?: {
+		setup?: ElementOutcome[];
+		teardown?: ElementOutcome[];
+	};
 	/**
 	 * Whether the run's OAuth 2.0 credential was renewed while it ran.
 	 *

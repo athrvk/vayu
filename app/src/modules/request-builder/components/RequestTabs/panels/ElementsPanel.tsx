@@ -14,18 +14,38 @@
  * collection chain contributes above it (`InheritedElementsNotice`), and
  * keeps the legacy glued-script notice for a design run recorded before
  * script parts existed.
+ *
+ * A `script.pre`/`script.post` row gets the "Names mentioned" chip row above
+ * its editor (issue #1553) via `ElementList`'s `renderAboveForm` - this is
+ * the one host that can answer `ScriptReferencesRow`'s props from
+ * `useRequestBuilderContext`, which `ScriptElementForm` itself cannot depend on.
  */
 
 import { useElementKindsQuery } from "@/queries";
 import { ElementList } from "@/components/shared/ElementList";
+import { ScriptReferencesRow } from "@/components/shared";
 import { useRequestBuilderContext } from "../../../context";
 import InheritedElementsNotice from "./InheritedElementsNotice";
 import LegacyScriptNotice from "./LegacyScriptNotice";
 
 export default function ElementsPanel() {
-	const { request, updateField, inheritedElements, legacyPreScript, legacyPostScript } =
-		useRequestBuilderContext();
+	const {
+		request,
+		updateField,
+		inheritedElements,
+		legacyPreScript,
+		legacyPostScript,
+		getAllVariables,
+		getVariableOrigins,
+		dataColumns,
+	} = useRequestBuilderContext();
 	const { data: kinds } = useElementKindsQuery();
+	// `script.setup` / `script.teardown` are collection-only (issue #1499):
+	// the engine refuses them on a request's own `elements`, so a request's
+	// Add menu never offers them - `InheritedElementsNotice` below still shows
+	// them when a collection above declares one, unfiltered, since that is
+	// display rather than an offer to add.
+	const addableKinds = (kinds ?? []).filter((kind) => !kind.collectionOnly);
 
 	return (
 		<div className="space-y-4">
@@ -43,8 +63,22 @@ export default function ElementsPanel() {
 			<ElementList
 				elements={request.elements}
 				onChange={(elements) => updateField("elements", elements)}
-				kinds={kinds ?? []}
+				kinds={addableKinds}
 				emptyLabel="No elements yet. Add an extractor, assertion, timer or script from the menu below."
+				renderAboveForm={(element) => {
+					if (element.kind !== "script.pre" && element.kind !== "script.post")
+						return null;
+					const script =
+						typeof element.config.script === "string" ? element.config.script : "";
+					return (
+						<ScriptReferencesRow
+							script={script}
+							allVariables={getAllVariables()}
+							getVariableOrigins={getVariableOrigins}
+							dataColumns={dataColumns}
+						/>
+					);
+				}}
 			/>
 		</div>
 	);

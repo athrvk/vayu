@@ -43,6 +43,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/core/elements.hpp"
@@ -124,6 +125,24 @@ struct ScenarioPlan {
 };
 
 /**
+ * The first and last plan position every scope-spanning element's `id`
+ * occupies (issue #1515), for `control.loop` and `control.transaction`: both
+ * compile once per member of the folder they are inherited into, and each
+ * member's own instance has to recognise its folder's boundary independently
+ * rather than being told it.
+ *
+ * A folder's whole subtree is a contiguous run of plan positions
+ * (`resolve_scenario`'s depth-first, subtree-before-own-requests walk), so
+ * one pass over `plan.steps` recording each such element id's minimum and
+ * maximum position is the whole answer - no separate folder identity is
+ * read or needed. Empty for a plan that resolved no `needs_span` kind, which
+ * is what leaves `ElementContext::element_spans` null for every run that
+ * carries none.
+ */
+[[nodiscard]] std::unordered_map<std::string, vayu::core::ElementSpan>
+compute_element_spans (const ScenarioPlan& plan);
+
+/**
  * Whether @p step carries a `script.pre` / `script.post` element (issue
  * #1514's cut-over - `ScenarioStep::pre_script` / `post_script` are gone).
  * The load path reads this to report a script it never runs (a load run
@@ -132,6 +151,18 @@ struct ScenarioPlan {
  * `find_step_post_script` in `run_manager.cpp`, not this.
  */
 [[nodiscard]] bool step_has_script (const ScenarioStep& step, std::string_view kind);
+
+/**
+ * `nullopt` if @p plan can run under load, or the caller-facing refusal
+ * naming why not (issue #1498): a `timer.pacing` element whose own
+ * `config.perUser` is `false` asks for one cadence shared across every
+ * virtual user, which needs cross-VU coordination this engine does not yet
+ * have on the load path - see `timer_pacing.cpp`'s file comment. The
+ * sequential run never calls this: a single virtual user makes
+ * `perUser: false` and `perUser: true` the same thing.
+ */
+[[nodiscard]] std::optional<std::string> refuse_shared_pacing_under_load (
+const ScenarioPlan& plan);
 
 /**
  * The validated `scenario` block of a `POST /runs` payload.

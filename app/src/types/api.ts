@@ -793,12 +793,17 @@ export interface StartScenarioRunRequest {
 	 */
 	elements?: {
 		/**
-		 * `"asConfigured"` (default) | `"off"`. Accepted and stored, but not
-		 * yet wired to any timer kind - `timer.think`'s current phase is
-		 * sequential-run-only. Issue #1498 ("the timer family") owns finishing
-		 * this; see `docs/engine/elements.md`'s "Not yet wired: timers".
+		 * `"asConfigured"` (default): every `timer.*` element runs its own
+		 * stored config. `"off"`: every `timer.*` element is silenced for the
+		 * run. `{fixedMs}` / `{minMs, maxMs}` (issue #1498): every `timer.*`
+		 * element's own wait span is replaced by the same fixed value or
+		 * uniform range, whatever that element's own config says - the same
+		 * "replaced, not merged" rule `scripts` below already uses. No app
+		 * control sends the object shapes yet (`RunCollectionDialog`'s Timers
+		 * toggle is `asConfigured` | `off` only); the engine accepts them
+		 * regardless, for a caller (MCP, a future control) that wants them.
 		 */
-		timers?: "asConfigured" | "off";
+		timers?: "asConfigured" | "off" | { fixedMs: number } | { minMs?: number; maxMs?: number };
 		/**
 		 * `"asMarked"` (default) reads each `script.*` element's own
 		 * `config.inline`; `"allInline"` / `"allDeferred"` force every
@@ -814,6 +819,14 @@ export interface StartScenarioRunRequest {
 		 */
 		includeScriptTime?: boolean;
 	};
+	/**
+	 * Pass/fail budgets this run is judged against (issue #1497 for a load
+	 * run; #1564 extends the same evaluation to a design-mode collection run).
+	 * Top-level, matching where the engine reads it (`validate_thresholds`,
+	 * `evaluate_thresholds`) for both `POST /runs` shapes. Omit to leave the
+	 * run measured but not judged - the pre-existing behaviour.
+	 */
+	thresholds?: RunThresholds;
 }
 
 // Run Management API

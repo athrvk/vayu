@@ -18,13 +18,16 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <random>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/core/auth_refresh.hpp"
 #include "vayu/core/capacity_controller.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/elements.hpp"
 #include "vayu/core/load_pacing.hpp"
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/metrics_collector.hpp"
@@ -326,11 +329,44 @@ struct RunContext {
     /// the recorded sample.
     bool include_script_time = false;
 
-    /// `elements.timers` (issue #1495), stored for #1498's timer family to
-    /// read once it exists. This issue validates the key and stores the
-    /// choice but does not yet wire "off" to suppress `timer.think` under
-    /// load - see `docs/engine/elements.md`'s Load paths section.
-    bool timers_disabled = false;
+    /// `elements.timers` (issue #1495, wired by #1498): `"asConfigured"`
+    /// (the default), `"off"`, or the fixed/range replacement shapes -
+    /// resolved once here from a payload `validate_elements_run_override`
+    /// has already accepted, and read by every `timer.*` kind's own wait
+    /// computation through `ElementContext::timers_override`
+    /// (`apply_timers_override`).
+    vayu::core::TimersOverride timers_override;
+
+    /// The raw seed behind @ref rng (issue #1498's `elements.seed`): from the
+    /// payload when given, else drawn once from `std::random_device`. Kept
+    /// alongside the generator itself because a scenario load run derives one
+    /// independent generator per virtual user from this value rather than
+    /// sharing @ref rng across worker threads (`vayu::core::derive_vu_rng`) -
+    /// a caller that wants a run reproducible supplies its own seed rather
+    /// than relying on one this engine generated.
+    uint64_t rng_seed = std::random_device{}();
+
+    /// This run's seeded generator, seeded from @ref rng_seed: what the
+    /// sequential (single-virtual-user) run's `ElementContext::rng` binds
+    /// directly. A scenario load run does not use this object at all - see
+    /// @ref rng_seed.
+    std::mt19937_64 rng{ rng_seed };
+
+    /// Per-node "when did this node last start" state for a sequential run's
+    /// own `timer.pacing` elements (issue #1498) - one run, one virtual user,
+    /// one map, alive for the run's whole life and bound onto every step's
+    /// `ElementContext::pacing_state`. A scenario load run keeps this state
+    /// on `VirtualUser` instead, one map per VU, so this member is never
+    /// touched by that path.
+    std::unordered_map<std::string, int64_t> pacing_state;
+
+    /// `script.setup`'s outcomes (#1499), written once by `execute_load_test`
+    /// before the strategy starts and read back by `finish_load_test` for the
+    /// summary's `lifecycle` key - safe unguarded for the same reason
+    /// `scripts_override` above is: written on the run's own worker thread
+    /// before any other thread of this run exists, read on that same thread
+    /// after every other one has joined.
+    std::vector<vayu::core::ElementOutcome> setup_outcomes;
 
     /**
      * Whether a compiled `script.*` element runs inline on a load run's
@@ -958,6 +994,10 @@ struct RunSummaryInputs {
     // unbound collection a contract nothing failed. Its sibling `coverage` is
     // exact where this is sampled; see `SampledValidationTotals`.
     std::optional<nlohmann::json> schema_validation;
+    // `script.setup` / `script.teardown` outcomes (#1499), under the summary's
+    // `lifecycle` key. Absent for a run whose collection declared neither, on
+    // the same absent-not-empty rule `coverage` follows.
+    std::optional<nlohmann::json> lifecycle;
     // What the server-vitals scrape recorded, under the summary's `monitor`
     // key. Absent for a run that configured no monitor - the report then omits
     // the section entirely rather than showing a run that scraped nothing.

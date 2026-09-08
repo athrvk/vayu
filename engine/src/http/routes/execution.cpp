@@ -1907,6 +1907,11 @@ nlohmann::json& scenario_manifest) {
         "http", "POST /runs - Invalid scenario: " + resolved.error);
         return RouteError{ 400, error_body (400, resolved.error, "invalid_scenario") };
     }
+    if (vayu::core::is_scenario_load_run (json)) {
+        if (auto reason = vayu::core::refuse_shared_pacing_under_load (resolved.plan)) {
+            return RouteError{ 400, error_body (400, *reason, "invalid_run_config") };
+        }
+    }
 
     scenario_manifest = vayu::core::build_scenario_manifest (
     resolved.request, resolved.plan, resolved.spec);
@@ -1929,6 +1934,41 @@ nlohmann::json& scenario_manifest) {
     { { "collection", scenario_execution->request.collection_id },
     { "steps", scenario_execution->plan.steps.size () },
     { "iterations", scenario_execution->request.iterations } });
+    return std::nullopt;
+}
+
+/**
+ * @ref resolve_run_scenario, plus - for a scenario **load** run only - the
+ * load-path controller refusal (issue #1515): `control.switch` /
+ * `control.loop` need to jump the plan, which a scenario load run's virtual
+ * users cannot do (`vayu::core::find_load_incompatible_controller`). Kept as
+ * one function, rather than the caller nesting both checks itself, to keep
+ * `handle_start_load_test`'s own branching within its cognitive-complexity
+ * budget.
+ */
+std::optional<RouteError> resolve_and_validate_run_scenario (RouteContext& ctx,
+const nlohmann::json& json,
+bool is_scenario_load,
+std::shared_ptr<const vayu::core::ScenarioExecution>& scenario_execution,
+nlohmann::json& scenario_manifest) {
+    if (auto rejection =
+        resolve_run_scenario (ctx, json, scenario_execution, scenario_manifest)) {
+        return rejection;
+    }
+    if (!is_scenario_load) {
+        return std::nullopt;
+    }
+    if (auto offending_kind =
+        vayu::core::find_load_incompatible_controller (scenario_execution->plan)) {
+        return RouteError{ 400,
+            error_body (400,
+            "'" + *offending_kind +
+            "' is not available on a scenario load run: it needs to jump or "
+            "repeat a step, and a load run's virtual users only ever advance "
+            "forward. Use a sequential (design-mode) collection run for a plan "
+            "carrying it.",
+            "invalid_scenario") };
+    }
     return std::nullopt;
 }
 
@@ -2024,8 +2064,8 @@ httplib::Response& res) {
     std::shared_ptr<const vayu::core::ScenarioExecution> scenario_execution;
     nlohmann::json scenario_manifest;
     if (is_scenario) {
-        if (auto rejection =
-            resolve_run_scenario (ctx, json, scenario_execution, scenario_manifest)) {
+        if (auto rejection = resolve_and_validate_run_scenario (ctx, json,
+            is_scenario_load, scenario_execution, scenario_manifest)) {
             res.status = rejection->status;
             res.set_content (rejection->body.dump (), "application/json");
             return;

@@ -14,6 +14,8 @@
 
 #include "vayu/core/elements.hpp"
 
+#include <random>
+
 namespace vayu::core {
 
 nlohmann::json ElementOutcome::to_json () const {
@@ -30,6 +32,26 @@ nlohmann::json ElementOutcome::to_json () const {
     }
     if (wrote) {
         node["wrote"] = *wrote;
+    }
+    return node;
+}
+
+nlohmann::json build_lifecycle_node (const std::vector<ElementOutcome>& run_start,
+const std::vector<ElementOutcome>& run_end) {
+    nlohmann::json node = nlohmann::json::object ();
+    if (!run_start.empty ()) {
+        nlohmann::json setup = nlohmann::json::array ();
+        for (const auto& outcome : run_start) {
+            setup.push_back (outcome.to_json ());
+        }
+        node["setup"] = std::move (setup);
+    }
+    if (!run_end.empty ()) {
+        nlohmann::json teardown = nlohmann::json::array ();
+        for (const auto& outcome : run_end) {
+            teardown.push_back (outcome.to_json ());
+        }
+        node["teardown"] = std::move (teardown);
     }
     return node;
 }
@@ -52,11 +74,50 @@ std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
         entry["enabled"].is_null () || entry.value ("enabled", true);
 
         if (const auto* kind = registry.find (out.kind); kind != nullptr && kind->compile) {
-            out.element = kind->compile (out.config);
+            // Stamped onto a *copy* passed to `compile`, never onto
+            // `out.config` itself - `out.config` is what the load path's
+            // deferred `script.post` replay reads back verbatim
+            // (`run_manager.cpp`), which must stay exactly what the caller
+            // wrote. `timer.pacing` (issue #1498) is the one kind that reads
+            // `_elementId`, to key its per-node "last started" state by the
+            // same id `scenario_plan.cpp` also stamped `_scopeEntry` onto.
+            nlohmann::json compile_config = out.config;
+            compile_config["_elementId"]  = out.id;
+            out.element                   = kind->compile (compile_config);
         }
         compiled.push_back (std::move (out));
     }
     return compiled;
+}
+
+std::optional<int64_t> apply_timers_override (const TimersOverride* override_,
+int64_t own_wait_ms,
+std::mt19937_64* rng) {
+    if (override_ == nullptr) {
+        return own_wait_ms;
+    }
+    switch (override_->mode) {
+    case TimersOverride::Mode::AsConfigured: return own_wait_ms;
+    case TimersOverride::Mode::Off: return std::nullopt;
+    case TimersOverride::Mode::Fixed: return override_->fixed_ms;
+    case TimersOverride::Mode::Range: {
+        int64_t min_ms = override_->min_ms;
+        int64_t max_ms = override_->max_ms;
+        if (max_ms < min_ms) {
+            std::swap (min_ms, max_ms);
+        }
+        if (max_ms == min_ms) {
+            return min_ms;
+        }
+        std::uniform_int_distribution<int64_t> dist (min_ms, max_ms);
+        if (rng != nullptr) {
+            return dist (*rng);
+        }
+        static thread_local std::mt19937_64 fallback{ std::random_device{}() };
+        return dist (fallback);
+    }
+    }
+    return own_wait_ms; // Unreachable for a value the enum actually holds.
 }
 
 const nlohmann::json* ensure_parsed_body (ElementContext& ctx) {
@@ -90,6 +151,7 @@ const std::function<std::optional<std::string> (const CompiledElement&)>& skip_r
         ctx.outcome_message.reset ();
         ctx.outcome_waited_ms.reset ();
         ctx.outcome_wrote.reset ();
+        ctx.element_id = compiled.id;
 
         std::optional<std::string> skipped;
         if (!compiled.enabled) {

@@ -21,17 +21,26 @@
  * element's own `CodeEditor` inside the list would fire the same
  * half-typed-value blur `AuthTab`'s doc comment measured. The fields only
  * make sense saved together, which is what the button means here too.
+ *
+ * A `script.pre`/`script.post` row gets the "Names mentioned" chip row above
+ * its editor (issue #1553), via `ElementList`'s `renderAboveForm` - the same
+ * `useDataContract`/`useVariableResolver` pair the retired `ScriptTab` read
+ * directly, since `ScriptElementForm` itself cannot depend on either.
  */
 
 import { useCallback } from "react";
 import { Button } from "@/components/ui";
-import { ExternalChangeCallout } from "@/components/shared";
+import { ExternalChangeCallout, ScriptReferencesRow } from "@/components/shared";
 import { ElementList } from "@/components/shared/ElementList";
-import { useDraftSaveContext, useEntityDraft } from "@/hooks";
+import { useDataContract, useDraftSaveContext, useEntityDraft, useVariableResolver } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import { useElementKindsQuery } from "@/queries";
 import type { Collection, ElementDef } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
+
+/** How many referenced names get a chip before the rest become a count - the
+ * collection tab's own, wider limit from before the migration (`ScriptTab`). */
+const CHIP_LIMIT = 8;
 
 interface ElementsTabProps {
 	collection: Collection;
@@ -42,6 +51,10 @@ interface ElementsTabProps {
 export default function ElementsTab({ collection, active = false }: ElementsTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 	const { data: kinds } = useElementKindsQuery();
+	const dataColumns = useDataContract(collection.id);
+	const { getAllVariables, getVariableOrigins } = useVariableResolver({
+		collectionId: collection.id,
+	});
 
 	const {
 		draft: elements,
@@ -91,6 +104,21 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 				onChange={setElements}
 				kinds={kinds ?? []}
 				emptyLabel="No elements yet. Add an extractor, assertion, timer or script from the menu below."
+				renderAboveForm={(element) => {
+					if (element.kind !== "script.pre" && element.kind !== "script.post")
+						return null;
+					const script =
+						typeof element.config.script === "string" ? element.config.script : "";
+					return (
+						<ScriptReferencesRow
+							script={script}
+							allVariables={getAllVariables()}
+							getVariableOrigins={getVariableOrigins}
+							dataColumns={dataColumns}
+							chipLimit={CHIP_LIMIT}
+						/>
+					);
+				}}
 			/>
 
 			<SaveFailed mutation={updateCollection} what="the elements list" />

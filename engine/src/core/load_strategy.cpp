@@ -7,6 +7,7 @@
 
 #include "vayu/core/load_strategy.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
@@ -282,6 +283,42 @@ int64_t duration_field_ms (const nlohmann::json& config, const std::string& key,
     return *parsed;
 }
 
+namespace {
+
+/// A non-negative JSON integer - the shape every `{fixedMs}` / `{minMs,
+/// maxMs}` field must have.
+bool is_non_negative_integer (const nlohmann::json& value) {
+    return value.is_number_integer () && value.get<int64_t> () >= 0;
+}
+
+/// "asConfigured" | "off" | {fixedMs} | {minMs,maxMs} (issue #1498): every
+/// `timer.*` element left as configured, silenced, or replaced by one fixed
+/// or uniformly random span for the whole run. A plain loop rather than
+/// `std::all_of` with a generic lambda, which needs a `.template get<...>`
+/// disambiguator on a dependent name for no readability gain here.
+bool is_valid_elements_timers_shape (const nlohmann::json& timers) {
+    if (timers.is_string ()) {
+        return timers == "asConfigured" || timers == "off";
+    }
+    if (!timers.is_object ()) {
+        return false;
+    }
+    if (timers.contains ("fixedMs")) {
+        return timers.size () == 1 && is_non_negative_integer (timers["fixedMs"]);
+    }
+    if (!timers.contains ("minMs") && !timers.contains ("maxMs")) {
+        return false;
+    }
+    for (const auto& [key, value] : timers.items ()) {
+        if ((key != "minMs" && key != "maxMs") || !is_non_negative_integer (value)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 std::optional<std::string> validate_elements_run_override (const nlohmann::json& config) {
     const auto elements = config.find ("elements");
     if (elements == config.end () || elements->is_null ()) {
@@ -292,20 +329,24 @@ std::optional<std::string> validate_elements_run_override (const nlohmann::json&
     }
 
     static const std::unordered_set<std::string> known_keys = { "timers",
-        "scripts", "includeScriptTime" };
+        "scripts", "includeScriptTime", "seed" };
     for (const auto& [key, value] : elements->items ()) {
         (void)value;
         if (!known_keys.contains (key)) {
             return "'elements." + key +
             "' is not a known field - expected one of timers, scripts, "
-            "includeScriptTime";
+            "includeScriptTime, seed";
         }
     }
 
-    if (auto timers = elements->find ("timers"); timers != elements->end ()) {
-        if (!timers->is_string () || (*timers != "asConfigured" && *timers != "off")) {
-            return "'elements.timers' must be 'asConfigured' or 'off'";
-        }
+    if (auto timers = elements->find ("timers");
+    timers != elements->end () && !is_valid_elements_timers_shape (*timers)) {
+        return "'elements.timers' must be 'asConfigured', 'off', "
+               "{\"fixedMs\": N} or {\"minMs\"/\"maxMs\": N}";
+    }
+    if (auto seed = elements->find ("seed");
+    seed != elements->end () && !is_non_negative_integer (*seed)) {
+        return "'elements.seed' must be a non-negative integer";
     }
     if (auto scripts = elements->find ("scripts"); scripts != elements->end ()) {
         if (!scripts->is_string () ||

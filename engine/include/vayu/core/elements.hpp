@@ -34,13 +34,54 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/types.hpp"
 
 namespace vayu::core {
+
+/**
+ * One scope-spanning kind's first and last position in the plan (issue
+ * #1515's `control.loop` / `control.transaction`): an element inherited from
+ * a folder compiles once per member request, so each member's own instance
+ * has to recognise "I am the folder's first member" or "I am its last"
+ * independently. Keyed by the element's own `id` in `compute_element_spans`
+ * (`scenario_plan.cpp`) - the same `id` string every one of a folder's
+ * inherited members carries, since `compile_elements` compiles the same
+ * source entry's `id` verbatim at each occurrence.
+ */
+struct ElementSpan {
+    size_t first = 0;
+    size_t last  = 0;
+    /// `ScenarioStep::name` of `first` - what `control.loop` jumps back to
+    /// through the same `resolve_next_step` a script's own `setNextRequest`
+    /// resolves against, so a loop-back is an ordinary `Next` decision to
+    /// every reader of the step list, not a second flow-control mechanism.
+    std::string first_step_name;
+};
+
+/**
+ * The run-level `elements.timers` override (issue #1498), read once at run
+ * start (`RunContext`) and consulted by every `timer.*` kind's own wait
+ * computation - never by the pipeline itself, which stays ignorant of what a
+ * kind's config means. `AsConfigured` is the default: every `timer.*`
+ * element runs its own stored config unchanged. `Off` silences every
+ * `timer.*` element for the run. `Fixed` and `Range` replace every
+ * `timer.*` element's own wait span with the same fixed value or uniform
+ * range, whatever that element's own config says - the same "replaced, not
+ * merged" rule `elements.scripts` already uses.
+ */
+struct TimersOverride {
+    enum class Mode : std::uint8_t { AsConfigured, Off, Fixed, Range };
+    Mode mode        = Mode::AsConfigured;
+    int64_t fixed_ms = 0;
+    int64_t min_ms   = 0;
+    int64_t max_ms   = 0;
+};
 
 /**
  * Everything a compiled element's `apply` reads and writes (issue #1514).
@@ -84,6 +125,102 @@ struct ElementContext {
     /// design send has none - a single exchange has nothing to stop mid-wait -
     /// so only the sequential run's plan walk binds this).
     std::function<bool ()> should_stop;
+
+    /// Resolves `{{name}}` tokens in @p text against this step's current
+    /// variables - the same scopes and, under a data-driven run, the same
+    /// row the request itself was bound against - through the caller's own
+    /// `vayu::http::resolve_template`, never a copy of it here (issue
+    /// #1515's `control.if` / `control.switch`, which read a condition or a
+    /// dispatch variable that lives in config text rather than the request
+    /// composition already resolved). Unset only where nothing needs it.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::function<std::string (const std::string& text)> resolve_template{};
+
+    /// This element's own `id`, set by `ElementPipeline::run` before every
+    /// `apply` call - never by a kind itself (issue #1515). A controller
+    /// that needs to recognise its own occurrence (`control.once`'s
+    /// fire-once flag, `control.transaction`'s span lookup) reads this
+    /// rather than being handed its id as a constructor argument, so
+    /// `Element::apply` keeps one signature for every kind.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string element_id{};
+    /// 0-based, as `pm.info.iteration` reports it - unset (0) for a design
+    /// send, which has no iteration to report. Read only by a kind whose
+    /// state must reset every iteration (`control.transaction`'s
+    /// per-iteration accumulator, `control.loop`'s per-iteration pass
+    /// count), through a key this iteration number is folded into rather
+    /// than a value `controller_state` is cleared for - clearing on an
+    /// iteration boundary would erase `control.once`'s fire-once flag too,
+    /// which must survive every iteration of a run.
+    size_t iteration = 0;
+    /// This step's position in the plan, unset for a design send (which
+    /// resolves no plan at all). A scope-spanning kind reads it against
+    /// `element_spans` to tell its folder's first member from its last;
+    /// every other kind ignores it.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<size_t> step_position{};
+    /// The plan-wide first/last position of every scope-spanning element's
+    /// id (issue #1515), computed once by `compute_element_spans` and
+    /// shared read-only for the run's life. Null for a design send and for
+    /// any plan that resolved no scope-spanning kind - neither needs one.
+    const std::unordered_map<std::string, ElementSpan>* element_spans = nullptr;
+    /// Where a kind's state must outlive one `apply` call and must not be
+    /// shared between an inherited element's several independent
+    /// occurrences (`control.once`'s fire-once flag, `control.throughput`'s
+    /// producer-side counter, `control.transaction`'s running sum) - a
+    /// fresh, empty map for a design send, one map for the whole sequential
+    /// run (issue #1515's single implicit user), one map per virtual user
+    /// under load, so one VU's count is never another's. Keyed by
+    /// `element_id`, optionally folded with `iteration`. Null only where a
+    /// caller resolves no element that reads it. A sibling of `pacing_state`
+    /// below (issue #1498's identical shape for `timer.pacing`) rather than
+    /// unified with it - kept separate rather than merged in this PR to
+    /// avoid widening either issue's own change.
+    std::unordered_map<std::string, int64_t>* controller_state = nullptr;
+
+    /// True for the design send and the sequential run, where a `timer.*`
+    /// kind's wait blocks the calling thread exactly as it always has; false
+    /// on a scenario load run's own producer/completion hooks, where blocking
+    /// would stall the shared event loop and a kind must instead report its
+    /// intended wait through `Element::scheduled_ready_delay_ms` for the
+    /// caller to apply through `VirtualUser::ready_at_ms` (issue #1498).
+    bool blocking_allowed = true;
+
+    /// A run's seeded generator (issue #1498), for a `timer.*` kind whose
+    /// wait is randomised and wants to be reproducible with the run's
+    /// `elements.seed`. Null for a design send, which has no run and no seed
+    /// to be reproducible against - a kind falls back to its own unseeded
+    /// generator there, exactly as before this field existed.
+    std::mt19937_64* rng = nullptr;
+
+    /// Per-node "when did this node last start" state for `timer.pacing`
+    /// (issue #1498), keyed by the pacing element's own id (stamped by
+    /// `compile_elements` as `config._elementId`) - not by kind, since a
+    /// step can carry more than one `timer.pacing` element on different
+    /// scopes. Bound to a run-local map for the sequential run (one VU, one
+    /// map, alive for the run's whole life) and to `VirtualUser`'s own map
+    /// under load (one map per VU, so two users pacing the same folder never
+    /// share a cadence). Null for a design send, where pacing cannot mean
+    /// anything - a pacing element then always reports its first-ever
+    /// occurrence and never waits.
+    std::unordered_map<std::string, int64_t>* pacing_state = nullptr;
+
+    /// The run's `elements.timers` override (issue #1498), or null for a
+    /// design send, which has no run-level override to read. Read-only: a
+    /// kind consults it, never writes it.
+    const TimersOverride* timers_override = nullptr;
+
+    /// `script.setup` / `script.teardown` (#1499): runs @p script once, at
+    /// `run.start` / `run.end`, against the run's own scopes rather than any
+    /// step's. Trailing, like the `outcome_*` fields below, and for the same
+    /// reason: every step-phase dispatch site predates #1499 and so skips both
+    /// - only the two run-boundary dispatch sites bind either. `{}` is
+    /// load-bearing on the same `Variable::created_at` precedent those fields
+    /// cite.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::function<vayu::ScriptResult (const std::string& script)> run_setup_script{};
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::function<vayu::ScriptResult (const std::string& script)> run_teardown_script{};
 
     /// One JSON parse of the response body, shared by every `extract.*` /
     /// `assert.jsonpath` on the same step rather than paid per kind.
@@ -154,6 +291,26 @@ class Element {
 
     [[nodiscard]] virtual Phase phase () const = 0;
     virtual void apply (ElementContext& ctx)   = 0;
+
+    /**
+     * Issue #1498: how long a scenario load run should hold the owning VU
+     * back before this element's phase would otherwise dispatch it, or
+     * `nullopt` for "nothing to schedule around" - the default every kind
+     * but `timer.think` and `timer.pacing` keeps. Called by the load path's
+     * own step-completion hook, before the VU is next considered ready, so a
+     * kind that wants a non-blocking wait reports it here instead of
+     * sleeping inside `apply` (which the load path never lets block). @p
+     * pacing_state is the same per-VU map `ElementContext::pacing_state`
+     * would bind for this VU; a kind that writes through it here must leave
+     * `apply` free to run again without double-booking the wait.
+     */
+    [[nodiscard]] virtual std::optional<int64_t> scheduled_ready_delay_ms (
+    std::unordered_map<std::string, int64_t>& pacing_state,
+    int64_t now_ms) const {
+        (void)pacing_state;
+        (void)now_ms;
+        return std::nullopt;
+    }
 };
 
 /**
@@ -170,9 +327,54 @@ struct ElementKind {
     std::string description;
     std::string category;
     HotPathClass hot_path = HotPathClass::Declarative;
+    // `script.setup` / `script.teardown` (#1499): true refuses the kind on a
+    // request's own `elements`, both at validate time and in the catalogue
+    // (`GET /elements/kinds`' `collectionOnly`), because a once-per-run
+    // element attached to one request in the tree would run once per request
+    // that happened to declare it rather than once per run - a question the
+    // model has no answer for. Every other kind stays request-and-collection,
+    // the default.
+    bool collection_only = false;
+    /// Whether this kind needs to know its own first/last occurrence across
+    /// the folder it is inherited into (issue #1515's `control.loop` /
+    /// `control.transaction`, which each compile once per member request and
+    /// must recognise their own folder's boundary independently). Read by
+    /// `compute_element_spans` through the registry, never a `kind ==`
+    /// comparison outside `core/elements` (#1512's extensibility contract,
+    /// rule 1).
+    bool needs_span = false;
+    /// Whether this kind can redirect the plan walk to a step other than
+    /// the next one (issue #1515's `control.loop` / `control.switch`). A
+    /// scenario load run's virtual users only ever advance forward
+    /// (`VirtualUser::step`), so `find_load_incompatible_controller`
+    /// (`scenario_load.cpp`) reads this - through the registry, never a
+    /// `kind ==` comparison outside `core/elements` (#1512's extensibility
+    /// contract, rule 1) - to refuse a load run carrying one rather than
+    /// silently running it once and ignoring what it asked for.
+    bool jumps_or_repeats = false;
+    /// Whether the plan compiler must track, across a whole iteration's step
+    /// sequence, which occurrence of this kind's element id comes first
+    /// (issue #1498). True only for `timer.pacing`: "the wait is measured
+    /// from the previous start of the same node" needs to know which one
+    /// occurrence - of the many a folder- or collection-scoped element is
+    /// inherited into - is that node's actual start. Read by
+    /// `scenario_plan.cpp` through the registry, never by a `kind ==`
+    /// comparison, so the extensibility contract's rule 1 holds for a future
+    /// kind that needs the same tracking. A sibling of `needs_span` above
+    /// (which additionally needs the *last* occurrence, not only the
+    /// first) rather than unified with it, for the same reason
+    /// `controller_state` and `pacing_state` stay two fields above.
+    bool tracks_scope_occurrence = false;
     // Absent for a kind that only validates (phase 0's `inherit.disable`);
     // present once a kind actually runs (#1514 onward).
     std::function<std::unique_ptr<Element> (const nlohmann::json& config)> compile;
+};
+
+/** Which stored row an `elements` array is being validated for (#1499): the
+ *  one fact `collection_only` is checked against. */
+enum class ElementOwner : std::uint8_t {
+    Request,
+    Collection,
 };
 
 /**
@@ -195,11 +397,13 @@ class Registry {
     /**
      * Validates the wire shape of an `elements` field: an array of objects,
      * each a known kind, each `config` against that kind's schema, with no
-     * duplicate `id`. Returns the first violation's message, or `nullopt` if
-     * the whole array is well-formed - the same "pure validator, route
-     * converts to a 400" split `core::validate_thresholds` uses.
+     * duplicate `id`, each honouring its kind's `collection_only` against
+     * @p owner. Returns the first violation's message, or `nullopt` if the
+     * whole array is well-formed - the same "pure validator, route converts
+     * to a 400" split `core::validate_thresholds` uses.
      */
-    [[nodiscard]] std::optional<std::string> validate (const nlohmann::json& elements) const;
+    [[nodiscard]] std::optional<std::string> validate (const nlohmann::json& elements,
+    ElementOwner owner = ElementOwner::Request) const;
 
     Registry (const Registry&)            = delete;
     Registry& operator= (const Registry&) = delete;
@@ -233,6 +437,18 @@ struct ElementOutcome {
 
     [[nodiscard]] nlohmann::json to_json () const;
 };
+
+/**
+ * `script.setup` / `script.teardown`'s outcomes (#1499), in the shape both run
+ * modes' summary stores under the `lifecycle` key: `{"setup": [...],
+ * "teardown": [...] }`, each key present only when that phase ran at least one
+ * element - an empty array would read as "a setup element ran and did
+ * nothing" rather than "this collection declared none". An empty object comes
+ * back when both are empty, which every caller treats as absent, the same
+ * `coverage` / `schema_validation` rule `RunSummaryInputs` already follows.
+ */
+[[nodiscard]] nlohmann::json build_lifecycle_node (const std::vector<ElementOutcome>& run_start,
+const std::vector<ElementOutcome>& run_end);
 
 /**
  * One entry of a resolved `elements` array, compiled once (issue #1512's
@@ -270,6 +486,19 @@ struct CompiledElement {
  * has simply never heard of.
  */
 [[nodiscard]] std::vector<CompiledElement> compile_elements (const nlohmann::json& elements);
+
+/**
+ * Applies the run's `elements.timers` override (issue #1498) to one
+ * `timer.*` kind's own computed wait: `nullopt` means "run silenced by
+ * `off`, do not wait at all"; a value means "wait this many milliseconds
+ * instead of @p own_wait_ms". @p rng is the same generator
+ * `ElementContext::rng` carries, drawn from for `Range`'s uniform pick;
+ * null falls back to an unseeded draw, exactly as a kind with no run would.
+ * A null @p override (a design send) returns @p own_wait_ms unchanged.
+ */
+[[nodiscard]] std::optional<int64_t> apply_timers_override (const TimersOverride* override_,
+int64_t own_wait_ms,
+std::mt19937_64* rng);
 
 /**
  * The response body parsed as JSON, cached on @p ctx so `extract.json`,

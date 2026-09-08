@@ -1487,6 +1487,7 @@ from, and what `docs/engine/elements.md`'s kind table is checked against.
     "description": "Drops one element inherited from an ancestor collection, named by id, out of this request or collection's resolved list.",
     "category": "inherit",
     "hotPathClass": "declarative",
+    "collectionOnly": false,
     "configSchema": {
       "type": "object",
       "properties": { "elementId": { "type": "string", "minLength": 1 } },
@@ -1501,10 +1502,11 @@ Phase 0 also registers `script.pre` and `script.post`, validate-only like
 `inherit.disable` - so a request or collection the startup fold migrated
 (`docs/engine/db-schema.md`) can be read back and written as-is without its
 own `elements` failing the registry that produced them - plus, in the test
-build only, a `test.echo` kind proving the registration path. No kind that
-actually *runs* (extractors, assertions, timers, controllers, metrics, and
-`script.*` executing for real) is registered yet; those land with #1514
-onward. See [Elements](elements.md) for the full kind table.
+build only, a `test.echo` kind proving the registration path. `collectionOnly`
+(issue #1499) is `true` only for `script.setup` / `script.teardown` - the app's
+Add menu on a request hides a kind marked so, and the registry itself refuses
+one on a request's own `elements` with a `400`. See [Elements](elements.md) for
+the full kind table.
 
 ## Trash
 
@@ -5062,14 +5064,16 @@ combined assertion tally: every `assert.*` element outcome and every
 `pm.test` call, however the script that made it ran - inline on the load
 path or through the deferred replay. Unevaluated, like a latency percentile,
 when the run made no assertion at all - a run with no `assert.*` element and
-no test script is unaffected by declaring this budget. **Load runs only**
-(a single-request or a scenario load run, `POST /runs` with no `scenario`
-block or with one carrying a load `mode`): a **collection** (sequential,
-design-mode) run's config is still accepted with a `thresholds` block, but
-nothing evaluates it yet and its report carries no `thresholdValidation`
-section - the same "measured, not judged" behavior as a run that declared no
-budgets at all. Tracked in
-[#1564](https://github.com/athrvk/vayu/issues/1564).
+no test script is unaffected by declaring this budget.
+
+**Every run mode is judged** (issue #1564): a single-request load run, a
+scenario load run and a **collection** (sequential, design-mode) run all
+evaluate the same `thresholds` block against their own numbers and store the
+same `thresholdValidation` shape. A collection run's error rate and latency
+percentiles are drawn from the steps it actually sent (a step a script or an
+unbound data row skipped counts toward neither), and its assertion tally is
+the same combined `assert.*`/`pm.test` count `maxAssertionFailureRatePct`
+reads for a load run.
 
 The verdict is the run's, not the process's: a run **stopped early** is judged on
 what it measured up to that point, and its status stays `stopped` whatever the
@@ -5097,9 +5101,10 @@ collection itself.
 ```jsonc
 {
   "elements": {
-    "timers": "asConfigured",     // "asConfigured" (default) | "off"
+    "timers": "asConfigured",     // "asConfigured" (default) | "off" | {"fixedMs": N} | {"minMs": N, "maxMs": N}
     "scripts": "asMarked",        // "asMarked" (default) | "allInline" | "allDeferred"
-    "includeScriptTime": false    // default false
+    "includeScriptTime": false,   // default false
+    "seed": 42                    // Optional, non-negative integer - seeds this run's RNG
   }
 }
 ```
@@ -5118,10 +5123,28 @@ own unknown-key rule uses, checked before the run row is created.
 - **`includeScriptTime`** folds the element pipeline's own elapsed time into
   a step's recorded latency when `true`; by default (`false`) a step's
   latency is its transfer alone, exactly as before this issue.
-- **`timers`** is accepted and stored but not yet wired to anything: no
-  kind reads it yet, since `timer.think`'s current phase (`step.between`) and
-  blocking wait are sequential-run-only. Issue #1498 ("the timer family")
-  owns finishing this.
+- **`timers`** (issue #1498) is wired end to end: `"asConfigured"` (default)
+  runs every `timer.*` element's own stored config unchanged; `"off"`
+  silences every `timer.*` element for the run (`waitedMs: 0`, no sleep);
+  `{"fixedMs": N}` or `{"minMs": N, "maxMs": N}` replace every `timer.*`
+  element's own computed wait with the same fixed value or uniform range,
+  whatever that element's own config says - "replaced, not merged", the
+  same rule `scripts` above uses. `timer.think`'s `step.between` phase now
+  dispatches on a scenario load run too (non-blocking, summed into
+  `VirtualUser::ready_at_ms`), so this override reaches load runs as well as
+  the sequential run.
+- **`seed`** (issue #1498) is an optional non-negative integer that seeds this
+  run's RNG, making a `timer.think` element's gaussian or uniform-random wait
+  reproducible. A scenario load run derives one independent generator per
+  virtual user from this seed rather than sharing one across worker threads.
+  Omitted, the run seeds from `std::random_device` as before, and every draw
+  is non-reproducible.
+
+Not reported at the run-summary level: there is no `summary.timers`
+aggregate. What a `timer.*` element waited is per-step, per-element -
+`waitedMs` on that element's entry in the step trace's `elements` array (see
+[The step trace](elements.md#the-step-trace)) - not rolled up into
+`GET /runs/:runId` / the completion report's `summary` object.
 
 Not part of this block: a **single-request** `POST /runs` payload has no
 `elements` attachment point at all (see `tests` above), so this block is
@@ -5620,6 +5643,24 @@ its row count - plus `{index, requestId, name, method, url}` per step, where
 `Authorization` headers and, for an `apikey` auth with `in: "query"`, a live key
 in the URL; it lives in memory for the run's life and nowhere else.
 
+**Controller elements redirect the sequence too (issue #1515).** `control.if`,
+`control.once` and `control.throughput` skip a step the same way
+`pm.execution.skipRequest()` does; `control.switch` jumps to a named member the
+same way `setNextRequest(name)` does - one flow-control channel, not two, so
+the rules above (an unresolved target fails the step by name, a cycle trips
+`maxStepsPerIteration`) apply identically. `control.loop`, on a folder, walks
+its members a fixed number of times per iteration by looping back to the
+folder's first member. See [elements.md](elements.md#controllers) for the
+kind table and every config shape.
+
+**`control.transaction` reports its own percentiles.** A folder carrying one
+sums every member's own response latency into a named total per pass, and the
+run's summary gains
+`scenario.transactions[] = { name, count, errors, latency: { min, p50, p90,
+p95, p99, max } }`, omitted for a transaction the run never closed. The same
+shape reports on a scenario load run's summary, top-level rather than under
+`scenario` - see below.
+
 #### Scenario load runs
 
 Adding a load **`mode`** beside the `scenario` block runs the same plan as a
@@ -5649,6 +5690,7 @@ row exists:
 | `mode: "capacity"` with a `scenario` | The search judges one windowed p99 and a sequence has one per step, so which of them the knee is measured against is a question the mode does not answer. |
 | `rps` / `targetRps` above zero, on any mode | It is what selects the open-loop path regardless of the declared mode. |
 | An unknown `mode` | |
+| The plan carries a `control.switch` or `control.loop` element (issue #1515) | Both need to jump the plan; a scenario load run's virtual users only ever advance forward. Named in the error message. Real, disclosed follow-up work - issue #1569. |
 
 `maxInFlight` is **moot** and is ignored with a warning: in-flight requests are
 bounded by the virtual-user count by construction, so `concurrency` is the only
@@ -5672,10 +5714,14 @@ knob.
   its own overlay, never the run's shared scopes, so a name one user's step 1
   writes (an `extract.json`'s target, an inline script's
   `pm.environment.set`) is visible only to that same user's later steps, never
-  to another user's concurrent one. `pm.execution` still throws - an inline
-  element can write state and mutate the request, never redirect the
-  sequence; flow control stays design-mode only (and, eventually, a
-  `control.*` element's).
+  to another user's concurrent one. `pm.execution` still throws - a *script*
+  cannot redirect the sequence under load. A **controller** element can
+  (issue #1515): `control.if`, `control.once` and `control.throughput` skip a
+  step the way `pm.execution.skipRequest()` would, counted in the run's
+  summary `skipped` key rather than the `0` every scenario load run reported
+  before this; `control.switch` and `control.loop` need to jump, which a load
+  run's virtual users cannot do, so a plan carrying either is refused outright
+  (see the table above) rather than silently run once through.
 - **A script that did not run inline stays deferred, keyed per step.** After
   the run drains, that step's own post-request script is replayed against the
   responses that step produced, and the tallies appear on that step's entry in
@@ -5720,7 +5766,7 @@ knob.
 ```json
 "scenario": {
   "iterations": 480, "iterationsCompleted": 474, "iterationsAbandoned": 6,
-  "stepsExecuted": 1422, "errored": 6, "virtualUsers": 50,
+  "stepsExecuted": 1422, "errored": 6, "skipped": 12, "virtualUsers": 50,
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 0, "unresolvedTokens": 0,
@@ -5750,6 +5796,22 @@ assertions" and "no failures" are different answers.
 ran at least once this run - **absent** for a step with no elements or none
 that ever ran, the same convention `tests` follows. `skipped` folds in both a
 disabled element and a `script.*` element left deferred to the replay above.
+
+**`transactions`** (issue #1515), a sibling of `steps` rather than a member of
+it - a `control.transaction` spans a folder, not one step:
+
+```json
+"transactions": [
+  { "name": "checkout", "count": 480, "errors": 0,
+    "latency": { "min": 8.1, "p50": 14.2, "p90": 22.0, "p95": 26.5,
+                 "p99": 33.0, "max": 55.4 } }
+]
+```
+
+One entry per declared `control.transaction` name that closed at least once
+this run, allocated up front from a scan of the plan - never discovered
+mid-run - so recording into it, like every other controller here, takes no
+lock.
 
 `unresolvedTokens` (issue #1503) counts, per step, how many of its executions
 sent a `{{token}}` composition the residual-token pass still could not answer
@@ -6969,6 +7031,10 @@ named it.
     "failures": [ { "step": "get pet", "status": 200, "path": "/id", "message": "Value type not permitted by 'type' constraint." } ],
     "failuresTotal": 6
   },
+  "lifecycle": {
+    "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok" } ],
+    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom" } ]
+  },
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
@@ -7003,6 +7069,18 @@ with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
 load shape alike (issue #1540): a single-request run with no data set and a
 scenario step report the same warning for the same mistake.
+
+**`lifecycle` (issue #1499) is `script.setup` / `script.teardown`'s outcomes** -
+what ran once at the run's own boundary, never at a step. Each key is present
+only when that phase ran at least one element (`ElementOutcome`'s usual shape:
+`id`, `kind`, `outcome`, `message?`, `waitedMs?`, `wrote?`); absent entirely,
+not `{}`, for a run whose collection declared neither, and for a single-request
+load run, which has no collection to declare them on. A `script.setup` outcome
+other than `"ok"` already means the run never sent anything - `status` is
+`Failed` and every other section above is absent or zeroed - so a reader who
+finds one here knows why the rest of the report is empty. A `script.teardown`
+outcome of `"error"` carries the thrown message but never changes `status`: a
+teardown failure is reported, not fatal.
 
 **A streaming run adds a `stream` section** and no other run carries one:
 

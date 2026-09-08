@@ -780,7 +780,38 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
             scripts_override = ScriptsOverrideMode::AllDeferred;
         }
         include_script_time = elements->value ("includeScriptTime", false);
-        timers_disabled = elements->value ("timers", std::string{}) == "off";
+
+        // "asConfigured" | "off" | {fixedMs} | {minMs,maxMs} - the object
+        // shapes are issue #1498's; `validate_elements_run_override` already
+        // refused anything else, so an unrecognised shape here falls back to
+        // the default rather than throwing, on the same rule the block above
+        // follows.
+        if (auto timers = elements->find ("timers"); timers != elements->end ()) {
+            if (timers->is_string () && *timers == "off") {
+                timers_override.mode = vayu::core::TimersOverride::Mode::Off;
+            } else if (timers->is_object () && timers->contains ("fixedMs")) {
+                timers_override.mode = vayu::core::TimersOverride::Mode::Fixed;
+                timers_override.fixed_ms = timers->value ("fixedMs", int64_t{ 0 });
+            } else if (timers->is_object () &&
+            (timers->contains ("minMs") || timers->contains ("maxMs"))) {
+                timers_override.mode = vayu::core::TimersOverride::Mode::Range;
+                timers_override.min_ms = timers->value ("minMs", int64_t{ 0 });
+                timers_override.max_ms = timers->value ("maxMs", timers_override.min_ms);
+            }
+        }
+
+        // A run without an explicit seed still gets a real one (the default
+        // member initialiser above draws from `std::random_device`) - only a
+        // caller that wants *this* run reproducible supplies its own.
+        // `rng_seed` and `rng` are re-seeded together: a scenario load run
+        // derives its virtual users' generators from `rng_seed` alone, so
+        // the two must never disagree about which seed this run actually
+        // used.
+        if (auto seed = elements->find ("seed"); seed != elements->end () &&
+        seed->is_number_integer () && seed->get<int64_t> () >= 0) {
+            rng_seed = static_cast<uint64_t> (seed->get<int64_t> ());
+            rng.seed (rng_seed);
+        }
     }
 
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
@@ -1516,6 +1547,168 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
 }
 
 /**
+ * `script.setup` / `script.teardown` (#1499) share this run-level
+ * `ScriptConfig` recipe with every other script the run executes - reading it
+ * twice (once for each dispatch site) rather than once and threading it
+ * through would be the same five config keys kept in sync by hand at two call
+ * sites instead of one.
+ */
+vayu::runtime::ScriptConfig read_lifecycle_script_config (vayu::db::Database& db,
+const nlohmann::json& config) {
+    vayu::runtime::ScriptConfig script_config;
+    script_config.timeout_ms     = static_cast<uint64_t> (db.get_config_int (
+    "scriptTimeout", vayu::core::constants::script_engine::TIMEOUT_MS));
+    script_config.memory_limit   = static_cast<size_t> (db.get_config_int (
+    "scriptMemoryLimit", vayu::core::constants::script_engine::MEMORY_LIMIT));
+    script_config.stack_size     = static_cast<size_t> (db.get_config_int (
+    "scriptStackSize", vayu::core::constants::script_engine::STACK_SIZE));
+    script_config.enable_console = db.get_config_bool (
+    "scriptEnableConsole", vayu::core::constants::script_engine::ENABLE_CONSOLE);
+    script_config.allow_send_request = vayu::http::read_allow_script_requests (config);
+    return script_config;
+}
+
+/** The collection's own `elements` array, compiled once - shared by both
+ *  `script.setup`'s and `script.teardown`'s dispatch, never a step's
+ *  inherited copy. Empty for an unbound or elements-free collection. */
+std::vector<vayu::core::CompiledElement>
+compile_collection_elements (vayu::db::Database& db, const std::string& collection_id) {
+    std::vector<vayu::core::CompiledElement> elements;
+    if (auto collection_row = db.get_collection (collection_id)) {
+        auto parsed = nlohmann::json::parse (collection_row->elements, nullptr, false);
+        if (!parsed.is_discarded ()) {
+            elements = vayu::core::compile_elements (parsed);
+        }
+    }
+    return elements;
+}
+
+/**
+ * `script.setup` (#1499): dispatched by `execute_load_test`, before it
+ * captures `test_start`, so a setup script's own time is never folded into
+ * the run's duration figures and a throwing setup fails the run before any
+ * load is sent. Writes into @p base_scopes, which the caller then hands to
+ * `execute_scenario_load` - so a setup write is visible to the run's very
+ * first submission, exactly as it is to a sequential run's first step. A
+ * single-request load run (no `context->scenario`) has no collection to
+ * declare one on - see #1573, filed for that wire-shape gap.
+ *
+ * @return `nullopt` on success; the failed outcome's message otherwise. The
+ *         caller's only remaining job on failure is to stop the run - this
+ *         does not touch `context->is_running` or the run's status itself,
+ *         since only the caller knows the rest of its own shutdown sequence.
+ */
+std::optional<std::string> run_collection_setup (vayu::db::Database& db,
+const std::shared_ptr<RunContext>& context,
+vayu::http::routes::ScriptVariableScopes& base_scopes) {
+    if (!context->scenario) {
+        return std::nullopt;
+    }
+
+    std::optional<std::string> environment_id;
+    if (auto it = context->config.find ("environmentId"); it != context->config.end () &&
+    it->is_string () && !it->get<std::string> ().empty ()) {
+        environment_id = it->get<std::string> ();
+    }
+    base_scopes = vayu::http::routes::load_script_variable_scopes (
+    db, environment_id, context->scenario->request.collection_id);
+
+    auto collection_elements =
+    compile_collection_elements (db, context->scenario->request.collection_id);
+    if (collection_elements.empty ()) {
+        return std::nullopt;
+    }
+
+    auto setup_config = read_lifecycle_script_config (db, context->config);
+    vayu::runtime::ScriptEngine setup_engine (setup_config);
+
+    vayu::Request lifecycle_request;
+    vayu::ScriptResult unread_pre;
+    vayu::ScriptResult unread_post;
+    vayu::core::ElementContext setup_ctx{
+        .request        = lifecycle_request,
+        .response       = nullptr,
+        .run_pre_script = [] (
+                          const std::string&) { return vayu::ScriptResult{}; },
+        .run_post_script = [] (
+                           const std::string&) { return vayu::ScriptResult{}; },
+        .pre_script_result  = unread_pre,
+        .post_script_result = unread_post,
+        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
+        .should_stop = nullptr,
+        .run_setup_script =
+        [&] (const std::string& script) {
+            auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
+            vayu::http::routes::bind_variable_scopes (script_ctx, base_scopes);
+            return vayu::http::routes::execute_script (
+            setup_engine, script, script_ctx, "Setup");
+        },
+    };
+    vayu::core::ElementPipeline::run (vayu::core::Phase::RunStart, setup_ctx,
+    collection_elements, context->setup_outcomes);
+    for (const auto& outcome : context->setup_outcomes) {
+        if (outcome.status == "error" || outcome.status == "failed") {
+            return outcome.message.value_or ("unknown error");
+        }
+    }
+    return std::nullopt;
+}
+
+/**
+ * `script.teardown` (#1499): the same collection-level elements
+ * `run_collection_setup` ran, dispatched by `finish_load_test` so
+ * `pm.info.run` can carry @p run_summary_info. Never lets a throw reach the
+ * caller's `final_status`: `ElementPipeline::run` already turns one into this
+ * element's own `"error"` outcome rather than propagating, so a failing
+ * teardown is recorded, not fatal. Empty for a single-request load run (no
+ * `scenario_state`) or a collection that declared no `script.teardown`.
+ */
+std::vector<vayu::core::ElementOutcome> run_collection_teardown (vayu::db::Database& db,
+const std::shared_ptr<RunContext>& context,
+const std::shared_ptr<ScenarioLoadState>& scenario_state,
+const vayu::runtime::RunSummaryInfo& run_summary_info) {
+    std::vector<vayu::core::ElementOutcome> teardown_outcomes;
+    if (!scenario_state || !context->scenario) {
+        return teardown_outcomes;
+    }
+
+    auto collection_elements =
+    compile_collection_elements (db, context->scenario->request.collection_id);
+    if (collection_elements.empty ()) {
+        return teardown_outcomes;
+    }
+
+    auto teardown_config = read_lifecycle_script_config (db, context->config);
+    vayu::runtime::ScriptEngine teardown_engine (teardown_config);
+
+    vayu::Request lifecycle_request;
+    vayu::ScriptResult unread_pre;
+    vayu::ScriptResult unread_post;
+    vayu::core::ElementContext teardown_ctx{
+        .request        = lifecycle_request,
+        .response       = nullptr,
+        .run_pre_script = [] (
+                          const std::string&) { return vayu::ScriptResult{}; },
+        .run_post_script = [] (
+                           const std::string&) { return vayu::ScriptResult{}; },
+        .pre_script_result  = unread_pre,
+        .post_script_result = unread_post,
+        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
+        .should_stop = nullptr,
+        .run_teardown_script =
+        [&] (const std::string& script) {
+            auto script_ctx = vayu::runtime::ScriptContext::for_teardown (run_summary_info);
+            vayu::http::routes::bind_variable_scopes (script_ctx, scenario_state->base_scopes);
+            return vayu::http::routes::execute_script (
+            teardown_engine, script, script_ctx, "Teardown");
+        },
+    };
+    vayu::core::ElementPipeline::run (vayu::core::Phase::RunEnd, teardown_ctx,
+    collection_elements, teardown_outcomes);
+    return teardown_outcomes;
+}
+
+/**
  * Everything a finished run leaves behind: the flush, the two deferred passes,
  * the stored summary and the terminal status.
  *
@@ -1573,6 +1766,18 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         "run", "Schema validation failed: " + std::string (e.what ()));
     }
 
+    // `script.teardown` (#1499): the same collection-level elements
+    // `script.setup` ran at the top of `execute_load_test`, dispatched here so
+    // `pm.info.run` can carry this pass's own totals - the reason it runs
+    // after schema validation rather than immediately once the drain ends.
+    vayu::runtime::RunSummaryInfo run_summary_info;
+    run_summary_info.requests_sent = completed;
+    run_summary_info.error_rate    = error_rate;
+    run_summary_info.assertions_passed = validation.run ? validation.run->passed : 0;
+    run_summary_info.assertions_failed = validation.run ? validation.run->failed : 0;
+    auto teardown_outcomes =
+    run_collection_teardown (db, context, scenario_state, run_summary_info);
+
     // Store the whole-run summary: everything the report used to rebuild by
     // scanning the run's metric rows, written once, here. Hoisted out of the
     // try so the terminal-status decision below can read its verdict - the
@@ -1585,6 +1790,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
             setup_overhead_s, avg_latency, percentiles };
         inputs = collect_summary_inputs (
         context, totals, validation, schema_totals, scenario_state);
+        inputs.lifecycle =
+        vayu::core::build_lifecycle_node (context->setup_outcomes, teardown_outcomes);
         db.update_run_summary (
         context->run_id, build_run_summary_payload (inputs).dump ());
         summary_stored = true;
@@ -1672,13 +1879,29 @@ RunManager& manager) {
             return;
         }
 
+        // `script.setup` (#1499): the collection's own once-per-run elements,
+        // run - and, on failure, refused - before `test_start` below is
+        // captured, so a setup script's own time is never folded into the
+        // run's duration figures and a throwing setup fails the run before any
+        // load is sent.
+        vayu::http::routes::ScriptVariableScopes base_scopes;
+        if (auto setup_failure = run_collection_setup (db, context, base_scopes)) {
+            vayu::utils::log_error ("script.setup failed: " + *setup_failure);
+            db.update_run_status (context->run_id, vayu::RunStatus::Failed);
+            context->is_running = false;
+            context->join_aux_threads ();
+            manager.retain_run (context->run_id);
+            return;
+        }
+
         // Execute Load Strategy
         auto test_start = std::chrono::steady_clock::now ();
         std::shared_ptr<ScenarioLoadState> scenario_state;
 
         try {
             if (context->scenario) {
-                scenario_state = execute_scenario_load (context, db, *context->scenario);
+                scenario_state = execute_scenario_load (
+                context, db, *context->scenario, std::move (base_scopes));
             } else {
                 auto strategy = LoadStrategy::create (config);
                 strategy->execute (context, db, request);
@@ -1909,22 +2132,7 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // nothing was measured against" are different answers, and only the absent
     // section can say the first.
     if (inputs.thresholds.has_value ()) {
-        nlohmann::json checks = nlohmann::json::array ();
-        for (const auto& check : inputs.thresholds->checks) {
-            nlohmann::json row = { { "metric", check.metric }, { "limit", check.limit },
-                { "passed", check.passed }, { "evaluated", check.evaluated } };
-            // Omitted rather than zeroed when unevaluated, the same rule this
-            // report follows for a section the run never populated - a
-            // ceiling of 0ms next to "passed": false would read as a real
-            // measurement instead of the absence it is.
-            if (check.evaluated) {
-                row["actual"] = check.actual;
-            }
-            checks.push_back (std::move (row));
-        }
-        summary["thresholds"] = { { "checks", checks },
-            { "passed", inputs.thresholds->passed },
-            { "failed", inputs.thresholds->failed } };
+        summary["thresholds"] = build_threshold_outcome_payload (*inputs.thresholds);
     }
     // Per-phase latency distributions, keyed by wire name so a reader does not
     // have to know the enum's order. Omitted when the run recorded none - a
@@ -1968,6 +2176,12 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // block carries its own `sampled` denominator and the report says so.
     if (inputs.schema_validation.has_value () && !inputs.schema_validation->empty ()) {
         summary["schemaValidation"] = *inputs.schema_validation;
+    }
+    // `script.setup` / `script.teardown` outcomes (#1499). Omitted for a run
+    // whose collection declared neither, and for a single-request load run,
+    // which has no collection to declare them on.
+    if (inputs.lifecycle.has_value () && !inputs.lifecycle->empty ()) {
+        summary["lifecycle"] = *inputs.lifecycle;
     }
     // What the server-vitals scrape recorded. Omitted for a run that configured
     // no monitor, so the report's section is absent rather than showing a run

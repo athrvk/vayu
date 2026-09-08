@@ -769,12 +769,12 @@ came back.
 
 #### Non-goals, so none of them arrives sideways
 
-Recorded here rather than left to be re-derived: **JMeter's logic-controller
-zoo** (if / while / switch / loop / interleave - `setNextRequest` covers the
-workflows people actually build; a declarative `controller.*` element kind is
-future work, #1497/#1515, and even then names a condition, not a nested
-sub-flow); **k6's open-model and arrival-rate executors for scenarios**;
-**distributed load**; **the engine reading data files from disk** (the
+Recorded here rather than left to be re-derived: **JMeter's while / interleave
+controllers**, and any nested sub-flow shape (`control.if` / `.once` /
+`.switch` / `.throughput` / `.loop`, #1515, each name a condition or a jump
+against the flat plan `setNextRequest` already walks - no controller owns a
+child list of its own); **k6's open-model and arrival-rate executors for
+scenarios**; **distributed load**; **the engine reading data files from disk** (the
 sandbox has no filesystem, and a user-supplied path would be a new trust
 boundary); **parallel steps within an iteration** (an iteration is ordered -
 that is the whole primitive); **a scenario-level test script** asserting

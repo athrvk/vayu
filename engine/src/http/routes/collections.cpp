@@ -258,7 +258,8 @@ bool is_create) {
     if (auto refusal = refuse_legacy_script_fields (json)) {
         return route_error (400, *refusal);
     }
-    if (auto outcome = apply_elements_field (json, "elements", c.elements, is_create);
+    if (auto outcome = apply_elements_field (json, "elements", c.elements,
+        is_create, vayu::core::ElementOwner::Collection);
     !outcome) {
         return outcome;
     }
