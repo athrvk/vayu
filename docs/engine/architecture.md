@@ -792,9 +792,11 @@ shared pool, no lock). Since #1594, a single-target `POST /runs` (no
 through `requestElements` - the mechanism is the same shape, a per-submission
 `ScopeOverlay` standing in for the scenario path's per-VU one, since a single
 target has no persistent virtual-user object to hold state on between
-submissions. `control.*` is the one family that stays a scenario-only
-concern in practice: nothing rejects it on `requestElements`, but a lone
-request has no sequence for a jump, skip or transaction to act on.
+submissions. `control.*`, `timer.pacing` and `timer.throughput` stay a
+scenario-only concern: `validate_request_elements_run_override` refuses them
+outright rather than accepting a kind that would silently no-op or misfire -
+a lone request has no sequence for a jump, skip or transaction to act on, and
+no per-VU or shared pacing state for the kind to read.
 
 Two things were deliberately left open: whether a **stored scenario entity**
 ever lands (the seam exists; the demand does not), and **retry /

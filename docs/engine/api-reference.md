@@ -4942,7 +4942,7 @@ Start a load test run (Vayu Mode).
   "targetRps": 1000,         // Target requests per second (constant_rps mode)
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
-  "requestName": "Create user",       // Optional, read by a script.post element as pm.info.requestName
+  "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional
   "requestElements": [],     // Optional step-level elements for THIS request - see below
   "data": [],                // Optional data rows, one object per row - see below
@@ -5229,7 +5229,7 @@ the same shape a request's own stored `elements` column holds:
 {
   "requestElements": [
     { "kind": "script.pre", "config": { "script": "pm.request.headers['X-Sig'] = sign()", "inline": true } },
-    { "kind": "assert.status", "config": { "expected": 200 } },
+    { "kind": "assert.status", "config": { "in": [200] } },
     { "kind": "script.post", "config": { "script": "pm.test('ok', function () { pm.expect(pm.response.code).to.eql(200); })" } }
   ]
 }
@@ -5244,6 +5244,18 @@ renames a composed request's chain-then-own `elements` onto, since `POST
 /compose` answers under the plain `elements` key and this endpoint's own
 `elements` key means something else (the override block above) - see
 [mcp.md](mcp.md#request-composition).
+
+**Only the kinds this run shape's own hooks actually dispatch are accepted**:
+`extract.*`, `assert.*`, `timer.think`, `script.pre`/`script.post` - the same
+phase-0 set issue #1514 gave the design send. A `control.*` kind or
+`timer.pacing`/`timer.throughput` is a `400` naming the index and the kind,
+never silently accepted and left inert: those need per-VU controller and
+pacing state (`controller_state`, `SharedThroughputCounters`,
+`pacing_state`) this run shape's single-submission model has no equivalent
+of, and admitting one without running it would report `"ok"` in
+`summary["elements"]` for behaviour that never happened. Run a sequence that
+needs a controller as a `"scenario"` instead, where its steps carry that
+state.
 
 `vayu::core::ElementPipeline` runs the compiled list per submission, the same
 phases a design send uses: `script.pre` at `step.before`, `extract.*` /
@@ -5276,6 +5288,15 @@ same guarantee a scenario load run's per-VU overlay gives its own steps.
 Nothing shares this overlay across submissions - each one gets its own,
 discarded after - which is what keeps many concurrent submissions from
 writing through one shared map.
+
+**`pm.info.requestName` is not bound for an inline element on this path.**
+The deferred replay (the un-inlined `script.post` case, `test_script`) reads
+`requestName` off the run's own config exactly as it always has; an inline
+`script.pre` / `script.post` element's `ScriptContext` does not carry it,
+since binding it is the scenario load path's own `bind_step_identity` call
+(`scenario_load.cpp`), which this path has no equivalent of yet. An inline
+script reading `pm.info.requestName` sees `undefined`, not the name a
+deferred one on the same run would.
 
 #### The `lifecycleElements` array (a single-request run's own setup/teardown)
 
@@ -6020,25 +6041,37 @@ fails the run by itself; both also feed the top-level `warnings` array below.
 outright** (`refuse_legacy_script_fields`), the same rule `POST /execute`,
 `PUT /requests/:id` and `PUT /collections/:id` already applied since issue
 #1514 - a payload carrying any of the five names (a real value, not `null`)
-is a `400` naming `elements` as the replacement, on either run shape, before
-the run row exists. `POST /runs` was the one route that still read the old
-names - a single-target run had nothing else to run a script through until
-its own element pipeline existed - and issue #1594 closed that gap:
-`requestElements` (above) is a single target's own script slot now, the
-same way a scenario's steps already read theirs off the plan's compiled
-elements. A caller still sending `tests` gets the same refusal every other
-route already gives; MCP's `start_load_run` never sends it - it folds the
+is a `400`, before the run row exists. The name it points a caller at
+depends on the shape: `requestElements` for a single target (this endpoint's
+own `elements` means the run-level override, not a script source, and
+pointing there would send a caller straight into a second refusal), plain
+`elements` for a scenario (its steps read theirs off the bound collection's
+stored elements, which no field on this payload can name more precisely).
+`POST /runs` was the one route that still read the old names on a single
+target - it had nothing else to run a script through until its own element
+pipeline existed - and issue #1594 closed that gap: `requestElements`
+(above) is a single target's own script slot now, the same way a scenario's
+steps already read theirs off the plan's compiled elements. A caller still
+sending `tests` gets the same refusal every other route already gives;
+MCP's `start_load_run` never sends it - it folds the
 agent-facing `postRequestScript` / `tests` argument into a `script.post`
 entry of `requestElements` client-side (see
 [mcp.md](mcp.md#request-composition)).
 
-**There is no pre-request hook on this endpoint.** `preRequestScript(s)` in a
-run payload is not an error, but nothing runs it - only `POST /execute` executes
-a pre-request script. A request that signs itself in one is sent unsigned under
-load. Since issue #1503 this is no longer silent: a scenario step whose request
-carries a pre-request script reports `preRequestScript: "skipped"` on its
-`scenario.steps` entry, and the run's `warnings` array carries one line naming
-how many steps did.
+**A `script.pre` element only reaches the wire when it is marked to.** The
+ad-hoc `preRequestScript(s)` field itself is refused (see above, same as
+`tests`) - a pre-request script only ever rides as a stored `script.pre`
+element now, on either run shape. Unmarked (`config.inline` unset, no
+`elements.scripts: "allInline"` override), it never runs - there is no
+pre-request replay to defer it to, unlike `script.post` - so a request that
+signs itself in one is sent unsigned. Since issue #1503 this is no longer
+silent on the scenario shape: a step whose request carries an un-inlined
+pre-request script reports `preRequestScript: "skipped"` on its
+`scenario.steps` entry, and the run's `warnings` array carries one line
+naming how many steps did. The single-target shape reports the same fact
+differently (see `requestElements` above): an un-inlined `script.pre`
+element's own entry in `summary["elements"]` carries the `"skipped"`
+outcome instead of a separate warning line.
 
 **Accepted ranges.** The numeric config is range-checked **before the run row is
 created**, so a rejected request leaves no `pending` row behind. A violation is

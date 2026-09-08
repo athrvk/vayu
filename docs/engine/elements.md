@@ -398,10 +398,15 @@ poll throttles a reserved-but-not-yet-released submission the same way it
 already throttles an in-flight one - no new thread, no change to any load
 strategy's own polling loop. What issue #1573 wires for this run shape stays
 separate: `lifecycleElements` (previous paragraph) is a run's own boundary,
-not a step's, and a `control.*` element is accepted on `requestElements`
-syntactically (nothing marks it collection-only) but a lone request has no
-sequence for a jump, skip or transaction to act on - the controller family
-stays a scenario-only concern in practice.
+not a step's. `validate_request_elements_run_override` refuses a `control.*`
+kind, `timer.pacing` and `timer.throughput` outright (a `400` naming the
+index and the kind) rather than accepting one that would silently no-op or
+misbehave - a lone request has no sequence for a jump, a per-VU controller
+state, or a shared pacing clock for `apply` to read, and admitting the kind
+without running it correctly would report `"ok"` for behaviour that never
+happened. The controller and pacing family stays a scenario-only concern;
+only `extract.*`, `assert.*`, `timer.think` and `script.pre`/`script.post`
+- the same phase-0 set #1514 gave the design send - are accepted here.
 
 ## Related issues
 
