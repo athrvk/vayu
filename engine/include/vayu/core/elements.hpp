@@ -41,6 +41,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "vayu/core/custom_metric_type.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::core {
@@ -258,6 +259,13 @@ struct ElementContext {
     /// design send, which has no run-level override to read. Read-only: a
     /// kind consults it, never writes it.
     const TimersOverride* timers_override = nullptr;
+
+    /// `metric.record`'s write (issue #1500): records one named custom
+    /// metric value into the run's `MetricsCollector`. Unset in a context
+    /// with no run behind it - a bare design send has no collector to write
+    /// into - which is what makes `metric.record` report `"skipped"` there
+    /// rather than recording nowhere silently.
+    std::function<void (const std::string& name, CustomMetricType type, double value)> record_metric;
 
     /// `script.setup` / `script.teardown` (#1499): runs @p script once, at
     /// `run.start` / `run.end`, against the run's own scopes rather than any

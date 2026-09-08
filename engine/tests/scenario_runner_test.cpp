@@ -853,6 +853,55 @@ TEST_F (ScenarioRunnerTest, TimerThinkWaitsBetweenStepsAndReportsHowLong) {
     EXPECT_LT (rows[0].latency_ms, 100.0);
 }
 
+// Issue #1500's acceptance criterion: a metric.record trend on one step
+// produces `customMetrics.<name>` in the sequential run's own summary
+// section, with a count equal to that step's completions.
+TEST_F (ScenarioRunnerTest, MetricRecordProducesCustomMetricsWithTheStepsCompletionCount) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/ok",
+    json::array ({ json{ { "id", "el_metric" }, { "kind", "metric.record" },
+    { "config",
+    { { "name", "ttfb2" }, { "type", "trend" }, { "source", { { "latency", true } } } } } } }));
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto custom_metrics = summary_of (run_id)["customMetrics"];
+    ASSERT_TRUE (custom_metrics.contains ("ttfb2"));
+    EXPECT_EQ (custom_metrics["ttfb2"]["type"], "trend");
+    EXPECT_EQ (custom_metrics["ttfb2"]["count"].get<size_t> (), 3u)
+    << "one recording per iteration of the step it is attached to";
+}
+
+// A collection run's own local `RunSummaryInputs` (built fresh in
+// `execute_scenario_run` rather than reusing `summary`) must carry
+// `custom_metrics` through to `evaluate_thresholds`, or a declared
+// `custom.<name>.<stat>` budget reads as unmeasured even though the value
+// sits right there in the summary. Mutation check: comment out
+// `threshold_inputs.custom_metrics = summary.custom_metrics;` in
+// `execute_scenario_run`, and `evaluated` reds to false.
+TEST_F (ScenarioRunnerTest, ACollectionRunJudgesADeclaredCustomMetricBudget) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/ok",
+    json::array ({ json{ { "id", "el_metric" }, { "kind", "metric.record" },
+    { "config",
+    { { "name", "ttfb2" }, { "type", "trend" }, { "source", { { "latency", true } } } } } } }));
+
+    const auto run_id = start_with_thresholds (
+    /*iterations=*/1, json{ { "custom.ttfb2.p95", 60000 } });
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto thresholds = summary_of (run_id)["thresholds"];
+    ASSERT_FALSE (thresholds.is_null ());
+    ASSERT_EQ (thresholds["checks"].size (), 1u);
+    const auto& check = thresholds["checks"][0];
+    EXPECT_TRUE (check["evaluated"].get<bool> ())
+    << "the metric was recorded this run - a generous budget must not read as "
+       "no data";
+    EXPECT_TRUE (check["passed"].get<bool> ());
+}
+
 TEST_F (ScenarioRunnerTest, AStopIsHonouredBetweenStepsNotAfterTheIteration) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/slow");

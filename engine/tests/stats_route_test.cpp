@@ -280,6 +280,31 @@ TEST_F (StatsRouteTest, UnreadableTickPayloadIsSkippedNotFatal) {
     EXPECT_EQ (body["pagination"]["returned"].get<int64_t> (), 2);
 }
 
+// This run's custom metrics (issue #1500), snapshotted into the tick the same
+// way every other field here is - absent by default (StoredTickPayloadKeysAndTypesArePinned
+// already pins that `sample_at`'s default carries no `custom_metrics` key at all), present
+// and correctly shaped when the collector recorded something.
+TEST_F (StatsRouteTest, TickCarriesCustomMetricsWhenTheRunRecordedAny) {
+    const std::string id = seed_run ();
+    auto sample          = sample_at (1000, 0.0);
+    vayu::core::CustomMetricSummary trend;
+    trend.type            = vayu::core::CustomMetricType::Trend;
+    trend.count           = 7;
+    trend.p95             = 40.0;
+    sample.custom_metrics = { { "ttfb2", trend } };
+    add_tick (id, sample.timestamp, vayu::core::build_metric_tick_payload (sample));
+
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    const auto& custom = body["data"][0]["custom_metrics"];
+    ASSERT_TRUE (custom.contains ("ttfb2"));
+    EXPECT_EQ (custom["ttfb2"]["type"], "trend");
+    EXPECT_EQ (custom["ttfb2"]["count"].get<size_t> (), 7u);
+    EXPECT_DOUBLE_EQ (custom["ttfb2"]["p95"].get<double> (), 40.0);
+}
+
 // ============================================================================
 // The server-vitals series (monitor_samples)
 // ============================================================================

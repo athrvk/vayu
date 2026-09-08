@@ -37,6 +37,7 @@
 #include <hdr/hdr_interval_recorder.h>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/custom_metric_type.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
@@ -266,6 +267,38 @@ inline constexpr size_t TIMING_PHASE_COUNT = 5;
 /// object is keyed by these.
 inline constexpr std::array<const char*, TIMING_PHASE_COUNT> TIMING_PHASE_KEYS = { "dns",
     "connect", "tls", "firstByte", "download" };
+
+/**
+ * @brief One named custom metric's whole-run answer, in the report's
+ *        `customMetrics.<name>` shape.
+ *
+ * `type` decides which of the fields beside `count` mean anything: a Trend
+ * carries the percentiles and `max`, a Counter and a Rate carry only
+ * `value` (a running total, or a 0-100 percentage) - the unused fields stay
+ * at their default rather than the struct branching into three shapes,
+ * which would cost every reader a variant visit for what is, in the end,
+ * five doubles.
+ */
+struct CustomMetricSummary {
+    CustomMetricType type = CustomMetricType::Trend;
+    size_t count          = 0;
+    double p50            = 0.0;
+    double p95            = 0.0;
+    double p99            = 0.0;
+    double max            = 0.0;
+    double value          = 0.0;
+};
+
+/**
+ * @brief `summary["customMetrics"]`'s value, by name, in the shape both run
+ *        modes store (issue #1500) - the load path's `run_manager.cpp` and
+ *        the sequential path's `scenario_runner.cpp` each finish with a
+ *        `std::map<std::string, CustomMetricSummary>` and must serialize it
+ *        identically, so `GET /runs/:id/report` cannot read one shape from a
+ *        load run's summary and another from a collection run's.
+ */
+[[nodiscard]] nlohmann::json build_custom_metrics_payload (
+const std::map<std::string, CustomMetricSummary>& metrics);
 
 /**
  * @brief Why a success trace was built, i.e. which budget retains it.
@@ -581,6 +614,60 @@ class MetricsCollector {
     [[nodiscard]] size_t response_bodies_captured () const {
         return response_bodies_captured_.load (std::memory_order_relaxed);
     }
+
+    /**
+     * @brief Reserve @p name as a custom metric before the run's hot path
+     *        starts (issue #1500).
+     *
+     * Called once per declared `metric.record` element while the plan
+     * compiles, so every name a load run's completion path will record
+     * through is already a resolved slot before the first submission - the
+     * same "resolved once, never per completion" rule the phase histogram
+     * bank follows. Idempotent for a name already registered under the same
+     * @p type (a name inherited onto several steps registers once per
+     * step); a name that has never been seen and would push the run past
+     * `constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES` is refused
+     * rather than silently admitted.
+     *
+     * @return false when @p name is new and the cap is already spent, or
+     *         when @p name is already registered under a *different* type -
+     *         a caller that gets false must not record through this name.
+     */
+    bool register_custom_metric (const std::string& name, CustomMetricType type);
+
+    /**
+     * @brief Record one value under a named custom metric (issue #1500).
+     *
+     * The hot-path call `metric.record` and `pm.metrics.*` both make. A name
+     * `register_custom_metric` has already resolved records lock-free
+     * (a trend through the same `hdr_record_value_atomic` the latency
+     * histograms use, a counter or rate through a plain atomic); a name
+     * seen here for the first time - `pm.metrics` may call with an
+     * arbitrary, undeclared name - is registered under a mutex on the spot,
+     * same cap, same idempotence rule as `register_custom_metric`. A value
+     * past the cap is dropped: there is nowhere left to put it, and the
+     * declarative case that must refuse loudly does so earlier, at
+     * validate time, before this is ever reached.
+     *
+     * A Trend value is clamped to zero before scaling into the histogram's
+     * fixed-point range (see `constants::metrics_collector::CUSTOM_METRIC_VALUE_SCALE`);
+     * a Counter's value is added to the running total; a Rate's value is
+     * read as a boolean (non-zero is true) and counted toward the share
+     * that were true.
+     */
+    void record_custom_metric (const std::string& name, CustomMetricType type, double value);
+
+    /**
+     * @brief This run's custom metrics, or `nullopt` when none were ever
+     *        recorded through - the same absent-not-zeros rule `phases`
+     *        follows, so the report's `customMetrics` section is left out
+     *        entirely for a run that declared none.
+     *
+     * Read after the run has drained, the same as `phase_percentiles()`:
+     * the trend histograms are read non-atomically here.
+     */
+    [[nodiscard]] std::optional<std::map<std::string, CustomMetricSummary>>
+    custom_metric_summaries () const;
 
     /**
      * @brief Record N requests dropped due to generator backpressure
@@ -1075,6 +1162,56 @@ class MetricsCollector {
     std::atomic<size_t> unresolved_token_requests_{ 0 };
     mutable std::mutex unresolved_token_names_mutex_;
     std::vector<std::string> unresolved_token_names_;
+
+    /**
+     * @brief One named custom metric's live storage (issue #1500).
+     *
+     * A trend's histogram is allocated once, at registration, and recorded
+     * into lock-free thereafter (`hdr_record_value_atomic`) - the same
+     * shape `phase_histograms_` uses. A counter and a rate need no
+     * histogram at all: a plain atomic total, or an atomic true/total pair,
+     * says everything their summary reports.
+     */
+    struct CustomMetricSlot {
+        CustomMetricType type           = CustomMetricType::Trend;
+        struct hdr_histogram* histogram = nullptr; // Trend only.
+        std::atomic<double> counter_total{ 0.0 };  // Counter only.
+        std::atomic<uint64_t> rate_true{ 0 };      // Rate only.
+        std::atomic<uint64_t> rate_total{ 0 };     // Rate only.
+
+        CustomMetricSlot () = default;
+        explicit CustomMetricSlot (CustomMetricType metric_type)
+        : type (metric_type) {
+        }
+        ~CustomMetricSlot () {
+            if (histogram != nullptr) {
+                hdr_close (histogram);
+            }
+        }
+        CustomMetricSlot (const CustomMetricSlot&)            = delete;
+        CustomMetricSlot& operator= (const CustomMetricSlot&) = delete;
+        CustomMetricSlot (CustomMetricSlot&&)                 = delete;
+        CustomMetricSlot& operator= (CustomMetricSlot&&)      = delete;
+    };
+    // Guards only slot *creation* (`find_or_create_custom_metric_slot`), the
+    // rare path: `register_custom_metric` runs once per name while the plan
+    // compiles, and `record_custom_metric` takes the lock only the first
+    // time a `pm.metrics` call introduces a name the plan never declared.
+    // Every recording call after a slot exists reads the pointer without
+    // the lock and writes through the slot's own atomics.
+    mutable std::mutex custom_metrics_mutex_;
+    std::map<std::string, std::unique_ptr<CustomMetricSlot>> custom_metrics_;
+
+    /**
+     * @brief @p name's slot, creating it under the cap if it does not exist.
+     *
+     * Returns nullptr when @p name is new and the cap
+     * (`constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES`) is already
+     * spent, or when @p name exists under a different @p type - a caller
+     * gets nullptr in both cases and must record nothing.
+     */
+    CustomMetricSlot* find_or_create_custom_metric_slot (const std::string& name,
+    CustomMetricType type);
 
     // Whole-run capture budget, spent in `max_sample_body_bytes`-bounded
     // chunks by the copies below.

@@ -1489,6 +1489,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                 set_scope_variable (scopes, scope, name, value);
             },
             .should_stop = nullptr, // A single exchange has nothing to interrupt.
+            .record_metric = nullptr, // A streaming send has no run to record into.
         };
         vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore,
         element_ctx, elements, pre_element_outcomes);
@@ -1616,6 +1617,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                             set_scope_variable (scopes, scope, name, value);
                         },
                         .should_stop = nullptr,
+                        .record_metric = nullptr, // A streaming send has no run to record into.
                     };
                     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter,
                     element_ctx, *elements, element_outcomes);

@@ -5075,6 +5075,27 @@ unbound data row skipped counts toward neither), and its assertion tally is
 the same combined `assert.*`/`pm.test` count `maxAssertionFailureRatePct`
 reads for a load run.
 
+**`custom.<name>.<stat>`** (issue #1500) budgets a named `metric.record` /
+`pm.metrics` value - `<name>` the metric was recorded under, `<stat>` one of
+`p50`, `p95`, `p99`, `max` (a trend), `value` (a counter's running total or a
+rate's percentage, whichever the name was declared as) or `rate` (the same
+field as `value`, spelled for a rate metric):
+
+```jsonc
+{ "thresholds": { "custom.ttfb2.p95": 50 } } // ceiling, always - >= 0
+```
+
+Unlike the six fixed keys, this is a dynamic key family: the route checks the
+shape (`custom.` prefix, a non-empty name, a stat from the list above) and that
+the value is a non-negative number, not that `ttfb2` is a name this run's plan
+actually declares - a `metric.record` on a step the run never reaches, or a
+plain typo, is not distinguishable from a not-yet-recorded metric at validate
+time. Evaluated the same way an unmeasured latency percentile is: `evaluated:
+false` when this run's collector never recorded that name, counted toward
+`failed` rather than a silent pass. **Load runs only**, the same limit
+`maxAssertionFailureRatePct` carries and for the same reason (#1564): a
+collection run's config accepts the block but nothing evaluates it yet.
+
 The verdict is the run's, not the process's: a run **stopped early** is judged on
 what it measured up to that point, and its status stays `stopped` whatever the
 verdict says. A **completed** run whose config set `thresholds.failRun: true`
@@ -7020,6 +7041,11 @@ named it.
     ],
     "passed": 1, "failed": 0, "verdict": "passed"
   },
+  "customMetrics": {
+    "ttfb2": { "type": "trend", "count": 42, "p50": 10.0, "p95": 40.0, "p99": 47.0, "max": 50.0 },
+    "bytesOut": { "type": "counter", "count": 4, "value": 4096.0 },
+    "cacheHit": { "type": "rate", "count": 10, "value": 30.0 }
+  },
   "auth": { "refreshes": [ { "atSeconds": 3620.4 } ], "refreshFailures": 0 },
   "coverage": {
     "operationsTotal": 18, "operationsCovered": 14,
@@ -7044,6 +7070,12 @@ named it.
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
+
+**`customMetrics`** (issue #1500) is this run's `metric.record` / `pm.metrics` values, by name -
+absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count`/`p50`/`p95`/`p99`/
+`max`; a `"counter"` or `"rate"` entry carries `count` and `value` (a running total, or a 0-100
+percentage). The same shape rides every [`GET /runs/:runId/metrics`](#get-runsrunidmetrics) tick,
+and [`custom.<name>.<stat>`](#the-thresholds-block-passfail-budgets) reads it for a threshold.
 
 **`timingBreakdown` holds two independently-present halves.** The `avg*` fields
 are means over the run's *retained trace sample* - the 1-in-`success_sample_rate`

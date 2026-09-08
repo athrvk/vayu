@@ -502,6 +502,13 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     if (!inputs.coverage.empty ()) {
         summary["coverage"] = inputs.coverage;
     }
+    // This run's custom metrics (issue #1500), under the same top-level
+    // `customMetrics` key the load path writes - one report section for
+    // both run modes, in `run_manager.cpp::build_run_summary_payload`'s
+    // shape, so `GET /runs/:id/report` reads it identically either way.
+    if (inputs.custom_metrics.has_value ()) {
+        summary["customMetrics"] = build_custom_metrics_payload (*inputs.custom_metrics);
+    }
     if (!inputs.lifecycle.empty ()) {
         summary["lifecycle"] = inputs.lifecycle;
     }
@@ -620,6 +627,13 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.rng             = &ctx.context->rng;
     inputs.timers_override = &ctx.context->timers_override;
     inputs.should_stop     = [&] { return ctx.context->should_stop.load (); };
+    // `metric.record` and `pm.metrics` (issue #1500) record into this run's
+    // own collector - a design send binds neither and reports "not
+    // available here" instead.
+    inputs.record_metric = [&ctx] (const std::string& name,
+                           vayu::core::CustomMetricType type, double value) {
+        ctx.context->metrics_collector->record_custom_metric (name, type, value);
+    };
 
     // The data pass, per iteration and before the send: composition
     // left every `{{data.column}}` written as it stands, because
@@ -937,6 +951,7 @@ StepRecord& record) {
         .rng              = &base.context->rng,
         .pacing_state     = &base.context->pacing_state,
         .timers_override  = &base.context->timers_override,
+        .record_metric    = nullptr, // metric.record is step.after only.
     };
     const size_t between_start = record.elements.size ();
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBetween,
@@ -1079,7 +1094,8 @@ std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
         .pre_script_result  = unread_pre,
         .post_script_result = unread_post,
         .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
-        .should_stop = nullptr,
+        .should_stop   = nullptr,
+        .record_metric = nullptr, // metric.record is step.after only.
         .run_setup_script =
         [&] (const std::string& script) {
             auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
@@ -1124,7 +1140,8 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
         .pre_script_result  = unread_pre,
         .post_script_result = unread_post,
         .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
-        .should_stop = nullptr,
+        .should_stop   = nullptr,
+        .record_metric = nullptr, // metric.record is step.after only.
         .run_teardown_script =
         [&] (const std::string& script) {
             auto script_ctx = vayu::runtime::ScriptContext::for_teardown (run_summary_info);
@@ -1364,6 +1381,7 @@ RunManager& manager) {
     std::chrono::duration<double> (std::chrono::steady_clock::now () - started_at)
     .count ();
     summary.coverage = coverage.build ();
+    summary.custom_metrics = context->metrics_collector->custom_metric_summaries ();
 
     // The run's verdict against its declared budgets (issue #1564), judged
     // once off the numbers just tallied above - never re-derived later, on
@@ -1389,6 +1407,11 @@ RunManager& manager) {
     if (summary.assertions.passed + summary.assertions.failed > 0) {
         threshold_inputs.assertions = summary.assertions;
     }
+    // `metric.record` / `pm.metrics` (issue #1500) share the same collector
+    // `summary.custom_metrics` was just read from above - without this, a
+    // declared `custom.<name>.<stat>` budget would report "no data" on a
+    // collection run despite the value sitting right there in the summary.
+    threshold_inputs.custom_metrics = summary.custom_metrics;
     summary.thresholds = evaluate_thresholds (context->config, threshold_inputs);
 
     // A stopped run keeps reporting Stopped regardless of verdict, and a run

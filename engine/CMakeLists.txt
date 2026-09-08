@@ -490,6 +490,7 @@ add_library(vayu_core STATIC
     src/core/elements/control_loop.cpp
     src/core/elements/control_transaction.cpp
     src/core/transaction_histograms.cpp
+    src/core/elements/metric_kinds.cpp
     # The only TU that sees VAYU_VERSION_STRING for the User-Agent - keep it
     # that way, or a version bump invalidates the whole compile cache (#659).
     src/core/user_agent.cpp
