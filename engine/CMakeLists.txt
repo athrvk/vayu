@@ -1,5 +1,30 @@
 cmake_minimum_required(VERSION 3.25)
 
+# ============================================================================
+# macOS deployment target
+# ============================================================================
+# Must be set before project(): CMake bakes it into the compiler probe, and an
+# LC_BUILD_VERSION written by the probe cannot be changed afterwards.
+#
+# Apple's clang defaults the deployment target to the *host* OS version. A
+# release built on GitHub's macos-latest (macOS 26 since 2026) therefore
+# targets macOS 26, and libc++ hands it symbols that only exist in that
+# release's dylib - v0.26.0 shipped a binary referencing
+# std::exception_ptr::__from_native_exception_pointer, which dyld cannot
+# resolve against an older /usr/lib/libc++.1.dylib, so the engine aborted at
+# launch on every Mac older than the runner. Pinning it here makes the floor a
+# property of the source tree rather than of whatever machine built it.
+#
+# 13.0 is the floor Vayu documents (README.md, docs/index.md) - Electron sets
+# it app-side. Raising it is a user-visible support change: update those two
+# pages and engine/triplets/*.cmake in the same commit.
+set(VAYU_MACOS_DEPLOYMENT_TARGET "13.0" CACHE STRING
+    "Minimum macOS version the engine supports")
+if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "${VAYU_MACOS_DEPLOYMENT_TARGET}" CACHE STRING
+        "Minimum macOS version to target" FORCE)
+endif()
+
 project(vayu-engine
     VERSION 0.26.0
     DESCRIPTION "High-performance API execution engine"

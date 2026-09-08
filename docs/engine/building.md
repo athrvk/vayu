@@ -488,6 +488,30 @@ All platforms script with the same vendored engine: QuickJS-NG
   `brew install llvm` clang-tidy and clang-format are found without touching
   `PATH` yourself
 
+#### The deployment target is pinned, and must stay pinned
+
+Apple's clang defaults the deployment target to the **host** macOS version, so
+an unpinned build is only guaranteed to run on the machine that produced it.
+That is a release bug, not a local one: v0.26.0 was built on a macOS 26 runner,
+linked `std::exception_ptr::__from_native_exception_pointer` out of that
+release's libc++, and every user on an older macOS got a dyld
+`Symbol not found` abort at launch - the installer reported success, and the
+app then failed to start the engine.
+
+`engine/CMakeLists.txt` therefore sets `CMAKE_OSX_DEPLOYMENT_TARGET` from
+`VAYU_MACOS_DEPLOYMENT_TARGET` (13.0, the floor Electron sets app-side and the
+README documents) **before `project()`** - after it, the compiler probe has
+already baked the wrong value in. The vcpkg dependencies need the same floor,
+which triplets carry rather than cache variables, so `engine/triplets/` overlays
+`arm64-osx` and `x64-osx` with `VCPKG_OSX_DEPLOYMENT_TARGET`; the `macos-*`
+presets point `VCPKG_OVERLAY_TRIPLETS` at that directory. Both numbers move
+together, with `README.md` and `docs/index.md`.
+
+`scripts/check-macos-min-version.sh` reads `minos` back out of the built binary
+(every slice of a universal one) and is what fails CI if any of that comes
+undone - `pr-tests.yml` runs it on the macOS engine leg, `release.yml` on the
+universal binary. Nothing else can catch this: CI never runs on the old OS.
+
 ### Windows
 
 - Requires Visual Studio 2022 or later

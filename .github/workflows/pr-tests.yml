@@ -761,6 +761,18 @@ jobs:
           python -m pip install --quiet pefile
           python .github/check-windows-deps.py engine/build-release/vayu-engine.exe
 
+      # The macOS counterpart of the check above, and the same class of bug:
+      # a runner that is newer than the OS floor cannot tell a portable binary
+      # from one that only runs here. Apple's clang defaults the deployment
+      # target to the host, so an unpinned build on macos-latest links libc++
+      # symbols that dyld cannot resolve on macOS 13 - v0.26.0 shipped exactly
+      # that and aborted at launch with "Symbol not found". Nothing else in CI
+      # can see it, because CI never runs on the old OS.
+      - name: Verify engine macOS deployment target
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./scripts/check-macos-min-version.sh engine/build-release/vayu-engine
+
       # `< /dev/null` is what a shell step already gives ctest here, written
       # down so it stays true: release.yml pins the same redirect on its own
       # ctest steps, and the pair is the contract that the suite sees one stdin
