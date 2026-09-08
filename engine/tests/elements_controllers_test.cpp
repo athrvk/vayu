@@ -450,7 +450,8 @@ TEST_F (ElementsControllersTest, ControlTransactionReportsPercentilesOverTheFold
     EXPECT_EQ (server_->hit_count ("/a"), 2u);
     EXPECT_EQ (server_->hit_count ("/b"), 2u);
 
-    const json summary      = summary_of (run_id);
+    const json summary = summary_of (run_id);
+    ASSERT_TRUE (summary["scenario"].contains ("transactions")) << summary.dump ();
     const json transactions = summary["scenario"]["transactions"];
     ASSERT_TRUE (transactions.is_array ());
     bool found = false;
