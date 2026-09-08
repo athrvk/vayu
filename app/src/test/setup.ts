@@ -93,6 +93,16 @@ if (hasDom && typeof Element.prototype.scrollIntoView !== "function") {
 	Element.prototype.scrollIntoView = function scrollIntoView() {};
 }
 
+/*
+ * Same reasoning, for `scrollTo`: `scrollWithin` (#1612) calls it on a named
+ * scroller instead of `scrollIntoView` on the target, so the container needs
+ * the same honest no-op. A test that asserts the call stubs `scrollTo` on
+ * that one element directly, which overrides this.
+ */
+if (hasDom && typeof Element.prototype.scrollTo !== "function") {
+	Element.prototype.scrollTo = function scrollTo() {};
+}
+
 if (typeof globalThis.ResizeObserver === "undefined") {
 	globalThis.ResizeObserver = class {
 		observe() {}

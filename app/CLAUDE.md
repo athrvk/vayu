@@ -125,6 +125,16 @@ object it returned rather than letting each side derive its own.
 **Before measuring or changing a class, `rg` for it in the components.** A
 conclusion about a combination the app never renders is not a finding.
 
+**Reveal inside the scroller you mean, never `scrollIntoView` in the shell**
+(#1612). `Element.scrollIntoView` walks every scrollable ancestor until the
+target is satisfied, and Chromium counts an `overflow: hidden` box as
+scrollable for that purpose - it has no scrollbar and no user gesture can
+move it, but a script can, and once it has there is no way back. Name the
+container the reveal means with a data attribute (`data-settings-scroller`
+is the settings pane's) and scroll it directly with `scrollWithin`
+(`@/lib/scroll-within`), which computes the offset from
+`getBoundingClientRect` and calls that one container's `scrollTo`.
+
 ## UI rules (enforced by tests - breaking one fails CI)
 
 - **Status colours have three tokens:** `--status-*` (dot/icon/tint),
