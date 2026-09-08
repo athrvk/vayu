@@ -82,7 +82,8 @@ shipping silently mismatched.
 | `assert.contains` | assert | `step.after` | #1514 |
 | `assert.duration` | assert | `step.after` | #1514 |
 | `assert.size` | assert | `step.after` | #1514 |
-| `timer.think` | timer | `step.between` | #1514 |
+| `timer.think` | timer | `step.between` | #1514 (fixed/uniform), #1498 (gaussian) |
+| `timer.pacing` | timer | `step.before` | #1498 |
 | `script.pre` | script | `step.before` | #1513 (validate-only), #1514 (runs) |
 | `script.post` | script | `step.after` | #1513 (validate-only), #1514 (runs) |
 | `script.setup` | script | `run.start` | #1499 |
@@ -102,10 +103,29 @@ declarative assertion exactly as they count a scripted one.
 one of `expected`, `regex` or `exists`, plus `negate`; `assert.contains` compares a `field` (`body`
 | `headers` | `url` | `status`) against `text` in `contains` | `equals` | `matches` mode;
 `assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
-an `op`. `timer.think` takes `ms`, or `minMs`/`maxMs` for a uniform random wait; it runs in
-`step.between`, after this step's own outcome is decided and before the next step begins, so the
-wait never counts against either step's latency, and it polls the run's stop signal every 50ms so a
-`Stop` mid-wait lands promptly rather than at the end of a multi-second think.
+an `op`. `timer.think` takes `ms`, `minMs`/`maxMs` for a uniform random wait, or `gaussian:
+{meanMs, deviationMs}` (both required, issue #1498) for a normally-distributed one, drawn from
+`std::normal_distribution` and clamped to zero (a draw below it would be a negative wait, which
+means nothing) then rounded to the nearest millisecond - `gaussian` is checked first, so it and
+`ms`/`minMs`/`maxMs` are mutually exclusive in practice even though the schema does not enforce it.
+It runs in `step.between`, after this step's own outcome is decided and before the next step
+begins, so the wait never counts against either step's latency, and it polls the run's stop signal
+every 50ms so a `Stop` mid-wait lands promptly rather than at the end of a multi-second think. A
+run's `elements.seed` (below) makes the random draw reproducible.
+
+`timer.pacing` (issue #1498) holds a request, a folder or the whole collection to a steady
+start-to-start cadence across iterations - `everyMs` (required) between one pass's entry into that
+scope and the next, whatever the node's own duration was - and runs in `step.before`, not
+`step.between`, because the wait belongs to the *next* pass and must land before that entry step is
+sent. The same element is inherited into every request under its scope, so `scenario_plan.cpp`'s
+`mark_scope_entries` stamps `config._scopeEntry` on only the first occurrence of that element's id
+in the iteration's step order; every later occurrence is a no-op, reported `skipped`. `perUser`
+(default `true`) gives each virtual user its own cadence; `perUser: false` (one cadence shared by
+every VU, JMeter's "All threads" pacing) works on the sequential run, where a single VU makes the
+two indistinguishable, but is refused with a `400` for a scenario load run - coordinating one
+shared deadline across many VUs without blocking a producer thread is a separate, harder problem,
+tracked as a follow-up issue. `timer.throughput` (a constant-throughput, shared-rate timer) is not
+yet implemented, for the same cross-VU coordination reason.
 
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
 step, through `ElementContext`'s lazily filled slot - a body over `maxElementBodyBytes` (default 1
@@ -194,13 +214,32 @@ beside the existing `tests` node, one row per element that ran at least once thi
 `StepElementTallies`, sized once from the plan's compiled elements so recording on the
 completion path is a lookup, never a lock or an allocation.
 
-**Not yet wired: timers.** `elements.timers` (`"asConfigured"` | `"off"`) is accepted and
-validated on `POST /runs` and stored on `RunContext`, but nothing reads it to suppress
-`timer.think` under load yet - #1498 ("the timer family... the run-level Timers override end
-to end") owns finishing that wiring, since `timer.think`'s current `step.between` phase and
-blocking wait are sequential-run-only and unreachable from the load hooks above by
-construction. `ready_at` plumbing (`VirtualUser::ready_at_ms`, a `take_ready_vu` skip) exists
-for #1498's `timer.pacing` to write into; nothing writes it yet.
+**Timers, wired end to end (issue #1498).** `elements.timers` (`"asConfigured"` (default) |
+`"off"` | `{fixedMs: N}` | `{minMs, maxMs}`) is validated on `POST /runs`, parsed into
+`RunContext::timers_override` (a `vayu::core::TimersOverride`), and applied through the one
+function every `timer.*` kind calls, `vayu::core::apply_timers_override` (`elements/pipeline.cpp`)
+- `"off"` silences the wait entirely (`waitedMs: 0`, no sleep), `fixedMs`/`{minMs,maxMs}` replace a
+kind's own computed wait with the run-wide one, whatever that kind's own config says. This also
+fixed a pre-existing dead-code bug: `RunContext::timers_disabled` was parsed from `"off"` since
+#1495 but nothing read it, because `timer.think`'s `step.between` phase was never dispatched on the
+load path at all. It is now: `ScenarioLoadDriver::run_step_between` (`scenario_load.cpp`) dispatches
+`Phase::StepBetween` on the step that just completed, non-blocking, and sums the outcomes'
+`waited_ms` into `VirtualUser::ready_at_ms`. `elements.seed` (a non-negative integer) seeds the
+run's own `std::mt19937_64` (`RunContext::rng`); a scenario load run derives one independent
+generator per virtual user off it (`vayu::core::derive_vu_rng`) rather than sharing one across
+worker threads, so a seeded run's random waits are reproducible.
+
+**Non-blocking waits: `scheduled_ready_delay_ms`.** `Element::scheduled_ready_delay_ms` (issue
+#1498) is how a kind that needs to wait tells a scenario load run to hold its VU back without
+blocking a worker thread: `timer.think` (whose wait already lands through `step.between`'s own
+dispatch above) needs no override, but `timer.pacing` does, since its phase (`step.before`) fires
+only once a VU has already been selected as ready - too late to defer non-blockingly.
+`ScenarioLoadDriver::finish_step` calls the override on the VU's *upcoming* step, right after
+deciding which step comes next and before the VU can be selected again, and applies the returned
+delay to `VirtualUser::ready_at_ms`, which already gated VU selection but, before #1498, had
+nothing writing to it. Per-node "last started" timestamps live in `VirtualUser::pacing_state`
+(one map per VU, so VUs pacing the same folder run independent cadences) for load, and in
+`RunContext::pacing_state` for the sequential run.
 
 **Not yet wired: the single-request load path.** `load_strategy.cpp` is unchanged: a
 single-request `POST /runs` payload has no `elements` attachment point today (its script model
@@ -220,13 +259,17 @@ gap, outside this page's Status callout.
 - #1497 - the `maxAssertionFailureRatePct` run threshold and `thresholds.failRun`, over the
   combined `assert.*` element and `pm.test` tally (load runs only; see `api-reference.md`'s
   thresholds section).
+- #1498 - `timer.think`'s gaussian option, the `timer.pacing` kind, a per-run seeded RNG
+  (`elements.seed`) and the `elements.timers` override wired end to end (this page's Timers
+  paragraphs and Load paths section). `timer.pacing`'s `perUser: false` under load and
+  `timer.throughput` (a constant-throughput, shared-rate timer) are deliberately deferred to a
+  follow-up issue.
 - #1499 - `script.setup` / `script.teardown`, the `run.start` / `run.end` dispatch this page's
   Kinds section describes, in both run modes. Deliberately does not wire a single-request load
   run's `POST /runs` to declare either kind - that shape has no collection to declare them on and
   is the same "separate gap" this page's Load paths section already names for single-request
   elements generally; the wire-shape decision that gap needs is filed as #1573.
-- #1515, #1498, #1500, #1501 - controllers, timers, metrics and load-time cookies that round out
-  the kind table.
+- #1515, #1500, #1501 - controllers, metrics and load-time cookies that round out the kind table.
 - #1516 - the app's `ElementList` primitive and editor.
 - #1517 - MCP's `elements` fields and the `vayu://elements/kinds` resource.
 - #1518 - Postman/OpenAPI round-trip and a JMeter `.jmx` importer.

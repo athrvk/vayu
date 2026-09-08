@@ -90,6 +90,10 @@ export * from "./DetailSkeleton";
 // The insertable templates under a script editor, for both script hosts
 export * from "./ScriptSnippets";
 
+// "Names mentioned:" - the variable-reference chip row above a script.pre/
+// script.post element's editor, for both script hosts
+export * from "./ScriptReferencesRow";
+
 // The same row actions on right-click, for rows that carry a "⋯" menu
 export * from "./RowContextMenu";
 export * from "./RowActionBody";

@@ -25,7 +25,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import type { Collection, ElementDef, ElementKindSchema } from "@/types";
+import type { Collection, DataContractScope, ElementDef, ElementKindSchema } from "@/types";
+import type { VariableOrigin } from "@/types/domain";
 import ElementsTab from "./ElementsTab";
 
 const mutation = {
@@ -41,6 +42,28 @@ const mutation = {
 
 vi.mock("@/queries/collections", () => ({
 	useUpdateCollectionMutation: () => mutation,
+}));
+
+/**
+ * The contract and variables in scope for the "Names mentioned" row (#1553).
+ * Stubbed at the `@/hooks` boundary - the same seam `ScriptTab.chips.test.tsx`
+ * used before it - rather than standing up a real chain through a QueryClient
+ * this suite does not otherwise need: what these tests guard is the wiring
+ * (the row appears above a script element, reading this tab's own answers),
+ * not `useDataContract`/`useVariableResolver` themselves, which have their
+ * own suites.
+ */
+const dataContract: { value: DataContractScope | undefined } = { value: undefined };
+const allVariables: { value: Record<string, { value: string; scope: string }> } = { value: {} };
+const variableOrigins: { value: Record<string, VariableOrigin[]> } = { value: {} };
+
+vi.mock("@/hooks", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/hooks")>()),
+	useDataContract: () => dataContract.value,
+	useVariableResolver: () => ({
+		getAllVariables: () => allVariables.value,
+		getVariableOrigins: (name: string) => variableOrigins.value[name] ?? [],
+	}),
 }));
 
 function kindSchema(kind: string, label: string, category: string): ElementKindSchema {
@@ -60,15 +83,29 @@ function kindSchema(kind: string, label: string, category: string): ElementKindS
 const KINDS: ElementKindSchema[] = [
 	kindSchema("extract.json", "Extract JSON", "extract"),
 	kindSchema("assert.status", "Assert Status", "assert"),
+	kindSchema("script.pre", "Pre-request Script", "script"),
+	kindSchema("script.post", "Test Script", "script"),
 ];
 
 vi.mock("@/queries", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/queries")>()),
 	useElementKindsQuery: () => ({ data: KINDS }),
+	// ScriptElementForm's snippets list reads this; not what this file guards.
+	useScriptCompletionsQuery: () => ({ data: undefined, isPending: true, isError: false }),
+}));
+
+// Monaco does not run under jsdom.
+vi.mock("@/components/ui", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/components/ui")>()),
+	CodeEditor: () => <div data-testid="code-editor" />,
 }));
 
 function extractElement(id: string): ElementDef {
 	return { id, kind: "extract.json", enabled: true, config: {} };
+}
+
+function scriptElement(id: string, kind: "script.pre" | "script.post", script: string): ElementDef {
+	return { id, kind, enabled: true, config: { script } };
 }
 
 function makeCollection(elements: ElementDef[]): Collection {
@@ -100,6 +137,9 @@ beforeEach(() => {
 	mutation.isPending = false;
 	mutation.isError = false;
 	mutation.error = null;
+	dataContract.value = undefined;
+	allVariables.value = {};
+	variableOrigins.value = {};
 });
 
 describe("ElementsTab - what it renders", () => {
@@ -231,5 +271,47 @@ describe("ElementsTab - an external write while the draft is dirty", () => {
 
 		expect(screen.getAllByText("Extract JSON")).toHaveLength(2);
 		expect(screen.queryByText(/changed elsewhere/i)).not.toBeInTheDocument();
+	});
+});
+
+// Issue #1553: the "Names mentioned" row, ported to sit above a script
+// element's own editor via ElementList's `renderAboveForm`, reading this
+// tab's own `useDataContract`/`useVariableResolver` answers - which
+// `ScriptElementForm` itself structurally cannot do (see that file's doc
+// comment).
+describe("ElementsTab - the Names-mentioned row (issue #1553)", () => {
+	it("shows above a script.pre element's editor, reading this tab's own context", () => {
+		allVariables.value = { token: { value: "abc", scope: "environment" } };
+		renderTab(
+			makeCollection([scriptElement("e1", "script.pre", 'pm.environment.get("token");')])
+		);
+
+		expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
+		expect(screen.getByText("token")).toBeInTheDocument();
+	});
+
+	it("shows above a script.post element's editor too", () => {
+		renderTab(
+			makeCollection([scriptElement("e1", "script.post", 'const u = "{{base_url}}";')])
+		);
+
+		expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
+		expect(screen.getByText("{{base_url}}")).toBeInTheDocument();
+	});
+
+	it("does not show for a non-script element", () => {
+		renderTab(makeCollection([extractElement("e1")]));
+
+		expect(screen.queryByText("Names mentioned:")).not.toBeInTheDocument();
+	});
+
+	it("paints a declared data column against this collection's own contract", () => {
+		dataContract.value = { collectionId: "c1", collectionName: "Acme API", columns: ["email"] };
+		renderTab(
+			makeCollection([scriptElement("e1", "script.pre", 'const e = "{{data.email}}";')])
+		);
+
+		const chip = screen.getByText("data.email");
+		expect(chip.getAttribute("title")).toContain("declared in Acme API");
 	});
 });

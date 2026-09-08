@@ -49,6 +49,7 @@ const KINDS: ElementKindSchema[] = [
 	kindSchema("extract.json", "Extract JSON", "extract"),
 	kindSchema("assert.status", "Assert Status", "assert"),
 	kindSchema("script.pre", "Pre-request Script", "script"),
+	kindSchema("script.post", "Test Script", "script"),
 	// script.setup / script.teardown (issue #1499): collection-only, so a
 	// request's own Add menu must never offer them.
 	kindSchema("script.setup", "Setup Script", "script", /* collectionOnly */ true),
@@ -85,6 +86,10 @@ function extractElement(id: string): ElementDef {
 	return { id, kind: "extract.json", enabled: true, config: {} };
 }
 
+function scriptElement(id: string, kind: "script.pre" | "script.post", script: string): ElementDef {
+	return { id, kind, enabled: true, config: { script } };
+}
+
 function setContext(overrides: Partial<RequestBuilderContextValue> = {}) {
 	ctx = {
 		request: { id: "req_1", collectionId: null, elements: [] } as never,
@@ -92,6 +97,9 @@ function setContext(overrides: Partial<RequestBuilderContextValue> = {}) {
 		inheritedElements: undefined,
 		legacyPreScript: undefined,
 		legacyPostScript: undefined,
+		getAllVariables: () => ({}),
+		getVariableOrigins: () => [],
+		dataColumns: undefined,
 		...overrides,
 	};
 }
@@ -210,5 +218,56 @@ describe("ElementsPanel", () => {
 		fireEvent.click(screen.getByRole("button", { name: /delete extract json/i }));
 
 		expect(updateField).toHaveBeenCalledWith("elements", []);
+	});
+
+	// Issue #1553: the "Names mentioned" row, ported to sit above a script
+	// element's own editor via ElementList's `renderAboveForm`, reading this
+	// panel's own `useRequestBuilderContext` answers - which `ScriptElementForm`
+	// itself structurally cannot do (see that file's doc comment).
+	describe("the Names-mentioned row (issue #1553)", () => {
+		it("shows above a script.pre element's editor, reading this panel's own context", () => {
+			setContext({
+				request: {
+					id: "req_1",
+					collectionId: null,
+					elements: [scriptElement("e1", "script.pre", 'pm.environment.get("token");')],
+				} as never,
+				getAllVariables: () => ({ token: { value: "abc", scope: "environment" } }),
+			});
+
+			render(<ElementsPanel />);
+
+			expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
+			expect(screen.getByText("token")).toBeInTheDocument();
+		});
+
+		it("shows above a script.post element's editor too", () => {
+			setContext({
+				request: {
+					id: "req_1",
+					collectionId: null,
+					elements: [scriptElement("e1", "script.post", 'const u = "{{base_url}}";')],
+				} as never,
+			});
+
+			render(<ElementsPanel />);
+
+			expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
+			expect(screen.getByText("{{base_url}}")).toBeInTheDocument();
+		});
+
+		it("does not show for a non-script element", () => {
+			setContext({
+				request: {
+					id: "req_1",
+					collectionId: null,
+					elements: [extractElement("e1")],
+				} as never,
+			});
+
+			render(<ElementsPanel />);
+
+			expect(screen.queryByText("Names mentioned:")).not.toBeInTheDocument();
+		});
 	});
 });

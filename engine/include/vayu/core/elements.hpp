@@ -34,13 +34,34 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "vayu/types.hpp"
 
 namespace vayu::core {
+
+/**
+ * The run-level `elements.timers` override (issue #1498), read once at run
+ * start (`RunContext`) and consulted by every `timer.*` kind's own wait
+ * computation - never by the pipeline itself, which stays ignorant of what a
+ * kind's config means. `AsConfigured` is the default: every `timer.*`
+ * element runs its own stored config unchanged. `Off` silences every
+ * `timer.*` element for the run. `Fixed` and `Range` replace every
+ * `timer.*` element's own wait span with the same fixed value or uniform
+ * range, whatever that element's own config says - the same "replaced, not
+ * merged" rule `elements.scripts` already uses.
+ */
+struct TimersOverride {
+    enum class Mode : std::uint8_t { AsConfigured, Off, Fixed, Range };
+    Mode mode        = Mode::AsConfigured;
+    int64_t fixed_ms = 0;
+    int64_t min_ms   = 0;
+    int64_t max_ms   = 0;
+};
 
 /**
  * Everything a compiled element's `apply` reads and writes (issue #1514).
@@ -84,6 +105,38 @@ struct ElementContext {
     /// design send has none - a single exchange has nothing to stop mid-wait -
     /// so only the sequential run's plan walk binds this).
     std::function<bool ()> should_stop;
+
+    /// True for the design send and the sequential run, where a `timer.*`
+    /// kind's wait blocks the calling thread exactly as it always has; false
+    /// on a scenario load run's own producer/completion hooks, where blocking
+    /// would stall the shared event loop and a kind must instead report its
+    /// intended wait through `Element::scheduled_ready_delay_ms` for the
+    /// caller to apply through `VirtualUser::ready_at_ms` (issue #1498).
+    bool blocking_allowed = true;
+
+    /// A run's seeded generator (issue #1498), for a `timer.*` kind whose
+    /// wait is randomised and wants to be reproducible with the run's
+    /// `elements.seed`. Null for a design send, which has no run and no seed
+    /// to be reproducible against - a kind falls back to its own unseeded
+    /// generator there, exactly as before this field existed.
+    std::mt19937_64* rng = nullptr;
+
+    /// Per-node "when did this node last start" state for `timer.pacing`
+    /// (issue #1498), keyed by the pacing element's own id (stamped by
+    /// `compile_elements` as `config._elementId`) - not by kind, since a
+    /// step can carry more than one `timer.pacing` element on different
+    /// scopes. Bound to a run-local map for the sequential run (one VU, one
+    /// map, alive for the run's whole life) and to `VirtualUser`'s own map
+    /// under load (one map per VU, so two users pacing the same folder never
+    /// share a cadence). Null for a design send, where pacing cannot mean
+    /// anything - a pacing element then always reports its first-ever
+    /// occurrence and never waits.
+    std::unordered_map<std::string, int64_t>* pacing_state = nullptr;
+
+    /// The run's `elements.timers` override (issue #1498), or null for a
+    /// design send, which has no run-level override to read. Read-only: a
+    /// kind consults it, never writes it.
+    const TimersOverride* timers_override = nullptr;
 
     /// `script.setup` / `script.teardown` (#1499): runs @p script once, at
     /// `run.start` / `run.end`, against the run's own scopes rather than any
@@ -166,6 +219,26 @@ class Element {
 
     [[nodiscard]] virtual Phase phase () const = 0;
     virtual void apply (ElementContext& ctx)   = 0;
+
+    /**
+     * Issue #1498: how long a scenario load run should hold the owning VU
+     * back before this element's phase would otherwise dispatch it, or
+     * `nullopt` for "nothing to schedule around" - the default every kind
+     * but `timer.think` and `timer.pacing` keeps. Called by the load path's
+     * own step-completion hook, before the VU is next considered ready, so a
+     * kind that wants a non-blocking wait reports it here instead of
+     * sleeping inside `apply` (which the load path never lets block). @p
+     * pacing_state is the same per-VU map `ElementContext::pacing_state`
+     * would bind for this VU; a kind that writes through it here must leave
+     * `apply` free to run again without double-booking the wait.
+     */
+    [[nodiscard]] virtual std::optional<int64_t> scheduled_ready_delay_ms (
+    std::unordered_map<std::string, int64_t>& pacing_state,
+    int64_t now_ms) const {
+        (void)pacing_state;
+        (void)now_ms;
+        return std::nullopt;
+    }
 };
 
 /**
@@ -190,6 +263,16 @@ struct ElementKind {
     // model has no answer for. Every other kind stays request-and-collection,
     // the default.
     bool collection_only = false;
+    /// Whether the plan compiler must track, across a whole iteration's step
+    /// sequence, which occurrence of this kind's element id comes first
+    /// (issue #1498). True only for `timer.pacing`: "the wait is measured
+    /// from the previous start of the same node" needs to know which one
+    /// occurrence - of the many a folder- or collection-scoped element is
+    /// inherited into - is that node's actual start. Read by
+    /// `scenario_plan.cpp` through the registry, never by a `kind ==`
+    /// comparison, so the extensibility contract's rule 1 holds for a future
+    /// kind that needs the same tracking.
+    bool tracks_scope_occurrence = false;
     // Absent for a kind that only validates (phase 0's `inherit.disable`);
     // present once a kind actually runs (#1514 onward).
     std::function<std::unique_ptr<Element> (const nlohmann::json& config)> compile;
@@ -311,6 +394,19 @@ struct CompiledElement {
  * has simply never heard of.
  */
 [[nodiscard]] std::vector<CompiledElement> compile_elements (const nlohmann::json& elements);
+
+/**
+ * Applies the run's `elements.timers` override (issue #1498) to one
+ * `timer.*` kind's own computed wait: `nullopt` means "run silenced by
+ * `off`, do not wait at all"; a value means "wait this many milliseconds
+ * instead of @p own_wait_ms". @p rng is the same generator
+ * `ElementContext::rng` carries, drawn from for `Range`'s uniform pick;
+ * null falls back to an unseeded draw, exactly as a kind with no run would.
+ * A null @p override (a design send) returns @p own_wait_ms unchanged.
+ */
+[[nodiscard]] std::optional<int64_t> apply_timers_override (const TimersOverride* override_,
+int64_t own_wait_ms,
+std::mt19937_64* rng);
 
 /**
  * The response body parsed as JSON, cached on @p ctx so `extract.json`,

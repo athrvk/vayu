@@ -544,6 +544,13 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     // everywhere else, because nowhere else has a sequence to
     // redirect (issue #355).
     inputs.in_scenario = true;
+    // A `timer.pacing` element's `step.before` dispatch (issue #1498) reads
+    // these off the run it belongs to - a design send's own `ExchangeInputs`
+    // leaves all four null, which is what keeps pacing meaningless there.
+    inputs.pacing_state    = &ctx.context->pacing_state;
+    inputs.rng             = &ctx.context->rng;
+    inputs.timers_override = &ctx.context->timers_override;
+    inputs.should_stop     = [&] { return ctx.context->should_stop.load (); };
 
     // The data pass, per iteration and before the send: composition
     // left every `{{data.column}}` written as it stands, because
@@ -880,6 +887,9 @@ ScenarioStepStore& store) {
                 .set_variable       = [] (std::string_view, const std::string&,
                                 const std::string&) {},
                 .should_stop = [&] { return base.context->should_stop.load (); },
+                .rng             = &base.context->rng,
+                .pacing_state    = &base.context->pacing_state,
+                .timers_override = &base.context->timers_override,
             };
             vayu::core::ElementPipeline::run (vayu::core::Phase::StepBetween,
             between_ctx, *step.elements, record.elements);

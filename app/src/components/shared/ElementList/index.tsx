@@ -22,8 +22,14 @@
  * Inherited (read-only) elements are a separate notice above this list
  * (`InheritedElementsNotice`), the same split the old script panels drew
  * between the editable script and the "runs before your own" chain card.
+ *
+ * `renderAboveForm` is the one host-supplied extension point (issue #1553):
+ * a plain render function, so this file still depends on nothing but the
+ * element itself - the host closes over whatever context it needs (variable
+ * resolution, a data contract) and hands back a node, or nothing.
  */
 
+import type { ReactNode } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import {
 	Button,
@@ -49,6 +55,12 @@ export interface ElementListProps {
 	kinds: ElementKindSchema[];
 	/** Shown when `elements` is empty, in place of the (otherwise empty) list. */
 	emptyLabel?: string;
+	/**
+	 * Extra content rendered above one element's own form, keyed to that
+	 * element - e.g. the "Names mentioned" row above a `script.*` element's
+	 * editor. Return `null`/`undefined` for an element with nothing to add.
+	 */
+	renderAboveForm?: (element: ElementDef) => ReactNode;
 }
 
 function kindLabel(kind: string, kinds: ElementKindSchema[]): string {
@@ -76,6 +88,7 @@ function ElementRow({
 	onUpdate,
 	onRemove,
 	onMove,
+	renderAboveForm,
 }: {
 	element: ElementDef;
 	kinds: ElementKindSchema[];
@@ -84,6 +97,7 @@ function ElementRow({
 	onUpdate: (element: ElementDef) => void;
 	onRemove: () => void;
 	onMove: (direction: -1 | 1) => void;
+	renderAboveForm?: (element: ElementDef) => ReactNode;
 }) {
 	const schema = kinds.find((k) => k.kind === element.kind);
 	const Bespoke = ELEMENT_FORM_OVERRIDES[element.kind];
@@ -144,6 +158,7 @@ function ElementRow({
 					<Trash2 className="h-4 w-4" />
 				</Button>
 			</div>
+			{renderAboveForm?.(element)}
 			{Bespoke ? (
 				<Bespoke
 					kind={element.kind}
@@ -165,7 +180,13 @@ function ElementRow({
 	);
 }
 
-export function ElementList({ elements, onChange, kinds, emptyLabel }: ElementListProps) {
+export function ElementList({
+	elements,
+	onChange,
+	kinds,
+	emptyLabel,
+	renderAboveForm,
+}: ElementListProps) {
 	const groups = groupedByCategory(kinds);
 
 	function addElement(kind: ElementKindSchema) {
@@ -209,6 +230,7 @@ export function ElementList({ elements, onChange, kinds, emptyLabel }: ElementLi
 					onUpdate={(next) => updateAt(index, next)}
 					onRemove={() => removeAt(index)}
 					onMove={(direction) => moveAt(index, direction)}
+					renderAboveForm={renderAboveForm}
 				/>
 			))}
 			<DropdownMenu>
