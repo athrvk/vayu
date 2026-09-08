@@ -468,13 +468,15 @@ size_t vu_index) {
 }
 
 /// `run_step_before`'s answer: elapsed pipeline time on `includeScriptTime`'s
-/// terms, and whether a controller kind (`control.if` / `control.once` /
+/// terms, whether a controller kind (`control.if` / `control.once` /
 /// `control.throughput`, issue #1515) asked to skip this occurrence - the
-/// load path's own `pm.execution.skipRequest()`, which nothing before #1515
-/// could ask for here.
+/// load path's own `pm.execution.skipRequest()` - and `control.switch`'s own
+/// dispatch target, if it fired (issue #1569's `Kind::Next`, read the same
+/// way the sequential run's `decide_next_step` reads a pre-request script's).
 struct StepBeforeResult {
     int64_t elapsed_ms = 0;
     bool skip          = false;
+    std::optional<std::string> next_target;
 };
 
 /**
@@ -535,10 +537,11 @@ vayu::Request& request) {
             vu.scope_overlay.apply_onto (vars);
             return vayu::http::resolve_template (text, vars);
         },
-        .iteration        = iteration,
-        .step_position    = step_index,
-        .element_spans    = &state.element_spans,
-        .controller_state = &vu.controller_state,
+        .iteration               = iteration,
+        .step_position           = step_index,
+        .element_spans           = &state.element_spans,
+        .controller_state        = &vu.controller_state,
+        .shared_controller_state = &state.shared_throughput,
         .blocking_allowed = false, // A worker thread must never block here.
         .rng              = &vu.rng,
         .pacing_state     = &vu.pacing_state,
@@ -556,6 +559,14 @@ vayu::Request& request) {
     // A controller kind's skip (issue #1515) - the load path's own
     // `pm.execution.skipRequest()`.
     const bool skip = pre_result.control.kind == vayu::ScriptControl::Kind::Skip;
+    // `control.switch`'s own dispatch (issue #1569) - a skip always wins
+    // over a dispatch on the same "last write wins" terms `pre_result` is a
+    // single shared field either way, matching the sequential run's own
+    // priority when both a skip and a jump are asked for on one step.
+    std::optional<std::string> next_target;
+    if (!skip && pre_result.control.kind == vayu::ScriptControl::Kind::Next) {
+        next_target = pre_result.control.target;
+    }
     // `pre_result.tests` is populated only when `script.pre` actually ran
     // above (a deferred one never invokes `run_pre_script`, so it stays
     // empty) - the inline half of issue #1497's assertion tally.
@@ -568,13 +579,14 @@ vayu::Request& request) {
     }
 
     if (!start) {
-        return StepBeforeResult{ 0, skip };
+        return StepBeforeResult{ 0, skip, next_target };
     }
     return StepBeforeResult{
         std::chrono::duration_cast<std::chrono::milliseconds> (
         std::chrono::steady_clock::now () - *start)
         .count (),
         skip,
+        next_target,
     };
 }
 
@@ -813,10 +825,16 @@ class ScenarioLoadDriver {
         // `step`'s address is stable for the run's whole life: the plan is
         // immutable, const data shared by the run's context.
         const ScenarioStep* step_ptr = &step;
+        // `control.switch`'s own dispatch (issue #1569), decided above at
+        // `step.before` and carried into the completion for `finish_step` to
+        // resolve once this step's own send (whatever it does) is done -
+        // never consulted on the transport-error path, which ends the
+        // iteration on `errored` alone regardless.
+        std::optional<std::string> next_target_before = before_result.next_target;
         context_->event_loop->submit (request,
-        [context = context_, &db = db_, state = state_, &plan = execution_.plan,
-        step_ptr, vu, step_index, iteration, vu_index, row, pipeline_before_ms,
-        sent_request] (size_t, const vayu::Result<vayu::Response>& result) {
+        [context = context_, &db = db_, state = state_, &plan = execution_.plan, step_ptr,
+        vu, step_index, iteration, vu_index, row, pipeline_before_ms, sent_request,
+        next_target_before] (size_t, const vayu::Result<vayu::Response>& result) {
             if (result.is_error ()) {
                 // No `Response` object exists at all - nothing for `step.after`
                 // to run against, exactly as before #1495. Coverage still
@@ -851,7 +869,8 @@ class ScenarioLoadDriver {
             // happened.
             state->coverage.record (step_index, response.status_code);
             finish_step (context, state, plan, vu, step_index, errored,
-            errored ? nullptr : &response.cookie_lines);
+            errored ? nullptr : &response.cookie_lines,
+            errored ? std::nullopt : next_target_before);
             handle_result (context, db, result,
             ResultAnnotations{ row, step_index, iteration, vu_index });
         });
@@ -886,13 +905,14 @@ class ScenarioLoadDriver {
             if (vu.ready_at_ms > 0 && vu.ready_at_ms > steady_now_ms ()) {
                 continue;
             }
-            if (vu.step == 0) {
+            if (vu.iteration_boundary) {
                 if (max_iterations_ > 0 && state_->iterations_started >= max_iterations_) {
                     vu.retired = true;
                     --live_vus_;
                     continue;
                 }
                 ++state_->iterations_started;
+                vu.iteration_boundary = false;
                 if (state_->data_row_count > 0) {
                     // One claim per iteration off the run-wide cursor, wrapping
                     // always. Claimed here rather than per step so every step
@@ -921,17 +941,27 @@ class ScenarioLoadDriver {
      * `step.between` of whatever preceded it) and reports `waited_ms: 0`, so
      * it contributes nothing through this path - see @ref
      * schedule_next_entry_wait for its actual scheduling.
+     *
+     * Also `control.loop`'s own seam (issue #1569): its `Next` decision -
+     * only the folder's *last* member ever makes one, per its own
+     * `needs_span` check - is returned the same way `run_step_before`
+     * returns `control.switch`'s, for `finish_step` to resolve against the
+     * run's `step_index`.
+     *
+     * @return the folder-start step name a `control.loop` asked to repeat,
+     *         or `nullopt` when nothing at this step decided one.
      */
-    static void run_step_between (const std::shared_ptr<RunContext>& context,
+    static std::optional<std::string> run_step_between (
+    const std::shared_ptr<RunContext>& context,
     ScenarioLoadState& state,
     const ScenarioStep& completed_step,
     size_t step_index,
     VirtualUser& vu) {
         if (!completed_step.elements || completed_step.elements->empty ()) {
-            return;
+            return std::nullopt;
         }
         std::vector<vayu::core::ElementOutcome> outcomes;
-        vayu::ScriptResult unused_pre;
+        vayu::ScriptResult between_control;
         vayu::ScriptResult unused_post;
         vayu::core::ElementContext ctx{
             // Never read or written by a `step.between` kind (`timer.think`,
@@ -942,10 +972,14 @@ class ScenarioLoadDriver {
             .response           = nullptr,
             .run_pre_script     = nullptr,
             .run_post_script    = nullptr,
-            .pre_script_result  = unused_pre,
+            .pre_script_result  = between_control,
             .post_script_result = unused_post,
             .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
             .should_stop      = nullptr,
+            .iteration        = vu.iteration,
+            .step_position    = step_index,
+            .element_spans    = &state.element_spans,
+            .controller_state = &vu.controller_state,
             .blocking_allowed = false,
             .rng              = &vu.rng,
             .pacing_state     = &vu.pacing_state,
@@ -962,7 +996,14 @@ class ScenarioLoadDriver {
         }
         if (total_wait_ms > 0) {
             vu.ready_at_ms = std::max (vu.ready_at_ms, steady_now_ms () + total_wait_ms);
+            fold_between_wait_into_open_transactions (*completed_step.elements,
+            state.element_spans, step_index, vu.iteration, total_wait_ms,
+            vu.controller_state);
         }
+
+        return between_control.control.kind == vayu::ScriptControl::Kind::Next ?
+        std::optional (between_control.control.target) :
+        std::nullopt;
     }
 
     /**
@@ -1004,7 +1045,11 @@ class ScenarioLoadDriver {
      * VU left busy permanently shrinks effective concurrency.
      *
      * @p next_cookies is null for an outcome that carries none - an error, or a
-     * step that was never sent.
+     * step that was never sent. @p next_target_from_before is
+     * `control.switch`'s own dispatch (issue #1569, `run_step_before`'s
+     * return), read only when this step did not error - the same "an
+     * instruction that cannot be honoured is this step's failure" priority
+     * `errored` already has over any control decision.
      */
     static void finish_step (const std::shared_ptr<RunContext>& context,
     const std::shared_ptr<ScenarioLoadState>& state,
@@ -1012,40 +1057,94 @@ class ScenarioLoadDriver {
     VirtualUser* vu,
     size_t step_index,
     bool errored,
-    const std::vector<std::string>* next_cookies) {
+    const std::vector<std::string>* next_cookies,
+    std::optional<std::string> next_target_from_before = std::nullopt) {
         const size_t step_count = plan.steps.size ();
         state->steps_executed.fetch_add (1, std::memory_order_relaxed);
+        ++vu->steps_this_iteration;
+
+        std::optional<std::string> next_target;
         if (errored) {
             state->steps.record_error (step_index);
             state->steps_errored.fetch_add (1, std::memory_order_relaxed);
         } else {
-            // Skipped for an errored (or never-sent) step, on the same rule
-            // the sequential run's own `step.between` dispatch follows
-            // (`scenario_runner.cpp`'s `run_iteration`).
-            run_step_between (context, *state, plan.steps[step_index], step_index, *vu);
+            // `control.loop`'s own decision (issue #1569) is chronologically
+            // last, so it overrides `control.switch`'s own step.before
+            // decision on the sequential run's own "last call wins" terms
+            // (`decide_next_step` reads its post-script over its pre).
+            next_target = run_step_between (
+            context, *state, plan.steps[step_index], step_index, *vu);
+            if (!next_target) {
+                next_target = std::move (next_target_from_before);
+            }
         }
 
-        const bool last_step = step_index + 1 >= step_count;
-        if (errored || last_step) {
-            // An errored step ends its iteration - and the VU starts the next
-            // one rather than being stranded, which would permanently shrink
-            // effective concurrency for the rest of the run.
-            if (last_step) {
-                state->iterations_completed.fetch_add (1, std::memory_order_relaxed);
+        // A `control.switch` / `control.loop` jump or repeat (issue #1569),
+        // resolved against the plan the same way a script's own
+        // `setNextRequest` is (`resolve_next_step`). A target this run
+        // cannot honour, or a cycle that never reaches
+        // `maxStepsPerIteration`, both end the iteration as abandoned - the
+        // sequential run's own rule for an instruction it cannot honour.
+        std::optional<size_t> jump_target;
+        bool jump_failed = false;
+        if (next_target && !errored) {
+            if (vu->steps_this_iteration >= state->max_steps_per_iteration) {
+                vayu::utils::log_warning ("run",
+                "Scenario load run: iteration exceeded maxStepsPerIteration - "
+                "a "
+                "control.switch/control.loop cycle never reached its end",
+                { { "runId", context->run_id },
+                { "maxStepsPerIteration", state->max_steps_per_iteration } });
+                jump_failed = true;
             } else {
-                state->iterations_abandoned.fetch_add (1, std::memory_order_relaxed);
+                const auto resolution = resolve_next_step (state->step_index, *next_target);
+                switch (resolution.kind) {
+                case NextStepResolution::Kind::Step:
+                    jump_target = resolution.index;
+                    break;
+                case NextStepResolution::Kind::EndIteration:
+                    break; // Ends below, on the same terms a natural last step does.
+                case NextStepResolution::Kind::Unresolved:
+                    vayu::utils::log_warning ("run",
+                    "Scenario load run: " + resolution.error,
+                    { { "runId", context->run_id } });
+                    jump_failed = true;
+                    break;
+                }
             }
-            vu->step = 0;
+        }
+
+        const bool ends_by_jump = next_target.has_value () && !jump_target && !jump_failed;
+        const bool abandon   = errored || jump_failed;
+        const bool last_step = step_index + 1 >= step_count;
+        const bool end_iteration = abandon || ends_by_jump || (!jump_target && last_step);
+
+        if (end_iteration) {
+            // An abandoned iteration ends here rather than stranding the VU,
+            // which would permanently shrink effective concurrency for the
+            // rest of the run; an ordinary last step or an explicit
+            // `Kind::EndIteration` both count as completed, not abandoned -
+            // neither is a failure.
+            if (abandon) {
+                state->iterations_abandoned.fetch_add (1, std::memory_order_relaxed);
+            } else {
+                state->iterations_completed.fetch_add (1, std::memory_order_relaxed);
+            }
+            vu->step               = 0;
+            vu->iteration_boundary = true;
             ++vu->iteration;
+            vu->steps_this_iteration = 0;
             // Empty at the start of each iteration: a new iteration is a
             // new user, not the same one logging in twice.
             vu->cookies.clear ();
             vu->scope_overlay.clear ();
         } else {
-            vu->step = step_index + 1;
+            vu->step = jump_target.value_or (step_index + 1);
             // Replace, never merge - the captured list is the whole jar the
             // handle held, so merging would resurrect a cookie the server
-            // deleted by expiring it.
+            // deleted by expiring it. This step's own send (a jump target
+            // does not change whether *this* step sent one) is what
+            // @p next_cookies describes either way.
             vu->cookies =
             next_cookies != nullptr ? *next_cookies : std::vector<std::string>{};
         }
@@ -1131,6 +1230,11 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     auto state            = std::make_shared<ScenarioLoadState> (plan, vu_count,
                make_coverage_tally (execution), std::move (base_scopes), script_config);
     state->data_row_count = execution.data_rows.size ();
+    // The same cycle guard the sequential run's own `setNextRequest` walk
+    // uses (issue #1569), against a `control.switch`/`control.loop` plan
+    // whose jump never reaches an end.
+    state->max_steps_per_iteration = resolve_max_steps_per_iteration (
+    db.get_config_int ("maxStepsPerIteration", 0), step_count);
     state->vus.reserve (vu_count);
     for (size_t i = 0; i < vu_count; ++i) {
         auto user = std::make_unique<VirtualUser> ();

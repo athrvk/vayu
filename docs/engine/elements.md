@@ -195,7 +195,12 @@ JMeter's logic controllers, as element kinds rather than a nested sub-flow (issu
 resolved `{{variable}}` is false - `{{v}} == x`, `!=`, `matches /re/`, or `{{v}} exists`, refused at
 validate outside that grammar. `control.once` runs on this user's first iteration only. `control.throughput`
 runs a share of occurrences by `percent` (an exact integer-carry accumulator, not a random draw) or
-`everyN`, on the producer's own per-user counter - no lock, no body parse. All three write the same
+`everyN`, on the producer's own counter - no lock, no body parse. `perUser` (default `true`) keeps that
+counter per virtual user; `perUser: false` (issue #1569, JMeter's "All threads" throughput mode) shares
+one atomic counter pair across every VU of a scenario load run instead, allocated up front from a plan
+scan (`SharedThroughputCounters`, `ElementKind::supports_shared_state` read through the registry rather
+than a `kind ==` comparison) - the sequential run's single implicit user already makes its own counter
+the "shared" instance, so `perUser` changes nothing there. All three write the same
 `ScriptControl::Skip` decision `pm.execution.skipRequest()` always has, so a skip is one mechanism
 end to end: `execute_exchange`'s pre-send check, `decide_next_step`, and `classify_step`'s
 `StepOutcome::Skipped` all read it exactly as they read a script's.
@@ -205,7 +210,7 @@ value, through the same `ScriptControl::Next` / `resolve_next_step` a script's o
 `setNextRequest` uses - so a switch's dispatch is an ordinary jump to every reader of the step list,
 not a second flow-control channel.
 
-`control.loop` (`count`) and `control.transaction` (`name`) both sit on a folder and are inherited
+`control.loop` (`count`) and `control.transaction` (`name`, `includeTimers?`) both sit on a folder and are inherited
 into every member beneath it, compiling once per member - so each member's own instance has to
 recognise its folder's first or last position independently rather than being told it.
 `compute_element_spans` (`scenario_plan.cpp`) answers that once per run, from a single pass over the
@@ -219,18 +224,24 @@ latency into a per-iteration accumulator (same keying) and, at the folder's last
 closed sum as its `ElementOutcome::waitedMs` with the transaction's `name` in `message` - the two
 fields the runner (`scenario_runner.cpp` / `scenario_load.cpp`) reads to fold the value into
 `TransactionHistograms`, one HdrHistogram per declared name allocated up front from a plan scan, so
-recording it takes no lock either. The report gains `scenario.transactions[] = { name, count,
-errors, latency: { min, p50, p90, p95, p99, max } }`, omitted for a transaction the run never closed.
+recording it takes no lock either. `includeTimers: true` (issue #1569) also folds a between-member
+`timer.*` wait into the same running sum - the runner's own `step.between` dispatch does this fold
+generically (`fold_between_wait_into_open_transactions`, shared by both run modes, found through the
+registry's `category` field rather than a `kind ==` comparison), skipped for the folder's last member,
+whose sum has already closed and reported by the time any wait after it could run. The report gains
+`scenario.transactions[] = { name, count, errors, latency: { min, p50, p90, p95, p99, max } }`, omitted
+for a transaction the run never closed.
 
-**Sequential-only: `control.switch` and `control.loop`.** A scenario load run's virtual users
-advance through the plan strictly forward (`VirtualUser::step`), with no jump the way a repeat or a
-dispatch needs; `POST /runs` refuses a load run whose plan carries either kind with a `400` naming
-it (`vayu::core::find_load_incompatible_controller`), read through the registry's own
-`jumps_or_repeats` flag. `control.if`, `control.once`, `control.throughput` and
-`control.transaction` all run under load too - see Load paths below for `control.if`'s own skip
-there, which the load path had no equivalent of before this issue. A load-path jump mechanism, plus
-`control.throughput`'s shared `perUser: false` budget and `control.transaction`'s `includeTimers`,
-are real, disclosed follow-up work: issue #1569.
+**`control.switch` and `control.loop` under a scenario load run (issue #1569).** A scenario load run's
+virtual users used to advance through the plan strictly forward (`VirtualUser::step`), with no jump the
+way a repeat or a dispatch needs. They now do: `ScenarioLoadState::step_index` (the load path's own
+`ScenarioStepIndex`, built once per run) resolves a `control.switch` target or a `control.loop`'s
+folder-start name through the same `resolve_next_step` the sequential run's `setNextRequest` uses, and
+`finish_step` applies the result to the VU's own `step`, guarded against a cycle that never closes by
+`VirtualUser::steps_this_iteration` and the same `maxStepsPerIteration` config entry the sequential run
+reads. Neither kind sets the registry's `jumps_or_repeats` flag any more, so `POST /runs`' own refusal
+(`vayu::core::find_load_incompatible_controller`, still there for a future kind that jumps in a way the
+load path cannot support yet) no longer applies to either.
 
 ## The step trace
 
@@ -358,9 +369,9 @@ gap, outside this page's Status callout.
 - #1515 - the controller family (`control.if`, `.once`, `.switch`, `.throughput`, `.loop`,
   `.transaction`), the load path's own `steps_skipped` counter, and `scenario.transactions[]`
   (this page's Controllers section).
-- #1569 - the follow-up disclosed by #1515: a scenario load run's own jump/repeat mechanism for
-  `control.switch` / `control.loop`, `control.throughput`'s shared `perUser: false` budget, and
-  `control.transaction`'s `includeTimers`.
+- #1569 - the follow-up disclosed by #1515, landed: a scenario load run's own jump/repeat
+  mechanism for `control.switch` / `control.loop`, `control.throughput`'s shared `perUser: false`
+  budget, and `control.transaction`'s `includeTimers`.
 - #1500 - `metric.record` and the `pm.metrics` script binding: custom trends, counters and
   rates, reported beside the built-in phases and usable as a `custom.<name>.<stat>` threshold.
 - #1501 - load-time cookies that round out the kind table.

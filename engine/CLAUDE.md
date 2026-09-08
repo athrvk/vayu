@@ -407,10 +407,18 @@ logged as a warning: it means a client skipped composition.
   family (`control.if`, `.once`, `.switch`, `.throughput`, `.loop`,
   `.transaction`) - JMeter-parity logic controllers that decide whether a
   step sends at all, jump to a named member, or sum a folder's members into
-  a named transaction with its own percentiles; `control.switch` /
-  `control.loop` run only in the sequential run today, since a scenario load
-  run's virtual users cannot jump the way either needs (issue #1569 tracks
-  that gap). The pipeline runs in the design send, the sequential (single-VU)
+  a named transaction with its own percentiles. #1569 gave `control.switch`
+  and `control.loop` their own jump/repeat mechanism on the load path too
+  (`ScenarioLoadState::step_index`, `VirtualUser::steps_this_iteration`,
+  `finish_step`'s own `resolve_next_step` call), the same
+  `maxStepsPerIteration` cycle guard the sequential run uses; `perUser:
+  false` on `control.throughput` shares one atomic budget across every
+  virtual user (`SharedThroughputCounters`, allocated up front from a plan
+  scan, no lock) instead of one per VU, and `control.transaction`'s
+  `includeTimers` folds a between-member `timer.*` wait into the sum
+  (`fold_between_wait_into_open_transactions`, shared by both run modes,
+  found through the registry's `category` rather than a `kind ==`
+  comparison). The pipeline runs in the design send, the sequential (single-VU)
   collection run, and - since #1495 - a scenario **load** run's own
   producer/completion hooks
   (`scenario_load.cpp`'s `run_step_before` / `run_step_after`): a declarative

@@ -23,13 +23,12 @@
  * `resolve_next_step` a script's own `pm.execution.setNextRequest` already
  * goes through - a loop-back is not a second flow-control mechanism.
  *
- * Sequential-run only: the load path's virtual users advance through the
- * plan strictly forward (`VirtualUser::step`), with no jump the way a
- * script-driven `setNextRequest` or this element's own `Next` needs, so a
- * scenario load run refuses a plan carrying `control.loop`
- * (`vayu::core::find_load_incompatible_controller`, `scenario_load.cpp`)
- * rather than silently running the folder once per iteration and ignoring
- * `count`.
+ * Runs under a scenario load run too (issue #1569): `scenario_load.cpp`'s
+ * own `finish_step` reads this same `Next` decision off
+ * `run_step_between`'s `ElementContext::pre_script_result` and resolves it
+ * against the run's own `ScenarioLoadState::step_index` - the load path's
+ * counterpart to `run_iteration`'s walk, guarded against a cycle that never
+ * closes by the same `maxStepsPerIteration` the sequential run uses.
  */
 
 #include "vayu/core/elements.hpp"
@@ -95,10 +94,9 @@ ElementKind make_control_loop_kind () {
     kind.label   = "Loop";
     kind.description =
     "Walks a folder's members a fixed number of times per iteration.";
-    kind.category         = "controller";
-    kind.hot_path         = HotPathClass::Declarative;
-    kind.needs_span       = true;
-    kind.jumps_or_repeats = true;
+    kind.category   = "controller";
+    kind.hot_path   = HotPathClass::Declarative;
+    kind.needs_span = true;
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ControlLoopElement> (config);
     };

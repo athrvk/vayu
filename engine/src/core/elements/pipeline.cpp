@@ -17,7 +17,63 @@
 #include <algorithm>
 #include <random>
 
+#include "vayu/core/scenario_plan.hpp"
+
 namespace vayu::core {
+
+std::string transaction_sum_key (const std::string& element_id, size_t iteration) {
+    return element_id + "#" + std::to_string (iteration) + "#sum";
+}
+
+SharedThroughputCounters::SharedThroughputCounters (const ScenarioPlan& plan) {
+    const auto& registry = Registry::instance ();
+    for (const auto& step : plan.steps) {
+        if (!step.elements) {
+            continue;
+        }
+        for (const auto& element : *step.elements) {
+            if (counters_.contains (element.id)) {
+                continue; // Already slotted - a folder-inherited occurrence
+                          // carries the same id at every member position.
+            }
+            const auto* kind = registry.find (element.kind);
+            if (kind == nullptr || !kind->supports_shared_state) {
+                continue;
+            }
+            if (element.config.value ("perUser", true)) {
+                continue; // This occurrence kept its own, per-VU counter.
+            }
+            counters_[element.id] = std::make_unique<Counters> ();
+        }
+    }
+}
+
+SharedThroughputCounters::Counters* SharedThroughputCounters::find (
+const std::string& element_id) {
+    const auto found = counters_.find (element_id);
+    return found == counters_.end () ? nullptr : found->second.get ();
+}
+
+void fold_between_wait_into_open_transactions (const std::vector<CompiledElement>& elements,
+const std::unordered_map<std::string, ElementSpan>& spans,
+size_t step_index,
+size_t iteration,
+int64_t wait_ms,
+std::unordered_map<std::string, int64_t>& controller_state) {
+    const auto& registry = Registry::instance ();
+    for (const auto& compiled : elements) {
+        const auto* kind = registry.find (compiled.kind);
+        if (kind == nullptr || kind->category != "transaction" ||
+        !compiled.config.value ("includeTimers", false)) {
+            continue;
+        }
+        const auto span = spans.find (compiled.id);
+        if (span == spans.end () || span->second.last == step_index) {
+            continue; // Unspanned, or this occurrence already closed it.
+        }
+        controller_state[transaction_sum_key (compiled.id, iteration)] += wait_ms;
+    }
+}
 
 SharedPacingClocks::SharedPacingClocks (const std::vector<std::string>& names) {
     for (const auto& name : names) {
