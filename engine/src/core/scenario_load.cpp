@@ -739,14 +739,20 @@ class ScenarioLoadDriver {
         return live_vus_;
     }
 
-    /** The next step of the next ready virtual user, submitted. */
-    void submit_one () {
+    /**
+     * The next step of the next ready virtual user, submitted.
+     *
+     * @return whether a VU was actually claimed. `false` means every VU is
+     *         deferred, in flight or retired; `maintain_concurrency` waits
+     *         out the nearer of a completion or the earliest deferral
+     *         (`deferred_wait_ms`) rather than retrying at once (issue
+     *         #1596) - not counting a submission here is what keeps
+     *         `in_flight()` honest either way.
+     */
+    bool submit_one () {
         VirtualUser* vu = take_ready_vu ();
         if (vu == nullptr) {
-            // Every VU is in flight or retired. The controller's own 50ms tick
-            // retries; not counting a submission here is what keeps
-            // `in_flight()` honest.
-            return;
+            return false;
         }
 
         const size_t step_index         = vu->step;
@@ -786,7 +792,7 @@ class ScenarioLoadDriver {
                 vayu::Result<vayu::Response> (vayu::Error{
                 vayu::ErrorCode::DataBindingFailed, step.name + ": " + bound.error }),
                 ResultAnnotations{ row, step_index, iteration, vu_index });
-                return;
+                return true;
             }
         }
 
@@ -812,7 +818,7 @@ class ScenarioLoadDriver {
             state_->steps_skipped.fetch_add (1, std::memory_order_relaxed);
             finish_step (context_, state_, execution_.plan, vu, step_index,
             /*errored=*/false, nullptr);
-            return;
+            return true;
         }
         const int64_t pipeline_before_ms = before_result.elapsed_ms;
         {
@@ -893,17 +899,41 @@ class ScenarioLoadDriver {
             ResultAnnotations{ row, step_index, iteration, vu_index });
         });
         context_->requests_sent++;
+        return true;
+    }
+
+    /**
+     * Ms until the earliest deferred VU `take_ready_vu` last skipped over
+     * becomes ready, or `nullopt` when its last scan found no deferral -
+     * either it found a VU (this cycle submitted), or every VU it skipped
+     * was busy or retired rather than deferred, which `maintain_concurrency`'s
+     * plain `in_flight() < target` wait already handles correctly (issue
+     * #1596). Recomputed against the current time on every call, not cached
+     * from the scan, so a wait started slightly after the scan still ends on
+     * time.
+     */
+    [[nodiscard]] std::optional<int64_t> deferred_wait_ms () const {
+        if (!earliest_deferred_ready_at_ms_) {
+            return std::nullopt;
+        }
+        return std::max<int64_t> (0, *earliest_deferred_ready_at_ms_ - steady_now_ms ());
     }
 
     private:
     /**
-     * A virtual user that is neither busy nor retired, claimed for one step.
+     * A virtual user that is neither busy nor retired and not deferred,
+     * claimed for one step.
      *
-     * Returns null when every VU is in flight or retired: the controller's own
-     * 50ms tick retries, and not counting a submission is what keeps
-     * `in_flight()` honest.
+     * Returns null when every VU is deferred, in flight or retired - not
+     * counting a submission either way is what keeps `in_flight()` honest.
+     * The two cases are told apart for `deferred_wait_ms`'s sake: a scan that
+     * skips a deferred VU records the soonest of them in
+     * `earliest_deferred_ready_at_ms_`, reset at the top of every call so a
+     * stale value from calls ago never lingers into one that found nothing
+     * deferred at all.
      */
     VirtualUser* take_ready_vu () {
+        earliest_deferred_ready_at_ms_.reset ();
         for (size_t scanned = 0; scanned < state_->vus.size (); ++scanned) {
             VirtualUser& vu = *state_->vus[cursor_];
             cursor_         = (cursor_ + 1) % state_->vus.size ();
@@ -916,11 +946,19 @@ class ScenarioLoadDriver {
             if (vu.busy.load (std::memory_order_acquire)) {
                 continue;
             }
-            // Plumbing for a scheduled wait (#1498's `timer.pacing` / gaussian
-            // `timer.think`) - nothing writes past 0 yet, so this is a no-op
-            // for every run today. Read after the acquire above for the same
-            // reason `step` and `iteration` are.
+            // `timer.pacing` / gaussian `timer.think` (issues #1498, #1570,
+            // #1571) defer a VU by stamping this in the future. A deferred VU
+            // is never in flight, so `maintain_concurrency` cannot tell "wait
+            // for a completion" and "wait for this VU" apart from
+            // `in_flight()` alone; recording the soonest one here is what lets
+            // `deferred_wait_ms` bound the wait instead of busy-spinning
+            // (issue #1596). Read after the acquire above for the same reason
+            // `step` and `iteration` are.
             if (vu.ready_at_ms > 0 && vu.ready_at_ms > steady_now_ms ()) {
+                if (!earliest_deferred_ready_at_ms_ ||
+                vu.ready_at_ms < *earliest_deferred_ready_at_ms_) {
+                    earliest_deferred_ready_at_ms_ = vu.ready_at_ms;
+                }
                 continue;
             }
             if (vu.iteration_boundary) {
@@ -1190,6 +1228,10 @@ class ScenarioLoadDriver {
     size_t max_iterations_ = 0;
     size_t cursor_         = 0;
     size_t live_vus_       = 0;
+    // `take_ready_vu`'s single writer, `deferred_wait_ms`'s single reader -
+    // both called only from the strategy thread, so this needs no lock of
+    // its own (issue #1596).
+    std::optional<int64_t> earliest_deferred_ready_at_ms_;
 };
 
 std::shared_ptr<ScenarioLoadState> execute_scenario_load (
@@ -1319,7 +1361,7 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
         0;
 
     maintain_concurrency (
-    context, [&driver] () { driver.submit_one (); },
+    context, [&driver] () { return driver.submit_one (); },
     [type, start_vus, target_vus, ramp_ms] (int64_t elapsed) -> size_t {
         if (*type != LoadTestType::RampUp) {
             return target_vus;
@@ -1333,7 +1375,10 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     [type, duration_ms, &driver] (int64_t elapsed) {
         return *type == LoadTestType::Iterations ? driver.live_vus () > 0 :
                                                    elapsed < duration_ms;
-    });
+    },
+    // Bounds the refill wait to the earliest deferral instead of busy-spinning
+    // while every VU is paced or thinking (issue #1596).
+    [&driver] () { return driver.deferred_wait_ms (); });
 
     return state;
 }

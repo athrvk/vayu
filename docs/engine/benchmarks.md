@@ -684,6 +684,28 @@ check; create fixtures over MCP and delete them with `confirmed: true`
 (destructive tools answer a preview first) - `list_runs` returns `{ data }`
 and carries no URL, so name probe runs by their request.
 
+### A paced scenario run no longer pins a core (2026-09-08, engine 0.26.x)
+
+`timer.pacing` deferred a virtual user by stamping a future `ready_at_ms`, but
+a deferred user is not in flight - so the producer's own `in_flight() <
+target` wait predicate stayed true for as long as any user was paced, and
+`refill_cv.wait_for` returned at once regardless of the duration it was given
+(issue #1596). A run's own request rate made no difference: this was the
+producer thread spinning its wait away, not real work.
+
+One virtual user, `timer.pacing` at 500ms, run for 2s in-process against the
+test mock server (`ElementsTimersLoadTest.APacedRunDoesNotBusySpinTheProducer`,
+whole-process `getrusage`/`GetProcessTimes` sampled before and after):
+
+| | producer CPU over 2s | % of one core |
+|---|---:|---:|
+| Before | ~2,059 ms | ~100% |
+| After | ~65 ms | ~3% |
+
+Pacing precision is unaffected - the bounded wait is exactly the remaining
+deferral, so a 10ms cadence still holds to about 1%, which is why nothing
+noticed this for as long as it went undiagnosed.
+
 ## Prior results (2026-07, CLI, unreconciled)
 
 These numbers were measured earlier via `scripts/test/bench-compare.sh` on a

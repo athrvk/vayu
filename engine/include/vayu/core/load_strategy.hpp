@@ -108,16 +108,29 @@ struct LoadAuthPlan {
  * submission path - is the same for both, so there is deliberately one copy of
  * this loop rather than one per executor.
  *
- * @param submit_one   submits exactly one request and increments requests_sent
+ * @param submit_one   attempts one submission and increments requests_sent;
+ *                     returns whether it actually submitted (a scenario load
+ *                     run's virtual users can all be deferred by a timer, in
+ *                     which case it does neither - issue #1596)
  * @param target_fn    desired in-flight at elapsed_ms
  * @param budget_fn    remaining submission budget (SIZE_MAX for time-bounded)
  * @param should_continue  whether to keep refilling at elapsed_ms
+ * @param deferred_wait_ms_fn  ms until the earliest candidate @p submit_one
+ *                     skipped over is due, valid only right after it returned
+ *                     false because every remaining candidate is deferred
+ *                     rather than merely without budget; `nullopt` otherwise.
+ *                     A deferred user is never in flight, so without this the
+ *                     `in_flight() < target` wait predicate stays true for as
+ *                     long as any user is deferred and the loop busy-spins
+ *                     (issue #1596). Single-request strategies have no notion
+ *                     of deferral and omit it.
  */
 void maintain_concurrency (std::shared_ptr<RunContext> context,
-const std::function<void ()>& submit_one,
+const std::function<bool ()>& submit_one,
 const std::function<size_t (int64_t)>& target_fn,
 const std::function<size_t ()>& budget_fn,
-const std::function<bool (int64_t)>& should_continue);
+const std::function<bool (int64_t)>& should_continue,
+const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn = {});
 
 /**
  * @brief Read a run-config duration field ("30s", "500ms", "5m", "2h") as
