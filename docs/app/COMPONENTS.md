@@ -1612,18 +1612,20 @@ so a kind the engine adds needs no change here; `inherit.disable` is excluded
 from it, since a user never adds one by hand - it is written by the
 inheritance notice's Disable toggle.
 
-**A new request or collection is seeded with an empty `script.pre`/
-`script.post` pair** (`lib/elements.ts`'s `defaultScriptElements`), enabled
-with `config.script: ""`. The two tabs this feature replaced were always
-present and ran only once given a non-blank body; `elements: []` on a fresh
-entity would hide that slot behind the Add menu for a user with no reason yet
-to know it exists. An empty script still passes the kind's own schema (only
-the property's presence is required, not its length), and `scriptTextFor`
-already treats a blank script as absent everywhere it is read, so the pair is
-inert until someone types into it. Seeded at every creation path -
-`useTreeCrud.ts`'s New Collection / Add Folder / Add Request, and
-`useNewRequest.ts`'s command-palette flow - not in `createDefaultRequestState`,
-which only fills transient local state and is never sent as a create payload.
+**A new request or collection sends no `elements` at all** (issue #1609):
+creation used to seed an empty, enabled `script.pre`/`script.post` pair
+(`lib/elements.ts`'s retired `defaultScriptElements`) so the two script tabs
+this feature replaced still had a visible slot on a fresh entity. That made
+`InheritedElementsNotice` claim "2 elements will run before your own" about a
+collection whose two elements did nothing, and gave the engine an empty
+script to compose, run and report as a real outcome. A blank `script.*`
+element (`isBlankScriptElement`, `lib/elements.ts`) is now inert everywhere it
+is read - `scriptTextFor`, the Elements tab's badge count, and
+`InheritedElementsNotice`'s count and list - the app-side half of a rule the
+engine pipeline enforces the same way (`docs/engine/elements.md`), so the
+seeding lost its reason to exist. A fresh entity's Elements tab shows the
+existing `emptyLabel` sentence pointing at the Add menu until #1606's app
+child gives it quick-add chips instead.
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 

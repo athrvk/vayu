@@ -13,6 +13,7 @@
 
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { isBlankScriptElement } from "@/lib/elements";
 import { useRequestBuilderContext } from "../../context";
 import type { RequestTab, TabInfo } from "../../types";
 import InfoPanel from "./panels/InfoPanel";
@@ -76,7 +77,11 @@ export default function RequestTabs() {
 		{
 			id: "elements",
 			label: "Elements",
-			badge: request.elements.filter((e) => e.enabled).length || undefined,
+			// A blank script.pre/post is inert (#1609) - it does nothing, so it
+			// doesn't count toward "something is here" any more than a disabled row.
+			badge:
+				request.elements.filter((e) => e.enabled && !isBlankScriptElement(e)).length ||
+				undefined,
 		},
 		{
 			/*

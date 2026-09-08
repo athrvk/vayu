@@ -9,14 +9,15 @@
  */
 
 /**
- * The two script tabs this feature replaced were always present, so a fresh
- * collection or request always had somewhere to type a pre-request or test
- * script. `elements: []` loses that visible slot behind an "Add element"
- * menu a new user has no reason to know about yet. Every creation path -
+ * A fresh collection or request used to be created with a seeded, empty
+ * `script.pre`/`script.post` pair, so the Elements tab looked the way the two
+ * script columns it replaced always did. That seeding is retired (#1609): it
+ * made every new collection's inherited-elements notice claim two elements
+ * would run when neither did anything, and gave the engine an "empty script"
+ * outcome to compose, run and report for no behaviour. Every creation path -
  * the sidebar's New Collection/Folder/Request, and the command palette's
- * "New Request" via `useNewRequest` - seeds a `script.pre`/`script.post`
- * pair instead, empty and enabled, so the Elements tab looks the way the
- * old two tabs did on a brand-new entity.
+ * "New Request" via `useNewRequest` - now sends no `elements` at all, so the
+ * entity starts with the engine's own default, `[]`.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -24,7 +25,6 @@ import { renderHook, act } from "@testing-library/react";
 
 import { useTreeCrud } from "./useTreeCrud";
 import type { Collection } from "@/types";
-import type { ElementDef } from "@/types";
 
 const createCollection = vi.fn();
 const createRequest = vi.fn();
@@ -54,16 +54,6 @@ function renderCrud() {
 	);
 }
 
-/** Every seeded pair looks like this, regardless of which path created it. */
-function expectScriptPair(elements: unknown) {
-	const list = elements as ElementDef[];
-	expect(list).toHaveLength(2);
-	expect(list[0]).toMatchObject({ kind: "script.pre", enabled: true, config: { script: "" } });
-	expect(list[1]).toMatchObject({ kind: "script.post", enabled: true, config: { script: "" } });
-	// Distinct ids - two elements of the same kind pair would otherwise collide.
-	expect(list[0].id).not.toBe(list[1].id);
-}
-
 beforeEach(() => {
 	createCollection.mockReset();
 	createRequest.mockReset();
@@ -71,7 +61,7 @@ beforeEach(() => {
 	createRequest.mockResolvedValue({ id: "r-new", collectionId: "c-1" });
 });
 
-describe("new-entity creation seeds a script.pre/script.post pair", () => {
+describe("new-entity creation sends no seeded elements", () => {
 	it("a top-level collection", async () => {
 		const { result } = renderCrud();
 
@@ -79,7 +69,7 @@ describe("new-entity creation seeds a script.pre/script.post pair", () => {
 		await act(async () => result.current.panel.createCollection());
 
 		expect(createCollection).toHaveBeenCalledTimes(1);
-		expectScriptPair(createCollection.mock.calls[0][0].elements);
+		expect(createCollection.mock.calls[0][0]).not.toHaveProperty("elements");
 	});
 
 	it("a subfolder", async () => {
@@ -91,7 +81,7 @@ describe("new-entity creation seeds a script.pre/script.post pair", () => {
 		expect(createCollection).toHaveBeenCalledTimes(1);
 		const sent = createCollection.mock.calls[0][0];
 		expect(sent.parentId).toBe("c-1");
-		expectScriptPair(sent.elements);
+		expect(sent).not.toHaveProperty("elements");
 	});
 
 	it("a request added from a collection's row menu", async () => {
@@ -103,6 +93,6 @@ describe("new-entity creation seeds a script.pre/script.post pair", () => {
 		await act(async () => addRequest?.onSelect());
 
 		expect(createRequest).toHaveBeenCalledTimes(1);
-		expectScriptPair(createRequest.mock.calls[0][0].elements);
+		expect(createRequest.mock.calls[0][0]).not.toHaveProperty("elements");
 	});
 });

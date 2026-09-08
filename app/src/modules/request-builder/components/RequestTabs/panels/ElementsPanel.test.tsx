@@ -125,7 +125,7 @@ describe("ElementsPanel", () => {
 			inheritedElements: [
 				{
 					id: "c1",
-					kind: "script.pre",
+					kind: "extract.json",
 					enabled: true,
 					config: {},
 					origin: { kind: "collection", id: "col_1", name: "Acme" },
