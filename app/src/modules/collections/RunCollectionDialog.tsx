@@ -137,8 +137,10 @@ const DEFAULT_DURATION_SECONDS = "30";
  * design-mode collection run has no inline/deferred distinction to make.
  * Matches `docs/engine/api-reference.md`'s "elements" block exactly:
  * `timers` reaches every `timer.*` kind under load (`"off"` included, since
- * #1498's reopen fix), and `scripts` picks whether a `script.*` element runs
- * inline on the event-loop worker or stays deferred to the post-run replay.
+ * #1498's reopen fix - `fixedMs`/`{minMs, maxMs}` do not yet reach
+ * `timer.pacing`/`timer.throughput` there, #1620), and `scripts` picks
+ * whether a `script.*` element runs inline on the event-loop worker or stays
+ * deferred to the post-run replay.
  */
 const TIMERS_DEFAULT = "asConfigured";
 const SCRIPTS_DEFAULT = "asMarked";
