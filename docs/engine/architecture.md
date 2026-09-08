@@ -780,19 +780,20 @@ boundary); **parallel steps within an iteration** (an iteration is ordered -
 that is the whole primitive); **a scenario-level test script** asserting
 across steps; **replacing `run_collection_smoke`** (an unordered,
 share-nothing, agent-facing matrix is a different tool and stays); and
-**inline elements on the load path**. As of #1514, `extract.*`, `assert.*`,
-`timer.think` and `script.*` are declarative elements that run **inline** -
-synchronously, per step, in list order - everywhere this section's design
-send and sequential run cover; under **load** none of them do, `POST /runs`
-still runs no element at all (a scenario load run only inspects a step's
-compiled `elements` to decide whether to warn and whether to sample it), and a
-script stays deferred: replayed against the sampled responses after the run
-drains, exactly as it did before elements existed. Wiring the pipeline into
-that path, so a load run's `extract.*` and `assert.*` run inline too rather
-than only a deferred script, is #1495's job. The escape hatch for a script
-staying inline there too, if it is ever wanted, is a bounded pool of QuickJS
-contexts per worker evaluated only for iterations the sampler already
-selected - its own issue, and its own benchmark.
+**inline elements on the single-request load path**. As of #1495, a scenario
+load run's producer and completion hooks run every declarative kind
+(`extract.*`, `assert.*`, `timer.*`) inline, per virtual user, through a
+per-user scope overlay and the residual-token pass; a `script.*` element
+stays deferred - replayed against the sampled responses after the run drains,
+exactly as it did before elements existed - unless it is marked `inline` or
+the run's `elements.scripts` override says so, in which case it runs at
+completion time on a per-worker QuickJS engine (no shared pool, no lock). A
+single-target `POST /runs` (no `scenario` block) still runs no element
+pipeline at all: the compiled `elements` on the one request it sends are
+inspected only to decide whether to warn and whether to sample it. Wiring the
+pipeline into that path, so a load run of one saved request gets the same
+inline extractors, assertions and timers a scenario load run already has, is
+#1594's job.
 
 Two things were deliberately left open: whether a **stored scenario entity**
 ever lands (the seam exists; the demand does not), and **retry /
