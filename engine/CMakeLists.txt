@@ -509,6 +509,13 @@ add_library(vayu_core STATIC
     src/utils/metrics_helper.cpp
     src/utils/id.cpp
     src/db/database.cpp
+    src/db/config_seeds/general.cpp
+    src/db/config_seeds/network.cpp
+    src/db/config_seeds/services.cpp
+    src/db/config_seeds/observability.cpp
+    src/db/config_seeds/data_retention.cpp
+    src/db/config_seeds/limits.cpp
+    src/db/config_seeds/scripting.cpp
     src/db/recovery.cpp
     src/core/auth_refresh.cpp
     src/core/load_strategy.cpp
