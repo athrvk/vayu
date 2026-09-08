@@ -4911,6 +4911,7 @@ Start a load test run (Vayu Mode).
   "data": [],                // Optional data rows, one object per row - see below
   "thresholds": {},          // Optional pass/fail budgets - see below
   "elements": {},            // Optional element-pipeline override for a scenario load run - see below
+  "lifecycleElements": [],   // Optional script.setup/script.teardown for THIS run only - see below
   "monitor": {},             // Optional server-vitals scrape - see below
   "followRedirects": true,   // Optional, default true - see POST /execute
   "maxRedirects": 10,        // Optional, default 10
@@ -5168,9 +5169,59 @@ aggregate. What a `timer.*` element waited is per-step, per-element -
 `GET /runs/:runId` / the completion report's `summary` object.
 
 Not part of this block: a **single-request** `POST /runs` payload has no
-`elements` attachment point at all (see `tests` above), so this block is
-accepted there too - the validator does not distinguish the two run shapes -
-but has nothing to override.
+step-level `elements` attachment point at all (see `tests` above), so this
+block is accepted there too - the validator does not distinguish the two run
+shapes - but has nothing to override. Its own place to declare
+`script.setup` / `script.teardown` is the separate `lifecycleElements` array
+below.
+
+#### The `lifecycleElements` array (a single-request run's own setup/teardown)
+
+A **single-request** `POST /runs` payload's own place to declare
+`script.setup` / `script.teardown` (issue #1573): it has no collection row to
+declare them on, and the `elements` block above is a per-step override, not a
+place to author new behaviour. An array of element descriptors, the same
+shape a collection's own `elements` column holds:
+
+```jsonc
+{
+  "lifecycleElements": [
+    { "kind": "script.setup", "config": { "script": "pm.environment.set('token', 'x')" } },
+    { "kind": "script.teardown", "config": { "script": "pm.sendRequest(...)" } }
+  ]
+}
+```
+
+Restricted by kind to the two elements that dispatch at a run's own
+boundary rather than a step's - any other `kind` is a `400` naming the index
+and the kind, not silently ignored or run as if it were one of the two. Each
+entry's `config` is validated against that kind's own schema (the same
+`Registry::validate` a collection's `elements` column is checked against);
+`id` and `enabled` are optional, defaulting to a generated id and `true`.
+Refused outright beside a `scenario` block - a scenario collection already
+has a real `elements` column for this, so declaring both would be two
+sources of truth for the same run boundary.
+
+`script.setup` runs once, before the run's first submission (before
+`test_start` is captured, so its own time is never folded into the run's
+duration figures); a throwing setup fails the run - `Failed`, nothing sent -
+the same as a collection-backed run. `script.teardown` runs once, after the
+last submission settles, and sees `pm.info.run` (`requestsSent`,
+`errorRate`, `assertionsPassed`, `assertionsFailed`); a throwing teardown is
+recorded under the report's `lifecycle.teardown` and never changes the run's
+terminal status. Both read and write the same variable scopes every other
+script of the run shares - the environment named by `environmentId`, and the
+collection scope of the request `requestId` links, when the run links one;
+a bare URL run with no `requestId` gets no collection scope. Unlike a
+collection-backed run, nothing on this run shape's own submission reads
+those scopes back: there is no per-request residual-token pass on the
+single-request load path (`load_strategy.cpp` is unchanged), so a
+`pm.environment.set` in `script.setup` is not a way to inject a value into
+`method` / `url` / `headers` / `body` above - only `pm.sendRequest` (external
+side effects) and the `lifecycle` outcomes in the report are observable from
+this run shape's own script.setup/teardown today. See
+[elements.md](elements.md#kinds) for the shared dispatch mechanism a
+collection-backed run uses for the same two kinds.
 
 #### The `monitor` block (server vitals)
 
@@ -7106,8 +7157,8 @@ scenario step report the same warning for the same mistake.
 what ran once at the run's own boundary, never at a step. Each key is present
 only when that phase ran at least one element (`ElementOutcome`'s usual shape:
 `id`, `kind`, `outcome`, `message?`, `waitedMs?`, `wrote?`); absent entirely,
-not `{}`, for a run whose collection declared neither, and for a single-request
-load run, which has no collection to declare them on. A `script.setup` outcome
+not `{}`, for a run whose collection (or, for a single-request run, whose own
+`lifecycleElements` array - issue #1573) declared neither. A `script.setup` outcome
 other than `"ok"` already means the run never sent anything - `status` is
 `Failed` and every other section above is absent or zeroed - so a reader who
 finds one here knows why the rest of the report is empty. A `script.teardown`

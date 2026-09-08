@@ -363,6 +363,38 @@ std::optional<std::string> validate_elements_run_override (const nlohmann::json&
     return std::nullopt;
 }
 
+std::optional<std::string> validate_lifecycle_elements_run_override (
+const nlohmann::json& config) {
+    const auto lifecycle = config.find ("lifecycleElements");
+    if (lifecycle == config.end () || lifecycle->is_null ()) {
+        return std::nullopt;
+    }
+    if (auto scenario = config.find ("scenario");
+    scenario != config.end () && !scenario->is_null ()) {
+        return "'lifecycleElements' is only valid for a single-request run - "
+               "a scenario collection declares script.setup/script.teardown "
+               "on its own elements list instead";
+    }
+    if (!lifecycle->is_array ()) {
+        return "'lifecycleElements' must be an array";
+    }
+
+    static const std::unordered_set<std::string> allowed_kinds = {
+        "script.setup", "script.teardown"
+    };
+    for (size_t i = 0; i < lifecycle->size (); ++i) {
+        const auto& entry = (*lifecycle)[i];
+        const std::string kind = entry.is_object () ? entry.value ("kind", "") : "";
+        if (!allowed_kinds.contains (kind)) {
+            return "'lifecycleElements[" + std::to_string (i) + "]' has kind '" +
+            kind + "' - only script.setup and script.teardown are allowed here";
+        }
+    }
+
+    return vayu::core::Registry::instance ().validate (
+    *lifecycle, vayu::core::ElementOwner::Collection);
+}
+
 namespace {
 
 // Update the in-flight high-water mark (single writer: the strategy thread).

@@ -170,7 +170,11 @@ answer to "once per run, or once per request that happens to carry it". Their `a
 same callback shape as `script.pre` / `script.post`, through the new `ElementContext::run_setup_script`
 / `run_teardown_script` pair: the sequential runner and the load path's `execute_load_test` compile the
 collection's own `elements` once (never a step's inherited copy) and dispatch `Phase::RunStart` /
-`Phase::RunEnd` against it directly, outside the step pipeline entirely. `run.start` runs before the
+`Phase::RunEnd` against it directly, outside the step pipeline entirely. A **single-request** load
+run has no collection row to compile that array from - it compiles `POST /runs`'s own top-level
+`lifecycleElements` array instead (issue #1573), the same two kinds only, checked the same
+`ElementOwner::Collection` way; `validate_lifecycle_elements_run_override` refuses it outright
+beside a `scenario` block, whose collection already has a real `elements` column for this. `run.start` runs before the
 sequential run's iteration loop, and before `execute_load_test` captures the load run's own
 `test_start` - so a setup script's own time is never folded into either mode's duration figures - and
 writes through the same `ScriptVariableScopes` (`scopes` / `base_scopes`) every other script of the
@@ -318,12 +322,17 @@ nothing writing to it. Per-node "last started" timestamps live in `VirtualUser::
 (one map per VU, so VUs pacing the same folder run independent cadences) for load, and in
 `RunContext::pacing_state` for the sequential run.
 
-**Not yet wired: the single-request load path.** `load_strategy.cpp` is unchanged: a
-single-request `POST /runs` payload has no `elements` attachment point today (its script model
-is still the legacy `tests` string, `RunContext::test_script`, not a compiled `elements` list),
-so there is no element pipeline call there to gate on inline-vs-deferred - a `ScopeOverlay`
-would have no writer. Wiring a stored request's `elements` into that run shape is a separate
-gap, outside this page's Status callout.
+**Still not wired: step-level elements on the single-request load path.** `load_strategy.cpp`'s
+per-submission and per-completion hooks are unchanged: a single-request `POST /runs` payload's
+own request has no `elements` attachment point today (its script model is still the legacy
+`tests` string, `RunContext::test_script`, not a compiled `elements` list), so there is no
+element pipeline call there to gate on inline-vs-deferred - a `ScopeOverlay` would have no
+writer. Wiring a stored request's `elements` into that run shape is a separate gap, outside this
+page's Status callout. What issue #1573 *does* wire for this run shape is the two kinds that
+dispatch at a run's own boundary rather than a step's: `lifecycleElements` (previous paragraph)
+lets a single-request run declare `script.setup` / `script.teardown`, run once before the load
+starts and once after it ends, the same `Phase::RunStart` / `Phase::RunEnd` dispatch a
+collection-backed run uses.
 
 ## Related issues
 
@@ -343,10 +352,13 @@ gap, outside this page's Status callout.
   `timer.throughput` (a constant-throughput, shared-rate timer) are deliberately deferred to a
   follow-up issue.
 - #1499 - `script.setup` / `script.teardown`, the `run.start` / `run.end` dispatch this page's
-  Kinds section describes, in both run modes. Deliberately does not wire a single-request load
-  run's `POST /runs` to declare either kind - that shape has no collection to declare them on and
-  is the same "separate gap" this page's Load paths section already names for single-request
-  elements generally; the wire-shape decision that gap needs is filed as #1573.
+  Kinds section describes, in both collection-backed run modes. Deliberately did not wire a
+  single-request load run's `POST /runs` to declare either kind - that shape has no collection to
+  declare them on; the wire-shape gap it left is #1573.
+- #1573 - `lifecycleElements`, a single-request `POST /runs` payload's own ephemeral place to
+  declare `script.setup` / `script.teardown` (this page's Kinds section and Load paths section).
+  Does not wire step-level elements (`extract.*`, `assert.*`, `timer.*`, `script.pre`/`.post`)
+  into the single-request load path - that remains the Load paths section's "still not wired" gap.
 - #1515 - the controller family (`control.if`, `.once`, `.switch`, `.throughput`, `.loop`,
   `.transaction`), the load path's own `steps_skipped` counter, and `scenario.transactions[]`
   (this page's Controllers section).

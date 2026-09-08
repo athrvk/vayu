@@ -93,6 +93,66 @@ TEST (ScriptLifecyclePlacementTest, TheCatalogueMarksBothKindsCollectionOnly) {
 }
 
 // ============================================================================
+// Validation: a single-request run's own `lifecycleElements` (issue #1573)
+// ============================================================================
+
+TEST (LifecycleElementsRunOverrideValidationTest, AbsentIsFine) {
+    const json config = json::object ();
+    EXPECT_FALSE (
+    vayu::core::validate_lifecycle_elements_run_override (config).has_value ());
+}
+
+TEST (LifecycleElementsRunOverrideValidationTest, NullIsFine) {
+    const json config{ { "lifecycleElements", nullptr } };
+    EXPECT_FALSE (
+    vayu::core::validate_lifecycle_elements_run_override (config).has_value ());
+}
+
+TEST (LifecycleElementsRunOverrideValidationTest, MustBeAnArray) {
+    const json config{ { "lifecycleElements", json::object () } };
+    auto reason = vayu::core::validate_lifecycle_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("must be an array"), std::string::npos) << *reason;
+}
+
+// Mutation check: drop the `allowed_kinds.contains (kind)` refusal loop and
+// this reddens - `Registry::validate` alone accepts `assert.status` on
+// `ElementOwner::Collection` fine, since it is not `collection_only`.
+TEST (LifecycleElementsRunOverrideValidationTest, RefusesAnyKindOtherThanSetupOrTeardown) {
+    const json config{ { "lifecycleElements",
+    json::array ({ json{ { "id", "el_1" }, { "kind", "assert.status" },
+    { "config", { { "expected", 200 } } } } }) } };
+    auto reason = vayu::core::validate_lifecycle_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("lifecycleElements[0]"), std::string::npos) << *reason;
+    EXPECT_NE (reason->find ("assert.status"), std::string::npos) << *reason;
+}
+
+TEST (LifecycleElementsRunOverrideValidationTest, AcceptsSetupAndTeardown) {
+    const json config{ { "lifecycleElements",
+    json::array ({ json{ { "id", "el_1" }, { "kind", "script.setup" },
+                   { "config", { { "script", "" } } } },
+    json{ { "id", "el_2" }, { "kind", "script.teardown" },
+    { "config", { { "script", "" } } } } }) } };
+    EXPECT_FALSE (
+    vayu::core::validate_lifecycle_elements_run_override (config).has_value ());
+}
+
+// The wire-shape rule the issue itself settles: a scenario collection already
+// has a real `elements` column for this, so the two must not both claim the
+// run's own setup/teardown.
+TEST (LifecycleElementsRunOverrideValidationTest, RefusedBesideAScenarioBlock) {
+    const json config{ { "scenario",
+                       json{ { "source", "collection" }, { "collectionId", "col_1" } } },
+        { "lifecycleElements",
+        json::array ({ json{ { "id", "el_1" }, { "kind", "script.setup" },
+        { "config", { { "script", "" } } } } }) } };
+    auto reason = vayu::core::validate_lifecycle_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("single-request run"), std::string::npos) << *reason;
+}
+
+// ============================================================================
 // Dispatch: run.start / run.end in both run modes
 // ============================================================================
 
@@ -273,6 +333,35 @@ class ScriptLifecycleTest : public ::testing::Test {
         auto execution_ptr =
         std::make_shared<const vayu::core::ScenarioExecution> (execution);
         EXPECT_TRUE (manager_.start_run (run_id, config, *db_, execution_ptr));
+        return await_terminal (run_id);
+    }
+
+    /// Runs a **single-request** load run - no `scenario`, no collection -
+    /// against `/ok`, with @p lifecycle_elements as its own `lifecycleElements`
+    /// override (issue #1573), and waits for a terminal status.
+    vayu::RunStatus run_single_request_load (const json& lifecycle_elements,
+    size_t iterations,
+    size_t concurrency,
+    bool allow_script_requests = false) {
+        json config{ { "method", "GET" }, { "url", server_->url ("/ok") },
+            { "mode", "iterations" }, { "iterations", iterations },
+            { "concurrency", concurrency },
+            { "allowScriptRequests", allow_script_requests } };
+        if (!lifecycle_elements.empty ()) {
+            config["lifecycleElements"] = lifecycle_elements;
+        }
+
+        const std::string run_id = "run_single";
+        vayu::db::Run run;
+        run.id              = run_id;
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Pending;
+        run.config_snapshot = config.dump ();
+        run.start_time      = now_ms ();
+        run.end_time        = run.start_time;
+        db_->create_run (run);
+
+        EXPECT_TRUE (manager_.start_run (run_id, config, *db_));
         return await_terminal (run_id);
     }
 
@@ -488,6 +577,109 @@ TEST_F (ScriptLifecycleTest, LoadTeardownSeesTheActualSentCount) {
 
     EXPECT_EQ (run_load (execution, /*iterations=*/3, /*concurrency=*/3,
                /*allow_script_requests=*/true),
+    vayu::RunStatus::Completed);
+
+    auto hits = server_->requests ();
+    // Three ordinary submissions plus teardown's own ping.
+    ASSERT_EQ (hits.size (), 4u);
+    const auto teardown_hit =
+    std::find_if (hits.begin (), hits.end (), [] (const auto& hit) {
+        return hit.target.find ("teardownSawSent=") != std::string::npos;
+    });
+    ASSERT_NE (teardown_hit, hits.end ());
+    EXPECT_NE (teardown_hit->target.find ("teardownSawSent=3"), std::string::npos)
+    << teardown_hit->target;
+}
+
+// ============================================================================
+// Dispatch: run.start / run.end for a single-request load run's own
+// `lifecycleElements` (issue #1573) - no collection, no scenario.
+// ============================================================================
+
+// Regression check for the `run_collection_setup` / `run_collection_teardown`
+// refactor this issue made: a single-request run declaring no
+// `lifecycleElements` at all still runs exactly as it always did, with no
+// `lifecycle` key in its summary.
+TEST_F (ScriptLifecycleTest, SingleRequestWithNoLifecycleElementsRunsNormally) {
+    EXPECT_EQ (run_single_request_load (json::array (), /*iterations=*/2,
+               /*concurrency=*/2),
+    vayu::RunStatus::Completed);
+    EXPECT_EQ (server_->requests ().size (), 2u);
+    EXPECT_FALSE (summary_of ("run_single").contains ("lifecycle"));
+}
+
+// The single-request half of the issue's own acceptance scenario. A
+// single-request run's own submission has no element pipeline to read a
+// scripted variable back from (docs/engine/elements.md's "Still not wired"
+// paragraph), so unlike the collection-backed case this cannot resolve into
+// the request itself - what it *can* do, the same as a collection's
+// `script.setup`, is reach the network with `pm.sendRequest` before the
+// run's own submissions start. Mutation check: skip binding
+// `setup_config.allow_send_request` from the run's own `allowScriptRequests`
+// and this reddens - `pm.sendRequest` throws, which fails the whole run.
+TEST_F (ScriptLifecycleTest, SingleRequestSetupCanFetchATokenWithSendRequestBeforeTheRunStarts) {
+    EXPECT_EQ (run_single_request_load (
+               script_setup_element ("pm.sendRequest('" + server_->url ("/token") +
+               "', function (err, res) { "
+               "  pm.sendRequest('" +
+               server_->url ("/ok") +
+               "?setupFetchedToken=' + res.json().token, function () {});"
+               "});"),
+               /*iterations=*/3, /*concurrency=*/3, /*allow_script_requests=*/true),
+    vayu::RunStatus::Completed);
+
+    // Three ordinary submissions plus setup's own ping proving the token
+    // `pm.sendRequest`-fetched from `/token` reached a second `pm.sendRequest`
+    // (`/token` itself is not recorded by `LifecycleMockServer` - only `/ok`
+    // is - the same reason the collection-mode precedent above only counts
+    // its own `/ok` hits).
+    auto hits = server_->requests ();
+    ASSERT_EQ (hits.size (), 4u);
+    const auto setup_hit = std::find_if (hits.begin (), hits.end (), [] (const auto& hit) {
+        return hit.target.find ("setupFetchedToken=") != std::string::npos;
+    });
+    ASSERT_NE (setup_hit, hits.end ());
+    EXPECT_NE (setup_hit->target.find ("setupFetchedToken=fetched-by-setup"), std::string::npos)
+    << setup_hit->target;
+}
+
+// Mutation check: let a throwing `script.setup` outcome pass unnoticed in
+// `execute_load_test` and this reddens to Completed with three requests sent
+// - the same mutation `LoadThrowingSetupFailsTheRunWithNoSubmissions` checks
+// for the collection-backed path.
+TEST_F (ScriptLifecycleTest, SingleRequestThrowingSetupFailsTheRunWithNoSubmissions) {
+    EXPECT_EQ (run_single_request_load (
+               script_setup_element ("throw new Error ('boom');"), /*iterations=*/1,
+               /*concurrency=*/3),
+    vayu::RunStatus::Failed);
+    EXPECT_TRUE (server_->requests ().empty ());
+}
+
+// The single-request half of LoadThrowingTeardownIsRecordedWithoutChangingStatus.
+TEST_F (ScriptLifecycleTest, SingleRequestThrowingTeardownIsRecordedWithoutChangingStatus) {
+    EXPECT_EQ (run_single_request_load (setup_and_teardown_elements ("", "throw new Error ('teardown boom');"),
+               /*iterations=*/2,
+               /*concurrency=*/2),
+    vayu::RunStatus::Completed);
+
+    auto summary = summary_of ("run_single");
+    ASSERT_TRUE (summary.contains ("lifecycle"));
+    ASSERT_TRUE (summary["lifecycle"].contains ("teardown"));
+    const auto& teardown = summary["lifecycle"]["teardown"];
+    ASSERT_EQ (teardown.size (), 1u);
+    EXPECT_EQ (teardown[0]["outcome"], "error");
+    EXPECT_NE (
+    teardown[0]["message"].get<std::string> ().find ("teardown boom"), std::string::npos);
+}
+
+// The single-request half of LoadTeardownSeesTheActualSentCount: teardown
+// pings the mock server with `pm.info.run.requestsSent`, proving it runs
+// after every submission has settled and sees this run shape's own count.
+TEST_F (ScriptLifecycleTest, SingleRequestTeardownSeesTheActualSentCount) {
+    EXPECT_EQ (run_single_request_load (
+               setup_and_teardown_elements ("",
+               "pm.sendRequest('" + server_->url ("/ok") + "?teardownSawSent=' + pm.info.run.requestsSent, function () {});"),
+               /*iterations=*/3, /*concurrency=*/3, /*allow_script_requests=*/true),
     vayu::RunStatus::Completed);
 
     auto hits = server_->requests ();
