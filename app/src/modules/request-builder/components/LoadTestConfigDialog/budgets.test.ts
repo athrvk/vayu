@@ -225,6 +225,10 @@ describe("the payload the dialog builds", () => {
 		).toEqual({ latencyP99Ms: 50, "custom.checkout_ttfb.p95": 120 });
 	});
 
+	// Mutation check: commenting out `buildThresholds`'s custom-rows fold-in
+	// loop reds this case and the three below it (4 of 4) - confirming they
+	// actually exercise the fold, not just its absence.
+
 	it("sends a custom budget under the engine's own key shape, stat included", () => {
 		for (const stat of CUSTOM_BUDGET_STATS) {
 			expect(

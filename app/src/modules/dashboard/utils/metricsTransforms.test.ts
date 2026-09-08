@@ -349,6 +349,57 @@ describe("buildCustomMetricsOverTime", () => {
 		expect(built.columns[built.names.indexOf("orders")]).toEqual([5, null]);
 	});
 
+	it("gaps a trend tick that has recorded no completions yet, rather than 0", () => {
+		// A trend with `count: 0` has no p95 to read (nothing completed in that
+		// window) - the wire never sends a `p95` key at all for it, so this is
+		// the "declared but not yet measured" case, distinct from "not declared".
+		const history = [
+			tick({
+				elapsed_seconds: 1,
+				custom_metrics: { latency: { type: "trend", count: 0 } },
+			}),
+		];
+		const built = buildCustomMetricsOverTime(history);
+		expect(built.names).toEqual(["latency"]);
+		expect(built.columns[0]).toEqual([null]);
+	});
+
+	it("tracks a counter that only increases, one running total per tick", () => {
+		const history = [
+			tick({
+				elapsed_seconds: 1,
+				custom_metrics: { orders: { type: "counter", count: 1, value: 1 } },
+			}),
+			tick({
+				elapsed_seconds: 2,
+				custom_metrics: { orders: { type: "counter", count: 4, value: 4 } },
+			}),
+			tick({
+				elapsed_seconds: 3,
+				custom_metrics: { orders: { type: "counter", count: 9, value: 9 } },
+			}),
+		];
+		const built = buildCustomMetricsOverTime(history);
+		expect(built.columns[0]).toEqual([1, 4, 9]);
+	});
+
+	it("keeps a rate that never rose above 0% as real zeros, not gaps", () => {
+		// `0` is a measured value here, not "not recorded" - `typeof value ===
+		// "number"` must accept it rather than treating it as falsy.
+		const history = [
+			tick({
+				elapsed_seconds: 1,
+				custom_metrics: { cacheHitRate: { type: "rate", count: 5, value: 0 } },
+			}),
+			tick({
+				elapsed_seconds: 2,
+				custom_metrics: { cacheHitRate: { type: "rate", count: 9, value: 0 } },
+			}),
+		];
+		const built = buildCustomMetricsOverTime(history);
+		expect(built.columns[0]).toEqual([0, 0]);
+	});
+
 	it("returns no series when no tick carries custom_metrics", () => {
 		const history = [tick({ elapsed_seconds: 1 }), tick({ elapsed_seconds: 2 })];
 		const built = buildCustomMetricsOverTime(history);

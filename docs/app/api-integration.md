@@ -1424,10 +1424,10 @@ them as free-text rows (`CustomBudgetRows.tsx`) rather than as a picker of
 recorded names: the engine checks the key's shape and the value's sign and does
 **not** cross-check the name against the run's own `metric.record` elements - an
 unmatched name is reported `evaluated: false` rather than refused - which is the
-call MCP's `thresholdsInput` already made for this family (`catchall`). The one
-place the two dialogs differ: these budgets are evaluated for **load runs
-only**, so `RunCollectionDialog` offers the rows only while its Load test switch
-is on and sends none while it is off.
+call MCP's `thresholdsInput` already made for this family (`catchall`). Like the
+six fixed keys, these are **not** gated by `RunCollectionDialog`'s Load test
+switch either - `execute_scenario_run` evaluates a design-mode run's custom
+metrics against the same declared budgets a load run's are judged against.
 
 The engine range-checks this payload before it creates the run row and answers a
 violation with `400 invalid_run_config` (accepted ranges are tabulated under
