@@ -800,8 +800,8 @@ CustomMetricType type) {
             constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
             &slot->histogram) != 0 ||
         slot->histogram == nullptr) {
-            vayu::utils::log_warning ("Run " + run_id_ +
-            ": failed to initialize the '" + name + "' custom metric histogram");
+            vayu::utils::log_warning ("run",
+            "Run " + run_id_ + ": failed to initialize the '" + name + "' custom metric histogram");
             return nullptr;
         }
     }
