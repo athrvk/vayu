@@ -51,6 +51,7 @@ function kindSchema(kind: string, label: string, category: string): ElementKindS
 		description: `${label} description`,
 		category,
 		hotPathClass: "declarative",
+		collectionOnly: false,
 		configSchema: { type: "object", properties: {} },
 		phases: [],
 	};

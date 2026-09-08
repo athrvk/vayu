@@ -157,6 +157,7 @@ add_executable(vayu_tests
     spec_coverage_test.cpp
     schema_validation_test.cpp
     elements_registry_test.cpp
+    elements_setup_teardown_test.cpp
     element_kinds_test.cpp
     version_isolation_test.cpp
     reentrant_test.cpp
@@ -364,6 +365,7 @@ set(vayu_scratch_database_suites
     ScenarioPlanTest
     ScenarioRunnerTest
     ScratchDatabaseCleanup
+    ScriptLifecycleTest
     ScriptRequestNameTest
     ScriptSendRequestCapLoadTest
     ScriptVariableScopesTest

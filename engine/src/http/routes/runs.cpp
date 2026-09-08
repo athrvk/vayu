@@ -283,6 +283,11 @@ struct ReportExtras {
     // the section out, because a run whose responses were never checked did not
     // pass a contract. Sampled where `coverage` is exact; the block says so.
     nlohmann::json schema_validation = nlohmann::json::object ();
+    // `script.setup` / `script.teardown` outcomes (issue #1499), passed
+    // through verbatim on the same terms as `coverage`. Empty for a run whose
+    // collection declared neither, or a single-request run, which has no
+    // collection to declare them on.
+    nlohmann::json lifecycle = nlohmann::json::object ();
     // What the run did not do (issue #1503): a request sent with an
     // unresolved `{{token}}`, a step whose pre-request script this mode
     // never ran. Verbatim from the summary - the producer already writes the
@@ -538,6 +543,15 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
     // Same again for sampled schema validation (issue #682). A block with no
     // `sampled` count says nothing a reader can act on - and cannot be labelled
     // honestly as a sample - so it is treated as absent.
+    // Same pass-through again for `script.setup` / `script.teardown` (issue
+    // #1499): the producer already writes `{setup?, teardown?}`, each present
+    // only when that phase ran at least one element, so an empty object here
+    // is every run whose collection declared neither.
+    if (summary.contains ("lifecycle") && summary["lifecycle"].is_object () &&
+    !summary["lifecycle"].empty ()) {
+        extras.lifecycle = summary["lifecycle"];
+    }
+
     if (summary.contains ("schemaValidation") && summary["schemaValidation"].is_object () &&
     summary["schemaValidation"].contains ("sampled") &&
     summary["schemaValidation"]["sampled"].is_number () &&
@@ -1134,6 +1148,12 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
     // Absent for every run that checked nothing; see ReportExtras.
     if (!extras.schema_validation.empty ()) {
         json_report["schemaValidation"] = extras.schema_validation;
+    }
+
+    // `script.setup` / `script.teardown` outcomes (issue #1499). Absent for
+    // every run whose collection declared neither; see ReportExtras::lifecycle.
+    if (!extras.lifecycle.empty ()) {
+        json_report["lifecycle"] = extras.lifecycle;
     }
 
     // The aggregate verdict, beside the per-response one. `verdict` is derived

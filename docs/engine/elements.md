@@ -19,7 +19,9 @@ shape both sides of the wire agree on; it is generated from, or checked against,
 > [`db-schema.md`](db-schema.md#the-script-to-elements-migration-issue-1514)); no transitional
 > alias, per the owner's decision. Issue #1495 lands the pipeline on a **scenario** load run's
 > producer/completion hooks (below) - a **single-request** load run still executes no element; see
-> that section for why.
+> that section for why. Issue #1499 lands the first kinds to run at a run's own boundary rather
+> than at a step's - `script.setup` / `script.teardown`, dispatched at `Phase::RunStart` /
+> `Phase::RunEnd` outside the step pipeline entirely, in both run modes a collection can run in.
 
 ## Shape
 
@@ -83,6 +85,8 @@ shipping silently mismatched.
 | `timer.think` | timer | `step.between` | #1514 |
 | `script.pre` | script | `step.before` | #1513 (validate-only), #1514 (runs) |
 | `script.post` | script | `step.after` | #1513 (validate-only), #1514 (runs) |
+| `script.setup` | script | `run.start` | #1499 |
+| `script.teardown` | script | `run.end` | #1499 |
 
 `extract.json` reads a JSONPath subset - `$.a.b`, `[n]`, `[*]`, `..name`; a filter (`[?...]`) is
 refused at validate. `extract.regex` compiles its `pattern` once, at plan-resolution time, and
@@ -113,6 +117,29 @@ streaming send's own inline pipeline calls) binds to the exact `execute_script` 
 always made. The element's own outcome is whether the script ran without throwing; the script's own
 `pm.test` assertions travel inside the same `vayu::ScriptResult` untouched, so a scripted step's
 trace shape is unchanged by this cut-over.
+
+`script.setup` / `script.teardown` are `collection_only` - refused (a `400` naming the index and
+kind) on a request's own `elements`, both at write time and in `GET /elements/kinds`'
+`collectionOnly` flag, because a once-per-run element attached to one request in the tree has no
+answer to "once per run, or once per request that happens to carry it". Their `apply` follows the
+same callback shape as `script.pre` / `script.post`, through the new `ElementContext::run_setup_script`
+/ `run_teardown_script` pair: the sequential runner and the load path's `execute_load_test` compile the
+collection's own `elements` once (never a step's inherited copy) and dispatch `Phase::RunStart` /
+`Phase::RunEnd` against it directly, outside the step pipeline entirely. `run.start` runs before the
+sequential run's iteration loop, and before `execute_load_test` captures the load run's own
+`test_start` - so a setup script's own time is never folded into either mode's duration figures - and
+writes through the same `ScriptVariableScopes` (`scopes` / `base_scopes`) every other script of the
+run shares, so its writes are visible from the very first step or submission. A throwing setup fails
+the run - `Failed`, nothing sent - before either mode's strategy starts; a throwing teardown is
+recorded under the report's `lifecycle.teardown` and never changes the run's terminal status, since
+`ElementPipeline::run` already turns a throw into that element's own `"error"` outcome rather than
+propagating one. Teardown's script sees `pm.info.run` (`requestsSent`, `errorRate`,
+`assertionsPassed`, `assertionsFailed`) - the one context that can report a run summary, because it is
+the one that runs after there is one. Neither kind gets a per-element `allowRequests` toggle: `pm.sendRequest`
+inside either script is gated by the run's own `allowScriptRequests` (`ScriptConfig::allow_send_request`,
+baked into the `ScriptEngine` instance every script of the run already shares) and capped at the same
+10 calls per script every other script gets - a second, per-element gate would be dead configuration
+next to a run-wide one that already decides the question.
 
 ## The step trace
 
@@ -193,8 +220,13 @@ gap, outside this page's Status callout.
 - #1497 - the `maxAssertionFailureRatePct` run threshold and `thresholds.failRun`, over the
   combined `assert.*` element and `pm.test` tally (load runs only; see `api-reference.md`'s
   thresholds section).
-- #1515, #1498, #1500, #1499, #1501 - controllers, timers, metrics, setup/teardown and
-  load-time cookies that round out the kind table.
+- #1499 - `script.setup` / `script.teardown`, the `run.start` / `run.end` dispatch this page's
+  Kinds section describes, in both run modes. Deliberately does not wire a single-request load
+  run's `POST /runs` to declare either kind - that shape has no collection to declare them on and
+  is the same "separate gap" this page's Load paths section already names for single-request
+  elements generally; the wire-shape decision that gap needs is filed as #1573.
+- #1515, #1498, #1500, #1501 - controllers, timers, metrics and load-time cookies that round out
+  the kind table.
 - #1516 - the app's `ElementList` primitive and editor.
 - #1517 - MCP's `elements` fields and the `vayu://elements/kinds` resource.
 - #1518 - Postman/OpenAPI round-trip and a JMeter `.jmx` importer.

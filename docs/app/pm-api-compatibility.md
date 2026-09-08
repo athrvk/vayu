@@ -147,7 +147,7 @@ request binding already follows:
 
 **`{{$vu}}` and `{{$iteration}}` resolve here too** (issue #1057), to the
 numbers the request beside the script was bound with - the same numbers
-[`pm.info.vu` / `pm.info.iteration`](#script-identity-pminfo---six-fields-all-optional)
+[`pm.info.vu` / `pm.info.iteration`](#script-identity-pminfo---seven-fields-all-optional)
 carry inside a run, and `1` / `0` on a single Send, because `POST /execute`
 binds exactly those two into every send that carries no row of its own (a
 single send is a run of one, issue #994 - the same rule the table below states
@@ -176,7 +176,7 @@ ancestor, the same walk `pm.collectionVariables` does (#234). The argument must
 be a string; anything else is a `TypeError` rather than a silently coerced
 `"undefined"`.
 
-### Script identity (`pm.info`) - six fields, all optional
+### Script identity (`pm.info`) - seven fields, all optional
 
 `pm.info` is always an object; each field is present only when there is a
 truthful value for it, so a script tests with `typeof` rather than assuming:
@@ -185,10 +185,11 @@ truthful value for it, so a script tests with `typeof` rather than assuming:
 |---|---|---|
 | `requestId` | The saved request the send is filed under | An ad-hoc request (MCP's `run_request` with no `requestId`, a load run started from a URL) |
 | `requestName` | The request's name **as the client sent it** - the name in the editor, which for an unsaved edit differs from the stored row | A request with no name, and an ad-hoc one |
-| `eventName` | `"prerequest"` in the Pre-request tab, `"test"` in the Tests tab | Never, for a script Vayu runs - both hooks set it |
+| `eventName` | `"prerequest"` in the Pre-request tab, `"test"` in the Tests tab, `"setup"` in a `script.setup` element, `"teardown"` in a `script.teardown` element (issue #1499) | Never, for a script Vayu runs - every hook sets it |
 | `iteration` | The 0-based pass this response was sent in - a collection run's pass, the iteration a load run's sampled response carried, or `0` for a send that bound a row, which is row 0 of 1 | An ordinary Send, which is one request rather than a pass of anything |
 | `vu` | The 1-based virtual user that sent it. Spans the concurrency in a collection load run; `1` everywhere else, because one request repeated is one user's iterations, and `1` for a send that bound a row, beside its iteration `0` | An ordinary Send |
 | `iterationCount` | How many passes that run will make - a collection run's total, and `1` for a send that bound a row, which is row 0 of 1 | An ordinary Send, and a load run |
+| `run` | A run summary (issue #1499): `{requestsSent, errorRate, assertionsPassed, assertionsFailed}`, whole run | Every hook except `script.teardown` - the one script that runs after there is a run to summarize |
 
 ```javascript
 if (pm.info.eventName === "prerequest") {

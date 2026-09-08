@@ -12,6 +12,7 @@
 #include <chrono>
 #include <deque>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
@@ -454,6 +455,9 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     // empty object - for a run that was not measured against one.
     if (!inputs.coverage.empty ()) {
         summary["coverage"] = inputs.coverage;
+    }
+    if (!inputs.lifecycle.empty ()) {
+        summary["lifecycle"] = inputs.lifecycle;
     }
     // Beside coverage rather than inside it, and on the same absent-when-not-
     // measured terms: the two answer different questions about one contract -
@@ -1021,6 +1025,64 @@ RunManager& manager) {
         context->append_event ("plan",
         build_plan_payload (plan.steps.size (), asked.iterations).dump ());
 
+        // `script.setup` / `script.teardown` (#1499): the collection's own
+        // once-per-run elements - never inherited per step, which is what
+        // `collection_only` refuses at write time - compiled once here and
+        // dispatched at both ends of the run, on the same `scopes` and
+        // `script_engine` every step's own scripts already share, so a
+        // setup write is visible to step 1 exactly as a prior step's would be
+        // and a teardown write persists with the rest at
+        // `persist_script_variables` below.
+        std::vector<vayu::core::CompiledElement> collection_elements;
+        if (auto collection_row = db.get_collection (asked.collection_id)) {
+            auto parsed = nlohmann::json::parse (collection_row->elements, nullptr, false);
+            if (!parsed.is_discarded ()) {
+                collection_elements = vayu::core::compile_elements (parsed);
+            }
+        }
+
+        vayu::Request lifecycle_request;
+        vayu::ScriptResult lifecycle_unread_pre;
+        vayu::ScriptResult lifecycle_unread_post;
+        vayu::runtime::RunSummaryInfo run_summary_info;
+        vayu::core::ElementContext lifecycle_ctx{
+            .request  = lifecycle_request,
+            .response = nullptr,
+            .run_pre_script =
+            [] (const std::string&) { return vayu::ScriptResult{}; },
+            .run_post_script =
+            [] (const std::string&) { return vayu::ScriptResult{}; },
+            .pre_script_result  = lifecycle_unread_pre,
+            .post_script_result = lifecycle_unread_post,
+            .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
+            .should_stop = nullptr,
+            .run_setup_script =
+            [&] (const std::string& script) {
+                auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
+                vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+                return vayu::http::routes::execute_script (
+                script_engine, script, script_ctx, "Setup");
+            },
+            .run_teardown_script =
+            [&] (const std::string& script) {
+                auto script_ctx =
+                vayu::runtime::ScriptContext::for_teardown (run_summary_info);
+                vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+                return vayu::http::routes::execute_script (
+                script_engine, script, script_ctx, "Teardown");
+            },
+        };
+
+        std::vector<vayu::core::ElementOutcome> setup_outcomes;
+        vayu::core::ElementPipeline::run (vayu::core::Phase::RunStart,
+        lifecycle_ctx, collection_elements, setup_outcomes);
+        for (const auto& outcome : setup_outcomes) {
+            if (outcome.status == "error" || outcome.status == "failed") {
+                throw std::runtime_error ("script.setup failed: " +
+                outcome.message.value_or ("unknown error"));
+            }
+        }
+
         for (size_t iteration = 0; iteration < asked.iterations; ++iteration) {
             if (context->should_stop) {
                 break;
@@ -1069,6 +1131,23 @@ RunManager& manager) {
 
         final_status = context->should_stop ? vayu::RunStatus::Stopped :
                                               vayu::RunStatus::Completed;
+
+        // `script.teardown`: `pm.info.run` reads this pass's own totals, and a
+        // throwing teardown - `ElementPipeline::run` turns it into this
+        // element's own "error" outcome rather than propagating - never
+        // changes `final_status`, already decided above.
+        run_summary_info.requests_sent     = summary.steps_executed;
+        run_summary_info.error_rate        = summary.steps_executed > 0 ?
+               (static_cast<double> (summary.errored) / static_cast<double> (summary.steps_executed)) * 100.0 :
+               0.0;
+        run_summary_info.assertions_passed = summary.passed;
+        run_summary_info.assertions_failed = summary.failed;
+
+        std::vector<vayu::core::ElementOutcome> teardown_outcomes;
+        vayu::core::ElementPipeline::run (vayu::core::Phase::RunEnd,
+        lifecycle_ctx, collection_elements, teardown_outcomes);
+        summary.lifecycle =
+        vayu::core::build_lifecycle_node (setup_outcomes, teardown_outcomes);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("Scenario run error: " + std::string (e.what ()));
         final_status = vayu::RunStatus::Failed;

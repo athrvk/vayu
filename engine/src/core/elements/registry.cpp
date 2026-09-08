@@ -23,6 +23,8 @@ namespace vayu::core {
 ElementKind make_inherit_disable_kind ();
 ElementKind make_script_pre_kind ();
 ElementKind make_script_post_kind ();
+ElementKind make_script_setup_kind ();
+ElementKind make_script_teardown_kind ();
 ElementKind make_extract_json_kind ();
 ElementKind make_extract_regex_kind ();
 ElementKind make_extract_header_kind ();
@@ -54,14 +56,15 @@ std::string hot_path_name (HotPathClass hot_path) {
 
 nlohmann::json kind_to_json (const ElementKind& kind) {
     nlohmann::json node;
-    node["kind"]          = kind.kind;
-    node["version"]       = kind.version;
-    node["label"]         = kind.label;
-    node["description"]   = kind.description;
-    node["category"]      = kind.category;
-    node["hotPathClass"]  = hot_path_name (kind.hot_path);
-    node["configSchema"]  = kind.config_schema;
-    nlohmann::json phases = nlohmann::json::array ();
+    node["kind"]           = kind.kind;
+    node["version"]        = kind.version;
+    node["label"]          = kind.label;
+    node["description"]    = kind.description;
+    node["category"]       = kind.category;
+    node["hotPathClass"]   = hot_path_name (kind.hot_path);
+    node["collectionOnly"] = kind.collection_only;
+    node["configSchema"]   = kind.config_schema;
+    nlohmann::json phases  = nlohmann::json::array ();
     for (const auto phase : kind.phases) {
         phases.push_back (phase_name (phase));
     }
@@ -114,6 +117,55 @@ size_t index) {
     "elements[{}] ({}): does not match its config schema", index, kind.kind);
 }
 
+/**
+ * One `elements[index]` entry's whole validation, extracted out of
+ * `Registry::validate`'s own loop (#1499's placement check pushed that
+ * function's cognitive complexity over the linter's threshold - the fix is
+ * un-nesting these checks into their own top-level function, not paring any
+ * of them back).
+ */
+std::optional<std::string> validate_one_element (const Registry& registry,
+const nlohmann::json& entry,
+size_t index,
+ElementOwner owner,
+std::unordered_set<std::string>& seen_ids) {
+    if (!entry.is_object ()) {
+        return std::format ("elements[{}] must be a JSON object", index);
+    }
+    if (!entry.contains ("id") || !entry["id"].is_string () ||
+    entry["id"].get<std::string> ().empty ()) {
+        return std::format ("elements[{}]: 'id' must be a non-empty string", index);
+    }
+    const auto id = entry["id"].get<std::string> ();
+    if (!seen_ids.insert (id).second) {
+        return std::format ("elements[{}]: duplicate id '{}'", index, id);
+    }
+    if (!entry.contains ("kind") || !entry["kind"].is_string ()) {
+        return std::format ("elements[{}]: 'kind' must be a string", index);
+    }
+    const auto kind_name = entry["kind"].get<std::string> ();
+    const auto* kind     = registry.find (kind_name);
+    if (kind == nullptr) {
+        return std::format ("elements[{}] (kind '{}') is not a known "
+                            "element kind - expected one of {}",
+        index, kind_name, known_kinds_list (registry.kinds ()));
+    }
+    if (kind->collection_only && owner != ElementOwner::Collection) {
+        return std::format ("elements[{}] (kind '{}') may only be added to "
+                            "a collection, not a request",
+        index, kind_name);
+    }
+    if (entry.contains ("enabled") && !entry["enabled"].is_boolean ()) {
+        return std::format ("elements[{}] ({}): 'enabled' must be a boolean", index, kind_name);
+    }
+    if (entry.contains ("name") && !entry["name"].is_null () && !entry["name"].is_string ()) {
+        return std::format ("elements[{}] ({}): 'name' must be a string", index, kind_name);
+    }
+    const auto config =
+    entry.contains ("config") ? entry["config"] : nlohmann::json::object ();
+    return validate_config_against_schema (*kind, config, index);
+}
+
 } // namespace
 
 Registry& Registry::instance () {
@@ -126,6 +178,8 @@ Registry& Registry::instance () {
         registry.register_kind (make_inherit_disable_kind ());
         registry.register_kind (make_script_pre_kind ());
         registry.register_kind (make_script_post_kind ());
+        registry.register_kind (make_script_setup_kind ());
+        registry.register_kind (make_script_teardown_kind ());
         registry.register_kind (make_extract_json_kind ());
         registry.register_kind (make_extract_regex_kind ());
         registry.register_kind (make_extract_header_kind ());
@@ -162,46 +216,15 @@ const std::vector<ElementKind>& Registry::kinds () const {
     return kinds_;
 }
 
-std::optional<std::string> Registry::validate (const nlohmann::json& elements) const {
+std::optional<std::string>
+Registry::validate (const nlohmann::json& elements, ElementOwner owner) const {
     if (!elements.is_array ()) {
         return "'elements' must be an array";
     }
 
     std::unordered_set<std::string> seen_ids;
     for (size_t i = 0; i < elements.size (); ++i) {
-        const auto& entry = elements[i];
-        if (!entry.is_object ()) {
-            return std::format ("elements[{}] must be a JSON object", i);
-        }
-        if (!entry.contains ("id") || !entry["id"].is_string () ||
-        entry["id"].get<std::string> ().empty ()) {
-            return std::format ("elements[{}]: 'id' must be a non-empty string", i);
-        }
-        const auto id = entry["id"].get<std::string> ();
-        if (!seen_ids.insert (id).second) {
-            return std::format ("elements[{}]: duplicate id '{}'", i, id);
-        }
-        if (!entry.contains ("kind") || !entry["kind"].is_string ()) {
-            return std::format ("elements[{}]: 'kind' must be a string", i);
-        }
-        const auto kind_name = entry["kind"].get<std::string> ();
-        const auto* kind     = find (kind_name);
-        if (kind == nullptr) {
-            return std::format ("elements[{}] (kind '{}') is not a known "
-                                "element kind - expected one of {}",
-            i, kind_name, known_kinds_list (kinds_));
-        }
-        if (entry.contains ("enabled") && !entry["enabled"].is_boolean ()) {
-            return std::format (
-            "elements[{}] ({}): 'enabled' must be a boolean", i, kind_name);
-        }
-        if (entry.contains ("name") && !entry["name"].is_null () &&
-        !entry["name"].is_string ()) {
-            return std::format ("elements[{}] ({}): 'name' must be a string", i, kind_name);
-        }
-        const auto config =
-        entry.contains ("config") ? entry["config"] : nlohmann::json::object ();
-        if (auto reason = validate_config_against_schema (*kind, config, i)) {
+        if (auto reason = validate_one_element (*this, elements[i], i, owner, seen_ids)) {
             return reason;
         }
     }

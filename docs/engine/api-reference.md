@@ -1487,6 +1487,7 @@ from, and what `docs/engine/elements.md`'s kind table is checked against.
     "description": "Drops one element inherited from an ancestor collection, named by id, out of this request or collection's resolved list.",
     "category": "inherit",
     "hotPathClass": "declarative",
+    "collectionOnly": false,
     "configSchema": {
       "type": "object",
       "properties": { "elementId": { "type": "string", "minLength": 1 } },
@@ -1501,10 +1502,11 @@ Phase 0 also registers `script.pre` and `script.post`, validate-only like
 `inherit.disable` - so a request or collection the startup fold migrated
 (`docs/engine/db-schema.md`) can be read back and written as-is without its
 own `elements` failing the registry that produced them - plus, in the test
-build only, a `test.echo` kind proving the registration path. No kind that
-actually *runs* (extractors, assertions, timers, controllers, metrics, and
-`script.*` executing for real) is registered yet; those land with #1514
-onward. See [Elements](elements.md) for the full kind table.
+build only, a `test.echo` kind proving the registration path. `collectionOnly`
+(issue #1499) is `true` only for `script.setup` / `script.teardown` - the app's
+Add menu on a request hides a kind marked so, and the registry itself refuses
+one on a request's own `elements` with a `400`. See [Elements](elements.md) for
+the full kind table.
 
 ## Trash
 
@@ -6969,6 +6971,10 @@ named it.
     "failures": [ { "step": "get pet", "status": 200, "path": "/id", "message": "Value type not permitted by 'type' constraint." } ],
     "failuresTotal": 6
   },
+  "lifecycle": {
+    "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok" } ],
+    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom" } ]
+  },
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
@@ -7003,6 +7009,18 @@ with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every
 load shape alike (issue #1540): a single-request run with no data set and a
 scenario step report the same warning for the same mistake.
+
+**`lifecycle` (issue #1499) is `script.setup` / `script.teardown`'s outcomes** -
+what ran once at the run's own boundary, never at a step. Each key is present
+only when that phase ran at least one element (`ElementOutcome`'s usual shape:
+`id`, `kind`, `outcome`, `message?`, `waitedMs?`, `wrote?`); absent entirely,
+not `{}`, for a run whose collection declared neither, and for a single-request
+load run, which has no collection to declare them on. A `script.setup` outcome
+other than `"ok"` already means the run never sent anything - `status` is
+`Failed` and every other section above is absent or zeroed - so a reader who
+finds one here knows why the rest of the report is empty. A `script.teardown`
+outcome of `"error"` carries the thrown message but never changes `status`: a
+teardown failure is reported, not fatal.
 
 **A streaming run adds a `stream` section** and no other run carries one:
 
