@@ -299,8 +299,8 @@ TEST (StreamFlag, TransientAloneIsStillFine) {
 // of that - it must stop rejecting the payload - and
 // `TheStreamsPostRequestScriptSeesItsEvents` below pins that they actually run.
 TEST (StreamFlag, ScriptsNoLongerRefuseAStreamingRequest) {
-    // Every spelling a payload can carry, read through the one name table
-    // `read_pre_request_script` / `read_post_request_script` own.
+    // Every spelling a payload can carry, read through `read_script`'s one
+    // name table.
     for (const char* key : { "preRequestScript", "postRequestScript", "tests" }) {
         const auto flag = read_stream_flag (
         json{ { "stream", true }, { key, "pm.test('x', function () {})" } });

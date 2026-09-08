@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -39,6 +40,7 @@
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/transport_policy.hpp"
+#include "vayu/runtime/script_engine.hpp"
 
 namespace vayu::http {
 // A scenario run's steps send through the daemon's jar; the manager only passes
@@ -185,6 +187,110 @@ struct EngineDefaults {
     size_t max_element_body_bytes = constants::elements::MAX_BODY_BYTES;
 };
 
+/**
+ * Per-element pass/fail/skip tallies for a single-request run's own
+ * `requestElements` (issue #1594) - the load-path sibling of
+ * `StepElementTallies` (`scenario_load.hpp`), but keyed by element id alone:
+ * this run shape has one virtual step (its one request, repeated), not a
+ * plan of many. Sized once, from `RunContext::step_elements`, at
+ * construction - so `record` below is a lookup into an existing map entry's
+ * atomics, never an insert, and safe for the concurrent event-loop worker
+ * threads that call it.
+ */
+class RequestElementTallies {
+    public:
+    RequestElementTallies () = default;
+    explicit RequestElementTallies (const std::vector<vayu::core::CompiledElement>& elements) {
+        for (const auto& element : elements) {
+            counts_.try_emplace (element.id);
+        }
+    }
+
+    /// A no-op for an element id this run's `step_elements` does not have.
+    void record (const std::string& element_id, const std::string& status) {
+        auto it = counts_.find (element_id);
+        if (it == counts_.end ()) {
+            return;
+        }
+        // "ok" is a pass; "error" folds into "failed"; every other status
+        // ("missing", "skipped") folds into "skipped" - the report answers
+        // "did this run's requests see this element pass", not which of two
+        // failure shapes it was, matching `StepElementTallies`'s own rule.
+        if (status == "ok") {
+            it->second.passed.fetch_add (1, std::memory_order_relaxed);
+        } else if (status == "failed" || status == "error") {
+            it->second.failed.fetch_add (1, std::memory_order_relaxed);
+        } else {
+            it->second.skipped.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+
+    /// This run's `elements` array for the report, in `step_elements`
+    /// order, or an empty one for an element that never ran - the same
+    /// "absent when nothing happened" convention `StepElementTallies::build`
+    /// follows.
+    [[nodiscard]] nlohmann::json build (
+    const std::vector<vayu::core::CompiledElement>& elements) const {
+        nlohmann::json out = nlohmann::json::array ();
+        for (const auto& element : elements) {
+            auto it = counts_.find (element.id);
+            if (it == counts_.end ()) {
+                continue;
+            }
+            const size_t passed = it->second.passed.load (std::memory_order_relaxed);
+            const size_t failed = it->second.failed.load (std::memory_order_relaxed);
+            const size_t skipped = it->second.skipped.load (std::memory_order_relaxed);
+            if (passed == 0 && failed == 0 && skipped == 0) {
+                continue;
+            }
+            out.push_back ({ { "id", element.id }, { "kind", element.kind },
+            { "passed", passed }, { "failed", failed }, { "skipped", skipped } });
+        }
+        return out;
+    }
+
+    /// Summed passed/failed across every `assert.*` element - the
+    /// declarative half of the run's combined assertion tally
+    /// (`maxAssertionFailureRatePct`), on the same rule
+    /// `StepElementTallies::assertion_totals` follows: a `script.*`
+    /// element's own outcome is not counted here, only its `pm.test` calls,
+    /// tallied separately on `RunContext::inline_script_tests_passed` /
+    /// `_failed`.
+    [[nodiscard]] vayu::core::AssertionTotals assertion_totals (
+    const std::vector<vayu::core::CompiledElement>& elements) const {
+        vayu::core::AssertionTotals totals;
+        for (const auto& element : elements) {
+            const auto* kind = vayu::core::Registry::instance ().find (element.kind);
+            if (kind == nullptr || kind->category != "assert") {
+                continue;
+            }
+            auto it = counts_.find (element.id);
+            if (it == counts_.end ()) {
+                continue;
+            }
+            totals.passed += it->second.passed.load (std::memory_order_relaxed);
+            totals.failed += it->second.failed.load (std::memory_order_relaxed);
+        }
+        return totals;
+    }
+
+    private:
+    struct Counts {
+        std::atomic<size_t> passed{ 0 };
+        std::atomic<size_t> failed{ 0 };
+        std::atomic<size_t> skipped{ 0 };
+    };
+    std::unordered_map<std::string, Counts> counts_;
+};
+
+// `optin.performance.Padding` is right that size-ordering these fields would
+// save bytes, and the trade is refused deliberately, on the `Response`
+// precedent (`types.hpp`): fields are grouped by concern (the event loop's
+// own state, the closed-loop counters, the think-reservation set, the
+// elements state, ...), each group documented in place, and size order would
+// scatter every one of those groups for a saving that does not matter on an
+// object allocated once per run.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct RunContext {
     std::string run_id;
     /// The loop also carries Windows' 1 ms timer resolution for its lifetime
@@ -315,6 +421,59 @@ struct RunContext {
     std::string test_script;
 
     /**
+     * A single-request run's own step-level elements (issue #1594), compiled
+     * once here from the payload's `requestElements` array - kept apart from
+     * `elements` (the run-level `timers`/`scripts`/`seed`/`includeScriptTime`
+     * override object @ref scripts_override etc. resolve from) because one
+     * flat run payload cannot use one key for both an object and an array.
+     * Null for a run sent with none, which is what keeps
+     * `submit_one_request`'s token-free fast path exactly as cheap as before
+     * this existed (#992). A `script.post` element found here that is not
+     * running inline (@ref script_element_runs_inline) has its `config.script`
+     * text copied into @ref test_script instead, for the existing deferred
+     * replay (`validate_scripts`) to read unchanged.
+     */
+    std::shared_ptr<const std::vector<vayu::core::CompiledElement>> step_elements;
+
+    /// Compiles @p config's `requestElements` into @ref step_elements, called
+    /// once by the constructor - split out to keep the constructor's own
+    /// cognitive complexity down, not because anything else calls this.
+    void compile_step_elements (const nlohmann::json& config);
+
+    /// Whether @ref step_elements holds at least one `Phase::StepBefore` kind
+    /// - computed once here, from the registry, rather than per submission:
+    /// `submit_one_request`'s fast path (#992) copies the request only when
+    /// this is true, since a `step.before` kind may need to mutate the copy
+    /// before it is sent.
+    bool step_elements_have_step_before = false;
+
+    /// @ref lifecycle_scopes, flattened once (issue #1594) - the "base" every
+    /// submission's own `ScopeOverlay` layers onto, on the same
+    /// `ScenarioLoadState::base_vars` precedent: flattened once per run,
+    /// never per submission. Populated by `run_collection_setup` alongside
+    /// `lifecycle_scopes` whenever @ref step_elements is non-empty, even for
+    /// a run that declares no `lifecycleElements` at all.
+    vayu::http::VariableValues step_base_vars;
+
+    /// The `ScriptConfig` recipe an inline `script.pre` / `script.post` in
+    /// @ref step_elements runs under - the same recipe `script.setup` /
+    /// `script.teardown` already read, populated alongside @ref
+    /// step_base_vars for the same reason (issue #1594).
+    vayu::runtime::ScriptConfig step_script_config;
+
+    /// Per-element pass/fail/skip tallies for @ref step_elements (issue
+    /// #1594), sized from it at construction. Default-constructed (empty)
+    /// for a run with none, so `record` is always a safe no-op there too.
+    RequestElementTallies element_tallies;
+
+    /// An inline `script.post`'s `pm.test` calls (issue #1594), the same
+    /// counters `ScenarioLoadState::inline_script_tests_passed` / `_failed`
+    /// are for the scenario path - empty unless `script.post` actually ran
+    /// inline this run.
+    std::atomic<size_t> inline_script_tests_passed{ 0 };
+    std::atomic<size_t> inline_script_tests_failed{ 0 };
+
+    /**
      * `elements.scripts` (issue #1495), resolved once here from a payload
      * `validate_elements_run_override` has already accepted: "asMarked"
      * leaves each `script.*` element's own `config.inline` to decide,
@@ -417,6 +576,28 @@ struct RunContext {
             return false;
         }
         return element_config.value ("inline", false);
+    }
+
+    /**
+     * Skip a compiled element under a load run's inline-vs-deferred rule
+     * (#1495): a declarative kind always runs; a `script.*` kind runs only
+     * when its own `config.inline` is set or the run's `elements.scripts`
+     * override forces it. Read through `HotPathClass`, never a `kind ==`
+     * comparison, so #1512's extensibility contract (rule 1) holds outside
+     * `core/elements`. Shared by the scenario load producer's pipeline hooks
+     * and, since issue #1594, a single-request run's own.
+     */
+    [[nodiscard]] static std::optional<std::string> load_pipeline_skip_reason (
+    const vayu::core::CompiledElement& element,
+    ScriptsOverrideMode scripts_mode) {
+        const auto* kind = vayu::core::Registry::instance ().find (element.kind);
+        if (kind == nullptr || kind->hot_path != vayu::core::HotPathClass::Script) {
+            return std::nullopt; // declarative - always runs here
+        }
+        if (!script_element_runs_inline (element.config, scripts_mode)) {
+            return "deferred to the run's post-run replay";
+        }
+        return std::nullopt;
     }
 
     // Latency (ms) past which a completion is captured as an outlier, resolved
@@ -571,6 +752,68 @@ struct RunContext {
     std::condition_variable refill_cv;
     std::atomic<bool> closed_loop{ false };
     std::atomic<size_t> peak_in_flight{ 0 }; // high-water mark of in_flight()
+
+    /**
+     * `timer.think`'s non-blocking backpressure on a single-request run
+     * (issue #1594): a completed submission whose `step.between` phase
+     * computed a wait must not free its concurrency slot until that wait
+     * elapses, but the completion thread (an event-loop worker) must never
+     * block to enforce it - the same "never blocks a worker thread" rule
+     * `ElementContext::blocking_allowed = false` states for the scenario
+     * path. There is no `VirtualUser` here to stamp a `ready_at_ms` on (a
+     * single-request run's submissions are anonymous and interchangeable),
+     * so the wait is instead held as a released-at deadline in this small
+     * set, and @ref in_flight below counts an unexpired one as still
+     * outstanding: a strategy's own `in_flight() < target` check then holds
+     * off the next submission for exactly as long the deferred VU model
+     * does, through the same `maintain_concurrency` poll loop, with no new
+     * thread and no per-strategy change.
+     *
+     * The atomic count is the fast path every run without a single
+     * `timer.think` element pays for: `in_flight()` is on the hot
+     * completion-and-refill path, and a run with no such element must not
+     * pay a mutex there.
+     */
+    mutable std::mutex think_reservation_mtx;
+    // steady-clock ms; guarded by think_reservation_mtx
+    mutable std::multiset<int64_t> think_reservation_deadlines;
+    mutable std::atomic<size_t> think_reservation_count{ 0 };
+
+    /// Reserve one concurrency slot's release for @p wait_ms from now
+    /// (issue #1594). Called from `handle_result` on an event-loop worker
+    /// thread; a non-positive wait reserves nothing.
+    void reserve_think_wait (int64_t wait_ms) {
+        if (wait_ms <= 0) {
+            return;
+        }
+        const int64_t deadline =
+        std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::steady_clock::now ().time_since_epoch ())
+        .count () +
+        wait_ms;
+        std::lock_guard<std::mutex> lock (think_reservation_mtx);
+        think_reservation_deadlines.insert (deadline);
+        think_reservation_count.store (
+        think_reservation_deadlines.size (), std::memory_order_relaxed);
+    }
+
+    /// Purges every reservation whose deadline has passed and returns how
+    /// many remain outstanding - called only from @ref in_flight, and only
+    /// once @ref think_reservation_count says there is at least one to look
+    /// at, so a run with none never takes this lock.
+    [[nodiscard]] size_t purge_expired_think_reservations () const {
+        const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::steady_clock::now ().time_since_epoch ())
+                            .count ();
+        std::lock_guard<std::mutex> lock (think_reservation_mtx);
+        while (!think_reservation_deadlines.empty () &&
+        *think_reservation_deadlines.begin () <= now) {
+            think_reservation_deadlines.erase (think_reservation_deadlines.begin ());
+        }
+        think_reservation_count.store (
+        think_reservation_deadlines.size (), std::memory_order_relaxed);
+        return think_reservation_deadlines.size ();
+    }
 
     // ---- Live metrics "topic" (N1) ---------------------------------------
     // Ring capacity in ticks, derived from `liveReplayWindowMs` and this run's
@@ -744,7 +987,14 @@ struct RunContext {
     [[nodiscard]] size_t in_flight () const {
         size_t sent = requests_sent.load ();
         size_t done = total_requests ();
-        return sent > done ? sent - done : 0;
+        size_t base = sent > done ? sent - done : 0;
+        // A run with no `timer.think` element (the overwhelming common case)
+        // never reserves one, so this is one relaxed load and nothing else -
+        // see `reserve_think_wait`'s doc comment.
+        if (think_reservation_count.load (std::memory_order_relaxed) == 0) {
+            return base;
+        }
+        return base + purge_expired_think_reservations ();
     }
     [[nodiscard]] size_t total_errors () const {
         return metrics_collector ? metrics_collector->total_errors () : 0;
@@ -996,6 +1246,13 @@ struct RunSummaryInputs {
     // when the run made no assertion at all, which is what keeps that metric
     // unevaluated rather than a trivial pass at 0/0.
     std::optional<AssertionTotals> assertions;
+    // A single-request run's own `requestElements` outcomes (issue #1594),
+    // under the summary's top-level `elements` key - the single-request
+    // sibling of a scenario run's per-step `scenario.steps[].elements`,
+    // which this run shape has no steps to hang one off. Absent for a run
+    // that declared none, or one whose elements never ran (the request never
+    // completed), on the same absent-not-empty rule `coverage` follows.
+    std::optional<nlohmann::json> elements;
     // The verdict on the budgets this run's config declared. Absent when it
     // declared none, which keeps the report's thresholdValidation section out
     // rather than reporting a run that passed zero checks. Sibling of `tests`,

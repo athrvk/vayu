@@ -342,8 +342,8 @@ AssertionTotals StepElementTallies::assertion_totals (const ScenarioPlan& plan) 
         for (size_t i = 0; i < count; ++i) {
             // Read through the registry's own category, never a `kind ==` or
             // prefix comparison outside `core/elements` (#1512's extensibility
-            // contract, rule 1) - the same lookup `load_pipeline_skip_reason`
-            // above uses for `HotPathClass`.
+            // contract, rule 1) - the same lookup `RunContext::
+            // load_pipeline_skip_reason` uses for `HotPathClass`.
             const auto* registered =
             vayu::core::Registry::instance ().find (elements[i].kind);
             if (registered == nullptr || registered->category != "assert") {
@@ -447,29 +447,6 @@ nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state) {
  */
 namespace {
 
-/**
- * Skip a compiled element under a load run's inline-vs-deferred rule (#1495):
- * a declarative kind always runs; a `script.*` kind runs only when its own
- * `config.inline` is set or the run's `elements.scripts` override forces it.
- * Read through `HotPathClass`, never a `kind ==` comparison, so #1512's
- * extensibility contract (rule 1) holds outside `core/elements`.
- */
-std::optional<std::string> load_pipeline_skip_reason (const vayu::core::CompiledElement& element,
-RunContext::ScriptsOverrideMode scripts_mode) {
-    const auto* kind = vayu::core::Registry::instance ().find (element.kind);
-    if (kind == nullptr || kind->hot_path != vayu::core::HotPathClass::Script) {
-        return std::nullopt; // declarative - always runs here
-    }
-    if (scripts_mode == RunContext::ScriptsOverrideMode::AllInline) {
-        return std::nullopt;
-    }
-    if (scripts_mode == RunContext::ScriptsOverrideMode::AllDeferred ||
-    !element.config.value ("inline", false)) {
-        return "deferred to the run's post-run replay";
-    }
-    return std::nullopt;
-}
-
 /// This step's `id`-less request identity, for `pm.info` inside an inline
 /// script - the same fields `execute_exchange`'s own `bind` lambda sets.
 void bind_step_identity (vayu::runtime::ScriptContext& ctx,
@@ -569,7 +546,7 @@ vayu::Request& request) {
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore, ctx,
     *step.elements, outcomes, [&context] (const vayu::core::CompiledElement& element) {
-        return load_pipeline_skip_reason (element, context->scripts_override);
+        return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
     for (const auto& outcome : outcomes) {
         state.element_tallies.record (step_index, outcome.id, outcome.status);
@@ -688,7 +665,7 @@ const vayu::Response& response) {
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx, *step.elements,
     outcomes, [&context] (const vayu::core::CompiledElement& element) {
-        return load_pipeline_skip_reason (element, context->scripts_override);
+        return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
     for (const auto& outcome : outcomes) {
         state.element_tallies.record (step_index, outcome.id, outcome.status);

@@ -3,35 +3,12 @@
 
 #include "vayu/http/script_parts.hpp"
 
-#include <initializer_list>
-
 namespace vayu::http {
 
 namespace {
 
 bool is_blank (const std::string& s) {
     return s.find_first_not_of (" \t\r\n") == std::string::npos;
-}
-
-// One accepted spelling of a script field: the list form and the legacy string.
-struct ScriptKeys {
-    const char* list_key;
-    const char* legacy_key;
-};
-
-// Try each spelling in order and return the first that yields a non-blank
-// script. Blank loses so that a payload which carries an empty
-// `postRequestScript` alongside a real `tests` runs the real one - the same
-// rule the list form already uses when it drops blank parts.
-std::string read_first_named (const nlohmann::json& json,
-std::initializer_list<ScriptKeys> names) {
-    for (const auto& name : names) {
-        std::string script = read_script (json, name.list_key, name.legacy_key);
-        if (!is_blank (script)) {
-            return script;
-        }
-    }
-    return {};
 }
 
 } // namespace
@@ -66,18 +43,6 @@ std::string read_script (const nlohmann::json& json, const char* list_key, const
         return joined;
     }
     return json.value (legacy_key, std::string{});
-}
-
-// The name table. The load path (`POST /runs`) reads its deferred validation
-// script through this one function, so a spelling added here is understood
-// everywhere it still matters.
-
-std::string read_post_request_script (const nlohmann::json& json) {
-    return read_first_named (json,
-    { { "postRequestScripts", "postRequestScript" },
-    // `tests` uses the same key for both forms: POST /runs never had a
-    // separate list spelling.
-    { "tests", "tests" } });
 }
 
 bool read_allow_script_requests (const nlohmann::json& json) {
