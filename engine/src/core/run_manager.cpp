@@ -1886,7 +1886,7 @@ RunManager& manager) {
         // load is sent.
         vayu::http::routes::ScriptVariableScopes base_scopes;
         if (auto setup_failure = run_collection_setup (db, context, base_scopes)) {
-            vayu::utils::log_error ("script.setup failed: " + *setup_failure);
+            vayu::utils::log_error ("run", "script.setup failed: " + *setup_failure);
             db.update_run_status (context->run_id, vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
