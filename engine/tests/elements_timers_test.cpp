@@ -1016,12 +1016,19 @@ TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesPacingUnderLoad) {
 
 // @copydoc ElementsTimersOffSilencesPacingUnderLoad, `timer.throughput`'s
 // shared-budget wait (`SharedThroughputBudgets::claim`), the other kind
-// `scheduled_ready_delay_ms` defers a VU through. Mutation check: the same
-// guard reverted reds this on the ceiling `SharedThroughputHoldsTheWholeRunToTheTargetRate`
-// above pins (18 to 90).
+// `scheduled_ready_delay_ms` defers a VU through. A lower rate than
+// `SharedThroughputHoldsTheWholeRunToTheTargetRate` uses above: this
+// environment's own achievable ceiling for ten VUs against a loopback mock
+// over 4s measures at 39-40 regardless of any element at all (Debug build,
+// this sandbox's CPU quota), which sits *inside* that test's own 600/minute
+// target - a rate that high cannot discriminate paced from unpaced here.
+// 120/minute shared keeps the paced case (measured consistently at 18) well
+// clear of the unpaced one. Mutation check: reverting the `shared.timers_override`
+// guard reds this on the floor alone - a paced run measures 18, an unpaced
+// one 39-40, and 30 sits between them with margin on both sides.
 TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesThroughputUnderLoad) {
     auto execution =
-    plan_with ({ vayu::tests::timer_throughput_element_json ("el_rate", 600.0) });
+    plan_with ({ vayu::tests::timer_throughput_element_json ("el_rate", 120.0) });
 
     auto config        = load_config ("4s");
     config["elements"] = json{ { "timers", "off" } };
@@ -1030,11 +1037,7 @@ TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesThroughputUnderLoad) {
     ASSERT_NE (state, nullptr);
     const size_t executed = state->steps_executed.load ();
 
-    // Ten VUs free-running against a loopback mock over 4s would send
-    // thousands (the shared test's own comment); 120 clears the paced
-    // ceiling of 90 with a wide margin while staying reachable on a
-    // contended box running several tests at once.
-    EXPECT_GT (executed, 120u)
+    EXPECT_GT (executed, 30u)
     << "elements.timers: \"off\" did not silence timer.throughput's shared "
        "budget under load - got "
     << executed << " requests over 4s, still in the paced range";
