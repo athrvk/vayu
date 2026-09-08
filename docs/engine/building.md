@@ -516,6 +516,24 @@ which triplets carry rather than cache variables, so `engine/triplets/` overlays
 presets point `VCPKG_OVERLAY_TRIPLETS` at that directory. Both numbers move
 together, with `README.md` and `docs/index.md`.
 
+The same availability rule bites through a dependency, and the cure is
+different. valijson decides whether to call `std::from_chars` by asking whether
+libc++ is recent enough, which on Apple is the wrong question: the header is
+present, but the **floating-point** overloads are marked introduced in macOS
+**26.0**, so `parseDouble` fails to compile for any target below it. So
+`engine/CMakeLists.txt` puts `VALIJSON_HAS_STD_FROM_CHARS=0` on the imported
+`valijson` target under `if(APPLE)`, selecting the `std::istringstream`
+fallback valijson already ships for standard libraries without it. Our own
+`utils/parse.hpp` is unaffected: every `parse_number<T>` instantiation is
+integral, and integer `from_chars` carries no availability marker. ryml's
+c4core defaults to fast_float rather than `std::from_chars`, and nlohmann has
+its own parser, so valijson is the only dependency that needed this.
+
+Note the asymmetry, since it is what pins the floor at 13.3 exactly:
+`std::to_chars` for floating point arrived in macOS 13.3, `std::from_chars`
+for floating point not until 26.0. The engine needs the first (`<format>`, and
+`js_json.hpp` directly) and can route around the second.
+
 `scripts/check-macos-min-version.sh` reads `minos` back out of the built binary
 (every slice of a universal one) and is what fails CI if any of that comes
 undone - `pr-tests.yml` runs it on the macOS engine leg, `release.yml` on the

@@ -300,6 +300,26 @@ find_package(httplib CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SqliteOrm CONFIG REQUIRED)
 find_package(valijson CONFIG REQUIRED)
+if(APPLE)
+    # valijson's own detection asks whether libc++ is new enough
+    # (`_LIBCPP_VERSION >= 200000`) and concludes std::from_chars is usable.
+    # On Apple that is the wrong question: the header is there, but libc++
+    # marks the *floating-point* overloads introduced in macOS 26.0, so
+    # `parseDouble` fails to compile for any deployment target below it
+    # ("'from_chars' is unavailable: introduced in macOS 26.0"). Since the
+    # engine targets 13.3, take valijson's documented third path - the
+    # std::istringstream fallback it already ships for standard libraries
+    # without floating-point from_chars. It parses under the classic locale
+    # and rejects trailing input exactly as the from_chars path does, and it
+    # runs at schema-validation time rather than on the request path.
+    #
+    # On the interface target rather than on each consumer: two targets link
+    # valijson today, and a third would otherwise inherit a build that only
+    # breaks on macOS. Revisit when macOS 26 is the floor - never before, or
+    # the engine stops building for everyone still on Ventura.
+    set_property(TARGET valijson APPEND PROPERTY
+        INTERFACE_COMPILE_DEFINITIONS VALIJSON_HAS_STD_FROM_CHARS=0)
+endif()
 # The one YAML reader in the engine (issue #853). A stored OpenAPI document is
 # YAML as often as JSON, and core/openapi_document.cpp is the only translation
 # unit that includes it - everything else reads the nlohmann DOM it produces.
