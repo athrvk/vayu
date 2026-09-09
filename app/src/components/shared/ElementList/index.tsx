@@ -48,6 +48,7 @@ import {
 import { TruncatedText } from "@/components/shared/TruncatedText";
 import { ToggleRow } from "@/modules/settings/main/panels/SettingControls";
 import { generateId } from "@/lib/id";
+import { missingRequiredKeys } from "@/lib/elements";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
@@ -133,6 +134,14 @@ function ElementRow({
 }) {
 	const schema = kinds.find((k) => k.kind === element.kind);
 	const Bespoke = ELEMENT_FORM_OVERRIDES[element.kind];
+	// Issue #1635: a fresh element's `config` is missing whatever its kind
+	// requires until the user fills the form below, and saving in that state
+	// 400s the whole request - `RequestBuilderProvider`/`ElementsTab` hold the
+	// save back for exactly this, so the row has to say which field is why.
+	const missingKeys = missingRequiredKeys(element, kinds);
+	const missingLabels = missingKeys.map(
+		(key) => schema?.configSchema.properties?.[key]?.title ?? key
+	);
 
 	return (
 		<div
@@ -168,6 +177,15 @@ function ElementRow({
 				<span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium shrink-0">
 					{kindLabel(element.kind, kinds)}
 				</span>
+				{missingLabels.length > 0 && (
+					<span
+						className="flex items-center gap-1.5 shrink-0 text-xs text-muted-foreground"
+						data-element-incomplete
+					>
+						<span className="h-2 w-2 rounded-full bg-warning shrink-0" aria-hidden />
+						Needs {missingLabels.join(", ")}
+					</span>
+				)}
 				<Input
 					value={element.name ?? ""}
 					placeholder="Optional name"

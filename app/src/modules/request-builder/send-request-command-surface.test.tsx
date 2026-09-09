@@ -49,6 +49,9 @@ vi.mock("@/hooks", () => ({
 }));
 
 vi.mock("@/queries", () => ({
+	// RequestBuilderProvider now reads the catalogue itself (issue #1635); an
+	// empty list means "nothing required", so the save-skip check is inert.
+	useElementKindsQuery: () => ({ data: [] }),
 	useGlobalsQuery: () => ({ data: { variables: {} } }),
 	useUpdateGlobalsMutation: () => ({ mutate: vi.fn() }),
 	useCollectionsQuery: () => ({ data: [] }),
