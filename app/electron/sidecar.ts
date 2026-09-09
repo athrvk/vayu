@@ -30,6 +30,7 @@ import {
 	ENGINE_PORT_RELEASE_DELAY_MS,
 	ENGINE_STDERR_TAIL_LINES,
 } from "./constants.js";
+import { appLogger } from "./app-log.js";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -228,7 +229,7 @@ function killVayuEngineProcess(pid: number): boolean {
 		}
 		return true;
 	} catch (err) {
-		console.warn(`[Sidecar] Failed to kill engine process ${pid}: ${err}`);
+		appLogger().warn("sidecar", `Failed to kill engine process ${pid}`, { error: String(err) });
 		return false;
 	}
 }
@@ -460,7 +461,7 @@ export class EngineSidecar {
 	private ensureDataDirectory(): void {
 		if (!fs.existsSync(this.dataDir)) {
 			fs.mkdirSync(this.dataDir, { recursive: true });
-			console.log(`[Sidecar] Created data directory: ${this.dataDir}`);
+			appLogger().info("sidecar", "Created data directory", { dataDir: this.dataDir });
 		}
 	}
 
@@ -487,17 +488,18 @@ export class EngineSidecar {
 	private async adoptIfVersionMatches(pid: number | null): Promise<boolean> {
 		const runningVersion = await this.system.probeVersion(this.port);
 		if (runningVersion === null || runningVersion === app.getVersion()) {
-			console.log(
-				`[Sidecar] Adopting the engine already running on port ${this.port}` +
-					(pid !== null ? ` (PID ${pid})` : " (no lock PID)")
-			);
+			appLogger().info("sidecar", "Adopting the engine already running on this port", {
+				port: this.port,
+				pid,
+			});
 			this.ownership = { kind: "adopted", pid };
 			return true;
 		}
 
-		console.warn(
-			`[Sidecar] Engine on port ${this.port} is version ${runningVersion}, this app ` +
-				`is ${app.getVersion()} - stopping it instead of adopting a mismatched daemon`
+		appLogger().warn(
+			"sidecar",
+			"Engine on this port is a different version - stopping it instead of adopting a mismatched daemon",
+			{ port: this.port, runningVersion, appVersion: app.getVersion() }
 		);
 		this.ownership = { kind: "adopted", pid };
 		await this.system.requestShutdown(this.port);
@@ -512,7 +514,7 @@ export class EngineSidecar {
 	 */
 	async start(): Promise<void> {
 		if (this.ownership.kind !== "none") {
-			console.log("[Sidecar] Engine already running (managed by this instance)");
+			appLogger().info("sidecar", "Engine already running (managed by this instance)");
 			return;
 		}
 
@@ -525,9 +527,9 @@ export class EngineSidecar {
 
 		if (lockStatus.locked) {
 			if (lockStatus.running && lockStatus.pid !== null) {
-				console.log(
-					`[Sidecar] Lock file found with PID ${lockStatus.pid}, process is running`
-				);
+				appLogger().info("sidecar", "Lock file found, process is running", {
+					pid: lockStatus.pid,
+				});
 				// Verify engine is actually responding on the port
 				if (await this.system.probeHealth(this.port)) {
 					if (await this.adoptIfVersionMatches(lockStatus.pid)) {
@@ -535,23 +537,27 @@ export class EngineSidecar {
 					}
 					// Mismatched daemon stopped instead of adopted - fall through to spawn.
 				} else {
-					console.warn(
-						`[Sidecar] Lock file indicates process ${lockStatus.pid} is running, but engine is not responding on port ${this.port}`
+					appLogger().warn(
+						"sidecar",
+						"Lock file indicates the process is running, but the engine is not responding on this port",
+						{ pid: lockStatus.pid, port: this.port }
 					);
 					// Process might be stuck, but we'll let the engine's lock mechanism handle it
 					// The engine will fail to start if it can't acquire the lock
 				}
 			} else if (lockStatus.pid !== null) {
 				// Lock file exists but process is not running - stale lock file
-				console.warn(
-					`[Sidecar] Stale lock file found (PID ${lockStatus.pid} not running), cleaning up...`
-				);
+				appLogger().warn("sidecar", "Stale lock file found, cleaning up", {
+					pid: lockStatus.pid,
+				});
 				// Clean up stale lock file to prevent issues during install/reinstall
 				try {
 					fs.unlinkSync(lockPath);
-					console.log(`[Sidecar] Removed stale lock file: ${lockPath}`);
+					appLogger().info("sidecar", "Removed stale lock file", { lockPath });
 				} catch (err) {
-					console.warn(`[Sidecar] Failed to remove stale lock file: ${err}`);
+					appLogger().warn("sidecar", "Failed to remove stale lock file", {
+						error: String(err),
+					});
 					// Continue anyway - the engine's lock mechanism will handle it
 				}
 			}
@@ -588,10 +594,11 @@ export class EngineSidecar {
 			);
 		}
 
-		console.log(`[Sidecar] Starting engine...`);
-		console.log(`[Sidecar]   Binary: ${this.binaryPath}`);
-		console.log(`[Sidecar]   Data Dir: ${this.dataDir}`);
-		console.log(`[Sidecar]   Port: ${this.port}`);
+		appLogger().info("sidecar", "Starting engine", {
+			binaryPath: this.binaryPath,
+			dataDir: this.dataDir,
+			port: this.port,
+		});
 
 		// Last look before the spawn, with no `await` between the two: from here
 		// on the child is tracked, so the quit path can kill it. Every check
@@ -599,40 +606,35 @@ export class EngineSidecar {
 		// can land in - and a child spawned into that window is an orphan.
 		this.assertNotStopping();
 
-		// Spawn the engine process
+		// Spawn the engine process. `--verbose 0` in production: the engine writes
+		// its own structured records to `engine_<stamp>.log` (#1557) regardless,
+		// so nothing here reads its console text any more (#1558) - dev keeps `2`
+		// for a developer watching a terminal.
 		this.process = this.system.spawnEngine(this.binaryPath, [
 			"--port",
 			this.port.toString(),
 			"--data-dir",
 			this.dataDir,
 			"--verbose",
-			`${isDev ? "2" : "1"}`,
+			`${isDev ? "2" : "0"}`,
 		]);
 		this.ownership = { kind: "spawned" };
 
-		// Handle stdout - set up listeners immediately to prevent buffering issues
-		// On Linux, if pipes aren't read, the process can block waiting for buffer space
+		// Drain stdout without re-printing it - the engine's own file is the
+		// record now (#1557, #1558). Still read eagerly: on Linux an unread pipe
+		// blocks the child on buffer space once it fills.
 		if (this.process.stdout) {
 			this.process.stdout.setEncoding("utf8");
-			this.process.stdout.on("data", (data) => {
-				const lines = data
-					.toString()
-					.split("\n")
-					.filter((line: string) => line.trim());
-				for (const line of lines) {
-					console.log(`[Engine] ${line}`);
-				}
-			});
-			// Resume reading to prevent backpressure
 			this.process.stdout.resume();
 		}
 
 		// Kept for the failure message: an engine that dies at spawn has usually
 		// said why on stderr, and that line is the difference between "exit code 127"
-		// and "cannot open shared object file".
+		// and "cannot open shared object file". Not re-printed, for the same
+		// reason stdout is not: only the tail this app cannot get any other way
+		// (the engine has no file yet) is worth keeping.
 		const stderrTail: string[] = [];
 
-		// Handle stderr - set up listeners immediately to prevent buffering issues
 		if (this.process.stderr) {
 			this.process.stderr.setEncoding("utf8");
 			this.process.stderr.on("data", (data) => {
@@ -641,7 +643,6 @@ export class EngineSidecar {
 					.split("\n")
 					.filter((line: string) => line.trim());
 				for (const line of lines) {
-					console.error(`[Engine] ${line}`);
 					stderrTail.push(line);
 					if (stderrTail.length > ENGINE_STDERR_TAIL_LINES) stderrTail.shift();
 				}
@@ -669,14 +670,14 @@ export class EngineSidecar {
 
 		// Handle process exit
 		child.on("exit", (code, signal) => {
-			console.log(`[Sidecar] Engine exited with code ${code} signal ${signal}`);
+			appLogger().info("sidecar", "Engine exited", { code, signal });
 			failure = { kind: "exit", code, signal, stderr: [...stderrTail] };
 			forget();
 		});
 
 		// Handle errors
 		child.on("error", (err) => {
-			console.error(`[Sidecar] Engine error:`, err);
+			appLogger().error("sidecar", "Engine error", { error: String(err) });
 			failure = { kind: "error", message: err.message };
 			forget();
 		});
@@ -722,7 +723,7 @@ export class EngineSidecar {
 			}
 
 			if (await this.system.probeHealth(this.port)) {
-				console.log(`[Sidecar] Engine is ready`);
+				appLogger().info("sidecar", "Engine is ready");
 				return;
 			}
 
@@ -754,18 +755,18 @@ export class EngineSidecar {
 	async stop(): Promise<void> {
 		const owned = this.ownership;
 		if (owned.kind === "none") {
-			console.log("[Sidecar] Engine not running");
+			appLogger().info("sidecar", "Engine not running");
 			return;
 		}
 
-		console.log("[Sidecar] Stopping engine...");
+		appLogger().info("sidecar", "Stopping engine");
 
 		// Try graceful HTTP shutdown first (works reliably on all platforms)
-		console.log("[Sidecar] Requesting graceful shutdown via HTTP...");
+		appLogger().info("sidecar", "Requesting graceful shutdown via HTTP");
 		if (await this.system.requestShutdown(this.port)) {
-			console.log("[Sidecar] Shutdown request accepted");
+			appLogger().info("sidecar", "Shutdown request accepted");
 		} else {
-			console.log("[Sidecar] HTTP shutdown request failed, will use signal");
+			appLogger().info("sidecar", "HTTP shutdown request failed, will use signal");
 		}
 
 		if (owned.kind === "adopted") {
@@ -803,14 +804,14 @@ export class EngineSidecar {
 		]);
 
 		if (!exitedInTime) {
-			console.log("[Sidecar] Engine did not exit gracefully, killing...");
+			appLogger().info("sidecar", "Engine did not exit gracefully, killing");
 			child.kill("SIGKILL");
 			await exited;
 		}
 
 		if (this.process === child) this.process = null;
 		this.ownership = { kind: "none" };
-		console.log("[Sidecar] Engine stopped");
+		appLogger().info("sidecar", "Engine stopped");
 	}
 
 	/**
@@ -827,9 +828,7 @@ export class EngineSidecar {
 		const gone = await this.waitForAdoptedExit(pid);
 
 		if (!gone && pid !== null) {
-			console.log(
-				`[Sidecar] Adopted engine (PID ${pid}) did not exit gracefully, killing...`
-			);
+			appLogger().info("sidecar", "Adopted engine did not exit gracefully, killing", { pid });
 			if (this.system.killEngineProcess(pid)) {
 				await this.waitForAdoptedExit(pid);
 			}
@@ -839,9 +838,7 @@ export class EngineSidecar {
 		// ours to keep claiming, and saying otherwise would make `isRunning()`
 		// lie in the other direction.
 		this.ownership = { kind: "none" };
-		console.log(
-			gone ? "[Sidecar] Adopted engine stopped" : "[Sidecar] Adopted engine released"
-		);
+		appLogger().info("sidecar", gone ? "Adopted engine stopped" : "Adopted engine released");
 	}
 
 	/**
@@ -908,7 +905,7 @@ export class EngineSidecar {
 	}
 
 	private async runRestart(maxRetries: number): Promise<void> {
-		console.log("[Sidecar] Restarting engine...");
+		appLogger().info("sidecar", "Restarting engine");
 
 		const baseDelay = ENGINE_RESTART_BASE_DELAY_MS;
 
@@ -921,9 +918,11 @@ export class EngineSidecar {
 				if (attempt > 0) {
 					// Calculate exponential delay: baseDelay * 2^(attempt-1)
 					const delay = baseDelay * Math.pow(2, attempt - 1);
-					console.log(
-						`[Sidecar] Retry attempt ${attempt}/${maxRetries} after ${delay}ms delay...`
-					);
+					appLogger().info("sidecar", "Retry attempt after delay", {
+						attempt,
+						maxRetries,
+						delayMs: delay,
+					});
 					await this.system.sleep(delay);
 				}
 
@@ -931,14 +930,15 @@ export class EngineSidecar {
 				// Small delay to ensure port is released
 				await this.system.sleep(ENGINE_PORT_RELEASE_DELAY_MS);
 				await this.start();
-				console.log("[Sidecar] Engine restarted successfully");
+				appLogger().info("sidecar", "Engine restarted successfully");
 				return;
 			} catch (error) {
 				const lastError = error instanceof Error ? error : new Error(String(error));
-				console.error(
-					`[Sidecar] Restart attempt ${attempt + 1}/${maxRetries + 1} failed:`,
-					lastError.message
-				);
+				appLogger().error("sidecar", "Restart attempt failed", {
+					attempt: attempt + 1,
+					maxAttempts: maxRetries + 1,
+					error: lastError.message,
+				});
 
 				// A shutdown is not a failed restart to retry - the engine is meant
 				// to be down, and retrying would spawn the orphan we just avoided.
@@ -971,7 +971,7 @@ export class EngineSidecar {
 		this.stopping = true;
 		const inFlight = this.restartInFlight;
 		if (inFlight) {
-			console.log("[Sidecar] Waiting for the in-flight restart before shutting down...");
+			appLogger().info("sidecar", "Waiting for the in-flight restart before shutting down");
 			await inFlight;
 		}
 		await this.stop();

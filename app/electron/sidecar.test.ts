@@ -355,6 +355,26 @@ describe("EngineSidecar - spawned engine", () => {
 		expect(sidecar.isRunning()).toBe(true);
 	});
 
+	/*
+	 * #1558: the engine's own `engine_<stamp>.log` is the record now, so the
+	 * app no longer needs the engine's console text at `-v 1` in production -
+	 * only dev, where a developer is watching a terminal, keeps `2`. `isDev`
+	 * is read once at module load, so this pins the mapping against whatever
+	 * `NODE_ENV` this test run actually has rather than asserting a literal
+	 * that would silently stop testing anything under a different one.
+	 */
+	it("passes --verbose 0 outside development, 2 in it", async () => {
+		const { system } = fakeSystem();
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+
+		await sidecar.start();
+
+		const args = vi.mocked(system.spawnEngine).mock.calls[0][1];
+		const verboseAt = args.indexOf("--verbose");
+		expect(verboseAt).toBeGreaterThan(-1);
+		expect(args[verboseAt + 1]).toBe(process.env.NODE_ENV === "development" ? "2" : "0");
+	});
+
 	it("stops what it spawned with SIGTERM off Windows", async () => {
 		stubPlatform("linux");
 		const { system, state } = fakeSystem();
@@ -446,6 +466,27 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 		// user to the logs for it.
 		await expect(sidecar.start()).rejects.toThrow(/libssl\.so\.3/);
 		await expect(sidecar.start()).rejects.toThrow(/signal SIGABRT/);
+	});
+
+	// #1558: the stderr tail is still collected for the failure message above -
+	// that assertion reds on its own if the collection ever breaks - but the
+	// line itself must not also be re-printed; the engine's own file is that
+	// record now. Mutation check: restore the `console.error` call this issue
+	// removed from the stderr `"data"` handler and this reds.
+	it("drains stdout and stderr without printing either", async () => {
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar(TEST_PORT, system);
+		await sidecar.start();
+
+		state.spawned[0].stdout.emit("data", "engine startup line\n");
+		state.spawned[0].stderr.emit("data", "a debug line\n");
+
+		expect(log).not.toHaveBeenCalled();
+		expect(error).not.toHaveBeenCalled();
+		log.mockRestore();
+		error.mockRestore();
 	});
 
 	it("reports a spawn that never produced a process at all", async () => {
