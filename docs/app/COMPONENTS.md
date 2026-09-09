@@ -573,7 +573,7 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 
 | Component | Role |
 |---|---|
-| `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `ContractCoverage`, `SampledSchemaValidation` and `TestValidationSummary` (the last carrying the run's named `pm.test` failures) |
+| `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `CustomMetricsSummary`, `ContractCoverage`, `SampledSchemaValidation`, `ScriptLifecycleSummary`, `RequestElementsSummary` (a single-request run's own `extract.*`/`assert.*`/`timer.*` outcomes, issues #1594/#1641 - absent for a scenario run, whose per-step tallies live in the Steps tab instead) and `TestValidationSummary` (the last carrying the run's named `pm.test` failures) |
 | `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`), plus any stretch the host spent asleep under the run (`stores/host-sleep-store.ts`, issue #1357); silent for a clean run that the machine stayed awake for |
 | `PerformanceTab.tsx` | Latency/throughput detail |
 | `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response |
