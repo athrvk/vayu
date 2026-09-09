@@ -204,11 +204,7 @@ TEST (LogRecordSchemaTest, AConvertedNumericFieldStaysNativeJsonNotAStringifiedS
     << record.at ("msg");
 }
 
-// Issue #1557's reopen: the propertyNames pattern was `^[a-z][a-z0-9_]*$`,
-// which refuses every lowerCamelCase field the engine actually emits -
-// `runId`, `requestId`, `environmentId`, `cacheKb`, `busyTimeoutMs` among
-// them - so a real log file failed this schema on its own field names, not
-// only on fixtures. Mirrors two real call sites
+// Issue #1557's reopen. Mirrors two real call sites
 // (`http/routes/execution.cpp`'s "Design Mode send" and `db/database.cpp`'s
 // "Database initialized with WAL mode") rather than inventing new field
 // names, so a schema change that widens the pattern enough to admit fixture

@@ -206,7 +206,8 @@ MetricsCollector::Percentiles percentiles_from_latencies (std::vector<double> la
 std::optional<vayu::core::ValidationVerdict> validate_step_response (const SpecBinding& spec,
 const std::optional<ResponseSchemaIndex>& index,
 const ScenarioStep& step,
-const vayu::Response& response) {
+const vayu::Response& response,
+const std::string& run_id) {
     if (!spec.bound ()) {
         return std::nullopt;
     }
@@ -225,8 +226,9 @@ const vayu::Response& response) {
         // A validator that threw is not a response that failed, and it is
         // certainly not a step that did - the design-mode hook's rule, for its
         // reason. The step keeps its outcome and loses only its verdict.
-        vayu::utils::log_warning (
-        "run", "Step schema validation failed: " + std::string (e.what ()));
+        vayu::utils::log_warning ("run",
+        "Step schema validation failed: " + std::string (e.what ()),
+        { { "runId", run_id } });
         return std::nullopt;
     }
 }
@@ -725,8 +727,8 @@ ScenarioSummaryInputs& summary) {
     // nobody made - the same reading that erases `response` from
     // their trace below.
     if (exchange.sent) {
-        record.validation = validate_step_response (
-        ctx.execution->spec, ctx.schema_index, step, exchange.response);
+        record.validation = validate_step_response (ctx.execution->spec,
+        ctx.schema_index, step, exchange.response, ctx.context->run_id);
         if (record.validation) {
             // The step's name and status ride the tally so a failure
             // example read far from the step list still says which

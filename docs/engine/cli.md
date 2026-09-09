@@ -213,7 +213,7 @@ $ vayu-engine --verbose 2
 ...
 13:57:19.123 DEBUG http     GET /health 200 0.4ms 61B
 13:57:20.456 DEBUG http     GET /inbox 200 1.3ms 412B
-13:57:21.789 INFO  http     POST /runs 202 3.1ms 118B
+13:57:21.789 INFO  http     GET /collections/missing 404 0.6ms 42B
 ```
 
 See [Logging](logging.md) for the record behind that rendering, its fields,
