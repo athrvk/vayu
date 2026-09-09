@@ -78,6 +78,17 @@ everything.
   record, never a hand-written field list, because the list drops every field
   added after it was written (`useTreeCrud.ts`'s Duplicate omits the execution
   settings, #1519).
+- **The console is not the log** (#1558): `electron/log.ts` on the main
+  process (`appLogger()` / `mcpLogger()` from `electron/app-log.ts`), and
+  `errors/error-logger.ts` in the renderer, forwarding through it whenever
+  `window.electronAPI` exists. A field, never text, for anything a reader
+  might filter on; one floor from the engine's `logLevel` for every log file
+  in `<data-dir>/logs/`. `electron/**`'s ESLint config bans `console.*`
+  outright (no `warn`/`error` allowance the way the renderer keeps) - a
+  module kept Electron-free for its own tests (`power-save.ts`, `notify.ts`,
+  `quit-shutdown.ts` and others under `electron/`) takes an injected `log`
+  callback instead of importing `log.ts` directly, the same seam it already
+  uses for `ipcMain` and the rest of Electron.
 - Styling: Tailwind CSS v4; all colours via CSS custom properties.
 - **Design system: `docs/design-system.md`**: tokens, elevation, typography,
   component patterns, accessibility. **Read it before touching any UI file.**
@@ -266,6 +277,7 @@ cadence is the proxy that proves it was.
 | `docs/app/openapi.md`               | Spec binding, sync, diff, export from the app's side         |
 | `docs/app/file-name-conventions.md` | The naming conventions themselves                            |
 | `docs/app/building.md`              | App build steps or tooling                                   |
+| `docs/engine/logging.md`            | The app's log record, categories, file names or the IPC path |
 
 **A test that reads a file outside `app/` registers it in
 `src/lib/routed-inputs.testkit.ts`**: a page under `docs/` in

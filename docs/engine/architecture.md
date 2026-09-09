@@ -1269,8 +1269,11 @@ Restore by hand, with the engine stopped.
 
 `vayu-engine` and `vayu-cli` each write one file under `<data-dir>/logs/`
 (`engine_<stamp>.log`, `cli_<stamp>.log`), one JSON record per line, plus a
-text rendering on the console. `logLevel` is the file's floor, `maxLogFileBytes`
-its rotation cap, and the newest 10 per-prefix files survive a start. Every
+text rendering on the console; the Electron app's own port of the same record
+and redaction rule (`electron/log.ts`, issue #1558) writes `app_<stamp>.log`
+alongside them. `logLevel` is the floor for every one of those files,
+`maxLogFileBytes` its rotation cap, and the newest 10 per-prefix files survive
+a start. Every
 route's request line comes from one hook, `install_request_logger`
 (`http/request_log.hpp`), installed on both `httplib::Server` instances the
 engine owns - the management API and the webhook inbox's listener, never the

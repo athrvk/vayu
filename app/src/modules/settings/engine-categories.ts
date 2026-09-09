@@ -96,7 +96,7 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		id: "observability",
 		label: "Observability",
 		description:
-			"Server monitoring, per-phase latency measurement, and the live metrics that feed the dashboard's charts",
+			"Server monitoring, per-phase latency measurement, and the live metrics that feed the dashboard's charts, and the log level for both log files",
 		icon: Activity,
 	},
 	{
