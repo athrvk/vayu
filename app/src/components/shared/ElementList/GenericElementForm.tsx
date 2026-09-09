@@ -12,18 +12,31 @@
  * is editable the day the engine ships it, which is the whole point of the
  * catalogue being schema-carrying rather than a label list.
  *
+ * **Labels come from the schema, not the property key** (issue #1608). Every
+ * property in the engine's catalogue carries `title` and `description` since
+ * issue #1607 - a property with neither (a kind an older engine build still
+ * serves) falls back to its raw key, the same "still editable" guarantee the
+ * kind-level fallback already gives. A `required` property renders before an
+ * optional one; one marked `x-vayu-group: "advanced"` renders under a
+ * disclosure instead, open on mount only when the element already has a
+ * value for one - closed for a fresh element, so the common fields are what
+ * a user sees first. `x-vayu-unit` becomes the numeric field's suffix.
+ *
  * One level of `object` nesting is supported (`assert.status.range`'s
  * `{min, max}`) - see {@link ElementConfigProperty}. Anything deeper, or a
  * form richer than one row per field, ships a bespoke override instead
  * (`elementForms.ts`).
  */
 
+import { useId } from "react";
+import { ChevronRight } from "lucide-react";
 import {
 	NumberSettingRow,
 	SelectSettingRow,
 	ToggleRow,
 } from "@/modules/settings/main/panels/SettingControls";
-import { Input, Label } from "@/components/ui";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger, Input, Label } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
 
 export interface GenericElementFormProps {
@@ -69,14 +82,31 @@ function PropertyRow({
 	onChange: (value: unknown) => void;
 }) {
 	property ??= {};
+	const label = property.title ?? name;
+	const hint = property.description;
+	const unit = property["x-vayu-unit"];
+	// Only the two hand-rolled `Label` + `Input` pairs below need this - the
+	// settings-row primitives (`ToggleRow`, `NumberSettingRow`,
+	// `SelectSettingRow`) already associate their own label internally.
+	const inputId = useId();
+
 	if (property.type === "boolean") {
-		return <ToggleRow label={name} checked={value === true} onChange={onChange} />;
+		return (
+			<ToggleRow
+				label={label}
+				description={hint}
+				checked={value === true}
+				onChange={onChange}
+			/>
+		);
 	}
 
 	if (property.type === "integer" || property.type === "number") {
 		return (
 			<NumberSettingRow
-				label={name}
+				label={label}
+				description={hint}
+				unit={unit}
 				value={asString(value)}
 				integer={property.type === "integer"}
 				min={property.minimum !== undefined ? String(property.minimum) : undefined}
@@ -93,7 +123,8 @@ function PropertyRow({
 	if (property.type === "string" && property.enum && property.enum.length > 0) {
 		return (
 			<SelectSettingRow
-				label={name}
+				label={label}
+				description={hint}
 				value={asString(value) || property.enum[0]}
 				onChange={onChange}
 				options={property.enum.map((option) => ({ value: option, label: option }))}
@@ -106,8 +137,12 @@ function PropertyRow({
 		const itemType = property.items?.type;
 		return (
 			<div className="space-y-1.5">
-				<Label className="text-sm font-medium">{name}</Label>
+				<Label htmlFor={inputId} className="text-sm font-medium">
+					{label}
+				</Label>
+				{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
 				<Input
+					id={inputId}
 					value={items.join(", ")}
 					placeholder="Comma-separated values"
 					onChange={(e) => {
@@ -129,7 +164,8 @@ function PropertyRow({
 	if (property.type === "object" && property.properties) {
 		return (
 			<fieldset className="space-y-3 rounded-md border border-rule surface-sunken p-3">
-				<legend className="px-1 text-sm font-medium">{name}</legend>
+				<legend className="px-1 text-sm font-medium">{label}</legend>
+				{hint && <p className="px-1 text-xs text-muted-foreground">{hint}</p>}
 				{Object.entries(property.properties).map(([childName, childProperty]) => (
 					<PropertyRow
 						key={childName}
@@ -152,8 +188,15 @@ function PropertyRow({
 	// rather than silently unrenderable.
 	return (
 		<div className="space-y-1.5">
-			<Label className="text-sm font-medium">{name}</Label>
-			<Input value={asString(value)} onChange={(e) => onChange(e.target.value)} />
+			<Label htmlFor={inputId} className="text-sm font-medium">
+				{label}
+			</Label>
+			{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+			<Input
+				id={inputId}
+				value={asString(value)}
+				onChange={(e) => onChange(e.target.value)}
+			/>
 		</div>
 	);
 }
@@ -164,9 +207,22 @@ export function GenericElementForm({ schema, config, onChange }: GenericElementF
 	if (names.length === 0) {
 		return <p className="text-xs text-muted-foreground">This kind takes no configuration.</p>;
 	}
+
+	const required = new Set(schema.required ?? []);
+	const advancedNames = names.filter((name) => properties[name]?.["x-vayu-group"] === "advanced");
+	const mainNames = names
+		.filter((name) => !advancedNames.includes(name))
+		.sort((a, b) => Number(!required.has(a)) - Number(!required.has(b)));
+	// Open on mount only when the element already carries a value for one -
+	// a fresh element starts with the common fields, not a disclosure to find
+	// the one already-set advanced property is behind.
+	const advancedIsSet = advancedNames.some(
+		(name) => Object.prototype.hasOwnProperty.call(config, name) && config[name] !== undefined
+	);
+
 	return (
 		<div className="space-y-3">
-			{names.map((name) => (
+			{mainNames.map((name) => (
 				<PropertyRow
 					key={name}
 					name={name}
@@ -175,6 +231,30 @@ export function GenericElementForm({ schema, config, onChange }: GenericElementF
 					onChange={(value) => onChange(setField(config, name, value))}
 				/>
 			))}
+			{advancedNames.length > 0 && (
+				<Collapsible defaultOpen={advancedIsSet}>
+					<CollapsibleTrigger
+						className={cn(
+							"flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground",
+							"[&[data-state=open]>svg]:rotate-90"
+						)}
+					>
+						<ChevronRight className="h-3 w-3 transition-transform" />
+						Advanced
+					</CollapsibleTrigger>
+					<CollapsibleContent className="space-y-3 pt-2">
+						{advancedNames.map((name) => (
+							<PropertyRow
+								key={name}
+								name={name}
+								property={properties[name]}
+								value={config[name]}
+								onChange={(value) => onChange(setField(config, name, value))}
+							/>
+						))}
+					</CollapsibleContent>
+				</Collapsible>
+			)}
 		</div>
 	);
 }

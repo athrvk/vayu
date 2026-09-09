@@ -6,16 +6,17 @@
  */
 
 /**
- * ElementList (issue #1512)
+ * ElementList (issue #1512, reworked into a card list by issue #1608)
  *
  * An ordered list of a request's or collection's own elements - extractors,
- * assertions, timers, controllers and scripts - each row a kind badge, an
- * optional name, an enable switch, reorder buttons, delete, and the kind's
- * form below it. The default form is generated from the kind's JSON Schema
- * (`GenericElementForm`); a bespoke override (`elementForms.ts`) replaces it
- * for a kind that needs one. The Add control is a searchable picker over the
- * catalogue, grouped by category (`element-categories.ts`), never a
- * hand-written list, so a kind the engine adds needs no change here.
+ * assertions, timers, controllers and scripts - each a collapsible card: a
+ * family icon, the element's name or its kind's label, a one-line summary of
+ * its config while collapsed, an enable switch, and a `⋯` menu for rename,
+ * move, duplicate and delete. The body, shown expanded, is the kind's form:
+ * generated from its JSON Schema (`GenericElementForm`) unless a bespoke
+ * override (`elementForms.ts`) replaces it. The Add control is a searchable
+ * picker over the catalogue, grouped by category (`element-categories.ts`),
+ * never a hand-written list, so a kind the engine adds needs no change here.
  *
  * A primitive under `components/shared/`, so it takes no feature-module
  * context: the request builder's Elements tab and the collection detail's
@@ -31,7 +32,7 @@
  */
 
 import { useState, type ReactNode } from "react";
-import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import {
 	Button,
 	Command,
@@ -40,30 +41,51 @@ import {
 	CommandInput,
 	CommandItem,
 	CommandList,
+	DeleteConfirmDialog,
 	Input,
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
+	Switch,
 } from "@/components/ui";
-import { TruncatedText } from "@/components/shared/TruncatedText";
-import { ToggleRow } from "@/modules/settings/main/panels/SettingControls";
+import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { generateId } from "@/lib/id";
+import { isBlankScriptElement } from "@/lib/elements";
+import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
-import { categoryLabel, categoryOrder, effectiveCategory } from "./element-categories";
+import {
+	categoryIcon,
+	categoryLabel,
+	categoryOrder,
+	effectiveCategory,
+} from "./element-categories";
+import { summarizeElement } from "./summarize-element";
 
 /** The picker's "Recently used" group heading - the cap lives in `layout-store`. */
 const RECENTLY_USED_HEADING = "Recently used";
+
+/**
+ * The empty state's quick-add chips (issue #1608), in the order they render.
+ * `script.setup` is `collectionOnly` (#1499), so it only ever appears among
+ * `kinds` - and therefore only ever renders as a chip - on the collection
+ * tab; the request tab's `kinds` prop already excludes it.
+ */
+const QUICK_ADD_LABELS: Readonly<Record<string, string>> = {
+	"extract.json": "Extract from JSON",
+	"assert.status": "Assert status code",
+	"script.pre": "Pre-request script",
+	"script.setup": "Setup script",
+};
+const QUICK_ADD_KINDS = Object.keys(QUICK_ADD_LABELS);
 
 export interface ElementListProps {
 	elements: ElementDef[];
 	onChange: (elements: ElementDef[]) => void;
 	kinds: ElementKindSchema[];
-	/** Shown when `elements` is empty, in place of the (otherwise empty) list. */
-	emptyLabel?: string;
 	/**
 	 * Extra content rendered above one element's own form, keyed to that
 	 * element - e.g. the "Names mentioned" row above a `script.*` element's
@@ -95,6 +117,26 @@ function groupedByCategory(kinds: ElementKindSchema[]): Map<string, ElementKindS
 	return new Map([...groups.entries()].sort(([a], [b]) => categoryOrder(a) - categoryOrder(b)));
 }
 
+/** The catalogue entries the empty state offers, in `QUICK_ADD_LABELS`' order. */
+function quickAddCandidates(kinds: ElementKindSchema[]): ElementKindSchema[] {
+	return QUICK_ADD_KINDS.map((kind) => kinds.find((k) => k.kind === kind)).filter(
+		(k): k is ElementKindSchema => k !== undefined
+	);
+}
+
+/**
+ * An element with nothing configured yet - delete asks nothing for one of
+ * these. A blank text field still leaves its key in `config` (`{path: ""}`),
+ * so "nothing configured" means every value is empty rather than the object
+ * itself being `{}`.
+ */
+function isElementBlank(element: ElementDef): boolean {
+	if (isBlankScriptElement(element)) return true;
+	return Object.values(element.config).every(
+		(value) => value === undefined || value === null || value === ""
+	);
+}
+
 /** `value` cmdk filters on - label, description and kind, so any of the three matches a search. */
 function searchValue(kind: ElementKindSchema): string {
 	return `${kind.label} ${kind.description} ${kind.kind}`;
@@ -117,108 +159,187 @@ function ElementRow({
 	kinds,
 	isFirst,
 	isLast,
+	isNew,
 	onUpdate,
 	onRemove,
 	onMove,
+	onDuplicate,
 	renderAboveForm,
 }: {
 	element: ElementDef;
 	kinds: ElementKindSchema[];
 	isFirst: boolean;
 	isLast: boolean;
+	/** Seeds this row's initial collapse state only - added or duplicated this session opens expanded. */
+	isNew: boolean;
 	onUpdate: (element: ElementDef) => void;
 	onRemove: () => void;
 	onMove: (direction: -1 | 1) => void;
+	onDuplicate: () => void;
 	renderAboveForm?: (element: ElementDef) => ReactNode;
 }) {
 	const schema = kinds.find((k) => k.kind === element.kind);
 	const Bespoke = ELEMENT_FORM_OVERRIDES[element.kind];
+	const label = kindLabel(element.kind, kinds);
+	const title = element.name ?? label;
+	const Icon = schema && categoryIcon(effectiveCategory(schema.category));
+	const summary = summarizeElement(element, schema);
+
+	const [open, setOpen] = useState(isNew);
+	const [renaming, setRenaming] = useState(false);
+	const [nameDraft, setNameDraft] = useState(element.name ?? "");
+	const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+	const startRename = () => {
+		// Deferred, not immediate: `onSelect` fires while the `⋯` menu's own
+		// `FocusScope` is still actively trapping focus - autofocusing this
+		// row's rename input in that same commit races the trap and loses (a
+		// `focusin` outside a still-trapped scope is yanked straight back into
+		// it, blurring the input the instant it claims focus). One tick is
+		// enough for the trap's own teardown, tied to the menu closing, to
+		// finish first.
+		setTimeout(() => {
+			setNameDraft(element.name ?? "");
+			setRenaming(true);
+		}, 0);
+	};
+	const commitRename = () => {
+		const trimmed = nameDraft.trim();
+		onUpdate({ ...element, name: trimmed.length > 0 ? trimmed : undefined });
+		setRenaming(false);
+	};
+
+	const handleDelete = () => {
+		if (isElementBlank(element)) onRemove();
+		else setConfirmingDelete(true);
+	};
+
+	const actions: RowAction[] = [
+		{ label: "Rename", icon: Pencil, onSelect: startRename },
+		{ label: "Move up", icon: ArrowUp, onSelect: () => onMove(-1), disabled: isFirst },
+		{ label: "Move down", icon: ArrowDown, onSelect: () => onMove(1), disabled: isLast },
+		{ label: "Duplicate", icon: Copy, onSelect: onDuplicate },
+		{ label: "Delete", icon: Trash2, onSelect: handleDelete, destructive: true },
+	];
+
+	const handleRowKeyDown = (e: React.KeyboardEvent) => {
+		if (renaming || !e.altKey) return;
+		if (e.key === "ArrowUp") {
+			e.preventDefault();
+			onMove(-1);
+		} else if (e.key === "ArrowDown") {
+			e.preventDefault();
+			onMove(1);
+		}
+	};
 
 	return (
 		<div
 			className={cn(
-				"space-y-3 rounded-md border border-rule surface-card p-3",
+				"rounded-md border border-rule surface-card",
 				!element.enabled && "opacity-60"
 			)}
 			data-element-row={element.kind}
 		>
-			<div className="flex items-center gap-2">
-				<div className="flex flex-col">
-					<Button
-						variant="rowAction"
-						size="icon"
-						className="h-4 w-6"
-						aria-label="Move element up"
-						disabled={isFirst}
-						onClick={() => onMove(-1)}
-					>
-						<ChevronUp className="h-3 w-3" />
-					</Button>
-					<Button
-						variant="rowAction"
-						size="icon"
-						className="h-4 w-6"
-						aria-label="Move element down"
-						disabled={isLast}
-						onClick={() => onMove(1)}
-					>
-						<ChevronDown className="h-3 w-3" />
-					</Button>
-				</div>
-				<span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium shrink-0">
-					{kindLabel(element.kind, kinds)}
-				</span>
-				<Input
-					value={element.name ?? ""}
-					placeholder="Optional name"
-					className="h-8 flex-1"
-					onChange={(e) => onUpdate({ ...element, name: e.target.value || undefined })}
-				/>
-				<ToggleRow
-					label="Enabled"
-					ariaLabel={`Enable ${kindLabel(element.kind, kinds)}`}
-					checked={element.enabled}
-					onChange={(enabled) => onUpdate({ ...element, enabled })}
-					className="shrink-0"
-				/>
-				<Button
-					variant="rowActionDestructive"
-					size="icon"
-					aria-label={`Delete ${kindLabel(element.kind, kinds)}`}
-					onClick={onRemove}
+			<div className="flex h-8 items-center gap-1 px-2">
+				<button
+					type="button"
+					aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
+					aria-expanded={open}
+					onClick={() => setOpen((o) => !o)}
+					onKeyDown={handleRowKeyDown}
+					className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
 				>
-					<Trash2 className="h-4 w-4" />
-				</Button>
+					<ChevronRight
+						className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")}
+					/>
+				</button>
+				{renaming ? (
+					<Input
+						autoFocus
+						value={nameDraft}
+						placeholder={label}
+						className="h-6 flex-1"
+						onChange={(e) => setNameDraft(e.target.value)}
+						onBlur={commitRename}
+						onKeyDown={(e) => {
+							if (isCommitEnter(e)) {
+								e.preventDefault();
+								commitRename();
+							} else if (e.key === "Escape") {
+								e.preventDefault();
+								setRenaming(false);
+							}
+						}}
+					/>
+				) : (
+					<button
+						type="button"
+						onClick={() => setOpen((o) => !o)}
+						onKeyDown={handleRowKeyDown}
+						className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
+					>
+						{/* eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static CATEGORY_ICONS map (via categoryIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope. */}
+						{Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />}
+						<span className="shrink-0 truncate text-sm">
+							<span className="font-medium">{title}</span>
+							{element.name && (
+								<span className="ml-1.5 text-muted-foreground">{label}</span>
+							)}
+						</span>
+						{!open && summary && (
+							<TruncatedText className="min-w-0 flex-1 text-xs text-muted-foreground">
+								{summary}
+							</TruncatedText>
+						)}
+					</button>
+				)}
+				<Switch
+					checked={element.enabled}
+					aria-label={`Enable ${label}`}
+					className="shrink-0"
+					onCheckedChange={(enabled) => onUpdate({ ...element, enabled })}
+				/>
+				<RowActionsMenu label={`More actions for ${label}`} actions={actions} />
 			</div>
-			{renderAboveForm?.(element)}
-			{Bespoke ? (
-				<Bespoke
-					kind={element.kind}
-					config={element.config}
-					onChange={(config) => onUpdate({ ...element, config })}
-				/>
-			) : schema ? (
-				<GenericElementForm
-					schema={schema.configSchema}
-					config={element.config}
-					onChange={(config) => onUpdate({ ...element, config })}
-				/>
-			) : (
-				<p className="text-xs text-muted-foreground">
-					This engine no longer registers kind &quot;{element.kind}&quot;.
-				</p>
+			{open && (
+				<div className="space-y-3 border-t border-rule px-3 pb-3 pt-3">
+					{renderAboveForm?.(element)}
+					{Bespoke ? (
+						<Bespoke
+							kind={element.kind}
+							config={element.config}
+							description={schema?.description ?? ""}
+							onChange={(config) => onUpdate({ ...element, config })}
+						/>
+					) : schema ? (
+						<GenericElementForm
+							schema={schema.configSchema}
+							config={element.config}
+							onChange={(config) => onUpdate({ ...element, config })}
+						/>
+					) : (
+						<p className="text-xs text-muted-foreground">
+							This engine no longer registers kind &quot;{element.kind}&quot;.
+						</p>
+					)}
+				</div>
 			)}
+			<DeleteConfirmDialog
+				open={confirmingDelete}
+				onOpenChange={setConfirmingDelete}
+				title={`Delete ${title}?`}
+				description={`This removes "${title}" and its configuration. This cannot be undone.`}
+				onConfirm={() => {
+					setConfirmingDelete(false);
+					onRemove();
+				}}
+			/>
 		</div>
 	);
 }
 
-export function ElementList({
-	elements,
-	onChange,
-	kinds,
-	emptyLabel,
-	renderAboveForm,
-}: ElementListProps) {
+export function ElementList({ elements, onChange, kinds, renderAboveForm }: ElementListProps) {
 	const groups = groupedByCategory(kinds);
 	const [pickerOpen, setPickerOpen] = useState(false);
 	const recentKindIds = useLayoutStore((s) => s.recentElementKinds);
@@ -226,6 +347,11 @@ export function ElementList({
 	const recentKinds = recentKindIds
 		.map((kind) => kinds.find((k) => k.kind === kind))
 		.filter((k): k is ElementKindSchema => k !== undefined);
+	// Seeds a just-added or just-duplicated row's initial collapse state only
+	// (read once, in `ElementRow`'s own `useState` initializer) - the most
+	// recent id is all that needs holding, since an older row already
+	// captured its own answer into its own local state at its own mount.
+	const [justAddedId, setJustAddedId] = useState<string | null>(null);
 
 	function addElement(kind: ElementKindSchema) {
 		const next: ElementDef = {
@@ -234,6 +360,7 @@ export function ElementList({
 			enabled: true,
 			config: {},
 		};
+		setJustAddedId(next.id);
 		onChange([...elements, next]);
 		addRecentElementKind(kind.kind);
 		setPickerOpen(false);
@@ -255,24 +382,56 @@ export function ElementList({
 		onChange(next);
 	}
 
+	function duplicateAt(index: number) {
+		const original = elements[index];
+		const copy: ElementDef = {
+			...original,
+			id: `el_${generateId()}`,
+			name: `${original.name ?? kindLabel(original.kind, kinds)} copy`,
+		};
+		setJustAddedId(copy.id);
+		onChange([...elements.slice(0, index + 1), copy, ...elements.slice(index + 1)]);
+	}
+
 	return (
 		<div className="space-y-3">
-			{elements.length === 0 && emptyLabel && (
-				<p className="text-sm text-muted-foreground">{emptyLabel}</p>
+			{elements.length === 0 ? (
+				<div className="space-y-3 rounded-md border border-dashed border-rule p-4 text-center">
+					<p className="text-sm text-muted-foreground">
+						No elements yet. Add one from the menu below, or start with:
+					</p>
+					<div className="flex flex-wrap justify-center gap-2">
+						{quickAddCandidates(kinds).map((kind) => (
+							<Button
+								key={kind.kind}
+								type="button"
+								variant="outline"
+								size="sm"
+								className="rounded-full"
+								onClick={() => addElement(kind)}
+							>
+								{QUICK_ADD_LABELS[kind.kind]}
+							</Button>
+						))}
+					</div>
+				</div>
+			) : (
+				elements.map((element, index) => (
+					<ElementRow
+						key={element.id}
+						element={element}
+						kinds={kinds}
+						isFirst={index === 0}
+						isLast={index === elements.length - 1}
+						isNew={element.id === justAddedId}
+						onUpdate={(next) => updateAt(index, next)}
+						onRemove={() => removeAt(index)}
+						onMove={(direction) => moveAt(index, direction)}
+						onDuplicate={() => duplicateAt(index)}
+						renderAboveForm={renderAboveForm}
+					/>
+				))
 			)}
-			{elements.map((element, index) => (
-				<ElementRow
-					key={element.id}
-					element={element}
-					kinds={kinds}
-					isFirst={index === 0}
-					isLast={index === elements.length - 1}
-					onUpdate={(next) => updateAt(index, next)}
-					onRemove={() => removeAt(index)}
-					onMove={(direction) => moveAt(index, direction)}
-					renderAboveForm={renderAboveForm}
-				/>
-			))}
 			<Popover open={pickerOpen} onOpenChange={setPickerOpen}>
 				<PopoverTrigger asChild>
 					<Button variant="outline" size="sm">

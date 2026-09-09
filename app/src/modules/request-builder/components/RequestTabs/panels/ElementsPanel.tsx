@@ -64,7 +64,6 @@ export default function ElementsPanel() {
 				elements={request.elements}
 				onChange={(elements) => updateField("elements", elements)}
 				kinds={addableKinds}
-				emptyLabel="No elements yet. Add an extractor, assertion, timer or script from the menu below."
 				renderAboveForm={(element) => {
 					if (element.kind !== "script.pre" && element.kind !== "script.post")
 						return null;

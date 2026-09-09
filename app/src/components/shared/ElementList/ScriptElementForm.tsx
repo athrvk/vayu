@@ -31,6 +31,12 @@
  * or collection can show a `script.pre` and a `script.post` row on the same
  * screen; `ScriptSnippets` used to read the store's boolean directly, so
  * opening one opened both.
+ *
+ * **The intro sentence is the kind's own `description`** (issue #1608), not
+ * a hard-coded pair of strings here - `script.pre` and `script.post`'s
+ * catalogue descriptions absorbed that explanatory text in issue #1607, so
+ * it is authored once and reused as both the card's collapsed summary
+ * fallback and this form's lead line.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -49,6 +55,8 @@ import { cn } from "@/lib/utils";
 export interface ScriptElementFormProps {
 	kind: string;
 	config: Record<string, unknown>;
+	/** The kind's own catalogue description - the form's lead sentence. */
+	description: string;
 	onChange: (config: Record<string, unknown>) => void;
 }
 
@@ -73,28 +81,7 @@ function useDebouncedHeightSave(save: (height: number) => void) {
 	);
 }
 
-/** Inline code in the intro sentence - a bare element, not a component. */
-const CODE_CLASS = "bg-muted px-1 rounded-md";
-
-const PRE_INTRO = (
-	<>
-		Execute JavaScript before sending the request. Use the{" "}
-		<code className={CODE_CLASS}>pm</code> API. Edits to{" "}
-		<code className={CODE_CLASS}>pm.request</code> change what is actually sent. Load tests do
-		not run pre-request scripts at all - this one runs on Send and in a collection run.
-	</>
-);
-
-const POST_INTRO = (
-	<>
-		Execute JavaScript after receiving the response. Use{" "}
-		<code className={CODE_CLASS}>pm.test()</code> for assertions.{" "}
-		<code className={CODE_CLASS}>pm.response.to</code> asserts about the response itself;{" "}
-		<code className={CODE_CLASS}>pm.expect</code> asserts about any value you hand it.
-	</>
-);
-
-export function ScriptElementForm({ kind, config, onChange }: ScriptElementFormProps) {
+export function ScriptElementForm({ kind, config, description, onChange }: ScriptElementFormProps) {
 	const script = typeof config.script === "string" ? config.script : "";
 	const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
 	const isPre = kind === "script.pre";
@@ -153,7 +140,7 @@ export function ScriptElementForm({ kind, config, onChange }: ScriptElementFormP
 
 	return (
 		<div className="flex flex-col gap-2">
-			<p className="text-xs text-muted-foreground">{isPre ? PRE_INTRO : POST_INTRO}</p>
+			<p className="text-xs text-muted-foreground">{description}</p>
 			<div className="flex flex-col">
 				<div
 					// `min-h-0`: the GraphQL body's own trap (`GraphQLBody.tsx:812-817`) -
