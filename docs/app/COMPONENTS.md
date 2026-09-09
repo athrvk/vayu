@@ -2155,7 +2155,10 @@ a three-size width scale - `lg` / `xl` / `2xl`, issues #701 and #892) and
 and the footer that can grow goes in **`DialogBody`**, which is the band that
 scrolls - so the title and the primary action stay on screen and the corner
 close button, positioned against the panel, does not scroll away with the
-content. `ImportModal` and `CommandDialog` opt out because each already has a
+content. The band also carries its own 4px/1px clearance (issue #1627), so a
+focused field's outset ring is never clipped by the `overflow-y-auto` that
+makes it scroll, and no call site needs to add its own. `ImportModal` and
+`CommandDialog` opt out because each already has a
 self-scrolling band of its own, and `DeleteConfirmDialog` has no middle at all;
 every other call site takes the band, which `dialog-height-band.test.tsx`
 enforces. `command` keeps the shape without the primitive: `CommandFooter` is a

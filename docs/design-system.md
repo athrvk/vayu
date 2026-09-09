@@ -1289,6 +1289,9 @@ ring 2px out and the panel still cuts it off. The `components/ui` primitives are
 unaffected either way, since they set `focus-visible:outline-none` and paint
 their own ring.
 
+`DialogBody` carries its own clearance for exactly this (issue #1627): a
+field inside a dialog needs nothing.
+
 **Which is why a primitive fixes its own clipping, with `ring-inset`.** Neither
 `.panel-clip` nor `.focus-ring-inset` reaches a Tailwind `ring` - both move
 `outline-offset`, and a primitive has already turned its outline off. `TabsTrigger`

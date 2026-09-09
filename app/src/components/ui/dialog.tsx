@@ -162,11 +162,21 @@ const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
  *
  * A short dialog does not need one - a confirm, a rename, a three-field form.
  * The panel keeps its own `overflow-y-auto` for those.
+ *
+ * `overflow-y-auto` computes `overflow-x` to `auto` too, so the band clips on
+ * all four sides - a focused field's outset ring loses its left and right
+ * edges here, and the first and last rows lose theirs at either scroll end
+ * (issue #1627). `-mx-1 px-1 -my-px py-px` folds 4px of horizontal and 1px of
+ * vertical clearance back with negative margins, so no call site's layout
+ * shifts and no call site needs its own copy.
  */
 const DialogBody = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
 	<div
 		data-slot="dialog-body"
-		className={cn("min-h-0 min-w-0 flex-auto overflow-y-auto", className)}
+		className={cn(
+			"min-h-0 min-w-0 flex-auto overflow-y-auto -mx-1 px-1 -my-px py-px",
+			className
+		)}
 		{...props}
 	/>
 );
