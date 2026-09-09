@@ -142,8 +142,14 @@ ElementKind make_timer_throughput_kind () {
     kind.config_schema = {
         { "type", "object" },
         { "properties",
-        { { "targetPerMinute", { { "type", "number" }, { "exclusiveMinimum", 0 } } },
-        { "perUser", { { "type", "boolean" } } } } },
+        { { "targetPerMinute",
+          { { "type", "number" }, { "exclusiveMinimum", 0 }, { "title", "Target rate" },
+          { "description", "The number of times this node should start per minute." } } },
+        { "perUser",
+        { { "type", "boolean" }, { "title", "Per user" }, { "x-vayu-group", "advanced" },
+        { "description",
+        "Applies the target rate to each virtual user independently "
+        "instead of sharing one budget across all of them." } } } } },
         { "required", { "targetPerMinute" } },
         { "additionalProperties", false },
     };

@@ -131,8 +131,14 @@ ElementKind make_control_transaction_kind () {
     kind.config_schema = {
         { "type", "object" },
         { "properties",
-        { { "name", { { "type", "string" }, { "minLength", 1 } } },
-        { "includeTimers", { { "type", "boolean" } } } } },
+        { { "name",
+          { { "type", "string" }, { "minLength", 1 }, { "title", "Transaction name" },
+          { "description", "The name this folder's summed latency is reported under." } } },
+        { "includeTimers",
+        { { "type", "boolean" }, { "title", "Include timers" },
+        { "description",
+        "Folds a between-member timer wait into the transaction's "
+        "summed time." } } } } },
         { "required", { "name" } },
         { "additionalProperties", false },
     };

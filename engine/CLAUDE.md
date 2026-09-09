@@ -450,7 +450,10 @@ logged as a warning: it means a client skipped composition.
   run uses; a script written there cannot resolve into the run's own
   submissions (no residual pass exists on this path), only reach the network
   itself (`pm.sendRequest`) and gate or report on the run. Do not add another
-  behaviour column beside `elements`; a new behaviour is an element kind.
+  behaviour column beside `elements`; a new behaviour is an element kind. A
+  kind's labels are in its schema (#1607): every `config_schema` property
+  carries `title` and `description`, so the app's generated form never falls
+  back to a raw property name.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the

@@ -1491,13 +1491,25 @@ from, and what `docs/engine/elements.md`'s kind table is checked against.
     "collectionOnly": false,
     "configSchema": {
       "type": "object",
-      "properties": { "elementId": { "type": "string", "minLength": 1 } },
+      "properties": {
+        "elementId": {
+          "type": "string",
+          "minLength": 1,
+          "title": "Element to disable",
+          "description": "The id of an inherited element to drop from this request or collection's resolved list."
+        }
+      },
       "required": ["elementId"],
       "additionalProperties": false
     }
   }
 ]
 ```
+
+Every property of every kind's `configSchema` carries a `title` and a `description` (issue
+#1607), plus, where relevant, `x-vayu-group: "advanced"` (folds the property under a disclosure)
+or `x-vayu-unit` (`"ms"`, `"%"` or `"B"`, a numeric suffix to render) - see
+[Elements](elements.md#schema-annotations).
 
 Phase 0 also registers `script.pre` and `script.post`, validate-only like
 `inherit.disable` - so a request or collection the startup fold migrated

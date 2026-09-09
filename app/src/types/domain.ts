@@ -634,6 +634,14 @@ export interface ElementConfigProperty {
 	/** Present only when `type` is `"object"` - one level deep, never further. */
 	properties?: Record<string, ElementConfigProperty | null>;
 	required?: string[];
+	/** A short label for this field (issue #1607), in place of its raw key. */
+	title?: string;
+	/** One sentence of hint text for this field (issue #1607). */
+	description?: string;
+	/** `"advanced"` folds this field under a disclosure instead of the form's main rows (issue #1607). */
+	"x-vayu-group"?: "advanced";
+	/** A numeric suffix to render beside this field's value: `"ms"`, `"%"` or `"B"` (issue #1607). */
+	"x-vayu-unit"?: "ms" | "%" | "B";
 }
 
 /**

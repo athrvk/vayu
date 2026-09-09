@@ -102,7 +102,12 @@ ElementKind make_control_loop_kind () {
     };
     kind.config_schema = {
         { "type", "object" },
-        { "properties", { { "count", { { "type", "integer" }, { "minimum", 1 } } } } },
+        { "properties",
+        { { "count",
+        { { "type", "integer" }, { "minimum", 1 }, { "title", "Repeat count" },
+        { "description",
+        "How many times to walk this folder's members per "
+        "iteration." } } } } },
         { "required", { "count" } },
         { "additionalProperties", false },
     };

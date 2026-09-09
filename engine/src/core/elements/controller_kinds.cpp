@@ -318,8 +318,11 @@ ElementKind make_control_if_kind () {
         { "type", "object" },
         { "properties",
         { { "condition",
-        { { "type", "string" },
-        { "pattern", R"(^\s*\{\{[^}]+\}\}\s*(==|!=|matches)\s*\S.*$|^\s*\{\{[^}]+\}\}\s*exists\s*$)" } } } } },
+        { { "type", "string" }, { "pattern", R"(^\s*\{\{[^}]+\}\}\s*(==|!=|matches)\s*\S.*$|^\s*\{\{[^}]+\}\}\s*exists\s*$)" },
+        { "title", "Condition" },
+        { "description",
+        "A {{variable}} comparison (==, !=, matches or exists) that "
+        "must hold for this step, or folder, to run." } } } } },
         { "required", { "condition" } },
         { "additionalProperties", false },
     };
@@ -361,8 +364,21 @@ ElementKind make_control_switch_kind () {
     kind.config_schema = {
         { "type", "object" },
         { "properties",
-        { { "variable", { { "type", "string" }, { "minLength", 1 } } },
-        { "cases", { { "type", "object" } } }, { "default", { { "type", "string" } } } } },
+        { { "variable",
+          { { "type", "string" }, { "minLength", 1 }, { "title", "Variable" },
+          { "description",
+          "The variable whose resolved value picks which case to "
+          "route to." } } },
+        { "cases",
+        { { "type", "object" }, { "title", "Cases" },
+        { "description",
+        "A map from a variable's value to the folder member's name "
+        "to route to." } } },
+        { "default",
+        { { "type", "string" }, { "title", "Default case" },
+        { "description",
+        "The folder member to route to when no case matches the "
+        "variable's value." } } } } },
         { "required", { "variable", "cases" } },
         { "additionalProperties", false },
     };
@@ -392,9 +408,20 @@ ElementKind make_control_throughput_kind () {
     kind.config_schema         = {
         { "type", "object" },
         { "properties",
-                { { "percent", { { "type", "number" }, { "minimum", 0 }, { "maximum", 100 } } },
-                { "everyN", { { "type", "integer" }, { "minimum", 1 } } },
-                { "perUser", { { "type", "boolean" } } } } },
+                { { "percent",
+                  { { "type", "number" }, { "minimum", 0 }, { "maximum", 100 },
+                  { "title", "Percent" }, { "x-vayu-unit", "%" },
+                  { "description",
+                  "Runs this share of occurrences, decided on the producer's "
+                          "own counter." } } },
+                { "everyN",
+                { { "type", "integer" }, { "minimum", 1 }, { "title", "Every Nth" },
+                { "description", "Runs only every Nth occurrence." } } },
+                { "perUser",
+                { { "type", "boolean" }, { "title", "Per user" }, { "x-vayu-group", "advanced" },
+                { "description",
+                "Counts occurrences per virtual user instead of sharing "
+                        "one counter across all of them." } } } } },
         { "additionalProperties", false },
     };
     return kind;
