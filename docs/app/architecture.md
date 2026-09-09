@@ -128,7 +128,7 @@ The React app follows a component-based architecture:
 ```
 src/
 ├── components/          # Shared UI components
-│   ├── layout/         # Shell, TitleBar, TabStrip, Drawer, Dock, ContextBar
+│   ├── layout/         # Shell, TitleBar, TabStrip, ActivityRail, Drawer, Dock, ContextBar, ContextRail
 │   ├── shared/         # Cross-feature shared components
 │   └── ui/             # UI primitives (Radix UI)
 ├── lib/                # Shared libraries

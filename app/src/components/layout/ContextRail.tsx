@@ -117,6 +117,7 @@ export function ContextRail() {
 						active={contextBarOpen && expanded}
 						onClick={() => onSectionClick(section, sections)}
 						label={section.title}
+						side="right"
 						variant="tile"
 					>
 						<Icon className="w-4 h-4" />

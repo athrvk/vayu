@@ -17,13 +17,23 @@ export interface RailButtonProps {
 	shortcut?: string;
 	children: React.ReactNode;
 	/**
-	 * `"edge-left"` / `"edge-right"` paint a 2px accent bar on that side when
-	 * active - the IntelliJ/VS Code convention for a rail's current item - and
-	 * nothing else, so the rail never reads as a row of filled tiles. `"tile"`
-	 * is the app's ordinary icon-toggle look (`bg-accent`), for a rail button
-	 * that is not primary navigation.
+	 * Which window edge this button's rail sits on - which side the active
+	 * indicator (for the `"indicator"` variant) paints on, and which side the
+	 * tooltip opens on. The tooltip always opens away from the window edge:
+	 * a rail on the right edge whose tooltip opened further right would run
+	 * off-screen.
 	 */
-	variant: "edge-left" | "edge-right" | "tile";
+	side: "left" | "right";
+	/**
+	 * `"indicator"` paints a 2px accent bar on `side` when active and nothing
+	 * else - the IntelliJ/VS Code convention for a rail's current item - so
+	 * the rail never reads as a row of filled tiles. `ActivityRail` uses this:
+	 * one mutually-exclusive choice of what the Drawer shows.
+	 * `"tile"` is the app's ordinary icon-toggle look (`bg-accent`), for a
+	 * multi-select set of buttons rather than one current item -
+	 * `ContextRail`'s sections, any of which can be expanded at once.
+	 */
+	variant: "indicator" | "tile";
 	/** Roving tabindex: -1 for every button but the one arrow keys would land on. */
 	tabIndex?: number;
 }
@@ -42,27 +52,24 @@ export function RailButton({
 	label,
 	shortcut,
 	children,
+	side,
 	variant,
 	tabIndex,
 }: RailButtonProps) {
+	const borderSide = side === "left" ? "border-l-2" : "border-r-2";
 	const activeClass =
 		variant === "tile"
 			? "bg-accent text-accent-foreground"
 			: cn(
 					"text-foreground",
-					variant === "edge-left"
-						? "border-l-2 border-l-primary"
-						: "border-r-2 border-r-primary"
+					borderSide,
+					side === "left" ? "border-l-primary" : "border-r-primary"
 				);
-	const idleClass =
-		variant === "tile"
-			? "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-			: cn(
-					"text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-					variant === "edge-left"
-						? "border-l-2 border-l-transparent"
-						: "border-r-2 border-r-transparent"
-				);
+	const idleClass = cn(
+		"text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+		variant === "indicator" &&
+			cn(borderSide, side === "left" ? "border-l-transparent" : "border-r-transparent")
+	);
 
 	return (
 		<Tooltip>
@@ -81,7 +88,8 @@ export function RailButton({
 					{children}
 				</button>
 			</TooltipTrigger>
-			<TooltipContent side={variant === "edge-right" ? "left" : "right"}>
+			{/* Away from the window edge this button's rail sits on - see the `side` doc above. */}
+			<TooltipContent side={side === "left" ? "right" : "left"}>
 				<p>{shortcut ? `${label} ${shortcut}` : label}</p>
 			</TooltipContent>
 		</Tooltip>

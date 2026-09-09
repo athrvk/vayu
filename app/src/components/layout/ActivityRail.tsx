@@ -99,7 +99,8 @@ export function ActivityRail() {
 						onClick={() => activateDrawerView(view)}
 						label={label}
 						shortcut={formatChord(DRAWER_VIEW_CHORDS[view])}
-						variant="edge-left"
+						side="left"
+						variant="indicator"
 						tabIndex={isRovingStop ? 0 : -1}
 					>
 						<Icon className="w-4 h-4" />

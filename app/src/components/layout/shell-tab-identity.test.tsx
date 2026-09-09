@@ -123,6 +123,21 @@ describe("tab content identity across the drawer", () => {
 		expect(strip.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 
+	// #1615's own geometry claim: ContextRail stays reachable when ContextBar
+	// overlays `main` below 1200px. `ContextBar`'s overlay mode positions
+	// `absolute` against its own `relative` parent - the row holding it and
+	// `main` and nothing else - so the rail has to sit one level further out,
+	// never inside that row, or the overlay would cover it along with `main`.
+	it("keeps ContextRail outside the box ContextBar's overlay positions from", () => {
+		renderShell();
+		const main = screen.getByRole("main");
+		const overlayBox = main.parentElement as HTMLElement;
+		const contextRail = screen.getByTestId("context-rail");
+
+		expect(overlayBox.contains(contextRail)).toBe(false);
+		expect(overlayBox.parentElement?.contains(contextRail)).toBe(true);
+	});
+
 	/*
 	 * The tabs pattern is a round trip, and only Shell can see both ends: the
 	 * strip's `aria-controls` has to land on an element that exists, and that
