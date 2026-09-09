@@ -255,6 +255,12 @@ struct ReportExtras {
     // Per-step latency and counts, verbatim from the summary. Empty for a
     // design-mode run, which reports its steps as `results[]` rows instead.
     nlohmann::json step_breakdown = nlohmann::json::array ();
+    // Every `control.transaction` name that closed at least once this run
+    // (issue #1515), `{ name, count, errors, latency }` per entry - verbatim
+    // from the summary, which both run modes already write it into
+    // (`scenario_runner.cpp`, `scenario_load.cpp`). Empty for a run with no
+    // `control.transaction` element, or one whose folder never closed.
+    nlohmann::json transactions = nlohmann::json::array ();
     // Non-zero means this run stored response headers and bodies verbatim.
     // Capture does not redact, by decision, so the Samples tab reads this to
     // warn rather than leaving the reader to infer it.
@@ -483,6 +489,9 @@ void apply_summary_scenario (const nlohmann::json& summary, ReportExtras& extras
         read_number (scenario, "iterations_abandoned", extras.iterations_abandoned);
         if (scenario.contains ("steps") && scenario["steps"].is_array ()) {
             extras.step_breakdown = scenario["steps"];
+        }
+        if (scenario.contains ("transactions") && scenario["transactions"].is_array ()) {
+            extras.transactions = scenario["transactions"];
         }
     }
 }
@@ -1144,6 +1153,14 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
         }
         if (!extras.step_breakdown.empty ()) {
             json_report["scenario"]["steps"] = extras.step_breakdown;
+        }
+        // A sibling of `steps` rather than a member of it - a
+        // `control.transaction` spans a folder, not one step (issue #1515).
+        // Omitted, never `[]`, for a run with no transaction that closed -
+        // the same "absent, not zeros" rule `coverage` and `customMetrics`
+        // already follow.
+        if (!extras.transactions.empty ()) {
+            json_report["scenario"]["transactions"] = extras.transactions;
         }
     }
 

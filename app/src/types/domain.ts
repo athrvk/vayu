@@ -2052,6 +2052,28 @@ export interface RunScenarioStepStat {
 	};
 }
 
+/**
+ * One `control.transaction` name's percentiles (issue #1515) - a folder's
+ * members summed into one latency distribution per pass, across the whole
+ * run. A sibling of {@link RunScenarioStepStat}, not a member of it: a
+ * transaction spans a folder, not one step.
+ */
+export interface RunTransactionSummary {
+	/** The `name` the element's config declared. */
+	name: string;
+	/** Closed occurrences - one per iteration that reached the folder's last member. */
+	count: number;
+	errors: number;
+	latency: {
+		min: number;
+		p50: number;
+		p90: number;
+		p95: number;
+		p99: number;
+		max: number;
+	};
+}
+
 export interface RunReport {
 	/**
 	 * What this run did not do (issue #1503): a request sent with an
@@ -2539,6 +2561,13 @@ export interface RunReport {
 		 * says what each step did.
 		 */
 		steps?: RunScenarioStepStat[];
+		/**
+		 * Every `control.transaction` name that closed at least once this run
+		 * (issue #1515), a sibling of `steps` rather than a member of it - a
+		 * transaction spans a folder, not one step. Absent, never `[]`, for a
+		 * run with no such element or one whose folder never closed.
+		 */
+		transactions?: RunTransactionSummary[];
 	};
 	results?: Array<{
 		/**

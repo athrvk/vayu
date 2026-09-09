@@ -447,6 +447,16 @@ nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state) {
  */
 namespace {
 
+/// The row @p row indexes into @p data_rows, or null for a run with no
+/// dataset behind it - what `run_step_before` / `run_step_after` pass
+/// through to `resolve_template_with_optional_row` (issue #1515). A free
+/// function rather than inline in `submit_one`, which is already at its
+/// cognitive-complexity budget.
+const nlohmann::json* data_row_at (const std::vector<nlohmann::json>& data_rows,
+std::optional<size_t> row) {
+    return row ? &data_rows.at (*row) : nullptr;
+}
+
 /// This step's `id`-less request identity, for `pm.info` inside an inline
 /// script - the same fields `execute_exchange`'s own `bind` lambda sets.
 void bind_step_identity (vayu::runtime::ScriptContext& ctx,
@@ -487,7 +497,8 @@ const ScenarioStep& step,
 size_t step_index,
 size_t iteration,
 size_t vu_index,
-vayu::Request& request) {
+vayu::Request& request,
+const nlohmann::json* data_row) {
     if (!step.elements || step.elements->empty ()) {
         return {};
     }
@@ -526,11 +537,14 @@ vayu::Request& request) {
         [&] (std::string_view scope, const std::string& name,
         const std::string& value) { vu.scope_overlay.set (scope, name, value); },
         .should_stop = nullptr,
+        // This iteration's bound row, under its `data.*` namespace, beside
+        // the scopes (issue #1515) - the same precedence a script's own
+        // `pm.variables.replaceIn` already gives it.
         .resolve_template =
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = state.base_vars;
             vu.scope_overlay.apply_onto (vars);
-            return vayu::http::resolve_template (text, vars);
+            return vayu::http::resolve_template_with_optional_row (text, vars, data_row);
         },
         .iteration               = iteration,
         .step_position           = step_index,
@@ -603,7 +617,8 @@ VirtualUser& vu,
 const ScenarioStep& step,
 size_t step_index,
 vayu::Request& request,
-const vayu::Response& response) {
+const vayu::Response& response,
+const nlohmann::json* data_row) {
     if (!step.elements || step.elements->empty ()) {
         return 0;
     }
@@ -646,7 +661,7 @@ const vayu::Response& response) {
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = state.base_vars;
             vu.scope_overlay.apply_onto (vars);
-            return vayu::http::resolve_template (text, vars);
+            return vayu::http::resolve_template_with_optional_row (text, vars, data_row);
         },
         .iteration        = vu.iteration,
         .step_position    = step_index,
@@ -783,8 +798,9 @@ class ScenarioLoadDriver {
         // name still unanswered, or a header-name collision the attempt
         // itself produced, is exactly as survivable as one composition alone
         // left behind.
-        const StepBeforeResult before_result = run_step_before (
-        context_, *state_, *vu, step, step_index, iteration, vu_index, request);
+        const nlohmann::json* data_row = data_row_at (execution_.data_rows, row);
+        const StepBeforeResult before_result = run_step_before (context_,
+        *state_, *vu, step, step_index, iteration, vu_index, request, data_row);
         if (before_result.skip) {
             // `control.if` / `control.once` / `control.throughput` asked to
             // skip this occurrence (issue #1515) - nothing goes out, on the
@@ -835,7 +851,7 @@ class ScenarioLoadDriver {
         std::optional<std::string> next_target_before = before_result.next_target;
         context_->event_loop->submit (request,
         [context = context_, &db = db_, state = state_, &plan = execution_.plan, step_ptr,
-        vu, step_index, iteration, vu_index, row, pipeline_before_ms, sent_request,
+        vu, step_index, iteration, vu_index, row, data_row, pipeline_before_ms, sent_request,
         next_target_before] (size_t, const vayu::Result<vayu::Response>& result) {
             if (result.is_error ()) {
                 // No `Response` object exists at all - nothing for `step.after`
@@ -854,7 +870,7 @@ class ScenarioLoadDriver {
             int64_t pipeline_after_ms      = 0;
             if (sent_request) {
                 pipeline_after_ms = run_step_after (context, *state, *vu,
-                *step_ptr, step_index, *sent_request, response);
+                *step_ptr, step_index, *sent_request, response, data_row);
             }
 
             const bool errored = response.has_error ();

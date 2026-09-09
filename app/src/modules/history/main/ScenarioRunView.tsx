@@ -61,6 +61,7 @@ import {
 	ScriptLifecycleSummary,
 	StopRunButton,
 	StoredExchangeWarning,
+	TransactionsSummary,
 } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
@@ -439,6 +440,13 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				    run's own boundary rather than at any step. Absent for a
 				    run whose collection declared neither. */}
 				<ScriptLifecycleSummary lifecycle={report?.lifecycle} />
+
+				{/* A folder's members, summed into one latency distribution per
+				    pass (issue #1515) - beside the other whole-run answers above
+				    the step list, since a transaction spans a folder, not one
+				    step. Absent for a collection with no control.transaction
+				    element. */}
+				<TransactionsSummary transactions={report?.scenario?.transactions} />
 
 				{steps.length === 0 ? (
 					/*

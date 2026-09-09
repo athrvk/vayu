@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -34,6 +35,7 @@
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "source_scan.hpp"
 #include "step_elements_test_helper.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -52,6 +54,15 @@ using nlohmann::json;
 using vayu::core::ElementSpan;
 using vayu::core::Registry;
 using vayu::tests::compiled_elements;
+
+namespace vayu::http::routes {
+// Defined in runs.cpp; returns {http_status, json_body}. Declared here, the
+// same way `runs_route_test.cpp` does, so `ControlTransactionReports...`
+// below can assert on `GET /runs/:id/report`'s own shape (issue #1515's
+// reopened criterion 1) instead of the stored summary column directly.
+std::pair<int, nlohmann::json>
+run_report_response (vayu::db::Database& db, const std::string& run_id);
+} // namespace vayu::http::routes
 
 namespace {
 
@@ -87,6 +98,82 @@ TEST (ControllerRegistry, AllSixKindsAreCataloguedWithTheirDeclaredPhase) {
         }
         EXPECT_TRUE (found) << kind << " missing from the catalogue";
     }
+}
+
+// The three files every `control.*` kind is defined in - declarative
+// elements that, per `controller_kinds.cpp`'s own file doc comment, must
+// "never [do] a body parse and never a lock". The catalogue-level test above
+// checks only the self-reported `hotPathClass` enum value; this reads the
+// actual source, because a future controller could set that enum by hand and
+// still take a lock behind it.
+const std::vector<std::filesystem::path>& controller_kind_files () {
+    static const std::vector<std::filesystem::path> files = [] {
+        const std::filesystem::path elements_dir =
+        std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src" / "core" / "elements";
+        return std::vector<std::filesystem::path>{
+            elements_dir / "controller_kinds.cpp",
+            elements_dir / "control_loop.cpp",
+            elements_dir / "control_transaction.cpp",
+        };
+    }();
+    return files;
+}
+
+TEST (ControllerRegistry, NeverParsesAScriptOrTakesALockOnTheDeclarativeHotPath) {
+    // A body parse: reaching into the script sandbox the way `script.*`
+    // kinds do (`script_kinds.cpp`) - a controller decides from
+    // `pre_script_result`/`controller_state`/its own config alone.
+    const std::vector<std::string_view> script_sandbox_names = {
+        "run_pre_script",
+        "run_post_script",
+        "execute_script",
+        "ScriptEngine",
+        "JSContext",
+    };
+    // A lock: the shared `control.throughput` budget (issue #1569) is
+    // `fetch_add`/CAS over `std::atomic` instead, named in the reopen
+    // comment this guard pins.
+    const std::vector<std::string_view> lock_names = {
+        "mutex",
+        "lock_guard",
+        "unique_lock",
+        "scoped_lock",
+    };
+
+    size_t scanned_bytes = 0;
+    for (const auto& path : controller_kind_files ()) {
+        const std::string source = vayu::tests::read_source (path);
+        ASSERT_FALSE (source.empty ()) << path.string () << " could not be read";
+        scanned_bytes += source.size ();
+        const std::string code = vayu::tests::strip_comments (source);
+        for (const auto& name : script_sandbox_names) {
+            EXPECT_FALSE (vayu::tests::names_identifier (code, name))
+            << path.string () << " names "
+            << name << " - a declarative controller must never reach the script sandbox";
+        }
+        for (const auto& name : lock_names) {
+            EXPECT_FALSE (vayu::tests::names_identifier (code, name))
+            << path.string () << " names " << name
+            << " - the shared-budget path uses only atomics (issue #1569)";
+        }
+    }
+    ASSERT_GT (scanned_bytes, 1000u) << "the scan read almost nothing";
+}
+
+/// The matcher still finds a planted identifier and still ignores a longer
+/// name containing it or a commented-out mention - the same discipline
+/// `reentrant_test.cpp`'s `TheGuardSeesACallAndNotALongerName` pins for
+/// `names_call`, here for `names_identifier`.
+TEST (ControllerRegistry, TheHotPathGuardSeesAnIdentifierAndNotALongerNameOrAComment) {
+    using vayu::tests::names_identifier;
+    using vayu::tests::strip_comments;
+
+    EXPECT_TRUE (names_identifier ("std::lock_guard<std::mutex> lock (m);", "mutex"));
+    EXPECT_TRUE (names_identifier ("std::lock_guard<std::mutex> lock (m);", "lock_guard"));
+    EXPECT_FALSE (names_identifier ("std::shared_mutex guard;", "mutex"))
+    << "a longer containing identifier must not match";
+    EXPECT_FALSE (names_identifier (strip_comments ("// takes a mutex here\n"), "mutex"))
+    << "a commented-out mention must not match";
 }
 
 TEST (ControllerRegistry, ControlIfRefusesAConditionOutsideTheGrammar) {
@@ -294,9 +381,12 @@ class ElementsControllersTest : public ::testing::Test {
     /// Resolve (recursively, so a folder's members are walked), create the
     /// run row and start the worker, exactly as `POST /runs` does minus the
     /// HTTP layer - mirroring `scenario_runner_test.cpp`'s own helper.
-    std::string start (size_t iterations) {
+    std::string start (size_t iterations, const json& data = json ()) {
         json scenario{ { "source", "collection" }, { "collectionId", "col_1" },
             { "recursive", true }, { "iterations", iterations } };
+        if (!data.is_null ()) {
+            scenario["data"] = data;
+        }
 
         vayu::core::ScenarioResolveOptions options;
         options.timeout_ms           = 5000;
@@ -356,6 +446,14 @@ class ElementsControllersTest : public ::testing::Test {
         return json::parse (run->summary);
     }
 
+    /// `GET /runs/:id/report`'s own body, for a criterion the route itself
+    /// must serve rather than one only the stored summary column answers.
+    [[nodiscard]] json report_of (const std::string& run_id) {
+        auto [status, body] = vayu::http::routes::run_report_response (*db_, run_id);
+        EXPECT_EQ (status, 200) << body.dump ();
+        return body;
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     std::unique_ptr<ControllerMockServer> server_;
     vayu::core::RunManager manager_;
@@ -384,6 +482,29 @@ TEST_F (ElementsControllersTest, ControlIfSkipsAStepWhoseConditionIsFalseAndSend
     EXPECT_EQ (trace["outcome"], "skipped");
 }
 
+// A CSV-driven row, not a collection variable (issue #1515's reopened
+// criterion 2's literal case): `resolve_template` must bind `{{data.*}}`
+// alongside the scopes, or a condition naming the bound row can never
+// resolve. Two iterations, one row each, so the first skips and the second
+// sends - a regression here would either send both (the namespace never
+// resolved, `{{data.tier}}` stayed literal and never equalled "gold") or
+// skip both.
+TEST_F (ElementsControllersTest, ControlIfReadsABoundDataRowAlongsideCollectionVariables) {
+    seed_root ();
+    seed_request ("req_a", "col_1", 0, "/a",
+    json::array (
+    { element ("el_if", "control.if", { { "condition", "{{data.tier}} == gold" } }) }));
+
+    const std::string run_id = start (2,
+    json::array ({ json{ { "tier", "silver" } }, json{ { "tier", "gold" } } }));
+    EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    EXPECT_EQ (server_->hit_count ("/a"), 1u)
+    << "only the row whose tier is gold should reach the wire";
+
+    const json summary = summary_of (run_id);
+    EXPECT_EQ (summary["scenario"]["skipped"], 1);
+}
+
 TEST_F (ElementsControllersTest, ControlOnceRunsOnlyOnTheFirstOfThreeIterations) {
     seed_root ();
     seed_request ("req_a", "col_1", 0, "/a",
@@ -403,6 +524,24 @@ TEST_F (ElementsControllersTest, ControlThroughputEveryNRunsExactlyEveryNthOccur
     EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
     EXPECT_EQ (server_->hit_count ("/a"), 2u)
     << "everyN: 2 over 4 occurrences must run exactly the 2nd and 4th";
+}
+
+// The `percent` carry (issue #1515's reopened test-shape note): an integer
+// carry scaled by 1000, so `percent: 50` over 4 occurrences fires
+// deterministically at the 2nd and 4th - 50000 + 50000 = 100000 on the 2nd,
+// carry resets to 0 and repeats identically on the 3rd and 4th. `everyN`'s
+// own test above covers the other branch of the same `if`/`else if`; nothing
+// exercised this one.
+TEST_F (ElementsControllersTest, ControlThroughputPercentRunsDeterministicallyOverManyOccurrences) {
+    seed_root ();
+    seed_request ("req_a", "col_1", 0, "/a",
+    json::array ({ element ("el_thr", "control.throughput", { { "percent", 50.0 } }) }));
+
+    const std::string run_id = start (4);
+    EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    EXPECT_EQ (server_->hit_count ("/a"), 2u)
+    << "percent: 50 accumulates an exact carry, firing the 2nd and 4th of 4 "
+       "occurrences";
 }
 
 TEST_F (ElementsControllersTest, ControlSwitchRoutesToTheNamedMemberAndSkipsTheRest) {
@@ -444,9 +583,9 @@ TEST_F (ElementsControllersTest, ControlTransactionReportsPercentilesOverTheFold
     EXPECT_EQ (server_->hit_count ("/a"), 2u);
     EXPECT_EQ (server_->hit_count ("/b"), 2u);
 
-    const json summary = summary_of (run_id);
-    ASSERT_TRUE (summary["scenario"].contains ("transactions")) << summary.dump ();
-    const json transactions = summary["scenario"]["transactions"];
+    const json report = report_of (run_id);
+    ASSERT_TRUE (report["scenario"].contains ("transactions")) << report.dump ();
+    const json transactions = report["scenario"]["transactions"];
     ASSERT_TRUE (transactions.is_array ());
     bool found = false;
     for (const auto& entry : transactions) {
@@ -467,13 +606,13 @@ TEST_F (ElementsControllersTest, ControlTransactionReportsPercentilesOverTheFold
 // members into the transaction's own sum - a folder identical to the test
 // above except for the timer and the flag, so the only variable is whether
 // the fold happened.
-double checkout_p50 (const json& summary) {
-    for (const auto& entry : summary["scenario"]["transactions"]) {
+double checkout_p50 (const json& report) {
+    for (const auto& entry : report["scenario"]["transactions"]) {
         if (entry["name"] == "checkout") {
             return entry["latency"]["p50"].get<double> ();
         }
     }
-    ADD_FAILURE () << "no 'checkout' transaction in " << summary.dump ();
+    ADD_FAILURE () << "no 'checkout' transaction in " << report.dump ();
     return -1.0;
 }
 
@@ -488,7 +627,7 @@ TEST_F (ElementsControllersTest, ControlTransactionIncludeTimersFoldsAWaitBetwee
 
     const std::string run_id = start (1);
     EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
-    EXPECT_GE (checkout_p50 (summary_of (run_id)), 60.0)
+    EXPECT_GE (checkout_p50 (report_of (run_id)), 60.0)
     << "the 60ms wait between the two members must be in the sum";
 }
 
@@ -502,7 +641,7 @@ TEST_F (ElementsControllersTest, ControlTransactionExcludesTimersByDefault) {
 
     const std::string run_id = start (1);
     EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
-    EXPECT_LT (checkout_p50 (summary_of (run_id)), 60.0)
+    EXPECT_LT (checkout_p50 (report_of (run_id)), 60.0)
     << "without includeTimers the wait must not reach the sum";
 }
 
@@ -694,13 +833,31 @@ TEST_F (ElementsControllersLoadTest, ControlTransactionReportsPercentilesUnderLo
     const json config{ { "scenario", { { "collectionId", "col_test" } } },
         { "mode", "iterations" }, { "concurrency", 2 }, { "iterations", 4 } };
     auto state = run (config, execution);
-
     ASSERT_NE (state, nullptr);
-    const json summary =
+
+    // Stored and read back through `GET /runs/:id/report` (issue #1515's
+    // reopened criterion 1), not `build_scenario_load_summary` alone - a
+    // regression in the route's own forwarding (`apply_summary_scenario` /
+    // `add_optional_report_sections` in runs.cpp) would leave this green
+    // while the route itself still dropped the field.
+    vayu::db::Run run_row;
+    run_row.id         = "run_ctrl_load_txn";
+    run_row.type       = vayu::RunType::Scenario;
+    run_row.status     = vayu::RunStatus::Completed;
+    run_row.start_time = 1;
+    run_row.end_time   = 2;
+    db_->create_run (run_row);
+    const json scenario_summary =
     vayu::core::build_scenario_load_summary (*state, execution.plan);
-    ASSERT_TRUE (summary.contains ("transactions")) << summary.dump ();
+    db_->update_run_summary (
+    run_row.id, json{ { "scenario", scenario_summary } }.dump ());
+
+    auto [status, report] =
+    vayu::http::routes::run_report_response (*db_, run_row.id);
+    ASSERT_EQ (status, 200) << report.dump ();
+    ASSERT_TRUE (report["scenario"].contains ("transactions")) << report.dump ();
     bool found = false;
-    for (const auto& entry : summary["transactions"]) {
+    for (const auto& entry : report["scenario"]["transactions"]) {
         if (entry["name"] == "checkout") {
             found = true;
             EXPECT_EQ (entry["count"], 4u)
@@ -708,7 +865,7 @@ TEST_F (ElementsControllersLoadTest, ControlTransactionReportsPercentilesUnderLo
             EXPECT_GE (entry["latency"]["p50"], 0.0);
         }
     }
-    EXPECT_TRUE (found) << summary.dump ();
+    EXPECT_TRUE (found) << report.dump ();
 }
 
 TEST_F (ElementsControllersLoadTest, ControlIfSkipsUnderLoadAndNeverReachesTheWire) {
@@ -724,6 +881,26 @@ TEST_F (ElementsControllersLoadTest, ControlIfSkipsUnderLoadAndNeverReachesTheWi
     EXPECT_EQ (server.hit_count ("/a"), 0u)
     << "an unresolved {{tier}} never equals 'gold', so every occurrence skips";
     EXPECT_GE (state->steps_skipped.load (), 4u);
+}
+
+// Same criterion as `ControlIfReadsABoundDataRowAlongsideCollectionVariables`,
+// under load: the row is claimed per iteration off the run-wide cursor
+// (`scenario_load.cpp`'s `data_cursor`), alternating gold/silver across the
+// run's four iterations, so exactly half should reach the wire.
+TEST_F (ElementsControllersLoadTest, ControlIfReadsABoundDataRowUnderLoad) {
+    ControllerLoadMockServer server;
+    auto execution = plan_over (server,
+    { element ("el_if", "control.if", { { "condition", "{{data.tier}} == gold" } }) }, {});
+    execution.data_rows = { json{ { "tier", "gold" } }, json{ { "tier", "silver" } } };
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "iterations" }, { "concurrency", 2 }, { "iterations", 4 } };
+    auto state = run (config, execution);
+
+    ASSERT_NE (state, nullptr);
+    EXPECT_EQ (server.hit_count ("/a"), 2u)
+    << "only the gold row's iterations should reach the wire";
+    EXPECT_EQ (state->steps_skipped.load (), 2u);
 }
 
 // ============================================================================
@@ -809,6 +986,26 @@ TEST_F (ElementsControllersLoadTest, ControlThroughputSharesABudgetAcrossVUsWhen
 
     ASSERT_NE (state, nullptr);
     EXPECT_EQ (server.hit_count ("/a"), 10u);
+}
+
+// `control.once`'s load-path case (issue #1515's reopened test-shape note):
+// the sequential fixture's `ControlOnceRunsOnlyOnTheFirstOfThreeIterations`
+// had no load counterpart, so a per-VU `controller_state` regression (sharing
+// one flag across every virtual user, or resetting it per iteration) had
+// nothing here to catch it.
+TEST_F (ElementsControllersLoadTest, ControlOnceFiresOncePerVirtualUserUnderLoad) {
+    ControllerLoadMockServer server;
+    auto execution =
+    plan_over (server, { element ("el_once", "control.once", json::object ()) }, {});
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "iterations" }, { "concurrency", 4 }, { "iterations", 12 } };
+    auto state = run (config, execution);
+
+    ASSERT_NE (state, nullptr);
+    EXPECT_EQ (server.hit_count ("/a"), 4u)
+    << "each of the 4 virtual users fires control.once exactly once, on its "
+       "own first iteration";
 }
 
 TEST_F (ElementsControllersLoadTest, ControlTransactionIncludeTimersFoldsAWaitUnderLoad) {

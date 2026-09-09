@@ -132,4 +132,33 @@ inline bool names_call (const std::string& code, std::string_view function) {
     return false;
 }
 
+/**
+ * @brief Whether @p code names @p identifier as a whole word - same
+ * boundary rule as @ref names_call, minus the trailing-call requirement.
+ *
+ * For a guard over a *type* or a bare name rather than a function call: a
+ * declared `std::mutex`, a class named `ScriptEngine`, a member named
+ * `run_pre_script` with no parens at the declaration site. `names_call` would
+ * miss all three because none is followed by `(` where the rule cares about
+ * them.
+ */
+inline bool names_identifier (const std::string& code, std::string_view identifier) {
+    const auto is_identifier_char = [] (char c) {
+        return (std::isalnum (static_cast<unsigned char> (c)) != 0) || c == '_';
+    };
+
+    for (size_t at = code.find (identifier); at != std::string::npos;
+    at             = code.find (identifier, at + 1)) {
+        if (at > 0 && is_identifier_char (code[at - 1])) {
+            continue; // e.g. shared_mutex when scanning for "mutex"
+        }
+        const size_t after = at + identifier.size ();
+        if (after < code.size () && is_identifier_char (code[after])) {
+            continue; // e.g. mutex_pool when scanning for "mutex"
+        }
+        return true;
+    }
+    return false;
+}
+
 } // namespace vayu::tests
