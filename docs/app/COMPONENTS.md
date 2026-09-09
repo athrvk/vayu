@@ -642,8 +642,8 @@ Revealing a result is one mechanism for both halves: the sidebar passes the resu
 
 - `OptionButtons` - the pick-one tile grid. `preview: (isSelected) => ReactNode` per option draws the theme badge, the accent swatch or the roundedness shape, so Appearance no longer re-implements the selected-card style three times.
 - `ToggleRow` - label (a node, for the MCP tool rows' `<code>` and counts), description, `disabled`, `title`. Takes an `anchor` like `NumberSettingRow` does, for the switches search reveals individually (Word wrap, Line numbers, Minimap), and names its box with `data-setting-row` from the same string that names the switch. A string label is wired to the switch with `htmlFor`/`id` as well as naming it through `aria-label`, so the words are part of the hit area - a Radix switch is a `<button>`, which is labelable; a node label has no text to associate, which is what `ariaLabel` is for.
-- `NumberSettingRow` - input, unit suffix, range hint, `aria-invalid` + message, and the Default line. Its `commit` prop is the one thing the four old copies really disagreed about: `"change"` for settings that apply live, `"blur"` for owners that do real work per write (the MCP caps cross IPC). An unparseable draft is never committed - it stays in the field until it is a number again. The description is pointed at with `aria-describedby` rather than only rendered (both ids, in reading order, when there is an error too), because a description like "Only applies while Follow redirects is on" is the reason the field is disabled. `data-setting-row` names the row's box.
-- `SelectSettingRow` - the pick-one row as a dropdown, for a set that reads as a list rather than a tile grid: `OptionButtons` stays the default where a user browses three or four choices, and this is for a value they already know the name of (the request tab's **Protocol**). `useId` pairs the visible label with the trigger and names it, because the trigger's text is the *chosen option*, not the setting. `onChange` hands back a `string` - a `Select` cannot promise the owner's union, so the owner narrows it (`isHttpVersion`) and decides what an unknown value means. Its second consumer is the engine view's `enum` card (`defaultHttpVersion`, `dbSynchronous`, `proxyMode`), which wrote the same row out by hand until issue #747: there the `CardTitle` is the setting's name, so it passes `labelHidden` and the label goes `sr-only` rather than away - it is what names the trigger, exactly as on `NumberSettingRow`. The trigger's width belongs to the row rather than to either caller (`w-48`, where `NumberSettingRow`'s input already stops), so the two control types end at the same place down a card; the engine's longest option label, "From environment", fits it. The card keeps its own guard for an entry whose `options` the engine omitted - rendering nothing is deliberate, and the primitive does not learn about it.
+- `NumberSettingRow` - input, unit suffix, range hint, `aria-invalid` + message, and the Default line. Its `commit` prop is the one thing the four old copies really disagreed about: `"change"` for settings that apply live, `"blur"` for owners that do real work per write (the MCP caps cross IPC). An unparseable draft is never committed - it stays in the field until it is a number again. The description is pointed at with `aria-describedby` rather than only rendered (both ids, in reading order, when there is an error too), because a description like "Only applies while Follow redirects is on" is the reason the field is disabled. `data-setting-row` names the row's box. `compact` is the opt-in denser variant the element card's schema-generated form uses (`text-xs` label, `h-8` input, no width cap, so the field fills a half-width grid column) - opt-in because the settings panels are read one row at a time and keep the roomier default.
+- `SelectSettingRow` - the pick-one row as a dropdown, for a set that reads as a list rather than a tile grid: `OptionButtons` stays the default where a user browses three or four choices, and this is for a value they already know the name of (the request tab's **Protocol**). `useId` pairs the visible label with the trigger and names it, because the trigger's text is the *chosen option*, not the setting. `onChange` hands back a `string` - a `Select` cannot promise the owner's union, so the owner narrows it (`isHttpVersion`) and decides what an unknown value means. Its second consumer is the engine view's `enum` card (`defaultHttpVersion`, `dbSynchronous`, `proxyMode`), which wrote the same row out by hand until issue #747: there the `CardTitle` is the setting's name, so it passes `labelHidden` and the label goes `sr-only` rather than away - it is what names the trigger, exactly as on `NumberSettingRow`. The trigger's width belongs to the row rather than to either caller (`w-48`, where `NumberSettingRow`'s input already stops), so the two control types end at the same place down a card; the engine's longest option label, "From environment", fits it. The card keeps its own guard for an entry whose `options` the engine omitted - rendering nothing is deliberate, and the primitive does not learn about it. It takes `compact` too, alongside `NumberSettingRow`, which drops `w-48` for the same reason that row drops its input cap.
 - `DefaultValueLine` - "Default: x" plus the reset that goes there. Used by `NumberSettingRow` and by the boolean/enum/string engine cards, so every entry type has one.
 
 Three save models coexist and each says which it is: app panels state `AppSettingsPanel.saveNote` (defaulting to `DEFAULT_SAVE_NOTE`, "Changes are saved automatically.") in the `ClientSettingsPanel` header, MCP overrides it, and the engine view states its staged-then-saved model beside the Save bar. Leaving an engine category still flushes its staged edits, and now **says** when one was dropped for being invalid instead of discarding it silently. A card's Revert discards a staged edit; Reset goes to the shipped default - one name each, for the two different things.
@@ -1609,7 +1609,13 @@ a moment - caught live, not by the jsdom suite, which has no real layout or
 (`max-w-[55%]`) alongside `truncate`: a user-typed name has no length limit,
 and `truncate` alone never engages without a `max-width` to truncate against -
 an uncapped one rendered at its full content width and pushed the switch and
-the `⋯` menu out of the row.
+the `⋯` menu out of the row. **The expanded card and `GenericElementForm`'s
+own rows run at the app's tightest density** - `space-y-2` and `p-2`/`py-2`
+throughout, `h-8` inputs (not the settings screen's `h-9`), `text-xs` labels -
+because this is where a user reads several fields at once, closer to a form
+than a settings page read one row at a time. The collapsed header (`h-8`,
+matching every other drawer row) is untouched; only what opens beneath it got
+denser.
 **Delete asks nothing for a blank element** (every configured value empty or
 absent) and confirms through `DeleteConfirmDialog` for one with real
 configuration. A primitive under `components/shared/` takes no feature-module
@@ -1635,6 +1641,23 @@ engine ships it, which is the whole point of the catalogue being
 schema-carrying rather than a label list - `extract.json`'s path field is
 deliberately generic-form only, proving the point rather than special-casing
 it.
+
+**Two short fields standing next to each other share a line** (`grid-cols-2`,
+the pairing `AuthFields` and `OAuth2Form` already use). `assert.status`'s
+`range` is one idea - "200 to 299" - and saying it as a label, a hint sentence
+and an input stacked twice over spent most of an expanded card on two
+integers. Only a number or an enum pairs: a JSONPath, a variable name or a
+regular expression has no length bound, and a boolean is already horizontal
+(`ToggleRow` is label-left/switch-right), so halving its width only crowds its
+description. And only **exactly two** adjacent - a run of three is a list, not
+a pair (`timer.think`'s `ms` / `minMs` / `maxMs` is a fixed wait beside the two
+bounds of a random one, and pairing by position would claim a relationship the
+schema never declared). Which two of three belong together is knowledge only
+the kind has, and this form knows no kinds: a kind that wants the grouping
+declares it as a nested `object`, the way `assert.status` already does, and is
+paired here for free. The halves are the settings rows' opt-in `compact`
+variant, so each one fills its column instead of stopping at the settings
+screen's `max-w-[12rem]` with the rest of the line empty.
 
 **A bespoke override is the exception, in one map** (`elementForms.ts`), never
 inline in `ElementList`. Phase 0 ships a bespoke form for every `script.*`

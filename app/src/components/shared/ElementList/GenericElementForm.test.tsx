@@ -143,3 +143,160 @@ describe("GenericElementForm - the Advanced disclosure", () => {
 	// in GenericElementForm.tsx - the case above reds, since "Per user" would
 	// stay hidden behind the still-closed disclosure.
 });
+
+describe("GenericElementForm - two short fields share a line", () => {
+	/**
+	 * The row's own box, by the `data-setting-row` the settings primitives
+	 * write from the same string they label the control with. Read rather than
+	 * scanned: the grid class is on the element the form puts *around* two
+	 * rows, which no source scan of a className string can see.
+	 */
+	function rowBox(label: string): HTMLElement {
+		const box = document.querySelector<HTMLElement>(`[data-setting-row="${label}"]`);
+		if (!box) throw new Error(`no row box named ${label}`);
+		return box;
+	}
+
+	function lineOf(label: string): HTMLElement {
+		const line = rowBox(label).parentElement;
+		if (!line) throw new Error(`${label}'s row box has no parent`);
+		return line;
+	}
+
+	it("pairs two adjacent numeric fields into one grid line", () => {
+		render(
+			<GenericElementForm
+				schema={schema({
+					min: { type: "integer", title: "Minimum" },
+					max: { type: "integer", title: "Maximum" },
+				})}
+				config={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(lineOf("Minimum").className).toContain("grid-cols-2");
+		expect(lineOf("Maximum")).toBe(lineOf("Minimum"));
+	});
+
+	it("pairs two adjacent enum dropdowns too, not only numbers", () => {
+		render(
+			<GenericElementForm
+				schema={schema({
+					field: { type: "string", enum: ["body", "headers"], title: "Field" },
+					scope: { type: "string", enum: ["env", "globals"], title: "Store in" },
+				})}
+				config={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(lineOf("Field").className).toContain("grid-cols-2");
+		expect(lineOf("Store in")).toBe(lineOf("Field"));
+	});
+
+	it("pairs a nested object's two children inside its fieldset", () => {
+		// `assert.status`'s `range`, the shape the pairing was written for: one
+		// idea ("200 to 299") that cost three stacked blocks to state.
+		render(
+			<GenericElementForm
+				schema={schema({
+					range: {
+						type: "object",
+						title: "Accepted range",
+						properties: {
+							min: { type: "integer", title: "Minimum" },
+							max: { type: "integer", title: "Maximum" },
+						},
+					},
+				})}
+				config={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(lineOf("Minimum").className).toContain("grid-cols-2");
+		expect(lineOf("Minimum").closest("fieldset")).not.toBeNull();
+	});
+
+	it("leaves a number beside a free-text field stacked", () => {
+		// A JSONPath has no length bound, so half a line for it is a worse
+		// trade than the line it would save.
+		render(
+			<GenericElementForm
+				schema={schema({
+					path: { type: "string", title: "JSONPath" },
+					matchNo: { type: "integer", title: "Which match" },
+				})}
+				config={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(lineOf("Which match").className).not.toContain("grid-cols-2");
+	});
+
+	it("leaves a run of three short fields stacked rather than pairing by position", () => {
+		// `timer.think`'s shape: a fixed wait beside the two bounds of a random
+		// one. Pairing the first two would claim a relationship the schema
+		// never declared - see `groupRows`.
+		render(
+			<GenericElementForm
+				schema={schema({
+					ms: { type: "integer", title: "Wait" },
+					minMs: { type: "integer", title: "Minimum wait" },
+					maxMs: { type: "integer", title: "Maximum wait" },
+				})}
+				config={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		for (const label of ["Wait", "Minimum wait", "Maximum wait"]) {
+			expect(lineOf(label).className).not.toContain("grid-cols-2");
+		}
+	});
+
+	it("edits either half of a pair without dropping the other", () => {
+		const onChange = vi.fn();
+		render(
+			<GenericElementForm
+				schema={schema({
+					min: { type: "integer", title: "Minimum" },
+					max: { type: "integer", title: "Maximum" },
+				})}
+				config={{ min: 200 }}
+				onChange={onChange}
+			/>
+		);
+
+		fireEvent.change(screen.getByLabelText("Maximum"), { target: { value: "299" } });
+
+		expect(onChange).toHaveBeenCalledWith({ min: 200, max: 299 });
+	});
+
+	it("renders the paired controls at the card's density, not the settings screen's", () => {
+		// The pair only pays off if each half fills its column: the settings
+		// screen's `max-w-[12rem]` input would leave one half of the line empty.
+		render(
+			<GenericElementForm
+				schema={schema({
+					min: { type: "integer", title: "Minimum" },
+					max: { type: "integer", title: "Maximum" },
+				})}
+				config={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		const input = screen.getByLabelText("Minimum");
+		expect(input.className).toContain("h-8");
+		expect(input.className).not.toContain("max-w-[12rem]");
+	});
+
+	// Mutation check: make `groupRows` return `names.map((name) => [name])` -
+	// the three pairing cases red on the missing `grid-cols-2`, while the two
+	// deliberately-stacked cases stay green, which is what tells the two rules
+	// apart. Dropping `compact` from `PropertyRow`'s `NumberSettingRow` reds
+	// the density case alone.
+});

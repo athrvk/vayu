@@ -133,6 +133,13 @@ interface ToggleRowProps {
 	/** Native tooltip on the switch (the MCP group toggles use it). */
 	title?: string;
 	className?: string;
+	/**
+	 * The denser variant, for a surface that shows several fields at once
+	 * rather than one setting at a time - the element card's schema-generated
+	 * form (`GenericElementForm`). Opt-in, never the default: the settings
+	 * panels are read one row at a time and keep the roomier type.
+	 */
+	compact?: boolean;
 }
 
 export function ToggleRow({
@@ -145,6 +152,7 @@ export function ToggleRow({
 	disabled,
 	title,
 	className,
+	compact = false,
 }: ToggleRowProps) {
 	const name = ariaLabel ?? (typeof label === "string" ? label : undefined);
 	const switchId = useId();
@@ -164,7 +172,10 @@ export function ToggleRow({
 					// association is real rather than decorative. The aria-label
 					// below still names it - a node label (the MCP rows' counts
 					// and <code> spans) has no text for the association to use.
-					<Label htmlFor={switchId} className="text-sm font-medium">
+					<Label
+						htmlFor={switchId}
+						className={cn("font-medium", compact ? "text-xs" : "text-sm")}
+					>
 						{label}
 					</Label>
 				) : (
@@ -213,6 +224,13 @@ interface SelectSettingRowProps {
 	onChange: (value: string) => void;
 	options: readonly { readonly value: string; readonly label: string }[];
 	disabled?: boolean;
+	/**
+	 * The denser variant - see {@link ToggleRow}'s `compact`. The trigger drops
+	 * the `w-48` cap with it, because a compact row is laid out by whatever
+	 * holds it (a half-width grid column in the element card's form), and a
+	 * fixed width there would overflow the column rather than fill it.
+	 */
+	compact?: boolean;
 }
 
 /**
@@ -245,23 +263,28 @@ export function SelectSettingRow({
 	onChange,
 	options,
 	disabled,
+	compact = false,
 }: SelectSettingRowProps) {
 	const triggerId = useId();
 	const descriptionId = `${triggerId}-description`;
 	return (
 		// `data-setting-row` names the row's box from the same string the trigger
 		// is named by - the convention the other two rows already keep.
-		<div className="space-y-1.5" data-setting-row={label}>
+		<div className={compact ? "space-y-1" : "space-y-1.5"} data-setting-row={label}>
 			<Label
 				htmlFor={triggerId}
-				className={cn("text-sm font-medium", labelHidden && "sr-only")}
+				className={cn(
+					"font-medium",
+					compact ? "text-xs" : "text-sm",
+					labelHidden && "sr-only"
+				)}
 			>
 				{label}
 			</Label>
 			<Select value={value} onValueChange={onChange} disabled={disabled}>
 				<SelectTrigger
 					id={triggerId}
-					className="h-9 w-48 text-sm"
+					className={cn("text-sm", compact ? "h-8 w-full" : "h-9 w-48")}
 					aria-label={label}
 					aria-describedby={description ? descriptionId : undefined}
 				>
@@ -369,6 +392,12 @@ interface NumberSettingRowProps {
 	disabled?: boolean;
 	/** Integers only (`step=1`); the engine's `number` entries pass false. */
 	integer?: boolean;
+	/**
+	 * The denser variant - see {@link ToggleRow}'s `compact`. The input drops
+	 * its `max-w-[12rem]` with it and fills the row instead, for the same
+	 * reason {@link SelectSettingRow}'s trigger drops `w-48`.
+	 */
+	compact?: boolean;
 }
 
 function derivedRangeHint(min?: string, max?: string): string | null {
@@ -407,6 +436,7 @@ export function NumberSettingRow({
 	onResetToDefault,
 	disabled,
 	integer = true,
+	compact = false,
 }: NumberSettingRowProps) {
 	// Held here so the field shows what was typed even while it is not a number
 	// the owner would accept. Cleared on blur, which is what lets a clamped or
@@ -459,15 +489,25 @@ export function NumberSettingRow({
 		// `data-setting-row` names the row's box: the input, its hint, its error
 		// and its Default line are siblings, and without a named container a
 		// consumer (or a test) is left guessing at `closest("div")`.
-		<div className="space-y-1.5" data-setting-row={label} data-setting-anchor={anchor}>
+		<div
+			className={compact ? "space-y-1" : "space-y-1.5"}
+			data-setting-row={label}
+			data-setting-anchor={anchor}
+		>
 			<Label
 				htmlFor={inputId}
-				className={cn("text-sm font-medium", labelHidden && "sr-only")}
+				className={cn(
+					"font-medium",
+					compact ? "text-xs" : "text-sm",
+					labelHidden && "sr-only"
+				)}
 			>
 				{label}
 			</Label>
 			<div className="flex items-center gap-2">
-				<div className="relative">
+				{/* `min-w-0` so a compact input can shrink inside a narrow grid
+				    column instead of forcing the column wider than its track. */}
+				<div className={cn("relative", compact && "min-w-0 flex-1")}>
 					<Input
 						id={inputId}
 						type="number"
@@ -487,7 +527,7 @@ export function NumberSettingRow({
 							if (isCommitEnter(e)) e.currentTarget.blur();
 						}}
 						className={cn(
-							"max-w-[12rem]",
+							compact ? "h-8" : "max-w-[12rem]",
 							// Literal classes, not a computed string: Tailwind's
 							// scanner cannot see one that is assembled at runtime.
 							unit && (unit.length > 4 ? "pr-20" : "pr-12"),

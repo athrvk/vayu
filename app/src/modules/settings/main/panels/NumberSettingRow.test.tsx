@@ -191,4 +191,30 @@ describe("NumberSettingRow", () => {
 			expect(screen.getByText("Default: 1 MB")).toBeInTheDocument();
 		});
 	});
+
+	describe("the compact variant", () => {
+		/*
+		 * `compact` exists for the element card's schema-generated form, which
+		 * shows several fields at once and pairs two short ones into one grid
+		 * line - a `max-w-[12rem]` input would leave half of such a line empty.
+		 * It is opt-in precisely because the settings panels must not move, so
+		 * the default case below is the half that matters most. Both classes
+		 * arrive through `cn()`, so they are read off the rendered node rather
+		 * than scanned for in the source.
+		 */
+		it("caps the input's width and keeps the settings type by default", () => {
+			render(<NumberSettingRow label="A" value="5" />);
+
+			expect(field("A").className).toContain("max-w-[12rem]");
+			expect(screen.getByText("A").className).toContain("text-sm");
+		});
+
+		it("lets a compact input fill whatever holds it, at the denser type", () => {
+			render(<NumberSettingRow label="A" value="5" compact />);
+
+			expect(field("A").className).toContain("h-8");
+			expect(field("A").className).not.toContain("max-w-[12rem]");
+			expect(screen.getByText("A").className).toContain("text-xs");
+		});
+	});
 });

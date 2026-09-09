@@ -117,3 +117,30 @@ describe("SelectSettingRow", () => {
 		);
 	});
 });
+
+describe("SelectSettingRow - the compact variant", () => {
+	/*
+	 * `compact` exists for the element card's schema-generated form, which
+	 * shows several fields at once and pairs two short ones into a grid line.
+	 * It is opt-in precisely because the settings panels must not move, so the
+	 * default half is the case that matters here. Read off the rendered node
+	 * rather than scanned: both class strings arrive through `cn()`.
+	 */
+	const ONE = [{ value: "body", label: "body" }] as const;
+
+	it("keeps the trigger's fixed width by default", () => {
+		render(<SelectSettingRow label="Field" value="body" onChange={vi.fn()} options={ONE} />);
+
+		expect(screen.getByRole("combobox", { name: "Field" }).className).toContain("w-48");
+	});
+
+	it("lets a compact trigger fill whatever holds it", () => {
+		render(
+			<SelectSettingRow label="Field" value="body" onChange={vi.fn()} options={ONE} compact />
+		);
+
+		const trigger = screen.getByRole("combobox", { name: "Field" });
+		expect(trigger.className).toContain("w-full");
+		expect(trigger.className).not.toContain("w-48");
+	});
+});
