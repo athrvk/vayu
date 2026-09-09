@@ -44,6 +44,13 @@ and any extra fields as `key=value` pairs. `vayu-engine`'s `-v 0|1|2` still
 governs which levels reach the console; the file's own floor is the separate
 `logLevel` setting below.
 
+One request line per HTTP call (issue #1510), at the level its own status
+calls for rather than one fixed level for every call: a 2xx is `debug`, a
+3xx or 4xx is `info`, and a 5xx is `warn`, because an engine failure is not
+something a quiet run should hide. `install_request_logger`
+(`http/request_log.cpp`) is the one place this decision is made, for both
+the management server and an inbox listener.
+
 ## Categories
 
 Engine: `startup`, `config`, `http`, `db`, `run`, `script`, `inbox`, `mock`,

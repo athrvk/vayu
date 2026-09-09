@@ -53,6 +53,11 @@ constexpr const char* ENGINE_FILE_PREFIX = "engine_";
 /// glob (issue #1557) while `prune_old_logs` still only ever deletes the
 /// generation it was asked to.
 constexpr const char* CLI_FILE_PREFIX = "cli_";
+/// Prefix of the pre-#1557 log files (`vayu_<stamp>.log`), from before the
+/// per-source `engine_`/`cli_` split. `Logger::init` removes any it finds,
+/// once per start, so an install that predates the split does not carry both
+/// generations forever.
+constexpr const char* LEGACY_FILE_PREFIX = "vayu_";
 /// Timestamp format for log filenames
 constexpr const char* TIME_FORMAT = "%Y%m%d_%H%M%S";
 /// How many per-start log files survive a start; the rest are deleted oldest

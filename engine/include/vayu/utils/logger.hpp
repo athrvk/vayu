@@ -169,6 +169,19 @@ std::optional<Logger::Level> parse_log_level (std::string_view name);
 std::size_t
 prune_old_logs (const std::string& log_dir, std::string_view file_prefix, std::size_t keep);
 
+/**
+ * @brief Delete every `<legacy_prefix>*.log` file (and its `.1` rotation) in
+ *        @p log_dir - the pre-#1557 naming, before the per-source `engine_`/
+ *        `cli_` split.
+ * @return How many files were deleted.
+ *
+ * Unlike `prune_old_logs`, this keeps none: the legacy generation is not a
+ * history to retain a tail of, it is dead weight from before the split, and
+ * every start pays the one directory scan to clear whatever a not-yet-upgraded
+ * install left behind.
+ */
+std::size_t remove_legacy_log_files (const std::string& log_dir, std::string_view legacy_prefix);
+
 // Convenience functions - the only way to log (issue #1557): `Logger::write`
 // is the one entry point these all route through, so a category is never
 // optional and a bad-value redaction path is not something a call site can
