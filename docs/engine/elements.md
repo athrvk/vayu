@@ -391,11 +391,16 @@ for the sequential run; a `perUser: false` element instead advances its own entr
 shared-pacing element id in the plan, so two VUs' concurrent completions claim distinct slots of
 the same clock rather than racing onto the same one. `SharedScheduleState::timers_override` (a
 `const TimersOverride*` alongside `pacing` and `throughput`, filled in from `RunContext` at the
-same call site) is `finish_step`'s own copy of the override for this seam: `"off"` returns
-`std::nullopt` before either kind touches its pacing state or shared clock at all, closing the gap
-this section used to disclose - a run that silences timers with `"off"` no longer defers a scenario
-load run's pacing or throughput element by its own interval first and only reports that truthfully
-after the fact.
+same call site) is `finish_step`'s own copy of the override for this seam: both kinds call the same
+`apply_timers_override` every other `timer.*` kind's `apply` calls, through `shared.timers_override`
+and a `shared.rng` (issue #1620, the VU's own generator, so a `Range` draw stays reproducible with
+`seed`) - `"off"` returns `std::nullopt` before either kind touches its pacing state or shared clock
+at all, and `"fixedMs"` / `{"minMs", "maxMs"}` replace the element's own `everyMs` /
+`targetPerMinute` with the override's value before either branch advances anything from it
+(`timer.throughput`'s shared token bucket converts the overridden interval into the equivalent rate
+per second). A run that silences or overrides timers no longer defers a scenario load run's pacing
+or throughput element by its own configured interval first and only reports that truthfully after
+the fact.
 
 **Step-level elements on the single-request load path, wired (issue #1594).**
 A single-request `POST /runs` payload's own request now has an `elements`

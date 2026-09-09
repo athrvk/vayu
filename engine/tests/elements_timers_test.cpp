@@ -1043,4 +1043,114 @@ TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesThroughputUnderLoad) {
     << executed << " requests over 4s, still in the paced range";
 }
 
+// Issue #1620: `"off"` reached `scheduled_ready_delay_ms` (the reopen fix
+// above), but `"fixedMs"` / `{"minMs", "maxMs"}` did not - the hook checked
+// only `TimersOverride::Mode::Off` and fell through to the element's own
+// `every_ms_` for every other mode, so a run overriding the interval instead
+// of silencing it still deferred `timer.pacing` by its own configured 500ms.
+// `timer.pacing` defaults `perUser: true`, so this exercises the per-user
+// branch (`detail::advance_per_user_pacing`). Mutation check: reverting
+// `scheduled_ready_delay_ms` to read `every_ms_` directly instead of the
+// `apply_timers_override`-derived interval reds this on the ceiling -
+// `APacedRunDoesNotBusySpinTheProducer` above pins the element's own 500ms
+// cadence to 4-6 over the same 2s window, which is what this test's floor
+// must clear.
+TEST_F (ElementsTimersLoadTest, ElementsTimersFixedMsOverridesPacingUnderLoad) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_pacing_element_json ("el_pacing", 500) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "constant_concurrency" }, { "concurrency", 1 }, { "duration", "2s" },
+        { "elements", { { "timers", { { "fixedMs", 100 } } } } } };
+
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    // 100ms apart over 2s against a loopback mock is comfortably above the
+    // element's own 500ms ceiling of 6, and well short of a fully unpaced
+    // run's count (the "off" test above clears 30) - the bounds separate
+    // "still paced, but at the override's interval" from either extreme.
+    EXPECT_GE (executed, 10u)
+    << "elements.timers: {fixedMs: 100} did not replace timer.pacing's own "
+       "500ms cadence under load - got "
+    << executed << " requests over 2s, still in the un-overridden paced range";
+    EXPECT_LE (executed, 30u)
+    << "got " << executed << " requests over 2s - the override's own 100ms interval was not honoured either";
+}
+
+// @copydoc ElementsTimersFixedMsOverridesPacingUnderLoad, `timer.throughput`'s
+// shared branch (`SharedThroughputBudgets::claim`, which takes a rate rather
+// than an interval - the conversion this issue adds). `el_rate`'s own
+// 120/minute config measures 18 over 4s (`ElementsTimersOffSilencesThroughputUnderLoad`'s
+// comment); overriding to a 4s interval (15/minute, an order of magnitude
+// slower) should leave each of the ten virtual users its one unpaced first
+// pass and almost nothing else in the remaining window. Mutation check: same
+// as above - reverting the hook to ignore `Fixed`/`Range` reds this on the
+// ceiling, since the run would instead measure the un-overridden 18.
+TEST_F (ElementsTimersLoadTest, ElementsTimersFixedMsOverridesThroughputUnderLoad) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_throughput_element_json ("el_rate", 120.0) });
+
+    auto config        = load_config ("4s");
+    config["elements"] = json{ { "timers", { { "fixedMs", 4000 } } } };
+
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    // Ten virtual users' unpaced first pass each is 10; the 4000ms interval
+    // (15/minute shared) allows at most one or two more claims in the
+    // remaining ~3.5s. 14 sits well below the element's own un-overridden 18
+    // and far below an unpaced run's 30+.
+    EXPECT_GE (executed, 10u)
+    << "expected at least the ten virtual users' own unpaced first pass, got " << executed;
+    EXPECT_LE (executed, 14u)
+    << "elements.timers: {fixedMs: 4000} did not replace timer.throughput's "
+       "own 120/minute rate under load - got "
+    << executed << " requests over 4s, close to the un-overridden 18";
+}
+
+// Issue #1620's `{"minMs", "maxMs"}` case, and its reproducibility
+// requirement: `SharedScheduleState::rng` threads the VU's own seeded
+// generator into `apply_timers_override`'s `Range` draw, the same
+// `std::mt19937_64` every other seeded wait in this suite reads from. Two
+// runs of the same single-VU plan with the same `seed` must draw the same
+// sequence of intervals and so complete the same number of passes; a
+// non-reproducible draw (an unseeded fallback generator, or no `rng` at all)
+// would make the two runs' counts disagree in general, though not on every
+// single run - the mutation check below is the reliable half of this test.
+// Mutation check: dropping `.rng = &vu->rng` at the `SharedScheduleState`
+// construction site falls back to `apply_timers_override`'s unseeded
+// thread-local generator, which reds this test's equality assertion across
+// repeated runs (not deterministically on the first try, since two unseeded
+// draws can coincide, but reliably under a repeat loop).
+TEST_F (ElementsTimersLoadTest, ElementsTimersRangeOverrideIsReproducibleWithSeed) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_pacing_element_json ("el_pacing", 500) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "constant_concurrency" }, { "concurrency", 1 }, { "duration", "1500ms" },
+        { "elements",
+        { { "timers", { { "minMs", 50 }, { "maxMs", 150 } } }, { "seed", 42 } } } };
+
+    auto state_a = run (config, execution);
+    ASSERT_NE (state_a, nullptr);
+    const size_t executed_a = state_a->steps_executed.load ();
+
+    auto state_b = run (config, execution);
+    ASSERT_NE (state_b, nullptr);
+    const size_t executed_b = state_b->steps_executed.load ();
+
+    EXPECT_EQ (executed_a, executed_b)
+    << "the same seed drew a different sequence of Range waits across two "
+       "runs - executed "
+    << executed_a << " then " << executed_b;
+
+    // Sanity bound: within the 50-150ms range, 1.5s cannot produce fewer
+    // than the un-paced-first-pass-plus-one, nor more than an unpaced run.
+    EXPECT_GE (executed_a, 2u);
+    EXPECT_LE (executed_a, 30u);
+}
+
 } // namespace

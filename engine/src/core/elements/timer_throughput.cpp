@@ -99,20 +99,38 @@ class TimerThroughputElement final : public Element {
         }
         // The run-level `elements.timers` override is consulted through
         // `shared.timers_override`, for the reason `timer_pacing.cpp`'s own
-        // comment states (issue #1498's reopen).
-        if (shared.timers_override != nullptr &&
-        shared.timers_override->mode == TimersOverride::Mode::Off) {
+        // comment states (issue #1498's reopen, extended to `Fixed`/`Range`
+        // by #1620): `apply_timers_override` hands back an interval in
+        // milliseconds, replacing `every_ms_` before either branch below
+        // advances anything from it.
+        const auto interval_ms =
+        apply_timers_override (shared.timers_override, every_ms_, shared.rng);
+        if (!interval_ms) {
             return std::nullopt;
         }
         if (!per_user_) {
             // One rate shared across every virtual user: `shared.throughput`
             // is always non-null here, sized by the plan scan that found this
-            // very element's id in the first place.
+            // very element's id in the first place. `claim` wants a rate per
+            // second; left un-overridden (`interval_ms == every_ms_`), the
+            // exact configured rate is used rather than one derived from the
+            // rounded `every_ms_`, so an un-overridden run's accuracy is
+            // unchanged. A `fixedMs`/`minMs`-`maxMs` override instead
+            // converts its interval into the equivalent rate, floored the
+            // same way `every_ms_for` floors the other direction so a
+            // near-zero interval cannot produce an unbounded rate.
+            const bool overridden = shared.timers_override != nullptr &&
+            (shared.timers_override->mode == TimersOverride::Mode::Fixed ||
+            shared.timers_override->mode == TimersOverride::Mode::Range);
+            const double rate_per_second = overridden ?
+            1000.0 / static_cast<double> (std::max<int64_t> (1, *interval_ms)) :
+            target_per_minute_ / 60.0;
             return shared.throughput != nullptr ?
-            shared.throughput->claim (element_id_, target_per_minute_ / 60.0, now_ms) :
+            shared.throughput->claim (element_id_, rate_per_second, now_ms) :
             int64_t{ 0 };
         }
-        return detail::advance_per_user_pacing (pacing_state, element_id_, every_ms_, now_ms);
+        return detail::advance_per_user_pacing (
+        pacing_state, element_id_, *interval_ms, now_ms);
     }
 
     private:
