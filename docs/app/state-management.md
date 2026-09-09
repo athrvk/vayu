@@ -2365,9 +2365,9 @@ const {
 
 **Behaviour:**
 - **Seeds and resyncs while clean:** a clean draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`. The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the draft adopts an external write per field](#the-request-builders-draft-adopts-an-external-write-per-field).
-- **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ScriptTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose.
+- **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ElementsTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose.
 - **Tracks by JSON value, not identity:** `value` may be a fresh object literal every render (`InfoTab` builds `{ name, description }` inline); callers do not have to memoize it.
-- **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`, discarding any pending `externalValue` too. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ScriptTab` passes `${collection.id}:${fieldKey}`, since pre- and post-request scripts are two different things to edit under one collection id.
+- **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`, discarding any pending `externalValue` too. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ElementsTab` passes `${collection.id}:elements`, one entity key for the whole element list under one collection id (the retired `ScriptTab` passed `${collection.id}:${fieldKey}`, since pre- and post-request scripts were two separate things to edit).
 - **Requiring the mutation is the point:** the three hand-rolled copies this replaced had drifted, and the one that omitted the reset had exactly that bug.
 
 **Usage:**
@@ -2396,7 +2396,7 @@ hook's documented behaviour above, and pinned by `useEntityDraft.test.ts`.
 
 The counterpart to `useSaveManager`'s registration half, for editors using the
 `useEntityDraft` model. Located in `app/src/hooks/useDraftSaveContext.ts`. Used
-by `InfoTab`, `AuthTab` and `ScriptTab`.
+by `InfoTab`, `AuthTab` and `ElementsTab`.
 
 ```typescript
 useDraftSaveContext({
@@ -2410,11 +2410,11 @@ useDraftSaveContext({
 
 **Behaviour:**
 - **Registration only.** It schedules nothing; each editor decides when to call
-  its own `save` - `AuthTab` on its Save button, `InfoTab` and `ScriptTab` when
-  focus leaves the field. The defect it fixes is orthogonal to that choice: the
-  *other* ways to save - Ctrl/Cmd+S, the quit flush, tab eviction - could not
-  reach these editors at all, because none of the three tabs ever called
-  `registerContext`.
+  its own `save` - `AuthTab` and `ElementsTab` on their Save button, `InfoTab`
+  when focus leaves the field. The defect it fixes is orthogonal to that
+  choice: the *other* ways to save - Ctrl/Cmd+S, the quit flush, tab eviction -
+  could not reach these editors at all, because none of the three tabs ever
+  called `registerContext`.
 - **`isActive` decides who owns Ctrl/Cmd+S.** `triggerSave` prefers the active
   context, and these editors stay mounted while hidden, so without it the last
   sibling to mount would answer for the panel on screen.
