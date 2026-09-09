@@ -133,14 +133,19 @@ const DEFAULT_VIRTUAL_USERS = "10";
 const DEFAULT_DURATION_SECONDS = "30";
 
 /**
- * The `elements` run override (issue #1495), scenario-load-run only - a
- * design-mode collection run has no inline/deferred distinction to make.
- * Matches `docs/engine/api-reference.md`'s "elements" block exactly:
- * `timers` reaches every `timer.*` kind under load (`"off"` included, since
- * #1498's reopen fix - `fixedMs`/`{minMs, maxMs}` do not yet reach
- * `timer.pacing`/`timer.throughput` there, #1620), and `scripts` picks
- * whether a `script.*` element runs inline on the event-loop worker or stays
- * deferred to the post-run replay.
+ * The `elements` run override (issue #1495). `timers` applies to every
+ * collection run, load test or not - `RunContext`'s constructor reads it off
+ * the payload the same way regardless of run shape (`run_manager.cpp`), and
+ * `timer.pacing`/`timer.think` honour it in the sequential runner exactly as
+ * they do under load (issue #1552's reopen). Under load, `"off"` reaches
+ * every `timer.*` kind (since #1498's reopen fix), but `fixedMs`/
+ * `{minMs, maxMs}` do not yet reach `timer.pacing`/`timer.throughput` there
+ * (#1620) - the sequential run this dialog also drives has no such gap, since
+ * it has no separate pre-scheduling hook to thread the override through.
+ * `scripts` stays load-only: the design send and the sequential run already
+ * run every `script.*` element inline, so a choice between inline and
+ * deferred has nothing to say until a run is on the event loop. Matches
+ * `docs/engine/api-reference.md`'s "elements" block exactly.
  */
 const TIMERS_DEFAULT = "asConfigured";
 const SCRIPTS_DEFAULT = "asMarked";
@@ -308,6 +313,19 @@ export default function RunCollectionDialog({
 	const handleRun = () => {
 		if (!canRun) return;
 		const thresholds = buildThresholds(budgets, failRun, customBudgets);
+		// Top-level, matching where the engine reads it
+		// (`validate_elements_run_override` looks at the run payload directly,
+		// not inside `scenario`) - and, unlike `mode`/`concurrency`/`duration`
+		// below, not gated by `loadTest`: `timers` is honoured by the
+		// sequential runner too. Omitted per-field at the engine's own
+		// defaults, the same "absent already means what the user asked for"
+		// rule `failOnSchemaError` follows below.
+		const elementsOverride = {
+			...(timersOverride !== TIMERS_DEFAULT ? { timers: timersOverride } : {}),
+			...(loadTest && scriptsOverride !== SCRIPTS_DEFAULT
+				? { scripts: scriptsOverride }
+				: {}),
+		};
 		startRun.mutate(
 			{
 				/*
@@ -326,27 +344,9 @@ export default function RunCollectionDialog({
 							mode: "constant_concurrency" as const,
 							concurrency: virtualUserCount,
 							duration: `${durationSeconds.trim()}s`,
-							// Top-level, matching where the engine reads it
-							// (`validate_elements_run_override` looks at the run
-							// payload directly, not inside `scenario`). Omitted at
-							// the engine's own defaults, the same "absent already
-							// means what the user asked for" rule `failOnSchemaError`
-							// follows below.
-							...(timersOverride !== TIMERS_DEFAULT ||
-							scriptsOverride !== SCRIPTS_DEFAULT
-								? {
-										elements: {
-											...(timersOverride !== TIMERS_DEFAULT
-												? { timers: timersOverride }
-												: {}),
-											...(scriptsOverride !== SCRIPTS_DEFAULT
-												? { scripts: scriptsOverride }
-												: {}),
-										},
-									}
-								: {}),
 						}
 					: {}),
+				...(Object.keys(elementsOverride).length > 0 ? { elements: elementsOverride } : {}),
 				scenario: {
 					source: "collection",
 					collectionId: collection.id,
@@ -511,32 +511,6 @@ export default function RunCollectionDialog({
 
 							<div className="flex items-center justify-between gap-4">
 								<Label className="leading-snug">
-									Timers
-									<span className="block text-xs font-normal text-muted-foreground">
-										As configured, or off for this run.
-									</span>
-								</Label>
-								<ToggleGroup
-									size="sm"
-									aria-label="Timers"
-									value={timersOverride}
-									onValueChange={(value) => {
-										// Radix emits "" when the active segment is
-										// clicked again; a choice is not optional here.
-										if (value === "asConfigured" || value === "off") {
-											setTimersOverride(value);
-										}
-									}}
-								>
-									<ToggleGroupItem value="asConfigured">
-										As configured
-									</ToggleGroupItem>
-									<ToggleGroupItem value="off">Off</ToggleGroupItem>
-								</ToggleGroup>
-							</div>
-
-							<div className="flex items-center justify-between gap-4">
-								<Label className="leading-snug">
 									Scripts
 									<span className="block text-xs font-normal text-muted-foreground">
 										As marked runs a script inline only where its own element
@@ -567,12 +541,40 @@ export default function RunCollectionDialog({
 						</>
 					)}
 
+					{/* Not gated by Load test, unlike Scripts above: the sequential
+					    runner honours `elements.timers` exactly as the load
+					    executor does (issue #1552's reopen), so a design-mode run
+					    can silence or override its timers too. */}
+					<div className="flex items-center justify-between gap-4">
+						<Label className="leading-snug">
+							Timers
+							<span className="block text-xs font-normal text-muted-foreground">
+								As configured, or off for this run.
+							</span>
+						</Label>
+						<ToggleGroup
+							size="sm"
+							aria-label="Timers"
+							value={timersOverride}
+							onValueChange={(value) => {
+								// Radix emits "" when the active segment is
+								// clicked again; a choice is not optional here.
+								if (value === "asConfigured" || value === "off") {
+									setTimersOverride(value);
+								}
+							}}
+						>
+							<ToggleGroupItem value="asConfigured">As configured</ToggleGroupItem>
+							<ToggleGroupItem value="off">Off</ToggleGroupItem>
+						</ToggleGroup>
+					</div>
+
 					{/*
 					 * Pass/fail budgets (issue #1564) - the disclosure itself is
-					 * not gated by `loadTest`, unlike Timers/Scripts above: the
-					 * engine now judges a design-mode collection run against the
-					 * six fixed budgets exactly as it already judges a load run,
-					 * so those apply to both. The custom rows inside it are the
+					 * not gated by `loadTest`, unlike Scripts above: the engine
+					 * now judges a design-mode collection run against the six
+					 * fixed budgets exactly as it already judges a load run, so
+					 * those apply to both. The custom rows inside it are the
 					 * exception and carry their own gate; see there.
 					 * Same card treatment as `LoadTestConfigDialog`'s own
 					 * disclosure, for the reason that one gives: a section that

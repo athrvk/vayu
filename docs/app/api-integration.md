@@ -688,28 +688,34 @@ implement, and it is refused rather than quietly run closed-loop. Such a run's
 `type` is `load`, so it streams `metrics` ticks and **not** `step` events - the
 caller must attach `loadTestService`, not `scenarioRunService`.
 
-A scenario *load* run also takes a top-level `elements` override (issue #1495,
-wired into `RunCollectionDialog` by issue #1552):
+A scenario run also takes a top-level `elements` override (issue #1495, wired
+into `RunCollectionDialog` by issue #1552):
 `{timers?: "asConfigured" | "off", scripts?: "asMarked" | "allInline" | "allDeferred", includeScriptTime?: boolean}`,
 documented in full at
 [api-reference.md](../engine/api-reference.md#the-elements-block-element-pipeline-override).
 It rides beside `mode`/`scenario`, never inside the `scenario` block, and
 `RunCollectionDialog` sends only the fields the user changed from the engine's
 own default - the same omitted-when-default rule `failOnSchemaError` follows.
-`timers` is accepted and stored engine-side but not yet wired to a kind (issue
-#1498 finishes that); `scripts` picks whether a `script.*` element runs inline
-on the event-loop worker or stays deferred to the post-run replay, and has no
-effect on a design-mode run, which is why the dialog only offers the two
-controls once Load test is on. Since issue #1594 the single-request
-`startLoadTest` payload has an `elements` attachment point too - its own
-step-level elements ride under `requestElements` instead (a distinct key,
-because this endpoint's own `elements` is the override block, not a script
-source) - and `LoadTestConfigDialog` sends the same `elements: {scripts}`
-override there once the user changes the dialog's Scripts control from its
-`"asMarked"` default, the one control the single-target payload's own
-`preRequestScript` warning needs: `"allInline"` is what makes a pre-request
-script actually reach the wire under load, since an unmarked one otherwise
-never runs on this path either.
+`timers` is wired to `timer.pacing`/`timer.think` end to end and applies to a
+design-mode run exactly as it does a load run, so the dialog offers that
+control regardless of Load test; `scripts` picks whether a `script.*` element
+runs inline on the event-loop worker or stays deferred to the post-run replay,
+and has no effect on a design-mode run (which already runs every script
+inline), which is why the dialog offers that one control only once Load test
+is on. Since issue #1594 the single-request `startLoadTest` payload has an
+`elements` attachment point too - its own step-level elements ride under
+`requestElements` instead (a distinct key, because this endpoint's own
+`elements` is the override block, not a script source) - and
+`LoadTestConfigDialog` sends the same `elements: {scripts}` override there
+once the user changes the dialog's Scripts control from its `"asMarked"`
+default, the one control the single-target payload's own `preRequestScript`
+warning needs: `"allInline"` is what makes a pre-request script actually
+reach the wire under load, since an unmarked one otherwise never runs on this
+path either. `LoadTestConfigDialog` offers no Timers twin, but not because
+the engine ignores the override there - `elements.timers` applies to a single
+target's own `timer.think` exactly the way it does to a scenario step's - the
+dialog simply has no timer control of its own on this path to pair it with
+yet.
 
 What comes back for one differs in two places worth knowing. `GET /runs/:id`
 returns the **resolved manifest** in place of the block that was sent
