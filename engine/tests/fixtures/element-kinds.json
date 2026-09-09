@@ -30,6 +30,12 @@
     "configSchema": {
       "additionalProperties": false,
       "properties": {
+        "inline": {
+          "description": "Runs on the load path's own producer/completion hooks instead of the deferred post-run replay.",
+          "title": "Run inline",
+          "type": "boolean",
+          "x-vayu-group": "advanced"
+        },
         "script": {
           "description": "The JavaScript source to execute.",
           "title": "Script",
@@ -56,6 +62,12 @@
     "configSchema": {
       "additionalProperties": false,
       "properties": {
+        "inline": {
+          "description": "Runs on the load path's own producer/completion hooks instead of the deferred post-run replay.",
+          "title": "Run inline",
+          "type": "boolean",
+          "x-vayu-group": "advanced"
+        },
         "script": {
           "description": "The JavaScript source to execute.",
           "title": "Script",

@@ -37,6 +37,7 @@ add_executable(vayu_tests
     script_types_test.cpp
     event_loop_test.cpp
     db_test.cpp
+    config_seed_test.cpp
     character_cast_test.cpp
     bounds_primitives_test.cpp
     db_concurrency_test.cpp
@@ -325,6 +326,7 @@ set(vayu_scratch_database_suites
     ColumnTextFixture
     CollectionsRouteTest
     ConfigRouteTest
+    ConfigSeedTest
     CustomCaVerificationTest
     DatabaseConcurrencyTest
     DefaultHeaderConfigTest

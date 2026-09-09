@@ -13,17 +13,17 @@
  */
 
 import type { ElementDef } from "@/types";
-import { generateId } from "@/lib/id";
 
 /**
  * The joined text of every enabled element of one script kind (`script.pre`
- * or `script.post`) in a list - what the load path's `tests`/pre-request
- * warning, and the variable-reference scanners, need: one flat string per
- * entity rather than the element list itself.
+ * or `script.post`) in a list - what a pre-request-script presence check
+ * (`LoadTestConfigDialog`'s warning) and the variable-reference scanners
+ * (`ColumnAudit`, `column-audit.ts`, `request-references.ts`) need: one flat
+ * string per entity rather than the element list itself.
  *
- * Joined with the engine's own separator (`"\n\n"`, `read_post_request_script`
- * / `compose_script_parts`) so a caller feeding this into `scriptParts()`
- * reproduces the single string a `script.post` column used to hold - the
+ * Joined with the engine's own separator (`"\n\n"`,
+ * `RunContext::compile_step_elements`) so it reproduces what a load run's
+ * deferred replay runs when more than one `script.post` element defers - the
  * common case is exactly one such element, and this degrades sensibly for
  * more than one rather than silently dropping every part past the first.
  */
@@ -39,18 +39,14 @@ export function scriptTextFor(
 }
 
 /**
- * The `script.pre`/`script.post` pair every new request and collection is
- * created with, empty and enabled. The two script tabs this feature replaced
- * were always present, running only once given a non-blank body; a fresh
- * `elements: []` loses that visible slot; a fresh user has to know the
- * "Add element" menu exists before they can find where a pre-request or test
- * script goes. An empty `config.script` still passes the kind's own schema -
- * it requires the property present, not non-empty - and `scriptTextFor`
- * already treats a blank script as absent everywhere it's read.
+ * Whether a `script.pre`/`script.post` element's own text is empty or
+ * whitespace-only - the shared rule for "absent for every purpose but
+ * storage" (#1609): not composed, not run, not reported, not counted toward
+ * an inherited-elements notice. A blank element still exists as a stored row
+ * (a user may be mid-edit); only its runtime effect is inert.
  */
-export function defaultScriptElements(): ElementDef[] {
-	return [
-		{ id: `el_${generateId()}`, kind: "script.pre", enabled: true, config: { script: "" } },
-		{ id: `el_${generateId()}`, kind: "script.post", enabled: true, config: { script: "" } },
-	];
+export function isBlankScriptElement(el: Pick<ElementDef, "kind" | "config">): boolean {
+	if (el.kind !== "script.pre" && el.kind !== "script.post") return false;
+	const text = el.config.script;
+	return typeof text !== "string" || text.trim().length === 0;
 }

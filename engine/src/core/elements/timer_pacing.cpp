@@ -91,15 +91,16 @@ class TimerPacingElement final : public Element {
         if (!scope_entry_) {
             return std::nullopt;
         }
-        // The run-level `elements.timers` override cannot reach this call:
-        // it is bound on `ElementContext`, which the load path's pre-select
-        // scheduling hook does not carry (it runs before any step's
-        // `ElementContext` exists). A run that silences timers with `off`
-        // still defers a scenario load run's pacing element by its own
-        // `everyMs` here; `apply`'s own override check then reports the
-        // outcome truthfully once the (already-elapsed) wait is confirmed.
-        // Disclosed in the PR as a known load-path limitation of the
-        // override, not present on the sequential run.
+        // The run-level `elements.timers` override cannot reach `apply`'s own
+        // check here - this hook runs before any step's `ElementContext`
+        // exists - so it is consulted through `shared.timers_override`
+        // instead (issue #1498's reopen). `"off"` books no wait and touches
+        // neither `pacing_state` nor the shared clock, matching `apply`'s own
+        // "off" outcome on the sequential run.
+        if (shared.timers_override != nullptr &&
+        shared.timers_override->mode == TimersOverride::Mode::Off) {
+            return std::nullopt;
+        }
         if (!per_user_) {
             // One cadence shared across every virtual user (issue #1570):
             // `shared.pacing` is always non-null here, sized by the plan

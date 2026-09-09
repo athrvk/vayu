@@ -853,6 +853,31 @@ TEST_F (ScenarioRunnerTest, TimerThinkWaitsBetweenStepsAndReportsHowLong) {
     EXPECT_LT (rows[0].latency_ms, 100.0);
 }
 
+// Issue #1609's acceptance criterion: a blank script.pre is inert - the
+// pipeline reports no outcome for it at all, not even "skipped" - while a
+// real script.post beside it on the same step still runs and reports.
+// Mutation check: revert the `is_blank_script_element` guard in
+// `compile_elements` and `trace0["elements"].size ()` reddens to 2.
+TEST_F (ScenarioRunnerTest, ABlankScriptPreReportsNoOutcomeButARealScriptPostDoes) {
+    seed_collection ("col_1");
+    seed_request_with_elements ("req_a", 0, "/ok",
+    json::array ({ json{ { "id", "el_blank_pre" }, { "kind", "script.pre" },
+                   { "config", { { "script", "  \n" } } } },
+    json{ { "id", "el_real_post" }, { "kind", "script.post" },
+    { "config", { { "script", "console.log('runs');" } } } } }));
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 1u);
+    const auto trace0 = json::parse (rows[0].trace_data);
+    ASSERT_EQ (trace0["elements"].size (), 1u);
+    EXPECT_EQ (trace0["elements"][0]["id"], "el_real_post");
+    EXPECT_EQ (trace0["elements"][0]["kind"], "script.post");
+    EXPECT_EQ (trace0["elements"][0]["outcome"], "ok");
+}
+
 // Issue #1500's acceptance criterion: a metric.record trend on one step
 // produces `customMetrics.<name>` in the sequential run's own summary
 // section, with a count equal to that step's completions.

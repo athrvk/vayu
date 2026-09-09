@@ -154,6 +154,14 @@ function saveConfig(config: SavedLoadTestConfig): void {
 	}
 }
 
+/**
+ * The `elements.scripts` run override (issue #1594), the same three values
+ * and the same default `RunCollectionDialog`'s Scripts toggle uses - "As
+ * marked" leaves each inherited `script.*` element's own `config.inline` to
+ * decide, the other two force every one of this run's elements regardless.
+ */
+const SCRIPTS_DEFAULT = "asMarked";
+
 export interface LoadTestConfigDialogProps {
 	onClose: () => void;
 	onStart: (config: LoadTestConfig) => void;
@@ -306,6 +314,9 @@ export default function LoadTestConfigDialog({
 	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [oauthGated, setOauthGated] = useState(false);
 	const [recordingOpen, setRecordingOpen] = useState(false);
+	const [scriptsOverride, setScriptsOverride] = useState<
+		"asMarked" | "allInline" | "allDeferred"
+	>(SCRIPTS_DEFAULT);
 
 	/**
 	 * Duration is meaningless in `iterations`: the engine stops on
@@ -473,14 +484,19 @@ export default function LoadTestConfigDialog({
 			});
 		}
 
-		if (hasPreRequestScript) {
+		// Unconditional before issue #1594: the load path ran no element at all,
+		// so a pre-request script never reached the wire regardless of what the
+		// run asked for. Now `elements.scripts: "allInline"` makes it run per
+		// submission, so the warning is only true at the other two settings.
+		if (hasPreRequestScript && scriptsOverride !== "allInline") {
 			list.push({
 				key: "pre-script",
 				severity: "warning",
 				node: (
 					<Callout severity="warning" title="Pre-request script will not run">
-						Running JS per request would cap throughput, so the load engine skips it.
-						Your test script still runs once afterwards, against sampled responses.
+						Running JS per request would cap throughput, so the load engine skips it
+						unless Scripts below is set to All inline. Your test script still runs once
+						afterwards, against sampled responses.
 					</Callout>
 				),
 			});
@@ -509,6 +525,7 @@ export default function LoadTestConfigDialog({
 		budgetsError,
 		monitoringError,
 		hasPreRequestScript,
+		scriptsOverride,
 		defaultHeaderDifference,
 	]);
 
@@ -553,6 +570,12 @@ export default function LoadTestConfigDialog({
 			thresholds: buildThresholds(budgets, failRun, customBudgets),
 			// Absent when no endpoint was given, for the same reason.
 			monitor: buildMonitor(monitor),
+			// Absent at the default, the same "absent already means what the
+			// user asked for" rule `failOnSchemaError` follows on the
+			// collection-run dialog (issue #1594).
+			...(scriptsOverride !== SCRIPTS_DEFAULT
+				? { elements: { scripts: scriptsOverride } }
+				: {}),
 		};
 
 		// Omitted in `iterations` - see `usesDuration`. Sending a value the engine
@@ -782,6 +805,48 @@ export default function LoadTestConfigDialog({
 								/>
 							</>
 						)}
+					</div>
+
+					{/*
+					 * The `elements.scripts` run override (issue #1594), the same
+					 * control and the same three values `RunCollectionDialog`'s
+					 * Scripts toggle offers. No Timers control here, unlike that
+					 * dialog - not because the engine ignores `elements.timers` on
+					 * this path (it applies it the same way, `load_strategy.cpp`'s
+					 * `step.before` / `step.between` contexts), but because this
+					 * dialog offers nothing to override it with yet: a single
+					 * request's own `timer.think` is the only timer kind
+					 * `requestElements` accepts, and there is no UI here for it at
+					 * all, marked or not.
+					 */}
+					<div className="flex items-center justify-between gap-4">
+						<Label className="leading-snug">
+							Scripts
+							<span className="block text-xs font-normal text-muted-foreground">
+								As marked runs a script inline only where its own element says to;
+								the other two override every script this run.
+							</span>
+						</Label>
+						<ToggleGroup
+							size="sm"
+							aria-label="Scripts"
+							value={scriptsOverride}
+							onValueChange={(value) => {
+								// Radix emits "" when the active segment is clicked
+								// again; a choice is not optional here.
+								if (
+									value === "asMarked" ||
+									value === "allInline" ||
+									value === "allDeferred"
+								) {
+									setScriptsOverride(value);
+								}
+							}}
+						>
+							<ToggleGroupItem value="asMarked">As marked</ToggleGroupItem>
+							<ToggleGroupItem value="allInline">All inline</ToggleGroupItem>
+							<ToggleGroupItem value="allDeferred">All deferred</ToggleGroupItem>
+						</ToggleGroup>
 					</div>
 
 					<p className="rounded-md border border-border bg-panel px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">

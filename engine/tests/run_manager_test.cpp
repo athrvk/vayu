@@ -570,33 +570,85 @@ TEST (RunManagerRetention, SweepEvictsExpiredOnly) {
     EXPECT_NE (mgr.get_run_or_retained ("b"), nullptr);
 }
 
-// A load run's `tests` may arrive as a list of parts, exactly like the design
-// path's scripts. Before this, only the request's own test script was sent, so
-// a collection-level assertion passed in design mode and was silently never
-// checked under load.
+// A single-request run's own `requestElements` may declare a `script.post`
+// element (issue #1594); when it is not marked to run inline, its script text
+// is what the deferred replay (`validate_scripts`) reads back through
+// `test_script` - the same field the retired `tests` payload field used to
+// populate directly.
 //
-// This exercises the wiring through RunContext's constructor - not
-// `read_script` in isolation (that coverage lives in script_compose_test.cpp).
-// Reverting run_manager.cpp's call back to `config["tests"].get<std::string>
-// ()` makes the constructor throw for a list payload; verified by temporarily
-// reverting and confirming this test fails, then restoring.
-TEST (RunManager, ConstructorJoinsTestScriptParts) {
+// This exercises the wiring through RunContext's constructor, not
+// `compile_elements` in isolation.
+TEST (RunManager, ConstructorReadsDeferredPostScriptFromRequestElements) {
     auto config = nlohmann::json::parse (R"({
-      "tests": [
-        {"origin":"collection","id":"c1","name":"API","script":"pm.test(\"a\",()=>{});"},
-        {"origin":"request","id":"r1","script":"pm.test(\"b\",()=>{});"}
+      "requestElements": [
+        { "kind": "script.post", "config": { "script": "pm.test(\"a\",()=>{});" } }
       ]
     })");
 
     RunContext ctx ("r", config);
-    EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});\n\npm.test(\"b\",()=>{});");
+    EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});");
 }
 
-TEST (RunManager, ConstructorStillAcceptsAPlainTestString) {
+// A saved request composes the collection chain's `script.post` elements
+// before its own (issue #1514's `compose_elements` order), and both are
+// deferred by default - so a request whose collection also asserts
+// something must run both under load, not only the first, the way
+// `read_script` always joined every enabled part before this run shape had
+// elements at all.
+TEST (RunManager, ConstructorJoinsEveryDeferredPostScriptWithABlankLine) {
+    auto config = nlohmann::json::parse (R"({
+      "requestElements": [
+        { "kind": "script.post", "config": { "script": "pm.test(\"chain\",()=>{});" } },
+        { "kind": "script.post", "config": { "script": "pm.test(\"own\",()=>{});" } }
+      ]
+    })");
+
+    RunContext ctx ("r", config);
+    EXPECT_EQ (ctx.test_script, "pm.test(\"chain\",()=>{});\n\npm.test(\"own\",()=>{});");
+}
+
+// The inline one is left out of the join entirely - both because it must not
+// run twice and because it may sit between two deferred ones in compile
+// order, which must not leave a stray blank line where it was skipped.
+TEST (RunManager, ConstructorSkipsAnInlineScriptPostWhenJoiningTheRest) {
+    auto config = nlohmann::json::parse (R"({
+      "requestElements": [
+        { "kind": "script.post", "config": { "script": "pm.test(\"chain\",()=>{});" } },
+        { "kind": "script.post",
+          "config": { "script": "pm.test(\"inline\",()=>{});", "inline": true } },
+        { "kind": "script.post", "config": { "script": "pm.test(\"own\",()=>{});" } }
+      ]
+    })");
+
+    RunContext ctx ("r", config);
+    EXPECT_EQ (ctx.test_script, "pm.test(\"chain\",()=>{});\n\npm.test(\"own\",()=>{});");
+}
+
+// A `script.post` marked `inline` runs on the pipeline hooks instead
+// (`submit_one_request` / `run_request_elements_after_submission`), so the
+// deferred replay must not run it a second time - `test_script` stays empty.
+TEST (RunManager, ConstructorLeavesTestScriptEmptyForAnInlineScriptPost) {
+    auto config = nlohmann::json::parse (R"({
+      "requestElements": [
+        { "kind": "script.post",
+          "config": { "script": "pm.test(\"a\",()=>{});", "inline": true } }
+      ]
+    })");
+
+    RunContext ctx ("r", config);
+    EXPECT_TRUE (ctx.test_script.empty ());
+}
+
+// The route refuses `tests`/`postRequestScript(s)` outright now (issue
+// #1594's cut-over) - the constructor itself no longer reads any of them, so
+// a payload that still carries one (a stale caller the route did not run in
+// front of, as this unit test bypasses it) is simply ignored rather than
+// populating `test_script`.
+TEST (RunManager, ConstructorIgnoresTheRetiredTestsField) {
     auto config = nlohmann::json::parse (R"({"tests":"pm.test(\"a\",()=>{});"})");
 
     RunContext ctx ("r", config);
-    EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});");
+    EXPECT_TRUE (ctx.test_script.empty ());
 }
 
 // The wiring nobody else covers: what a collector counted has to reach the

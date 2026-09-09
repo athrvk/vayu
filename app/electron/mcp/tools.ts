@@ -1729,30 +1729,6 @@ function readScriptEdits(args: Record<string, unknown>): ["pre" | "post", string
 	return edits;
 }
 
-/**
- * The joined text of every enabled element of one script kind, or `""`.
- *
- * Mirrors the engine's own `read_script` join (`"\n\n"`, `script_parts.cpp`) and
- * the renderer's `scriptTextFor` (`src/lib/elements.ts`), which this cannot
- * import: `tsconfig.node.json` withholds the `@/*` mapping so production code in
- * `electron/` cannot reach into `src/`. Used to fold a composed `elements` list
- * back into the single string `POST /runs` still reads.
- */
-function scriptTextFromElements(elements: unknown, which: "pre" | "post"): string {
-	if (!Array.isArray(elements)) return "";
-	const kind = SCRIPT_ELEMENT_KINDS[which];
-	return elements
-		.filter(
-			(el): el is Record<string, unknown> =>
-				isRecord(el) && el.kind === kind && el.enabled !== false
-		)
-		.map((el) =>
-			isRecord(el.config) && typeof el.config.script === "string" ? el.config.script : ""
-		)
-		.filter((script) => script.trim().length > 0)
-		.join("\n\n");
-}
-
 /** Read an optional agent-supplied `auth` block (a `{ mode, … }` object). */
 function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
 	const a = args.auth;
@@ -1774,23 +1750,24 @@ function readAuthArg(args: Record<string, unknown>): AuthRecord | undefined {
  * overrides carrying `{{variables}}` resolve too. Without a `requestId` the
  * run is ad-hoc and `url` is required.
  *
- * **The two endpoints spell the script differently, so this translates.**
- * `POST /compose` returns the resolved chain as `elements` and nothing else
- * (issue #1514 retired `preRequestScripts` / `postRequestScripts` from it),
- * while a single-target `POST /runs` reads its validation script only through
- * `read_post_request_script` - `tests` or the `postRequestScript(s)` aliases -
- * and never looks at `elements`. Left alone, a saved request's stored
- * assertions would compose into `elements` and then be silently ignored under
- * load. So the composed `script.post` elements are folded back into `tests`,
- * joined the way the engine joins parts, and `elements` is dropped rather than
- * left on the payload for an endpoint that does not read it.
+ * **The two endpoints spell the resolved chain under different keys, so this
+ * translates.** `POST /compose` returns it as `elements`; a single-target
+ * `POST /runs` reads its own step-level elements under `requestElements`
+ * instead (issue #1594) - a distinct key from `elements` there, which is the
+ * run-level `timers`/`scripts` override object `args.elements` becomes. So the
+ * composed list is renamed onto the payload rather than copied verbatim.
  *
- * `droppedPreRequestScripts` counts what a load run cannot honour - the
- * engine has no pre-request hook on `POST /runs`, so a saved request that
- * signs itself in a pre-request script goes out unsigned under load. Counted
- * from the composed `elements`' `script.pre` entries, read before `elements`
- * is deleted from the payload above, and reported rather than dropped in
- * silence.
+ * **`script.pre` can reach the wire now, but only when marked.** Before issue
+ * #1594, `POST /runs` ran no element pipeline at all, so a saved request's
+ * pre-request script never applied under load - `droppedPreRequestScripts`
+ * existed to say so. Now a `script.pre` element runs inline, per submission,
+ * when its own `config.inline` is set or the run's `elements.scripts`
+ * override forces it; left `asMarked` with no per-element mark, it still
+ * never runs (there is no pre-request replay to defer it to, unlike
+ * `script.post`). `droppedPreRequestScripts` folds `args.elements.scripts`
+ * into the count itself - "allInline" drops it to 0, "allDeferred" counts
+ * every enabled `script.pre` regardless of its own mark - so the caller only
+ * has to check whether the count is non-zero, not re-read the override too.
  */
 async function composeLoadRunRequest(
 	args: Record<string, unknown>,
@@ -1830,27 +1807,48 @@ async function composeLoadRunRequest(
 
 	const payload = await composeViaEngine(ctx.client, composeBody, signal);
 
-	// A saved request's pre-request scripts cannot run under load; report how
-	// many the composed chain held before `elements` leaves the payload.
+	// Mirrors `RunContext::script_element_runs_inline` (engine-side): the
+	// run's own `elements.scripts` override, when present, decides for every
+	// `script.pre` element regardless of its own `config.inline` - "allInline"
+	// runs every one of them, "allDeferred" runs none, and only the absence of
+	// an override falls back to each element's own mark. Reading only
+	// `config.inline` here (as an earlier version of this function did) missed
+	// the "allDeferred" case: a request whose `script.pre` was individually
+	// marked inline would count as not dropped, when the override forces it
+	// deferred anyway - the caveat below would then say nothing about a script
+	// that, in fact, never ran.
+	const scriptsOverride =
+		isRecord(args.elements) && typeof args.elements.scripts === "string"
+			? args.elements.scripts
+			: undefined;
 	const droppedPreRequestScripts = Array.isArray(payload.elements)
-		? payload.elements.filter(
-				(el) => isRecord(el) && el.kind === SCRIPT_ELEMENT_KINDS.pre && el.enabled !== false
-			).length
+		? payload.elements.filter((el) => {
+				if (!isRecord(el) || el.kind !== SCRIPT_ELEMENT_KINDS.pre || el.enabled === false) {
+					return false;
+				}
+				if (scriptsOverride === "allInline") return false;
+				if (scriptsOverride === "allDeferred") return true;
+				return !(isRecord(el.config) && el.config.inline === true);
+			}).length
 		: 0;
 
-	// The composed assertions, folded into the one name a single-target run
-	// reads. `elements` goes either way: /runs would ignore it, and leaving it
-	// on the payload would suggest a pipeline that does not run here.
-	const composedTests = scriptTextFromElements(payload.elements, "post");
-	delete payload.elements;
-
-	// An agent-written validation script replaces the composed one rather than
-	// joining it: with no way to know which the agent meant, running both would
-	// add assertions they never asked for. This is the only place `tests` is
-	// placed on a run payload - the handler does not add it again.
+	// An agent-written validation script replaces every composed `script.post`
+	// element rather than joining them: with no way to know which the agent
+	// meant, running both would add assertions they never asked for. This is
+	// the only place a post-request script is placed on this array - the
+	// handler does not add one again.
 	const adHocScript = readValidationScript(args);
-	const tests = adHocScript ?? composedTests;
-	if (tests !== "") payload.tests = tests;
+	let elements = Array.isArray(payload.elements) ? payload.elements : [];
+	if (adHocScript !== undefined) {
+		elements = elements.filter(
+			(el) => !(isRecord(el) && el.kind === SCRIPT_ELEMENT_KINDS.post)
+		);
+		if (adHocScript !== "") {
+			elements = [...elements, scriptElement("post", adHocScript, "mcp-script-post")];
+		}
+	}
+	delete payload.elements;
+	if (elements.length > 0) payload.requestElements = elements;
 
 	return { payload, droppedPreRequestScripts };
 }
@@ -2172,38 +2170,18 @@ const LOAD_RUN_SCHEMA_GATE_REFUSAL =
 	`run_collection, which is where the gate takes effect.`;
 
 /**
- * Why `elements` cannot override a single-target load run's timers/scripts
- * (issue #1559): there is no stored collection of `timer.*`/`script.*`
- * elements here to override - a single target's only script slot is
- * `postRequestScript`/`tests`. The engine's own validator
- * (`validate_elements_run_override`, `engine/src/core/load_strategy.cpp`)
- * accepts the block on every `POST /runs` call regardless of shape and simply
- * has nothing to apply it to here, so refusing it client-side is the same
- * "written and read by nothing" guard `SINGLE_TARGET_LOAD_FIELDS` states for
- * the opposite direction (a single-target field beside a scenario).
- */
-const ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL =
-	`"elements" does not apply to a single-target load run: there is no stored collection of ` +
-	`timer.*/script.* elements here to override - the only script slot a single target has is ` +
-	`"postRequestScript"/"tests". Nothing was started - the engine would have accepted the block and ` +
-	`read it from nothing. Remove it, or pass "scenario" to load-test a collection, where its ` +
-	`stored elements are what "asConfigured"/"asMarked" mean.`;
-
-/**
  * `elements.timers`'s two enum values (issue #1495), shared between
- * `run_collection` and `start_load_run` because - unlike `scripts` - it
- * genuinely takes effect on **both** run shapes: `execute_scenario_run`
- * (the design-mode runner `run_collection` drives) wires
- * `RunContext::timers_override` into the same `ExchangeInputs` a scenario
- * load run does (`scenario_runner.cpp`'s two call sites, `scenario_load.cpp`'s
- * three), so a `timer.pacing`/`timer.think` wait fires - and can be silenced -
- * during a plain `run_collection` call exactly as it does under load.
- * `scripts_override` has no such reach: its one reader,
- * `replay_scenario_steps`, is the load path's own post-run replay
- * (`run_manager.cpp`), so `scripts` is offered on `start_load_run` only.
- * Neither reaches a single-target load run - `load_strategy.cpp` wires
- * neither override at all, which is what `ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL`
- * states.
+ * `run_collection` and `start_load_run` because it takes effect on every run
+ * shape both tools can start: `execute_scenario_run` (the design-mode runner
+ * `run_collection` drives) wires `RunContext::timers_override` into the same
+ * `ExchangeInputs` a scenario load run does (`scenario_runner.cpp`'s two call
+ * sites, `scenario_load.cpp`'s three), so a `timer.pacing`/`timer.think` wait
+ * fires - and can be silenced - during a plain `run_collection` call exactly
+ * as it does under load; a single target's own `requestElements` reads the
+ * same override now too (issue #1594, `load_strategy.cpp`'s pipeline hooks).
+ * `scripts_override` reaches the same three: `replay_scenario_steps` (the
+ * load path's post-run replay, `run_manager.cpp`) and, since #1594, a single
+ * target's own inline-vs-deferred dispatch.
  */
 function elementsTimersInput() {
 	return z
@@ -7130,16 +7108,12 @@ export const TOOLS: McpTool[] = [
 					"Load-test a collection's ordered sequence instead of one target. Cannot be combined with url/requestId or any single-target field. `concurrency` is the number of virtual users, each walking the whole plan with its own cookies; `iterations` (top level) is the total passes across all of them in iterations mode. Modes: constant_concurrency (default), ramp_up, iterations - constant_rps and capacity are refused, with the engine's reasoning."
 				),
 			// The run-level override block issue #1495 defines on `POST /runs`
-			// (`validate_elements_run_override`). `scripts` reaches only the
-			// scenario load path; a single-target run has nothing stored to
-			// override for either key, so the whole block is refused there by
-			// name instead of silently accepted and read by nothing (see
-			// ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL and
-			// `elementsTimersInput`'s doc comment for the per-key reach). The
-			// engine's contract also takes `includeScriptTime` and `seed`, but
-			// no control anywhere in the product - app or MCP - sends either
-			// today, so they stay off this schema until something actually
-			// needs them.
+			// (`validate_elements_run_override`), now reaching a single target's
+			// own elements too (issue #1594), the same way it already reaches a
+			// scenario's. The engine's contract also takes `includeScriptTime`
+			// and `seed`, but no control anywhere in the product - app or MCP -
+			// sends either today, so they stay off this schema until something
+			// actually needs them.
 			elements: z
 				.object({
 					timers: elementsTimersInput(),
@@ -7147,12 +7121,12 @@ export const TOOLS: McpTool[] = [
 						.enum(["asMarked", "allInline", "allDeferred"])
 						.optional()
 						.describe(
-							'Forces every script.pre/script.post element\'s inline-vs-deferred execution for this run, overriding each element\'s own setting: "allInline" or "allDeferred". "asMarked" (default) leaves each at what it declares.'
+							'Forces every script.pre/script.post element\'s inline-vs-deferred execution for this run, overriding each element\'s own setting: "allInline" or "allDeferred". "asMarked" (default) leaves each at what it declares. On a single target, "allInline" is what makes a pre-request script actually reach the wire per submission - left "asMarked" with no per-element mark, it still never runs.'
 						),
 				})
 				.optional()
 				.describe(
-					"Override how this run's stored timer.*/script.* elements execute, without editing the collection - the same block RunCollectionDialog's load-test section sends. Scenario runs only (\"scenario\" required); a single-target run is refused, since it has no stored elements for this to override."
+					"Override how this run's stored timer.*/script.* elements execute, without editing the collection - the same block RunCollectionDialog's load-test section sends. Works on a scenario (\"scenario\") and on a single target alike."
 				),
 			// Declared only so it can be refused by name - see
 			// LOAD_RUN_SCHEMA_GATE_REFUSAL for why an undeclared key would be
@@ -7178,10 +7152,6 @@ export const TOOLS: McpTool[] = [
 			// inside it.
 			const scenario = readScenarioArg(args);
 			if (scenario) return startScenarioLoadRun(args, scenario, ctx, signal);
-
-			if (args.elements !== undefined) {
-				return errorResult(ELEMENTS_OVERRIDE_SINGLE_TARGET_REFUSAL);
-			}
 
 			let composed;
 			try {
@@ -7229,6 +7199,13 @@ export const TOOLS: McpTool[] = [
 			const payload: Record<string, unknown> = {
 				...composed.payload,
 				mode,
+				// The run-level timers/scripts override (issue #1594), same as a
+				// scenario's - `validate_elements_run_override` reads it on every
+				// `POST /runs` payload regardless of mode, and a single target's
+				// own `requestElements` now has a pipeline for it to reach.
+				...(args.elements && typeof args.elements === "object"
+					? { elements: args.elements }
+					: {}),
 			};
 			for (const key of [
 				"concurrency",
@@ -7279,12 +7256,16 @@ export const TOOLS: McpTool[] = [
 			const cappedDuration = defaultDurationUnderCap(loadParams, ctx.config);
 			if (cappedDuration !== null) payload.duration = cappedDuration;
 
-			// A saved request's pre-request script cannot run under load - the
-			// engine has no such hook on POST /runs. Say so rather than let an agent
-			// believe the request was prepared the way a Send prepares it.
+			// A saved request's unmarked pre-request script does not run under
+			// load unless this run's own `elements.scripts` forces every script
+			// inline (issue #1594) - `composeLoadRunRequest` already folds that
+			// override into `droppedPreRequestScripts` itself (0 whenever
+			// "allInline" applies), so a non-zero count here is always real. Say
+			// so rather than let an agent believe the request was prepared the
+			// way a Send prepares it.
 			const caveat =
 				composed.droppedPreRequestScripts > 0
-					? `\n\nNote: ${composed.droppedPreRequestScripts} pre-request script(s) on this saved request were NOT applied - POST /runs has no pre-request hook, so anything they sign or rewrite is missing from the requests this run sends.`
+					? `\n\nNote: ${composed.droppedPreRequestScripts} pre-request script(s) on this saved request were NOT applied - they are not marked to run inline, and this run's own elements.scripts is not "allInline", so anything they sign or rewrite is missing from the requests this run sends.`
 					: "";
 
 			const summary = `Start a load test against ${payload.url} (mode: ${payload.mode})?`;

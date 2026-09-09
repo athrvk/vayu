@@ -670,12 +670,17 @@ TEST_F (ElementsTimersRunnerTest, GaussianTimerThinkWaitsApproximatelyItsMean) {
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now () - started);
-    // A generous floor, not a tight window: a gaussian draw around a 100ms
-    // mean with a 1ms deviation is essentially always >= 90ms, and a loaded
-    // CI box only ever makes this run *longer*, never shorter - there is no
-    // way for load to push it below 50ms.
-    EXPECT_GE (elapsed.count (), 50)
-    << "the think time did not hold up the run at all";
+    // A window, not a one-sided floor: a gaussian draw around a 100ms mean
+    // with a 1ms deviation is essentially always in [90, 110]ms, so 50ms was
+    // no floor at all - it passed on a run that never waited a tenth of the
+    // configured mean. The 800ms ceiling stays generous against CI jitter
+    // and the two GETs' own transfer time while still catching a wait that
+    // is off by an order of magnitude.
+    EXPECT_GE (elapsed.count (), 90)
+    << "the think time did not hold up the run for close to its configured "
+       "mean";
+    EXPECT_LT (elapsed.count (), 800)
+    << "the think time held up the run far longer than its configured mean";
 }
 
 // `timer.pacing` on a single request holds a steady cadence across
@@ -794,6 +799,10 @@ TEST_F (ElementsTimersRunnerTest, TheSameSeedReproducesTheSameThinkWaitAcrossTwo
         return trace0["elements"][0]["waitedMs"].get<int64_t> ();
     };
 
+    // Non-zero first: two runs that both happened to wait 0ms would pass the
+    // equality check below without proving the seed decided anything.
+    EXPECT_GT (waited_ms_of (run_1), 0)
+    << "the gaussian wait was 0ms - this proves nothing about the seed";
     EXPECT_EQ (waited_ms_of (run_1), waited_ms_of (run_2))
     << "the same elements.seed must draw the same gaussian wait on both runs";
 }
@@ -972,6 +981,66 @@ TEST_F (ElementsTimersLoadTest, APacedRunDoesNotBusySpinTheProducer) {
     EXPECT_GE (executed, 4u) << "the pacing interval grew - the bounded wait "
                                 "is overshooting the deferral";
     EXPECT_LE (executed, 6u) << "the pacing interval shrank or vanished";
+}
+
+// Issue #1498's reopen: `elements.timers: "off"` silences `timer.think`
+// (dispatched through `step.between`) but did not reach `timer.pacing`'s own
+// pre-selection scheduling hook (`scheduled_ready_delay_ms`), which runs
+// before any step's `ElementContext` - and therefore its bound
+// `timers_override` - exists. The run still deferred every VU by the
+// configured 500ms and only reported the (already-elapsed) wait as silenced
+// once `apply` ran. Mutation check: reverting the `shared.timers_override`
+// guard in `timer_pacing.cpp`'s `scheduled_ready_delay_ms` reds this on the
+// ceiling alone - `APacedRunDoesNotBusySpinTheProducer` above pins the paced
+// range (4 to 6) this override must clear.
+TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesPacingUnderLoad) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_pacing_element_json ("el_pacing", 500) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "constant_concurrency" }, { "concurrency", 1 },
+        { "duration", "2s" }, { "elements", { { "timers", "off" } } } };
+
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    // Back-to-back against a loopback mock over 2s comfortably clears the
+    // paced ceiling of 6 by an order of magnitude; 30 is a floor generous
+    // enough to absorb a loaded CI box while staying far above it.
+    EXPECT_GT (executed, 30u)
+    << "elements.timers: \"off\" did not silence timer.pacing under load - "
+       "got "
+    << executed << " requests over 2s, still in the paced range";
+}
+
+// @copydoc ElementsTimersOffSilencesPacingUnderLoad, `timer.throughput`'s
+// shared-budget wait (`SharedThroughputBudgets::claim`), the other kind
+// `scheduled_ready_delay_ms` defers a VU through. A lower rate than
+// `SharedThroughputHoldsTheWholeRunToTheTargetRate` uses above: this
+// environment's own achievable ceiling for ten VUs against a loopback mock
+// over 4s measures at 39-40 regardless of any element at all (Debug build,
+// this sandbox's CPU quota), which sits *inside* that test's own 600/minute
+// target - a rate that high cannot discriminate paced from unpaced here.
+// 120/minute shared keeps the paced case (measured consistently at 18) well
+// clear of the unpaced one. Mutation check: reverting the `shared.timers_override`
+// guard reds this on the floor alone - a paced run measures 18, an unpaced
+// one 39-40, and 30 sits between them with margin on both sides.
+TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesThroughputUnderLoad) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_throughput_element_json ("el_rate", 120.0) });
+
+    auto config        = load_config ("4s");
+    config["elements"] = json{ { "timers", "off" } };
+
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    EXPECT_GT (executed, 30u)
+    << "elements.timers: \"off\" did not silence timer.throughput's shared "
+       "budget under load - got "
+    << executed << " requests over 4s, still in the paced range";
 }
 
 } // namespace
