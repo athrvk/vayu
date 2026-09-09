@@ -699,25 +699,26 @@ describe("dispatch emits mcp:data-changed, continued", () => {
 
 	test("a throwing listener does not fail a write the engine already applied", async () => {
 		const client = fakeClient();
+		const warn = vi.fn();
 		const ctx: ToolContext = {
 			client,
 			config: resolveSafetyConfig(WRITES_ENABLED),
 			onDataChanged: () => {
 				throw new Error("renderer went away");
 			},
+			log: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn(), applyFloor: vi.fn() },
 		};
-		const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
-		try {
-			const res = await dispatchTool(
-				"create_request",
-				{ collectionId: "col_1", name: "New", url: "https://api.example.com/x" },
-				ctx
-			);
-			expect(res.isError).toBeFalsy();
-			expect(client.createRequest).toHaveBeenCalledTimes(1);
-			expect(errorLog).toHaveBeenCalled();
-		} finally {
-			errorLog.mockRestore();
-		}
+		const res = await dispatchTool(
+			"create_request",
+			{ collectionId: "col_1", name: "New", url: "https://api.example.com/x" },
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(client.createRequest).toHaveBeenCalledTimes(1);
+		expect(warn).toHaveBeenCalledWith(
+			"mcp",
+			expect.stringContaining("Failed to notify"),
+			expect.objectContaining({ tool: "create_request" })
+		);
 	});
 });
