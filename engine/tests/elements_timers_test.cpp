@@ -1111,21 +1111,24 @@ TEST_F (ElementsTimersLoadTest, ElementsTimersFixedMsOverridesThroughputUnderLoa
     << executed << " requests over 4s, close to the un-overridden 18";
 }
 
-// Issue #1620's `{"minMs", "maxMs"}` case, and its reproducibility
-// requirement: `SharedScheduleState::rng` threads the VU's own seeded
-// generator into `apply_timers_override`'s `Range` draw, the same
-// `std::mt19937_64` every other seeded wait in this suite reads from. Five
-// runs of the same single-VU plan with the same `seed` must all draw the
-// same sequence of intervals and so complete the same number of passes -
-// looped rather than compared as a single pair, so a non-reproducible draw
-// (an unseeded fallback generator, or no `rng` at all) cannot pass by two
-// unseeded draws coinciding once, which a single-pair comparison could not
-// rule out. Mutation check: dropping `.rng = &vu->rng` at the
-// `SharedScheduleState` construction site falls back to
-// `apply_timers_override`'s unseeded thread-local generator, which reds this
-// loop's equality assertion within a handful of iterations even though any
-// one pair of unseeded draws can occasionally coincide.
-TEST_F (ElementsTimersLoadTest, ElementsTimersRangeOverrideIsReproducibleWithSeed) {
+// Issue #1620's `{"minMs", "maxMs"}` case reaching `timer.pacing`'s per-user
+// branch under load, staying inside the configured range. The acceptance
+// criteria's "reproducible with elements.seed" half is proven at the layer
+// that actually determines it - `ApplyTimersOverrideTest.
+// RangeModeIsReproducibleWithTheSameSeedAndStaysInBounds` above (two
+// identically-seeded generators draw identically) and `DeriveVuRngTest.
+// SameSeedAndIndexProduceIdenticalSequences` (a VU's generator is a pure
+// function of the run seed and its index) - not here: comparing the *count*
+// of steps two independent load runs complete inside a fixed wall-clock
+// window is not actually a test of RNG reproducibility, because which step
+// lands inside or outside that window also depends on real thread-scheduling
+// timing, which a fixed seed does not control. An earlier version of this
+// test compared exactly that and was flaky on CI (off by one or two between
+// runs on the same seed, on a busier box) for precisely this reason. Mutation
+// check: reverting `scheduled_ready_delay_ms` to read `every_ms_` directly
+// instead of the `apply_timers_override`-derived interval reds this on the
+// ceiling, the same way it reds the `FixedMs` case above.
+TEST_F (ElementsTimersLoadTest, ElementsTimersRangeOverrideReachesPacingUnderLoad) {
     auto execution =
     plan_with ({ vayu::tests::timer_pacing_element_json ("el_pacing", 500) });
 
@@ -1134,39 +1137,29 @@ TEST_F (ElementsTimersLoadTest, ElementsTimersRangeOverrideIsReproducibleWithSee
         { "elements",
         { { "timers", { { "minMs", 50 }, { "maxMs", 150 } } }, { "seed", 42 } } } };
 
-    auto first = run (config, execution);
-    ASSERT_NE (first, nullptr);
-    const size_t executed_first = first->steps_executed.load ();
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
 
-    // Sanity bound: within the 50-150ms range, 1.5s cannot produce fewer
-    // than the un-paced-first-pass-plus-one, nor more than an unpaced run.
-    EXPECT_GE (executed_first, 2u);
-    EXPECT_LE (executed_first, 30u);
-
-    for (int attempt = 0; attempt < 4; ++attempt) {
-        auto repeat = run (config, execution);
-        ASSERT_NE (repeat, nullptr);
-        const size_t executed_repeat = repeat->steps_executed.load ();
-        EXPECT_EQ (executed_first, executed_repeat)
-        << "the same seed drew a different sequence of Range waits on repeat " << attempt
-        << " - executed " << executed_first << " then " << executed_repeat;
-    }
+    // Well clear of the element's own 500ms-cadence ceiling
+    // (`APacedRunDoesNotBusySpinTheProducer` pins it at 4-6 over the same
+    // 2s shape), and short of a fully unpaced run.
+    EXPECT_GE (executed, 8u) << "elements.timers: {minMs: 50, maxMs: 150} did "
+                                "not replace timer.pacing's "
+                                "own 500ms cadence under load - got "
+                             << executed << " requests over 1.5s";
+    EXPECT_LE (executed, 30u);
 }
 
-// @copydoc ElementsTimersRangeOverrideIsReproducibleWithSeed, `timer.throughput`'s
-// shared branch (`perUser: false`, the default): the acceptance criteria ask
-// for Range reproducibility "for both kinds under load", and both call the
-// same `apply_timers_override` with `shared.rng`, but only `timer.pacing`'s
-// per-user branch had a dedicated case above. Pinned to a single virtual
-// user rather than the ten-VU shape the other throughput tests use: with
-// several VUs racing to claim the one shared budget, which VU's draw lands
-// first depends on real thread-scheduling order, not only the seed, so the
-// aggregate count is not reproducible even with a correctly-seeded `rng` -
-// concurrency itself is the confound, not this fix. One VU removes that
-// confound and still exercises the shared branch's rate conversion
-// (`shared.throughput != nullptr` -> `claim`), which is the code this test
-// exists to cover. Same mutation check as above.
-TEST_F (ElementsTimersLoadTest, ElementsTimersRangeOverrideIsReproducibleWithSeedForThroughput) {
+// @copydoc ElementsTimersRangeOverrideReachesPacingUnderLoad, `timer.throughput`'s
+// shared branch (`perUser: false`, the default) - the acceptance criteria ask
+// for Range mode to reach "both kinds under load", and only `timer.pacing`'s
+// per-user branch had a dedicated Range case above. Pinned to a single
+// virtual user rather than the ten-VU shape the other throughput tests use,
+// so the shared budget's own claim path is exercised without ten VUs racing
+// it (a confound this fix does not touch and does not need to prove
+// anything about). Same mutation check as above.
+TEST_F (ElementsTimersLoadTest, ElementsTimersRangeOverrideReachesThroughputUnderLoad) {
     auto execution =
     plan_with ({ vayu::tests::timer_throughput_element_json ("el_rate", 120.0,
     /*scope_entry=*/true, /*per_user=*/false) });
@@ -1176,23 +1169,18 @@ TEST_F (ElementsTimersLoadTest, ElementsTimersRangeOverrideIsReproducibleWithSee
         { "elements",
         { { "timers", { { "minMs", 50 }, { "maxMs", 150 } } }, { "seed", 7 } } } };
 
-    auto first = run (config, execution);
-    ASSERT_NE (first, nullptr);
-    const size_t executed_first = first->steps_executed.load ();
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
 
-    // Sanity bound: within the 50-150ms range, 1.5s cannot produce fewer
-    // than the un-paced-first-pass-plus-one, nor more than an unpaced run.
-    EXPECT_GE (executed_first, 2u);
-    EXPECT_LE (executed_first, 30u);
-
-    for (int attempt = 0; attempt < 4; ++attempt) {
-        auto repeat = run (config, execution);
-        ASSERT_NE (repeat, nullptr);
-        const size_t executed_repeat = repeat->steps_executed.load ();
-        EXPECT_EQ (executed_first, executed_repeat)
-        << "the same seed drew a different sequence of Range waits on repeat " << attempt
-        << " - executed " << executed_first << " then " << executed_repeat;
-    }
+    // el_rate's own 120/minute (500ms per pass) would sit at the same 4-6
+    // ceiling `timer.pacing`'s 500ms case does; the 50-150ms override clears
+    // it the same way.
+    EXPECT_GE (executed, 8u) << "elements.timers: {minMs: 50, maxMs: 150} did "
+                                "not replace timer.throughput's "
+                                "own 120/minute rate under load - got "
+                             << executed << " requests over 1.5s";
+    EXPECT_LE (executed, 30u);
 }
 
 } // namespace
