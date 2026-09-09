@@ -299,7 +299,7 @@ function ElementRow({
 						className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
 					>
 						{/* eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static CATEGORY_ICONS map (via categoryIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope. */}
-						{Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />}
+						{Icon && <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
 						{/*
 						 * `shrink-0` keeps a title at its natural width instead of
 						 * ceding space in the flex distribution - the summary
@@ -351,7 +351,7 @@ function ElementRow({
 				/>
 			</div>
 			{open && (
-				<div className="space-y-3 border-t border-rule px-3 pb-3 pt-3">
+				<div className="space-y-2 border-t border-rule px-2 py-2">
 					{renderAboveForm?.(element)}
 					{Bespoke ? (
 						<Bespoke
@@ -442,9 +442,9 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 	}
 
 	return (
-		<div className="space-y-3">
+		<div className="space-y-2">
 			{elements.length === 0 ? (
-				<div className="space-y-3 rounded-md border border-dashed border-rule p-4 text-center">
+				<div className="space-y-2 rounded-md border border-dashed border-rule p-3 text-center">
 					<p className="text-sm text-muted-foreground">
 						No elements yet. Add one from the menu below, or start with:
 					</p>
