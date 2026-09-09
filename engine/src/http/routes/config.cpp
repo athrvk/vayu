@@ -56,6 +56,13 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
     if (entry.unit) {
         entry_json["unit"] = *entry.unit;
     }
+    // The boolean sibling this entry is nested under and disabled without,
+    // omitted when the entry stands on its own - a catalogue fact the seed
+    // asserts is internally consistent (`ConfigSeeder::validate_dependencies`),
+    // never a value `POST /config` reads back.
+    if (entry.depends_on) {
+        entry_json["dependsOn"] = *entry.depends_on;
+    }
     if (entry.options) {
         // Stored as a JSON-array string (JSON-in-TEXT, same convention as
         // every other structured column); parse it back to a real array so

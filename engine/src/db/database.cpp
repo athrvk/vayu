@@ -469,7 +469,11 @@ inline auto make_storage (const std::string& path) {
     // Nullable, like min_value/max_value: an entry that measures nothing
     // declares no unit, and NULL is that. A nullable column is ALTER-friendly
     // without a default_value.
-    make_column ("unit", &ConfigEntry::unit)),
+    make_column ("unit", &ConfigEntry::unit),
+    // The key of a boolean sibling this entry is nested under, in the app.
+    // Nullable for the same reason as unit: an entry with no dependency
+    // declares none, and NULL is that - not a value POST /config ever writes.
+    make_column ("depends_on", &ConfigEntry::depends_on)),
 
     // Globals: App-wide variables (singleton row with id="globals")
     make_table ("globals", make_column ("id", &Globals::id, primary_key ()),
@@ -3765,6 +3769,8 @@ void Database::seed_default_config () {
     config_seeds::seed_data_retention (seed, now);
     config_seeds::seed_limits (seed, now);
     config_seeds::seed_scripting (seed, now);
+
+    seed.validate_dependencies ();
 
     seed_transaction.commit ();
 

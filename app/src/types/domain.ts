@@ -2738,6 +2738,14 @@ export interface ConfigEntry {
 	 * as a bug.
 	 */
 	options?: { value: string; label: string }[];
+	/**
+	 * The key of a boolean entry in the same category this one means nothing
+	 * without (`correlationIdHeader` names `correlationIdEnabled`). Absent when
+	 * the entry stands on its own; `SettingsMain` nests a dependent immediately
+	 * under its parent, indented and disabled while the parent reads `"false"`.
+	 * A catalogue fact only - never sent back on `POST /config`.
+	 */
+	dependsOn?: string;
 }
 
 /** Client-side settings panels (localStorage-backed prefs, rendered by app panels). */

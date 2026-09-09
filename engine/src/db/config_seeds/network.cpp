@@ -189,7 +189,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "network_performance", "true", std::nullopt, std::nullopt, std::nullopt, now }));
 
     seed (keywords ({ "tracing", "x-request-id", "debugging" }) (
-    ConfigEntry{ "correlationIdEnabled", "false", "boolean", "Send a Correlation Id",
+    ConfigEntry{ "correlationIdEnabled", "false", "boolean", "Correlation Id",
     "Adds a header carrying a fresh identifier to every request, so one send "
     "or one iteration of a load run can be found in a server's logs. Off by "
     "default: it is a header your server did not ask for, and a gateway that "
@@ -197,16 +197,16 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "that carries the header itself is left alone.",
     "network_performance", "false", std::nullopt, std::nullopt, std::nullopt, now }));
 
-    seed (
+    seed (depends_on ("correlationIdEnabled") (
     keywords ({ "tracing", "distributed" }) (ConfigEntry{ "correlationIdHeader",
-    std::string (vayu::http::DEFAULT_CORRELATION_HEADER), "string", "Correlation Id Header",
+    std::string (vayu::http::DEFAULT_CORRELATION_HEADER), "string", "Header name",
     "Which header the correlation id goes out under, when it is switched on. "
     "The default is namespaced to Vayu so it collides with nothing; set it to "
     "the name your own infrastructure reads - X-Request-ID and "
     "X-Correlation-ID are the common ones - if you want Vayu's id to land "
     "there instead.",
     "network_performance", std::string (vayu::http::DEFAULT_CORRELATION_HEADER),
-    std::nullopt, std::nullopt, std::nullopt, now }));
+    std::nullopt, std::nullopt, std::nullopt, now })));
 
     // Custom trust anchors (issue #706). `text` rather than `string` because
     // what goes in it is a pasted PEM block: the single-line input every other

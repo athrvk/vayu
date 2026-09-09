@@ -1518,6 +1518,7 @@ written by `POST /config`. Struct is `db::ConfigEntry`.
 | `advanced`      | INTEGER | Boolean; an internal, rendered collapsed under "Advanced" |
 | `keywords`      | TEXT    | JSON array of extra search terms; `"[]"` when the entry declares none |
 | `unit`          | TEXT    | What a numeric value measures (`ms`, `sec`, `days`, `bytes`); NULL for a count |
+| `depends_on`    | TEXT    | Key of a boolean entry in the same category this one means nothing without; NULL when the entry stands on its own |
 
 **A row can outlive the catalogue that wrote it** (issue #1492). `seed_default_config`
 only touches two lists on every start - the keys it upserts and a fixed retired-key
@@ -1546,6 +1547,17 @@ forgotten in the app still fails. Reseeding rewrites an existing row's metadata
 while keeping its value, which is how a retired category
 (`database_performance`, folded into `general_engine` in #586) carries an
 upgraded database across with nothing to migrate by hand.
+
+**depends_on** (issue #1610) names a relation, never a value: `correlationIdHeader`
+carries `depends_on: "correlationIdEnabled"`, since the header means nothing
+until the id is switched on. `ConfigSeeder::validate_dependencies`, called once
+every category's seed function has run, refuses a `depends_on` naming a key
+nothing seeded, a key in a different category, or a key that is not itself
+`"boolean"` - the same refusal shape as a key seeded twice. `GET /config`
+serializes it as `dependsOn`, omitted when absent; `POST /config` never reads
+it back, because it describes the catalogue, not a stored value. The settings
+screen (`SettingsMain.tsx`) nests the dependent's card immediately beneath its
+parent's, indented and disabled until the parent reads `true`.
 
 **The seed itself is one file per category** (issue #1611):
 `Database::seed_default_config` (`engine/src/db/database.cpp`) is the ordered
