@@ -94,7 +94,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 						Currently in {ownerName}. Choose where it should go - it lands at the end.
 					</DialogDescription>
 				</DialogHeader>
-				<DialogBody className="max-h-72 -mx-1 px-1">
+				<DialogBody className="max-h-72">
 					{offersTopLevel && (
 						<Button
 							variant="ghost"

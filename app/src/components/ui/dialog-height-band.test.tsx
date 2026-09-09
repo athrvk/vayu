@@ -122,6 +122,18 @@ describe("the dialog height cap", () => {
 			"shrink-0"
 		);
 	});
+
+	it("gives the band its own clearance, so a focused field's ring is never clipped (issue #1627)", () => {
+		const { body } = renderTallDialog();
+
+		// `overflow-y-auto` computes `overflow-x` to `auto` too, so the band
+		// clips a full-width field's outset ring on all four sides. The
+		// negative margins fold the padding back so no dialog's layout shifts.
+		expect(body.className).toContain("-mx-1");
+		expect(body.className).toContain("px-1");
+		expect(body.className).toContain("-my-px");
+		expect(body.className).toContain("py-px");
+	});
 });
 
 /**
@@ -193,6 +205,25 @@ describe("the dialogs that can grow", () => {
 				// Comments inside the opening tag first: prose naming a class is
 				// not a class.
 				if (/max-h-\[/.test(tag[0].replace(/\/\/[^\n]*/g, ""))) offenders.push(relative);
+			}
+		}
+		expect(offenders).toEqual([]);
+	});
+
+	it("does not leave a hand-rolled copy of the band's own clearance behind (issue #1627)", () => {
+		// One call site used to carry the primitive's `-mx-1` / `px-1` clearance
+		// itself; the fix is now folded into the primitive. A copy left behind
+		// would double the clearance there and drift the moment the
+		// primitive's own numbers change.
+		const offenders: string[] = [];
+		for (const file of files) {
+			const relative = file
+				.slice(srcRoot.length + 1)
+				.split("\\")
+				.join("/");
+			if (relative === "components/ui/dialog.tsx") continue;
+			for (const tag of readFileSync(file, "utf8").matchAll(/<DialogBody\b[\s\S]*?>/g)) {
+				if (/-mx-1|-my-px/.test(tag[0])) offenders.push(relative);
 			}
 		}
 		expect(offenders).toEqual([]);
