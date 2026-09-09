@@ -70,7 +70,7 @@ is a manual copy with the engine stopped, described in
 | Option | Description |
 |--------|-------------|
 | `-h, --help` | Show help message |
-| `-v, --verbose [LEVEL]` | Enable verbose output. LEVEL is 0 (warn/error), 1 (info) or 2 (debug); `-v`/`--verbose` on its own means 1. A level outside 0-2, or one that is not a whole number, is refused with exit code 1. The same flag `vayu-engine` has always read `-v` as |
+| `-v, --verbose [LEVEL]` | Enable verbose output. LEVEL is 0 (warn/error), 1 (info) or 2 (debug); `-v`/`--verbose` on its own means 1. A level outside 0-2, or one that is not a whole number, is refused with exit code 1. `vayu-cli` reads `-v` the same way `vayu-engine` has always read it; `-v` used to mean `--version` here and no longer does. |
 | `--version` | Show version information (long form only - `-v` is `--verbose`) |
 | *(anything else)* | Refused, naming the argument, with exit code 1 |
 | `--no-color` | Disable colored output |
@@ -211,10 +211,13 @@ not something a quiet run should hide:
 ```
 $ vayu-engine --verbose 2
 ...
-GET /health 200 0.4ms 61B
-GET /inbox 200 1.3ms 412B
-POST /runs 202 3.1ms 118B
+13:57:19.123 DEBUG http     GET /health 200 0.4ms 61B
+13:57:20.456 DEBUG http     GET /inbox 200 1.3ms 412B
+13:57:21.789 INFO  http     GET /collections/missing 404 0.6ms 42B
 ```
+
+See [Logging](logging.md) for the record behind that rendering, its fields,
+and why a 2xx line is `debug` while a 3xx/4xx/5xx line is `info`/`warn`.
 
 ```
 $ vayu-engine --port notanumber

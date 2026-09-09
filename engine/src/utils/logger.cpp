@@ -60,6 +60,12 @@ void Logger::init (const std::string& log_dir, std::string_view source) {
     // disk for every value of N.
     prune_old_logs (log_dir_, file_prefix (),
     static_cast<std::size_t> (vayu::core::constants::logging::RETAINED_FILES));
+
+    // The pre-#1557 generation is never one of the N kept above - it has its
+    // own prefix, so `prune_old_logs` never sees it - and nothing else in the
+    // engine mentions it, so an install that predates the split would carry
+    // it forever otherwise.
+    remove_legacy_log_files (log_dir_, vayu::core::constants::logging::LEGACY_FILE_PREFIX);
 }
 
 void Logger::set_file_level (Level level) {
@@ -297,6 +303,36 @@ prune_old_logs (const std::string& log_dir, std::string_view file_prefix, std::s
         // in the directory forever, which is the growth this prune exists to
         // stop.
         fs::remove (candidates[i].string () + ".1", remove_ec);
+    }
+    return deleted;
+}
+
+std::size_t remove_legacy_log_files (const std::string& log_dir, std::string_view legacy_prefix) {
+    namespace fs = std::filesystem;
+
+    constexpr std::string_view SUFFIX = ".log";
+
+    std::error_code ec;
+    std::vector<fs::path> victims;
+    for (const auto& entry : fs::directory_iterator (log_dir, ec)) {
+        if (!entry.is_regular_file ())
+            continue;
+        const std::string name = entry.path ().filename ().string ();
+        if (name.starts_with (legacy_prefix) && name.ends_with (SUFFIX)) {
+            victims.push_back (entry.path ());
+        }
+    }
+    if (ec) {
+        return 0;
+    }
+
+    std::size_t deleted = 0;
+    for (const auto& victim : victims) {
+        std::error_code remove_ec;
+        if (fs::remove (victim, remove_ec)) {
+            ++deleted;
+        }
+        fs::remove (victim.string () + ".1", remove_ec);
     }
     return deleted;
 }

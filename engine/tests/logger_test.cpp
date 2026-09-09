@@ -219,6 +219,26 @@ TEST (LoggerRetentionTest, AStartPrunesTheDirectoryItOpensInto) {
     EXPECT_GT (newest_log (dir.path ()).filename ().string (), std::string ("engine_2025"));
 }
 
+// A start removes the pre-#1557 generation outright: it carries no prefix
+// `prune_old_logs` was ever told to keep any of, so nothing else in the
+// engine would ever remove it. Mutation-check: drop the `remove_legacy_log_files`
+// call from `Logger::init` and the planted file survives the start below.
+TEST (LoggerRetentionTest, AStartRemovesTheLegacyGenerationOutright) {
+    ScratchLogDir dir;
+    std::ofstream (dir.path () / "vayu_20260101_000000.log") << "legacy";
+    std::ofstream (dir.path () / "vayu_20260101_000000.log.1")
+    << "legacy rotated";
+    std::ofstream (dir.path () / "vayu_20260102_000000.log") << "legacy, newer";
+
+    Logger::instance ().init (dir.string ());
+
+    const auto remaining = names_in (dir.path ());
+    EXPECT_EQ (remaining.count ("vayu_20260101_000000.log"), 0u);
+    EXPECT_EQ (remaining.count ("vayu_20260101_000000.log.1"), 0u);
+    EXPECT_EQ (remaining.count ("vayu_20260102_000000.log"), 0u)
+    << "every legacy file goes, not just the oldest";
+}
+
 // ---------------------------------------------------------------------------
 // Level: the file sink used to take DEBUG unconditionally.
 // ---------------------------------------------------------------------------
