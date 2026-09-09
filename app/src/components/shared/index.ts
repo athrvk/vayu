@@ -46,6 +46,9 @@ export * from "./SampledSchemaValidation";
 // "Setup ran successfully; Teardown failed" - script.setup / script.teardown outcomes
 export * from "./ScriptLifecycleSummary";
 
+// A single-request run's own step-level element outcomes (issue #1641)
+export * from "./RequestElementsSummary";
+
 // "982 of 1,000 assertions passed" - a load run's test outcome, live and stored
 export * from "./TestValidationSummary";
 

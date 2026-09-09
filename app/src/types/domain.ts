@@ -2441,6 +2441,18 @@ export interface RunReport {
 		teardown?: ElementOutcome[];
 	};
 	/**
+	 * A single-request run's own step-level element outcomes (issues #1594,
+	 * #1641) - extractors, assertions, timers tallied across every submission,
+	 * the single-request sibling of {@link RunScenarioStepStat.elements}.
+	 *
+	 * `undefined` for a scenario run (its per-step tallies live nested under
+	 * {@link RunReport.scenario} instead - the two never coexist) and for a
+	 * single-request run that declared no `requestElements`, or one whose
+	 * elements never ran. Reuses {@link RunScenarioStepElementTally}: both
+	 * come off the same `{id, kind, passed, failed, skipped}` tally shape.
+	 */
+	elements?: RunScenarioStepElementTally[];
+	/**
 	 * Whether the run's OAuth 2.0 credential was renewed while it ran.
 	 *
 	 * A run longer than its access token used to turn into a 401 storm the

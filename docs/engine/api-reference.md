@@ -7294,9 +7294,21 @@ named it.
     "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok" } ],
     "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom" } ]
   },
+  "elements": [
+    { "id": "el_1", "kind": "assert.status", "passed": 9, "failed": 1, "skipped": 0 },
+    { "id": "el_2", "kind": "extract.json", "passed": 10, "failed": 0, "skipped": 0 }
+  ],
   "results": [ { "id": 41, "...": "sampled request/response outcomes" } ]
 }
 ```
+
+**`elements`** (issues #1594, #1641) is a single-request run's own `requestElements`
+outcomes - `extract.*` / `assert.*` / `timer.*`, tallied across every submission as
+`{id, kind, passed, failed, skipped}`. Absent, not `[]`, for a run that declared no
+`requestElements`, one whose elements never ran, and every scenario run - a scenario's
+own per-step tallies live under `scenario.steps[].elements` instead (see
+[The `scenario` block](#the-scenario-block-collection-runs) and
+[Scenario load runs](#scenario-load-runs)), and the two never coexist on one report.
 
 **`customMetrics`** (issue #1500) is this run's `metric.record` / `pm.metrics` values, by name -
 absent, not `{}`, for a run that recorded none. A `"trend"` entry carries `count`/`p50`/`p95`/`p99`/

@@ -19,6 +19,7 @@ import {
 	CapacitySummary,
 	ContractCoverage,
 	CustomMetricsSummary,
+	RequestElementsSummary,
 	RunWarnings,
 	SampledSchemaValidation,
 	ScriptLifecycleSummary,
@@ -100,6 +101,12 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			    own boundary. Absent for a run whose collection declared
 			    neither. */}
 			<ScriptLifecycleSummary lifecycle={report.lifecycle} />
+
+			{/* A single-request run's own extractor, assertion and timer
+			    outcomes (issue #1594/#1641) - a scenario run reports its
+			    per-step elements in the Steps tab instead, so this is absent
+			    there. */}
+			<RequestElementsSummary elements={report.elements} />
 
 			{/* Whether the run's own assertions passed, and which failed. The
 			    schema block above judges the response against a contract; this
