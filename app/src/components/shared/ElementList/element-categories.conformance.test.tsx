@@ -1,4 +1,7 @@
 /**
+ * @vitest-environment jsdom
+ */
+/**
  * Copyright (c) 2026 Atharva Kusumbia
  *
  * This source code is licensed under the Apache 2.0 license found in the
@@ -27,8 +30,10 @@
 
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { KNOWN_CATEGORIES, effectiveCategory } from "./element-categories";
+import { KNOWN_CATEGORIES, categoryLabel, effectiveCategory } from "./element-categories";
+import { ElementList } from "./index";
 import type { ElementKindSchema } from "@/types";
 
 const [FIXTURE_PATH] = ENGINE_READING_GUARDS.elementCategoryLabels.paths.map(fromRepoRoot);
@@ -60,6 +65,24 @@ describe.runIf(fixtureExists)("element category labels conformance (fixture pres
 		expect(transaction, "fixture no longer has control.transaction").toBeTruthy();
 		expect(transaction!.category).toBe("transaction");
 		expect(effectiveCategory(transaction!.category)).toBe("controller");
+	});
+
+	// The unit tests in `ElementList.test.tsx` cover ordering against a small,
+	// hand-written fixture with only three categories present; this is the
+	// same claim against the live registry's full set, so a category that
+	// exists only in the real catalogue (timer, controller, metric) is
+	// actually exercised end to end, not just implied by `categoryOrder`'s
+	// array position.
+	it("renders every known category as a heading, in family order, against the live registry", async () => {
+		render(<ElementList elements={[]} onChange={() => {}} kinds={fixture} />);
+		fireEvent.click(screen.getByRole("button", { name: /add element/i }));
+
+		const expectedHeadings = KNOWN_CATEGORIES.map((category) => categoryLabel(category));
+		await screen.findByText(expectedHeadings[0]);
+
+		const namePattern = new RegExp(`^(${expectedHeadings.join("|")})$`);
+		const renderedHeadings = screen.getAllByText(namePattern).map((el) => el.textContent);
+		expect(renderedHeadings).toEqual(expectedHeadings);
 	});
 });
 

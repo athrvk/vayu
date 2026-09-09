@@ -222,6 +222,40 @@ describe("ElementList - the Add menu", () => {
 		expect(screen.queryByText("Extract JSON")).not.toBeInTheDocument();
 	});
 
+	// cmdk's default fuzzy scorer treats a query as a scattered subsequence:
+	// "regex" matches "a regular expression" too (r-e-g-...-e-x, in order,
+	// just not adjacent), which is real - the engine's own catalogue has
+	// `assert.jsonpath` describing itself that way beside `extract.regex`.
+	// `commandFilter` (`index.tsx`) exists to keep a search literal. Mutation
+	// check: drop the `filter={commandFilter}` prop from `Command` in
+	// `index.tsx` and this reddens - both kinds would show for "regex".
+	it("matches a literal substring, not cmdk's default fuzzy subsequence", async () => {
+		const kinds: ElementKindSchema[] = [
+			kindSchema({
+				kind: "extract.regex",
+				label: "Extract with a regular expression",
+				category: "extract",
+				description: "Runs a regular expression against the response.",
+			}),
+			kindSchema({
+				kind: "assert.jsonpath",
+				label: "Assert JSON value",
+				category: "assert",
+				description: "Matches a value or matches a regular expression.",
+			}),
+		];
+		render(<ElementList elements={[]} onChange={vi.fn()} kinds={kinds} />);
+		openMenu();
+		await screen.findByText("Assert JSON value");
+
+		fireEvent.change(screen.getByPlaceholderText("Search elements"), {
+			target: { value: "regex" },
+		});
+
+		expect(screen.getByText("Extract with a regular expression")).toBeInTheDocument();
+		expect(screen.queryByText("Assert JSON value")).not.toBeInTheDocument();
+	});
+
 	it("adds a new, enabled element of the picked kind, and closes the picker", async () => {
 		const onChange = renderList([]);
 		openMenu();

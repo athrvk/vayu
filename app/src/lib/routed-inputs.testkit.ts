@@ -287,7 +287,7 @@ export const ENGINE_READING_GUARDS = {
 	 * position in `element-categories.ts`.
 	 */
 	elementCategoryLabels: {
-		reader: "app/src/components/shared/ElementList/element-categories.conformance.test.ts",
+		reader: "app/src/components/shared/ElementList/element-categories.conformance.test.tsx",
 		paths: ["engine/tests/fixtures/element-kinds.json"],
 	},
 } as const satisfies Record<string, ReadingGuard>;

@@ -55,7 +55,7 @@ import { GenericElementForm } from "./GenericElementForm";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { categoryLabel, categoryOrder, effectiveCategory } from "./element-categories";
 
-/** The picker's "Recently used" group heading and cap on entries shown. */
+/** The picker's "Recently used" group heading - the cap lives in `layout-store`. */
 const RECENTLY_USED_HEADING = "Recently used";
 
 export interface ElementListProps {
@@ -98,6 +98,18 @@ function groupedByCategory(kinds: ElementKindSchema[]): Map<string, ElementKindS
 /** `value` cmdk filters on - label, description and kind, so any of the three matches a search. */
 function searchValue(kind: ElementKindSchema): string {
 	return `${kind.label} ${kind.description} ${kind.kind}`;
+}
+
+/**
+ * Plain case-insensitive substring matching, not cmdk's default fuzzy
+ * scorer. The default treats a query as a scattered subsequence, so "regex"
+ * fuzzy-matches unrelated prose too - `assert.jsonpath`'s "matches a regular
+ * expression" contains r-e-g-e-x in order despite naming no regex kind. A
+ * technical picker over exact kind names and descriptions wants "contains
+ * this text", not "these letters appear somewhere, in this order".
+ */
+function commandFilter(value: string, search: string): number {
+	return value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0;
 }
 
 function ElementRow({
@@ -268,8 +280,15 @@ export function ElementList({
 						Add element
 					</Button>
 				</PopoverTrigger>
-				<PopoverContent align="start" className="w-96 p-0">
-					<Command>
+				{/* `border-0 bg-transparent shadow-none`: `Command` already paints its
+				    own surface (`COMMAND_SURFACE` in `command.tsx`), so this popover
+				    is a positioning box around it, not a second card - the shape
+				    `ScriptSnippets.tsx` uses for the same `Command`, one surface deep. */}
+				<PopoverContent
+					align="start"
+					className="w-96 border-0 bg-transparent p-0 shadow-none"
+				>
+					<Command filter={commandFilter}>
 						<CommandInput placeholder="Search elements" />
 						<CommandList className="max-h-80">
 							<CommandEmpty>No element matches that.</CommandEmpty>
