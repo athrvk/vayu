@@ -145,7 +145,7 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `types.hpp` are aggregates an insert site fills field by field, so a
   forgotten one is indeterminate and sqlite_orm stores whatever that was. The
   three enums (`Request::method`, `Run::type`, `Run::status`) default to what
-  `database.cpp`'s `row_extractor` falls back to for an unparsable stored
+  `database_impl.hpp`'s `row_extractor` falls back to for an unparsable stored
   value, so struct and reader agree. A default bounds a wrong insert; it is not
   a substitute for setting the field.
 - **A destructor, a thread entry and `main` are total, and no linter says so**
@@ -190,11 +190,13 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   before any repair pass can read the column. Read the data out in a step
   that runs ahead of the probe - a `PRAGMA user_version`-gated migration - or
   keep the column mapped; a pass that runs after the probe reads a column
-  that is already gone. `Database::migrate_before_sync` (`database.cpp`,
-  #1514) is that migration, called as the constructor's very first,
-  unguarded statement so the exception it can throw (see below) propagates
-  rather than being caught by the recovery path meant for corruption: open
-  raw sqlite3, read `PRAGMA user_version`, refuse to start on a version newer
+  that is already gone. `migrate_before_sync` (`db_maintenance.cpp`, declared
+  in `database_impl.hpp` for `database.cpp`'s constructor to call across the
+  translation-unit boundary, #1514) is that migration, called as the
+  constructor's very first, unguarded statement so the exception it can throw
+  (see below) propagates rather than being caught by the recovery path meant
+  for corruption: open raw sqlite3, read `PRAGMA user_version`, refuse to
+  start on a version newer
   than this engine's `SCHEMA_VERSION` (a newer database is not corrupt and
   must never be quarantined), and on an older or fresh one fold any row whose
   `pre_request_script` / `post_request_script` is non-blank and not already

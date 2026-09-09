@@ -246,7 +246,7 @@ class Database {
     Database (Database&&)                 = delete;
     Database& operator= (Database&&)      = delete;
 
-    // Initialize database (create tables, etc.)
+    // Initialize database (create tables, etc.) - defined in db_maintenance.cpp
     void init ();
 
     /**
@@ -272,9 +272,10 @@ class Database {
      * Read once at construction, so the polled health endpoint costs no file
      * access.
      */
-    [[nodiscard]] const std::optional<RecoveryRecord>& recovery () const;
+    [[nodiscard]] const std::optional<RecoveryRecord>& recovery () const; // db_maintenance.cpp
 
-    // Project Management
+    // Project Management - collections and their trash/reorder are defined
+    // in db_collections.cpp; requests and their examples in db_requests.cpp.
     void create_collection (const Collection& c);
     /// Live collections only - a deleted one is gone to every reader but the
     /// trash (issue #988).
@@ -364,9 +365,10 @@ class Database {
     /// (issue #722). `now` is the caller's clock, as every other write here.
     void suppress_request_example (const std::string& id, int64_t now);
 
-    // OpenAPI documents (issue #637). Bound by collections rather than owned by
-    // one, so nothing here cascades: `delete_spec_document` is only ever reached
-    // once the route has proven no collection still names the id.
+    // OpenAPI documents - defined in db_specs.cpp. Bound by collections
+    // rather than owned by one, so nothing here cascades:
+    // `delete_spec_document` is only ever reached once the route has proven
+    // no collection still names the id.
 
     void save_spec_document (const SpecDocument& s);
     std::optional<SpecDocument> get_spec_document (const std::string& id);
@@ -473,7 +475,7 @@ class Database {
      * out of the trash, so a request sitting there stays byte-identical until
      * someone actually brings it back.
      */
-    int64_t strip_stored_managed_headers ();
+    int64_t strip_stored_managed_headers (); // db_maintenance.cpp
 
     /**
      * @brief Persist a whole import in one transaction (issue #96).
@@ -487,6 +489,7 @@ class Database {
      * its temp ids first), because nothing here can look up a row that the same
      * transaction has not committed yet.
      */
+    // db_requests.cpp
     void import_apply (const std::vector<Collection>& collections,
     const std::vector<Request>& requests,
     const std::vector<Environment>& environments,
@@ -512,6 +515,7 @@ class Database {
      * that already exist and must not touch environments, and the two callers
      * validate entirely different things beforehand.
      */
+    // db_collections.cpp
     void apply_reorder (const std::vector<Collection>& collections,
     const std::vector<Request>& requests);
 
@@ -530,7 +534,7 @@ class Database {
      * sync asked for it to not be there, and it is not. Its examples are
      * removed with it either way, the same cascade `delete_request` performs.
      */
-    void spec_sync_apply (const SpecSyncBatch& batch);
+    void spec_sync_apply (const SpecSyncBatch& batch); // db_specs.cpp
 
     /**
      * @brief Run @p fn with the DB mutex held for the whole of it (issue #386).
@@ -549,8 +553,9 @@ class Database {
      * Hold it only for a bounded composite: everything else serializing on this
      * lock - `/health`, the runs poll, SSE - waits for the whole of @p fn.
      */
-    void with_lock (const std::function<void ()>& fn);
+    void with_lock (const std::function<void ()>& fn); // database.cpp
 
+    // db_environments.cpp
     void save_environment (const Environment& e);
     std::vector<Environment> get_environments ();
     std::optional<Environment> get_environment (const std::string& id);
@@ -565,21 +570,24 @@ class Database {
      * per design send, and *once per run* on the load and collection paths -
      * never per transfer; see `vayu::http::resolve_transport_policy`.
      */
+    // db_credentials.cpp
     void save_client_certificate (const ClientCertificate& c);
     std::vector<ClientCertificate> get_client_certificates ();
     std::optional<ClientCertificate> get_client_certificate (const std::string& id);
     void delete_client_certificate (const std::string& id);
 
-    // Globals (singleton)
+    // Globals (singleton) - db_environments.cpp
     void save_globals (const Globals& g);
     std::optional<Globals> get_globals ();
 
-    // OAuth token cache
+    // OAuth token cache - db_credentials.cpp
     void save_oauth_token (const OAuthToken& t);
     std::optional<OAuthToken> get_oauth_token (const std::string& cache_key);
     void delete_oauth_token (const std::string& cache_key);
 
-    // Execution
+    // Execution - runs and every run-scoped artifact below (metric ticks,
+    // monitor samples, results, the webhook inbox) are defined in
+    // db_runs.cpp.
     void create_run (const Run& run);
     std::optional<Run> get_run (const std::string& id);
     void update_run_status (const std::string& id, RunStatus status);
@@ -764,6 +772,7 @@ class Database {
      * `resolve_transport_policy` materializes is a sibling for the same
      * reason): a caller holding a `Database` knows where the workspace lives.
      */
+    // db_maintenance.cpp
     [[nodiscard]] std::string backups_directory () const;
 
     /**
@@ -805,8 +814,8 @@ class Database {
      */
     class BackupSlot {
         public:
-        explicit BackupSlot (Database& db);
-        ~BackupSlot ();
+        explicit BackupSlot (Database& db); // db_maintenance.cpp
+        ~BackupSlot ();                     // db_maintenance.cpp
 
         // Neither copyable nor movable: this is a lock, and every one of the
         // four would produce a second object claiming to hold the one slot.
@@ -826,7 +835,7 @@ class Database {
         bool held_ = false;
     };
 
-    // Config Entries - Structured configuration with metadata
+    // Config Entries - Structured configuration with metadata; db_config.cpp
     void save_config_entry (const ConfigEntry& entry);
     /**
      * @brief Write a batch of config entries in one sqlite transaction (#1453).
@@ -870,7 +879,7 @@ class Database {
      * way to observe that the setting reached the database, which is what makes
      * the wiring testable and the startup line honest about what it applied.
      */
-    int applied_cache_size_bytes () const;
+    int applied_cache_size_bytes () const; // db_maintenance.cpp
 
     /**
      * @brief SQLite's `synchronous` level on this database's connection, read
@@ -884,7 +893,7 @@ class Database {
      * line reported the level the engine had *asked* for while the schema sync
      * and the config seed had already run at SQLite's own default.
      */
-    int applied_synchronous () const;
+    int applied_synchronous () const; // db_maintenance.cpp
 
     // Type-safe config getters (replaces ConfigManager)
     int get_config_int (const std::string& key, int default_value = 0);
@@ -912,7 +921,7 @@ class Database {
      * both call it, so a new child table is wired into both by editing one
      * function. The caller must already hold the DB mutex.
      */
-    void remove_run_cascade_locked (const std::string& id);
+    void remove_run_cascade_locked (const std::string& id); // db_runs.cpp
 
     /**
      * @brief Every collection id in @p root_id's subtree, @p root_id first.
@@ -927,7 +936,7 @@ class Database {
      * loop forever while the global DB mutex is held (issue #79). The caller
      * must already hold that mutex.
      */
-    std::vector<std::string> collection_subtree_locked (const std::string& root_id);
+    std::vector<std::string> collection_subtree_locked (const std::string& root_id); // db_collections.cpp
 
     /**
      * @brief Destroy a collection subtree or a single request outright -
@@ -937,8 +946,8 @@ class Database {
      * definition purge and retention both reach for. The caller must already
      * hold the DB mutex.
      */
-    void purge_collection_locked (const std::string& id);
-    void purge_request_locked (const std::string& id);
+    void purge_collection_locked (const std::string& id); // db_collections.cpp
+    void purge_request_locked (const std::string& id);    // db_requests.cpp
 
     /**
      * @brief The trash entry for one deleted row, or nothing when @p id names
@@ -950,7 +959,7 @@ class Database {
      * The listing filters roots out of *its* answer; these three still agree
      * about what an entry says. The caller must already hold the DB mutex.
      */
-    std::optional<TrashEntry> trash_entry_locked (const std::string& id);
+    std::optional<TrashEntry> trash_entry_locked (const std::string& id); // db_collections.cpp
 
     /**
      * @brief Whether the collection @p owner_id names is missing or itself
@@ -961,7 +970,7 @@ class Database {
      * collection that sits at the top has nothing above it by design. The
      * caller must already hold the DB mutex.
      */
-    bool owner_is_absent_locked (const std::optional<std::string>& owner_id);
+    bool owner_is_absent_locked (const std::optional<std::string>& owner_id); // database.cpp
 
     /**
      * @brief The two halves of `restore_deleted`, split by what a row can come
@@ -973,6 +982,7 @@ class Database {
      * Both take an entry `trash_entry_locked` already proved deleted, and both
      * require the DB mutex.
      */
+    // Both defined in db_collections.cpp, beside restore_deleted.
     std::expected<TrashOutcome, RestoreFailure> restore_request_locked (
     const TrashEntry& entry);
     TrashOutcome restore_collection_locked (const TrashEntry& entry);
@@ -987,7 +997,7 @@ class Database {
      * deactivating the previous environment and activating the new one is one
      * atomic switch, never a window in which two or zero are active.
      */
-    void deactivate_other_environments_locked (const std::string& keep_id);
+    void deactivate_other_environments_locked (const std::string& keep_id); // db_environments.cpp
 
     /**
      * @brief Refuse a spec write whose target rows have moved under it.
@@ -998,7 +1008,7 @@ class Database {
      * hold the DB mutex and be inside the write's own transaction, so what this
      * proves is still true when the write lands.
      */
-    void verify_spec_sync_rows_locked (const SpecSyncBatch& batch);
+    void verify_spec_sync_rows_locked (const SpecSyncBatch& batch); // db_specs.cpp
 
     /**
      * @brief Write one spec batch: deletes first, then the document, the
@@ -1007,7 +1017,7 @@ class Database {
      * Same scope rule as @ref verify_spec_sync_rows_locked - mutex held, inside
      * the transaction, after the verification.
      */
-    void write_spec_sync_batch_locked (const SpecSyncBatch& batch);
+    void write_spec_sync_batch_locked (const SpecSyncBatch& batch); // db_specs.cpp
 
     /**
      * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.
@@ -1018,7 +1028,7 @@ class Database {
      * exceptions rethrow immediately; busy exhaustion after @p attempts logs
      * and rethrows. @p what names the operation for log messages.
      */
-    void retry_on_busy (const char* what,
+    void retry_on_busy (const char* what, // database.cpp
     int attempts,
     std::chrono::milliseconds base,
     const std::function<void ()>& fn);

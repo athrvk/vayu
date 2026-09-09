@@ -5,9 +5,17 @@ description: >-
 
 # Engine Database Schema
 
-Vayu uses SQLite via `sqlite_orm`. The schema is defined in `engine/src/db/database.cpp` and the
+Vayu uses SQLite via `sqlite_orm`. The schema is defined in `engine/src/db/database_impl.hpp` and the
 struct definitions live in `engine/include/vayu/types.hpp`. `sync_schema()` adds new columns
 automatically on startup - no migration scripts are needed for additive changes.
+
+`Database`'s own code is nine translation units under `engine/src/db/` (issue #1614), one per table
+family, over that shared internal header: `database.cpp` (construction, locking, transactions),
+`db_collections.cpp`, `db_requests.cpp`, `db_environments.cpp`, `db_runs.cpp` (runs and every
+run-scoped artifact: metric ticks, monitor samples, results, the webhook inbox), `db_specs.cpp`,
+`db_credentials.cpp`, `db_config.cpp` and `db_maintenance.cpp` (schema migration, corruption
+recovery, `init()`'s startup repair passes, workspace backup). `database.hpp`'s section comments
+name which file defines each member.
 
 > **Breaking changes**: a destructive schema change is now a versioned migration, not a wipe.
 > `PRAGMA user_version` is the marker: `Database::Database`'s `migrate_before_sync` (issue #1514)
@@ -208,10 +216,10 @@ columns dead data and the cut a real migration rather than another additive pass
 its `scriptsFoldedIntoElements` marker and its `.pre-elements-fold.bak` snapshot are gone; `PRAGMA
 user_version` is the marker now.
 
-`migrate_before_sync (path)` (`engine/src/db/database.cpp`, a free function in the anonymous
-namespace, called from `Database::Database` before *any* `sync_schema ()` - including the
-constructor's own validation probe) opens `path` with a raw `sqlite3` connection, independent of
-`sqlite_orm`:
+`migrate_before_sync (path)` (`engine/src/db/db_maintenance.cpp`, declared in `database_impl.hpp`
+so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call it before *any*
+`sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
+`sqlite3` connection, independent of `sqlite_orm`:
 
 1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `1`) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
@@ -884,7 +892,7 @@ Singleton table; always has exactly one row with `id = "globals"`.
 
 ### `runs`
 
-Stores design-mode and load-test run records. Defined in `database.cpp` (`make_table("runs", …)`);
+Stores design-mode and load-test run records. Defined in `database_impl.hpp` (`make_table("runs", …)`);
 struct is `db::Run` in `engine/include/vayu/types.hpp`.
 
 | Column            | Type    | Notes                                                       |
@@ -1047,7 +1055,7 @@ use - `sanitize_config_snapshot` truncates `body.content` in place and records
 it cuts. Without this cap a single oversized send (a large upload, a big JSON
 fixture) left a permanently bloated `config_snapshot` behind: the one-time
 summary build the cache above pays per run id, and the `q` filter's `LIKE` /
-`collectionId`'s `json_extract` (`run_filter_where`, `db/database.cpp`, run
+`collectionId`'s `json_extract` (`run_filter_where`, `db/db_runs.cpp`, run
 unconditionally as part of every list query's `WHERE`) all scan the stored
 string's full length on every call that uses them. The by-id route
 (`GET /runs/:id`) returns whatever was stored, cap included - it never
@@ -1560,7 +1568,7 @@ screen (`SettingsMain.tsx`) nests the dependent's card immediately beneath its
 parent's, indented and disabled until the parent reads `true`.
 
 **The seed itself is one file per category** (issue #1611):
-`Database::seed_default_config` (`engine/src/db/database.cpp`) is the ordered
+`Database::seed_default_config` (`engine/src/db/db_config.cpp`) is the ordered
 list of seven calls, one per `engine/src/db/config_seeds/{general, network,
 services, observability, data_retention, limits, scripting}.cpp` - each file
 holding exactly the `ConfigEntry` literals for the category its name says, over
@@ -1665,7 +1673,7 @@ list is literal.
 
 ## Indexes
 
-Declared alongside the tables in `make_storage()` (`engine/src/db/database.cpp`). `sqlite_orm`
+Declared alongside the tables in `make_vayu_storage()` (`engine/src/db/database_impl.hpp`). `sqlite_orm`
 requires index arguments to precede the table arguments. `sync_schema()` creates them on startup
 for fresh **and** pre-existing databases, so adding an index is additive and needs no migration.
 

@@ -11,11 +11,12 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    `engine/vcpkg.json`, and refuses to run if that file has grown a `version`
    field back: CI keys the vcpkg binary cache on the manifest's hash, so a
    version there made every release rebuild every C++ dependency from source.
-   It also does not touch `SCHEMA_VERSION` (`engine/src/db/database.cpp`),
-   which is a separate constant bumped only by the commit that changes
-   `make_storage`'s mapping. A bump is one-way: an older engine refuses to
-   open a database a newer one already stamped (issue #1492), so check
-   whether this release's changes touched the schema before tagging - not
+   It also does not touch `SCHEMA_VERSION`
+   (`engine/src/db/db_maintenance.cpp`), which is a separate constant bumped
+   only by the commit that changes `make_vayu_storage`'s mapping
+   (`engine/src/db/database_impl.hpp`). A bump is one-way: an older engine
+   refuses to open a database a newer one already stamped (issue #1492), so
+   check whether this release's changes touched the schema before tagging - not
    every version bump carries one.
 2. Check the vcpkg baseline for staleness - `cd engine && vcpkg
    x-update-baseline --dry-run`. **The release window is the cadence**: nothing
