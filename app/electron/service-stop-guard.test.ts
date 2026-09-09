@@ -281,10 +281,11 @@ describe("createServiceStopGuard", () => {
 	});
 
 	it("treats a dialog it could not show as a no, not as consent", async () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const log = vi.fn();
 		const guard = createServiceStopGuard({
 			ask: () => Promise.reject(new Error("no window to parent to")),
 			platform: "linux",
+			log,
 		});
 		guard.publish([inbox]);
 
@@ -292,8 +293,7 @@ describe("createServiceStopGuard", () => {
 		// Not latched either: the next gesture asks again rather than inheriting a
 		// consent nobody gave.
 		expect(guard.isCleared("quit")).toBe(false);
-		expect(warn).toHaveBeenCalled();
-		warn.mockRestore();
+		expect(log).toHaveBeenCalled();
 	});
 
 	it("forgets the snapshot when told the renderer went away", () => {
@@ -388,15 +388,14 @@ describe("registerRunningServicesIpc", () => {
 	it("ignores a message that is not a snapshot rather than clearing one", () => {
 		const guard = stubGuard();
 		const { ipc, send } = fakeIpc();
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		registerRunningServicesIpc(ipc, guard);
+		const log = vi.fn();
+		registerRunningServicesIpc(ipc, guard, log);
 		send(new RendererStub(), [inbox]);
 
 		send(new RendererStub(), "everything");
 
 		expect(guard.running()).toEqual([inbox]);
-		expect(warn).toHaveBeenCalled();
-		warn.mockRestore();
+		expect(log).toHaveBeenCalled();
 	});
 
 	it("drops the snapshot with the renderer that published it", () => {
@@ -540,7 +539,7 @@ describe("main.ts wiring", () => {
 	});
 
 	it("takes the renderer's snapshot off the channel", () => {
-		expect(main).toContain("registerRunningServicesIpc(ipcMain, serviceStopGuard)");
+		expect(main).toContain("registerRunningServicesIpc(ipcMain, serviceStopGuard,");
 	});
 
 	it("asks nothing of a quit that came from a signal", () => {

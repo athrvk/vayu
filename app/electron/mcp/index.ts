@@ -18,6 +18,7 @@ import { EngineClient } from "./engine-client.js";
 import { McpHttpServer } from "./http.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import type { McpDataChangedEvent, ToolContext } from "./tools.js";
+import type { Logger } from "../log.js";
 
 export interface VayuMcpServiceOptions {
 	engineBaseUrl: string;
@@ -30,6 +31,8 @@ export interface VayuMcpServiceOptions {
 	 * forward it to the renderer. Omitted when there is no renderer to tell.
 	 */
 	onDataChanged?: (event: McpDataChangedEvent) => void;
+	/** Where a served call is logged (#1558), `src: "mcp"`. */
+	log?: Logger;
 }
 
 export class VayuMcpService {
@@ -48,6 +51,7 @@ export class VayuMcpService {
 				client: this.client,
 				config: this.config,
 				onDataChanged: opts.onDataChanged,
+				log: opts.log,
 			}),
 		});
 	}

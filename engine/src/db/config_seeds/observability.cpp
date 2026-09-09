@@ -131,14 +131,14 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     "disables retention, so that fallback is immediate.",
     "observability", "60000", "0", "600000", std::nullopt, now }));
 
-    seed (restart_required (keywords ({ "verbosity", "logging" }) (ConfigEntry{ "logLevel",
-    vayu::core::constants::logging::DEFAULT_LEVEL, "enum", "Engine Log Level",
-    "The lowest severity the engine writes to its log file. Debug records "
-    "everything, which is what a bug report wants and what fills a disk "
-    "fastest; "
-    "Warning and Error keep a long-running install quiet. The console is "
-    "separate - it follows the daemon's -v flag, so raising this does not "
-    "silence a terminal you started the engine in.",
+    seed (restart_required (keywords ({ "verbosity", "logging" }) (ConfigEntry{
+    "logLevel", vayu::core::constants::logging::DEFAULT_LEVEL, "enum", "Log Level",
+    "The lowest severity written to Vayu's log files - the engine's and the "
+    "app's, side by side in the logs folder. Debug records everything, which "
+    "is what a bug report wants and what fills a disk fastest; Warning and "
+    "Error keep a long-running install quiet. Applies on the next start. A "
+    "terminal you started the engine in yourself is separate and follows its "
+    "-v flag.",
     "observability", vayu::core::constants::logging::DEFAULT_LEVEL,
     std::nullopt, std::nullopt, log_level_options_json (), now })));
 

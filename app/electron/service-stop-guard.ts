@@ -142,6 +142,8 @@ export interface ServiceStopGuardDeps {
 	rendererGone?: () => boolean;
 	/** Defaults to the host's. Injected so both branches can be tested. */
 	platform?: NodeJS.Platform;
+	/** Where an unanswerable question is reported. Category `"ipc"`. Defaults to a no-op. */
+	log?: (msg: string, fields?: Record<string, unknown>) => void;
 }
 
 export interface ServiceStopGuard {
@@ -177,6 +179,7 @@ export interface ServiceStopGuard {
 export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopGuard {
 	const platform = deps.platform ?? process.platform;
 	const rendererGone = deps.rendererGone ?? (() => false);
+	const log = deps.log ?? (() => {});
 	/**
 	 * On macOS closing the window hides it and the app keeps serving, so that
 	 * click costs nothing and asking about it would be a lie. Quit stops the
@@ -235,10 +238,9 @@ export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopG
 					// up - the close already happened and the answer is moot; in any
 					// other, refusing to stop the user's services on an error is the
 					// safe half, and a signal still quits without asking at all.
-					console.warn(
-						"[service-stop-guard] could not ask about running services",
-						error
-					);
+					log("service-stop-guard: could not ask about running services", {
+						error: String(error),
+					});
 					return false;
 				})
 				.finally(() => {
@@ -292,13 +294,19 @@ export interface IpcLike {
  * crashes never sends a closing "nothing is running", and without this the next
  * close would name services that died with it.
  */
-export function registerRunningServicesIpc(ipc: IpcLike, guard: ServiceStopGuard): void {
+export function registerRunningServicesIpc(
+	ipc: IpcLike,
+	guard: ServiceStopGuard,
+	log: (msg: string, fields?: Record<string, unknown>) => void = () => {}
+): void {
 	const watchOwner = createRendererWatch(() => guard.forget());
 
 	ipc.on(RUNNING_SERVICES_CHANNEL, (event: IpcEventLike, ...args: unknown[]) => {
 		const services = parseRunningServices(args[0]);
 		if (!services) {
-			console.warn("[service-stop-guard] ignored a message that is not a snapshot", args[0]);
+			log("service-stop-guard: ignored a message that is not a snapshot", {
+				message: args[0],
+			});
 			return;
 		}
 		watchOwner(event.sender);

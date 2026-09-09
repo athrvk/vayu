@@ -76,6 +76,8 @@ export interface WakeLockDeps {
 	send: (channel: string, payload: unknown) => void;
 	/** Wall clock, injected so a test can move it. */
 	now?: () => number;
+	/** Where a hold and its release are reported. Category `"power"`. Defaults to a no-op. */
+	log?: (msg: string, fields?: Record<string, unknown>) => void;
 }
 
 export interface WakeLock {
@@ -94,6 +96,7 @@ export interface WakeLock {
 
 export function createWakeLock(deps: WakeLockDeps): WakeLock {
 	const now = deps.now ?? Date.now;
+	const log = deps.log ?? (() => {});
 	const holds = new Map<string, { ownerId: number | null }>();
 	let blockerId: number | null = null;
 	/** Set only between an announced suspend and its resume. */
@@ -102,11 +105,11 @@ export function createWakeLock(deps: WakeLockDeps): WakeLock {
 	function startBlocker(reason: string): void {
 		if (blockerId !== null) return;
 		blockerId = deps.blocker.start(WAKE_LOCK_BLOCKER_TYPE);
-		// The main process's console is the app's log, and "why is this machine
-		// refusing to sleep" is a question a user does ask - `pmset -g assertions`
-		// and `powercfg /requests` name Vayu but not what it is doing. This is the
-		// only place that can answer, so the reason a holder gives is stated here.
-		console.log(`[power] holding the system wake lock: ${reason}`);
+		// "Why is this machine refusing to sleep" is a question a user does ask -
+		// `pmset -g assertions` and `powercfg /requests` name Vayu but not what it
+		// is doing. This is the only place that can answer, so the reason a
+		// holder gives is stated here.
+		log("Holding the system wake lock", { reason });
 	}
 
 	function stopBlockerIfIdle(): void {
@@ -115,7 +118,7 @@ export function createWakeLock(deps: WakeLockDeps): WakeLock {
 		// it no longer knows throws on some platforms.
 		if (deps.blocker.isStarted(blockerId)) deps.blocker.stop(blockerId);
 		blockerId = null;
-		console.log("[power] system wake lock released");
+		log("System wake lock released");
 	}
 
 	/*

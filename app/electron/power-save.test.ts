@@ -68,11 +68,8 @@ function harness(clock?: () => number) {
 	const blocker = fakeBlocker();
 	const monitor = fakeMonitor();
 	const send = vi.fn();
-	// Held rather than let through: these lines are the app's log in production
-	// (see the eslint override for `electron/`), and a test suite that prints
-	// them is a test suite nobody reads the output of.
-	const log = vi.spyOn(console, "log").mockImplementation(() => {});
-	const lock = createWakeLock({ blocker, monitor, send, now: clock });
+	const log = vi.fn();
+	const lock = createWakeLock({ blocker, monitor, send, now: clock, log });
 	return { blocker, monitor, send, lock, log };
 }
 
@@ -98,7 +95,7 @@ describe("createWakeLock - reference counting", () => {
 		const { lock, log } = harness();
 		const token = lock.hold("Load test run streaming");
 
-		expect(log.mock.calls[0]?.[0]).toContain("Load test run streaming");
+		expect(log.mock.calls[0]?.[1]).toEqual({ reason: "Load test run streaming" });
 
 		log.mockClear();
 		lock.release(token);

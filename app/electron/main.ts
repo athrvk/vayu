@@ -70,6 +70,14 @@ import { stampInstalledVersion } from "./appimage-stamp.js";
 import { clearResponseCacheOnUpgrade } from "./response-cache-clear.js";
 import { reportStartupIfRequested } from "./startup-probe.js";
 import { revealWhenReady } from "./window-reveal.js";
+import {
+	appLogger,
+	mcpLogger,
+	rendererLogger,
+	appLogsPath,
+	applyFloorFromEngine,
+} from "./app-log.js";
+import { registerLogIpc } from "./log-ipc.js";
 /*
  * MCP is imported by weight, not through its barrel.
  *
@@ -350,6 +358,7 @@ const rendererRecovery = createRendererRecovery({
 		app.quit();
 	},
 	quit: () => app.quit(),
+	log: (msg, fields) => appLogger().error("window", msg, fields),
 	// The dead renderer's flush settled against nobody; the live one that
 	// replaced it has its own unsaved work and must be asked.
 	onRecovered: () => saveFlusher.reset(),
@@ -373,6 +382,7 @@ const serviceStopGuard = createServiceStopGuard({
 	// A renderer that is gone publishes nothing, including the snapshot that
 	// says its services went with it.
 	rendererGone: () => rendererRecovery.isRendererGone(),
+	log: (msg, fields) => appLogger().warn("ipc", msg, fields),
 });
 
 /**
@@ -822,7 +832,10 @@ async function startEngine() {
 	try {
 		engineSidecar = new EngineSidecar();
 		await engineSidecar.start();
-		console.log("[Main] Engine started successfully at", engineSidecar.getApiUrl());
+		appLogger().info("main", "Engine started successfully", { url: engineSidecar.getApiUrl() });
+		// Read once per launch: the file floor governs every record buffered
+		// before this resolves, and every one after.
+		void applyFloorFromEngine(appLogger(), engineSidecar.getApiUrl());
 	} catch (error) {
 		// A slow engine is not a failed one, and it is not ours to kill. The
 		// process is alive and still working through its startup housekeeping; the
@@ -830,11 +843,13 @@ async function startEngine() {
 		// health poll adopts the engine the moment it answers. Quitting here ended
 		// launches that were about to succeed.
 		if (error instanceof EngineNotReadyError) {
-			console.warn(`[Main] ${error.message}; leaving it to the renderer's health poll.`);
+			appLogger().warn("main", `${error.message}; leaving it to the renderer's health poll.`);
+			appLogger().applyFloor("debug");
 			return;
 		}
 
-		console.error("[Main] Failed to start engine:", error);
+		appLogger().error("main", "Failed to start engine", { error: String(error) });
+		appLogger().applyFloor("debug");
 		// Show error dialog to user
 		const { dialog } = await import("electron");
 		await dialog.showErrorBox(
@@ -868,7 +883,7 @@ async function startMcp() {
 		// Inside the try, not ahead of it: this is the first thing in the whole app
 		// to touch the persisted MCP config, so it is where a store failure lands.
 		if (!loadMcpEnabled()) {
-			console.log("[Main] MCP server disabled by preference; not starting.");
+			appLogger().info("mcp", "MCP server disabled by preference; not starting.");
 			return;
 		}
 		// Only the port is paid for here. The SDK, the tool registry and the
@@ -886,6 +901,7 @@ async function startMcp() {
 					version: app.getVersion(),
 					safety: loadPersistedSafety(),
 					onDataChanged: sendMcpDataChanged,
+					log: mcpLogger(),
 				});
 				mcpService = service;
 				return (req, res) => service.handleRequest(req, res);
@@ -893,11 +909,13 @@ async function startMcp() {
 		});
 		await listener.start();
 		mcpListener = listener;
-		console.log("[Main] MCP server listening at", listener.url);
+		appLogger().info("mcp", "MCP server listening", { url: listener.url });
 	} catch (error) {
 		// The MCP server is a non-critical convenience - a bind failure (e.g. port
 		// in use) must not take down the app. Log and continue.
-		console.error("[Main] Failed to start MCP server (continuing without it):", error);
+		appLogger().error("mcp", "Failed to start MCP server (continuing without it)", {
+			error: String(error),
+		});
 		mcpListener = null;
 	}
 }
@@ -928,9 +946,9 @@ async function stopMcp() {
 	if (!listener) return;
 	try {
 		await listener.stop();
-		console.log("[Main] MCP server stopped");
+		appLogger().info("mcp", "MCP server stopped");
 	} catch (error) {
-		console.error("[Main] Error stopping MCP server:", error);
+		appLogger().error("mcp", "Error stopping MCP server", { error: String(error) });
 	}
 }
 
@@ -941,9 +959,9 @@ async function stopEngine() {
 			// flight has to be waited out and no further one allowed - otherwise
 			// the engine it spawns outlives the process that would kill it.
 			await engineSidecar.shutdown();
-			console.log("[Main] Engine stopped successfully");
+			appLogger().info("main", "Engine stopped successfully");
 		} catch (error) {
-			console.error("[Main] Error stopping engine:", error);
+			appLogger().error("main", "Error stopping engine", { error: String(error) });
 		}
 	}
 }
@@ -955,14 +973,14 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 
 	try {
 		await engineSidecar.restart();
-		console.log("[Main] Engine restarted successfully");
+		appLogger().info("main", "Engine restarted successfully");
 		return { success: true };
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		// The error itself, not its text: the sidecar gives up with a sentence
 		// written for the user and attaches the attempt that failed as `cause`,
 		// which the string form drops. The renderer still gets the sentence.
-		console.error("[Main] Failed to restart engine:", error);
+		appLogger().error("main", "Failed to restart engine", { error: String(error) });
 		return { success: false, error: errorMessage };
 	}
 }
@@ -982,6 +1000,7 @@ function setupIpcHandlers() {
 			blocker: powerSaveBlocker,
 			monitor: powerMonitor,
 			send: (channel, payload) => liveWindow()?.webContents.send(channel, payload),
+			log: (msg, fields) => appLogger().info("power", msg, fields),
 		})
 	);
 
@@ -1002,6 +1021,7 @@ function setupIpcHandlers() {
 			hasWindow: () => liveWindow() !== null,
 			focus: focusMainWindow,
 			send: (channel, payload) => liveWindow()?.webContents.send(channel, payload),
+			log: (msg) => appLogger().warn("notify", msg),
 		})
 	);
 
@@ -1014,7 +1034,8 @@ function setupIpcHandlers() {
 		ipcMain,
 		createRunProgress({
 			window: () => liveWindow(),
-		})
+		}),
+		(msg, fields) => appLogger().warn("ipc", msg, fields)
 	);
 
 	// What the Dock and taskbar icon carries for the user who is not looking at
@@ -1022,12 +1043,14 @@ function setupIpcHandlers() {
 	// were elsewhere, and a mark for a run that failed while they were. The
 	// renderer says what happened; whether it is worth painting is a question
 	// about the window's focus, which only this side can answer.
-	registerOsIconIpc(ipcMain, osIcon);
+	registerOsIconIpc(ipcMain, osIcon, (msg, fields) => appLogger().warn("ipc", msg, fields));
 
 	// What the Services drawer has listening, kept current for the close that
 	// would stop it (#1363). One snapshot per change, not a question asked while
 	// the user waits on the close - see service-stop-guard.ts.
-	registerRunningServicesIpc(ipcMain, serviceStopGuard);
+	registerRunningServicesIpc(ipcMain, serviceStopGuard, (msg, fields) =>
+		appLogger().warn("ipc", msg, fields)
+	);
 
 	// Open one of the app's own documentation links in the system browser.
 	// Keyed rather than URL-taking on purpose: the renderer cannot ask for an
@@ -1301,6 +1324,15 @@ function setupIpcHandlers() {
 	ipcMain.handle("proxy:refreshSystem", async () => {
 		return await refreshSystemProxy(proxyResolution());
 	});
+
+	// A renderer's uncaught error or rejection (main.tsx's window listeners) and
+	// error-logger.ts's own calls, forwarded onto the app's own logger (#1558).
+	// Settings, General's Open logs folder button.
+	registerLogIpc(ipcMain, {
+		rendererLog: rendererLogger(),
+		appLog: appLogger(),
+		logsPath: appLogsPath,
+	});
 }
 
 /**
@@ -1332,7 +1364,7 @@ function proxyResolution(): ProxyResolutionSystem {
 const isPrimaryInstance = app.requestSingleInstanceLock();
 
 if (!isPrimaryInstance) {
-	console.log("[Main] Another Vayu instance is already running; focusing it and exiting.");
+	appLogger().info("main", "Another Vayu instance is already running; focusing it and exiting.");
 	app.quit();
 } else {
 	// A second launch is how a Jump List task and a Windows file association
@@ -1510,6 +1542,7 @@ const quitShutdown = createQuitShutdown({
 	defer: (run) => {
 		setImmediate(run);
 	},
+	log: (msg, fields) => appLogger().error("main", msg, fields),
 });
 
 // Ensure saves are flushed and engine is stopped when the app quits

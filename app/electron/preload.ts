@@ -228,6 +228,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		logsPath: string;
 		dbPath: string;
 	}> => ipcRenderer.invoke("app:getPaths"),
+	// Settings, General's "Open logs folder" button (#1558).
+	openLogsFolder: (): Promise<string> => ipcRenderer.invoke("app:openLogsFolder"),
+
+	// Forward one error-logger.ts record to the app's own log file (#1558).
+	// One-way, like setRunProgress/setOsIconSignal below - the caller does not
+	// wait on a write it cannot itself recover from.
+	log: (record: {
+		level: "debug" | "info" | "warn" | "error";
+		cat: string;
+		msg: string;
+		err?: { name: string; message: string; stack?: string };
+		fields?: Record<string, unknown>;
+	}): void => ipcRenderer.send("log:record", record),
 
 	// The absolute path of a `File` the user picked, for a multipart file part:
 	// the engine opens the file itself, so the renderer needs its path and never
@@ -438,5 +451,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 });
 
 window.addEventListener("DOMContentLoaded", () => {
+	// Preload runs in the renderer process, not main - the app's file logger
+	// (electron/log.ts) is main-process-only, and importing it here would open a
+	// second, uncoordinated writer against the same log file (#1558).
+	// eslint-disable-next-line no-console
 	console.log("Vayu loaded");
 });

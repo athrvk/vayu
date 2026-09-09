@@ -42,6 +42,14 @@ export const ENGINE_LOCK_FILE = "vayu.lock";
  */
 export const ENGINE_LOGS_DIR = "logs";
 export const ENGINE_DB_DIR = "db";
+/**
+ * The app log file's own rotation and retention, mirroring the engine's
+ * `maxLogFileBytes` default and `RETAINED_FILES`
+ * (`engine/include/vayu/core/constants.hpp`) so `app_<stamp>.log` behaves the
+ * same way `engine_<stamp>.log` does - see `electron/log.ts`.
+ */
+export const APP_LOG_MAX_BYTES = 64 * 1024 * 1024;
+export const APP_LOG_RETENTION_COUNT = 10;
 
 // MCP server (Model Context Protocol) - a TypeScript sidecar hosted in this
 // main process that exposes the engine's capabilities to agents (Claude Code,
