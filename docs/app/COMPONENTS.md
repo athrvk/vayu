@@ -1660,7 +1660,9 @@ variant, so each one fills its column instead of stopping at the settings
 screen's `max-w-[12rem]` with the rest of the line empty.
 
 **A bespoke override is the exception, in one map** (`elementForms.ts`), never
-inline in `ElementList`. Phase 0 ships a bespoke form for every `script.*`
+inline in `ElementList`. There are two: `ScriptElementForm`, below, and
+`ModeElementForm` for the five mutually-exclusive-strategy kinds, after it.
+Phase 0 ships a bespoke form for every `script.*`
 kind - `script.pre` / `script.post` and, since issue #1499, `script.setup` /
 `script.teardown` - which render `ScriptElementForm`'s Monaco editor and
 insertable snippets instead of the generic form's plain text field, because
@@ -1684,6 +1686,44 @@ GraphQL body's `ResizableHandle` styling, without the panel group it depends
 on - drags it between `SCRIPT_EDITOR_MIN_HEIGHT` and `SCRIPT_EDITOR_MAX_HEIGHT`
 (`constants/layout.ts`), previewing every pointer-move frame and persisting
 debounced, plus ArrowUp/ArrowDown by `SCRIPT_EDITOR_HEIGHT_STEP`.
+
+**Five kinds pick one strategy instead of showing every one at once**
+(`ModeElementForm.tsx`, with the table in `element-modes.ts`). `assert.status`
+accepts an `in` list **or** a `range`; `timer.think` waits `ms` **or**
+`minMs`/`maxMs` **or** a `gaussian`; `assert.jsonpath` checks `exists` **or**
+`expected` **or** `regex`; `control.throughput` limits by `everyN` **or**
+`percent`; `metric.record`'s `source` reads exactly one of its six keys. The
+engine resolves each by an if/else-if chain or a fixed-priority loop and never
+combines two - but JSON Schema declares them as independent optional siblings,
+so the generic form rendered every alternative's fields at once, with nothing
+saying which one would actually run. That is not only clutter: an element that
+once had a `range` and was then given an `in` kept the `range` invisibly, and
+the engine's own priority could still prefer the hidden one over the fields on
+screen. `metric.record`'s schema comment says why the fix cannot be a
+schema-level `oneOf` (valijson reports "matched N schemas" without naming one),
+so it lives entirely here. **The mode on screen is derived from `config`, by
+the engine's own priority order** - transcribed into `detectionOrder`, one per
+kind, each naming the C++ function it came from - so the card cannot claim one
+strategy while the engine runs another; a blank element starts on the kind's
+stated default (`assert.status` on `in`, `timer.think` on `ms`, which is the
+engine's *fallback* rather than its first check, hence the two orders being
+separate). **Switching modes clears the other strategies' keys**, since a
+leftover is both unreachable in the UI and, with `additionalProperties: false`
+on all five schemas, a save failure. The chosen mode's own value is kept, not
+reset - switching *to* it is what makes that data visible and editable. The
+picker is the `ToggleGroup` segmented control up to three modes and a compact
+`SelectSettingRow` past that (`metric.record`'s six sources), the split
+`SettingControls.tsx` already draws between a few options a user browses and a
+set that reads as a list. Everything below the picker is still
+`GenericElementForm`, over a subset of the same schema: titles, hints, units,
+the advanced disclosure and the two-fields-per-line pairing arrive unchanged,
+so a mode's fields are literally the same rows as every other card's. A mode
+whose key is a boolean *marker* (`exists`, `latency`, `status`, `size`) renders
+no field at all - the engine reads the key's presence and ignores its value, so
+a toggle would offer an "off" that turns nothing off; choosing the mode writes
+`true`. Only the mode *labels* are app-side copy, because a strategy is a
+grouping the schema does not name (`minMs` + `maxMs` are one mode with two
+titles); every field label still comes from the catalogue.
 
 **The Add control is a searchable picker (issue #1604), not a plain dropdown.**
 A `Popover` holds a `Command` (`ElementList/element-categories.ts`'s display

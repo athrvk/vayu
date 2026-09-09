@@ -16,16 +16,33 @@
  * field. `extract.json`'s path field is deliberately generic-form only for
  * now (a bespoke response-body picker is real UI work with no engine
  * dependency, so it is a follow-up rather than part of this cut).
+ *
+ * The second override is {@link ModeElementForm}, for the kinds whose schema
+ * declares mutually exclusive strategies as independent optional siblings -
+ * `assert.status`, `assert.jsonpath`, `timer.think`, `control.throughput`,
+ * `metric.record`. They are spread from `ELEMENT_MODES` rather than listed
+ * again here, so that table stays the one place a kind is on this list.
  */
 
 import type { ComponentType } from "react";
+import type { ElementConfigSchema } from "@/types";
 import { ScriptElementForm, type ScriptElementFormProps } from "./ScriptElementForm";
+import { ModeElementForm } from "./ModeElementForm";
+import { ELEMENT_MODES } from "./element-modes";
 
-export type ElementFormProps = ScriptElementFormProps;
+export interface ElementFormProps extends ScriptElementFormProps {
+	/**
+	 * The kind's `configSchema`, for a bespoke form that still renders its
+	 * fields from the catalogue. Absent only for an element naming a kind this
+	 * engine build no longer serves.
+	 */
+	schema?: ElementConfigSchema;
+}
 
 export const ELEMENT_FORM_OVERRIDES: Record<string, ComponentType<ElementFormProps>> = {
 	"script.pre": ScriptElementForm,
 	"script.post": ScriptElementForm,
 	"script.setup": ScriptElementForm,
 	"script.teardown": ScriptElementForm,
+	...Object.fromEntries(Object.keys(ELEMENT_MODES).map((kind) => [kind, ModeElementForm])),
 };

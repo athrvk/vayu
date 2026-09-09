@@ -92,6 +92,19 @@ const ASSERT_KIND = kindSchema({
 	category: "assert",
 });
 
+/**
+ * The kind that genuinely declares no configuration - `control.once` is the
+ * one in the live catalogue. Not `assert.status`, which used to stand in for
+ * it here: its real schema declares two mutually exclusive strategies, so it
+ * routes to `ModeElementForm` (`element-modes.ts`) and would show a mode
+ * picker rather than the generic form's "takes no configuration" line.
+ */
+const ONCE_KIND = kindSchema({
+	kind: "control.once",
+	label: "Once Only",
+	category: "controller",
+});
+
 const SCRIPT_KIND = kindSchema({
 	kind: "script.pre",
 	label: "Pre-request Script",
@@ -106,7 +119,13 @@ const INHERIT_DISABLE_KIND = kindSchema({
 	category: "extract",
 });
 
-const KINDS: ElementKindSchema[] = [EXTRACT_KIND, ASSERT_KIND, SCRIPT_KIND, INHERIT_DISABLE_KIND];
+const KINDS: ElementKindSchema[] = [
+	EXTRACT_KIND,
+	ASSERT_KIND,
+	ONCE_KIND,
+	SCRIPT_KIND,
+	INHERIT_DISABLE_KIND,
+];
 
 function extractElement(id: string, path = ""): ElementDef {
 	return { id, kind: "extract.json", enabled: true, config: { path } };
@@ -114,6 +133,10 @@ function extractElement(id: string, path = ""): ElementDef {
 
 function assertElement(id: string): ElementDef {
 	return { id, kind: "assert.status", enabled: true, config: {} };
+}
+
+function onceElement(id: string): ElementDef {
+	return { id, kind: "control.once", enabled: true, config: {} };
 }
 
 function scriptElement(id: string, script = ""): ElementDef {
@@ -200,8 +223,8 @@ describe("ElementList - the generic form for a kind with no bespoke override", (
 	});
 
 	it("says plainly when a kind's schema declares no configuration at all", () => {
-		renderList([assertElement("a1")]);
-		expandRow("Assert Status");
+		renderList([onceElement("o1")]);
+		expandRow("Once Only");
 
 		expect(screen.getByText(/takes no configuration/i)).toBeInTheDocument();
 	});
@@ -262,8 +285,8 @@ describe("ElementList - collapse and expand", () => {
 	it("opens a newly added element expanded, not collapsed", async () => {
 		render(<StatefulList initial={[]} />);
 		fireEvent.click(screen.getByRole("button", { name: /add element/i }));
-		await screen.findByText("Assert Status");
-		fireEvent.click(screen.getByText("Assert Status").closest("[cmdk-item]")!);
+		await screen.findByText("Once Only");
+		fireEvent.click(screen.getByText("Once Only").closest("[cmdk-item]")!);
 
 		expect(screen.getByText(/takes no configuration/i)).toBeInTheDocument();
 	});
