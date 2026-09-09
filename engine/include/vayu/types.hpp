@@ -1552,6 +1552,20 @@ struct ConfigEntry {
     // suppression rather than the removal (#946 measured the removal).
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<std::string> unit{};
+    // The key of a boolean entry in the same category this one means nothing
+    // without ("correlationIdHeader" names "correlationIdEnabled"). Serialized
+    // as `dependsOn` and omitted when absent, `POST /config` never reads it (a
+    // catalogue fact, not a value); the app renders the dependent nested under
+    // its parent, disabled until the parent is true. `ConfigSeeder::
+    // validate_dependencies` refuses a value naming an unknown key, a key in
+    // another category, or a key that is not itself boolean.
+    //
+    // Declared after `unit` for the same reason `unit` is declared after
+    // `updated_at`: every trailing field here is set through a wrapper, never
+    // positionally, and the default member initializer keeps the 53 existing
+    // positional seeds free of `-Wmissing-field-initializers`.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<std::string> depends_on{};
 };
 
 /**

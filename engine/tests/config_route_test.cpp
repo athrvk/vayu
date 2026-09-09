@@ -548,6 +548,47 @@ TEST_F (ConfigRouteTest, AdvancedSerializesOnTheWire) {
 }
 
 // ---------------------------------------------------------------------------
+// dependsOn (#1610): a dependent entry means nothing until its named boolean
+// sibling is on, so `SettingsMain` nests it under that entry's row.
+// ---------------------------------------------------------------------------
+
+TEST_F (ConfigRouteTest, DependsOnSerializesOnTheWire) {
+    auto [status, body] =
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"4"}})");
+    ASSERT_EQ (status, 200);
+
+    json header = find_entry (body, "correlationIdHeader");
+    ASSERT_TRUE (header.contains ("dependsOn"));
+    EXPECT_EQ (header["dependsOn"].get<std::string> (), "correlationIdEnabled");
+
+    json switch_entry = find_entry (body, "correlationIdEnabled");
+    EXPECT_FALSE (switch_entry.contains ("dependsOn"))
+    << "the switch itself depends on nothing and must omit the key, not send "
+       "it null";
+}
+
+// The set, not one entry: the seed scan #1610's issue asked for found exactly
+// one pair in the current catalogue. A future entry that grows a `dependsOn`
+// belongs in this set too, so a reviewer sees every relation at once instead
+// of finding one by accident.
+TEST_F (ConfigRouteTest, DependsOnFlagsExactlyTheRecordedPairs) {
+    const std::map<std::string, std::string> expected = {
+        { "correlationIdHeader", "correlationIdEnabled" }
+    };
+
+    auto entries = db_->get_all_config_entries ();
+    ASSERT_FALSE (entries.empty ()) << "catalogue empty - nothing was scanned";
+
+    std::map<std::string, std::string> actual;
+    for (const auto& entry : entries) {
+        if (entry.depends_on) {
+            actual[entry.key] = *entry.depends_on;
+        }
+    }
+    EXPECT_EQ (actual, expected);
+}
+
+// ---------------------------------------------------------------------------
 // keywords: the search terms the copy never says.
 // ---------------------------------------------------------------------------
 

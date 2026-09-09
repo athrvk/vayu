@@ -639,6 +639,15 @@ types). `options` is present only for `type: "enum"` entries - a JSON array of
 hand-maintained value-to-label map. `value` and `default` are always strings;
 `type` is one of `integer`, `number`, `boolean`, `string`, or `enum`.
 
+**`dependsOn`** (issue #1610) is present only on an entry that means nothing
+until a boolean sibling in the same category is on - `correlationIdHeader`
+carries `"dependsOn": "correlationIdEnabled"`. It is a catalogue fact the seed
+asserts is internally consistent (a value naming an unknown, cross-category or
+non-boolean key fails engine startup); `POST /config` never reads it back. The
+Settings screen nests the dependent's card immediately beneath its parent's,
+indented and disabled with a "Turn on \<parent label\> to use this" hint while
+the parent reads `"false"`.
+
 `requiresRestart` and `advanced` are booleans, always present:
 
 - **`requiresRestart`** - the running engine keeps the old value until it is

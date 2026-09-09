@@ -9,7 +9,10 @@
  * so a category file that drops, adds or edits an entry reds here rather than
  * only in a review of a 64-entry diff. `RefusesAKeySeededTwice` exercises the
  * duplicate guard the split made necessary: one function could not seed a key
- * twice by construction, seven files can.
+ * twice by construction, seven files can. `RefusesADependsOnNaming*` exercise
+ * the `dependsOn` relation issue #1610 added: a dependent entry must name a
+ * boolean sibling in its own category, checked once every category has seeded
+ * (`validate_dependencies`), since seed order across files is not a contract.
  */
 
 #include <gtest/gtest.h>
@@ -21,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "../src/db/config_seeds/seed.hpp"
@@ -68,7 +72,8 @@ json catalogue_from (vayu::db::Database& db) {
         { "default_value", machine_dependent ? "<core count>" : entry.default_value },
         { "min_value", entry.min_value.value_or ("") },
         { "max_value", entry.max_value.value_or ("") },
-        { "requires_restart", entry.requires_restart }, { "advanced", entry.advanced } });
+        { "requires_restart", entry.requires_restart }, { "advanced", entry.advanced },
+        { "depends_on", entry.depends_on.value_or ("") } });
     }
     return out;
 }
@@ -111,6 +116,77 @@ TEST (ConfigSeederTest, RefusesAKeySeededTwice) {
     EXPECT_THROW (seed (entry), std::runtime_error)
     << "a second seed of the same key across two category files must fail "
     << "the engine's start, not silently overwrite the first";
+}
+
+vayu::db::ConfigEntry make_entry (std::string key, std::string type, std::string category) {
+    vayu::db::ConfigEntry entry;
+    entry.key           = std::move (key);
+    entry.value         = "1";
+    entry.type          = std::move (type);
+    entry.label         = "Test entry";
+    entry.description   = "A fixture entry for validate_dependencies tests.";
+    entry.category      = std::move (category);
+    entry.default_value = "1";
+    entry.updated_at    = 0;
+    return entry;
+}
+
+TEST (ConfigSeederTest, AcceptsADependsOnNamingABooleanSiblingInTheSameCategory) {
+    std::unordered_set<std::string> known;
+    vayu::db::config_seeds::ConfigSeeder seed (
+    {}, known, [] (const vayu::db::ConfigEntry&) {}, [] (const std::string&) {});
+
+    auto parent = make_entry ("switchKey", "boolean", "network_performance");
+    auto child  = make_entry ("dependentKey", "string", "network_performance");
+    child.depends_on = "switchKey";
+
+    seed (parent);
+    seed (child);
+    EXPECT_NO_THROW (seed.validate_dependencies ());
+}
+
+TEST (ConfigSeederTest, RefusesADependsOnNamingAnUnseededKey) {
+    std::unordered_set<std::string> known;
+    vayu::db::config_seeds::ConfigSeeder seed (
+    {}, known, [] (const vayu::db::ConfigEntry&) {}, [] (const std::string&) {});
+
+    auto child = make_entry ("dependentKey", "string", "network_performance");
+    child.depends_on = "noSuchKey";
+    seed (child);
+
+    EXPECT_THROW (seed.validate_dependencies (), std::runtime_error)
+    << "a dependsOn naming a key nothing seeded must fail the engine's start";
+}
+
+TEST (ConfigSeederTest, RefusesADependsOnNamingANonBooleanKey) {
+    std::unordered_set<std::string> known;
+    vayu::db::config_seeds::ConfigSeeder seed (
+    {}, known, [] (const vayu::db::ConfigEntry&) {}, [] (const std::string&) {});
+
+    auto parent = make_entry ("switchKey", "integer", "network_performance");
+    auto child  = make_entry ("dependentKey", "string", "network_performance");
+    child.depends_on = "switchKey";
+
+    seed (parent);
+    seed (child);
+    EXPECT_THROW (seed.validate_dependencies (), std::runtime_error)
+    << "a dependsOn naming a non-boolean key must fail the engine's start";
+}
+
+TEST (ConfigSeederTest, RefusesADependsOnNamingAKeyInAnotherCategory) {
+    std::unordered_set<std::string> known;
+    vayu::db::config_seeds::ConfigSeeder seed (
+    {}, known, [] (const vayu::db::ConfigEntry&) {}, [] (const std::string&) {});
+
+    auto parent = make_entry ("switchKey", "boolean", "network_performance");
+    auto child  = make_entry ("dependentKey", "string", "limits");
+    child.depends_on = "switchKey";
+
+    seed (parent);
+    seed (child);
+    EXPECT_THROW (seed.validate_dependencies (), std::runtime_error)
+    << "a dependsOn naming a key outside the dependent's own category must "
+    << "fail the engine's start";
 }
 
 } // namespace

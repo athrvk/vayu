@@ -25,6 +25,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <initializer_list>
 #include <stdexcept>
@@ -124,7 +125,8 @@ class ConfigSeeder {
             throw std::runtime_error (
             "Database: config key seeded twice: " + new_entry.key);
         }
-        auto it = existing_.find (new_entry.key);
+        seeded_[new_entry.key] = new_entry;
+        auto it                = existing_.find (new_entry.key);
         if (it != existing_.end ()) {
             // Preserve the user's value but update metadata (description,
             // label, etc.)
@@ -138,8 +140,42 @@ class ConfigSeeder {
         }
     }
 
+    // Refuses a `dependsOn` naming a key nothing seeded, a key in a different
+    // category, or a key that is not itself boolean - the same way `operator()`
+    // refuses a key seeded twice, and for the same reason: a dangling relation
+    // would reach the app as a nesting instruction it cannot carry out. Called
+    // once, after every category's seed function has run, so a dependent is
+    // free to name a parent regardless of which file seeds first.
+    void validate_dependencies () const {
+        for (const auto& [key, entry] : seeded_) {
+            if (!entry.depends_on) {
+                continue;
+            }
+            const std::string& parent_key = *entry.depends_on;
+            auto parent_it                = seeded_.find (parent_key);
+            if (parent_it == seeded_.end ()) {
+                throw std::runtime_error (std::format (
+                "Database: config entry '{}' depends on unknown key '{}'", key, parent_key));
+            }
+            const ConfigEntry& parent = parent_it->second;
+            if (parent.category != entry.category) {
+                throw std::runtime_error (
+                std::format ("Database: config entry '{}' depends on '{}', "
+                             "which is not in the same category",
+                key, parent_key));
+            }
+            if (parent.type != "boolean") {
+                throw std::runtime_error (
+                std::format ("Database: config entry '{}' depends on '{}', "
+                             "which is not a boolean entry",
+                key, parent_key));
+            }
+        }
+    }
+
     private:
     std::unordered_map<std::string, ConfigEntry> existing_;
+    std::unordered_map<std::string, ConfigEntry> seeded_;
     std::unordered_set<std::string>& known_keys_;
     std::function<void (const ConfigEntry&)> replace_;
 };
@@ -193,6 +229,18 @@ std::initializer_list<const char*> terms) {
 inline std::function<ConfigEntry (ConfigEntry)> unit (const char* symbol) {
     return [symbol = std::string (symbol)] (ConfigEntry entry) {
         entry.unit = symbol;
+        return entry;
+    };
+}
+
+// depends_on: this entry means nothing until the named boolean sibling in the
+// same category is switched on ("Header name" without "Correlation Id" being
+// true). The app nests the entry under its parent, indented and disabled
+// until the parent reads true; `ConfigSeeder::validate_dependencies` refuses
+// a key naming an absent, cross-category, or non-boolean parent.
+inline std::function<ConfigEntry (ConfigEntry)> depends_on (const char* key) {
+    return [key = std::string (key)] (ConfigEntry entry) {
+        entry.depends_on = key;
         return entry;
     };
 }
