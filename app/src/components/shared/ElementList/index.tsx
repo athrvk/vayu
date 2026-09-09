@@ -50,7 +50,7 @@ import {
 } from "@/components/ui";
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { generateId } from "@/lib/id";
-import { isBlankScriptElement } from "@/lib/elements";
+import { isBlankScriptElement, missingRequiredKeys } from "@/lib/elements";
 import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores";
@@ -200,6 +200,14 @@ function ElementRow({
 	const title = element.name ?? label;
 	const Icon = schema && categoryIcon(effectiveCategory(schema.category));
 	const summary = summarizeElement(element, schema);
+	// Issue #1635: a fresh element's `config` is missing whatever its kind
+	// requires until the user fills the form below, and saving in that state
+	// 400s the whole request - `RequestBuilderProvider`/`ElementsTab` hold the
+	// save back for exactly this, so the row has to say which field is why.
+	const missingKeys = missingRequiredKeys(element, kinds);
+	const missingLabels = missingKeys.map(
+		(key) => schema?.configSchema.properties?.[key]?.title ?? key
+	);
 
 	const [open, setOpen] = useState(isNew);
 	const [renaming, setRenaming] = useState(false);
@@ -321,10 +329,34 @@ function ElementRow({
 								<span className="ml-1.5 text-muted-foreground">{label}</span>
 							)}
 						</span>
-						{!open && summary && (
-							<TruncatedText className="min-w-0 flex-1 text-xs text-muted-foreground">
-								{summary}
-							</TruncatedText>
+						{/*
+						 * A missing required field (issue #1635) takes the summary's
+						 * spot rather than sharing the row with it - both being
+						 * `min-w-0 flex-1` would split what little room is left
+						 * after the title, and "why isn't this saving" outranks the
+						 * config preview. Shown whether the card is open or
+						 * collapsed: a list of collapsed cards is exactly where a
+						 * user needs to spot which one is blocking the save
+						 * without expanding each in turn.
+						 */}
+						{missingLabels.length > 0 ? (
+							<span
+								className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground"
+								data-element-incomplete
+							>
+								<span
+									className="h-2 w-2 shrink-0 rounded-full bg-warning"
+									aria-hidden
+								/>
+								<TruncatedText>{`Needs ${missingLabels.join(", ")}`}</TruncatedText>
+							</span>
+						) : (
+							!open &&
+							summary && (
+								<TruncatedText className="min-w-0 flex-1 text-xs text-muted-foreground">
+									{summary}
+								</TruncatedText>
+							)
 						)}
 					</button>
 				)}

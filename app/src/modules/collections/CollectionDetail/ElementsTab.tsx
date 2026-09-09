@@ -35,6 +35,7 @@ import { ElementList } from "@/components/shared/ElementList";
 import { useDataContract, useDraftSaveContext, useEntityDraft, useVariableResolver } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import { useElementKindsQuery } from "@/queries";
+import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
 import type { Collection, ElementDef } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
 
@@ -68,10 +69,21 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		mutation: updateCollection,
 	});
 
+	const kindsList = kinds ?? [];
+	const incomplete = hasIncompleteElement(elements, kindsList);
+
 	const persist = useCallback(async () => {
 		if (!isDirty) return;
+		// Same whole-array 400 as the request builder's autosave (issue #1635):
+		// this button is disabled while `incomplete`, but `useDraftSaveContext`
+		// also registers `persist` for Cmd+S and the quit flush, neither of
+		// which reads the disabled attribute - so the check has to live here
+		// too, not only on the button below. Reads `kinds` directly (not
+		// `kindsList`, a fresh `[]` reference on every render while the query is
+		// still loading) so this callback's identity does not churn with it.
+		if (hasIncompleteElement(elements, kinds ?? [])) throw new SaveBlockedError();
 		await updateCollection.mutateAsync({ id: collection.id, elements });
-	}, [isDirty, updateCollection, collection.id, elements]);
+	}, [isDirty, updateCollection, collection.id, elements, kinds]);
 
 	useDraftSaveContext({
 		id: `collection-${collection.id}-elements`,
@@ -102,7 +114,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 			<ElementList
 				elements={elements}
 				onChange={setElements}
-				kinds={kinds ?? []}
+				kinds={kindsList}
 				renderAboveForm={(element) => {
 					if (element.kind !== "script.pre" && element.kind !== "script.post")
 						return null;
@@ -122,10 +134,17 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 
 			<SaveFailed mutation={updateCollection} what="the elements list" />
 
+			{incomplete && (
+				<p className="text-xs text-muted-foreground">
+					Finish the field an element marked &quot;Needs&quot; above is missing before
+					saving.
+				</p>
+			)}
+
 			<div className="flex gap-2">
 				<Button
 					onClick={handleSave}
-					disabled={!isDirty || updateCollection.isPending}
+					disabled={!isDirty || updateCollection.isPending || incomplete}
 					className="font-semibold"
 				>
 					{updateCollection.isPending ? "Saving…" : "Save Elements"}

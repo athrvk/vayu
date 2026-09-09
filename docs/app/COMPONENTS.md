@@ -1616,6 +1616,20 @@ because this is where a user reads several fields at once, closer to a form
 than a settings page read one row at a time. The collapsed header (`h-8`,
 matching every other drawer row) is untouched; only what opens beneath it got
 denser.
+**A missing required field names itself, in place of the summary** (issue
+#1635): `missingRequiredKeys` (`lib/elements.ts`) reads the same presence-only
+check `addElement`'s fresh `config: {}` can trigger, and the row shows "Needs
+`<title>`" with a warning dot instead of `summarizeElement`'s preview -
+whether the card is open or collapsed, since a list of collapsed cards is
+exactly where a user needs to spot which one is blocking the save without
+expanding each in turn. `RequestBuilderProvider`'s `handleSave` and
+`ElementsTab`'s `persist` hold the save back for the same reason
+`defaultConfigFor` exists above - a request's whole `elements` array 400s on
+one incomplete member - and throw `SaveBlockedError` instead of sending a
+payload already known to fail; `useSaveManager` reads that type to stay
+"pending" rather than backing off a retry against a payload that will not
+have changed by the next attempt.
+
 **Delete asks nothing for a blank element** (every configured value empty or
 absent) and confirms through `DeleteConfirmDialog` for one with real
 configuration. A primitive under `components/shared/` takes no feature-module

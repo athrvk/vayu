@@ -34,6 +34,9 @@ const environments: Array<Record<string, unknown>> = [];
 const session = { activeEnvironmentId: null as string | null };
 
 vi.mock("@/queries", () => ({
+	// RequestBuilderProvider now reads the catalogue itself (issue #1635); an
+	// empty list means "nothing required", so the save-skip check is inert.
+	useElementKindsQuery: () => ({ data: [] }),
 	useGlobalsQuery: () => ({ data: globals }),
 	useCollectionsQuery: () => ({ data: collections }),
 	useCollectionAncestors: () => [],

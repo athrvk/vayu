@@ -81,11 +81,29 @@ function kindSchema(kind: string, label: string, category: string): ElementKindS
 	};
 }
 
+/** A kind with a required config field, for the incompleteness cases (#1635). */
+const REQUIRED_KIND: ElementKindSchema = {
+	kind: "extract.required",
+	version: 1,
+	label: "Extract Required",
+	description: "Extract Required description",
+	category: "extract",
+	hotPathClass: "declarative",
+	collectionOnly: false,
+	configSchema: {
+		type: "object",
+		required: ["variable"],
+		properties: { variable: { type: "string", title: "Variable name" } },
+	},
+	phases: [],
+};
+
 const KINDS: ElementKindSchema[] = [
 	kindSchema("extract.json", "Extract JSON", "extract"),
 	kindSchema("assert.status", "Assert Status", "assert"),
 	kindSchema("script.pre", "Pre-request Script", "script"),
 	kindSchema("script.post", "Test Script", "script"),
+	REQUIRED_KIND,
 ];
 
 vi.mock("@/queries", async (importOriginal) => ({
@@ -223,6 +241,64 @@ describe("ElementsTab - the Save button", () => {
 		expect(
 			screen.getByText(/saved together, when you press Save Elements/i)
 		).toBeInTheDocument();
+	});
+});
+
+describe("ElementsTab - a required field an element's config is missing (issue #1635)", () => {
+	async function addRequiredElement() {
+		openAddMenu();
+		fireEvent.click((await screen.findByText("Extract Required")).closest("[cmdk-item]")!);
+	}
+
+	it("stays disabled (not merely undirtied) once an incomplete element makes the draft dirty", async () => {
+		renderTab(makeCollection([]));
+		await addRequiredElement();
+
+		// The picker's own add is what makes the draft dirty - a plain `!isDirty`
+		// check would already disable this button, so this case is only proof of
+		// the incompleteness guard if it stays disabled *while* dirty.
+		expect(screen.getByText("Extract Required")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /save elements/i })).toBeDisabled();
+	});
+
+	it("names the field on the row itself", async () => {
+		renderTab(makeCollection([]));
+		await addRequiredElement();
+
+		expect(screen.getByText("Needs Variable name")).toBeInTheDocument();
+	});
+
+	it("re-enables Save Elements once the field is filled in", async () => {
+		renderTab(makeCollection([]));
+		await addRequiredElement();
+		expect(screen.getByRole("button", { name: /save elements/i })).toBeDisabled();
+
+		const textboxes = screen.getAllByRole("textbox");
+		fireEvent.change(textboxes[textboxes.length - 1], {
+			target: { value: "token" },
+		});
+
+		expect(screen.getByRole("button", { name: /save elements/i })).toBeEnabled();
+		expect(screen.queryByText(/^Needs /)).not.toBeInTheDocument();
+	});
+
+	it("never calls the update mutation while an element is incomplete, even via a direct click", async () => {
+		renderTab(makeCollection([]));
+		await addRequiredElement();
+
+		// Disabled buttons refuse a real click too - this pins the same guard
+		// `persist` carries for Cmd+S and the quit flush, which do not read the
+		// disabled attribute at all.
+		fireEvent.click(screen.getByRole("button", { name: /save elements/i }));
+
+		expect(mutation.mutateAsync).not.toHaveBeenCalled();
+	});
+
+	it("says why saving is held back", async () => {
+		renderTab(makeCollection([]));
+		await addRequiredElement();
+
+		expect(screen.getByText(/finish the field/i)).toBeInTheDocument();
 	});
 });
 

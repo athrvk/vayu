@@ -42,6 +42,9 @@ const mutateCollection = vi.fn();
 const mutateEnvironment = vi.fn();
 
 vi.mock("@/queries", () => ({
+	// RequestBuilderProvider now reads the catalogue itself (issue #1635); an
+	// empty list means "nothing required", so the save-skip check is inert.
+	useElementKindsQuery: () => ({ data: [] }),
 	useGlobalsQuery: () => ({ data: globals }),
 	useCollectionsQuery: () => ({ data: collections }),
 	// The provider walks this for the auth an `inherit` resolves to; nothing
