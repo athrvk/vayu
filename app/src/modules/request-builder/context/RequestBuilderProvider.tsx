@@ -24,6 +24,7 @@ import { retainKeys } from "./retain-keys";
 import { useVariableResolver, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
 import { mergeExternalWrite } from "@/lib/field-merge";
+import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
 import {
 	useCollectionAncestors,
@@ -34,6 +35,7 @@ import {
 	useEnvironmentsQuery,
 	useUpdateEnvironmentMutation,
 	useLastDesignRunQuery,
+	useElementKindsQuery,
 } from "@/queries";
 import {
 	useSessionStore,
@@ -190,6 +192,12 @@ export default function RequestBuilderProvider({
 		...initialRequest,
 		collectionId: collectionId || null,
 	}));
+
+	// The catalogue's `required` keys per kind (issue #1635) - `handleSave`
+	// below needs it to decide whether `elements` is safe to send; cached by
+	// `useElementKindsQuery` itself, so this costs nothing beyond the fetch
+	// `ElementsPanel` already makes.
+	const { data: elementKinds } = useElementKindsQuery();
 
 	// The id of the request currently on screen. This single provider is reused
 	// across request tabs (no per-tab key), so an execute that is still in flight
@@ -846,6 +854,21 @@ export default function RequestBuilderProvider({
 		// name says what matters): a `setRequest` that lands during the await
 		// cannot silently add to what this save already claims to have sent.
 		const changedFields = touchedFields;
+		// `buildUpdatePayload` sends the whole `elements` array whenever it is
+		// touched (issue #1635) - an element the picker just added still has
+		// `config: {}`, missing whatever its kind requires, and the engine 400s
+		// the *entire* payload on that one element's behalf. Presence-only check
+		// against the catalogue's `required` keys, the same cheap and exact test
+		// `addElement`'s fresh seed needs: throwing here (instead of calling
+		// `onSave`) keeps the request dirty and skips the network call, and
+		// `useSaveManager` reads `SaveBlockedError` to stay `"pending"` rather
+		// than backing off a retry against a payload that will not have changed.
+		if (
+			changedFields.has("elements") &&
+			hasIncompleteElement(request.elements, elementKinds ?? [])
+		) {
+			throw new SaveBlockedError();
+		}
 		await onSave(request, changedFields);
 		// An edit landed, or a foreign write arrived, while this save was in
 		// flight: either way `changeTokenRef` moved and the payload that went
@@ -871,7 +894,7 @@ export default function RequestBuilderProvider({
 			setBaseline((prev) => ({ ...prev, ...(savedPatch as Partial<RequestState>) }));
 		}
 		setHasUnsavedChanges(false);
-	}, [request, changeToken, touchedFields, onSave]);
+	}, [request, changeToken, touchedFields, onSave, elementKinds]);
 
 	const {
 		forceSave,

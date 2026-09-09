@@ -343,6 +343,75 @@ describe("ElementList - reordering", () => {
 	});
 });
 
+describe("ElementList - a required field the config is missing (issue #1635)", () => {
+	const REQUIRED_KIND = kindSchema({
+		kind: "extract.required",
+		label: "Extract Required",
+		category: "extract",
+		configSchema: {
+			type: "object",
+			required: ["variable"],
+			properties: {
+				variable: { type: "string", title: "Variable name" },
+			},
+		},
+	});
+	const kinds: ElementKindSchema[] = [REQUIRED_KIND];
+
+	it("names the missing field by the schema's own title, not the raw key", () => {
+		render(
+			<ElementList
+				elements={[{ id: "r1", kind: "extract.required", enabled: true, config: {} }]}
+				onChange={vi.fn()}
+				kinds={kinds}
+			/>
+		);
+
+		expect(screen.getByText("Needs Variable name")).toBeInTheDocument();
+	});
+
+	it("falls back to the raw key when the schema gives it no title", () => {
+		const untitled: ElementKindSchema = {
+			...REQUIRED_KIND,
+			configSchema: { type: "object", required: ["variable"] },
+		};
+		render(
+			<ElementList
+				elements={[{ id: "r1", kind: "extract.required", enabled: true, config: {} }]}
+				onChange={vi.fn()}
+				kinds={[untitled]}
+			/>
+		);
+
+		expect(screen.getByText("Needs variable")).toBeInTheDocument();
+	});
+
+	it("clears once the required field holds a value", () => {
+		render(
+			<ElementList
+				elements={[
+					{
+						id: "r1",
+						kind: "extract.required",
+						enabled: true,
+						config: { variable: "x" },
+					},
+				]}
+				onChange={vi.fn()}
+				kinds={kinds}
+			/>
+		);
+
+		expect(screen.queryByText(/^Needs /)).not.toBeInTheDocument();
+	});
+
+	it("says nothing for a kind with no required fields at all", () => {
+		renderList([extractElement("e1")]);
+
+		expect(screen.queryByText(/^Needs /)).not.toBeInTheDocument();
+	});
+});
+
 describe("ElementList - empty state", () => {
 	it("shows the caller's empty label only when there are no elements", () => {
 		render(
