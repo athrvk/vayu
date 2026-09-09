@@ -1586,13 +1586,24 @@ third copy of that keyboard handling.
 
 The primitive both Elements tabs bind to (issue #1512): an ordered list of a
 request's or collection's own elements - extractors, assertions, timers,
-controllers and scripts - each row a kind badge, an optional name, an enable
-switch, reorder buttons and delete, with the kind's form underneath. A
-primitive under `components/shared/` takes no feature-module context, so both
-hosts pass their own `elements` array, `onChange` setter and the catalogue
-(`useElementKindsQuery`) as props rather than the component reading either
-host's context - the same rule `request-builder/types.ts` states for why
-`KeyValueEditor` moved out of the request-builder module.
+controllers and scripts - each a **collapsible card** (issue #1608): a family
+icon (one per catalogue category, `element-categories.ts`'s `categoryIcon`),
+the element's name or its kind's label, a one-line **summary** of its config
+while collapsed (`summarize-element.ts` - `in [200, 201]`, `wait 500 ms`,
+`$.token → token (env)`; a kind this module has no template for falls back to
+the kind's own description, and one that is genuinely unconfigured to its
+first two properties as `key: value`), an enable switch, and a `⋯` menu
+(`RowActionsMenu`) for Rename, Move up/down, Duplicate and Delete. Click on
+the header toggles the card; a newly added or duplicated element opens
+expanded, everything else starts collapsed. Alt+Up/Alt+Down on the header's
+own two toggle buttons moves the row, mirroring the menu's Move items.
+**Delete asks nothing for a blank element** (every configured value empty or
+absent) and confirms through `DeleteConfirmDialog` for one with real
+configuration. A primitive under `components/shared/` takes no feature-module
+context, so both hosts pass their own `elements` array, `onChange` setter and
+the catalogue (`useElementKindsQuery`) as props rather than the component
+reading either host's context - the same rule `request-builder/types.ts`
+states for why `KeyValueEditor` moved out of the request-builder module.
 
 **The default form is generated from the kind's JSON Schema**
 (`GenericElementForm.tsx`), the way `SettingsMain.tsx` renders a config entry
@@ -1600,19 +1611,29 @@ by type: string, integer, number, boolean, enum and string-array properties
 map to the same row primitives - `NumberSettingRow` / `SelectSettingRow` /
 `ToggleRow` - `SettingsPanel.tsx` already uses, plus one level of `object`
 nesting for a kind whose config groups two fields (`assert.status.range`'s
-`{min, max}`). A kind the app has never seen is editable the day the engine
-ships it, which is the whole point of the catalogue being schema-carrying
-rather than a label list - `extract.json`'s path field is deliberately
-generic-form only, proving the point rather than special-casing it.
+`{min, max}`). **Labels come from the schema's own `title` and `description`**
+(issue #1607), not the raw property key - `control.throughput`'s `everyN`
+reads "Every Nth", not `everyN`. A `required` property renders before an
+optional one; a property carrying `x-vayu-group: "advanced"` renders instead
+under a disclosure, closed on mount unless the element already has a value
+for one; `x-vayu-unit` (`"ms"` / `"%"` / `"B"`) becomes the numeric field's
+input suffix. A kind the app has never seen is still editable the day the
+engine ships it, which is the whole point of the catalogue being
+schema-carrying rather than a label list - `extract.json`'s path field is
+deliberately generic-form only, proving the point rather than special-casing
+it.
 
 **A bespoke override is the exception, in one map** (`elementForms.ts`), never
 inline in `ElementList`. Phase 0 ships exactly one: `script.pre` /
 `script.post` render `ScriptElementForm`'s Monaco editor and insertable
 snippets instead of the generic form's plain text field, because "the same
-editor" is what the Elements tab has to keep for a script. It deliberately
-carries none of the old `ScriptPanel`'s variable-reference chips or inherited/
-legacy notices - those read `useRequestBuilderContext`, which this primitive
-cannot depend on - so inheritance is shown once for the whole list by
+editor" is what the Elements tab has to keep for a script. Its lead sentence
+is the kind's own catalogue `description` (issue #1608, absorbed there by
+#1607) rather than a hard-coded pair of strings, so the text is authored once
+and doubles as the card's collapsed-summary fallback. It deliberately carries
+none of the old `ScriptPanel`'s variable-reference chips or inherited/legacy
+notices - those read `useRequestBuilderContext`, which this primitive cannot
+depend on - so inheritance is shown once for the whole list by
 `InheritedElementsNotice` instead of once per script row.
 
 **The editor box has a definite pixel height, resizable by a handle below it**
@@ -1654,9 +1675,14 @@ element (`isBlankScriptElement`, `lib/elements.ts`) is now inert everywhere it
 is read - `scriptTextFor`, the Elements tab's badge count, and
 `InheritedElementsNotice`'s count and list - the app-side half of a rule the
 engine pipeline enforces the same way (`docs/engine/elements.md`), so the
-seeding lost its reason to exist. A fresh entity's Elements tab shows the
-existing `emptyLabel` sentence pointing at the Add menu until #1606's app
-child gives it quick-add chips instead.
+seeding lost its reason to exist. **A fresh entity's Elements tab shows a
+sentence plus quick-add chips instead of a bare `emptyLabel` string**
+(issue #1608): `ElementList` itself computes them from whichever kinds it
+finds in the `kinds` prop it was already handed - Extract from JSON, Assert
+status code and Pre-request script always, Setup script only when the
+collection tab's own `kinds` (which, unlike the request tab's, includes the
+`collectionOnly` kinds) offers `script.setup`. A click adds that kind,
+expanded, the same as the picker.
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 

@@ -1768,6 +1768,13 @@ no layout, so an `offsetHeight` assertion would pass while measuring nothing), t
 delegation behaviourally, because `fireEvent.click(row)` targets the row itself -
 exactly the pointer that used to land on dead padding.
 
+The shared `ElementList`'s element card header (`components/shared/ElementList/`,
+issue #1608) is the same `h-8` row with two embedded controls beyond its own
+toggle - an enable switch and a `⋯` menu - each a real interactive child rather
+than a row-level click delegated by target equality: with the header's own click
+handled by two real buttons (the chevron and the label), there is no ambiguous
+"click landed on the row itself" case left for `isRowSurface` to resolve.
+
 ---
 
 ## Overflowing Text
