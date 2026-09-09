@@ -688,20 +688,22 @@ implement, and it is refused rather than quietly run closed-loop. Such a run's
 `type` is `load`, so it streams `metrics` ticks and **not** `step` events - the
 caller must attach `loadTestService`, not `scenarioRunService`.
 
-A scenario *load* run also takes a top-level `elements` override (issue #1495,
-wired into `RunCollectionDialog` by issue #1552):
+A scenario run also takes a top-level `elements` override (issue #1495, wired
+into `RunCollectionDialog` by issue #1552):
 `{timers?: "asConfigured" | "off", scripts?: "asMarked" | "allInline" | "allDeferred", includeScriptTime?: boolean}`,
 documented in full at
 [api-reference.md](../engine/api-reference.md#the-elements-block-element-pipeline-override).
 It rides beside `mode`/`scenario`, never inside the `scenario` block, and
 `RunCollectionDialog` sends only the fields the user changed from the engine's
 own default - the same omitted-when-default rule `failOnSchemaError` follows.
-`timers` is accepted and stored engine-side but not yet wired to a kind (issue
-#1498 finishes that); `scripts` picks whether a `script.*` element runs inline
-on the event-loop worker or stays deferred to the post-run replay, and has no
-effect on a design-mode run, which is why the dialog only offers the two
-controls once Load test is on. The single-request `startLoadTest` payload has
-no `elements` attachment point yet - a separate, unwired engine gap - so
+`timers` is wired to `timer.pacing`/`timer.think` end to end and applies to a
+design-mode run exactly as it does a load run, so the dialog offers that
+control regardless of Load test; `scripts` picks whether a `script.*` element
+runs inline on the event-loop worker or stays deferred to the post-run replay,
+and has no effect on a design-mode run (which already runs every script
+inline), which is why the dialog offers that one control only once Load test
+is on. The single-request `startLoadTest` payload has no `elements`
+attachment point yet - a separate, unwired engine gap - so
 `LoadTestConfigDialog` sends no such override.
 
 What comes back for one differs in two places worth knowing. `GET /runs/:id`

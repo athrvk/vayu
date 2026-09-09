@@ -516,10 +516,13 @@ describe("running the sequence as a load test", () => {
 
 /*
  * The `elements` run override (issue #1552, the app-side twin of the engine
- * contract issue #1495 shipped). Top-level on the payload, scenario-load-run
- * only, and omitted whenever both controls are left at the engine's own
- * defaults - the same "absent means the default" rule the rest of this
- * payload already follows.
+ * contract issue #1495 shipped). Top-level on the payload and omitted per
+ * field whenever a control is left at the engine's own default - the same
+ * "absent means the default" rule the rest of this payload already follows.
+ * `timers` applies to a design-mode run and a load run alike (the sequential
+ * runner honours it exactly as the load executor does); `scripts` stays
+ * load-only, since the design send and the sequential run already run every
+ * `script.*` element inline regardless of the choice.
  */
 describe("the elements override", () => {
 	const enableLoadTest = () =>
@@ -533,10 +536,10 @@ describe("the elements override", () => {
 		expect(mutate.mock.calls[0][0]).not.toHaveProperty("elements");
 	});
 
-	it("never sends an elements override on a design-mode (non-load) run", () => {
+	it("never sends a scripts override on a design-mode (non-load) run", () => {
 		// Turn Load test on, change Scripts, then off again - the state
 		// persists on the component, so this proves the payload gates on
-		// `loadTest` and not merely on the controls never having rendered.
+		// `loadTest` and not merely on the control never having rendered.
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		enableLoadTest();
 		const scripts = screen.getByRole("radiogroup", { name: /^scripts$/i });
@@ -547,7 +550,16 @@ describe("the elements override", () => {
 		expect(mutate.mock.calls[0][0]).not.toHaveProperty("elements");
 	});
 
-	it("sends a Timers-only override when only Timers is changed", () => {
+	it("sends a Timers override on a design-mode (non-load) run - not gated by Load test", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		const timers = screen.getByRole("radiogroup", { name: /^timers$/i });
+		fireEvent.click(within(timers).getByRole("radio", { name: /^off$/i }));
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0].elements).toEqual({ timers: "off" });
+	});
+
+	it("sends a Timers-only override when only Timers is changed on a load run", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		enableLoadTest();
 		const timers = screen.getByRole("radiogroup", { name: /^timers$/i });
