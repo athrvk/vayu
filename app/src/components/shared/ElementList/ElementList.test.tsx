@@ -24,8 +24,9 @@
  * warning is about: a form only the generic renderer can produce.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { useLayoutStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import { ElementList } from "./index";
 
@@ -118,6 +119,10 @@ function renderList(elements: ElementDef[], onChange = vi.fn()) {
 	return onChange;
 }
 
+beforeEach(() => {
+	useLayoutStore.setState({ recentElementKinds: [] });
+});
+
 describe("ElementList - the generic form for a kind with no bespoke override", () => {
 	it("renders a schema-driven field, labeled from the kind's own configSchema", () => {
 		renderList([extractElement("e1")]);
@@ -171,33 +176,92 @@ describe("ElementList - the bespoke form for script.pre", () => {
 
 describe("ElementList - the Add menu", () => {
 	function openMenu() {
-		fireEvent.pointerDown(screen.getByRole("button", { name: /add element/i }), { button: 0 });
+		fireEvent.click(screen.getByRole("button", { name: /add element/i }));
 	}
 
-	it("groups the catalogue by category", async () => {
+	function optionRow(label: string): HTMLElement {
+		return screen.getByText(label).closest("[cmdk-item]") as HTMLElement;
+	}
+
+	it("groups the catalogue by category, in family order and title case", async () => {
+		renderList([]);
+		openMenu();
+		await screen.findByText("Extract JSON");
+
+		const headings = screen
+			.getAllByText(/^(Extract|Assert|Script)$/)
+			.map((el) => el.textContent);
+		expect(headings).toEqual(["Extract", "Assert", "Script"]);
+	});
+
+	it("shows each item's description on the row, not only on hover", async () => {
 		renderList([]);
 		openMenu();
 
-		expect(await screen.findByText("extract")).toBeInTheDocument();
-		expect(screen.getByText("assert")).toBeInTheDocument();
-		expect(screen.getByText("script")).toBeInTheDocument();
+		expect(await screen.findByText(EXTRACT_KIND.description)).toBeInTheDocument();
 	});
 
 	it("excludes inherit.disable from the menu, per the component's own comment", async () => {
 		renderList([]);
 		openMenu();
 
-		await screen.findByRole("menuitem", { name: "Extract JSON" });
-		expect(
-			screen.queryByRole("menuitem", { name: /inherited element disabled/i })
-		).not.toBeInTheDocument();
+		await screen.findByText("Extract JSON");
+		expect(screen.queryByText(/inherited element disabled/i)).not.toBeInTheDocument();
 	});
 
-	it("adds a new, enabled element of the picked kind", async () => {
+	it("filters to a matching kind by search text", async () => {
+		renderList([]);
+		openMenu();
+		await screen.findByText("Assert Status");
+
+		fireEvent.change(screen.getByPlaceholderText("Search elements"), {
+			target: { value: "assert.status" },
+		});
+
+		expect(screen.getByText("Assert Status")).toBeInTheDocument();
+		expect(screen.queryByText("Extract JSON")).not.toBeInTheDocument();
+	});
+
+	// cmdk's default fuzzy scorer treats a query as a scattered subsequence:
+	// "regex" matches "a regular expression" too (r-e-g-...-e-x, in order,
+	// just not adjacent), which is real - the engine's own catalogue has
+	// `assert.jsonpath` describing itself that way beside `extract.regex`.
+	// `commandFilter` (`index.tsx`) exists to keep a search literal. Mutation
+	// check: drop the `filter={commandFilter}` prop from `Command` in
+	// `index.tsx` and this reddens - both kinds would show for "regex".
+	it("matches a literal substring, not cmdk's default fuzzy subsequence", async () => {
+		const kinds: ElementKindSchema[] = [
+			kindSchema({
+				kind: "extract.regex",
+				label: "Extract with a regular expression",
+				category: "extract",
+				description: "Runs a regular expression against the response.",
+			}),
+			kindSchema({
+				kind: "assert.jsonpath",
+				label: "Assert JSON value",
+				category: "assert",
+				description: "Matches a value or matches a regular expression.",
+			}),
+		];
+		render(<ElementList elements={[]} onChange={vi.fn()} kinds={kinds} />);
+		openMenu();
+		await screen.findByText("Assert JSON value");
+
+		fireEvent.change(screen.getByPlaceholderText("Search elements"), {
+			target: { value: "regex" },
+		});
+
+		expect(screen.getByText("Extract with a regular expression")).toBeInTheDocument();
+		expect(screen.queryByText("Assert JSON value")).not.toBeInTheDocument();
+	});
+
+	it("adds a new, enabled element of the picked kind, and closes the picker", async () => {
 		const onChange = renderList([]);
 		openMenu();
+		await screen.findByText("Assert Status");
 
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Assert Status" }));
+		fireEvent.click(optionRow("Assert Status"));
 
 		expect(onChange).toHaveBeenCalledTimes(1);
 		const added = (onChange.mock.calls[0][0] as ElementDef[])[0];
@@ -206,6 +270,21 @@ describe("ElementList - the Add menu", () => {
 		expect(added.config).toEqual({});
 		expect(typeof added.id).toBe("string");
 		expect(added.id.length).toBeGreaterThan(0);
+		// The popover closes on select - its content unmounts from the portal.
+		expect(screen.queryByText("Assert Status")).not.toBeInTheDocument();
+	});
+
+	it("remembers the picked kind under Recently used on the next open", async () => {
+		renderList([]);
+		openMenu();
+		await screen.findByText("Assert Status");
+		fireEvent.click(optionRow("Assert Status"));
+
+		openMenu();
+		await screen.findByText("Recently used");
+
+		// Once under Recently used, once in its own category group.
+		expect(screen.getAllByText("Assert Status")).toHaveLength(2);
 	});
 });
 

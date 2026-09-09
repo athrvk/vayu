@@ -25,6 +25,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { useLayoutStore } from "@/stores";
 import type { Collection, DataContractScope, ElementDef, ElementKindSchema } from "@/types";
 import type { VariableOrigin } from "@/types/domain";
 import ElementsTab from "./ElementsTab";
@@ -127,7 +128,7 @@ function renderTab(collection: Collection) {
 }
 
 function openAddMenu() {
-	fireEvent.pointerDown(screen.getByRole("button", { name: /add element/i }), { button: 0 });
+	fireEvent.click(screen.getByRole("button", { name: /add element/i }));
 }
 
 beforeEach(() => {
@@ -140,6 +141,10 @@ beforeEach(() => {
 	dataContract.value = undefined;
 	allVariables.value = {};
 	variableOrigins.value = {};
+	// `ElementList`'s Add-element picker reads/writes this directly - reset so
+	// one test's pick does not surface as a duplicate "Recently used" row
+	// in the next.
+	useLayoutStore.setState({ recentElementKinds: [] });
 });
 
 describe("ElementsTab - what it renders", () => {
@@ -172,7 +177,7 @@ describe("ElementsTab - the Save button", () => {
 		expect(save).toBeDisabled();
 
 		openAddMenu();
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Extract JSON" }));
+		fireEvent.click((await screen.findByText("Extract JSON")).closest("[cmdk-item]")!);
 
 		expect(save).toBeEnabled();
 	});
@@ -181,7 +186,7 @@ describe("ElementsTab - the Save button", () => {
 		renderTab(makeCollection([]));
 
 		openAddMenu();
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Extract JSON" }));
+		fireEvent.click((await screen.findByText("Extract JSON")).closest("[cmdk-item]")!);
 		expect(screen.getByRole("button", { name: /save elements/i })).toBeEnabled();
 
 		fireEvent.click(screen.getByRole("button", { name: /^reset$/i }));
