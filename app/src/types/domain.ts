@@ -1993,6 +1993,22 @@ export interface LoadTestMetrics {
 }
 
 /**
+ * One element's pass/fail/skip tally within a load run's step, from
+ * `scenario.steps[i].elements` (`StepElementTallies::build`,
+ * `engine/src/core/scenario_load.cpp`) - the load-path sibling of the
+ * sequential run's per-execution {@link ElementOutcome}. Aggregated across
+ * every virtual user and iteration rather than one outcome per execution,
+ * which is why the shape is a set of counts instead of a single `outcome`.
+ */
+export interface RunScenarioStepElementTally {
+	id: string;
+	kind: string;
+	passed: number;
+	failed: number;
+	skipped: number;
+}
+
+/**
  * One plan step's numbers in a scenario load run's report, from the summary's
  * `scenario.steps` array (`build_step_breakdown`,
  * `engine/src/core/scenario_load.cpp`).
@@ -2050,6 +2066,15 @@ export interface RunScenarioStepStat {
 		passed: number;
 		failed: number;
 	};
+	/**
+	 * This step's non-script elements - extractors, assertions, timers -
+	 * tallied across every virtual user and iteration (issue #1495). Absent
+	 * for a step with no compiled elements or none that ever ran; an element
+	 * that never ran is omitted rather than listed at zero, the same
+	 * "absent when nothing happened" convention {@link unresolvedTokens} and
+	 * {@link tests} follow.
+	 */
+	elements?: RunScenarioStepElementTally[];
 }
 
 export interface RunReport {

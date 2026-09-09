@@ -159,3 +159,59 @@ describe("the per-step test tallies", () => {
 		).toBeNull();
 	});
 });
+
+/**
+ * Non-script elements - extractors, assertions, timers - tallied per step
+ * across every virtual user and iteration (`scenario.steps[i].elements`,
+ * issue #1495). Written by the engine since #1495 but never rendered until
+ * this reopen of #1516: the sequential run's per-step outcomes show up in
+ * `ScenarioStepCard`, and a load run's counterpart had no reader at all.
+ */
+describe("the per-step element tallies", () => {
+	const WITH_ELEMENTS: RunScenarioStepStat[] = [
+		{
+			...STEPS[0],
+			elements: [{ id: "el_1", kind: "extract.json", passed: 40, failed: 0, skipped: 0 }],
+		},
+		{
+			...STEPS[1],
+			elements: [{ id: "el_2", kind: "assert.status", passed: 30, failed: 4, skipped: 2 }],
+		},
+	];
+
+	it("shows a row per element under its step, with kind and every non-zero count", () => {
+		render(<ScenarioStepsTab steps={WITH_ELEMENTS} virtualUsers={8} />);
+
+		const rows = screen.getAllByRole("row").slice(1); // drop the header row
+		// Each step row is followed by one row per element it compiled.
+		expect(rows).toHaveLength(4);
+
+		expect(within(rows[1]).getByText("extract.json")).toBeTruthy();
+		expect(within(rows[1]).getByText("40 passed")).toBeTruthy();
+
+		expect(within(rows[3]).getByText("assert.status")).toBeTruthy();
+		expect(within(rows[3]).getByText("30 passed")).toBeTruthy();
+		expect(
+			within(rows[3]).getByText("4 failed", { selector: "span.text-status-error-text" })
+		).toBeTruthy();
+		expect(within(rows[3]).getByText("2 skipped")).toBeTruthy();
+	});
+
+	it("omits the failed and skipped counts when they are zero", () => {
+		// An element that never failed or was never skipped states neither -
+		// the same "absent when nothing happened" reading the Tests column
+		// already gives a step that asserted nothing.
+		render(<ScenarioStepsTab steps={WITH_ELEMENTS} virtualUsers={8} />);
+		const rows = screen.getAllByRole("row").slice(1);
+		expect(within(rows[1]).queryByText(/failed/)).toBeNull();
+		expect(within(rows[1]).queryByText(/skipped/)).toBeNull();
+	});
+
+	it("renders no element rows for a step with none", () => {
+		// Mutation check: reverting to `STEPS` (no `elements` field on either
+		// step) must drop back to exactly one row per step.
+		render(<ScenarioStepsTab steps={STEPS} virtualUsers={8} />);
+		const rows = screen.getAllByRole("row").slice(1);
+		expect(rows).toHaveLength(2);
+	});
+});

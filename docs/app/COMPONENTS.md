@@ -582,7 +582,7 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 | `LatencyMetric.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts |
 | `MonitorSummary.tsx` | Per-series min/avg/max for the run's server-vitals scrape, under the Performance tab's chart. Present whenever `report.monitor` is - including the run whose every scrape failed, which has a failure count and no line to draw, and read as an unexplained empty chart before it |
 
-A **scenario load run** lands in `LoadTestDetail`, not `ScenarioRunView`: it is `type: "load"`, publishes ticks and reports percentiles like any load run, and its target simply happens to be a sequence. Two things follow, both keyed off `report.scenario.steps` being present rather than off a run-type flag - that array is what this pane actually needs to render. It has no single method and URL, so the header strip says what the sequence was instead of the "GET Unknown URL" fallback, which the reader cannot tell apart from a broken run. And it stores no per-step `results` rows - one row per step per iteration per virtual user is what a load run exists not to keep - so `ScenarioStepsTab.tsx` renders the engine's per-step histogram breakdown, the only per-step record such a run has. Its `(n short)` marker is the visible shape of an errored step ending its iterations early, which otherwise reads as a run that simply lost requests. The **Tests** column is the deferred per-step validation - each step's own post-request script replayed after the run against that step's sampled responses - and shows a dash, never a `0`, for a step that asserted nothing: the engine omits the object rather than writing zeros, because "no assertions" and "no failures" are different answers.
+A **scenario load run** lands in `LoadTestDetail`, not `ScenarioRunView`: it is `type: "load"`, publishes ticks and reports percentiles like any load run, and its target simply happens to be a sequence. Two things follow, both keyed off `report.scenario.steps` being present rather than off a run-type flag - that array is what this pane actually needs to render. It has no single method and URL, so the header strip says what the sequence was instead of the "GET Unknown URL" fallback, which the reader cannot tell apart from a broken run. And it stores no per-step `results` rows - one row per step per iteration per virtual user is what a load run exists not to keep - so `ScenarioStepsTab.tsx` renders the engine's per-step histogram breakdown, the only per-step record such a run has. Its `(n short)` marker is the visible shape of an errored step ending its iterations early, which otherwise reads as a run that simply lost requests. The **Tests** column is the deferred per-step validation - each step's own post-request script replayed after the run against that step's sampled responses - and shows a dash, never a `0`, for a step that asserted nothing: the engine omits the object rather than writing zeros, because "no assertions" and "no failures" are different answers. A step's non-script elements - extractors, assertions, timers - each get their own row beneath the step's, tallied across every virtual user and iteration (`step.elements`, issue #1495); an element that never ran is omitted rather than listed at zero, the same convention `unresolvedTokens` and `tests` follow. This is the load run's counterpart to the sequential run's per-step outcomes (`ScenarioStepCard.tsx`'s `ElementOutcomes`), aggregated as counts instead of one outcome per execution because a load run has many.
 
 > History detail reuses the live dashboard's `hero/`, `charts/`, and `stats/` components by feeding them a `DashboardDerived` built from the stored report (`reportToDerived`), so live and historical views stay visually consistent.
 
@@ -1606,14 +1606,15 @@ rather than a label list - `extract.json`'s path field is deliberately
 generic-form only, proving the point rather than special-casing it.
 
 **A bespoke override is the exception, in one map** (`elementForms.ts`), never
-inline in `ElementList`. Phase 0 ships exactly one: `script.pre` /
-`script.post` render `ScriptElementForm`'s Monaco editor and insertable
-snippets instead of the generic form's plain text field, because "the same
-editor" is what the Elements tab has to keep for a script. It deliberately
-carries none of the old `ScriptPanel`'s variable-reference chips or inherited/
-legacy notices - those read `useRequestBuilderContext`, which this primitive
-cannot depend on - so inheritance is shown once for the whole list by
-`InheritedElementsNotice` instead of once per script row.
+inline in `ElementList`. Phase 0 ships a bespoke form for every `script.*`
+kind - `script.pre` / `script.post` and, since issue #1499, `script.setup` /
+`script.teardown` - which render `ScriptElementForm`'s Monaco editor and
+insertable snippets instead of the generic form's plain text field, because
+"the same editor" is what the Elements tab has to keep for a script. It
+deliberately carries none of the old `ScriptPanel`'s variable-reference chips
+or inherited/legacy notices - those read `useRequestBuilderContext`, which
+this primitive cannot depend on - so inheritance is shown once for the whole
+list by `InheritedElementsNotice` instead of once per script row.
 
 **The editor box has a definite pixel height, resizable by a handle below it**
 (issue #1605). `ElementRow` is an auto-height card, not a bounded ancestor a
