@@ -15,19 +15,21 @@
  * Three claims are worth pinning, because each replaced something the two old
  * Quick Reference blocks could not do: the list *inserts* rather than being
  * retyped, it shows the templates for the editor it sits under rather than all
- * of them, and it remembers whether the user wanted it open across the tab
- * switch that unmounts the panel.
+ * of them, and its collapsed state is the host's to control rather than this
+ * component's own (issue #1605 - two script rows on one screen must not share
+ * one boolean; `ScriptElementForm.test.tsx` covers the per-row persistence
+ * this component only exposes through `onCollapsedChange`).
  *
  * The fourth case is the deletion itself: two hand-rolled copies of this idea
  * are gone, and a source scan says so - with a floor, since a scan that reads
  * nothing passes every "is absent" assertion.
  */
 
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
-import { ScriptSnippets } from "./ScriptSnippets";
-import { useLayoutStore } from "@/stores";
+import { ScriptSnippets, type ScriptSnippetsProps } from "./ScriptSnippets";
 import { fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import type { ScriptCompletion } from "@/types/domain";
 
@@ -89,8 +91,17 @@ function served(completions: ScriptCompletion[] = TEMPLATES) {
 
 beforeEach(() => {
 	served();
-	useLayoutStore.setState({ scriptSnippetsCollapsed: true });
 });
+
+/**
+ * A minimal controlled host, standing in for `ScriptElementForm`'s per-row
+ * `useState` - the real component under test is `ScriptSnippets` and its
+ * `collapsed`/`onCollapsedChange` contract, not any particular host's storage.
+ */
+function Controlled(props: Omit<ScriptSnippetsProps, "collapsed" | "onCollapsedChange">) {
+	const [collapsed, setCollapsed] = useState(true);
+	return <ScriptSnippets {...props} collapsed={collapsed} onCollapsedChange={setCollapsed} />;
+}
 
 function open() {
 	fireEvent.click(screen.getByRole("button", { name: /snippets/i }));
@@ -98,33 +109,50 @@ function open() {
 
 describe("ScriptSnippets", () => {
 	it("starts collapsed, because the editor is what the panel is for", () => {
-		render(
-			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
-		);
+		render(<Controlled context="pre" onInsert={() => ({ placement: "cursor" as const })} />);
 
 		expect(screen.queryByPlaceholderText(/filter snippets/i)).not.toBeInTheDocument();
 	});
 
-	it("remembers being opened, in the store that survives the tab unmount", () => {
-		const { unmount } = render(
-			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
+	it("is controlled: it renders open or closed from the `collapsed` prop, not its own state", () => {
+		const { rerender } = render(
+			<ScriptSnippets
+				context="pre"
+				collapsed={false}
+				onCollapsedChange={() => {}}
+				onInsert={() => ({ placement: "cursor" as const })}
+			/>
+		);
+		expect(screen.getByPlaceholderText(/filter snippets/i)).toBeInTheDocument();
+
+		rerender(
+			<ScriptSnippets
+				context="pre"
+				collapsed={true}
+				onCollapsedChange={() => {}}
+				onInsert={() => ({ placement: "cursor" as const })}
+			/>
+		);
+		expect(screen.queryByPlaceholderText(/filter snippets/i)).not.toBeInTheDocument();
+	});
+
+	it("reports the toggle rather than tracking it, so two mounted rows never share one boolean", () => {
+		const onCollapsedChange = vi.fn();
+		render(
+			<ScriptSnippets
+				context="pre"
+				collapsed={true}
+				onCollapsedChange={onCollapsedChange}
+				onInsert={() => ({ placement: "cursor" as const })}
+			/>
 		);
 		open();
 
-		expect(useLayoutStore.getState().scriptSnippetsCollapsed).toBe(false);
-
-		// The Radix tab switch: the panel goes away and comes back.
-		unmount();
-		render(
-			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
-		);
-		expect(screen.getByPlaceholderText(/filter snippets/i)).toBeInTheDocument();
+		expect(onCollapsedChange).toHaveBeenCalledWith(false);
 	});
 
 	it("offers a pre-request editor its own templates and the shared one", () => {
-		render(
-			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
-		);
+		render(<Controlled context="pre" onInsert={() => ({ placement: "cursor" as const })} />);
 		open();
 
 		expect(screen.getByText("Set a header")).toBeInTheDocument();
@@ -135,9 +163,7 @@ describe("ScriptSnippets", () => {
 	});
 
 	it("offers a test editor the assertions instead", () => {
-		render(
-			<ScriptSnippets context="test" onInsert={() => ({ placement: "cursor" as const })} />
-		);
+		render(<Controlled context="test" onInsert={() => ({ placement: "cursor" as const })} />);
 		open();
 
 		expect(screen.getByText("Test: Status code")).toBeInTheDocument();
@@ -146,7 +172,7 @@ describe("ScriptSnippets", () => {
 
 	it("hands the caller the template, placeholders and all", () => {
 		const onInsert = vi.fn(() => ({ placement: "cursor" as const }));
-		render(<ScriptSnippets context="pre" onInsert={onInsert} />);
+		render(<Controlled context="pre" onInsert={onInsert} />);
 		open();
 
 		fireEvent.click(screen.getByText("Set a header").closest("[cmdk-item]")!);
@@ -170,7 +196,7 @@ describe("ScriptSnippets", () => {
 
 		it("names the template and where it went", () => {
 			render(
-				<ScriptSnippets
+				<Controlled
 					context="pre"
 					onInsert={() => ({ placement: "end-of-script" as const })}
 				/>
@@ -185,7 +211,7 @@ describe("ScriptSnippets", () => {
 
 		it("speaks again when the same template is inserted twice", () => {
 			render(
-				<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
+				<Controlled context="pre" onInsert={() => ({ placement: "cursor" as const })} />
 			);
 			open();
 			insertFirst();
@@ -202,7 +228,7 @@ describe("ScriptSnippets", () => {
 		});
 
 		it("shows a refusal on screen, not only to a screen reader", () => {
-			render(<ScriptSnippets context="pre" onInsert={() => null} />);
+			render(<Controlled context="pre" onInsert={() => null} />);
 			open();
 			insertFirst();
 
@@ -214,13 +240,13 @@ describe("ScriptSnippets", () => {
 
 		it("clears the refusal once an insertion lands", () => {
 			let answer: { placement: "cursor" } | null = null;
-			const { rerender } = render(<ScriptSnippets context="pre" onInsert={() => answer} />);
+			const { rerender } = render(<Controlled context="pre" onInsert={() => answer} />);
 			open();
 			insertFirst();
 			expect(screen.queryByRole("status")).toBeTruthy();
 
 			answer = { placement: "cursor" };
-			rerender(<ScriptSnippets context="pre" onInsert={() => answer} />);
+			rerender(<Controlled context="pre" onInsert={() => answer} />);
 			insertFirst();
 
 			expect(screen.queryByRole("status")).toBeNull();
@@ -229,18 +255,14 @@ describe("ScriptSnippets", () => {
 
 	it("says so when the engine is not answering, rather than looking empty", () => {
 		query.value = { data: undefined, isPending: false, isError: true };
-		render(
-			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
-		);
+		render(<Controlled context="pre" onInsert={() => ({ placement: "cursor" as const })} />);
 		open();
 
 		expect(screen.getByText(/engine, which is not answering/i)).toBeInTheDocument();
 	});
 
 	it("counts what it is holding, so a collapsed header still says there is something", () => {
-		render(
-			<ScriptSnippets context="pre" onInsert={() => ({ placement: "cursor" as const })} />
-		);
+		render(<Controlled context="pre" onInsert={() => ({ placement: "cursor" as const })} />);
 
 		expect(screen.getByRole("button", { name: /snippets/i }).textContent).toContain("2");
 	});

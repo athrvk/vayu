@@ -13,11 +13,14 @@ import {
 	DEFAULT_CONTEXT_BAR_WIDTH,
 	DEFAULT_DRAWER_WIDTH,
 	DEFAULT_GRAPHQL_VARIABLES_SIZE,
+	DEFAULT_SCRIPT_EDITOR_HEIGHT,
 	GRAPHQL_VARIABLES_MAX_SIZE,
 	GRAPHQL_VARIABLES_MIN_SIZE,
 	PANEL_MIN_WIDTH,
 	PANEL_MAX_WIDTH,
 	RETIRED_CONTEXT_BAR_SECTIONS,
+	SCRIPT_EDITOR_MAX_HEIGHT,
+	SCRIPT_EDITOR_MIN_HEIGHT,
 } from "@/constants/layout";
 
 export type DrawerView =
@@ -81,8 +84,25 @@ interface LayoutState {
 	 * Collapsed by default. The editor is what the panel is for, and a list that
 	 * opened itself under every script editor would be the wall of prose it
 	 * replaced, with a chevron on it.
+	 *
+	 * This is a *default* the next script row a user opens starts from, not the
+	 * live state of every row on screen (issue #1605): the Elements tab can show
+	 * a `script.pre` and a `script.post` row on one screen, each with its own
+	 * `useState` seeded from this value, so expanding one no longer expands the
+	 * other. Each row writes its own toggle back here, which is what makes the
+	 * *next* row a user opens start the way they last left one.
 	 */
 	scriptSnippetsCollapsed: boolean;
+
+	/**
+	 * Height (px) of a `script.pre` / `script.post` element's Monaco editor box.
+	 *
+	 * One value for every script row, the same "one size across every instance"
+	 * shape `graphqlVariablesSize` uses. Pixels rather than a percentage: the
+	 * element card the editor sits in is auto-height, not a bounded parent a
+	 * percentage could divide against (issue #1605).
+	 */
+	scriptEditorHeight: number;
 
 	/**
 	 * Whether the ⌘K command palette is showing.
@@ -125,6 +145,7 @@ interface LayoutState {
 	setGraphqlVariablesSize: (size: number) => void;
 
 	setScriptSnippetsCollapsed: (collapsed: boolean) => void;
+	setScriptEditorHeight: (height: number) => void;
 
 	setPaletteOpen: (open: boolean) => void;
 }
@@ -142,6 +163,7 @@ export const useLayoutStore = create<LayoutState>()(
 			graphqlVariablesCollapsed: false,
 			graphqlVariablesSize: DEFAULT_GRAPHQL_VARIABLES_SIZE,
 			scriptSnippetsCollapsed: true,
+			scriptEditorHeight: DEFAULT_SCRIPT_EDITOR_HEIGHT,
 			paletteOpen: false,
 
 			setDrawerOpen: (open) => set({ drawerOpen: open }),
@@ -187,6 +209,13 @@ export const useLayoutStore = create<LayoutState>()(
 				}),
 
 			setScriptSnippetsCollapsed: (collapsed) => set({ scriptSnippetsCollapsed: collapsed }),
+			setScriptEditorHeight: (height) =>
+				set({
+					scriptEditorHeight: Math.max(
+						SCRIPT_EDITOR_MIN_HEIGHT,
+						Math.min(SCRIPT_EDITOR_MAX_HEIGHT, height)
+					),
+				}),
 
 			setPaletteOpen: (open) => set({ paletteOpen: open }),
 		}),
@@ -240,6 +269,7 @@ export const useLayoutStore = create<LayoutState>()(
 				graphqlVariablesCollapsed: state.graphqlVariablesCollapsed,
 				graphqlVariablesSize: state.graphqlVariablesSize,
 				scriptSnippetsCollapsed: state.scriptSnippetsCollapsed,
+				scriptEditorHeight: state.scriptEditorHeight,
 			}),
 		}
 	)

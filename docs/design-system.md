@@ -1503,7 +1503,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **17 directives across 11 files**, listed
+file that provides the missing half. **18 directives across 12 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1527,6 +1527,11 @@ not rule names - two of these lines silence two rules at once.
 - `components/layout/PanelResizeHandle.tsx` (1) -
   `jsx-a11y/no-noninteractive-element-interactions`: the window splitter, with
   its arrow/Page/Home/End handling in the `onKeyDown` beside it.
+- `components/shared/ElementList/ScriptElementForm.tsx` (1) -
+  `jsx-a11y/no-noninteractive-element-interactions`: the `script.pre`/
+  `script.post` editor's height handle, the same window-splitter shape as
+  `PanelResizeHandle` above, with its pointer drag and arrow-key handling in
+  the `onPointerDown`/`onKeyDown` beside it (issue #1605).
 - `components/shared/VariableInput/index.tsx` (2) -
   `jsx-a11y/click-events-have-key-events` and
   `jsx-a11y/no-static-element-interactions` on the box that widens the hit area

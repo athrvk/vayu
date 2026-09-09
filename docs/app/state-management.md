@@ -177,7 +177,8 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   contextBarWidth: number
   contextBarCollapsedSections: string[]  // Section ids the user collapsed (`code` by default)
   requestSplitRatio: number              // 0–1; left/request pane fraction
-  scriptSnippetsCollapsed: boolean       // Is the snippets list under the script editors closed? (collapsed by default)
+  scriptSnippetsCollapsed: boolean       // Default a fresh script row's snippets list starts from (collapsed); each row keeps its own state after that
+  scriptEditorHeight: number             // Height (px) of a script.pre/script.post element's editor box - one value for every row
   paletteOpen: boolean                   // Is the ⌘K command palette showing?
 }
 ```
