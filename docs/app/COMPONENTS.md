@@ -1597,6 +1597,19 @@ first two properties as `key: value`), an enable switch, and a `⋯` menu
 the header toggles the card; a newly added or duplicated element opens
 expanded, everything else starts collapsed. Alt+Up/Alt+Down on the header's
 own two toggle buttons moves the row, mirroring the menu's Move items.
+**Rename's autofocus is timed off `RowActionsMenu`'s `onCloseAutoFocus`**, not
+a guessed delay: selecting Rename only flags the row's own pending-rename ref,
+and the actual state flip - drafting the name, showing the input - runs from
+that callback, which Radix itself calls once the closing menu's `FocusScope`
+teardown (and the `aria-hidden` it places on the rest of the page while open)
+has actually finished. A raw `setTimeout` landed the autofocus before that
+cleanup reliably completed, focusing an element still marked `aria-hidden` for
+a moment - caught live, not by the jsdom suite, which has no real layout or
+`aria-hidden` enforcement to catch it on. The title span itself is capped
+(`max-w-[55%]`) alongside `truncate`: a user-typed name has no length limit,
+and `truncate` alone never engages without a `max-width` to truncate against -
+an uncapped one rendered at its full content width and pushed the switch and
+the `⋯` menu out of the row.
 **Delete asks nothing for a blank element** (every configured value empty or
 absent) and confirms through `DeleteConfirmDialog` for one with real
 configuration. A primitive under `components/shared/` takes no feature-module
@@ -1684,6 +1697,22 @@ status code and Pre-request script always, Setup script only when the
 collection tab's own `kinds` (which, unlike the request tab's, includes the
 `collectionOnly` kinds) offers `script.setup`. A click adds that kind,
 expanded, the same as the picker.
+
+**A newly added element seeds `config` from `defaultConfigFor`, not a bare
+`{}`** - found live: the engine validates a request's whole `elements` array
+on every save, and a script kind's schema requires the `script` key *present*
+(`required: ["script"]`, checked engine-side by `valijson`, key presence only,
+no `minLength`); `config: {}` alone omits it, so quick-adding "Pre-request
+script" and then touching anything else on the request 400s the *entire* save
+with "Missing required property 'script'", not only that element's own. A
+script kind seeds `{ script: "" }` instead - a real, valid value (the engine
+already treats a blank script as a no-op, `is_blank_script_element`), not a
+placeholder. Every other kind still seeds `{}`: several of them have their own
+required, non-blankable string fields (`extract.json`'s `variable`,
+`control.transaction`'s `name`, both `minLength: 1`) that an empty string
+would not satisfy either, and a kind-specific fake placeholder would be worse
+than the failure it dodges - tracked as a follow-up rather than guessed at
+here (issue #1635).
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 

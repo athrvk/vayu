@@ -31,7 +31,7 @@
  * resolution, a data contract) and hands back a node, or nothing.
  */
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ChevronRight, Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import {
 	Button,
@@ -125,6 +125,22 @@ function quickAddCandidates(kinds: ElementKindSchema[]): ElementKindSchema[] {
 }
 
 /**
+ * A freshly added element's starting `config`. Every script kind's schema
+ * requires the `script` key present - `config: {}` alone omits it, and the
+ * engine validates a request's whole `elements` array on every save, so one
+ * still-blank script element fails every subsequent save of the request,
+ * not just its own (discovered live: quick-adding "Pre-request script" and
+ * then touching anything else 400s with "Missing required property
+ * 'script'"). An empty string satisfies the schema outright and is not a
+ * placeholder - the engine already treats a blank script as a no-op
+ * (`is_blank_script_element`), so `{ script: "" }` is a real, valid value
+ * for "nothing written yet".
+ */
+function defaultConfigFor(kind: ElementKindSchema): Record<string, unknown> {
+	return kind.kind.startsWith("script.") ? { script: "" } : {};
+}
+
+/**
  * An element with nothing configured yet - delete asks nothing for one of
  * these. A blank text field still leaves its key in `config` (`{path: ""}`),
  * so "nothing configured" means every value is empty rather than the object
@@ -189,19 +205,22 @@ function ElementRow({
 	const [renaming, setRenaming] = useState(false);
 	const [nameDraft, setNameDraft] = useState(element.name ?? "");
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
-
+	// Flipped by `startRename`, consumed by `RowActionsMenu`'s
+	// `onCloseAutoFocus` below - not a `setTimeout`. `onSelect` fires while
+	// the `⋯` menu's own `FocusScope` is still actively trapping focus:
+	// autofocusing this row's rename input in that same commit races the
+	// trap and loses (a `focusin` outside a still-trapped scope is yanked
+	// straight back into it, blurring the input the instant it claims
+	// focus) - and, found live testing this feature, races the `aria-hidden`
+	// Radix places on the rest of the page while the menu is open too, which
+	// a guessed delay is not guaranteed to outlast. `onCloseAutoFocus` is the
+	// exact signal Radix itself uses for "the closing content's cleanup has
+	// finished, focus is about to move" - the same event this component
+	// already claims to override the trigger-focus default with a
+	// roving-tabindex tree's own row (`RowActionsMenu.tsx`).
+	const pendingRenameRef = useRef(false);
 	const startRename = () => {
-		// Deferred, not immediate: `onSelect` fires while the `⋯` menu's own
-		// `FocusScope` is still actively trapping focus - autofocusing this
-		// row's rename input in that same commit races the trap and loses (a
-		// `focusin` outside a still-trapped scope is yanked straight back into
-		// it, blurring the input the instant it claims focus). One tick is
-		// enough for the trap's own teardown, tied to the menu closing, to
-		// finish first.
-		setTimeout(() => {
-			setNameDraft(element.name ?? "");
-			setRenaming(true);
-		}, 0);
+		pendingRenameRef.current = true;
 	};
 	const commitRename = () => {
 		const trimmed = nameDraft.trim();
@@ -281,7 +300,22 @@ function ElementRow({
 					>
 						{/* eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static CATEGORY_ICONS map (via categoryIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope. */}
 						{Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />}
-						<span className="shrink-0 truncate text-sm">
+						{/*
+						 * `shrink-0` keeps a title at its natural width instead of
+						 * ceding space in the flex distribution - the summary
+						 * (`TruncatedText` below, `min-w-0 flex-1`) is the one meant
+						 * to visually degrade first, so a short kind label like
+						 * "Assert status code" always renders whole. `shrink-0`
+						 * alone never truncates, though: a user-typed `name` has no
+						 * length limit, and an unbounded box still renders at its
+						 * full content width regardless of flex-shrink, pushing the
+						 * summary, the enable switch and the `⋯` menu out of the row
+						 * instead of yielding to them. `max-w-[55%]` is the cap
+						 * `truncate` needs to actually engage for that case, without
+						 * touching the common short-title case (`shrink-0` still
+						 * wins there, well under the cap).
+						 */}
+						<span className="max-w-[55%] shrink-0 truncate text-sm">
 							<span className="font-medium">{title}</span>
 							{element.name && (
 								<span className="ml-1.5 text-muted-foreground">{label}</span>
@@ -300,7 +334,21 @@ function ElementRow({
 					className="shrink-0"
 					onCheckedChange={(enabled) => onUpdate({ ...element, enabled })}
 				/>
-				<RowActionsMenu label={`More actions for ${label}`} actions={actions} />
+				<RowActionsMenu
+					label={`More actions for ${label}`}
+					actions={actions}
+					onCloseAutoFocus={(e) => {
+						if (!pendingRenameRef.current) return;
+						pendingRenameRef.current = false;
+						// Skip Radix's default (focus the trigger) - the rename
+						// input is about to mount with `autoFocus` and claim focus
+						// itself; landing it on the trigger first just to lose it
+						// again a render later would flash focus across two controls.
+						e.preventDefault();
+						setNameDraft(element.name ?? "");
+						setRenaming(true);
+					}}
+				/>
 			</div>
 			{open && (
 				<div className="space-y-3 border-t border-rule px-3 pb-3 pt-3">
@@ -358,7 +406,7 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 			id: `el_${generateId()}`,
 			kind: kind.kind,
 			enabled: true,
-			config: {},
+			config: defaultConfigFor(kind),
 		};
 		setJustAddedId(next.id);
 		onChange([...elements, next]);

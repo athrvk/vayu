@@ -54,9 +54,26 @@ interface RowActionsMenuProps {
 	 * path in.
 	 */
 	tabIndex?: number;
+	/**
+	 * Runs after the roving-tabindex-tree focus return above, when the menu
+	 * has one (issue #1608's element-card Rename). This is the same signal
+	 * Radix uses to hand focus back to the trigger - firing once the closing
+	 * content's own cleanup (its `FocusScope` trap, and the `aria-hidden` it
+	 * places on the rest of the page while open) has actually finished, not
+	 * a guessed delay. A caller that wants to autofocus something of its own
+	 * on close (an inline rename input) calls `event.preventDefault()` here
+	 * the same way the tree-row branch above does.
+	 */
+	onCloseAutoFocus?: (event: Event) => void;
 }
 
-export function RowActionsMenu({ label, actions, className, tabIndex = 0 }: RowActionsMenuProps) {
+export function RowActionsMenu({
+	label,
+	actions,
+	className,
+	tabIndex = 0,
+	onCloseAutoFocus,
+}: RowActionsMenuProps) {
 	const [open, setOpen] = useState(false);
 	const trigger = useRef<HTMLButtonElement>(null);
 
@@ -98,9 +115,11 @@ export function RowActionsMenu({ label, actions, className, tabIndex = 0 }: RowA
 					// it belongs to is where focus has to land - otherwise Escape
 					// leaves the tree's one stop on something Tab cannot return to.
 					const row = trigger.current?.closest<HTMLElement>('[role="treeitem"]');
-					if (!row) return;
-					e.preventDefault();
-					row.focus();
+					if (row) {
+						e.preventDefault();
+						row.focus();
+					}
+					onCloseAutoFocus?.(e);
 				}}
 			>
 				{rowActionRows(actions).map(({ action, separatorBefore }) => (

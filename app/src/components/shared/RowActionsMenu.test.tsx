@@ -153,4 +153,22 @@ describe("where focus lands when the menu closes", () => {
 
 		await waitFor(() => expect(document.activeElement).toBe(button));
 	});
+
+	// The element card's Rename (issue #1608) needs the exact moment Radix
+	// considers its own close cleanup finished - not a guessed `setTimeout` -
+	// to autofocus a row-owned input instead of the trigger. `onCloseAutoFocus`
+	// is that signal; a caller outside a roving-tabindex tree (the `row`
+	// branch above is a no-op there) still needs to reach it.
+	it("calls a caller-supplied onCloseAutoFocus outside a tree too", async () => {
+		const onCloseAutoFocus = vi.fn();
+		render(
+			<RowActionsMenu label={LABEL} actions={actions} onCloseAutoFocus={onCloseAutoFocus} />
+		);
+		trigger().click();
+		const menu = await screen.findByRole("menu");
+
+		fireEvent.keyDown(menu, { key: "Escape" });
+
+		await waitFor(() => expect(onCloseAutoFocus).toHaveBeenCalledTimes(1));
+	});
 });

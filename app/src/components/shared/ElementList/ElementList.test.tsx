@@ -369,6 +369,28 @@ describe("ElementList - the Add menu", () => {
 		expect(screen.queryByText("Assert Status")).not.toBeInTheDocument();
 	});
 
+	// A script kind's schema requires the `script` key present (engine-side,
+	// `script_kinds.cpp`) - `config: {}` alone omits it, and the engine
+	// validates a request's whole `elements` array on every save, so one
+	// still-blank script element fails every later save of the request, not
+	// just its own. `{ script: "" }` satisfies the schema outright and is a
+	// real value, not a placeholder: the engine already treats a blank
+	// script as a no-op.
+	//
+	// Mutation check: revert `defaultConfigFor` (`index.tsx`) to always
+	// return `{}` and this reddens with `config: {}`.
+	it("seeds a script kind's config with an empty script, not an empty object", async () => {
+		const onChange = renderList([]);
+		openMenu();
+		await screen.findByText("Pre-request Script");
+
+		fireEvent.click(optionRow("Pre-request Script"));
+
+		const added = (onChange.mock.calls[0][0] as ElementDef[])[0];
+		expect(added.kind).toBe("script.pre");
+		expect(added.config).toEqual({ script: "" });
+	});
+
 	it("remembers the picked kind under Recently used on the next open", async () => {
 		renderList([]);
 		openMenu();
@@ -464,6 +486,31 @@ describe("ElementList - rename", () => {
 		expect(onChange).not.toHaveBeenCalled();
 		expect(screen.queryByPlaceholderText("Extract JSON")).not.toBeInTheDocument();
 		expect(screen.getByText("Extract JSON")).toBeInTheDocument();
+	});
+
+	// A `name` is user-typed, with no length limit - `title`'s own span has to
+	// stay truncatable (a real `max-width` alongside `truncate`), or an
+	// unusually long one renders at its full content width regardless of the
+	// row's own size and pushes the enable switch and the `⋯` menu out of
+	// view instead of yielding to them (found live: jsdom has no layout, so
+	// this is a class-list assertion, not a measured overflow - see the
+	// `boxed-surfaces.test.tsx` pattern `app/CLAUDE.md` names for this class
+	// of bug).
+	//
+	// Mutation check: drop `max-w-[55%]` from the title `<span>` in
+	// `index.tsx`, keeping `shrink-0 truncate` - this reddens, since
+	// `truncate` alone never engages without a `max-width` to truncate
+	// against.
+	it("keeps the title span truncatable, not just shrink-resistant", async () => {
+		render(<StatefulList initial={[extractElement("e1")]} />);
+		await chooseRowAction("Extract JSON", "Rename");
+		const input = await screen.findByPlaceholderText("Extract JSON");
+		fireEvent.change(input, { target: { value: "A rather long custom element name" } });
+		fireEvent.keyDown(input, { key: "Enter" });
+
+		const title = screen.getByText("A rather long custom element name");
+		expect(title.parentElement?.className).toMatch(/(^|\s)max-w-\[55%\](\s|$)/);
+		expect(title.parentElement?.className).toMatch(/\btruncate\b/);
 	});
 });
 
