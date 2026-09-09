@@ -6,10 +6,12 @@
  */
 
 /**
- * Small, context-free reads over an `ElementDef[]` list (issue #1512),
- * shared by the request-builder module, the collections module and the
- * generic reference scanners in `lib/` - none of which may depend on each
- * other, so this lives in `lib/` rather than under any one of them.
+ * Small, context-free reads over an `ElementDef[]` list (issue #1512), and
+ * `SaveBlockedError` (issue #1635) - the same save-path contract both a
+ * request's autosave and a collection's manual save button need - shared by
+ * the request-builder module, the collections module and the generic
+ * reference scanners in `lib/` - none of which may depend on each other, so
+ * this lives in `lib/` rather than under any one of them.
  */
 
 import type { ElementDef, ElementKindSchema } from "@/types";
