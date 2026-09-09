@@ -26,6 +26,7 @@
  * engine keeps them apart by omitting the object.
  */
 
+import { Fragment } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
@@ -125,91 +126,125 @@ export default function ScenarioStepsTab({
 					</thead>
 					<tbody>
 						{steps.map((step) => (
-							<tr key={step.index} className="border-b last:border-b-0">
-								<th scope="row" className="px-3 py-2 font-normal text-left">
-									<div className="flex items-center gap-2 min-w-0">
-										<span className="text-xs text-muted-foreground font-mono shrink-0">
-											{step.index + 1}
-										</span>
-										<Badge
-											variant="outline"
-											className="font-mono text-[10px] shrink-0"
-										>
-											{step.method}
-										</Badge>
-										<TruncatedText className="text-foreground min-w-0">
-											{step.name || step.requestId}
-										</TruncatedText>
-									</div>
-								</th>
-								<td className="px-3 py-2 text-right font-mono">
-									{formatNumber(step.executed)}
-									{/* A step the sequence reached fewer times than the
-									    first one did is the visible shape of an earlier
-									    step erroring out. */}
-									{step.executed < expectedPerStep && (
-										<span
-											className="ml-1 text-xs text-muted-foreground"
-											title={`${formatNumber(
-												expectedPerStep - step.executed
-											)} iterations ended before reaching this step`}
-										>
-											({formatNumber(expectedPerStep - step.executed)} short)
-										</span>
-									)}
-								</td>
-								<td
-									className={
-										step.errors > 0
-											? "px-3 py-2 text-right font-mono text-status-error-text"
-											: "px-3 py-2 text-right font-mono text-muted-foreground"
-									}
-								>
-									{formatNumber(step.errors)}
-								</td>
-								<td className="px-3 py-2 text-right font-mono">
-									{step.tests ? (
-										<span
-											title={`${formatNumber(
-												step.tests.passed
-											)} passed, ${formatNumber(
-												step.tests.failed
-											)} failed across ${formatNumber(
-												step.tests.sampled
-											)} sampled response${step.tests.sampled === 1 ? "" : "s"}`}
-										>
-											{formatNumber(step.tests.passed)}
-											{step.tests.failed > 0 && (
-												<span className="text-status-error-text">
-													{" / "}
-													{formatNumber(step.tests.failed)}
+							<Fragment key={step.index}>
+								<tr className="border-b last:border-b-0">
+									<th scope="row" className="px-3 py-2 font-normal text-left">
+										<div className="flex items-center gap-2 min-w-0">
+											<span className="text-xs text-muted-foreground font-mono shrink-0">
+												{step.index + 1}
+											</span>
+											<Badge
+												variant="outline"
+												className="font-mono text-[10px] shrink-0"
+											>
+												{step.method}
+											</Badge>
+											<TruncatedText className="text-foreground min-w-0">
+												{step.name || step.requestId}
+											</TruncatedText>
+										</div>
+									</th>
+									<td className="px-3 py-2 text-right font-mono">
+										{formatNumber(step.executed)}
+										{/* A step the sequence reached fewer times than the
+										    first one did is the visible shape of an earlier
+										    step erroring out. */}
+										{step.executed < expectedPerStep && (
+											<span
+												className="ml-1 text-xs text-muted-foreground"
+												title={`${formatNumber(
+													expectedPerStep - step.executed
+												)} iterations ended before reaching this step`}
+											>
+												({formatNumber(expectedPerStep - step.executed)}{" "}
+												short)
+											</span>
+										)}
+									</td>
+									<td
+										className={
+											step.errors > 0
+												? "px-3 py-2 text-right font-mono text-status-error-text"
+												: "px-3 py-2 text-right font-mono text-muted-foreground"
+										}
+									>
+										{formatNumber(step.errors)}
+									</td>
+									<td className="px-3 py-2 text-right font-mono">
+										{step.tests ? (
+											<span
+												title={`${formatNumber(
+													step.tests.passed
+												)} passed, ${formatNumber(
+													step.tests.failed
+												)} failed across ${formatNumber(
+													step.tests.sampled
+												)} sampled response${step.tests.sampled === 1 ? "" : "s"}`}
+											>
+												{formatNumber(step.tests.passed)}
+												{step.tests.failed > 0 && (
+													<span className="text-status-error-text">
+														{" / "}
+														{formatNumber(step.tests.failed)}
+													</span>
+												)}
+											</span>
+										) : (
+											// A step that asserted nothing. A zero here would read as
+											// "nothing failed", which is a claim the run never made.
+											<span
+												className="text-muted-foreground"
+												title="No assertions"
+											>
+												-
+											</span>
+										)}
+									</td>
+									<td className="px-3 py-2 text-right font-mono">
+										{latency(step.latency.p50)}
+									</td>
+									<td className="px-3 py-2 text-right font-mono">
+										{latency(step.latency.p95)}
+									</td>
+									<td className="px-3 py-2 text-right font-mono">
+										{latency(step.latency.p99)}
+									</td>
+									<td className="px-3 py-2 text-right font-mono">
+										{latency(step.latency.max)}
+									</td>
+								</tr>
+								{/* One row per non-script element this step compiled and
+								    ran - extractors, assertions, timers - tallied across
+								    every virtual user and iteration the way the Tests
+								    column already is for scripts (issue #1516). */}
+								{step.elements?.map((element) => (
+									<tr
+										key={`${step.index}-${element.id}`}
+										className="border-b last:border-b-0 bg-muted/20"
+									>
+										<td colSpan={8} className="px-3 py-1.5 pl-9">
+											<div className="flex items-center gap-2 text-xs">
+												<span className="text-muted-foreground font-mono">
+													{element.kind}
 												</span>
-											)}
-										</span>
-									) : (
-										// A step that asserted nothing. A zero here would read as
-										// "nothing failed", which is a claim the run never made.
-										<span
-											className="text-muted-foreground"
-											title="No assertions"
-										>
-											-
-										</span>
-									)}
-								</td>
-								<td className="px-3 py-2 text-right font-mono">
-									{latency(step.latency.p50)}
-								</td>
-								<td className="px-3 py-2 text-right font-mono">
-									{latency(step.latency.p95)}
-								</td>
-								<td className="px-3 py-2 text-right font-mono">
-									{latency(step.latency.p99)}
-								</td>
-								<td className="px-3 py-2 text-right font-mono">
-									{latency(step.latency.max)}
-								</td>
-							</tr>
+												<span className="font-mono text-status-success-text">
+													{formatNumber(element.passed)} passed
+												</span>
+												{element.failed > 0 && (
+													<span className="font-mono text-status-error-text">
+														{formatNumber(element.failed)} failed
+													</span>
+												)}
+												{element.skipped > 0 && (
+													<span className="font-mono text-muted-foreground">
+														{formatNumber(element.skipped)} skipped
+													</span>
+												)}
+											</div>
+										</td>
+									</tr>
+								))}
+							</Fragment>
 						))}
 					</tbody>
 				</table>
