@@ -226,6 +226,7 @@ jobs:
               - 'docs/engine/mcp.md'
               - 'docs/compare/vayu-vs-bruno.md'
               - 'docs/compare/vayu-vs-postman.md'
+              - 'docs/engine/log-record.schema.json'
             # The files under `engine/` that a suite in `app/` reads: engine
             # headers and sources a parity guard pins a value against, and the
             # fixtures a conformance guard replays. Same defect as the pages
