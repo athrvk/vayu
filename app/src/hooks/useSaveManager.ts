@@ -22,6 +22,7 @@ import { useClientSettingsStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
 import { TIMING } from "@/config/timing";
+import { SaveBlockedError } from "@/lib/elements";
 
 /**
  * The registry id this hook saves under. Three places in this file need it -
@@ -206,6 +207,15 @@ export function useSaveManager({
 					markPendingSave();
 				}
 			} catch (error) {
+				if (error instanceof SaveBlockedError) {
+					// Not a failure - the caller chose not to send. Report the same
+					// "still dirty, nothing in flight" state a plain unsaved edit
+					// has, so the status bar reads correctly and `attemptAutoSave`
+					// (which checks for `"error"`) does not arm a retry against a
+					// payload that will not have changed by the next tick.
+					markPendingSave();
+					return;
+				}
 				console.error("Save failed:", error);
 				failSave(error instanceof Error ? error.message : "Save failed");
 

@@ -6,13 +6,15 @@
  */
 
 /**
- * Small, context-free reads over an `ElementDef[]` list (issue #1512),
- * shared by the request-builder module, the collections module and the
- * generic reference scanners in `lib/` - none of which may depend on each
- * other, so this lives in `lib/` rather than under any one of them.
+ * Small, context-free reads over an `ElementDef[]` list (issue #1512), and
+ * `SaveBlockedError` (issue #1635) - the same save-path contract both a
+ * request's autosave and a collection's manual save button need - shared by
+ * the request-builder module, the collections module and the generic
+ * reference scanners in `lib/` - none of which may depend on each other, so
+ * this lives in `lib/` rather than under any one of them.
  */
 
-import type { ElementDef } from "@/types";
+import type { ElementDef, ElementKindSchema } from "@/types";
 
 /**
  * The joined text of every enabled element of one script kind (`script.pre`
@@ -49,4 +51,47 @@ export function isBlankScriptElement(el: Pick<ElementDef, "kind" | "config">): b
 	if (el.kind !== "script.pre" && el.kind !== "script.post") return false;
 	const text = el.config.script;
 	return typeof text !== "string" || text.trim().length === 0;
+}
+
+/**
+ * The `required` keys of an element's kind that its own `config` is missing
+ * outright (issue #1635) - presence only, not `minLength`/`minimum`. That
+ * matches what `addElement`'s fresh `config: {}` produces exactly (no key at
+ * all), which is cheap and exact for the "just created it" case without
+ * duplicating the engine's fuller JSON Schema validation client-side; the
+ * engine's own `PUT` still owns every other constraint.
+ */
+export function missingRequiredKeys(
+	element: Pick<ElementDef, "kind" | "config">,
+	kinds: ElementKindSchema[]
+): string[] {
+	const required = kinds.find((k) => k.kind === element.kind)?.configSchema.required ?? [];
+	return required.filter((key) => element.config[key] === undefined);
+}
+
+/**
+ * Whether any element in the list is missing a required config key outright
+ * (issue #1635) - the shape that 400s the *entire* `elements` array on save,
+ * not only that one element's own edit, because the array is sent whole
+ * whenever it is touched (`buildUpdatePayload`).
+ */
+export function hasIncompleteElement(elements: ElementDef[], kinds: ElementKindSchema[]): boolean {
+	return elements.some((el) => missingRequiredKeys(el, kinds).length > 0);
+}
+
+/**
+ * Thrown by a save callback to mean "nothing was sent, and nothing should be
+ * retried" (issue #1635) - a payload the caller already knows the server
+ * will refuse (an incomplete element, per `hasIncompleteElement`), as
+ * opposed to a save that was attempted and failed. Both save paths -
+ * `useSaveManager`'s autosave and `useDraftSaveContext`'s manual-button
+ * model - read this type to report "still dirty, nothing in flight" rather
+ * than a genuine failure; neither retries against a payload that will not
+ * have changed by the next attempt.
+ */
+export class SaveBlockedError extends Error {
+	constructor(message = "Save blocked: fix the incomplete field first") {
+		super(message);
+		this.name = "SaveBlockedError";
+	}
 }
