@@ -24,6 +24,7 @@ import {
 	ScriptLifecycleSummary,
 	TestValidationSummary,
 	ThresholdVerdict,
+	TransactionsSummary,
 } from "@/components/shared";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
@@ -67,6 +68,13 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			    are reported, not scored. Absent for a run that never called
 			    pm.metrics or metric.record. */}
 			<CustomMetricsSummary customMetrics={report.customMetrics} />
+
+			{/* A folder's members, summed into one latency distribution per
+			    pass (issue #1515) - beside the other per-run numbers rather
+			    than in the step breakdown, since a transaction spans a
+			    folder, not one step. Absent for a collection with no
+			    control.transaction element. */}
+			<TransactionsSummary transactions={report.scenario?.transactions} />
 
 			{/* What the search found, for a capacity run. Beside the verdict
 			    rather than below the charts: "what can it take" is the question
