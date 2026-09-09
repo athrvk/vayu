@@ -13,8 +13,9 @@
  * optional name, an enable switch, reorder buttons, delete, and the kind's
  * form below it. The default form is generated from the kind's JSON Schema
  * (`GenericElementForm`); a bespoke override (`elementForms.ts`) replaces it
- * for a kind that needs one. The Add menu groups the catalogue by category,
- * never a hand-written list, so a kind the engine adds needs no change here.
+ * for a kind that needs one. The Add control is a searchable picker over the
+ * catalogue, grouped by category (`element-categories.ts`), never a
+ * hand-written list, so a kind the engine adds needs no change here.
  *
  * A primitive under `components/shared/`, so it takes no feature-module
  * context: the request builder's Elements tab and the collection detail's
@@ -29,25 +30,33 @@
  * resolution, a data contract) and hands back a node, or nothing.
  */
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import {
 	Button,
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuGroup,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
+	Command,
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
 	Input,
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
 } from "@/components/ui";
+import { TruncatedText } from "@/components/shared/TruncatedText";
 import { ToggleRow } from "@/modules/settings/main/panels/SettingControls";
 import { generateId } from "@/lib/id";
 import { cn } from "@/lib/utils";
+import { useLayoutStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
+import { categoryLabel, categoryOrder, effectiveCategory } from "./element-categories";
+
+/** The picker's "Recently used" group heading and cap on entries shown. */
+const RECENTLY_USED_HEADING = "Recently used";
 
 export interface ElementListProps {
 	elements: ElementDef[];
@@ -67,17 +76,28 @@ function kindLabel(kind: string, kinds: ElementKindSchema[]): string {
 	return kinds.find((k) => k.kind === kind)?.label ?? kind;
 }
 
+/**
+ * Groups the addable catalogue by its display category, in family order
+ * (`element-categories.ts`) - `control.transaction` folds into "Controller"
+ * here rather than keeping its engine-side category as its own group.
+ */
 function groupedByCategory(kinds: ElementKindSchema[]): Map<string, ElementKindSchema[]> {
 	const groups = new Map<string, ElementKindSchema[]>();
 	// `inherit.disable` is consumed by the engine at compose time, never a row
 	// a user adds by hand - it is written by the inheritance notice's disable
 	// toggle instead.
 	for (const kind of kinds.filter((k) => k.kind !== "inherit.disable")) {
-		const list = groups.get(kind.category) ?? [];
+		const category = effectiveCategory(kind.category);
+		const list = groups.get(category) ?? [];
 		list.push(kind);
-		groups.set(kind.category, list);
+		groups.set(category, list);
 	}
-	return groups;
+	return new Map([...groups.entries()].sort(([a], [b]) => categoryOrder(a) - categoryOrder(b)));
+}
+
+/** `value` cmdk filters on - label, description and kind, so any of the three matches a search. */
+function searchValue(kind: ElementKindSchema): string {
+	return `${kind.label} ${kind.description} ${kind.kind}`;
 }
 
 function ElementRow({
@@ -188,6 +208,12 @@ export function ElementList({
 	renderAboveForm,
 }: ElementListProps) {
 	const groups = groupedByCategory(kinds);
+	const [pickerOpen, setPickerOpen] = useState(false);
+	const recentKindIds = useLayoutStore((s) => s.recentElementKinds);
+	const addRecentElementKind = useLayoutStore((s) => s.addRecentElementKind);
+	const recentKinds = recentKindIds
+		.map((kind) => kinds.find((k) => k.kind === kind))
+		.filter((k): k is ElementKindSchema => k !== undefined);
 
 	function addElement(kind: ElementKindSchema) {
 		const next: ElementDef = {
@@ -197,6 +223,8 @@ export function ElementList({
 			config: {},
 		};
 		onChange([...elements, next]);
+		addRecentElementKind(kind.kind);
+		setPickerOpen(false);
 	}
 
 	function updateAt(index: number, element: ElementDef) {
@@ -233,31 +261,56 @@ export function ElementList({
 					renderAboveForm={renderAboveForm}
 				/>
 			))}
-			<DropdownMenu>
-				<DropdownMenuTrigger asChild>
+			<Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+				<PopoverTrigger asChild>
 					<Button variant="outline" size="sm">
 						<Plus className="h-4 w-4" />
 						Add element
 					</Button>
-				</DropdownMenuTrigger>
-				<DropdownMenuContent align="start">
-					{[...groups.entries()].map(([category, categoryKinds], i) => (
-						<DropdownMenuGroup key={category}>
-							{i > 0 && <DropdownMenuSeparator />}
-							<DropdownMenuLabel className="capitalize">{category}</DropdownMenuLabel>
-							{categoryKinds.map((kind) => (
-								<DropdownMenuItem
-									key={kind.kind}
-									onSelect={() => addElement(kind)}
-									title={kind.description}
-								>
-									{kind.label}
-								</DropdownMenuItem>
+				</PopoverTrigger>
+				<PopoverContent align="start" className="w-96 p-0">
+					<Command>
+						<CommandInput placeholder="Search elements" />
+						<CommandList className="max-h-80">
+							<CommandEmpty>No element matches that.</CommandEmpty>
+							{recentKinds.length > 0 && (
+								<CommandGroup heading={RECENTLY_USED_HEADING}>
+									{recentKinds.map((kind) => (
+										<CommandItem
+											key={`recent-${kind.kind}`}
+											value={`recent ${searchValue(kind)}`}
+											onSelect={() => addElement(kind)}
+											className="flex-col items-start gap-0.5"
+										>
+											<span>{kind.label}</span>
+											<TruncatedText className="w-full text-xs text-muted-foreground">
+												{kind.description}
+											</TruncatedText>
+										</CommandItem>
+									))}
+								</CommandGroup>
+							)}
+							{[...groups.entries()].map(([category, categoryKinds]) => (
+								<CommandGroup key={category} heading={categoryLabel(category)}>
+									{categoryKinds.map((kind) => (
+										<CommandItem
+											key={kind.kind}
+											value={searchValue(kind)}
+											onSelect={() => addElement(kind)}
+											className="flex-col items-start gap-0.5"
+										>
+											<span>{kind.label}</span>
+											<TruncatedText className="w-full text-xs text-muted-foreground">
+												{kind.description}
+											</TruncatedText>
+										</CommandItem>
+									))}
+								</CommandGroup>
 							))}
-						</DropdownMenuGroup>
-					))}
-				</DropdownMenuContent>
-			</DropdownMenu>
+						</CommandList>
+					</Command>
+				</PopoverContent>
+			</Popover>
 		</div>
 	);
 }

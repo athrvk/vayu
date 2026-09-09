@@ -1627,10 +1627,21 @@ on - drags it between `SCRIPT_EDITOR_MIN_HEIGHT` and `SCRIPT_EDITOR_MAX_HEIGHT`
 (`constants/layout.ts`), previewing every pointer-move frame and persisting
 debounced, plus ArrowUp/ArrowDown by `SCRIPT_EDITOR_HEIGHT_STEP`.
 
-**The Add menu groups the catalogue by category**, never a hand-written list,
-so a kind the engine adds needs no change here; `inherit.disable` is excluded
-from it, since a user never adds one by hand - it is written by the
-inheritance notice's Disable toggle.
+**The Add control is a searchable picker (issue #1604), not a plain dropdown.**
+A `Popover` holds a `Command` (`ElementList/element-categories.ts`'s display
+map), so a user can type "regex" instead of reading twenty rows for "Extract
+with a regular expression" - each row shows the kind's description via
+`TruncatedText`, not only on hover. Groups render in family order (Extract,
+Assert, Timer, Controller, Script, Metric); a category the map does not know
+still renders, last, under its own raw name, so a kind the engine adds needs
+no change here. `control.transaction` displays under "Controller" although its
+engine-side category stays `"transaction"` - that string is a load-bearing
+lookup key for `TransactionHistograms` and the `includeTimers` fold, so the
+picker folds it for display rather than the registration changing what it
+means. `inherit.disable` is excluded from the picker entirely, since a user
+never adds one by hand - it is written by the inheritance notice's Disable
+toggle. The last five kinds added surface under a "Recently used" group,
+persisted in `layout-store`'s `recentElementKinds`.
 
 **A new request or collection sends no `elements` at all** (issue #1609):
 creation used to seed an empty, enabled `script.pre`/`script.post` pair

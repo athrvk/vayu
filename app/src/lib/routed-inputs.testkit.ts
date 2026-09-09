@@ -280,6 +280,16 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/components/shared/ElementList/element-kinds.conformance.test.tsx",
 		paths: ["engine/tests/fixtures/element-kinds.json"],
 	},
+	/*
+	 * The same fixture, read for the Add-element picker's category display map
+	 * (issue #1604): every category the registry produces, folding
+	 * `control.transaction` into `controller`, has to have a label and a
+	 * position in `element-categories.ts`.
+	 */
+	elementCategoryLabels: {
+		reader: "app/src/components/shared/ElementList/element-categories.conformance.test.ts",
+		paths: ["engine/tests/fixtures/element-kinds.json"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**

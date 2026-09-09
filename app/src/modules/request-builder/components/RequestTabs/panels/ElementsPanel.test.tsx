@@ -22,6 +22,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { useLayoutStore } from "@/stores";
 import type { RequestBuilderContextValue } from "../../../types";
 import type { ElementDef, ElementKindSchema } from "@/types";
 
@@ -107,6 +108,10 @@ function setContext(overrides: Partial<RequestBuilderContextValue> = {}) {
 beforeEach(() => {
 	updateField.mockClear();
 	setContext();
+	// `ElementList`'s Add-element picker reads/writes this directly - reset so
+	// one test's pick does not surface as a duplicate "Recently used" row
+	// in the next.
+	useLayoutStore.setState({ recentElementKinds: [] });
 });
 
 describe("ElementsPanel", () => {
@@ -164,14 +169,10 @@ describe("ElementsPanel", () => {
 
 		render(<ElementsPanel />);
 
-		// `ElementList`'s Add-element menu is an uncontrolled DropdownMenu, so
-		// Radix's own trigger handles opening it - on `pointerdown`, not on
-		// `click` (unlike `RowActionsMenu`, which layers a click handler over
-		// Radix's for a keyboard-dispatched `.click()`).
-		fireEvent.pointerDown(screen.getByRole("button", { name: /add element/i }), {
-			button: 0,
-		});
-		fireEvent.click(await screen.findByRole("menuitem", { name: /extract json/i }));
+		// `ElementList`'s Add-element control is a `Popover` holding a `Command`
+		// (issue #1604) - it opens on the trigger button's ordinary `click`.
+		fireEvent.click(screen.getByRole("button", { name: /add element/i }));
+		fireEvent.click((await screen.findByText("Extract JSON")).closest("[cmdk-item]")!);
 
 		expect(updateField).toHaveBeenCalledWith(
 			"elements",
@@ -186,12 +187,10 @@ describe("ElementsPanel", () => {
 
 		render(<ElementsPanel />);
 
-		fireEvent.pointerDown(screen.getByRole("button", { name: /add element/i }), {
-			button: 0,
-		});
-		await screen.findByRole("menuitem", { name: /extract json/i });
+		fireEvent.click(screen.getByRole("button", { name: /add element/i }));
+		await screen.findByText("Extract JSON");
 
-		expect(screen.queryByRole("menuitem", { name: /setup script/i })).not.toBeInTheDocument();
+		expect(screen.queryByText("Setup Script")).not.toBeInTheDocument();
 	});
 
 	it('calls updateField("elements", ...) when an existing element is toggled off', () => {
