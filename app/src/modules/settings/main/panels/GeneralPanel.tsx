@@ -132,6 +132,12 @@ export default function GeneralPanel() {
 		resetAll();
 	};
 
+	/** `electronAPI.openLogsFolder` resolves with a non-empty string only on failure. */
+	const openLogsFolder = async () => {
+		const result = await window.electronAPI?.openLogsFolder();
+		if (result) showToast(`Couldn't open the logs folder - ${result}`, "error");
+	};
+
 	return (
 		<>
 			{/* Version + manual update check - the first thing people open
@@ -260,13 +266,29 @@ export default function GeneralPanel() {
 									["Logs", appPaths.logsPath],
 								] as const
 							).map(([label, value]) => (
-								<div key={label} className="flex flex-col gap-0.5">
-									<span className="text-xs font-medium text-muted-foreground">
-										{label}
-									</span>
-									<span className="text-xs font-mono text-foreground break-all">
-										{value}
-									</span>
+								<div
+									key={label}
+									className="flex items-center justify-between gap-2"
+								>
+									<div className="flex flex-col gap-0.5 min-w-0">
+										<span className="text-xs font-medium text-muted-foreground">
+											{label}
+										</span>
+										<span className="text-xs font-mono text-foreground break-all">
+											{value}
+										</span>
+									</div>
+									{label === "Logs" && window.electronAPI && (
+										<Button
+											variant="outline"
+											size="sm"
+											className="shrink-0"
+											onClick={() => void openLogsFolder()}
+										>
+											<FolderOpen className="w-4 h-4 mr-1.5" />
+											Open
+										</Button>
+									)}
 								</div>
 							))}
 						</div>

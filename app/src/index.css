@@ -403,6 +403,18 @@
 		--dock-height: 2rem;
 
 		/*
+		 * Width of the ActivityRail and the ContextRail, the window-edge navigation
+		 * strips #1615 moved the Dock's switchers onto.
+		 *
+		 * The same reasoning as the Dock's own height token above: both rails read it (one
+		 * value, so a left rail and a right rail of different widths cannot drift
+		 * apart), and it is what a rail-adjacent layout measures against rather
+		 * than a literal repeated at each call site. Theme-independent, so
+		 * declared once.
+		 */
+		--rail-width: 2.5rem;
+
+		/*
 		 * Height of the TitleBar, the window row holding the search bar.
 		 *
 		 * Same reason as --dock-height, at the other edge. The toast stack can

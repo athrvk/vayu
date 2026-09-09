@@ -27,6 +27,7 @@ import {
 } from "./engine-client.js";
 import type { McpSafetyConfig } from "./config.js";
 import type { LoadRunParams } from "./safety.js";
+import type { Logger } from "../log.js";
 import {
 	checkAllowlist,
 	checkLoadCaps,
@@ -209,6 +210,12 @@ export interface ToolContext {
 	 * the stdio CLI has no window.
 	 */
 	onDataChanged?: (event: McpDataChangedEvent) => void;
+	/**
+	 * Where a served call and a notify failure are logged (#1558), `src: "mcp"`.
+	 * Absent only in a test double - both real hosts (the Electron-hosted
+	 * transport and the stdio CLI) always provide one.
+	 */
+	log?: Logger;
 }
 
 export interface ToolResult {
@@ -8158,6 +8165,9 @@ export async function dispatchTool(
 		if (err instanceof ToolArgError) return errorResult(err.message);
 		return errorResult(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
 	}
+	// One record per served call, whichever transport served it (#1558) - the
+	// one place both the Electron-hosted host and the stdio CLI route through.
+	ctx.log?.debug("mcp", "Served tool call", { tool: name });
 	// Only a call that succeeded changed anything. A tool that returned an error
 	// result may still have got as far as the engine, but it cannot say so, and
 	// an invalidation storm on every rejected call would be worse than the one
@@ -8206,7 +8216,10 @@ function notifyDataChanged(
 				...(entity === "run" && startedRun !== undefined ? { startedRun } : {}),
 			});
 		} catch (err) {
-			console.error(`[MCP] Failed to notify "${entity}" change from ${tool.name}:`, err);
+			ctx.log?.warn("mcp", `Failed to notify "${entity}" change`, {
+				tool: tool.name,
+				error: String(err),
+			});
 		}
 	}
 }

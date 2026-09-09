@@ -32,7 +32,9 @@ import { useTabsStore } from "@/stores";
 // here. Same list as Shell.chords.test.tsx, minus the TabStrip stub.
 vi.mock("./Drawer", () => ({ Drawer: () => <div data-testid="drawer" /> }));
 vi.mock("./Dock", () => ({ Dock: () => <div data-testid="dock" /> }));
+vi.mock("./ActivityRail", () => ({ ActivityRail: () => <div data-testid="activity-rail" /> }));
 vi.mock("./ContextBar", () => ({ ContextBar: () => <div data-testid="context-bar" /> }));
+vi.mock("./ContextRail", () => ({ ContextRail: () => <div data-testid="context-rail" /> }));
 vi.mock("@/modules/palette", () => ({ CommandPalette: () => <div data-testid="palette" /> }));
 vi.mock("@/modules/collections/ImportModal", () => ({
 	ImportModal: () => <div data-testid="import-modal" />,

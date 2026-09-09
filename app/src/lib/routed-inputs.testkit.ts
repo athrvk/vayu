@@ -152,6 +152,22 @@ export const DOC_READING_GUARDS = {
 			"docs/compare/vayu-vs-postman.md",
 		],
 	},
+	/*
+	 * The app-side logger (#1558) is a from-scratch port of the engine's
+	 * `LogRecord`, and this is the one schema both sides claim to match: every
+	 * line `log.ts` writes validates against it, hand-checked rather than with
+	 * ajv (the schema is small), and its `cat` enums for `src: "app"` and
+	 * `src: "renderer"` are what `log-record.conformance.test.ts` holds
+	 * `log.ts` and `error-logger.ts`'s category lists to.
+	 */
+	appLogSchema: {
+		reader: "app/electron/log.test.ts",
+		paths: ["docs/engine/log-record.schema.json"],
+	},
+	appLogConformance: {
+		reader: "app/electron/log-record.conformance.test.ts",
+		paths: ["docs/engine/log-record.schema.json"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**

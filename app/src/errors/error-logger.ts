@@ -24,18 +24,62 @@ export interface ErrorContext {
 	metadata?: Record<string, unknown>;
 }
 
+/** The schema's closed `cat` enum for `src: "renderer"` (#1558). */
+const RENDERER_CATEGORIES = new Set(["renderer", "boundary"]);
+
+/** `context.component` when it is itself a valid category, else the generic one. */
+function categoryFor(context?: ErrorContext): "renderer" | "boundary" {
+	const component = context?.component;
+	return component !== undefined && RENDERER_CATEGORIES.has(component)
+		? (component as "renderer" | "boundary")
+		: "renderer";
+}
+
+function levelFor(severity: ErrorSeverity): "debug" | "info" | "warn" | "error" {
+	switch (severity) {
+		case "critical":
+		case "high":
+			return "error";
+		case "medium":
+			return "warn";
+		case "low":
+			return "info";
+	}
+}
+
 /**
- * Log an error to the console, at the level its severity earns.
+ * Log an error, at the level its severity earns.
  *
- * The console is the whole of it. Vayu runs on the user's machine and ships no
- * telemetry; sending errors anywhere else is a product decision nobody has
- * made, not a wiring gap to be filled in passing.
+ * Forwarded to the app's own log file through `electronAPI.log` (#1558) when
+ * it is available - `main.ts` validates the shape, redacts and applies the
+ * `logLevel` floor, so this side does neither. Outside Electron (`vite` in a
+ * browser, the sweep/probe harnesses `app/CLAUDE.md` describes) there is no
+ * main process to forward to, so this keeps today's console behaviour, which
+ * is what those environments read.
  */
 export function logError(
 	error: Error,
 	severity: ErrorSeverity = "medium",
 	context?: ErrorContext
 ): void {
+	if (window.electronAPI) {
+		window.electronAPI.log({
+			level: levelFor(severity),
+			cat: categoryFor(context),
+			msg: error.message || error.name,
+			err: { name: error.name, message: error.message, stack: error.stack },
+			fields: {
+				severity,
+				...(context?.component !== undefined ? { component: context.component } : {}),
+				...(context?.action !== undefined ? { action: context.action } : {}),
+				...(context?.userId !== undefined ? { userId: context.userId } : {}),
+				...(context?.requestId !== undefined ? { requestId: context.requestId } : {}),
+				...(context?.metadata !== undefined ? { metadata: context.metadata } : {}),
+			},
+		});
+		return;
+	}
+
 	const timestamp = new Date().toISOString();
 	const logEntry = {
 		timestamp,

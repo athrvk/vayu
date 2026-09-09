@@ -37,6 +37,8 @@
  * reason `startup-probe.ts` and `window-navigation.ts` sit beside it.
  */
 
+import { appLogger } from "./app-log.js";
+
 /**
  * How long a first frame gets before the window is shown regardless.
  *
@@ -68,7 +70,7 @@ export interface RevealDeps {
 	fallbackMs?: number;
 	/** Timer for the fallback, injected so a test need not wait it out. */
 	after?: (ms: number, fn: () => void) => void;
-	/** Defaults to `console.warn`. */
+	/** Defaults to the app logger's `warn`, category `"window"`. */
 	warn?: (message: string) => void;
 }
 
@@ -84,7 +86,7 @@ export function revealWhenReady(
 ): void {
 	const fallbackMs = deps.fallbackMs ?? REVEAL_FALLBACK_MS;
 	const after = deps.after ?? ((ms: number, fn: () => void) => void setTimeout(fn, ms));
-	const warn = deps.warn ?? ((message: string) => console.warn(message));
+	const warn = deps.warn ?? ((message: string) => appLogger().warn("window", message));
 
 	// Both paths stay armed - the event can still fire after the fallback, and
 	// the timer cannot be cleared through the slice of BrowserWindow this takes

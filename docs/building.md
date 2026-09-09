@@ -262,8 +262,9 @@ there. Pass `-jN` to override. See
 ### Development
 - **All platforms**: `engine/data/`
   - Database: `engine/data/db/vayu.db`
-  - Logs: `engine/data/logs/` (`engine_<stamp>.log`, one per start, newest 10
-    kept - see [Engine Logging](engine/logging.md))
+  - Logs: `engine/data/logs/` (`engine_<stamp>.log`, `cli_<stamp>.log` and the
+    Electron app's own `app_<stamp>.log`, one per process start, newest 10 per
+    prefix kept - see [Engine Logging](engine/logging.md))
   - Lock file: `engine/data/vayu.lock`
 
 ### Production

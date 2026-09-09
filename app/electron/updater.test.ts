@@ -34,7 +34,16 @@ const quit = vi.fn();
 const openExternal = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("electron", () => ({
-	app: { getVersion: () => "0.9.0", quit: (...args: unknown[]) => quit(...args) },
+	app: {
+		getVersion: () => "0.9.0",
+		quit: (...args: unknown[]) => quit(...args),
+		// electron/log.ts's appLogger() reads these through engineDataDirectory();
+		// this test never asserts on the log file, only that a launch failure is
+		// never lost to it.
+		getPath: () => "/tmp/vayu-updater-test",
+		getAppPath: () => "/tmp/vayu-updater-test",
+		isPackaged: false,
+	},
 	dialog: {
 		showMessageBox: (...args: unknown[]) => showMessageBox(...args),
 	},

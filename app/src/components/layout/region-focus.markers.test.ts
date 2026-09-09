@@ -8,16 +8,16 @@
 /**
  * Every region the cycle names is a region something renders (#1219).
  *
- * `AppRegion` is a union of four names and `cycleRegionFocus` walks whatever
+ * `AppRegion` is a union of five names and `cycleRegionFocus` walks whatever
  * carries the attribute, so the two halves cannot disagree at compile time: a
  * band that lost its marker in a refactor would simply drop out of the cycle,
  * silently, and F6 would move focus somewhere plausible. That is this
  * codebase's most repeated defect wearing a different hat - a value declared in
  * one place and read in none.
  *
- * A scan rather than a render, because the four bands are never on screen
- * together in a test: the title bar is Electron-only, and the two sidebars
- * unmount when closed.
+ * A scan rather than a render, because the five bands are never on screen
+ * together in a test: the title bar is Electron-only, and the drawer and
+ * context bar unmount when closed.
  */
 
 import { describe, it, expect } from "vitest";
@@ -62,7 +62,7 @@ function markedRegions(): string[] {
  * makes this a compile error if a name is dropped from `AppRegion`, and the
  * cases below catch one being added without a band to mark.
  */
-const EXPECTED = ["banner", "drawer", "main", "context"] satisfies AppRegion[];
+const EXPECTED = ["banner", "rail", "drawer", "main", "context"] satisfies AppRegion[];
 
 describe("the shell marks every region the cycle knows about", () => {
 	it("scans a non-empty set of layout files", () => {

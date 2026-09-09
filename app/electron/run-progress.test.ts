@@ -189,7 +189,8 @@ describe("registerRunProgressIpc", () => {
 				listener = fn;
 			},
 		};
-		registerRunProgressIpc(ipc, painter);
+		const log = vi.fn();
+		registerRunProgressIpc(ipc, painter, log);
 		const senderEvents = new Map<string, () => void>();
 		const sender = {
 			id: 1,
@@ -198,6 +199,7 @@ describe("registerRunProgressIpc", () => {
 		};
 		return {
 			applied,
+			log,
 			cleared: () => cleared,
 			send: (payload: unknown) => listener?.({ sender }, payload),
 			fire: (event: "destroyed" | "did-start-loading") => senderEvents.get(event)?.(),
@@ -211,12 +213,10 @@ describe("registerRunProgressIpc", () => {
 	});
 
 	it("ignores a message that is not an update, and says so", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const ipc = ipcHarness();
 		ipc.send({ state: "elsewhere" });
 		expect(ipc.applied).toEqual([]);
-		expect(warn).toHaveBeenCalled();
-		warn.mockRestore();
+		expect(ipc.log).toHaveBeenCalled();
 	});
 
 	/*

@@ -18,7 +18,7 @@
  * is the whole reason it lives outside main.ts.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -34,12 +34,6 @@ import { createSaveFlusher, FLUSH_TIMEOUT_MS } from "./save-flush";
 // main.ts creates windows and starts the engine at import time, so the wiring
 // itself can only be read.
 const main = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "main.ts"), "utf8");
-
-beforeEach(() => {
-	// The module logs every crash, which is the point of it - just not on stderr
-	// in the middle of a test run.
-	vi.spyOn(console, "error").mockImplementation(() => {});
-});
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -69,6 +63,7 @@ function fakeTransport(
 		),
 		relaunch: vi.fn(),
 		quit: vi.fn(),
+		log: vi.fn(),
 		onRecovered: vi.fn(),
 	};
 

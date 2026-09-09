@@ -169,15 +169,25 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 			    for exactly this reason. `min-h-0` because a flex child's default
 			    `min-height: auto` refuses to shrink below its content, which would
 			    push the overflow back up to the root. */}
-			<div className="flex-1 min-h-0 overflow-y-auto px-3 py-1 divide-y divide-border">
+			<div
+				className="flex-1 min-h-0 overflow-y-auto px-3 py-1 divide-y divide-border"
+				// Where the Context Rail's `scrollWithin` call scrolls, and nothing
+				// above it - see `app/CLAUDE.md`'s "Reveal inside the scroller you
+				// mean" rule (#1612).
+				data-context-bar-scroller
+			>
 				{sections.map((section) => (
-					<ContextBarSectionSlot
-						key={section.id}
-						section={section}
-						tab={tab}
-						expanded={!contextBarCollapsedSections.includes(section.id)}
-						onToggle={() => toggleContextBarSection(section.id)}
-					/>
+					// The wrapper, not `ContextBarSectionSlot` itself, carries the
+					// anchor: a "hidden" relevance verdict renders nothing at all, and
+					// an id on an element that may not exist is not a scroll target.
+					<div key={section.id} data-context-bar-section={section.id}>
+						<ContextBarSectionSlot
+							section={section}
+							tab={tab}
+							expanded={!contextBarCollapsedSections.includes(section.id)}
+							onToggle={() => toggleContextBarSection(section.id)}
+						/>
+					</div>
 				))}
 			</div>
 		</aside>

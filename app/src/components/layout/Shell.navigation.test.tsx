@@ -29,7 +29,9 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 
 vi.mock("./Drawer", () => ({ Drawer: () => <div data-testid="drawer" /> }));
 vi.mock("./Dock", () => ({ Dock: () => <div data-testid="dock" /> }));
+vi.mock("./ActivityRail", () => ({ ActivityRail: () => <div data-testid="activity-rail" /> }));
 vi.mock("./ContextBar", () => ({ ContextBar: () => <div data-testid="context-bar" /> }));
+vi.mock("./ContextRail", () => ({ ContextRail: () => <div data-testid="context-rail" /> }));
 vi.mock("./TabStrip", () => ({ TabStrip: () => <div data-testid="tab-strip" /> }));
 vi.mock("@/modules/palette", () => ({ CommandPalette: () => <div data-testid="palette" /> }));
 vi.mock("@/modules/collections/ImportModal", () => ({

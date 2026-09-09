@@ -127,6 +127,15 @@ node dist-electron/mcp/cli.js
 Configuration comes from environment variables (see [Configuration](#configuration)),
 since there is no Settings UI. It still requires a running engine.
 
+**Logging** (#1558): stdout is the JSON-RPC channel, so every diagnostic goes
+to stderr as text, unconditionally - never gated by `VAYU_LOG_CONSOLE` the way
+the Electron-hosted host's console rendering is. Set `VAYU_LOG_DIR` to also
+write a JSON-lines `mcp_<stamp>.log` there (unset: console only) - its own
+prefix, since this process shares no file or data directory with the Electron
+main process. A call served through this transport and one served through the
+Electron-hosted transport each leave a `src: "mcp"` record; see
+[Engine Logging](logging.md).
+
 ### What is live on each transport
 
 Elicitation (human confirmation) and `tools/list_changed` (live tool-set updates)
@@ -1731,6 +1740,7 @@ from environment variables:
 | `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
 | `VAYU_MCP_DISABLED_TOOLS`       | (empty)                 | Comma-separated tool names to disable. |
+| `VAYU_LOG_DIR`                  | (unset)                 | Also write `mcp_<stamp>.log` there (#1558). |
 
 Both entry points sanitize their input through the same function
 (`sanitizeSafetyInput` in `electron/mcp/config.ts`), so the environment is held to

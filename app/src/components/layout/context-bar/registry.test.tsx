@@ -140,6 +140,15 @@ describe("the context-bar section registry", () => {
 		}
 	});
 
+	// #1615: the right-edge Context Rail draws one icon per section straight
+	// from this list. A section with none would leave the rail silently short
+	// of a button rather than failing anywhere near the registry.
+	it("gives every section an icon, for the Context Rail", () => {
+		for (const section of CONTEXT_BAR_SECTIONS) {
+			expect(section.icon).toBeDefined();
+		}
+	});
+
 	it("has no sections for the four tab types that deliberately show nothing", () => {
 		for (const type of OTHER_TYPES) {
 			expect(sectionsForTab(tab(type))).toEqual([]);

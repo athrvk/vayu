@@ -41,7 +41,9 @@ import { ImportModal } from "@/modules/collections/ImportModal";
 import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
 import { Drawer } from "./Drawer";
 import { Dock } from "./Dock";
+import { ActivityRail } from "./ActivityRail";
 import { ContextBar } from "./ContextBar";
+import { ContextRail } from "./ContextRail";
 import { TabStrip } from "./TabStrip";
 import { tabElementId, tabPanelElementId } from "./tab-aria";
 import { closeTabFromKeyboard } from "./tab-focus";
@@ -237,8 +239,8 @@ export default function Shell() {
 	useEffect(() => {
 		/*
 		 * Every chord here is a definition in `constants/shortcuts.ts`, matched by
-		 * `matchesChord` - the same registry the Dock's tooltips advertise from
-		 * and the same matcher the Send/Load Test handler uses (#938).
+		 * `matchesChord` - the same registry the ActivityRail's tooltips advertise
+		 * from and the same matcher the Send/Load Test handler uses (#938).
 		 *
 		 * It was fourteen hand-rolled comparisons against `e.key` behind a raw
 		 * `e.metaKey || e.ctrlKey`, and the two bugs that cost were both things
@@ -326,9 +328,10 @@ export default function Shell() {
 				return;
 			}
 
-			// The drawer switchers, from the same table the Dock's tooltips read.
-			// Settings is in that table too and is handled above, by the chord it
-			// shares - opening the tab, which brings its drawer view with it.
+			// The drawer switchers, from the same table the ActivityRail's tooltips
+			// read. Settings is in that table too and is handled above, by the
+			// chord it shares - opening the tab, which brings its drawer view with
+			// it.
 			for (const [view, chord] of Object.entries(DRAWER_VIEW_CHORDS) as [
 				DrawerView,
 				Chord,
@@ -404,12 +407,13 @@ export default function Shell() {
 			    once, shows nothing until the flow asks where a request should
 			    land. The palette renders its own from the same hook. */}
 			<CollectionPicker {...pickerProps} />
-			{/* Every tab uses the same shell: one left Drawer (its view switches
-			    with the tab - collections/history/variables/settings), the main
-			    content, and the request-only ContextBar. No tab type takes over
-			    the row, so the Dock's drawer switchers always have a Drawer to act
-			    on. */}
+			{/* Every tab uses the same shell: the ActivityRail's view switchers,
+			    one left Drawer (its view switches with the tab -
+			    collections/history/variables/settings), the main content, and the
+			    request-only ContextBar with its own ContextRail. No tab type takes
+			    over the row, so the rail always has a Drawer to act on. */}
 			<div className="flex flex-1 overflow-hidden">
+				<ActivityRail />
 				<Drawer />
 				{/*
 				 * The content column: tab strip on top, then main + ContextBar.
@@ -424,51 +428,61 @@ export default function Shell() {
 				 * `relative` moved down with the strip, onto the main+context row:
 				 * the ContextBar's overlay mode (<1200px) positions against its
 				 * nearest positioned ancestor, and from the outer row it would now
-				 * cover the tabs it belongs to.
+				 * cover the tabs it belongs to. `ContextRail` sits one level out
+				 * from that `relative` box rather than inside it, as a plain flex
+				 * item beside whatever the box contains - so an overlaying
+				 * ContextBar covers `main` up to the rail and never the rail itself,
+				 * which is what keeps the rail reachable in overlay mode too
+				 * (#1615).
 				 */}
 				<div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 					<TabStrip />
-					<div className="flex flex-1 overflow-hidden relative">
-						<main
-							className="flex-1 overflow-hidden flex flex-col min-w-0"
-							// A stop in the F6 cycle - see `region-focus.ts`. On `main`
-							// rather than on the tabpanel inside it so the cycle reaches
-							// the pane whether or not a tab is open.
-							{...regionProps("main")}
-						>
-							{/*
-							 * The other half of the strip's tabs pattern: the region a tab
-							 * controls has to say so, or `aria-controls` points at nothing
-							 * and the panel claims no owner. The role goes on a child of
-							 * `main` rather than on `main` itself - `main` is a landmark and
-							 * carries only `role="main"`, so overwriting it would trade one
-							 * relationship for another.
-							 */}
-							<div
-								role="tabpanel"
-								id={activeTab ? tabPanelElementId(activeTab.id) : undefined}
-								aria-labelledby={activeTab ? tabElementId(activeTab.id) : undefined}
-								className="flex flex-1 flex-col min-w-0 overflow-hidden"
+					<div className="flex flex-1 overflow-hidden">
+						<div className="flex flex-1 overflow-hidden relative">
+							<main
+								className="flex-1 overflow-hidden flex flex-col min-w-0"
+								// A stop in the F6 cycle - see `region-focus.ts`. On `main`
+								// rather than on the tabpanel inside it so the cycle reaches
+								// the pane whether or not a tab is open.
+								{...regionProps("main")}
 							>
 								{/*
-								 * One boundary around the panel, not one per surface: only
-								 * one surface is mounted at a time, and a boundary inside
-								 * each branch would be the same fallback written eight
-								 * times. It sits inside the panel div so the tab's aria
-								 * relationship holds while its chunk is still loading.
+								 * The other half of the strip's tabs pattern: the region a tab
+								 * controls has to say so, or `aria-controls` points at nothing
+								 * and the panel claims no owner. The role goes on a child of
+								 * `main` rather than on `main` itself - `main` is a landmark and
+								 * carries only `role="main"`, so overwriting it would trade one
+								 * relationship for another.
 								 */}
-								<Suspense
-									fallback={
-										<DetailSkeleton
-											label={LOADING_LABEL[activeTab?.type ?? "welcome"]}
-										/>
+								<div
+									role="tabpanel"
+									id={activeTab ? tabPanelElementId(activeTab.id) : undefined}
+									aria-labelledby={
+										activeTab ? tabElementId(activeTab.id) : undefined
 									}
+									className="flex flex-1 flex-col min-w-0 overflow-hidden"
 								>
-									{renderTabContent(activeTab)}
-								</Suspense>
-							</div>
-						</main>
-						<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
+									{/*
+									 * One boundary around the panel, not one per surface: only
+									 * one surface is mounted at a time, and a boundary inside
+									 * each branch would be the same fallback written eight
+									 * times. It sits inside the panel div so the tab's aria
+									 * relationship holds while its chunk is still loading.
+									 */}
+									<Suspense
+										fallback={
+											<DetailSkeleton
+												label={LOADING_LABEL[activeTab?.type ?? "welcome"]}
+											/>
+										}
+									>
+										{renderTabContent(activeTab)}
+									</Suspense>
+								</div>
+							</main>
+							<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
+						</div>
+						<ContextRail />
 					</div>
 				</div>
 			</div>

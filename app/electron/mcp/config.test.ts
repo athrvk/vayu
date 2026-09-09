@@ -405,6 +405,6 @@ describe("formatSafetyEnvNotices", () => {
 		// Guard the guard: an empty read would pass every assertion below.
 		expect(source.length).toBeGreaterThan(0);
 		expect(source).toContain("formatSafetyEnvNotices");
-		expect(source).toContain("console.error(notice)");
+		expect(source).toContain('log.warn("mcp", notice)');
 	});
 });

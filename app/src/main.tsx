@@ -12,9 +12,32 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { queryClient } from "./lib/query-client";
 import { TooltipProvider } from "./components/ui";
 import { TIMING } from "./config/timing";
-import { ErrorBoundary } from "./errors";
+import { ErrorBoundary, logError } from "./errors";
 import App from "./App";
 import "./index.css";
+
+/**
+ * Whatever `ErrorBoundary` cannot reach: an error thrown outside a component's
+ * render (an event handler, a timer, a raw DOM listener) and a rejected
+ * promise nobody awaited (#1558). Registered once, for the process's whole
+ * life - React's own render errors still go through `ErrorBoundary`, which is
+ * a narrower, more specific report (a component stack) than either listener
+ * below can build.
+ */
+window.addEventListener("error", (event) => {
+	logError(event.error instanceof Error ? event.error : new Error(event.message), "high", {
+		component: "window",
+		action: "error",
+	});
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+	const reason: unknown = event.reason;
+	logError(reason instanceof Error ? reason : new Error(String(reason)), "high", {
+		component: "window",
+		action: "unhandledrejection",
+	});
+});
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
 	<React.StrictMode>

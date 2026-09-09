@@ -271,6 +271,23 @@ interface ElectronAPI {
 		logsPath: string;
 		dbPath: string;
 	}>;
+	/** Open the logs directory in the OS file manager (Settings, General). */
+	openLogsFolder: () => Promise<string>;
+
+	/**
+	 * Forward one `error-logger.ts` record to the app's own log file (#1558).
+	 * One-way and unacknowledged - the caller does not wait on a write it
+	 * cannot itself recover from. `cat` is `"renderer"` or `"boundary"`; main
+	 * validates the shape, applies redaction and the `logLevel` floor, and
+	 * caps the channel at 20 records per second per window.
+	 */
+	log: (record: {
+		level: "debug" | "info" | "warn" | "error";
+		cat: string;
+		msg: string;
+		err?: { name: string; message: string; stack?: string };
+		fields?: Record<string, unknown>;
+	}) => void;
 
 	/**
 	 * Absolute path of a picked `File`, for a multipart file part. Synchronous

@@ -30,6 +30,7 @@
  */
 
 import { ENGINE_HOST, ENGINE_PORT } from "./constants.js";
+import { appLogger } from "./app-log.js";
 
 /**
  * The URL Chromium is asked about.
@@ -130,7 +131,7 @@ export const defaultProxyResolutionSystem: ProxyResolutionSystem = {
 		});
 		if (!response.ok) throw new Error(`config responded ${response.status}`);
 	},
-	log: (message) => console.error(message),
+	log: (message) => appLogger().error("main", message),
 };
 
 /**

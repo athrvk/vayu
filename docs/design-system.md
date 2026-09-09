@@ -1150,6 +1150,7 @@ hides icons from a scale audit and lets off-grid values (15px) creep in. Use
 ```css
 --radius: 0.375rem;      /* 6px - base border radius (default) */
 --dock-height: 2rem;     /* 32px - footer status strip */
+--rail-width: 2.5rem;    /* 40px - ActivityRail and ContextRail */
 ```
 
 **`--dock-height` exists because a `fixed` element has to know it.** The Dock is
@@ -1164,6 +1165,15 @@ Both sides now go through the token - `h-[var(--dock-height)]` on the Dock,
 `bottom-[calc(var(--dock-height)+1rem)]` on the viewport - so the height cannot
 change in one place only. jsdom does no layout and cannot measure the overlap, so
 `toast-position.test.tsx` guards the *reference* on each side instead.
+
+**`--rail-width` is the same rule at the window's side edges** (#1615). Both
+`ActivityRail` (left) and `ContextRail` (right) read it, so the app can never
+end up with two window-edge navigation strips of different widths - a single
+`w-[var(--rail-width)]` on each is what keeps them in step, the same way one
+`--dock-height` keeps the Dock and the toast viewport from drifting apart.
+Unlike the Drawer and the ContextBar, a rail is not user-resizable: it holds a
+fixed row of icon buttons, so a token rather than a `PANEL_MIN_WIDTH`-style
+stored preference is the right amount of mechanism.
 
 | Class | Value | Follows the setting? |
 |-------|-------|----------------------|
@@ -1506,7 +1516,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **18 directives across 12 files**, listed
+file that provides the missing half. **19 directives across 13 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1522,6 +1532,11 @@ not rule names - two of these lines silence two rules at once.
   `jsx-a11y/click-events-have-key-events` on the close affordance, which is
   Delete or Backspace on the focused row and a `tabIndex={-1}` pointer target
   here.
+- `components/layout/ActivityRail.tsx` (1) -
+  `jsx-a11y/no-noninteractive-element-interactions` on the `<nav>`: roving
+  `tabindex` for Up/Down between the six view buttons, the same shape
+  `TabStrip`'s tablist uses for Left/Right, on a landmark rather than a widget
+  role because the rail is deliberately `role="toolbar"`-free (#1615).
 - `components/layout/Dock.tsx` (3) - `jsx-a11y/no-noninteractive-tabindex`
   three times: the Radix `TooltipTrigger` wires focus and blur to the tooltip
   holding the engine error text, the same shape again on the save-error
@@ -2184,12 +2199,14 @@ the only one.
 ```
 Shell                            flex flex-col h-full bg-background
 ├── row (flex-1)
+│   ├── ActivityRail (nav)   w-[var(--rail-width)], bg-panel - the six view
+│   │                        buttons, on the window's left edge (#1615)
 │   ├── Drawer (aside)       220–480px, default 260px, bg-panel - one of the six
 │   │                        views, plus its PanelResizeHandle on the right edge
-│   └── content column       TabStrip, then main beside the ContextBar
-│                            (220–480px, its handle on the left edge)
-└── Dock                     h-[var(--dock-height)] border-t border-border - the
-                             view switcher, along the bottom of the window
+│   └── content column       TabStrip, then a row of [main + ContextBar]
+│                            beside ContextRail (w-[var(--rail-width)])
+└── Dock                     h-[var(--dock-height)] border-t border-border -
+                             ambient status only, along the bottom of the window
 ```
 
 ### The panels that resize, and the one handle that resizes them
@@ -2214,37 +2231,65 @@ because a drag there resized a box inside a pane the user had already sized, and
 held that size in component state that Radix threw away on the next tab switch
 (#1323). The pane's own splitter is the one control for how tall an editor is.
 
+### ActivityRail and ContextRail
+
+The primary navigation runs down the window's left edge, not along its bottom
+(#1615): the OS Dock auto-hides over the app's lowest 60-80px on macOS, so a
+switcher living there is the one target on screen the system can cover mid-use.
+`ActivityRail` (`app/src/components/layout/ActivityRail.tsx`) is a
+`<nav aria-label="Sidebar views">`, `w-[var(--rail-width)]`, holding the six
+`RailButton`s the Dock used to render, top-aligned rather than pinned to the
+rail's own bottom (a bottom cluster is the same Dock problem in miniature).
+`ContextRail` (`ContextRail.tsx`) is the same shape on the right edge: one
+button per `CONTEXT_BAR_SECTIONS` entry the active tab has something for.
+
+- **`RailButton` (`RailButton.tsx`) is `w-full h-9` with a `w-4 h-4` icon**,
+  icon-only so `aria-label` is the accessible name and the chord (where there
+  is one) stays out of it - a tooltip supplies `aria-describedby` while open,
+  never a name. Two variants: `"edge-left"`/`"edge-right"` paint a 2px
+  `border-*-primary` bar on the rail's outer edge when active and nothing
+  else - not a filled tile, which would read as a toolbar of independent
+  actions rather than one mutually-exclusive choice of what the Drawer shows.
+  `"tile"` is the ordinary `bg-accent text-accent-foreground` icon-toggle look,
+  for `ContextRail`'s buttons, which are a multi-select set of expanded
+  sections rather than a single current view.
+- **ActivityRail's names, marks and order** read from
+  `constants/drawer-views.ts` and its chords from `constants/shortcuts.ts`, so
+  the palette offering the same six cannot name them differently. Deliberately
+  not `role="toolbar"`, the same choice the Dock nav it replaces made: arrow
+  keys move focus (`ArrowUp`/`ArrowDown`, roving `tabindex`, mirroring
+  `TabStrip`'s handler), but claiming full toolbar semantics for six toggle
+  buttons would overstate what six toggle buttons are.
+- **Clicking the open view's button closes the drawer.** The buttons call
+  `activateDrawerView`, which switches the view and toggles `drawerOpen` only
+  when that view is already showing. A small `status-success-text` dot on the
+  Services button is the one badge the footer carried that moved here - the
+  running-services count itself stays in the Dock too (see below).
+- **ContextRail renders nothing when the context bar has nothing for the active
+  tab** (`contextBarHasContent`, the same predicate the Dock's toggle used to
+  read). Clicking a section's icon opens the bar if closed, expands that
+  section if collapsed, and scrolls it into view with `scrollWithin`
+  (`@/lib/scroll-within`, #1612) rather than `Element.scrollIntoView`; clicking
+  the icon of the section that is the only one expanded collapses the whole
+  bar. Present in both of `ContextBar`'s layout modes - see below.
+
 ### Dock
 
-The view switcher runs along the bottom of the window, not down its left edge:
-`Dock` (`app/src/components/layout/Dock.tsx`) is one flex row,
+The footer is ambient status only, since #1615 moved its two switchers onto the
+rails above: `Dock` (`app/src/components/layout/Dock.tsx`) is one flex row,
 `h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0`. The
 height is that token rather than a bare `h-8` because the toast viewport is
 `fixed` and offsets itself above this strip by the same value - the token is what
 keeps the two from drifting apart.
 
-- **Left - the six view buttons.** A `<nav aria-label="Sidebar views">`, its
-  names, marks and order read from `constants/drawer-views.ts` and its chords
-  from `constants/shortcuts.ts`, so the palette offering the same six cannot name
-  them differently. Deliberately not `role="toolbar"`: that promises arrow-key
-  traversal between the buttons, which this does not implement.
-- **A button is `w-7 h-7 rounded-md text-xs` with a `w-4 h-4` icon** -
-  `bg-accent text-accent-foreground` while its view is the open one, and
-  `text-muted-foreground hover:bg-muted/50 hover:text-foreground` otherwise. It
-  is icon-only, so its `aria-label` is the accessible name and the chord stays
-  out of it: a tooltip supplies `aria-describedby` while open, never a name.
-- **Middle - ambient status.** The engine connection light (a `bg-current` dot
-  plus Starting… / Connected / Disconnected, on `status-success-text` when
-  connected and `--muted-foreground` otherwise), a running-services button and a
-  pending-restart button that render only when there is something to report, the
-  save status, and the version string. **This strip is where the connection
-  state lives** - no sidebar footer carries a second copy.
-- **Right - the context bar toggle**, the same button component again, pressed
-  on what is visible rather than on the stored open flag.
-- **Clicking the open view's button closes the drawer.** The buttons call
-  `activateDrawerView`, which switches the view and toggles `drawerOpen` only
-  when that view is already showing; an ambient chip pointing at a view calls
-  `revealDrawerView`, which opens and never closes.
+The engine connection light (a `bg-current` dot plus Starting… / Connected /
+Disconnected, on `status-success-text` when connected and `--muted-foreground`
+otherwise), a running-services button and a pending-restart button that render
+only when there is something to report, the save status, and the version
+string. **This strip is where the connection state lives** - no sidebar footer
+carries a second copy. Every item here already has a non-footer path when
+there is something to click, so the system Dock covering this strip on macOS
+costs a glance, never a click.
 
 ### Drawer
 
@@ -2949,8 +2994,11 @@ opt-out.
 | `app/tailwind.config.js` | Color mapping, font families, keyframes, animation aliases |
 | `app/index.html` | Pre-paint appearance script; no font `<link>` (see `fonts.css`) |
 | `app/src/fonts.css` | Bundled `@fontsource` imports for all six font families |
-| `app/src/components/layout/Shell.tsx` | Root layout - the drawer row, the content column (TabStrip, main, ContextBar), the Dock, and the window chords |
-| `app/src/components/layout/Dock.tsx` | The bottom strip - six view buttons, ambient status, context bar toggle |
+| `app/src/components/layout/Shell.tsx` | Root layout - the ActivityRail, the drawer row, the content column (TabStrip, main, ContextBar, ContextRail), the Dock, and the window chords |
+| `app/src/components/layout/ActivityRail.tsx` | Left-edge nav - the six view buttons the Dock used to hold, with roving tabindex |
+| `app/src/components/layout/ContextRail.tsx` | Right-edge nav - one icon per applicable context-bar section |
+| `app/src/components/layout/RailButton.tsx` | The icon button shared by both rails - edge-indicator and tile variants |
+| `app/src/components/layout/Dock.tsx` | The bottom strip - ambient status only (engine light, version, services, save state, pending restart) |
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |

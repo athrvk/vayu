@@ -11,6 +11,7 @@ import { app, dialog, ipcMain, shell } from "electron";
 // be pulled off the default import.
 import electronUpdater from "electron-updater";
 import { resolveUpdateStrategy, type UpdateStrategy } from "./updater-strategy.js";
+import { appLogger } from "./app-log.js";
 import {
 	REPO,
 	UPDATE_CHECK_INTERVAL_MS as CHECK_INTERVAL_MS,
@@ -245,7 +246,7 @@ function handleCheckFailure(err: unknown): void {
 	failedAttempt = attempt;
 
 	if (attempt > 0 && attempt < MAX_CHECK_ATTEMPTS) {
-		console.error(`[Updater] first check failed, retrying once: ${message}`);
+		appLogger().error("updater", "First check failed, retrying once", { error: message });
 		retryTimer = setTimeout(() => {
 			retryTimer = null;
 			attempt += 1;
@@ -311,7 +312,7 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	});
 
 	if (strategy === "disabled") {
-		console.log("[Updater] disabled (development)");
+		appLogger().info("updater", "Disabled (development)");
 		return;
 	}
 
@@ -349,7 +350,7 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	});
 
 	autoUpdater.on("error", (err) => {
-		console.error("[Updater] error:", err);
+		appLogger().error("updater", "Error", { error: String(err) });
 		handleCheckFailure(err);
 	});
 

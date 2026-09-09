@@ -45,6 +45,7 @@ function region(name: AppRegion, ...buttonIds: string[]): HTMLElement {
 /** The whole window, in the order the Shell renders it. */
 function fullShell(): void {
 	region("banner", "banner-search");
+	region("rail", "rail-collections");
 	region("drawer", "drawer-first", "drawer-second");
 	region("main", "main-first");
 	region("context", "context-first");
@@ -62,10 +63,38 @@ describe("the regions on screen", () => {
 		fullShell();
 		expect(appRegions().map((el) => el.getAttribute(REGION_ATTRIBUTE))).toEqual([
 			"banner",
+			"rail",
 			"drawer",
 			"main",
 			"context",
 		]);
+	});
+});
+
+describe("the activity rail (#1615)", () => {
+	// The rail is always on screen, unlike the drawer it sits beside - this is
+	// the case the issue names: F6 must still reach the app's primary
+	// navigation with the drawer collapsed, since a closed drawer is simply
+	// absent from the DOM (see "bands the cycle has to step over" above).
+	it("is reachable from the banner even with the drawer collapsed", () => {
+		region("banner", "banner-search");
+		region("rail", "rail-collections");
+		region("main", "main-first");
+		document.getElementById("banner-search")?.focus();
+
+		expect(cycleRegionFocus(1)).toBe(true);
+		expect(activeId()).toBe("rail-collections");
+	});
+
+	it("hands off to the drawer when it is open", () => {
+		fullShell();
+		document.getElementById("banner-search")?.focus();
+
+		expect(cycleRegionFocus(1)).toBe(true);
+		expect(activeId()).toBe("rail-collections");
+
+		expect(cycleRegionFocus(1)).toBe(true);
+		expect(activeId()).toBe("drawer-first");
 	});
 });
 

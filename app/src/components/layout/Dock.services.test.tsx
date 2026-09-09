@@ -16,12 +16,11 @@
  * listening?" anywhere. The Dock's middle region already carries that class of
  * fact (the connection light), so the aggregate indicator lives there.
  *
- * Two claims, and the second is the one a source scan could not make:
- *
- * 1. The fifth Dock button exists and activates the services drawer view.
- * 2. **Nothing renders when nothing runs.** Mutation-check: make
- *    `RunningServices` render unconditionally and the first case below fails,
- *    because "0 services" appears in a Dock with an empty engine.
+ * The claim this file makes now, since #1615 moved the drawer switchers
+ * (including the Services button `ActivityRail.test.tsx` covers) off the Dock:
+ * **nothing renders when nothing runs.** Mutation-check: make
+ * `RunningServices` render unconditionally and the first case below fails,
+ * because "0 services" appears in a Dock with an empty engine.
  *
  * The transport is mocked and the real queries and hooks run, so the count is
  * computed the way the app computes it - including the asymmetry between the
@@ -129,22 +128,6 @@ beforeEach(() => {
 	// The count is gated on this, and the store's own default is `starting` - a
 	// list that answered at all came from an engine that was up.
 	useEngineStore.setState({ engineStatus: "connected", engineError: null });
-});
-
-describe("the services drawer switcher", () => {
-	it("is in the Dock's sidebar navigation, with its chord in the tooltip", () => {
-		renderDock();
-		const button = screen.getByRole("button", { name: "Services" });
-		expect(button).toBeInTheDocument();
-		expect(button.getAttribute("aria-pressed")).toBe("false");
-	});
-
-	it("activates the services view", () => {
-		renderDock();
-		fireEvent.click(screen.getByRole("button", { name: "Services" }));
-		expect(useLayoutStore.getState().drawerView).toBe("services");
-		expect(useLayoutStore.getState().drawerOpen).toBe(true);
-	});
 });
 
 describe("the running-services indicator", () => {
