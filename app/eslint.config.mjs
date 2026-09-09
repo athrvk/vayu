@@ -97,7 +97,7 @@ export default [
 			// a row, or the command palette - where moving focus into the thing the
 			// user just opened is the WAI-ARIA dialog pattern, not the page-load
 			// autofocus this rule exists to prevent. Off here rather than suppressed
-			// fourteen times, the same call `no-console` gets for `electron/`.
+			// fourteen times.
 			"jsx-a11y/no-autofocus": "off",
 
 			// The rule recognises a nested control by lower-case tag name, so it
@@ -135,16 +135,17 @@ export default [
 		},
 	},
 
-	// Main process: its console IS the app's log. `electron/` runs in Node and
-	// writes to the terminal the user launched Vayu from - the sidecar's engine
-	// lifecycle, the lock-file recovery, the updater's disabled-in-dev line.
-	// That output is diagnosed from, not left-over debug chatter, so `no-console`
-	// is off here rather than suppressed 35 times. The renderer keeps the rule:
-	// its console is DevTools, which nobody reads and everybody ships.
+	// Main process: `electron/log.ts` is the log now (#1558) - a structured
+	// record, a file, a console renderer gated by the engine's `logLevel`. A
+	// bare `console.*` call bypasses all of it (no category, no redaction, no
+	// file), so the base rule's `warn`/`error` allowance is withdrawn here too;
+	// the one legitimate exception (preload.ts runs in the renderer process,
+	// not main, so it cannot reach the main-process logger) is suppressed at
+	// its own line, with the reason.
 	{
 		files: ["electron/**/*.{ts,tsx}"],
 		rules: {
-			"no-console": "off",
+			"no-console": "error",
 		},
 	},
 
