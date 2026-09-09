@@ -27,21 +27,6 @@ namespace vayu::http {
 std::string read_script (const nlohmann::json& json, const char* list_key, const char* legacy_key);
 
 /**
- * Read the post-request (test) script from a load-run payload.
- *
- * **One script, several names**, kept for `POST /runs` alone: issue #1514
- * cut `POST /execute` and the stored resources over to `elements`, refusing
- * `preRequestScript(s)` / `postRequestScript(s)` / `tests` outright, but a
- * load run's own deferred validation script (issue #1495's job to fold into
- * the pipeline) still reads through here exactly as before, under
- * `postRequestScripts`, `postRequestScript` or `tests` in either form - the
- * names are tried in that fixed order and the **first that yields a
- * non-blank script wins**; they are never merged. Add a new spelling to the
- * table in the .cpp, not to a call site.
- */
-std::string read_post_request_script (const nlohmann::json& json);
-
-/**
  * Whether this payload's scripts may issue requests through `pm.sendRequest`.
  *
  * Read under `allowScriptRequests`. **Absent, null or non-boolean all mean

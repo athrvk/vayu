@@ -4201,7 +4201,8 @@ and is never re-resolved - see [POST /execute](#post-execute) and
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to
   `inherit`), the resolved `elements` list (collection chain root→leaf, then
-  the request's own, each stamped with its origin - see [Elements](elements.md)),
+  the request's own, each stamped with its origin, disabled and blank
+  `script.*` entries dropped the same way - see [Elements](elements.md)),
   the stored execution options (`followRedirects` /
   `maxRedirects` / `httpVersion` / `verifySSL`, always emitted) and its `requestName` (the
   script sandbox reads it as `pm.info.requestName`; omitted when the row's name
@@ -4543,8 +4544,9 @@ checked in the MCP server, before it calls this endpoint, so a request issued
 from inside a script never passes that gate. Denying unless a caller asks means
 a client that forgets gets a script that cannot send rather than unchecked
 egress. The app's Send and load runs send `true`; the MCP server never does.
-`POST /runs` reads the same field for its deferred `tests` validation, so one
-script behaves the same on both. Read **before** the `stream` branch, so a
+`POST /runs` reads the same field for a `script.post` element's deferred
+validation (its `requestElements`, below), so one script behaves the same on
+both. Read **before** the `stream` branch, so a
 streaming send's scripts are governed by it exactly as a buffered send's are -
 the app sends it on both halves of Send (issue #653). See
 [scripting.md](scripting.md#sending-a-request-from-a-script-pmsendrequest).
@@ -4941,12 +4943,12 @@ Start a load test run (Vayu Mode).
   "targetRps": 1000,         // Target requests per second (constant_rps mode)
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
-  "requestName": "Create user",       // Optional, read by the tests script as pm.info.requestName
+  "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional
-  "tests": "",               // Optional, deferred validation script
+  "requestElements": [],     // Optional step-level elements for THIS request - see below
   "data": [],                // Optional data rows, one object per row - see below
   "thresholds": {},          // Optional pass/fail budgets - see below
-  "elements": {},            // Optional element-pipeline override for a scenario load run - see below
+  "elements": {},            // Optional element-pipeline override, either run shape - see below
   "lifecycleElements": [],   // Optional script.setup/script.teardown for THIS run only - see below
   "monitor": {},             // Optional server-vitals scrape - see below
   "followRedirects": true,   // Optional, default true - see POST /execute
@@ -5192,7 +5194,14 @@ own unknown-key rule uses, checked before the run row is created.
   same rule `scripts` above uses. `timer.think`'s `step.between` phase now
   dispatches on a scenario load run too (non-blocking, summed into
   `VirtualUser::ready_at_ms`), so this override reaches load runs as well as
-  the sequential run.
+  the sequential run. `timer.pacing` and `timer.throughput` schedule their
+  wait before that step's `ElementContext` exists at all
+  (`Element::scheduled_ready_delay_ms`, see
+  [Load paths](elements.md#load-paths)); `"off"` reaches
+  them there too, through the run's own copy of the override
+  (`SharedScheduleState::timers_override`), so a run with `timers: "off"`
+  defers neither kind under load - `"fixedMs"`/`{"minMs", "maxMs"}` are not
+  yet threaded through that same seam.
 - **`seed`** (issue #1498) is an optional non-negative integer that seeds this
   run's RNG, making a `timer.think` element's gaussian or uniform-random wait
   reproducible. A scenario load run derives one independent generator per
@@ -5206,12 +5215,96 @@ aggregate. What a `timer.*` element waited is per-step, per-element -
 [The step trace](elements.md#the-step-trace)) - not rolled up into
 `GET /runs/:runId` / the completion report's `summary` object.
 
-Not part of this block: a **single-request** `POST /runs` payload has no
-step-level `elements` attachment point at all (see `tests` above), so this
-block is accepted there too - the validator does not distinguish the two run
-shapes - but has nothing to override. Its own place to declare
-`script.setup` / `script.teardown` is the separate `lifecycleElements` array
-below.
+Not part of this block: a **single-request** `POST /runs` payload's step-level
+attachment point is the separate `requestElements` array below, not this
+one - this block is accepted on either run shape (the validator does not
+distinguish them), and on a single-request run it overrides what
+`requestElements` declares, the same way it overrides a scenario's stored
+elements. The run's own boundary, `script.setup` / `script.teardown`, is a
+third array again, `lifecycleElements`, further below.
+
+#### The `requestElements` array (a single-request run's own step-level elements)
+
+A **single-request** `POST /runs` payload's own place to attach step-level
+elements to the one request it sends (issue #1594): before this, a
+single-target load run ran no element pipeline at all, so the same request's
+`extract.*` / `assert.*` / `timer.think` / `script.*` elements that run in a
+design send, a sequential collection run, and a scenario load run's steps
+never ran under a single-target load run. An array of element descriptors,
+the same shape a request's own stored `elements` column holds:
+
+```jsonc
+{
+  "requestElements": [
+    { "kind": "script.pre", "config": { "script": "pm.request.headers['X-Sig'] = sign()", "inline": true } },
+    { "kind": "assert.status", "config": { "in": [200] } },
+    { "kind": "script.post", "config": { "script": "pm.test('ok', function () { pm.expect(pm.response.code).to.eql(200); })" } }
+  ]
+}
+```
+
+Validated the same way a stored `elements` column is (`Registry::validate`
+per entry, a bad `kind` or `config` a `400` naming the index); `id` and
+`enabled` are optional, defaulting to a generated id and `true`. Refused
+outright beside a `scenario` block, whose steps already carry their own
+resolved elements from the plan. This is the field MCP's `start_load_run`
+renames a composed request's chain-then-own `elements` onto, since `POST
+/compose` answers under the plain `elements` key and this endpoint's own
+`elements` key means something else (the override block above) - see
+[mcp.md](mcp.md#request-composition).
+
+**Only the kinds this run shape's own hooks actually dispatch are accepted**:
+`extract.*`, `assert.*`, `timer.think`, `script.pre`/`script.post` - the same
+phase-0 set issue #1514 gave the design send. A `control.*` kind or
+`timer.pacing`/`timer.throughput` is a `400` naming the index and the kind,
+never silently accepted and left inert: those need per-VU controller and
+pacing state (`controller_state`, `SharedThroughputCounters`,
+`pacing_state`) this run shape's single-submission model has no equivalent
+of, and admitting one without running it would report `"ok"` in
+`summary["elements"]` for behaviour that never happened. Run a sequence that
+needs a controller as a `"scenario"` instead, where its steps carry that
+state.
+
+`vayu::core::ElementPipeline` runs the compiled list per submission, the same
+phases a design send uses: `script.pre` at `step.before`, `extract.*` /
+`assert.*` / `script.post` at `step.after`. **A `script.*` element runs
+inline only when marked or forced.** Unlike a design send or a sequential
+collection run, a load submission has no persistent per-VU object to defer a
+script onto, so a `script.pre` or `script.post` element runs inline, per
+submission, only when its own `config.inline` is `true` or this run's
+`elements.scripts` override (above) is `"allInline"`; left unmarked with no
+override, `script.post` still runs, but *deferred* - on the run's completion
+replay, the same way a plain `tests` string used to - while `script.pre`
+simply never runs at all, because there is no pre-request replay to defer it
+to. `RunContext::script_element_runs_inline` is the one place that decision
+is made, shared with the scenario load path's own step dispatch.
+`timer.think`'s wait is folded into `maintain_concurrency`'s own
+backpressure (`RunContext::reserve_think_wait`) rather than a blocking sleep
+on a worker thread, so a request-level timer costs no new thread the way the
+scenario load path's per-VU wait does.
+
+**A `script.pre` element's edits reach the wire, and its scope's writes reach
+later `{{tokens}}` in the same submission.** When `requestElements` is
+non-empty, each submission resolves against a small, request-scoped variable
+overlay (`vayu::http::routes::ScopeOverlay`) layered over the run's
+flattened base scopes, and the residual-token pass
+(`resolve_residual_tokens`, [Request composition](#post-compose)) runs
+against that view before the transfer - so a `pm.environment.set` (or a
+`pm.request` edit) an inline `script.pre` makes is visible to any
+`{{token}}` compose could not already resolve on that same request, the
+same guarantee a scenario load run's per-VU overlay gives its own steps.
+Nothing shares this overlay across submissions - each one gets its own,
+discarded after - which is what keeps many concurrent submissions from
+writing through one shared map.
+
+**`pm.info.requestName` is not bound for an inline element on this path.**
+The deferred replay (the un-inlined `script.post` case, `test_script`) reads
+`requestName` off the run's own config exactly as it always has; an inline
+`script.pre` / `script.post` element's `ScriptContext` does not carry it,
+since binding it is the scenario load path's own `bind_step_identity` call
+(`scenario_load.cpp`), which this path has no equivalent of yet. An inline
+script reading `pm.info.requestName` sees `undefined`, not the name a
+deferred one on the same run would.
 
 #### The `lifecycleElements` array (a single-request run's own setup/teardown)
 
@@ -5251,15 +5344,18 @@ terminal status. Both read and write the same variable scopes every other
 script of the run shares - the environment named by `environmentId`, and the
 collection scope of the request `requestId` links, when the run links one;
 a bare URL run with no `requestId` gets no collection scope. Unlike a
-collection-backed run, nothing on this run shape's own submission reads
-those scopes back: there is no per-request residual-token pass on the
-single-request load path (`load_strategy.cpp` is unchanged), so a
-`pm.environment.set` in `script.setup` is not a way to inject a value into
-`method` / `url` / `headers` / `body` above - only `pm.sendRequest` (external
-side effects) and the `lifecycle` outcomes in the report are observable from
-this run shape's own script.setup/teardown today. See
-[elements.md](elements.md#kinds) for the shared dispatch mechanism a
-collection-backed run uses for the same two kinds.
+collection-backed run, `script.setup` / `script.teardown` alone do not make
+those scopes reach the request: the residual-token pass a `requestElements`
+entry gets (see above) only runs when `requestElements` is itself non-empty,
+because that pass reads the same base scopes `run_collection_setup` only
+loads once one of the two arrays is present, and `lifecycleElements` alone
+still leaves `method` / `url` / `headers` / `body` reading nothing back. So a
+`pm.environment.set` in `script.setup` reaches a later `{{token}}` only when
+the run also declares `requestElements`; with `lifecycleElements` alone,
+`pm.sendRequest` (external side effects) and the `lifecycle` outcomes in the
+report are the only things observable from this run shape's own
+script.setup/teardown. See [elements.md](elements.md#kinds) for the shared
+dispatch mechanism a collection-backed run uses for the same two kinds.
 
 #### The `monitor` block (server vitals)
 
@@ -5949,38 +6045,41 @@ fails the run by itself; both also feed the top-level `warnings` array below.
 }
 ```
 
-**`tests` accepts both forms** - the legacy single string, or a list of parts
-(`[{ "origin": "collection" | "request", "id", "name", "script" }]`) that the
-engine joins itself, unchanged since before issue #1514 (see
-[scripting.md](scripting.md#script-elements-design-send-and-the-sequential-run)).
-The list wins when both are sent. Sending the collection chain's parts means its
-assertions are now actually checked under load - previously only the
-request's own `tests` string was ever sent, so a collection-level assertion
-passed in design mode and was silently never validated by a load run.
+**`tests`, `postRequestScript(s)` and `preRequestScript(s)` are refused
+outright** (`refuse_legacy_script_fields`), the same rule `POST /execute`,
+`PUT /requests/:id` and `PUT /collections/:id` already applied since issue
+#1514 - a payload carrying any of the five names (a real value, not `null`)
+is a `400`, before the run row exists. The name it points a caller at
+depends on the shape: `requestElements` for a single target (this endpoint's
+own `elements` means the run-level override, not a script source, and
+pointing there would send a caller straight into a second refusal), plain
+`elements` for a scenario (its steps read theirs off the bound collection's
+stored elements, which no field on this payload can name more precisely).
+`POST /runs` was the one route that still read the old names on a single
+target - it had nothing else to run a script through until its own element
+pipeline existed - and issue #1594 closed that gap: `requestElements`
+(above) is a single target's own script slot now, the same way a scenario's
+steps already read theirs off the plan's compiled elements. A caller still
+sending `tests` gets the same refusal every other route already gives;
+MCP's `start_load_run` never sends it - it folds the
+agent-facing `postRequestScript` / `tests` argument into a `script.post`
+entry of `requestElements` client-side (see
+[mcp.md](mcp.md#request-composition)).
 
-**`tests` and `postRequestScript(s)` are the same field, still accepted here.**
-The post-request script is stored as `postRequestScript`, `POST /execute` grew
-up calling it `postRequestScript(s)`, and this endpoint calls it `tests`. This
-single-target `POST /runs` still accepts all three names - the names are tried
-in a fixed order (`postRequestScripts`, `postRequestScript`, then `tests`) and
-the first that yields a non-blank script wins; they are never merged. **`POST
-/execute`, `PUT /requests/:id` and `PUT /collections/:id` no longer do**: since
-issue #1514, `elements` is the only script source there and a payload carrying
-any of the three (a real value, not `null`) is refused with a `400` naming
-`elements`. A payload composed for one of those and sent to this endpoint
-unchanged still starts a load run - which is how a saved request's composed
-test scripts reach one - but the reverse no longer holds. Wiring this
-endpoint's own single-target request onto the element pipeline and refusing
-the three names here too is issue #1594, not yet landed; until it does, this
-is deliberately the one route that still reads them.
-
-**There is no pre-request hook on this endpoint.** `preRequestScript(s)` in a
-run payload is not an error, but nothing runs it - only `POST /execute` executes
-a pre-request script. A request that signs itself in one is sent unsigned under
-load. Since issue #1503 this is no longer silent: a scenario step whose request
-carries a pre-request script reports `preRequestScript: "skipped"` on its
-`scenario.steps` entry, and the run's `warnings` array carries one line naming
-how many steps did.
+**A `script.pre` element only reaches the wire when it is marked to.** The
+ad-hoc `preRequestScript(s)` field itself is refused (see above, same as
+`tests`) - a pre-request script only ever rides as a stored `script.pre`
+element now, on either run shape. Unmarked (`config.inline` unset, no
+`elements.scripts: "allInline"` override), it never runs - there is no
+pre-request replay to defer it to, unlike `script.post` - so a request that
+signs itself in one is sent unsigned. Since issue #1503 this is no longer
+silent on the scenario shape: a step whose request carries an un-inlined
+pre-request script reports `preRequestScript: "skipped"` on its
+`scenario.steps` entry, and the run's `warnings` array carries one line
+naming how many steps did. The single-target shape reports the same fact
+differently (see `requestElements` above): an un-inlined `script.pre`
+element's own entry in `summary["elements"]` carries the `"skipped"`
+outcome instead of a separate warning line.
 
 **Accepted ranges.** The numeric config is range-checked **before the run row is
 created**, so a rejected request leaves no `pending` row behind. A violation is

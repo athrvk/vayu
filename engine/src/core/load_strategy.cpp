@@ -8,8 +8,10 @@
 #include "vayu/core/load_strategy.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
+#include <format>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -17,6 +19,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 
@@ -406,6 +409,85 @@ const nlohmann::json& config) {
 
 namespace {
 
+/**
+ * The kinds `run_request_elements_step_before` / `_after_submission`
+ * actually know how to run (issue #1594's own scope: `extract.*`, `assert.*`,
+ * `timer.think`, `script.pre`/`script.post` - the same phase-0 set #1514
+ * landed for the design send). Every other kind `Registry::validate` would
+ * otherwise accept under `ElementOwner::Request` needs state this run shape
+ * never binds - `control.*` needs `controller_state` /
+ * `SharedThroughputCounters` (a plan-wide scan neither `RunContext` nor
+ * `submit_one_request` ever builds for a lone request), `timer.pacing` /
+ * `timer.throughput` need `pacing_state` and the load path's own
+ * `scheduled_ready_delay_ms` dispatch (`ScenarioLoadDriver::finish_step`'s
+ * job, which has no single-request counterpart). Accepting one of these
+ * kinds here would not fail loudly: the pipeline would call `apply` with a
+ * null `controller_state`, most kinds no-op or run unconditionally against a
+ * null check, and the element would report `"ok"` in `summary["elements"]`
+ * for behaviour that never happened - `control.once` running on *every*
+ * submission being the sharpest example. Refusing the kind by name is the
+ * same "written and read by nothing" guard the single-target `elements`
+ * override refusal used before this issue existed; extending the set is a
+ * deliberate follow-up, not a schema oversight to work around.
+ */
+constexpr std::array<std::string_view, 10> REQUEST_ELEMENTS_SUPPORTED_KINDS{
+    "extract.json", "extract.regex", "extract.boundary", "assert.status",
+    "assert.jsonpath", "assert.contains", "assert.duration", "assert.size", "timer.think",
+    // script.pre / script.post checked separately below - HotPathClass::Script,
+    // not a literal comparison, per the extensibility contract's rule 1.
+};
+
+} // namespace
+
+std::optional<std::string> validate_request_elements_run_override (
+const nlohmann::json& config) {
+    const auto elements = config.find ("requestElements");
+    if (elements == config.end () || elements->is_null ()) {
+        return std::nullopt;
+    }
+    if (auto scenario = config.find ("scenario");
+    scenario != config.end () && !scenario->is_null ()) {
+        return "'requestElements' is only valid for a single-request run - a "
+               "scenario collection's steps already carry their own resolved "
+               "elements";
+    }
+    if (!elements->is_array ()) {
+        return "'requestElements' must be an array";
+    }
+
+    // Stamped the same way `validate_lifecycle_elements_run_override` stamps
+    // its array: a caller that named no id gets one here too, rather than a
+    // 400 asking it to invent one itself.
+    nlohmann::json stamped = *elements;
+    vayu::core::stamp_default_element_ids (stamped);
+    if (auto reason = vayu::core::Registry::instance ().validate (
+        stamped, vayu::core::ElementOwner::Request)) {
+        return reason;
+    }
+    for (size_t i = 0; i < stamped.size (); ++i) {
+        const auto& entry           = stamped[i];
+        const std::string kind_name = entry.value ("kind", "");
+        const auto* kind = vayu::core::Registry::instance ().find (kind_name);
+        const bool is_script =
+        kind != nullptr && kind->hot_path == vayu::core::HotPathClass::Script;
+        const bool is_supported = is_script ||
+        std::find (REQUEST_ELEMENTS_SUPPORTED_KINDS.begin (),
+        REQUEST_ELEMENTS_SUPPORTED_KINDS.end (),
+        kind_name) != REQUEST_ELEMENTS_SUPPORTED_KINDS.end ();
+        if (!is_supported) {
+            return std::format (
+            "requestElements[{}]: '{}' does not run on a single-target load "
+            "run - only extract.*, assert.*, timer.think and "
+            "script.pre/script.post do; run this as part of a \"scenario\" "
+            "instead",
+            i, kind_name);
+        }
+    }
+    return std::nullopt;
+}
+
+namespace {
+
 // Update the in-flight high-water mark (single writer: the strategy thread).
 inline void update_peak (const std::shared_ptr<RunContext>& context) {
     size_t f    = context->in_flight ();
@@ -460,14 +542,208 @@ class SubmissionRequest {
     size_t cursor_            = 0;
 };
 
+/**
+ * Runs @p context's `requestElements` `step.before` elements against @p
+ * request, mutating it in place and writing into @p overlay - a fresh
+ * overlay for this submission alone (issue #1594: "the overlay lives on the
+ * submission", never shared or persisted across submissions the way a
+ * scenario run's per-VU overlay is, since many submissions run concurrently
+ * with nothing to serialise them the way a virtual user does).
+ */
+void run_request_elements_step_before (const std::shared_ptr<RunContext>& context,
+vayu::Request& request,
+vayu::http::routes::ScopeOverlay& overlay) {
+    std::vector<vayu::core::ElementOutcome> outcomes;
+    vayu::ScriptResult pre_result;
+    vayu::ScriptResult unused_post_result;
+    vayu::core::ElementContext ctx{
+        .request  = request,
+        .response = nullptr,
+        .run_pre_script =
+        [&] (const std::string& script) {
+            auto& engine = vayu::http::routes::script_engine_for_this_thread (
+            context->step_script_config);
+            auto scopes = overlay.materialize (context->lifecycle_scopes);
+            auto script_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
+            vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            script_ctx.record_metric = [context] (const std::string& name,
+                                       vayu::core::CustomMetricType type, double value) {
+                context->metrics_collector->record_custom_metric (name, type, value);
+            };
+            auto result = vayu::http::routes::execute_script (
+            engine, script, script_ctx, "Pre-request");
+            overlay.replace_from (scopes);
+            return result;
+        },
+        .run_post_script    = nullptr,
+        .pre_script_result  = pre_result,
+        .post_script_result = unused_post_result,
+        .set_variable =
+        [&] (std::string_view scope, const std::string& name,
+        const std::string& value) { overlay.set (scope, name, value); },
+        .should_stop = nullptr,
+        .resolve_template =
+        [&] (const std::string& text) {
+            vayu::http::VariableValues vars = context->step_base_vars;
+            overlay.apply_onto (vars);
+            return vayu::http::resolve_template (text, vars);
+        },
+        .blocking_allowed = false, // An event-loop worker must never block here.
+        .timers_override = &context->timers_override,
+        .record_metric   = nullptr, // metric.record is step.after only.
+    };
+    vayu::core::ElementPipeline::run (vayu::core::Phase::StepBefore, ctx,
+    *context->step_elements, outcomes,
+    [context] (const vayu::core::CompiledElement& element) {
+        return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
+    });
+    // Tallied here and not only on the completion side: this is the only
+    // phase a `step.before` kind ever reports in, so an outcome dropped here
+    // is one the report can never show - `summary["elements"]` would simply
+    // have no entry for a `script.pre`, whether it ran or was deferred. The
+    // scenario path's `run_step_before` (scenario_load.cpp) records on the
+    // same edge.
+    for (const auto& outcome : outcomes) {
+        context->element_tallies.record (outcome.id, outcome.status);
+    }
+    // `pre_result.tests` is populated only when `script.pre` actually ran
+    // inline (a deferred one never invokes `run_pre_script`), the same inline
+    // half of issue #1497's assertion tally the scenario path folds in.
+    for (const auto& test : pre_result.tests) {
+        if (test.passed) {
+            context->inline_script_tests_passed.fetch_add (1, std::memory_order_relaxed);
+        } else {
+            context->inline_script_tests_failed.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+}
+
+/**
+ * Runs @p context's `requestElements` `step.after` and `step.between`
+ * elements for one completed submission - `step.after` against the response
+ * that came back, `step.between` for `timer.think`'s non-blocking wait
+ * (issue #1594), reserved on @p context through `reserve_think_wait` rather
+ * than applied to a `VirtualUser::ready_at_ms` there is none of here. Never
+ * blocks: this runs on an event-loop worker thread, inside the curl
+ * completion drain.
+ */
+void run_request_elements_after_submission (const std::shared_ptr<RunContext>& context,
+vayu::Request& request,
+const vayu::Response& response,
+vayu::http::routes::ScopeOverlay& overlay) {
+    std::vector<vayu::core::ElementOutcome> outcomes;
+    vayu::ScriptResult unused_pre_result;
+    vayu::ScriptResult post_result;
+    vayu::core::ElementContext ctx{
+        .request = request,
+        .response = const_cast<vayu::Response*> (&response), // NOLINT(cppcoreguidelines-pro-type-const-cast)
+        .run_pre_script = nullptr,
+        .run_post_script =
+        [&] (const std::string& script) {
+            auto& engine = vayu::http::routes::script_engine_for_this_thread (
+            context->step_script_config);
+            auto scopes = overlay.materialize (context->lifecycle_scopes);
+            auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
+            vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+            script_ctx.record_metric = [context] (const std::string& name,
+                                       vayu::core::CustomMetricType type, double value) {
+                context->metrics_collector->record_custom_metric (name, type, value);
+            };
+            auto result = vayu::http::routes::execute_script (
+            engine, script, script_ctx, "Post-request");
+            overlay.replace_from (scopes);
+            return result;
+        },
+        .pre_script_result  = unused_pre_result,
+        .post_script_result = post_result,
+        .set_variable =
+        [&] (std::string_view scope, const std::string& name,
+        const std::string& value) { overlay.set (scope, name, value); },
+        .should_stop = nullptr,
+        .resolve_template =
+        [&] (const std::string& text) {
+            vayu::http::VariableValues vars = context->step_base_vars;
+            overlay.apply_onto (vars);
+            return vayu::http::resolve_template (text, vars);
+        },
+        .blocking_allowed = false,
+        .record_metric =
+        [context] (const std::string& name, vayu::core::CustomMetricType type, double value) {
+            context->metrics_collector->record_custom_metric (name, type, value);
+        },
+        .max_body_bytes = context->max_element_body_bytes,
+    };
+
+    vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx,
+    *context->step_elements, outcomes,
+    [context] (const vayu::core::CompiledElement& element) {
+        return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
+    });
+    for (const auto& outcome : outcomes) {
+        context->element_tallies.record (outcome.id, outcome.status);
+    }
+    // Same rule as `run_request_elements_step_before`: empty unless
+    // `script.post` ran inline.
+    for (const auto& test : post_result.tests) {
+        if (test.passed) {
+            context->inline_script_tests_passed.fetch_add (1, std::memory_order_relaxed);
+        } else {
+            context->inline_script_tests_failed.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+
+    // `step.between` (issue #1594): `timer.think`'s load-path counterpart to
+    // the sequential run's own dispatch, run here instead of blocking a
+    // worker thread. There is no `VirtualUser::ready_at_ms` to stamp on a
+    // single-request run's anonymous submissions, so the wait is reserved on
+    // the run itself instead - see `RunContext::reserve_think_wait`. A fresh
+    // context, on the same terms `scenario_load.cpp`'s own `run_step_between`
+    // builds one: never read or written by a `step.between` kind
+    // (`timer.think`) beyond the request it is bound to for `pm.request`.
+    std::vector<vayu::core::ElementOutcome> between_outcomes;
+    vayu::ScriptResult between_pre_result;
+    vayu::ScriptResult between_post_result;
+    vayu::core::ElementContext between_ctx{
+        .request            = request,
+        .response           = nullptr,
+        .run_pre_script     = nullptr,
+        .run_post_script    = nullptr,
+        .pre_script_result  = between_pre_result,
+        .post_script_result = between_post_result,
+        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
+        .should_stop      = nullptr,
+        .blocking_allowed = false,
+        .timers_override  = &context->timers_override,
+        .record_metric    = nullptr,
+    };
+    vayu::core::ElementPipeline::run (vayu::core::Phase::StepBetween,
+    between_ctx, *context->step_elements, between_outcomes);
+    int64_t total_wait_ms = 0;
+    for (const auto& outcome : between_outcomes) {
+        total_wait_ms += outcome.waited_ms.value_or (0);
+        context->element_tallies.record (outcome.id, outcome.status);
+    }
+    context->reserve_think_wait (total_wait_ms);
+}
+
 /// Hand @p request to the event loop and account for it, with @p annotations on
-/// whatever record its completion produces.
+/// whatever record its completion produces. @p sent_request and @p overlay are
+/// non-null only for a submission whose run carries `requestElements` (issue
+/// #1594); non-null, they run `step.after` / `step.between` against the
+/// response before the shared `handle_result` records it.
 void submit_to_loop (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 const vayu::Request& request,
-const ResultAnnotations& annotations) {
+const ResultAnnotations& annotations,
+std::shared_ptr<vayu::Request> sent_request,
+std::shared_ptr<vayu::http::routes::ScopeOverlay> overlay) {
     context->event_loop->submit (request,
-    [context, &db, annotations] (size_t, const vayu::Result<vayu::Response>& result) {
+    [context, &db, annotations, sent_request = std::move (sent_request),
+    overlay = std::move (overlay)] (size_t, const vayu::Result<vayu::Response>& result) {
+        if (sent_request && overlay && result.is_ok ()) {
+            run_request_elements_after_submission (
+            context, *sent_request, result.value (), *overlay);
+        }
         handle_result (context, db, result, annotations);
     });
     context->requests_sent++;
@@ -530,16 +806,33 @@ SubmissionRequest& live) {
         std::optional<size_t> (iteration % data->rows.size ()),
         std::nullopt, iteration, SOLE_VIRTUAL_USER };
 
+    const bool has_step_elements =
+    context->step_elements && !context->step_elements->empty ();
+
     // The credentials are tested beside the request's own template because they
     // are a third thing a submission can have to bind (issue #1055) - a run
     // whose *only* token sits in a credential has no rows and an empty request
-    // template, and skipping the bind here would send it unauthenticated.
+    // template, and skipping the bind here would send it unauthenticated. Since
+    // issue #1594, a `step.before` kind is a fourth: it may write into the
+    // request itself, which - unlike a `step.after`-only kind, which only ever
+    // reads it back - needs a per-submission copy to isolate concurrent
+    // submissions from each other.
     if (data == nullptr && context->load_template.empty () &&
-    context->load_auth.credentials.empty ()) {
+    context->load_auth.credentials.empty () && !context->step_elements_have_step_before) {
         if (!context->load_unresolved_tokens.empty ()) {
             context->metrics_collector->record_unresolved_token (context->load_unresolved_tokens);
         }
-        submit_to_loop (context, db, live.current (), annotations);
+        if (!has_step_elements) {
+            submit_to_loop (context, db, live.current (), annotations, nullptr, nullptr);
+            return;
+        }
+        // No `step.before` kind to run and nothing to bind, so the request
+        // itself needs no per-submission copy - but `step.after` /
+        // `step.between` still need a stable, isolated request and scope
+        // overlay to run against once the response is back.
+        submit_to_loop (context, db, live.current (), annotations,
+        std::make_shared<vayu::Request> (live.current ()),
+        std::make_shared<vayu::http::routes::ScopeOverlay> ());
         return;
     }
 
@@ -562,18 +855,40 @@ SubmissionRequest& live) {
         return;
     }
 
-    // Whatever the bind above left unresolved goes on the wire regardless
-    // (issue #1503): a single-request load run runs no residual pass either,
-    // so the mistake is only counted, never refused. The token-free fast
-    // path above never copies `request` at all (issue #992) and is not
-    // scanned here for that reason - it records `context->load_unresolved_tokens`,
-    // scanned once by `start_run` before this loop began (issue #1540).
-    if (auto names = vayu::http::routes::unresolved_token_names (request);
+    auto overlay =
+    has_step_elements ? std::make_shared<vayu::http::routes::ScopeOverlay> () : nullptr;
+    if (has_step_elements && context->step_elements_have_step_before) {
+        run_request_elements_step_before (context, request, *overlay);
+    }
+
+    // Whatever the bind above (and a `step.before` extractor or script, when
+    // one just ran) left unresolved is re-resolved once against this
+    // submission's own overlay (issue #1594's residual pass, mirroring
+    // `scenario_load.cpp`'s `run_step_before` caller) when the run carries
+    // `requestElements`; a run without any still just counts the mistake,
+    // never refusing it (issue #1503), exactly as before this existed. The
+    // token-free fast path above never copies `request` at all (issue #992)
+    // and is not scanned here for that reason - it records
+    // `context->load_unresolved_tokens`, scanned once by `start_run` before
+    // this loop began (issue #1540).
+    if (has_step_elements) {
+        vayu::http::VariableValues vars = context->step_base_vars;
+        overlay->apply_onto (vars);
+        const auto refusal = vayu::http::routes::resolve_residual_tokens (request, vars);
+        auto still_unresolved = vayu::http::routes::unresolved_token_names (request);
+        if (refusal || !still_unresolved.empty ()) {
+            context->metrics_collector->record_unresolved_token (refusal ?
+            std::vector<std::string>{ refusal->error.message } :
+            std::move (still_unresolved));
+        }
+    } else if (auto names = vayu::http::routes::unresolved_token_names (request);
     !names.empty ()) {
         context->metrics_collector->record_unresolved_token (names);
     }
 
-    submit_to_loop (context, db, request, annotations);
+    auto sent_request =
+    has_step_elements ? std::make_shared<vayu::Request> (request) : nullptr;
+    submit_to_loop (context, db, request, annotations, sent_request, overlay);
 }
 
 } // namespace

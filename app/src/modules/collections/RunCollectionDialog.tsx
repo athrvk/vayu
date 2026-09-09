@@ -137,11 +137,15 @@ const DEFAULT_DURATION_SECONDS = "30";
  * collection run, load test or not - `RunContext`'s constructor reads it off
  * the payload the same way regardless of run shape (`run_manager.cpp`), and
  * `timer.pacing`/`timer.think` honour it in the sequential runner exactly as
- * they do under load (issue #1552's reopen). `scripts` stays load-only: the
- * design send and the sequential run already run every `script.*` element
- * inline, so a choice between inline and deferred has nothing to say until a
- * run is on the event loop. Matches `docs/engine/api-reference.md`'s
- * "elements" block exactly.
+ * they do under load (issue #1552's reopen). Under load, `"off"` reaches
+ * every `timer.*` kind (since #1498's reopen fix), but `fixedMs`/
+ * `{minMs, maxMs}` do not yet reach `timer.pacing`/`timer.throughput` there
+ * (#1620) - the sequential run this dialog also drives has no such gap, since
+ * it has no separate pre-scheduling hook to thread the override through.
+ * `scripts` stays load-only: the design send and the sequential run already
+ * run every `script.*` element inline, so a choice between inline and
+ * deferred has nothing to say until a run is on the event loop. Matches
+ * `docs/engine/api-reference.md`'s "elements" block exactly.
  */
 const TIMERS_DEFAULT = "asConfigured";
 const SCRIPTS_DEFAULT = "asMarked";

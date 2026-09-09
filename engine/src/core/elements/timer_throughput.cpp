@@ -97,8 +97,13 @@ class TimerThroughputElement final : public Element {
         if (!scope_entry_) {
             return std::nullopt;
         }
-        // The run-level `elements.timers` override cannot reach this call,
-        // for the reason `timer_pacing.cpp`'s own override comment states.
+        // The run-level `elements.timers` override is consulted through
+        // `shared.timers_override`, for the reason `timer_pacing.cpp`'s own
+        // comment states (issue #1498's reopen).
+        if (shared.timers_override != nullptr &&
+        shared.timers_override->mode == TimersOverride::Mode::Off) {
+            return std::nullopt;
+        }
         if (!per_user_) {
             // One rate shared across every virtual user: `shared.throughput`
             // is always non-null here, sized by the plan scan that found this

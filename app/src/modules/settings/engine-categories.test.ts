@@ -22,8 +22,8 @@ import { ENGINE_SETTINGS_EDITED_IN_APP } from "./engine-settings-edited-in-app";
 import { APP_SETTINGS_PANELS } from "./main/app-panels";
 import { APP_SETTINGS } from "./main/app-settings";
 
-/** Held in the testkit, so CI routes an edit to the seed back to this suite. */
-const [DATABASE_CPP] = ENGINE_READING_GUARDS.settingsShelves.paths.map(fromRepoRoot);
+/** Held in the testkit, so CI routes an edit to any of the seven back to this suite. */
+const CONFIG_SEED_FILES = ENGINE_READING_GUARDS.settingsShelves.paths.map(fromRepoRoot);
 
 describe("the engine category registry", () => {
 	it("lists the categories the engine seeds, in visit order", () => {
@@ -98,7 +98,9 @@ describe("the engine category registry", () => {
  * the only copy neither test can restate wrongly.
  */
 describe("the seed and the registry agree on the shelves", () => {
-	const seed = readFileSync(DATABASE_CPP, "utf8");
+	// One category, one file (#1611) - concatenated so the regexes below read
+	// across all seven the same way they used to read the one function.
+	const seed = CONFIG_SEED_FILES.map((path) => readFileSync(path, "utf8")).join("\n");
 
 	const registered = new Set<string>(ENGINE_SETTINGS_CATEGORIES.map((c) => c.id));
 

@@ -3746,30 +3746,35 @@ describe("start_load_run scenario runs", () => {
 		).toThrow();
 	});
 
-	test("refuses an elements override on a single-target run", async () => {
+	// Issue #1594: a single target's own `requestElements` now has a pipeline
+	// for the run-level override to reach, so `elements` is accepted here too,
+	// not only beside `scenario`.
+	test("accepts an elements override on a single-target run", async () => {
 		const client = scenarioLoadClient();
 		const res = await dispatchTool(
 			"start_load_run",
 			{ url: "https://api.example.com/x", elements: { timers: "off" }, confirmed: true },
 			ctxWith(client, allowed)
 		);
-		expect(res.isError).toBe(true);
-		expect(firstText(res)).toContain('"elements"');
-		expect(firstText(res)).toMatch(/no stored collection of/);
-		expect(client.startRun).not.toHaveBeenCalled();
-		expect(client.composeRequest).not.toHaveBeenCalled();
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		expect(payload.elements).toEqual({ timers: "off" });
 	});
 
-	test("declares elements so the single-target refusal survives schema validation", () => {
-		// An argument the schema does not declare is stripped by the SDK before
-		// the handler runs, which would drop the block in silence - the failure
-		// this refusal exists to prevent.
+	test("declares elements as usable on both a scenario and a single target", () => {
 		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
 			string,
 			z.ZodType
 		>;
 		expect(shape.elements).toBeDefined();
-		expect(shape.elements.description).toMatch(/Scenario runs only/);
+		expect(shape.elements.description).not.toMatch(/Scenario runs only/);
+		// The positive half: not merely "doesn't say scenario-only" (which an
+		// empty or unrelated description would also pass), but actually says
+		// the single-target case works.
+		expect(shape.elements.description).toMatch(/single target/i);
 	});
 
 	/**
@@ -5088,7 +5093,7 @@ describe("dispatchTool", () => {
 			.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>)
 			.parse(args);
 
-	test("start_load_run sends postRequestScript to /runs under the key it reads", async () => {
+	test("start_load_run sends postRequestScript to /runs as a script.post element", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"start_load_run",
@@ -5102,9 +5107,17 @@ describe("dispatchTool", () => {
 
 		expect(res.isError).toBeFalsy();
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(payload.tests).toBe("pm.test('ok', function () {});");
-		// Forwarding it verbatim would look right and validate nothing: the
-		// engine's run config reads `tests` and never `postRequestScript`.
+		expect(payload.requestElements).toEqual([
+			{
+				id: "mcp-script-post",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('ok', function () {});" },
+			},
+		]);
+		// The retired flat field (issue #1594's cut-over): POST /runs refuses it
+		// by name now, so it must never be built for this payload.
+		expect(payload.tests).toBeUndefined();
 		expect(payload.postRequestScript).toBeUndefined();
 	});
 
@@ -5287,7 +5300,7 @@ describe("dispatchTool", () => {
 		).toThrow();
 	});
 
-	test("start_load_run still accepts the engine's own `tests` spelling", async () => {
+	test("start_load_run still accepts the agent argument name `tests` as the same script", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"start_load_run",
@@ -5301,7 +5314,15 @@ describe("dispatchTool", () => {
 
 		expect(res.isError).toBeFalsy();
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(payload.tests).toBe("pm.test('a', () => {});");
+		expect(payload.requestElements).toEqual([
+			{
+				id: "mcp-script-post",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('a', () => {});" },
+			},
+		]);
+		expect(payload.tests).toBeUndefined();
 	});
 
 	test("run_request accepts `tests` as the same script as postRequestScript", async () => {
@@ -5749,7 +5770,7 @@ describe("dispatchTool", () => {
 				),
 		});
 
-	test("start_load_run composes a saved request; the chain's assertions fold into `tests`", async () => {
+	test("start_load_run composes a saved request; the chain's assertions fold into `requestElements`", async () => {
 		const client = savedRequestClient();
 		const res = await dispatchTool(
 			"start_load_run",
@@ -5765,13 +5786,34 @@ describe("dispatchTool", () => {
 		expect(payload.headers).toMatchObject({ "X-Api": "v1" });
 		expect(payload.requestId).toBe("req_1");
 		// The whole point: the collection's assertion and the request's own both
-		// travel, in chain-then-own order, under the key /runs actually reads -
-		// joined the way the engine joins parts (`read_script`'s "\n\n").
-		expect(payload.tests).toBe(
-			"pm.test('chain', function () {});\n\npm.test('own', function () {});"
-		);
-		// And `elements` does not ride along: a single-target run has no element
-		// pipeline, so leaving it would imply one that never runs.
+		// travel, in chain-then-own order, under the key /runs actually reads for
+		// step-level elements (issue #1594) - not the retired flat `tests` string.
+		expect(payload.requestElements).toEqual([
+			{
+				id: "el_chain",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('chain', function () {});" },
+				origin: { kind: "collection", id: "col_1", name: "API" },
+			},
+			{
+				id: "el_sig",
+				kind: "script.pre",
+				enabled: true,
+				config: { script: "pm.request.headers['X-Sig'] = 'abc';" },
+				origin: { kind: "request", id: "req_1" },
+			},
+			{
+				id: "el_own",
+				kind: "script.post",
+				enabled: true,
+				config: { script: "pm.test('own', function () {});" },
+				origin: { kind: "request", id: "req_1" },
+			},
+		]);
+		expect(payload.tests).toBeUndefined();
+		// `elements` is the run-level `timers`/`scripts` override object, a
+		// different key entirely, and none was passed here.
 		expect(payload.elements).toBeUndefined();
 	});
 
@@ -5784,17 +5826,78 @@ describe("dispatchTool", () => {
 		);
 
 		expect(res.isError).toBeFalsy();
-		// The `script.pre` element stays on the payload (POST /runs has no
-		// pre-request hook, but nothing here strips what the engine's own
-		// warnings read)...
+		// The `script.pre` element stays on the payload, under `requestElements`
+		// (it does reach the wire now - just not this one, since it carries no
+		// `config.inline` mark and no override forces it)...
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		// POST /runs has no pre-request hook, so the script must not be sent
-		// pretending it will run - under either the retired name or `elements`...
+		// `preRequestScripts` is refused outright now (issue #1594's cut-over),
+		// so the retired name must never be sent regardless...
 		expect(payload.preRequestScripts).toBeUndefined();
+		// ...and `elements` is the run-level override object, not sent here
+		// since no override was passed.
 		expect(payload.elements).toBeUndefined();
 		// ...and the agent has to be told, or a request that signs itself goes
 		// out unsigned with nothing saying so. The count comes off the composed
 		// `script.pre` elements now, so a miscounted fold reddens here.
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).toMatch(/1 pre-request script\(s\).*NOT applied/i);
+	});
+
+	// The count folds `args.elements.scripts` in, not only each element's own
+	// `config.inline` - the run-level override decides every `script.pre`'s
+	// fate when it is set, regardless of the mark.
+	test("start_load_run suppresses the caveat when elements.scripts forces every script inline", async () => {
+		const client = savedRequestClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				requestId: "req_1",
+				duration: "30s",
+				confirmed: true,
+				elements: { scripts: "allInline" },
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.elements).toEqual({ scripts: "allInline" });
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).not.toMatch(/pre-request script\(s\)/i);
+	});
+
+	// The gap the count used to miss: a `script.pre` marked `config.inline`
+	// individually still does not run once the run's own override forces
+	// every script deferred - so it must count as dropped too, not be
+	// excluded because its own mark says otherwise.
+	test("start_load_run counts even a marked script.pre as dropped when elements.scripts forces every script deferred", async () => {
+		const client = fakeClient({
+			composeRequest: vi.fn().mockResolvedValue({
+				method: "GET",
+				url: "https://api.example.com/x",
+				requestId: "req_1",
+				elements: [
+					{
+						id: "el_sig",
+						kind: "script.pre",
+						enabled: true,
+						config: { script: "pm.request.headers['X-Sig'] = 'abc';", inline: true },
+					},
+				],
+			}),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				requestId: "req_1",
+				duration: "30s",
+				confirmed: true,
+				elements: { scripts: "allDeferred" },
+			},
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
 		const text = res.content.map((c) => c.text).join("\n");
 		expect(text).toMatch(/1 pre-request script\(s\).*NOT applied/i);
 	});
@@ -5820,8 +5923,24 @@ describe("dispatchTool", () => {
 			const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
 			// Replaces rather than joins: with no way to know which the agent
 			// meant, running both would add assertions they never asked for. The
-			// composed chain must not survive under any other key either.
-			expect(payload.tests).toBe("pm.test('adhoc', function () {});");
+			// composed `script.post` elements must not survive alongside it - only
+			// the composed `script.pre` (untouched) and the ad-hoc script remain.
+			expect(payload.requestElements).toEqual([
+				{
+					id: "el_sig",
+					kind: "script.pre",
+					enabled: true,
+					config: { script: "pm.request.headers['X-Sig'] = 'abc';" },
+					origin: { kind: "request", id: "req_1" },
+				},
+				{
+					id: "mcp-script-post",
+					kind: "script.post",
+					enabled: true,
+					config: { script: "pm.test('adhoc', function () {});" },
+				},
+			]);
+			expect(payload.tests).toBeUndefined();
 			expect(payload.postRequestScripts).toBeUndefined();
 			expect(payload.elements).toBeUndefined();
 		}
@@ -5844,11 +5963,10 @@ describe("dispatchTool", () => {
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.url).toBe("https://staging.example.com/users");
 		// Only the stated field is overridden; the rest of the request stands -
-		// both composed assertions included, folded into the key /runs reads.
+		// the whole composed element list included, unchanged, under the key
+		// /runs reads for step-level elements.
 		expect(payload.method).toBe("POST");
-		expect(payload.tests).toBe(
-			"pm.test('chain', function () {});\n\npm.test('own', function () {});"
-		);
+		expect(payload.requestElements).toEqual(composedSavedRequest.elements);
 	});
 
 	// The saved request stores http1.1 and the agent asks for http2, so a pass
@@ -5870,11 +5988,10 @@ describe("dispatchTool", () => {
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.httpVersion).toBe("http2");
 		// Only the stated field is overridden; the rest of the request stands -
-		// both composed assertions included, folded into the key /runs reads.
+		// the whole composed element list included, unchanged, under the key
+		// /runs reads for step-level elements.
 		expect(payload.url).toBe("https://api.example.com/users");
-		expect(payload.tests).toBe(
-			"pm.test('chain', function () {});\n\npm.test('own', function () {});"
-		);
+		expect(payload.requestElements).toEqual(composedSavedRequest.elements);
 	});
 
 	// The other half of the rule: with nothing stated the stored protocol runs,

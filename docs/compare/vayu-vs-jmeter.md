@@ -102,6 +102,25 @@ are things Vayu plans to catch up on:
   the extractors, assertions, timers and logic controllers in the table above)
   imports and runs; a team fluent in JMeter's full plugin ecosystem is still
   better served staying there.
+- **Your load model needs a load-run logic jump.** Think time and pacing
+  timers work under load now (`timer.think`, including a gaussian option;
+  `timer.pacing`, including its shared-cadence case, `perUser: false` -
+  one cadence held across every virtual user, not one per user; and
+  `timer.throughput`, the analogue of JMeter's Constant Throughput Timer,
+  which targets a rate - N per minute - shared across every virtual user by
+  default rather than held per user), and logic controllers - conditionals,
+  once-only, throughput, loops and named transactions - are elements
+  (`control.if` / `.once` / `.switch` / `.throughput` / `.loop` /
+  `.transaction`) that run under load too: `control.switch`'s dispatch and
+  `control.loop`'s repeat jump a scenario load run's virtual users the same
+  way they jump the sequential run, `control.throughput` can share one
+  budget across every virtual user (`perUser: false`) instead of one per
+  user, and `control.transaction` can fold a between-member `timer.*` wait
+  into its own reported latency (`includeTimers`). Correlation across a
+  scenario's steps - a login's token reaching the next step's header, per
+  virtual user - does work under load now too: mark the extracting element
+  or script `inline` (or set the run's `elements.scripts` override), or let
+  it stay in the post-run replay by default.
 - **It has to be JVM-native** for your infrastructure, monitoring, or compliance
   reasons.
 

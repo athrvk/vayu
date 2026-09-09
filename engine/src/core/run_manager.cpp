@@ -314,7 +314,8 @@ RunContext::ScriptsOverrideMode scripts_mode) {
             return nullptr;
         }
         if (auto found = element.config.find ("script");
-        found != element.config.end () && found->is_string ()) {
+        found != element.config.end () && found->is_string () &&
+        !vayu::core::is_blank_script_text (found->get_ref<const std::string&> ())) {
             return &found->get_ref<const std::string&> ();
         }
     }
@@ -759,15 +760,6 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     mc_config.response_sample_rate =
     static_cast<size_t> (config.value ("response_sample_rate", 100));
 
-    // Extract the test script from the run config (root level). Either a plain
-    // string or a list of parts, under `tests` or the `postRequestScript(s)`
-    // the same script is stored and sent to /execute under - one concept, and
-    // `read_post_request_script` owns every name it answers to. Load runs
-    // receive the collection chain's test scripts as well as the request's
-    // own; before that, a collection-level assertion was silently never
-    // checked.
-    test_script = vayu::http::read_post_request_script (config);
-
     // Resolved from a payload `validate_elements_run_override` has already
     // accepted (the route checks before the run row exists), so a value
     // outside the known set here falls back to the default rather than
@@ -815,7 +807,64 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
         }
     }
 
+    // A single-request run's own step-level elements (issue #1594) - after
+    // `scripts_override` above, since a `script.post` element's
+    // inline-or-deferred fate can depend on it.
+    compile_step_elements (config);
+
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
+}
+
+/**
+ * `requestElements` (issue #1594), compiled once here into @ref
+ * step_elements - refused beside a `scenario` block by the route, so this is
+ * a no-op for that shape. Every `script.post` element found here that is not
+ * running inline has its script text folded into @ref test_script, joined
+ * with a blank line in compiled order exactly as `read_script` always joined
+ * multiple parts, for the existing deferred replay (`validate_scripts`) to
+ * read; an inline one is left for the pipeline hooks
+ * (`submit_one_request` / `run_request_elements_after_submission`,
+ * `load_strategy.cpp`) to run, and the deferred replay must not run it a
+ * second time. Split out of the constructor to keep its own cognitive
+ * complexity down, not because anything else calls this.
+ */
+void RunContext::compile_step_elements (const nlohmann::json& run_config) {
+    auto request_elements = run_config.find ("requestElements");
+    if (request_elements == run_config.end () ||
+    !request_elements->is_array () || request_elements->empty ()) {
+        return;
+    }
+    nlohmann::json stamped = *request_elements;
+    vayu::core::stamp_default_element_ids (stamped);
+    auto compiled = std::make_shared<std::vector<vayu::core::CompiledElement>> (
+    vayu::core::compile_elements (stamped));
+    for (const auto& element : *compiled) {
+        const auto* kind = vayu::core::Registry::instance ().find (element.kind);
+        if (kind != nullptr &&
+        std::find (kind->phases.begin (), kind->phases.end (),
+        vayu::core::Phase::StepBefore) != kind->phases.end ()) {
+            step_elements_have_step_before = true;
+        }
+        if (element.kind != "script.post" ||
+        RunContext::script_element_runs_inline (element.config, scripts_override)) {
+            continue;
+        }
+        // Every un-inlined `script.post` folds in here, not only the first:
+        // a saved request composes the collection chain's elements before its
+        // own (issue #1514's `compose_elements` order), and both are deferred
+        // by default, the same as `read_script` always joined every enabled
+        // part with a blank line before this run shape had elements at all.
+        if (auto script = element.config.find ("script");
+        script != element.config.end () && script->is_string () &&
+        !script->get<std::string> ().empty ()) {
+            if (!test_script.empty ()) {
+                test_script += "\n\n";
+            }
+            test_script += script->get<std::string> ();
+        }
+    }
+    element_tallies = vayu::core::RequestElementTallies (*compiled);
+    step_elements   = std::move (compiled);
 }
 
 RunContext::~RunContext () {
@@ -1501,6 +1550,14 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         // (issue #629). Empty for a run of an unbound collection, which
         // the payload builder treats as absent.
         inputs.coverage = build_scenario_load_coverage (*scenario_state);
+    } else if (context->step_elements && !context->step_elements->empty ()) {
+        // A single-request run's own step-level elements (issue #1594) - the
+        // single-request sibling of the `scenario_state` block above, read
+        // the same way after the same drain.
+        auto built = context->element_tallies.build (*context->step_elements);
+        if (!built.empty ()) {
+            inputs.elements = std::move (built);
+        }
     }
     // Issue #1497's combined assertion tally: the deferred replay's pm.test
     // results (already in `inputs.tests`, both single-request and scenario
@@ -1524,6 +1581,18 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
             std::memory_order_relaxed);
             assertions.failed += scenario_state->inline_script_tests_failed.load (
             std::memory_order_relaxed);
+        } else if (context->step_elements && !context->step_elements->empty ()) {
+            // The single-request sibling (issue #1594): the same combined
+            // tally, off `RunContext::element_tallies` /
+            // `inline_script_tests_passed` / `_failed` instead.
+            const auto element_totals =
+            context->element_tallies.assertion_totals (*context->step_elements);
+            assertions.passed += element_totals.passed;
+            assertions.failed += element_totals.failed;
+            assertions.passed +=
+            context->inline_script_tests_passed.load (std::memory_order_relaxed);
+            assertions.failed +=
+            context->inline_script_tests_failed.load (std::memory_order_relaxed);
         }
         if (assertions.passed + assertions.failed > 0) {
             inputs.assertions = assertions;
@@ -1662,12 +1731,29 @@ vayu::http::routes::ScriptVariableScopes& base_scopes) {
         }
     } else {
         collection_elements = compile_run_lifecycle_elements (context->config);
-        if (collection_elements.empty ()) {
+        // Issue #1594: a run's own `requestElements` needs the same base
+        // scopes `lifecycleElements` does, even when it declares no
+        // `lifecycleElements` at all - so the early return below only fires
+        // when NEITHER exists to read or write them.
+        const bool needs_scopes = !collection_elements.empty () ||
+        (context->step_elements && !context->step_elements->empty ());
+        if (!needs_scopes) {
             return std::nullopt;
         }
         base_scopes = vayu::http::routes::load_script_variable_scopes (db,
         environment_id, single_request_lifecycle_collection_id (db, context->config));
         context->lifecycle_scopes = base_scopes;
+        if (context->step_elements && !context->step_elements->empty ()) {
+            context->step_base_vars =
+            vayu::http::routes::flatten_variable_scopes (base_scopes);
+            context->step_script_config =
+            read_lifecycle_script_config (db, context->config);
+        }
+        if (collection_elements.empty ()) {
+            // Scopes are loaded for `requestElements` alone; nothing to run
+            // at `Phase::RunStart`.
+            return std::nullopt;
+        }
     }
 
     auto setup_config = read_lifecycle_script_config (db, context->config);
@@ -1698,6 +1784,22 @@ vayu::http::routes::ScriptVariableScopes& base_scopes) {
     };
     vayu::core::ElementPipeline::run (vayu::core::Phase::RunStart, setup_ctx,
     collection_elements, context->setup_outcomes);
+    // `run_setup_script` above binds `base_scopes` by reference and writes a
+    // `script.setup`'s `pm.environment.set`/`pm.collectionVariables.set` calls
+    // into it in place - so the copies taken before this call
+    // (`context->lifecycle_scopes`, `context->step_base_vars`) are stale the
+    // moment setup writes anything. Refreshed here, after the write, so a
+    // `requestElements` submission's residual pass and the teardown read
+    // what setup actually left rather than what existed before it ran. The
+    // scenario branch does not touch either field - its own caller re-reads
+    // `base_scopes` by reference once this function returns.
+    if (!context->scenario) {
+        context->lifecycle_scopes = base_scopes;
+        if (context->step_elements && !context->step_elements->empty ()) {
+            context->step_base_vars =
+            vayu::http::routes::flatten_variable_scopes (base_scopes);
+        }
+    }
     for (const auto& outcome : context->setup_outcomes) {
         if (outcome.status == "error" || outcome.status == "failed") {
             return outcome.message.value_or ("unknown error");
@@ -2233,6 +2335,15 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // executors. Omitted for a single-request load run, which has no sequence.
     if (inputs.scenario.has_value ()) {
         summary["scenario"] = *inputs.scenario;
+    }
+    // A single-request run's own `requestElements` outcomes (issue #1594),
+    // the single-request sibling of `scenario` above - this run shape has no
+    // steps to hang a per-step breakdown off, so its elements land at the
+    // summary's top level instead. Omitted for every scenario run (its own
+    // elements are already inside `scenario.steps[].elements`) and for a
+    // single-request run that declared none.
+    if (inputs.elements.has_value () && !inputs.elements->empty ()) {
+        summary["elements"] = *inputs.elements;
     }
     // Which of the bound contract's operations this run exercised (issue #629),
     // in the same shape the design-mode runner writes. Omitted for every run not

@@ -17,6 +17,7 @@
 #include <string_view>
 #include <unordered_set>
 
+#include "vayu/core/elements.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/routes.hpp"
@@ -881,8 +882,8 @@ const std::vector<nlohmann::json>& levels) {
     return disabled;
 }
 
-// One level's enabled, non-disabled, non-`inherit.disable` elements, each
-// stamped with where it came from.
+// One level's enabled, non-disabled, non-`inherit.disable`, non-blank-script
+// elements, each stamped with where it came from.
 void emit_level (nlohmann::json& out,
 const nlohmann::json& elements,
 const std::unordered_set<std::string>& disabled,
@@ -894,6 +895,13 @@ const std::string& origin_name) {
             continue;
         }
         if (!element.value ("enabled", true)) {
+            continue;
+        }
+        // A blank script.pre/post/setup/teardown is inert everywhere (#1609),
+        // so it is not composed either - the same rule `compile_elements`
+        // enforces at run time.
+        if (vayu::core::is_blank_script_element (element.value ("kind", ""),
+            element.value ("config", nlohmann::json::object ()))) {
             continue;
         }
         const auto id = element.value ("id", "");

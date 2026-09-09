@@ -1,0 +1,652 @@
+[
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "false",
+    "key": "correlationIdEnabled",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "boolean"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "X-Vayu-Request-Id",
+    "key": "correlationIdHeader",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "string"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "",
+    "key": "customCaCertificates",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "text"
+  },
+  {
+    "advanced": true,
+    "category": "general_engine",
+    "default_value": "10000",
+    "key": "dbBusyTimeout",
+    "max_value": "60000",
+    "min_value": "1000",
+    "requires_restart": true,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "general_engine",
+    "default_value": "67108864",
+    "key": "dbCacheSize",
+    "max_value": "1073741824",
+    "min_value": "1048576",
+    "requires_restart": true,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "general_engine",
+    "default_value": "0",
+    "key": "dbSynchronous",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": true,
+    "type": "enum"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "auto",
+    "key": "defaultHttpVersion",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "enum"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "30000",
+    "key": "defaultTimeout",
+    "max_value": "300000",
+    "min_value": "1000",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "300",
+    "key": "dnsCacheTimeout",
+    "max_value": "3600",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "1000",
+    "key": "eventLoopMaxConcurrent",
+    "max_value": "10000",
+    "min_value": "1",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "200",
+    "key": "eventLoopMaxPerHost",
+    "max_value": "1000",
+    "min_value": "1",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "services",
+    "default_value": "250",
+    "key": "inboxLivePollIntervalMs",
+    "max_value": "5000",
+    "min_value": "25",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "services",
+    "default_value": "65536",
+    "key": "inboxMaxBodyBytes",
+    "max_value": "8388608",
+    "min_value": "256",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "services",
+    "default_value": "500",
+    "key": "inboxMaxCaptures",
+    "max_value": "10000",
+    "min_value": "1",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "observability",
+    "default_value": "50000",
+    "key": "liveMaxRetainedTicks",
+    "max_value": "500000",
+    "min_value": "1000",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "observability",
+    "default_value": "300000",
+    "key": "liveReplayWindowMs",
+    "max_value": "3600000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "observability",
+    "default_value": "60000",
+    "key": "liveRetentionMs",
+    "max_value": "600000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "observability",
+    "default_value": "100",
+    "key": "liveTickIntervalMs",
+    "max_value": "1000",
+    "min_value": "10",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "true",
+    "key": "loadNegotiateCompression",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "boolean"
+  },
+  {
+    "advanced": false,
+    "category": "observability",
+    "default_value": "debug",
+    "key": "logLevel",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": true,
+    "type": "enum"
+  },
+  {
+    "advanced": true,
+    "category": "general_engine",
+    "default_value": "false",
+    "key": "managedHeadersStripped",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "boolean"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "5",
+    "key": "maxBackupsRetained",
+    "max_value": "100",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "limits",
+    "default_value": "33554432",
+    "key": "maxDesignResponseBodyBytes",
+    "max_value": "1073741824",
+    "min_value": "1024",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "limits",
+    "default_value": "1048576",
+    "key": "maxElementBodyBytes",
+    "max_value": "1073741824",
+    "min_value": "1024",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "observability",
+    "default_value": "67108864",
+    "key": "maxLogFileBytes",
+    "max_value": "1073741824",
+    "min_value": "0",
+    "requires_restart": true,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "limits",
+    "default_value": "33554432",
+    "key": "maxResponseBodyBytes",
+    "max_value": "1073741824",
+    "min_value": "1024",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "268435456",
+    "key": "maxResponseSampleBytes",
+    "max_value": "1073741824",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "200",
+    "key": "maxRunsRetained",
+    "max_value": "100000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "32768",
+    "key": "maxSampleBodyBytes",
+    "max_value": "104857600",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "2097152",
+    "key": "maxSampleBytes",
+    "max_value": "1073741824",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "limits",
+    "default_value": "16777216",
+    "key": "maxScenarioDataBytes",
+    "max_value": "104857600",
+    "min_value": "1024",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "limits",
+    "default_value": "1000",
+    "key": "maxScenarioDataRows",
+    "max_value": "1000000",
+    "min_value": "1",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "limits",
+    "default_value": "200",
+    "key": "maxScenarioSteps",
+    "max_value": "10000",
+    "min_value": "1",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "5000",
+    "key": "maxScenarioStoredSteps",
+    "max_value": "1000000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "limits",
+    "default_value": "10485760",
+    "key": "maxSpecDocumentBytes",
+    "max_value": "104857600",
+    "min_value": "1024",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "limits",
+    "default_value": "0",
+    "key": "maxStepsPerIteration",
+    "max_value": "1000000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "10000",
+    "key": "maxStoredErrors",
+    "max_value": "10000000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "5242880",
+    "key": "maxTraceBodyBytes",
+    "max_value": "104857600",
+    "min_value": "1024",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "observability",
+    "default_value": "1000",
+    "key": "monitorIntervalMs",
+    "max_value": "60000",
+    "min_value": "250",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "observability",
+    "default_value": "8",
+    "key": "monitorMaxSeries",
+    "max_value": "64",
+    "min_value": "1",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "observability",
+    "default_value": "0",
+    "key": "monitorScrapeTimeoutMs",
+    "max_value": "60000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "true",
+    "key": "negotiateCompression",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "boolean"
+  },
+  {
+    "advanced": false,
+    "category": "services",
+    "default_value": "60000",
+    "key": "oauth2RefreshLeadMs",
+    "max_value": "3600000",
+    "min_value": "1000",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "services",
+    "default_value": "1000",
+    "key": "oauth2RefreshMinIntervalMs",
+    "max_value": "3600000",
+    "min_value": "100",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "services",
+    "default_value": "100",
+    "key": "oauth2RefreshPollIntervalMs",
+    "max_value": "5000",
+    "min_value": "10",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "services",
+    "default_value": "60000",
+    "key": "oauth2RefreshRetryMaxMs",
+    "max_value": "3600000",
+    "min_value": "1000",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "services",
+    "default_value": "5000",
+    "key": "oauth2RefreshRetryMs",
+    "max_value": "600000",
+    "min_value": "250",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "observability",
+    "default_value": "true",
+    "key": "phaseHistograms",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "boolean"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "",
+    "key": "proxyBypass",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "string"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "environment",
+    "key": "proxyMode",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "enum"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "",
+    "key": "proxySystemUrl",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "string"
+  },
+  {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "",
+    "key": "proxyUrl",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "string"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "30",
+    "key": "runRetentionDays",
+    "max_value": "3650",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "scripting_sandbox",
+    "default_value": "true",
+    "key": "scriptEnableConsole",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "boolean"
+  },
+  {
+    "advanced": false,
+    "category": "scripting_sandbox",
+    "default_value": "67108864",
+    "key": "scriptMemoryLimit",
+    "max_value": "268435456",
+    "min_value": "1048576",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "scripting_sandbox",
+    "default_value": "262144",
+    "key": "scriptStackSize",
+    "max_value": "1048576",
+    "min_value": "65536",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "scripting_sandbox",
+    "default_value": "5000",
+    "key": "scriptTimeout",
+    "max_value": "60000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": true,
+    "category": "services",
+    "default_value": "60000",
+    "key": "sseIdleTimeoutMs",
+    "max_value": "3600000",
+    "min_value": "1000",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "services",
+    "default_value": "65536",
+    "key": "sseMaxEventBytes",
+    "max_value": "8388608",
+    "min_value": "256",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "services",
+    "default_value": "2000",
+    "key": "sseMaxRetainedEvents",
+    "max_value": "200000",
+    "min_value": "10",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "500",
+    "key": "sseMaxStoredEvents",
+    "max_value": "100000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "services",
+    "default_value": "600000",
+    "key": "sseMaxStreamDurationMs",
+    "max_value": "86400000",
+    "min_value": "1000",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "services",
+    "default_value": "100000",
+    "key": "sseMaxStreamEvents",
+    "max_value": "10000000",
+    "min_value": "1",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "data_retention",
+    "default_value": "30",
+    "key": "trashRetentionDays",
+    "max_value": "3650",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
+    "category": "general_engine",
+    "default_value": "<core count>",
+    "key": "workers",
+    "max_value": "128",
+    "min_value": "1",
+    "requires_restart": false,
+    "type": "integer"
+  }
+]

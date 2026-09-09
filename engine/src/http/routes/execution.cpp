@@ -1833,9 +1833,8 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
 
     // The `elements` override (issue #1495) is validated for both load-run
     // shapes, not only a scenario's - the validator does not distinguish
-    // them, and a single-request payload has no `elements` attachment point
-    // to apply it to yet (see `docs/engine/elements.md`'s Load paths
-    // section), so this accepts the key there without it doing anything.
+    // them, and since issue #1594 a single-request run's own step pipeline
+    // reads what it resolves to as well.
     if (auto invalid = vayu::core::validate_elements_run_override (json)) {
         vayu::utils::log_warning (
         "http", "POST /runs - Invalid elements override: " + *invalid);
@@ -1849,6 +1848,29 @@ validate_load_request (RouteContext& ctx, nlohmann::json& json, bool is_scenario
         vayu::utils::log_warning (
         "http", "POST /runs - Invalid lifecycleElements: " + *invalid);
         return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
+    }
+
+    // A single-request run's own place to declare its request's step-level
+    // elements (issue #1594) - refused outright beside `scenario`, whose
+    // steps already carry their own resolved elements from the plan.
+    if (auto invalid = vayu::core::validate_request_elements_run_override (json)) {
+        vayu::utils::log_warning ("http", "POST /runs - Invalid requestElements: " + *invalid);
+        return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
+    }
+
+    // `preRequestScript(s)` / `postRequestScript(s)` / `tests` are refused
+    // here too now (issue #1594's cut-over): a single-request run's own
+    // script slot is `requestElements`'s `script.pre` / `script.post` now,
+    // so the refusal names that field rather than this endpoint's own
+    // `elements` (the run-level override, a different thing entirely) - a
+    // caller who followed the default message here would land on a second
+    // 400. A scenario run keeps the default: its scripts live on the bound
+    // collection's stored `elements`, which this refusal cannot name any
+    // more precisely than the other routes already do.
+    if (auto invalid = refuse_legacy_script_fields (
+        json, is_scenario ? "elements" : "requestElements")) {
+        vayu::utils::log_warning ("http", "POST /runs - " + *invalid);
+        return RouteError{ 400, error_body (400, *invalid) };
     }
 
     // Validate required fields

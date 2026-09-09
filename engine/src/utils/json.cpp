@@ -842,7 +842,7 @@ namespace {
  * produces the long one ("x-www-form-urlencoded", "form-data"), while
  * "form"/"formdata" are the engine's own older names, still accepted so a stored
  * or replayed payload keeps working. The table here is the one place a spelling
- * is added - the same rule `read_post_request_script`'s follows.
+ * is added - the same rule `read_script`'s list-key/legacy-key pair follows.
  */
 std::optional<Error> read_request_body (const Json& json, Request& request) {
     // Body (optional)
@@ -857,7 +857,7 @@ std::optional<Error> read_request_body (const Json& json, Request& request) {
             // "form-data"), while "form"/"formdata" are the engine's own
             // older names, still accepted so a stored or replayed payload
             // keeps working. This table is the one place a spelling is
-            // added - same rule as read_post_request_script's.
+            // added - same rule as read_script's list-key/legacy-key pair.
             if (mode == "json") {
                 request.body.mode = BodyMode::Json;
             } else if (mode == "text") {

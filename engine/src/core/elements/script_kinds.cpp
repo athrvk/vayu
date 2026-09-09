@@ -161,11 +161,39 @@ make_script_kind (Phase phase, const char* kind, const char* label, const char* 
     return element_kind;
 }
 
+/**
+ * `config.inline`, on the two step-level script kinds only (issue #1495,
+ * `RunContext::script_element_runs_inline`): a load run reads it to decide
+ * whether this script runs on the producer/completion hooks or is left to the
+ * deferred replay. The base schema above closes `additionalProperties`, so a
+ * kind that does not add it here refuses the marking outright - which is what
+ * made the opt-in unreachable through every validated write path there is
+ * (`apply_elements_field`, `validate_request_elements_run_override`) until
+ * issue #1594 exercised one end to end. `script.setup` / `script.teardown` do
+ * not get it: a run-boundary kind has no inline-or-deferred choice to make.
+ */
+void allow_inline_marking (ElementKind& kind) {
+    kind.config_schema["properties"]["inline"] = { { "type", "boolean" } };
+}
+
 } // namespace
+
+bool is_blank_script_text (const std::string& text) {
+    return text.find_first_not_of (" \t\r\n") == std::string::npos;
+}
+
+bool is_blank_script_element (const std::string& kind, const nlohmann::json& config) {
+    if (kind != "script.pre" && kind != "script.post" &&
+    kind != "script.setup" && kind != "script.teardown") {
+        return false;
+    }
+    return is_blank_script_text (config.value ("script", ""));
+}
 
 ElementKind make_script_pre_kind () {
     auto kind = make_script_kind (Phase::StepBefore, "script.pre",
     "Pre-request script", "Runs before the request is sent.");
+    allow_inline_marking (kind);
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ScriptPreElement> (config);
     };
@@ -175,6 +203,7 @@ ElementKind make_script_pre_kind () {
 ElementKind make_script_post_kind () {
     auto kind = make_script_kind (Phase::StepAfter, "script.post",
     "Post-request script", "Runs after the response is received.");
+    allow_inline_marking (kind);
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ScriptPostElement> (config);
     };

@@ -18,8 +18,8 @@ shape both sides of the wire agree on; it is generated from, or checked against,
 > `post_request_script` are gone, cut over by a one-shot migration (see
 > [`db-schema.md`](db-schema.md#the-script-to-elements-migration-issue-1514)); no transitional
 > alias, per the owner's decision. Issue #1495 lands the pipeline on a **scenario** load run's
-> producer/completion hooks (below) - a **single-request** load run still executes no element; see
-> that section for why. Issue #1499 lands the first kinds to run at a run's own boundary rather
+> producer/completion hooks (below); issue #1594 lands it on a **single-request** load run's own
+> submission too, through `requestElements` - see that section. Issue #1499 lands the first kinds to run at a run's own boundary rather
 > than at a step's - `script.setup` / `script.teardown`, dispatched at `Phase::RunStart` /
 > `Phase::RunEnd` outside the step pipeline entirely, in both run modes a collection can run in.
 
@@ -188,6 +188,14 @@ always made. The element's own outcome is whether the script ran without throwin
 `pm.test` assertions travel inside the same `vayu::ScriptResult` untouched, so a scripted step's
 trace shape is unchanged by this cut-over.
 
+A **blank** `script.pre` / `.post` / `.setup` / `.teardown` (its own `script` empty or
+whitespace-only, `is_blank_script_element`) is inert everywhere but storage (issue #1609): `POST
+/compose` does not emit it, `compile_elements` compiles it to no runnable behaviour the same way an
+unknown kind does, so `ElementPipeline::run` reports no outcome for it at all - not even `skipped` -
+and `scenario_plan.cpp`'s `step_has_script` (the pre-request-script-under-load warning, a step's
+`preRequestScript` breakdown field) does not count it as carrying one. The stored row is untouched, so
+it still lists and edits in its own request's or collection's Elements tab.
+
 `script.setup` / `script.teardown` are `collection_only` - refused (a `400` naming the index and
 kind) on a request's own `elements`, both at write time and in `GET /elements/kinds`'
 `collectionOnly` flag, because a once-per-run element attached to one request in the tree has no
@@ -338,44 +346,83 @@ scenario load run reported as a hardcoded `0` before this.
 **Timers, wired end to end (issue #1498).** `elements.timers` (`"asConfigured"` (default) |
 `"off"` | `{fixedMs: N}` | `{minMs, maxMs}`) is validated on `POST /runs`, parsed into
 `RunContext::timers_override` (a `vayu::core::TimersOverride`), and applied through the one
-function every `timer.*` kind calls, `vayu::core::apply_timers_override` (`elements/pipeline.cpp`)
-- `"off"` silences the wait entirely (`waitedMs: 0`, no sleep), `fixedMs`/`{minMs,maxMs}` replace a
-kind's own computed wait with the run-wide one, whatever that kind's own config says. This also
-fixed a pre-existing dead-code bug: `RunContext::timers_disabled` was parsed from `"off"` since
-#1495 but nothing read it, because `timer.think`'s `step.between` phase was never dispatched on the
-load path at all. It is now: `ScenarioLoadDriver::run_step_between` (`scenario_load.cpp`) dispatches
-`Phase::StepBetween` on the step that just completed, non-blocking, and sums the outcomes'
-`waited_ms` into `VirtualUser::ready_at_ms`. `elements.seed` (a non-negative integer) seeds the
-run's own `std::mt19937_64` (`RunContext::rng`); a scenario load run derives one independent
-generator per virtual user off it (`vayu::core::derive_vu_rng`) rather than sharing one across
-worker threads, so a seeded run's random waits are reproducible.
+function every `timer.*` kind's `apply` calls, `vayu::core::apply_timers_override`
+(`elements/pipeline.cpp`) - `"off"` silences the wait entirely (`waitedMs: 0`, no sleep),
+`fixedMs`/`{minMs,maxMs}` replace a kind's own computed wait with the run-wide one, whatever that
+kind's own config says. This also fixed a pre-existing dead-code bug: `RunContext::timers_disabled`
+was parsed from `"off"` since #1495 but nothing read it, because `timer.think`'s `step.between`
+phase was never dispatched on the load path at all. It is now: `ScenarioLoadDriver::run_step_between`
+(`scenario_load.cpp`) dispatches `Phase::StepBetween` on the step that just completed, non-blocking,
+and sums the outcomes' `waited_ms` into `VirtualUser::ready_at_ms`. `elements.seed` (a non-negative
+integer) seeds the run's own `std::mt19937_64` (`RunContext::rng`); a scenario load run derives one
+independent generator per virtual user off it (`vayu::core::derive_vu_rng`) rather than sharing one
+across worker threads, so a seeded run's random waits are reproducible. `"off"` also reaches
+`timer.pacing` and `timer.throughput` under load (below), whose own scheduling seam runs before
+`apply_timers_override`'s call site ever exists for that step.
 
 **Non-blocking waits: `scheduled_ready_delay_ms`.** `Element::scheduled_ready_delay_ms` (issue
 #1498) is how a kind that needs to wait tells a scenario load run to hold its VU back without
 blocking a worker thread: `timer.think` (whose wait already lands through `step.between`'s own
-dispatch above) needs no override, but `timer.pacing` does, since its phase (`step.before`) fires
-only once a VU has already been selected as ready - too late to defer non-blockingly.
-`ScenarioLoadDriver::finish_step` calls the override on the VU's *upcoming* step, right after
-deciding which step comes next and before the VU can be selected again, and applies the returned
-delay to `VirtualUser::ready_at_ms`, which already gated VU selection but, before #1498, had
-nothing writing to it. Per-node "last started" timestamps live in `VirtualUser::pacing_state`
+dispatch above) needs no override, but `timer.pacing` and `timer.throughput` do, since their phase
+(`step.before`) fires only once a VU has already been selected as ready - too late to defer
+non-blockingly. `ScenarioLoadDriver::finish_step` calls the override on the VU's *upcoming* step,
+right after deciding which step comes next and before the VU can be selected again, and applies the
+returned delay to `VirtualUser::ready_at_ms`, which already gated VU selection but, before #1498,
+had nothing writing to it. Per-node "last started" timestamps live in `VirtualUser::pacing_state`
 (one map per VU, so VUs pacing the same folder run independent cadences) for `perUser: true` and
 for the sequential run; a `perUser: false` element instead advances its own entry in
 `ScenarioLoadState::shared_pacing` (a `SharedPacingClocks`, issue #1570), one atomic per
 shared-pacing element id in the plan, so two VUs' concurrent completions claim distinct slots of
-the same clock rather than racing onto the same one.
+the same clock rather than racing onto the same one. `SharedScheduleState::timers_override` (a
+`const TimersOverride*` alongside `pacing` and `throughput`, filled in from `RunContext` at the
+same call site) is `finish_step`'s own copy of the override for this seam: `"off"` returns
+`std::nullopt` before either kind touches its pacing state or shared clock at all, closing the gap
+this section used to disclose - a run that silences timers with `"off"` no longer defers a scenario
+load run's pacing or throughput element by its own interval first and only reports that truthfully
+after the fact.
 
-**Still not wired: step-level elements on the single-request load path.** `load_strategy.cpp`'s
-per-submission and per-completion hooks are unchanged: a single-request `POST /runs` payload's
-own request has no `elements` attachment point today (its script model is still the legacy
-`tests` string, `RunContext::test_script`, not a compiled `elements` list), so there is no
-element pipeline call there to gate on inline-vs-deferred - a `ScopeOverlay` would have no
-writer. Wiring a stored request's `elements` into that run shape is a separate gap, outside this
-page's Status callout. What issue #1573 *does* wire for this run shape is the two kinds that
-dispatch at a run's own boundary rather than a step's: `lifecycleElements` (previous paragraph)
-lets a single-request run declare `script.setup` / `script.teardown`, run once before the load
-starts and once after it ends, the same `Phase::RunStart` / `Phase::RunEnd` dispatch a
-collection-backed run uses.
+**Step-level elements on the single-request load path, wired (issue #1594).**
+A single-request `POST /runs` payload's own request now has an `elements`
+attachment point - `requestElements`, a distinct key from this endpoint's own
+run-level `elements` override (above) - compiled once at run start into
+`RunContext::step_elements`. `load_strategy.cpp`'s `submit_one_request` runs
+`Phase::StepBefore` immediately before the transfer and `handle_result` runs
+`Phase::StepAfter` once the response is in, the same phases a design send
+uses; `extract.*` / `assert.*` always run there, and a `script.pre` /
+`script.post` element runs inline only when its own `config.inline` is
+`true` or the run's `elements.scripts` override forces it -
+`RunContext::script_element_runs_inline` deciding exactly as it does for a
+scenario step. An unmarked `script.post` defers to this run's own completion
+replay (`RunContext::test_script`, folded from the un-inlined element at
+compile time so the replay does not need to know `elements` exist); an
+unmarked `script.pre` simply never runs, since there is no pre-request replay
+on this path to defer it to.
+
+There is no persistent virtual-user object on this path to carry a
+`ScopeOverlay` across submissions the way a scenario's does, so each
+submission gets its own, built fresh from the run's flattened base scopes
+(`RunContext::step_base_vars`) and discarded once that submission settles -
+proportional to one request's writes, never shared with a concurrent
+submission. An inline `script.pre`'s edits and any `pm.environment.set` it
+makes reach the residual-token pass (`resolve_residual_tokens`) run against
+that same overlay before the transfer, so a value one script writes resolves
+a `{{token}}` later in the same request. `timer.think`'s wait costs no new
+thread: `RunContext::reserve_think_wait` / `purge_expired_think_reservations`
+hold a mutex-guarded multiset of release deadlines folded into
+`RunContext::in_flight()`, so the existing `maintain_concurrency` closed-loop
+poll throttles a reserved-but-not-yet-released submission the same way it
+already throttles an in-flight one - no new thread, no change to any load
+strategy's own polling loop. What issue #1573 wires for this run shape stays
+separate: `lifecycleElements` (previous paragraph) is a run's own boundary,
+not a step's. `validate_request_elements_run_override` refuses a `control.*`
+kind, `timer.pacing` and `timer.throughput` outright (a `400` naming the
+index and the kind) rather than accepting one that would silently no-op or
+misbehave - a lone request has no sequence for a jump, a per-VU controller
+state, or a shared pacing clock for `apply` to read, and admitting the kind
+without running it correctly would report `"ok"` for behaviour that never
+happened. The controller and pacing family stays a scenario-only concern;
+only `extract.*`, `assert.*`, `timer.think` and `script.pre`/`script.post`
+- the same phase-0 set #1514 gave the design send - are accepted here.
 
 ## Related issues
 
@@ -405,8 +452,14 @@ collection-backed run uses.
   declare them on; the wire-shape gap it left is #1573.
 - #1573 - `lifecycleElements`, a single-request `POST /runs` payload's own ephemeral place to
   declare `script.setup` / `script.teardown` (this page's Kinds section and Load paths section).
-  Does not wire step-level elements (`extract.*`, `assert.*`, `timer.*`, `script.pre`/`.post`)
-  into the single-request load path - that remains the Load paths section's "still not wired" gap.
+  Left step-level elements (`extract.*`, `assert.*`, `timer.*`, `script.pre`/`.post`) unwired on
+  the single-request load path - that gap is #1594's.
+- #1594 - `requestElements`, wiring step-level elements into the single-request load path (this
+  page's Load paths section): the run pipeline's per-submission `Phase::StepBefore` /
+  `Phase::StepAfter` dispatch, inline-vs-deferred `script.*` dispatch shared with the scenario
+  path, a per-submission `ScopeOverlay`, and non-blocking `timer.think` backpressure via
+  `RunContext::reserve_think_wait`. `preRequestScript(s)` / `postRequestScript(s)` / `tests` are
+  refused on `POST /runs` now too, the same as every other route since #1514.
 - #1515 - the controller family (`control.if`, `.once`, `.switch`, `.throughput`, `.loop`,
   `.transaction`), the load path's own `steps_skipped` counter, and `scenario.transactions[]`
   (this page's Controllers section).
