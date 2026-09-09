@@ -1190,7 +1190,8 @@ class ScenarioLoadDriver {
         // error's duration too.
         schedule_next_entry_wait (plan.steps[vu->step], *vu,
         SharedScheduleState{ .pacing = &state->shared_pacing,
-        .throughput                  = &state->shared_throughput_budgets });
+        .throughput                  = &state->shared_throughput_budgets,
+        .timers_override             = &context->timers_override });
 
         // Released *before* handle_result, which is what increments the
         // completion count `in_flight()` is derived from: a VU that became

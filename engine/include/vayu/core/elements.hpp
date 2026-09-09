@@ -49,6 +49,7 @@
 namespace vayu::core {
 
 struct ScenarioPlan;
+struct TimersOverride;
 
 /**
  * @brief Cross-instance shared clocks, one atomic per name (issue #1570) -
@@ -159,14 +160,23 @@ class SharedThroughputBudgets {
  * coordination shape is added, and the single call site
  * (`schedule_next_entry_wait`, `scenario_load.cpp`) fills it in once.
  *
- * Both members are null outside a scenario load run - no other caller reaches
- * this hook at all today - and a kind reading one must say what it does
- * without it (`timer.pacing` and `timer.throughput` both fall back to no
- * wait, which is what a run with no shared coordination would produce).
+ * Both `pacing` and `throughput` are null outside a scenario load run - no
+ * other caller reaches this hook at all today - and a kind reading one must
+ * say what it does without it (`timer.pacing` and `timer.throughput` both
+ * fall back to no wait, which is what a run with no shared coordination
+ * would produce).
+ *
+ * `timers_override` is the run's `elements.timers` override (issue #1498's
+ * reopen): this hook runs before any step's `ElementContext` exists, so it
+ * cannot read `ElementContext::timers_override` the way every other
+ * `timer.*` kind's `apply` does - a kind that schedules through here must
+ * consult this copy instead, and check it before doing anything else, so an
+ * `"off"` run books no wait and touches no pacing state at all.
  */
 struct SharedScheduleState {
-    SharedPacingClocks* pacing          = nullptr;
-    SharedThroughputBudgets* throughput = nullptr;
+    SharedPacingClocks* pacing            = nullptr;
+    SharedThroughputBudgets* throughput   = nullptr;
+    const TimersOverride* timers_override = nullptr;
 };
 
 /**

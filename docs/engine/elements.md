@@ -338,32 +338,40 @@ scenario load run reported as a hardcoded `0` before this.
 **Timers, wired end to end (issue #1498).** `elements.timers` (`"asConfigured"` (default) |
 `"off"` | `{fixedMs: N}` | `{minMs, maxMs}`) is validated on `POST /runs`, parsed into
 `RunContext::timers_override` (a `vayu::core::TimersOverride`), and applied through the one
-function every `timer.*` kind calls, `vayu::core::apply_timers_override` (`elements/pipeline.cpp`)
-- `"off"` silences the wait entirely (`waitedMs: 0`, no sleep), `fixedMs`/`{minMs,maxMs}` replace a
-kind's own computed wait with the run-wide one, whatever that kind's own config says. This also
-fixed a pre-existing dead-code bug: `RunContext::timers_disabled` was parsed from `"off"` since
-#1495 but nothing read it, because `timer.think`'s `step.between` phase was never dispatched on the
-load path at all. It is now: `ScenarioLoadDriver::run_step_between` (`scenario_load.cpp`) dispatches
-`Phase::StepBetween` on the step that just completed, non-blocking, and sums the outcomes'
-`waited_ms` into `VirtualUser::ready_at_ms`. `elements.seed` (a non-negative integer) seeds the
-run's own `std::mt19937_64` (`RunContext::rng`); a scenario load run derives one independent
-generator per virtual user off it (`vayu::core::derive_vu_rng`) rather than sharing one across
-worker threads, so a seeded run's random waits are reproducible.
+function every `timer.*` kind's `apply` calls, `vayu::core::apply_timers_override`
+(`elements/pipeline.cpp`) - `"off"` silences the wait entirely (`waitedMs: 0`, no sleep),
+`fixedMs`/`{minMs,maxMs}` replace a kind's own computed wait with the run-wide one, whatever that
+kind's own config says. This also fixed a pre-existing dead-code bug: `RunContext::timers_disabled`
+was parsed from `"off"` since #1495 but nothing read it, because `timer.think`'s `step.between`
+phase was never dispatched on the load path at all. It is now: `ScenarioLoadDriver::run_step_between`
+(`scenario_load.cpp`) dispatches `Phase::StepBetween` on the step that just completed, non-blocking,
+and sums the outcomes' `waited_ms` into `VirtualUser::ready_at_ms`. `elements.seed` (a non-negative
+integer) seeds the run's own `std::mt19937_64` (`RunContext::rng`); a scenario load run derives one
+independent generator per virtual user off it (`vayu::core::derive_vu_rng`) rather than sharing one
+across worker threads, so a seeded run's random waits are reproducible. `"off"` also reaches
+`timer.pacing` and `timer.throughput` under load (below), whose own scheduling seam runs before
+`apply_timers_override`'s call site ever exists for that step.
 
 **Non-blocking waits: `scheduled_ready_delay_ms`.** `Element::scheduled_ready_delay_ms` (issue
 #1498) is how a kind that needs to wait tells a scenario load run to hold its VU back without
 blocking a worker thread: `timer.think` (whose wait already lands through `step.between`'s own
-dispatch above) needs no override, but `timer.pacing` does, since its phase (`step.before`) fires
-only once a VU has already been selected as ready - too late to defer non-blockingly.
-`ScenarioLoadDriver::finish_step` calls the override on the VU's *upcoming* step, right after
-deciding which step comes next and before the VU can be selected again, and applies the returned
-delay to `VirtualUser::ready_at_ms`, which already gated VU selection but, before #1498, had
-nothing writing to it. Per-node "last started" timestamps live in `VirtualUser::pacing_state`
+dispatch above) needs no override, but `timer.pacing` and `timer.throughput` do, since their phase
+(`step.before`) fires only once a VU has already been selected as ready - too late to defer
+non-blockingly. `ScenarioLoadDriver::finish_step` calls the override on the VU's *upcoming* step,
+right after deciding which step comes next and before the VU can be selected again, and applies the
+returned delay to `VirtualUser::ready_at_ms`, which already gated VU selection but, before #1498,
+had nothing writing to it. Per-node "last started" timestamps live in `VirtualUser::pacing_state`
 (one map per VU, so VUs pacing the same folder run independent cadences) for `perUser: true` and
 for the sequential run; a `perUser: false` element instead advances its own entry in
 `ScenarioLoadState::shared_pacing` (a `SharedPacingClocks`, issue #1570), one atomic per
 shared-pacing element id in the plan, so two VUs' concurrent completions claim distinct slots of
-the same clock rather than racing onto the same one.
+the same clock rather than racing onto the same one. `SharedScheduleState::timers_override` (a
+`const TimersOverride*` alongside `pacing` and `throughput`, filled in from `RunContext` at the
+same call site) is `finish_step`'s own copy of the override for this seam: `"off"` returns
+`std::nullopt` before either kind touches its pacing state or shared clock at all, closing the gap
+this section used to disclose - a run that silences timers with `"off"` no longer defers a scenario
+load run's pacing or throughput element by its own interval first and only reports that truthfully
+after the fact.
 
 **Step-level elements on the single-request load path, wired (issue #1594).**
 A single-request `POST /runs` payload's own request now has an `elements`
