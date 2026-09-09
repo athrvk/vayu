@@ -259,3 +259,66 @@ describe("layout-store graphql variables pane", () => {
 		expect(stored.state.graphqlVariablesSize).toBe(52);
 	});
 });
+/**
+ * The Add-element picker's "Recently used" group (issue #1604) - the last
+ * five kinds added, most recent first.
+ */
+describe("layout-store recent element kinds", () => {
+	beforeEach(() => {
+		useLayoutStore.setState({ recentElementKinds: [] });
+	});
+
+	it("starts empty", () => {
+		expect(useLayoutStore.getInitialState().recentElementKinds).toEqual([]);
+	});
+
+	it("puts the newest kind first", () => {
+		const { addRecentElementKind } = useLayoutStore.getState();
+
+		addRecentElementKind("extract.json");
+		addRecentElementKind("assert.status");
+
+		expect(useLayoutStore.getState().recentElementKinds).toEqual([
+			"assert.status",
+			"extract.json",
+		]);
+	});
+
+	it("moves a repeated kind to the front instead of duplicating it", () => {
+		const { addRecentElementKind } = useLayoutStore.getState();
+
+		addRecentElementKind("extract.json");
+		addRecentElementKind("assert.status");
+		addRecentElementKind("extract.json");
+
+		expect(useLayoutStore.getState().recentElementKinds).toEqual([
+			"extract.json",
+			"assert.status",
+		]);
+	});
+
+	it("caps the list at five, dropping the oldest", () => {
+		const { addRecentElementKind } = useLayoutStore.getState();
+
+		for (const kind of ["k1", "k2", "k3", "k4", "k5", "k6"]) {
+			addRecentElementKind(kind);
+		}
+
+		expect(useLayoutStore.getState().recentElementKinds).toEqual([
+			"k6",
+			"k5",
+			"k4",
+			"k3",
+			"k2",
+		]);
+	});
+
+	it("survives a restart", () => {
+		useLayoutStore.getState().addRecentElementKind("extract.json");
+
+		// Mutation check: drop `recentElementKinds` from `partialize` and the
+		// picker's "Recently used" group is empty on every fresh launch.
+		const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "{}");
+		expect(stored.state.recentElementKinds).toEqual(["extract.json"]);
+	});
+});

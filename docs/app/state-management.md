@@ -179,6 +179,7 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   requestSplitRatio: number              // 0–1; left/request pane fraction
   scriptSnippetsCollapsed: boolean       // Default a fresh script row's snippets list starts from (collapsed); each row keeps its own state after that
   scriptEditorHeight: number             // Height (px) of a script.pre/script.post element's editor box - one value for every row
+  recentElementKinds: string[]           // Last 5 kinds added through the Add-element picker, most recent first
   paletteOpen: boolean                   // Is the ⌘K command palette showing?
 }
 ```

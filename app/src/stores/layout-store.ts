@@ -105,6 +105,17 @@ interface LayoutState {
 	scriptEditorHeight: number;
 
 	/**
+	 * The last five element kinds added through the Add-element picker, most
+	 * recent first - the picker's own "Recently used" group (issue #1604).
+	 *
+	 * Kind ids, not kind schemas: the catalogue is served fresh from the engine
+	 * every session, so a kind the engine no longer registers just drops out
+	 * when the picker filters this list against the live catalogue at render
+	 * time, rather than this store needing its own migration for it.
+	 */
+	recentElementKinds: string[];
+
+	/**
 	 * Whether the ⌘K command palette is showing.
 	 *
 	 * Here rather than as local state in the palette because the two things that
@@ -147,6 +158,9 @@ interface LayoutState {
 	setScriptSnippetsCollapsed: (collapsed: boolean) => void;
 	setScriptEditorHeight: (height: number) => void;
 
+	/** Moves `kind` to the front of `recentElementKinds`, capped at five. */
+	addRecentElementKind: (kind: string) => void;
+
 	setPaletteOpen: (open: boolean) => void;
 }
 
@@ -164,6 +178,7 @@ export const useLayoutStore = create<LayoutState>()(
 			graphqlVariablesSize: DEFAULT_GRAPHQL_VARIABLES_SIZE,
 			scriptSnippetsCollapsed: true,
 			scriptEditorHeight: DEFAULT_SCRIPT_EDITOR_HEIGHT,
+			recentElementKinds: [],
 			paletteOpen: false,
 
 			setDrawerOpen: (open) => set({ drawerOpen: open }),
@@ -216,6 +231,14 @@ export const useLayoutStore = create<LayoutState>()(
 						Math.min(SCRIPT_EDITOR_MAX_HEIGHT, height)
 					),
 				}),
+
+			addRecentElementKind: (kind) =>
+				set((s) => ({
+					recentElementKinds: [
+						kind,
+						...s.recentElementKinds.filter((k) => k !== kind),
+					].slice(0, 5),
+				})),
 
 			setPaletteOpen: (open) => set({ paletteOpen: open }),
 		}),
@@ -270,6 +293,7 @@ export const useLayoutStore = create<LayoutState>()(
 				graphqlVariablesSize: state.graphqlVariablesSize,
 				scriptSnippetsCollapsed: state.scriptSnippetsCollapsed,
 				scriptEditorHeight: state.scriptEditorHeight,
+				recentElementKinds: state.recentElementKinds,
 			}),
 		}
 	)
