@@ -162,18 +162,18 @@ describe("HTTP_VERSIONS parity with the engine", () => {
 	// hand-copied list, is what makes this a drift guard instead of a tautology.
 	// Both paths are held in the testkit, so CI routes an edit to either back to
 	// this suite instead of failing on the next unrelated change under `app/`.
-	const [TYPES_HPP, DATABASE_CPP] =
+	const [TYPES_HPP, NETWORK_SEED_CPP] =
 		ENGINE_READING_GUARDS.httpVersionOptions.paths.map(fromRepoRoot);
 	const source = readFileSync(TYPES_HPP, "utf8");
 
 	// `types.hpp` only proves the two sides agree on the *domain*. What the
 	// engine actually seeds into `defaultHttpVersion.options` is built by
-	// `http_version_options_json()` in database.cpp - so the guard also has to
-	// pin that this function still *derives* the seeded list from
-	// `all_http_versions()` / `to_string` / `http_version_label`, rather than a
-	// literal array someone swapped in later that could silently drift or
-	// reorder without either of the checks above noticing.
-	const databaseSource = readFileSync(DATABASE_CPP, "utf8");
+	// `http_version_options_json()` in `config_seeds/network.cpp` (#1611) - so
+	// the guard also has to pin that this function still *derives* the seeded
+	// list from `all_http_versions()` / `to_string` / `http_version_label`,
+	// rather than a literal array someone swapped in later that could silently
+	// drift or reorder without either of the checks above noticing.
+	const databaseSource = readFileSync(NETWORK_SEED_CPP, "utf8");
 
 	it("read non-empty engine source files", () => {
 		// Guards against the failure mode CLAUDE.md documents: a source-scanning
@@ -187,7 +187,10 @@ describe("HTTP_VERSIONS parity with the engine", () => {
 		const fnMatch = databaseSource.match(
 			/std::string http_version_options_json \(\) \{([\s\S]*?)\n\}/
 		);
-		expect(fnMatch, "http_version_options_json() not found in database.cpp").not.toBeNull();
+		expect(
+			fnMatch,
+			"http_version_options_json() not found in config_seeds/network.cpp"
+		).not.toBeNull();
 
 		const body = fnMatch?.[1] ?? "";
 		expect(body).toContain("all_http_versions ()");
@@ -201,9 +204,9 @@ describe("HTTP_VERSIONS parity with the engine", () => {
 		// allowed to carry them - but not to cross a `;`, which would let the
 		// match start at an earlier entry and assert about the wrong statement.
 		const seedMatch = databaseSource.match(
-			/upsert_config \([^;]*ConfigEntry\{ "defaultHttpVersion",[\s\S]*?\}\)+;/
+			/seed \([^;]*ConfigEntry\{ "defaultHttpVersion",[\s\S]*?\}\)+;/
 		);
-		expect(seedMatch, "defaultHttpVersion upsert_config call not found").not.toBeNull();
+		expect(seedMatch, "defaultHttpVersion seed call not found").not.toBeNull();
 		expect(seedMatch?.[0]).toContain("http_version_options_json ()");
 	});
 

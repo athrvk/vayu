@@ -183,11 +183,21 @@ export const ENGINE_READING_GUARDS = {
 	},
 	settingsShelves: {
 		reader: "app/src/modules/settings/engine-categories.test.ts",
-		paths: ["engine/src/db/database.cpp"],
+		// One file per category (#1611) - `seed_default_config` in
+		// `database.cpp` is now just the ordered list of calls into these.
+		paths: [
+			"engine/src/db/config_seeds/general.cpp",
+			"engine/src/db/config_seeds/network.cpp",
+			"engine/src/db/config_seeds/services.cpp",
+			"engine/src/db/config_seeds/observability.cpp",
+			"engine/src/db/config_seeds/data_retention.cpp",
+			"engine/src/db/config_seeds/limits.cpp",
+			"engine/src/db/config_seeds/scripting.cpp",
+		],
 	},
 	httpVersionOptions: {
 		reader: "app/src/modules/settings/main/SettingsMain.enum.test.tsx",
-		paths: ["engine/include/vayu/types.hpp", "engine/src/db/database.cpp"],
+		paths: ["engine/include/vayu/types.hpp", "engine/src/db/config_seeds/network.cpp"],
 	},
 	/*
 	 * The one guard in both registries: it reads three pages under `docs/` and,
