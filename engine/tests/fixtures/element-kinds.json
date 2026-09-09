@@ -28,6 +28,9 @@
     "configSchema": {
       "additionalProperties": false,
       "properties": {
+        "inline": {
+          "type": "boolean"
+        },
         "script": {
           "type": "string"
         }
@@ -52,6 +55,9 @@
     "configSchema": {
       "additionalProperties": false,
       "properties": {
+        "inline": {
+          "type": "boolean"
+        },
         "script": {
           "type": "string"
         }

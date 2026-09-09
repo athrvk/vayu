@@ -743,8 +743,10 @@ export const apiService = {
 		return answer;
 	},
 
-	/** A run's `tests` script is the same script Send runs - see executeRequest. */
-
+	/**
+	 * A single-target run's `requestElements` are the same resolved chain
+	 * `POST /execute` runs (issue #1594) - see executeRequest.
+	 */
 	async startLoadTest(data: StartLoadTestRequest): Promise<StartLoadTestResponse> {
 		return await httpClient.post<StartLoadTestResponse>(API_ENDPOINTS.START_LOAD_TEST, {
 			...data,

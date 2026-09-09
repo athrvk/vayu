@@ -10,11 +10,11 @@
  * chain's, root to leaf, then the request's own, minus whatever the request's
  * own `inherit.disable` entries name. Each part records where it came from.
  *
- * Generalizes `scriptParts` (`./script-parts.ts`, kept for the load path's
- * `tests` field, which still sends a joined script string) to every element
- * kind: Send executes editor state that may be unsaved, so the app resolves
- * the whole chain itself rather than asking the engine to resolve it from a
- * stored id - the same reason the old script-only version existed.
+ * Send executes editor state that may be unsaved, so the app resolves the
+ * whole chain itself rather than asking the engine to resolve it from a
+ * stored id - `POST /compose`'s by-id path (what MCP and a saved request's
+ * load-test run, issue #1594, both use instead) resolves the same chain
+ * engine-side, since it has a real id to resolve from.
  */
 
 import type { Collection, ElementDef, ResolvedElement } from "@/types";

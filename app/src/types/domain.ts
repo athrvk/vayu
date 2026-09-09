@@ -692,9 +692,9 @@ export interface ElementDef {
  * One element as sent inline to `POST /compose` / `POST /execute` for an
  * ad-hoc send (issue #1512), stamped with where it came from - the
  * generalized, N-kind form of {@link ScriptPart}. Built by
- * `elements-parts.ts`, which walks the collection chain the way `scriptParts`
- * used to for scripts alone. Absent `origin` is an inline send with no
- * `requestId` chain to resolve from.
+ * `elements-parts.ts`, which walks the collection chain, root to leaf, then
+ * the request's own. Absent `origin` is an inline send with no `requestId`
+ * chain to resolve from.
  */
 export interface ResolvedElement extends ElementDef {
 	origin?: { kind: "collection" | "request"; id?: string; name?: string };
@@ -1759,6 +1759,17 @@ export interface LoadTestConfig {
 	 * `ParsedDataFile` has already answered. Absent exactly when `data` is.
 	 */
 	dataColumns?: string[];
+	/**
+	 * The `elements` run override (issue #1594), single-request runs only:
+	 * whether an inherited `script.*` element's own `config.inline` decides
+	 * ("asMarked"), or every one runs inline / stays deferred regardless of
+	 * its own marking. The same override {@link StartScenarioRunRequest}
+	 * sends, restricted to `scripts` here - a load run has no per-run
+	 * `timers` control on this dialog. Absent means "asMarked", the engine's
+	 * own default, so the field is only sent when the user actually changed
+	 * it.
+	 */
+	elements?: { scripts: "asMarked" | "allInline" | "allDeferred" };
 }
 
 /**

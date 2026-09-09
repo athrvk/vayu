@@ -51,7 +51,6 @@ import { resolveAuthSource, resolveAuthForSend } from "./utils/auth-resolution";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
 import { toFlatHeaders } from "./utils/key-value";
-import { scriptParts } from "./utils/script-parts";
 import { elementsParts, scriptTextFor } from "./utils/elements-parts";
 import {
 	buildExecBody,
@@ -685,6 +684,23 @@ export default function RequestBuilder() {
 				// keeps a load test measuring the request Send sends.
 				const bodyPayload = buildExecBody(pendingLoadTestRequest, (s) => s);
 
+				// Elements: the collection chain root to leaf, then the request's
+				// own, minus whatever the request's own `inherit.disable` entries
+				// name (issue #1512) - the same resolution `handleSendRequest`'s
+				// own compose call uses. The single-request load path runs this
+				// list's `extract.*` / `assert.*` inline and `timer.think` /
+				// `script.*` per `elements.scripts` below (issue #1594); before
+				// that, only `script.post` reached the run at all, joined into a
+				// flat replayed string. `POST /runs` reads this under
+				// `requestElements`, a distinct key from `elements` (the run-level
+				// timers/scripts override object) - a flat run payload has no
+				// `request` sub-object to nest a request-shaped array under.
+				const requestElements = elementsParts(
+					collectionAncestors,
+					fetchedRequest.id,
+					pendingLoadTestRequest.elements
+				);
+
 				// Compose engine-side, then start the run with the composed
 				// request half plus the load shape - never re-resolved.
 				const composed = await engineComposeRequest({
@@ -694,6 +710,7 @@ export default function RequestBuilder() {
 						headers: toFlatHeaders(pendingLoadTestRequest.headers),
 						body: bodyPayload,
 						auth: { ...pendingLoadTestRequest.auth },
+						elements: requestElements,
 						// Same redirect policy the single-request Send uses, so a
 						// load test measures the same hops the user sees.
 						followRedirects: pendingLoadTestRequest.followRedirects,
@@ -707,20 +724,6 @@ export default function RequestBuilder() {
 						// test that verified where Send did not would fail on
 						// every request against the host the user opted out for.
 						verifySSL: pendingLoadTestRequest.verifySSL,
-						// The collection chain's test scripts too. Load runs only ever
-						// validated the request's own, so a collection-level assertion
-						// passed in design mode and was never checked under load.
-						// Scripts ride through composition untouched - the engine
-						// never interpolates script text. Load mode runs no element
-						// yet (issue #1495), so this still joins the `script.post`
-						// elements' text into the same flat `ScriptPart[]` shape the
-						// deferred replay has always taken.
-						tests: scriptParts(
-							collectionAncestors,
-							(c) => scriptTextFor(c.elements, "script.post"),
-							fetchedRequest.id,
-							scriptTextFor(pendingLoadTestRequest.elements, "script.post")
-						),
 					},
 					collectionId: fetchedRequest.collectionId,
 					environmentId: activeEnvironmentId || undefined,
@@ -782,6 +785,14 @@ export default function RequestBuilder() {
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
 					comment: config.comment,
+					// The resolved chain composed above (issue #1594), never the
+					// spread's own `elements` - the composed payload's `elements`
+					// is `requestElements`' own resolved list, while `elements` on
+					// `POST /runs` is the run-level timers/scripts override object
+					// the dialog's Scripts control writes; the two must not
+					// collide under one name.
+					requestElements,
+					elements: config.elements,
 					success_sample_rate: config.success_sample_period,
 					slow_threshold_ms: config.slow_threshold_ms,
 					save_timing_breakdown: config.save_timing_breakdown,

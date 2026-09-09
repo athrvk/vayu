@@ -420,24 +420,30 @@ vayu::core::ElementOwner owner = vayu::core::ElementOwner::Request) {
  * Refuse `preRequestScript`, `postRequestScript` and `tests` (issue #1514's
  * cut-over): the owner's decision was a clean cut, not a transitional read/
  * write alias, so every route that used to accept a script as one of these
- * keys now refuses it outright, naming `elements` as the replacement. Checked
+ * keys now refuses it outright, naming its own replacement field. Checked
  * against every spelling `script_parts.hpp` used to accept (`preRequestScripts`
  * / `postRequestScripts` included), so a caller cannot dodge the refusal by
  * sending the list form instead of the singular one.
+ *
+ * @p replacement names the field this route actually reads a script.pre/
+ * script.post from now - `elements` for every route but a single-target
+ * `POST /runs`, whose own script slot is `requestElements` instead (issue
+ * #1594): that endpoint's `elements` key means the run-level timers/scripts
+ * override, not a script source, so pointing the message at it would send a
+ * caller who follows it straight into a second refusal.
  *
  * A plain message rather than a `RouteResult`: callers answer with it two
  * different ways (`route_error` here, a bare 400 in `read_execute_payload`),
  * and the check itself is the same three lines either way.
  */
-[[nodiscard]] inline std::optional<std::string> refuse_legacy_script_fields (
-const nlohmann::json& json) {
+[[nodiscard]] inline std::optional<std::string>
+refuse_legacy_script_fields (const nlohmann::json& json, const char* replacement = "elements") {
     for (const char* key : { "preRequestScript", "preRequestScripts",
          "postRequestScript", "postRequestScripts", "tests" }) {
         if (json.contains (key) && !json[key].is_null ()) {
-            return std::format (
-            "'{}' is no longer accepted - scripts are 'elements' "
-            "now (a 'script.pre' or 'script.post' entry)",
-            key);
+            return std::format ("'{}' is no longer accepted - scripts are '{}' "
+                                "now (a 'script.pre' or 'script.post' entry)",
+            key, replacement);
         }
     }
     return std::nullopt;

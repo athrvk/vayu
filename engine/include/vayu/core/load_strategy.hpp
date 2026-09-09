@@ -186,6 +186,25 @@ const nlohmann::json& config);
 validate_lifecycle_elements_run_override (const nlohmann::json& config);
 
 /**
+ * @brief Why a run payload's top-level `requestElements` cannot run, or
+ *        `nullopt` if it can (issue #1594).
+ *
+ * A single-request `POST /runs` payload's own place to declare its request's
+ * step-level elements (`extract.*`, `assert.*`, `timer.think`, `script.pre`,
+ * `script.post`, ...) - a distinct key from `elements`, which is already the
+ * run-level `timers`/`scripts`/`seed`/`includeScriptTime` override object
+ * `validate_elements_run_override` reads, and a flat single-request payload
+ * has no `request` sub-object to nest a request-shaped `elements` array
+ * under. An array of element descriptors, the same shape a stored request's
+ * own `elements` column holds, validated with `ElementOwner::Request` (no
+ * kind restricted the way `lifecycleElements`' two kinds are). Refused
+ * outright beside a `scenario` block, whose steps already carry their own
+ * resolved `elements` from the plan.
+ */
+[[nodiscard]] std::optional<std::string>
+validate_request_elements_run_override (const nlohmann::json& config);
+
+/**
  * @brief How long a `constant_rps` tick sleeps before it spins out the rest of
  *        @p remainder_us, in microseconds. 0 means spin the whole remainder.
  *

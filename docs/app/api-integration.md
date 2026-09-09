@@ -700,9 +700,16 @@ own default - the same omitted-when-default rule `failOnSchemaError` follows.
 #1498 finishes that); `scripts` picks whether a `script.*` element runs inline
 on the event-loop worker or stays deferred to the post-run replay, and has no
 effect on a design-mode run, which is why the dialog only offers the two
-controls once Load test is on. The single-request `startLoadTest` payload has
-no `elements` attachment point yet - a separate, unwired engine gap - so
-`LoadTestConfigDialog` sends no such override.
+controls once Load test is on. Since issue #1594 the single-request
+`startLoadTest` payload has an `elements` attachment point too - its own
+step-level elements ride under `requestElements` instead (a distinct key,
+because this endpoint's own `elements` is the override block, not a script
+source) - and `LoadTestConfigDialog` sends the same `elements: {scripts}`
+override there once the user changes the dialog's Scripts control from its
+`"asMarked"` default, the one control the single-target payload's own
+`preRequestScript` warning needs: `"allInline"` is what makes a pre-request
+script actually reach the wire under load, since an unmarked one otherwise
+never runs on this path either.
 
 What comes back for one differs in two places worth knowing. `GET /runs/:id`
 returns the **resolved manifest** in place of the block that was sent

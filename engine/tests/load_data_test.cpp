@@ -476,10 +476,14 @@ TEST_F (LoadDataTest, TheDeferredScriptReadsTheRowItsSampleBound) {
     payload["data"] = json::array ({ json{ { "id", "a" } }, json{ { "id", "b" } } });
     // Passes only if each sample carries its own row: a replay bound to row 0
     // for both would see 'a' twice and the set below would hold one entry.
-    payload["tests"] = R"js(pm.test('bound', function () {
+    // Deferred (no `inline`), the same as a plain `tests` string used to be
+    // (issue #1594's cut-over: `requestElements`' `script.post` is the
+    // replacement).
+    payload["requestElements"] =
+    json::array ({ json{ { "kind", "script.post" }, { "config", { { "script", R"js(pm.test('bound', function () {
   var id = pm.iterationData.get('id');
   if (id !== 'a' && id !== 'b') { throw new Error('sample saw ' + id); }
-});)js";
+});)js" } } } } });
 
     run (payload);
 
@@ -510,11 +514,15 @@ TEST_F (LoadDataTest, WithoutRowsTheDeferredScriptSeesNoIterationData) {
     // `pm.iterationData` is the binding that is absent, not a column of it: a
     // row-free run leaves the whole scope `undefined`, so a script reaching
     // through it for a column would throw rather than read `undefined`.
-    payload["tests"] = R"js(pm.test('absent', function () {
+    // Deferred (no `inline`), the same as a plain `tests` string used to be
+    // (issue #1594's cut-over: `requestElements`' `script.post` is the
+    // replacement).
+    payload["requestElements"] =
+    json::array ({ json{ { "kind", "script.post" }, { "config", { { "script", R"js(pm.test('absent', function () {
   if (typeof pm.iterationData !== 'undefined') {
     throw new Error('a row-free run bound a row');
   }
-});)js";
+});)js" } } } } });
 
     run (payload);
 

@@ -27,7 +27,6 @@ import type {
 	RequestAuth,
 	OAuth2Config,
 	LoadTestMode,
-	ScriptPart,
 	ElementDef,
 	ResolvedElement,
 	HttpVersion,
@@ -530,8 +529,9 @@ export interface ComposeRequestRequest {
 
 /**
  * What `POST /compose` returns: an `ExecuteRequestRequest` plus whatever
- * extra fields rode through composition verbatim (e.g. the load path's
- * `tests` script parts - scripts are never interpolated).
+ * extra fields rode through composition verbatim (e.g. the resolved
+ * `elements` array a load run renames onto `requestElements` - scripts are
+ * never interpolated).
  */
 export type ComposedRequest = ExecuteRequestRequest & Record<string, unknown>;
 
@@ -610,7 +610,27 @@ export interface StartLoadTestRequest {
 	success_sample_rate?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
-	tests?: ScriptPart[];
+	/**
+	 * This run's own step-level elements (issue #1594): the collection chain
+	 * root to leaf, then the request's own, the same resolved list
+	 * {@link ExecuteRequestRequest.elements} carries and `POST /compose`
+	 * echoes back. A distinct key from `elements` below - the run payload is
+	 * flat, so one key cannot be both a request-shaped array and the
+	 * run-level override object. Replaces the retired `tests` field, which
+	 * `POST /runs` now refuses by name alongside `postRequestScript(s)` /
+	 * `preRequestScript(s)`.
+	 */
+	requestElements?: ResolvedElement[];
+	/**
+	 * The `elements` run override (issue #1594), single-target runs only now
+	 * too: `scripts` picks whether a `script.*` element in
+	 * {@link requestElements} runs inline on the event-loop worker or stays
+	 * deferred to the post-run replay. Accepted (and validated) beside a
+	 * `scenario` block as well, since the validator does not distinguish the
+	 * two shapes - see {@link StartScenarioRunRequest.elements} for `timers`,
+	 * which this dialog has no control for.
+	 */
+	elements?: { scripts?: "asMarked" | "allInline" | "allDeferred" };
 
 	// Pass/fail budgets for the whole run. camelCase because these are the
 	// engine's own metric names, which come back unchanged in the report's
@@ -657,8 +677,8 @@ export interface StartLoadTestRequest {
 	 * fields are separate and why sending both is a `400`.
 	 *
 	 * Every `{{data.column}}` in the URL, headers, body and auth credentials
-	 * binds per submission, and the deferred `tests` script reads the row its
-	 * sample carried as `pm.iterationData`. The set is never persisted - the run
+	 * binds per submission, and a deferred `script.post` element reads the row
+	 * its sample carried as `pm.iterationData`. The set is never persisted - the run
 	 * snapshot records `dataRowCount` alone - but a bound cell travels in the
 	 * request that carried it, which the run stores with its retained traces.
 	 */
