@@ -683,10 +683,14 @@ ExchangeInputs inputs) {
         .should_stop = inputs.should_stop,
         // `values_from_scopes` is what `resolve_residual_tokens` above
         // already reads @p scopes through; a controller kind's condition or
-        // dispatch variable resolves against the same view (issue #1515).
+        // dispatch variable resolves against the same view, plus this
+        // iteration's bound row under its `data.*` namespace when the run
+        // has one (issue #1515) - the same precedence a script's own
+        // `pm.variables.replaceIn` already gives it.
         .resolve_template =
         [&] (const std::string& text) {
-            return vayu::http::resolve_template (text, values_from_scopes (scopes));
+            return vayu::http::resolve_template_with_optional_row (
+            text, values_from_scopes (scopes), inputs.iteration_data);
         },
         .iteration        = inputs.iteration.value_or (0),
         .step_position    = inputs.step_position,

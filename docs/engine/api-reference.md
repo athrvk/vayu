@@ -7423,7 +7423,11 @@ and never needed to (that one reports an empty `refreshes` array).
 "scenario": {
   "iterations": 3, "iterationsCompleted": 3, "stepsExecuted": 6,
   "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
-  "stepsStored": 6, "stepsDropped": 0
+  "stepsStored": 6, "stepsDropped": 0,
+  "transactions": [
+    { "name": "checkout", "count": 3, "errors": 0,
+      "latency": { "min": 8.1, "p50": 14.2, "p90": 22.0, "p95": 26.5, "p99": 33.0, "max": 55.4 } }
+  ]
 }
 ```
 
@@ -7431,6 +7435,12 @@ and never needed to (that one reports an empty `refreshes` array).
 that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every
 non-passing step among the ones kept. `summary.totalRequests` is the number of
 step executions, not the number of rows that survived.
+
+`transactions` (issue #1515) is a sibling of `steps`, not a member of it - a
+`control.transaction` spans a folder, not one step - and is **absent**, never
+`[]`, for a run with no `control.transaction` element or one whose folder
+never closed. One entry per declared name that closed at least once, in the
+same shape `scenario.transactions` documents elsewhere on this page.
 
 `latency.*` and the enriched `summary` fields (`peakConcurrency`, `droppedRequests`,
 `avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted

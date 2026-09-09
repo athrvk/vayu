@@ -662,6 +662,21 @@ std::string render_data_value (const nlohmann::json& value) {
     return value.dump ();
 }
 
+std::string resolve_template_with_optional_row (const std::string& input,
+const VariableValues& vars,
+const nlohmann::json* row) {
+    if (row == nullptr || !row->is_object ()) {
+        return resolve_template (input, vars);
+    }
+    DataRowColumns columns;
+    for (const auto& [column, cell] : row->items ()) {
+        columns.columns[column] = render_data_value (cell);
+    }
+    std::optional<std::string> missing;
+    std::string resolved = resolve_template_with_data (input, vars, columns, missing);
+    return missing ? input : resolved;
+}
+
 std::string resolve_template_with_data (const std::string& input,
 const VariableValues& vars,
 const DataRowColumns& row,

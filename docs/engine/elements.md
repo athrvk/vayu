@@ -259,7 +259,11 @@ end to end: `execute_exchange`'s pre-send check, `decide_next_step`, and `classi
 `control.switch` (`variable`, `cases`, `default?`) routes to a named member by a resolved variable's
 value, through the same `ScriptControl::Next` / `resolve_next_step` a script's own
 `setNextRequest` uses - so a switch's dispatch is an ordinary jump to every reader of the step list,
-not a second flow-control channel.
+not a second flow-control channel. A value that matches no `cases` entry and has no `default` does
+**not** end the folder: this occurrence proceeds unrouted, as an ordinary `"ok"` outcome with no
+jump at all, falling through to whatever the plan's own order would have sent next. The element
+carries no folder boundary of its own to end at - only a `needs_span` kind does, and `control.switch`
+is not one - so there is nothing here to decide where "the folder" ends.
 
 `control.loop` (`count`) and `control.transaction` (`name`, `includeTimers?`) both sit on a folder and are inherited
 into every member beneath it, compiling once per member - so each member's own instance has to

@@ -390,6 +390,28 @@ std::optional<std::string>& missing_column,
 const std::optional<IterationIdentity>& identity = std::nullopt);
 
 /**
+ * Resolve @p input against @p vars, folding @p row's columns into the
+ * `data.*` namespace (and Postman's bare-column precedence, issue #1007)
+ * when a row is bound - the same precedence `resolve_script_template`
+ * already gives `pm.variables.replaceIn` (issue #1515's `control.if` /
+ * `control.switch`, which read a condition or a dispatch variable that
+ * lives in config text rather than a request field composition already
+ * resolved).
+ *
+ * There is no error channel here for a controller kind to throw through, so
+ * a `{{data.column}}` the row does not carry leaves @p input written as it
+ * stands - the same answer composition gives any other name it cannot
+ * resolve - rather than the partially-substituted text
+ * `resolve_template_with_data` would otherwise return.
+ *
+ * @p row is null for a design send and for a run with no dataset behind it,
+ * both of which resolve @p input against @p vars alone.
+ */
+[[nodiscard]] std::string resolve_template_with_optional_row (const std::string& input,
+const VariableValues& vars,
+const nlohmann::json* row);
+
+/**
  * Deep-resolve every string *value* inside a JSON value (object keys are left
  * alone), preserving structure. Non-string leaves pass through verbatim.
  *
