@@ -42,11 +42,12 @@ const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
  * A ceiling, not a count to hold: 16 was what #1216 left behind, one of which
  * went with the body editor's drag handle (#1323); 17 added the Dock's
  * worker-count tooltip (#1508); 18 adds the script element form's editor
- * height handle (#1605). The number moves down with the list in the doc when
- * a site is fixed rather than suppressed. Raising it means adding a site to
- * the doc too, which is where the reason has to convince the next reader.
+ * height handle (#1605); 19 adds ActivityRail's roving-tabindex nav (#1615).
+ * The number moves down with the list in the doc when a site is fixed rather
+ * than suppressed. Raising it means adding a site to the doc too, which is
+ * where the reason has to convince the next reader.
  */
-const CEILING = 18;
+const CEILING = 19;
 
 /** The reason marker eslint itself understands, and this repository writes. */
 const REASON = " -- ";

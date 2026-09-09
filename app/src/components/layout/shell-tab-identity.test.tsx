@@ -36,7 +36,9 @@ vi.mock("./Drawer", () => ({
 	Drawer: () => <div data-testid="drawer" />,
 }));
 vi.mock("./Dock", () => ({ Dock: () => <div data-testid="dock" /> }));
+vi.mock("./ActivityRail", () => ({ ActivityRail: () => <div data-testid="activity-rail" /> }));
 vi.mock("./ContextBar", () => ({ ContextBar: () => <div data-testid="context-bar" /> }));
+vi.mock("./ContextRail", () => ({ ContextRail: () => <div data-testid="context-rail" /> }));
 vi.mock("@/modules/collections/ImportModal", () => ({
 	ImportModal: () => <div data-testid="import-modal" />,
 }));
@@ -101,15 +103,23 @@ describe("tab content identity across the drawer", () => {
 	});
 
 	it("puts the tab strip inside the column the drawer sits beside", () => {
-		// The geometry claim itself: the strip is a *sibling of main*, under the
-		// same column, rather than a row spanning the window. Anything else and
-		// its left edge stops tracking the drawer's resize handle.
+		// The geometry claim itself: the strip sits in the *same column* as main,
+		// rather than a row spanning the window. Anything else and its left edge
+		// stops tracking the drawer's resize handle.
 		renderShell();
 		// The strip row, not the tablist nested in it - the tablist holds only
-		// tabs, so the element sitting beside main is its parent.
+		// tabs, so the element sitting in the column is its parent.
 		const strip = screen.getByRole("tablist").parentElement as HTMLElement;
 		const main = screen.getByRole("main");
-		expect(strip.parentElement).toBe(main.parentElement?.parentElement);
+		// `contains`, not an exact depth: #1615 added one more row inside the
+		// column, beside main+ContextBar, to hold `ContextRail` outside the box
+		// ContextBar's overlay mode positions from - so main is strip's
+		// grand-nephew now rather than its sibling's child. `contains` still
+		// catches the regression this guards (the strip moving out of the
+		// column into a row of its own), and the ordering check below still
+		// proves the strip comes first.
+		expect(strip.parentElement?.contains(main)).toBe(true);
+		expect(main.parentElement).not.toBe(strip.parentElement);
 		expect(strip.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 

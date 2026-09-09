@@ -6,6 +6,7 @@
  */
 
 import type { ComponentType } from "react";
+import type { LucideIcon } from "lucide-react";
 import type { Tab } from "@/stores";
 
 /** What every section is handed: the tab it is describing. */
@@ -68,6 +69,12 @@ export interface ContextBarSection {
 	/** Stable across releases - it is the key the collapsed state persists under. */
 	id: string;
 	title: string;
+	/**
+	 * The glyph the right-edge Context Rail shows for this section (#1615). Every
+	 * entry carries one - `registry.test.tsx` asserts it - so the rail and the
+	 * bar read one list and cannot drift.
+	 */
+	icon: LucideIcon;
 	/**
 	 * Whether this section has anything to say about this tab. Takes the whole
 	 * tab, not just its type, because Phase 2's collection and run sections turn

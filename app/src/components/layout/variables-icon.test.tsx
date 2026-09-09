@@ -11,37 +11,33 @@
 /**
  * "Variables" is drawn one way, and that way is `{}`.
  *
- * The Dock used `Zap`, which is this app's load-test mark everywhere else - the
- * Load Test button in the URL bar, the dashboard tab icon, the badge on a load
- * run in History. In the Dock it promised "run" and opened a variable editor.
+ * The Dock's own switcher used `Zap` once, this app's load-test mark
+ * everywhere else - the Load Test button in the URL bar, the dashboard tab
+ * icon, the badge on a load run in History - and there it promised "run" and
+ * opened a variable editor. That switcher is `ActivityRail` since #1615, and
+ * `ActivityRail.test.tsx` carries its half of this guard now.
  *
- * Swapping only the Dock would have left the concept drawn three ways, since
- * the welcome Launcher used `Database` and the variables empty state used
- * `Variable`. So this pins the association, not just the glyph: the thing
- * labelled "Variables" carries `Braces`, in all three places, and carries no
- * icon that means something else in the app.
+ * Swapping only the switcher would have left the concept drawn three ways,
+ * since the welcome Launcher used `Database` and the variables empty state
+ * used `Variable`. So this pins the two glyphs this file still owns: the tab
+ * strip (a tab opened from either surface) and the two other UI copies, and
+ * carries no icon that means something else in the app.
  *
  * Rendered rather than source-scanned. A scan would read `icon: <Braces …>` in
- * the Dock's `DRAWER_BUTTONS` happily enough, but the Launcher and the empty
+ * a switcher's own button table happily enough, but the Launcher and the empty
  * state both hand their icon over as a *component reference* (`icon={Braces}`)
  * that a sibling renders - the class never appears as text next to the word
  * "Variables", which is precisely the blind spot CLAUDE.md records from the
  * badge-hover guard.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
-import { TooltipProvider } from "@/components/ui";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Dock } from "./Dock";
 import { TabStrip } from "./TabStrip";
 import { Launcher } from "@/modules/welcome/Launcher";
 import VariablesMain from "@/modules/variables/main/VariablesMain";
 import { useTabsStore } from "@/stores";
-
-// The Dock prints the app version, which Vite `define`s at build time; vitest
-// does not, so without this the component throws before it renders an icon.
-vi.stubGlobal("__VAYU_VERSION__", "0.0.0-test");
 
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: [], isLoading: false, isError: false }),
@@ -54,11 +50,6 @@ vi.mock("@/queries", () => ({
 		enabled: false,
 	}),
 	runDetailOptions: () => ({ queryKey: ["run"], queryFn: async () => undefined, enabled: false }),
-	// The Dock's running-services indicator reads all three service lists; with
-	// none running it renders nothing, which is the state this file wants anyway.
-	useInboxesQuery: () => ({ data: [] }),
-	useMockIssuersQuery: () => ({ data: [] }),
-	useMockServersQuery: () => ({ data: [] }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({
@@ -77,56 +68,11 @@ function iconNames(root: Element): string[] {
 		.map((c) => c.slice("lucide-".length));
 }
 
-beforeEach(cleanup);
-
-/**
- * `Dock` no longer mounts its own `TooltipProvider` - the delay is set once at
- * the app root (`main.tsx`), and a bare nested provider would have reset this
- * strip to Radix's 700ms. So the harness supplies one, as the app does.
- */
-const renderDock = () =>
-	render(
-		<TooltipProvider>
-			<Dock />
-		</TooltipProvider>
-	);
-
 describe("the variables icon", () => {
-	it("is Braces in the Dock, not the load-test bolt", () => {
-		renderDock();
-		const button = screen.getByRole("button", { name: "Variables" });
-
-		const names = iconNames(button);
-		// Guards the reader: a renamed class or an icon-less button would make
-		// every assertion below vacuous.
-		expect(names.length).toBeGreaterThan(0);
-		expect(names).toContain("braces");
-		expect(names).not.toContain("zap");
-	});
-
-	it("does not reuse an icon another Dock button already owns", () => {
-		renderDock();
-		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
-		const buttons = Array.from(nav.querySelectorAll("button"));
-
-		// Six since Trash joined the strip (issue #989).
-		expect(buttons).toHaveLength(6);
-		const perButton = buttons.map((b) => iconNames(b).join("+"));
-		expect(new Set(perButton).size).toBe(perButton.length);
-	});
-
-	it("keeps the bolt out of the drawer switchers entirely", () => {
-		// `Zap` means "load test" in this app. Any of the six wearing it would
-		// re-introduce the same misreading in a different slot.
-		renderDock();
-		const nav = screen.getByRole("navigation", { name: "Sidebar views" });
-		expect(iconNames(nav)).not.toContain("zap");
-	});
-
 	it("survives the trip into the tab strip", () => {
-		// The tab existed with no icon at all, so pressing a `Braces` control in
-		// the Dock or on the Launcher opened a tab where the glyph had gone -
-		// the one place the user looks to confirm what they just opened.
+		// The tab existed with no icon at all, so pressing a `Braces` control on
+		// the rail or the Launcher opened a tab where the glyph had gone - the
+		// one place the user looks to confirm what they just opened.
 		useTabsStore.setState({
 			openTabs: [{ id: "t1", type: "variables", entityId: null }],
 			activeTabId: "t1",

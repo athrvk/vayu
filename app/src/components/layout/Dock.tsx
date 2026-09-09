@@ -5,69 +5,19 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { Info, PanelRight, RefreshCw } from "lucide-react";
+import { Info, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatChord } from "@/lib/platform";
-import { DRAWER_VIEW_CHORDS, TOGGLE_CONTEXT_BAR_CHORD } from "@/constants/shortcuts";
-import { DRAWER_VIEWS } from "@/constants/drawer-views";
 import {
-	useLayoutStore,
 	useEngineStore,
+	useLayoutStore,
 	useSaveStore,
-	useTabsStore,
 	// Aliased: `EngineStatus` is the component below, and the type is what it
 	// switches on.
 	type EngineStatus as EngineConnectionStatus,
 } from "@/stores";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
-import { contextBarHasContent } from "./context-bar-content";
 import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
-
-interface DockButtonProps {
-	active: boolean;
-	onClick: () => void;
-	/** What the button is. Becomes both the accessible name and the tooltip. */
-	label: string;
-	/** Shown after the label in the tooltip; deliberately not in the name. */
-	shortcut?: string;
-	children: React.ReactNode;
-}
-
-/**
- * These buttons are icon-only, so the label is the only thing that names them.
- * A Radix tooltip is not a substitute: it supplies `aria-describedby` while
- * open, never an accessible *name*, so the button announced as just "button".
- * Taking `label` rather than a prebuilt tooltip string means the name is
- * derived here and cannot be omitted at a call site.
- *
- * The shortcut stays out of the accessible name - it is useful on hover but
- * turns the name into "Collections Control Shift E" when read aloud.
- */
-function DockButton({ active, onClick, label, shortcut, children }: DockButtonProps) {
-	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<button
-					onClick={onClick}
-					aria-label={label}
-					aria-pressed={active}
-					className={cn(
-						"flex items-center justify-center w-7 h-7 rounded-md text-xs transition-colors",
-						active
-							? "bg-accent text-accent-foreground"
-							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-					)}
-				>
-					{children}
-				</button>
-			</TooltipTrigger>
-			<TooltipContent side="top">
-				<p>{shortcut ? `${label} ${shortcut}` : label}</p>
-			</TooltipContent>
-		</Tooltip>
-	);
-}
 
 /**
  * What each engine state is called in the strip.
@@ -356,17 +306,7 @@ function PendingRestartButton() {
 }
 
 export function Dock() {
-	const { drawerOpen, drawerView, activateDrawerView, contextBarOpen, toggleContextBar } =
-		useLayoutStore();
-	const { openTabs, activeTabId } = useTabsStore();
 	const saveStatus = useSaveStore((s) => s.status);
-
-	// "Open" is not the same as "on screen": the bar renders nothing off a request
-	// tab, so a button pressed on `contextBarOpen` alone lit up with nothing to
-	// show. Pressed mirrors what is visible instead - the toggle still works, and
-	// the state it reports is the state the user can see.
-	const activeTab = openTabs.find((t) => t.id === activeTabId);
-	const contextBarVisible = contextBarOpen && contextBarHasContent(activeTab);
 
 	// No TooltipProvider of its own. A bare nested one would reset this strip to
 	// Radix's 700ms default, ignoring the app-wide delay set in main.tsx.
@@ -377,31 +317,17 @@ export function Dock() {
 			 * viewport is `fixed` and has to offset itself above this strip - see
 			 * `ui/toast.tsx`. Same value (2rem); the token is what keeps the two
 			 * from drifting apart.
+			 *
+			 * Status only, since #1615: the sidebar-view switchers moved to
+			 * `ActivityRail` and the context-bar toggle to `ContextRail`, both on a
+			 * window edge the OS never covers. Everything left here already has a
+			 * non-footer path when there is something to click (pending restart is
+			 * the banner in Settings, save status opens the tab it names), so the
+			 * system Dock covering this strip on macOS costs a glance, never a
+			 * click.
 			 */}
 			<div className="flex items-center h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0">
-				{/* Left - drawer switchers.
-				    <nav>: these five choose what the sidebar shows, which is the
-				    app's primary navigation. Not role="toolbar" - that promises
-				    arrow-key traversal between the buttons, which this does not
-				    implement, and claiming it would mislead a keyboard user. */}
-				<nav className="flex items-center gap-0.5" aria-label="Sidebar views">
-					{/* Names, marks and order from `constants/drawer-views.ts`, chords
-					    from `constants/shortcuts.ts` - the strip holds neither, so the
-					    palette offering the same six cannot name them differently. */}
-					{DRAWER_VIEWS.map(({ view, label, icon: Icon }) => (
-						<DockButton
-							key={view}
-							active={drawerOpen && drawerView === view}
-							onClick={() => activateDrawerView(view)}
-							label={label}
-							shortcut={formatChord(DRAWER_VIEW_CHORDS[view])}
-						>
-							<Icon className="w-4 h-4" />
-						</DockButton>
-					))}
-				</nav>
-
-				{/* Middle - ambient status */}
+				{/* Ambient status */}
 				<div className="flex-1 flex items-center justify-center gap-4">
 					<EngineStatus />
 
@@ -449,18 +375,6 @@ export function Dock() {
 					 * decoration, so it gets a passing colour.
 					 */}
 					<EngineVersion />
-				</div>
-
-				{/* Right - toggles */}
-				<div className="flex items-center gap-0.5">
-					<DockButton
-						active={contextBarVisible}
-						onClick={toggleContextBar}
-						label="Toggle context bar"
-						shortcut={`(${formatChord(TOGGLE_CONTEXT_BAR_CHORD)})`}
-					>
-						<PanelRight className="w-4 h-4" />
-					</DockButton>
 				</div>
 			</div>
 		</>

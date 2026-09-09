@@ -8,16 +8,18 @@
 /**
  * Moving focus *between* the shell's regions, rather than within one (#1219).
  *
- * The window is four bands - the title bar, the drawer, the main pane and the
- * context bar - and until now the only way from one to another was Tab, which
- * walks every request in an expanded collection tree on the way. F6 cycles
- * them; ⌘L jumps to the one field people ask for by name.
+ * The window is five bands - the title bar, the activity rail, the drawer, the
+ * main pane and the context bar - and until now the only way from one to
+ * another was Tab, which walks every request in an expanded collection tree on
+ * the way. F6 cycles them; ⌘L jumps to the one field people ask for by name.
+ * The activity rail joined the cycle with #1615, so a keyboard user can reach
+ * the app's primary navigation even with the drawer collapsed.
  *
  * **Marked, not queried by tag.** A `querySelectorAll("header, aside, main")`
  * looks like it would do, and it picks up the run view's `<header>`, the
  * breadcrumb's `<nav>` and the inbox's own `<aside>` - content landmarks
  * *inside* `main`, so the cycle would walk around inside one region forever.
- * The four bands carry `data-app-region` instead: the shell says which of its
+ * The five bands carry `data-app-region` instead: the shell says which of its
  * children are regions, and a feature adding a landmark of its own cannot join
  * the cycle by accident.
  *
@@ -46,7 +48,7 @@ export const REGION_ATTRIBUTE = "data-app-region";
  * is document order, not this list, so a band moving in the layout moves in the
  * cycle without an edit here.
  */
-export type AppRegion = "banner" | "drawer" | "main" | "context";
+export type AppRegion = "banner" | "rail" | "drawer" | "main" | "context";
 
 /**
  * The props that mark a band, spread onto it: `<aside {...regionProps("drawer")}>`.
