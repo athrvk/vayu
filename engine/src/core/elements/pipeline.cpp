@@ -207,7 +207,8 @@ std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
         out.enabled = !entry.contains ("enabled") ||
         entry["enabled"].is_null () || entry.value ("enabled", true);
 
-        if (const auto* kind = registry.find (out.kind); kind != nullptr && kind->compile) {
+        if (const auto* kind = registry.find (out.kind); kind != nullptr &&
+        kind->compile && !is_blank_script_element (out.kind, out.config)) {
             // Stamped onto a *copy* passed to `compile`, never onto
             // `out.config` itself - `out.config` is what the load path's
             // deferred `script.post` replay reads back verbatim

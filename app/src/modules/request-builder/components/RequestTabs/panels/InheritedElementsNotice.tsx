@@ -12,9 +12,12 @@
  * kind. Walks the ancestor chain of the request's collection (root first, via
  * `useCollectionAncestors` - the same hook `AuthInheritBanner` uses for auth)
  * and lists every enabled element a collection in the chain carries - the
- * ones that will run before the request's own. A disable toggle writes an
- * `inherit.disable` entry into the request's own list rather than editing the
- * ancestor, which the request cannot do.
+ * ones that will run before the request's own. A blank `script.pre`/
+ * `script.post` (empty or whitespace-only text) is excluded: it is inert
+ * everywhere else (#1609), so counting it here would claim a run that never
+ * happens. A disable toggle writes an `inherit.disable` entry into the
+ * request's own list rather than editing the ancestor, which the request
+ * cannot do.
  *
  * Renders nothing when no collection in the chain carries an element. That is
  * most requests, so it must not leave an empty box behind.
@@ -27,6 +30,7 @@
 import { Folder } from "lucide-react";
 import { useCollectionAncestors } from "@/queries/collections";
 import { Button } from "@/components/ui";
+import { isBlankScriptElement } from "@/lib/elements";
 import type { Collection, ElementDef, ElementKindSchema, ResolvedElement } from "@/types";
 import ChainCard from "./ChainCard";
 
@@ -71,7 +75,11 @@ export default function InheritedElementsNotice({
 	// nobody will render.
 	const ancestors = useCollectionAncestors(entries ? null : collectionId);
 	const source = (entries ?? entriesFromChain(ancestors)).filter(
-		(e) => e.enabled && e.kind !== "inherit.disable" && e.origin?.kind === "collection"
+		(e) =>
+			e.enabled &&
+			e.kind !== "inherit.disable" &&
+			e.origin?.kind === "collection" &&
+			!isBlankScriptElement(e)
 	);
 
 	if (source.length === 0) return null;

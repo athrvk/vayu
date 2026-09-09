@@ -4201,7 +4201,8 @@ and is never re-resolved - see [POST /execute](#post-execute) and
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to
   `inherit`), the resolved `elements` list (collection chain root→leaf, then
-  the request's own, each stamped with its origin - see [Elements](elements.md)),
+  the request's own, each stamped with its origin, disabled and blank
+  `script.*` entries dropped the same way - see [Elements](elements.md)),
   the stored execution options (`followRedirects` /
   `maxRedirects` / `httpVersion` / `verifySSL`, always emitted) and its `requestName` (the
   script sandbox reads it as `pm.info.requestName`; omitted when the row's name

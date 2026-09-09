@@ -25,7 +25,6 @@ import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "@/constants/collection";
-import { defaultScriptElements } from "@/lib/elements";
 
 export interface TreeCrudOptions {
 	collections: Collection[];
@@ -186,7 +185,6 @@ export function useTreeCrud({
 		try {
 			await createCollectionMutation.mutateAsync({
 				name: newCollectionName.trim(),
-				elements: defaultScriptElements(),
 			});
 		} catch (error) {
 			reportFailure(error, "Failed to create collection");
@@ -210,7 +208,6 @@ export function useTreeCrud({
 				await createCollectionMutation.mutateAsync({
 					name: newSubCollectionName.trim(),
 					parentId: parentId,
-					elements: defaultScriptElements(),
 				});
 			} catch (error) {
 				reportFailure(error, "Failed to create folder");
@@ -240,7 +237,6 @@ export function useTreeCrud({
 					name: DEFAULT_REQUEST_NAME,
 					method: "GET",
 					url: "",
-					elements: defaultScriptElements(),
 				});
 			} catch (error) {
 				reportFailure(error, "Failed to create request");

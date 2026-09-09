@@ -13,7 +13,6 @@
  */
 
 import type { ElementDef } from "@/types";
-import { generateId } from "@/lib/id";
 
 /**
  * The joined text of every enabled element of one script kind (`script.pre`
@@ -40,18 +39,14 @@ export function scriptTextFor(
 }
 
 /**
- * The `script.pre`/`script.post` pair every new request and collection is
- * created with, empty and enabled. The two script tabs this feature replaced
- * were always present, running only once given a non-blank body; a fresh
- * `elements: []` loses that visible slot; a fresh user has to know the
- * "Add element" menu exists before they can find where a pre-request or test
- * script goes. An empty `config.script` still passes the kind's own schema -
- * it requires the property present, not non-empty - and `scriptTextFor`
- * already treats a blank script as absent everywhere it's read.
+ * Whether a `script.pre`/`script.post` element's own text is empty or
+ * whitespace-only - the shared rule for "absent for every purpose but
+ * storage" (#1609): not composed, not run, not reported, not counted toward
+ * an inherited-elements notice. A blank element still exists as a stored row
+ * (a user may be mid-edit); only its runtime effect is inert.
  */
-export function defaultScriptElements(): ElementDef[] {
-	return [
-		{ id: `el_${generateId()}`, kind: "script.pre", enabled: true, config: { script: "" } },
-		{ id: `el_${generateId()}`, kind: "script.post", enabled: true, config: { script: "" } },
-	];
+export function isBlankScriptElement(el: Pick<ElementDef, "kind" | "config">): boolean {
+	if (el.kind !== "script.pre" && el.kind !== "script.post") return false;
+	const text = el.config.script;
+	return typeof text !== "string" || text.trim().length === 0;
 }

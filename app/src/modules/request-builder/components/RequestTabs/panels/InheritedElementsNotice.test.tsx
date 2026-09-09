@@ -101,7 +101,9 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 	it("lists an ancestor collection's enabled element, with its kind label", () => {
 		chain.length = 0;
 		chain.push(
-			collection("root", "Acme", [element({ id: "r1", kind: "script.pre" })]),
+			collection("root", "Acme", [
+				element({ id: "r1", kind: "script.pre", config: { script: "pm.log('x')" } }),
+			]),
 			collection("leaf", "Refunds", [])
 		);
 
@@ -114,12 +116,47 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 	it("skips a disabled element", () => {
 		chain.length = 0;
 		chain.push(
-			collection("root", "Acme", [element({ id: "r1", kind: "script.pre", enabled: false })])
+			collection("root", "Acme", [
+				element({
+					id: "r1",
+					kind: "script.pre",
+					enabled: false,
+					config: { script: "pm.log('x')" },
+				}),
+			])
 		);
 
 		const { container } = renderNotice({ collectionId: "root" });
 
 		expect(container).toBeEmptyDOMElement();
+	});
+
+	it("skips a blank script.pre", () => {
+		chain.length = 0;
+		chain.push(
+			collection("root", "Acme", [
+				element({ id: "r1", kind: "script.pre", config: { script: "" } }),
+			])
+		);
+
+		const { container } = renderNotice({ collectionId: "root" });
+
+		expect(container).toBeEmptyDOMElement();
+	});
+
+	it("skips a whitespace-only script.post but lists a real one alongside it", () => {
+		chain.length = 0;
+		chain.push(
+			collection("root", "Acme", [
+				element({ id: "r1", kind: "script.post", config: { script: "  \n\t" } }),
+				element({ id: "r2", kind: "extract.json", config: {} }),
+			])
+		);
+
+		renderNotice({ collectionId: "root" });
+
+		expect(screen.getByText("Extract JSON")).toBeInTheDocument();
+		expect(screen.getByText("A collection will run before your own.")).toBeInTheDocument();
 	});
 
 	it("falls back to the raw kind string when the catalogue has no label for it", () => {
@@ -157,14 +194,14 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 		const entries: ResolvedElement[] = [
 			{
 				id: "c1",
-				kind: "script.pre",
+				kind: "extract.json",
 				enabled: true,
 				config: {},
 				origin: { kind: "collection", id: "c1", name: "Parent Collection" },
 			},
 			{
 				id: "r1",
-				kind: "script.pre",
+				kind: "extract.json",
 				enabled: true,
 				config: {},
 				origin: { kind: "request", id: "r1" },
@@ -182,7 +219,7 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 	it("renders the chain root to leaf, matching execution order", () => {
 		chain.length = 0;
 		chain.push(
-			collection("root", "Outer", [element({ id: "r1", kind: "script.pre" })]),
+			collection("root", "Outer", [element({ id: "r1", kind: "extract.json" })]),
 			collection("leaf", "Inner", [element({ id: "l1", kind: "extract.json" })])
 		);
 
@@ -196,7 +233,7 @@ describe("InheritedElementsNotice - listing the chain's elements", () => {
 describe("InheritedElementsNotice - the Disable / Re-enable toggle", () => {
 	it("adds an inherit.disable entry naming the element when Disable is pressed", () => {
 		chain.length = 0;
-		chain.push(collection("root", "Acme", [element({ id: "r1", kind: "script.pre" })]));
+		chain.push(collection("root", "Acme", [element({ id: "r1", kind: "extract.json" })]));
 
 		const onChangeOwnElements = vi.fn();
 		renderNotice({ collectionId: "root", ownElements: [], onChangeOwnElements });
@@ -215,7 +252,7 @@ describe("InheritedElementsNotice - the Disable / Re-enable toggle", () => {
 
 	it("shows Re-enable, and removes the disable entry, once the element is disabled", () => {
 		chain.length = 0;
-		chain.push(collection("root", "Acme", [element({ id: "r1", kind: "script.pre" })]));
+		chain.push(collection("root", "Acme", [element({ id: "r1", kind: "extract.json" })]));
 
 		const ownElements: ElementDef[] = [
 			element({ id: "el_disable_r1", kind: "inherit.disable", config: { elementId: "r1" } }),
@@ -233,7 +270,7 @@ describe("InheritedElementsNotice - the Disable / Re-enable toggle", () => {
 		// `disabledIds` marks the row, it does not hide it - only an actually
 		// disabled *ancestor* element (its own `enabled: false`) is left off.
 		chain.length = 0;
-		chain.push(collection("root", "Acme", [element({ id: "r1", kind: "script.pre" })]));
+		chain.push(collection("root", "Acme", [element({ id: "r1", kind: "extract.json" })]));
 
 		const ownElements: ElementDef[] = [
 			element({ id: "el_disable_r1", kind: "inherit.disable", config: { elementId: "r1" } }),

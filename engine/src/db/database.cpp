@@ -54,6 +54,7 @@
 
 #include "config_seeds/seed.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/elements.hpp"
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/utils/id.hpp"
@@ -1046,10 +1047,6 @@ void log_reclaim_outcome (const ReclaimOutcome& outcome) {
 /// this file predates the fold ever adding.
 constexpr int SCHEMA_VERSION = 1;
 
-bool is_blank_script_text (const std::string& text) {
-    return text.find_first_not_of (" \t\r\n") == std::string::npos;
-}
-
 /// @p table's current column names, read fresh so a caller never assumes a
 /// shape a genuinely pre-cutover database (older than #1513, no `elements`
 /// column at all) does not have.
@@ -1110,13 +1107,13 @@ const std::string& post) {
     };
 
     bool changed = false;
-    if (!is_blank_script_text (pre) && !has_kind ("script.pre")) {
+    if (!vayu::core::is_blank_script_text (pre) && !has_kind ("script.pre")) {
         elements.push_back (
         { { "id", vayu::utils::generate_id ("el_") }, { "kind", "script.pre" },
         { "enabled", true }, { "config", { { "script", pre } } } });
         changed = true;
     }
-    if (!is_blank_script_text (post) && !has_kind ("script.post")) {
+    if (!vayu::core::is_blank_script_text (post) && !has_kind ("script.post")) {
         elements.push_back (
         { { "id", vayu::utils::generate_id ("el_") }, { "kind", "script.post" },
         { "enabled", true }, { "config", { { "script", post } } } });

@@ -178,6 +178,18 @@ void allow_inline_marking (ElementKind& kind) {
 
 } // namespace
 
+bool is_blank_script_text (const std::string& text) {
+    return text.find_first_not_of (" \t\r\n") == std::string::npos;
+}
+
+bool is_blank_script_element (const std::string& kind, const nlohmann::json& config) {
+    if (kind != "script.pre" && kind != "script.post" &&
+    kind != "script.setup" && kind != "script.teardown") {
+        return false;
+    }
+    return is_blank_script_text (config.value ("script", ""));
+}
+
 ElementKind make_script_pre_kind () {
     auto kind = make_script_kind (Phase::StepBefore, "script.pre",
     "Pre-request script", "Runs before the request is sent.");

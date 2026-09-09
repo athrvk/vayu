@@ -612,6 +612,37 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     EXPECT_EQ (payload["environmentId"], "env_1");
 }
 
+// Issue #1609: a blank script.pre/post is inert, including at composition -
+// it never reaches a client of POST /compose at all, the same as a disabled
+// element. Mutation check: remove the `is_blank_script_element` guard in
+// `emit_level` and this reddens to `elements.size () == 2`.
+TEST_F (RequestComposerTest, ABlankScriptIsNotComposedButARealOneAlongsideItIs) {
+    vayu::db::Collection col;
+    col.id       = "col_1";
+    col.name     = "Collection col_1";
+    col.elements = json::array (
+    { json{ { "id", "el_blank_pre" }, { "kind", "script.pre" },
+      { "enabled", true }, { "config", { { "script", "   \n\t" } } } },
+    json{ { "id", "el_real_post" }, { "kind", "script.post" }, { "enabled", true },
+    { "config", { { "script", "console.log('runs');" } } } } })
+                   .dump ();
+    col.order      = 0;
+    col.created_at = 1;
+    col.updated_at = 1;
+    db_->create_collection (col);
+
+    auto r = make_request ("req_1", "col_1");
+    db_->save_request (r);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+
+    ASSERT_EQ (payload["elements"].size (), 1u);
+    EXPECT_EQ (payload["elements"][0]["id"], "el_real_post");
+    EXPECT_EQ (payload["elements"][0]["kind"], "script.post");
+}
+
 TEST_F (RequestComposerTest, StoredRequestWithoutAuthBlobDefaultsToInherit) {
     seed_collection ("col", "", "", R"({"mode":"apikey","key":"X-Key","value":"k"})");
     auto r = make_request ("req_1", "col");

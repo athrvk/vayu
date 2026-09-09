@@ -729,8 +729,15 @@ bool step_has_script (const ScenarioStep& step, std::string_view kind) {
     if (!step.elements) {
         return false;
     }
+    // A blank script.pre/post is inert (#1609): it carries no behaviour to
+    // warn about (`build_run_warnings`) or report as skipped
+    // (`build_step_breakdown`), so a step whose only match is blank does not
+    // count as carrying one.
     return std::any_of (step.elements->begin (), step.elements->end (),
-    [&] (const CompiledElement& element) { return element.kind == kind; });
+    [&] (const CompiledElement& element) {
+        return element.kind == kind &&
+        !is_blank_script_element (element.kind, element.config);
+    });
 }
 
 std::unordered_map<std::string, vayu::core::ElementSpan> compute_element_spans (
