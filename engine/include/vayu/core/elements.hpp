@@ -170,13 +170,19 @@ class SharedThroughputBudgets {
  * reopen): this hook runs before any step's `ElementContext` exists, so it
  * cannot read `ElementContext::timers_override` the way every other
  * `timer.*` kind's `apply` does - a kind that schedules through here must
- * consult this copy instead, and check it before doing anything else, so an
- * `"off"` run books no wait and touches no pacing state at all.
+ * consult this copy instead, through `apply_timers_override`, and check it
+ * before doing anything else, so an `"off"` run books no wait and touches no
+ * pacing state at all. `rng` (issue #1620) is the VU's own generator, for
+ * `apply_timers_override`'s `Range` mode to draw from - the same
+ * `std::mt19937_64` `ElementContext::rng` binds elsewhere, so a `Range`
+ * override stays reproducible per #1498's `seed` contract whichever seam
+ * drew it.
  */
 struct SharedScheduleState {
     SharedPacingClocks* pacing            = nullptr;
     SharedThroughputBudgets* throughput   = nullptr;
     const TimersOverride* timers_override = nullptr;
+    std::mt19937_64* rng                  = nullptr;
 };
 
 /**

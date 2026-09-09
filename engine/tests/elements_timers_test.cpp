@@ -1043,4 +1043,144 @@ TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesThroughputUnderLoad) {
     << executed << " requests over 4s, still in the paced range";
 }
 
+// Issue #1620: `"off"` reached `scheduled_ready_delay_ms` (the reopen fix
+// above), but `"fixedMs"` / `{"minMs", "maxMs"}` did not - the hook checked
+// only `TimersOverride::Mode::Off` and fell through to the element's own
+// `every_ms_` for every other mode, so a run overriding the interval instead
+// of silencing it still deferred `timer.pacing` by its own configured 500ms.
+// `timer.pacing` defaults `perUser: true`, so this exercises the per-user
+// branch (`detail::advance_per_user_pacing`). Mutation check: reverting
+// `scheduled_ready_delay_ms` to read `every_ms_` directly instead of the
+// `apply_timers_override`-derived interval reds this on the ceiling -
+// `APacedRunDoesNotBusySpinTheProducer` above pins the element's own 500ms
+// cadence to 4-6 over the same 2s window, which is what this test's floor
+// must clear.
+TEST_F (ElementsTimersLoadTest, ElementsTimersFixedMsOverridesPacingUnderLoad) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_pacing_element_json ("el_pacing", 500) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "constant_concurrency" }, { "concurrency", 1 }, { "duration", "2s" },
+        { "elements", { { "timers", { { "fixedMs", 100 } } } } } };
+
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    // 100ms apart over 2s against a loopback mock is comfortably above the
+    // element's own 500ms ceiling of 6, and well short of a fully unpaced
+    // run's count (the "off" test above clears 30) - the bounds separate
+    // "still paced, but at the override's interval" from either extreme.
+    EXPECT_GE (executed, 10u)
+    << "elements.timers: {fixedMs: 100} did not replace timer.pacing's own "
+       "500ms cadence under load - got "
+    << executed << " requests over 2s, still in the un-overridden paced range";
+    EXPECT_LE (executed, 30u)
+    << "got " << executed << " requests over 2s - the override's own 100ms interval was not honoured either";
+}
+
+// @copydoc ElementsTimersFixedMsOverridesPacingUnderLoad, `timer.throughput`'s
+// shared branch (`SharedThroughputBudgets::claim`, which takes a rate rather
+// than an interval - the conversion this issue adds). `el_rate`'s own
+// 120/minute config measures 18 over 4s (`ElementsTimersOffSilencesThroughputUnderLoad`'s
+// comment); overriding to a 4s interval (15/minute, an order of magnitude
+// slower) should leave each of the ten virtual users its one unpaced first
+// pass and almost nothing else in the remaining window. Mutation check: same
+// as above - reverting the hook to ignore `Fixed`/`Range` reds this on the
+// ceiling, since the run would instead measure the un-overridden 18.
+TEST_F (ElementsTimersLoadTest, ElementsTimersFixedMsOverridesThroughputUnderLoad) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_throughput_element_json ("el_rate", 120.0) });
+
+    auto config        = load_config ("4s");
+    config["elements"] = json{ { "timers", { { "fixedMs", 4000 } } } };
+
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    // Ten virtual users' unpaced first pass each is 10; the 4000ms interval
+    // (15/minute shared) allows at most one or two more claims in the
+    // remaining ~3.5s. 14 sits well below the element's own un-overridden 18
+    // and far below an unpaced run's 30+.
+    EXPECT_GE (executed, 10u)
+    << "expected at least the ten virtual users' own unpaced first pass, got " << executed;
+    EXPECT_LE (executed, 14u)
+    << "elements.timers: {fixedMs: 4000} did not replace timer.throughput's "
+       "own 120/minute rate under load - got "
+    << executed << " requests over 4s, close to the un-overridden 18";
+}
+
+// Issue #1620's `{"minMs", "maxMs"}` case reaching `timer.pacing`'s per-user
+// branch under load, staying inside the configured range. The acceptance
+// criteria's "reproducible with elements.seed" half is proven at the layer
+// that actually determines it - `ApplyTimersOverrideTest.
+// RangeModeIsReproducibleWithTheSameSeedAndStaysInBounds` above (two
+// identically-seeded generators draw identically) and `DeriveVuRngTest.
+// SameSeedAndIndexProduceIdenticalSequences` (a VU's generator is a pure
+// function of the run seed and its index) - not here: comparing the *count*
+// of steps two independent load runs complete inside a fixed wall-clock
+// window is not actually a test of RNG reproducibility, because which step
+// lands inside or outside that window also depends on real thread-scheduling
+// timing, which a fixed seed does not control. An earlier version of this
+// test compared exactly that and was flaky on CI (off by one or two between
+// runs on the same seed, on a busier box) for precisely this reason. Mutation
+// check: reverting `scheduled_ready_delay_ms` to read `every_ms_` directly
+// instead of the `apply_timers_override`-derived interval reds this on the
+// ceiling, the same way it reds the `FixedMs` case above.
+TEST_F (ElementsTimersLoadTest, ElementsTimersRangeOverrideReachesPacingUnderLoad) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_pacing_element_json ("el_pacing", 500) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "constant_concurrency" }, { "concurrency", 1 }, { "duration", "1500ms" },
+        { "elements",
+        { { "timers", { { "minMs", 50 }, { "maxMs", 150 } } }, { "seed", 42 } } } };
+
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    // Well clear of the element's own 500ms-cadence ceiling
+    // (`APacedRunDoesNotBusySpinTheProducer` pins it at 4-6 over the same
+    // 2s shape), and short of a fully unpaced run.
+    EXPECT_GE (executed, 8u) << "elements.timers: {minMs: 50, maxMs: 150} did "
+                                "not replace timer.pacing's "
+                                "own 500ms cadence under load - got "
+                             << executed << " requests over 1.5s";
+    EXPECT_LE (executed, 30u);
+}
+
+// @copydoc ElementsTimersRangeOverrideReachesPacingUnderLoad, `timer.throughput`'s
+// shared branch (`perUser: false`, the default) - the acceptance criteria ask
+// for Range mode to reach "both kinds under load", and only `timer.pacing`'s
+// per-user branch had a dedicated Range case above. Pinned to a single
+// virtual user rather than the ten-VU shape the other throughput tests use,
+// so the shared budget's own claim path is exercised without ten VUs racing
+// it (a confound this fix does not touch and does not need to prove
+// anything about). Same mutation check as above.
+TEST_F (ElementsTimersLoadTest, ElementsTimersRangeOverrideReachesThroughputUnderLoad) {
+    auto execution =
+    plan_with ({ vayu::tests::timer_throughput_element_json ("el_rate", 120.0,
+    /*scope_entry=*/true, /*per_user=*/false) });
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "constant_concurrency" }, { "concurrency", 1 }, { "duration", "1500ms" },
+        { "elements",
+        { { "timers", { { "minMs", 50 }, { "maxMs", 150 } } }, { "seed", 7 } } } };
+
+    auto state = run (config, execution);
+    ASSERT_NE (state, nullptr);
+    const size_t executed = state->steps_executed.load ();
+
+    // el_rate's own 120/minute (500ms per pass) would sit at the same 4-6
+    // ceiling `timer.pacing`'s 500ms case does; the 50-150ms override clears
+    // it the same way.
+    EXPECT_GE (executed, 8u) << "elements.timers: {minMs: 50, maxMs: 150} did "
+                                "not replace timer.throughput's "
+                                "own 120/minute rate under load - got "
+                             << executed << " requests over 1.5s";
+    EXPECT_LE (executed, 30u);
+}
+
 } // namespace

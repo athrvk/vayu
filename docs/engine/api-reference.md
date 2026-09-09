@@ -5218,11 +5218,12 @@ own unknown-key rule uses, checked before the run row is created.
   the sequential run. `timer.pacing` and `timer.throughput` schedule their
   wait before that step's `ElementContext` exists at all
   (`Element::scheduled_ready_delay_ms`, see
-  [Load paths](elements.md#load-paths)); `"off"` reaches
+  [Load paths](elements.md#load-paths)); every mode reaches
   them there too, through the run's own copy of the override
-  (`SharedScheduleState::timers_override`), so a run with `timers: "off"`
-  defers neither kind under load - `"fixedMs"`/`{"minMs", "maxMs"}` are not
-  yet threaded through that same seam.
+  (`SharedScheduleState::timers_override`, issue #1620), so a run with
+  `timers: "off"` defers neither kind under load and a run with `"fixedMs"`
+  or `{"minMs", "maxMs"}` schedules their wait from that value rather than
+  the element's own `everyMs` / `targetPerMinute`.
 - **`seed`** (issue #1498) is an optional non-negative integer that seeds this
   run's RNG, making a `timer.think` element's gaussian or uniform-random wait
   reproducible. A scenario load run derives one independent generator per

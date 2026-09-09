@@ -94,11 +94,15 @@ class TimerPacingElement final : public Element {
         // The run-level `elements.timers` override cannot reach `apply`'s own
         // check here - this hook runs before any step's `ElementContext`
         // exists - so it is consulted through `shared.timers_override`
-        // instead (issue #1498's reopen). `"off"` books no wait and touches
-        // neither `pacing_state` nor the shared clock, matching `apply`'s own
-        // "off" outcome on the sequential run.
-        if (shared.timers_override != nullptr &&
-        shared.timers_override->mode == TimersOverride::Mode::Off) {
+        // instead (issue #1498's reopen), via the same `apply_timers_override`
+        // every other `timer.*` kind's `apply` calls (issue #1620): `"off"`
+        // books no wait and touches neither `pacing_state` nor the shared
+        // clock; `"fixedMs"` / `{"minMs", "maxMs"}` replace `every_ms_` with
+        // the override's value before either branch below advances anything,
+        // the same "replaced, not merged" rule `apply` follows.
+        const auto interval_ms =
+        apply_timers_override (shared.timers_override, every_ms_, shared.rng);
+        if (!interval_ms) {
             return std::nullopt;
         }
         if (!per_user_) {
@@ -106,10 +110,11 @@ class TimerPacingElement final : public Element {
             // `shared.pacing` is always non-null here, sized by the plan
             // scan that found this very element's id in the first place.
             return shared.pacing != nullptr ?
-            shared.pacing->advance (element_id_, every_ms_, now_ms) :
+            shared.pacing->advance (element_id_, *interval_ms, now_ms) :
             int64_t{ 0 };
         }
-        return detail::advance_per_user_pacing (pacing_state, element_id_, every_ms_, now_ms);
+        return detail::advance_per_user_pacing (
+        pacing_state, element_id_, *interval_ms, now_ms);
     }
 
     private:
