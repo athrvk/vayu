@@ -204,6 +204,38 @@ TEST (LogRecordSchemaTest, AConvertedNumericFieldStaysNativeJsonNotAStringifiedS
     << record.at ("msg");
 }
 
+// Issue #1557's reopen: the propertyNames pattern was `^[a-z][a-z0-9_]*$`,
+// which refuses every lowerCamelCase field the engine actually emits -
+// `runId`, `requestId`, `environmentId`, `cacheKb`, `busyTimeoutMs` among
+// them - so a real log file failed this schema on its own field names, not
+// only on fixtures. Mirrors two real call sites
+// (`http/routes/execution.cpp`'s "Design Mode send" and `db/database.cpp`'s
+// "Database initialized with WAL mode") rather than inventing new field
+// names, so a schema change that widens the pattern enough to admit fixture
+// snake_case but not real camelCase still reds here.
+TEST (LogRecordSchemaTest, ARealCamelCaseFieldNameValidates) {
+    const nlohmann::json schema = load_schema ();
+    ScratchLogDir dir;
+    Logger::instance ().init (dir.string (), "engine");
+    Logger::instance ().set_max_file_bytes (0);
+    Logger::instance ().set_file_level (Logger::Level::DEBUG);
+
+    vayu::utils::log_info ("http", "Design Mode send",
+    { { "runId", "r1" }, { "method", "GET" }, { "url", "http://h/x" },
+    { "requestId", "req1" }, { "environmentId", "env1" } });
+    vayu::utils::log_debug ("db", "Database initialized with WAL mode",
+    { { "cacheKb", 2048 }, { "busyTimeoutMs", 5000 }, { "synchronous", "NORMAL" } });
+    Logger::instance ().flush ();
+
+    const auto records = read_records (dir.path ());
+    ASSERT_EQ (records.size (), 2u);
+    for (const auto& record : records) {
+        EXPECT_TRUE (validates (schema, record)) << record.dump ();
+    }
+    EXPECT_EQ (records.front ().at ("runId"), "r1");
+    EXPECT_EQ (records.back ().at ("cacheKb"), 2048);
+}
+
 // Mutation-check: change `record.at ("cat")` in the fixture below to a
 // category from the wrong branch (`"db"` under `src: "cli"` is fine since
 // `cli`'s enum is a superset, but `"boundary"`, `renderer`'s own, is not) and

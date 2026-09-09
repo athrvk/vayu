@@ -1059,9 +1059,9 @@ TransactionHistograms& transactions) {
             // continue-on-failure is deliberately not invented ahead of
             // demand (design doc, "Deliberately left open").
             vayu::utils::log_warning ("run",
-            "Scenario run " + base.context->run_id + ": iteration " +
-            std::to_string (base.iteration) + " ended at step '" +
-            record.step_name + "' - " + record.error);
+            "Scenario run: iteration " + std::to_string (base.iteration) +
+            " ended at step '" + record.step_name + "' - " + record.error,
+            { { "runId", base.context->run_id } });
             break;
         }
         if (end_iteration) {
@@ -1359,7 +1359,8 @@ RunManager& manager) {
             db.add_results_batch (rows);
         } catch (const std::exception& e) {
             vayu::utils::log_error ("run",
-            "Failed to store scenario step results: " + std::string (e.what ()));
+            "Failed to store scenario step results: " + std::string (e.what ()),
+            { { "runId", context->run_id } });
             summary.steps_stored = 0;
         }
 
@@ -1383,7 +1384,8 @@ RunManager& manager) {
         summary.lifecycle =
         vayu::core::build_lifecycle_node (setup_outcomes, teardown_outcomes);
     } catch (const std::exception& e) {
-        vayu::utils::log_error ("run", "Scenario run error: " + std::string (e.what ()));
+        vayu::utils::log_error ("run", "Scenario run error: " + std::string (e.what ()),
+        { { "runId", context->run_id } });
         final_status = vayu::RunStatus::Failed;
     }
 
@@ -1441,7 +1443,8 @@ RunManager& manager) {
         context->run_id, build_scenario_summary_payload (summary).dump ());
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
-        "Failed to store scenario run summary: " + std::string (e.what ()));
+        "Failed to store scenario run summary: " + std::string (e.what ()),
+        { { "runId", context->run_id } });
     }
 
     try {
@@ -1450,21 +1453,22 @@ RunManager& manager) {
         db.update_run_status_with_retry (context->run_id, final_status);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
-        "Failed to update scenario run status: " + std::string (e.what ()));
+        "Failed to update scenario run status: " + std::string (e.what ()),
+        { { "runId", context->run_id } });
     }
 
     try {
         db.prune_runs_configured ();
     } catch (const std::exception& e) {
-        vayu::utils::log_warning ("run", "Run pruning failed: " + std::string (e.what ()));
+        vayu::utils::log_warning ("run", "Run pruning failed: " + std::string (e.what ()),
+        { { "runId", context->run_id } });
     }
 
     vayu::utils::log_debug ("run",
-    "Scenario run " + context->run_id + " " + vayu::to_string (final_status) +
-    ": " + std::to_string (summary.steps_executed) + " step(s) over " +
-    std::to_string (summary.iterations_completed) + " iteration(s), " +
-    std::to_string (summary.passed) + " passed, " + std::to_string (summary.failed) +
-    " failed, " + std::to_string (summary.errored) + " errored");
+    std::string ("Scenario run ") + vayu::to_string (final_status),
+    { { "runId", context->run_id }, { "stepsExecuted", summary.steps_executed },
+    { "iterationsCompleted", summary.iterations_completed }, { "passed", summary.passed },
+    { "failed", summary.failed }, { "errored", summary.errored } });
 
     context->is_running = false;
     // After the last step event, never before: a consumer treats `closed` as
