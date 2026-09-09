@@ -138,7 +138,9 @@ sends `{level, cat, msg, err, fields}` over the one-way `log:record` IPC
 channel (mirroring `runs:progress`'s shape), and `log-ipc.ts` validates it,
 stamps `src: "renderer"` and the sender's OS process id, and caps the channel
 at 20 records per second per window - the 21st in a window is dropped with one
-`warn` naming the count, so a render loop cannot fill the disk. Settings,
+`warn`, and every later drop in the same window silently, so a render loop
+cannot fill the disk with either the records or the warnings about them.
+Settings,
 General's **Open logs folder** button (`app:openLogsFolder`) opens
 `<data-dir>/logs/` in the OS file manager.
 

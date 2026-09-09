@@ -40,21 +40,31 @@ function isRendererLogRecord(value: unknown): value is RendererLogRecord {
 }
 
 /** One sender's per-second record count, so a render loop cannot fill the disk. */
-class RateLimiter {
-	private windows = new Map<number, { startedAt: number; count: number }>();
+export class RateLimiter {
+	private windows = new Map<number, { startedAt: number; count: number; warned: boolean }>();
 
 	constructor(private readonly now: () => number = Date.now) {}
 
-	/** Registers one record for @p senderId and reports whether it is over budget. */
-	overLimit(senderId: number): boolean {
+	/**
+	 * Registers one record for @p senderId. Returns `"under"` (deliver it),
+	 * `"first-over"` (the 21st in this window - drop it and warn once) or
+	 * `"over"` (already warned this window - drop it silently). Distinguishing
+	 * the last two is the whole point of the cap: warning on every one of a
+	 * loop's thousands of drops would itself fill the disk exactly as fast as
+	 * the loop would have.
+	 */
+	check(senderId: number): "under" | "first-over" | "over" {
 		const now = this.now();
 		const window = this.windows.get(senderId);
 		if (!window || now - window.startedAt >= 1000) {
-			this.windows.set(senderId, { startedAt: now, count: 1 });
-			return false;
+			this.windows.set(senderId, { startedAt: now, count: 1, warned: false });
+			return "under";
 		}
 		window.count += 1;
-		return window.count > RECORDS_PER_SECOND;
+		if (window.count <= RECORDS_PER_SECOND) return "under";
+		if (window.warned) return "over";
+		window.warned = true;
+		return "first-over";
 	}
 }
 
@@ -86,9 +96,12 @@ export function registerLogIpc(
 
 	ipc.on("log:record", (event, ...args: unknown[]) => {
 		const senderId = event.sender.id;
-		if (limiter.overLimit(senderId)) {
-			// The 21st record in the window is where this fires, so the drop is
-			// itself visible in the file without spending another budget slot.
+		const status = limiter.check(senderId);
+		if (status === "over") return;
+		if (status === "first-over") {
+			// The 21st record in the window is where this fires, once - every
+			// later drop in the same window is silent, or the warning itself
+			// would fill the disk exactly as fast as the loop being capped would.
 			deps.appLog.warn("ipc", "Dropping renderer log records over the per-second cap", {
 				senderId,
 			});
