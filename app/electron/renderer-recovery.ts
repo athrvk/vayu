@@ -80,6 +80,8 @@ export interface RendererRecoveryTransport {
 	promptUnresponsive: () => Promise<UnresponsiveChoice>;
 	relaunch: () => void;
 	quit: () => void;
+	/** Where a crash and a crash loop are reported. Category `"window"`. */
+	log: (msg: string, fields?: Record<string, unknown>) => void;
 	/**
 	 * A live renderer has replaced a gone one. Whatever the dead one still owed
 	 * is unrecoverable, so main.ts clears the save flush here - otherwise a
@@ -117,9 +119,10 @@ export function createRendererRecovery(transport: RendererRecoveryTransport): Re
 		isRendererGone: () => gone,
 
 		handleRenderProcessGone: (details) => {
-			console.error(
-				`[Main] Renderer process gone: ${details.reason} (exit code ${details.exitCode})`
-			);
+			transport.log("Renderer process gone", {
+				reason: details.reason,
+				exitCode: details.exitCode,
+			});
 			gone = true;
 			// A hang cannot outlive the process that was hanging.
 			responding = true;
@@ -132,7 +135,7 @@ export function createRendererRecovery(transport: RendererRecoveryTransport): Re
 				return;
 			}
 
-			console.error("[Main] Renderer crash loop; asking the user what to do.");
+			transport.log("Renderer crash loop; asking the user what to do.");
 			void transport.promptCrashLoop(details).then((choice) => {
 				if (choice === "relaunch") transport.relaunch();
 				else transport.quit();

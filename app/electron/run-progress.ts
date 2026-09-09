@@ -193,13 +193,17 @@ export function parseRunProgressUpdate(raw: unknown): RunProgressUpdate | null {
  * gets to send its terminal message, and without this the taskbar keeps a bar
  * for a run that is gone until the app quits.
  */
-export function registerRunProgressIpc(ipc: IpcLike, painter: RunProgressPainter): void {
+export function registerRunProgressIpc(
+	ipc: IpcLike,
+	painter: RunProgressPainter,
+	log: (msg: string, fields?: Record<string, unknown>) => void = () => {}
+): void {
 	const watchOwner = createRendererWatch(() => painter.clear());
 
 	ipc.on(RUN_PROGRESS_CHANNEL, (event: IpcEventLike, ...args: unknown[]) => {
 		const update = parseRunProgressUpdate(args[0]);
 		if (!update) {
-			console.warn("[run-progress] ignored a message that is not an update", args[0]);
+			log("run-progress: ignored a message that is not an update", { message: args[0] });
 			return;
 		}
 		watchOwner(event.sender);

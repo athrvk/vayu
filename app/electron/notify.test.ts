@@ -76,9 +76,7 @@ function harness(options: HarnessOptions = {}) {
 	const focus = vi.fn();
 	const send = vi.fn();
 	const timeouts: (() => void)[] = [];
-	// Held rather than let through: `console.warn` here is the app's log in
-	// production, and a test suite that prints it is one nobody reads.
-	const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+	const log = vi.fn();
 	const deps: NotifyDeps = {
 		create: (createOptions) => {
 			const notification = fakeNotification();
@@ -96,13 +94,14 @@ function harness(options: HarnessOptions = {}) {
 			timeouts.push(fn);
 			if (options.runTimeouts) fn();
 		},
+		log,
 	};
 	return {
 		built,
 		state,
 		focus,
 		send,
-		warn,
+		log,
 		/** Fire whatever the notifier scheduled, as the clock eventually would. */
 		runTimeouts: () => {
 			for (const fn of timeouts) fn();
@@ -243,13 +242,13 @@ describe("createNotifier - a build that cannot show one", () => {
 	});
 
 	it("logs the fallback once, however many failures arrive", () => {
-		const { notifier, built, warn } = harness();
+		const { notifier, built, log } = harness();
 		notifier.show(request());
 
 		built[0].fire("failed");
 		built[0].fire("failed");
 
-		expect(warn).toHaveBeenCalledTimes(1);
+		expect(log).toHaveBeenCalledTimes(1);
 	});
 });
 

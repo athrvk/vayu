@@ -39,6 +39,8 @@ export interface QuitShutdownTransport {
 	 * `quit()` is not re-entered from inside the handler that stopped for it.
 	 */
 	defer: (run: () => void) => void;
+	/** Where a child that would not stop is reported. Category `"main"`. Defaults to a no-op. */
+	log?: (msg: string, fields?: Record<string, unknown>) => void;
 }
 
 export interface QuitShutdown {
@@ -53,6 +55,7 @@ export interface QuitShutdown {
 
 export function createQuitShutdown(transport: QuitShutdownTransport): QuitShutdown {
 	let state: "idle" | "stopping" | "stopped" = "idle";
+	const log = transport.log ?? (() => {});
 
 	return {
 		hasStopped: () => state === "stopped",
@@ -81,7 +84,7 @@ export function createQuitShutdown(transport: QuitShutdownTransport): QuitShutdo
 				} catch (error) {
 					// A child that will not stop cannot hold the app open - and an
 					// unhandled rejection here would take down the quit as well.
-					console.error("[Main] Error during shutdown, quitting anyway:", error);
+					log("Error during shutdown, quitting anyway", { error: String(error) });
 				} finally {
 					// Marked before the resumed quit, so the `before-quit` it fires
 					// falls through instead of deferring itself forever.

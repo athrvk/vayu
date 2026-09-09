@@ -421,13 +421,17 @@ export function parseOsIconSignal(raw: unknown): OsIconSignal | null {
  * say the Inbox was opened, and without this the Dock keeps a count for captures
  * whose list is gone until the app quits.
  */
-export function registerOsIconIpc(ipc: IpcLike, painter: OsIconPainter): void {
+export function registerOsIconIpc(
+	ipc: IpcLike,
+	painter: OsIconPainter,
+	log: (msg: string, fields?: Record<string, unknown>) => void = () => {}
+): void {
 	const watchOwner = createRendererWatch(() => painter.clear());
 
 	ipc.on(OS_ICON_CHANNEL, (event: IpcEventLike, ...args: unknown[]) => {
 		const signal = parseOsIconSignal(args[0]);
 		if (!signal) {
-			console.warn("[os-icon] ignored a message that is not a signal", args[0]);
+			log("os-icon: ignored a message that is not a signal", { message: args[0] });
 			return;
 		}
 		watchOwner(event.sender);

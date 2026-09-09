@@ -146,6 +146,8 @@ export interface NotifyDeps {
 	send: (channel: string, payload: unknown) => void;
 	/** Run `fn` after `ms`. Injected so a test can fire or withhold the timeout. */
 	after?: (ms: number, fn: () => void) => void;
+	/** Where the availability latch is reported, once. Category `"notify"`. Defaults to a no-op. */
+	log?: (msg: string) => void;
 }
 
 export interface Notifier {
@@ -218,12 +220,13 @@ export function createNotifier(deps: NotifyDeps): Notifier {
 	 */
 	let unavailableReason: string | null = null;
 	const after = deps.after ?? ((ms, fn) => setTimeout(fn, ms));
+	const log = deps.log ?? (() => {});
 
 	/** Latch the refusal, once, whichever notification brought it. */
 	function markUnavailable(): void {
 		if (unavailableReason !== null) return;
 		unavailableReason = NOTIFY_UNAVAILABLE_REASON;
-		console.warn(`[notify] ${NOTIFY_UNAVAILABLE_REASON}; falling back to in-app toasts`);
+		log(`${NOTIFY_UNAVAILABLE_REASON}; falling back to in-app toasts`);
 	}
 
 	/**

@@ -450,7 +450,8 @@ describe("registerOsIconIpc", () => {
 				listener = fn;
 			},
 		};
-		registerOsIconIpc(ipc, painter);
+		const log = vi.fn();
+		registerOsIconIpc(ipc, painter, log);
 		const senderEvents = new Map<string, () => void>();
 		const sender = {
 			id: 1,
@@ -459,6 +460,7 @@ describe("registerOsIconIpc", () => {
 		};
 		return {
 			applied,
+			log,
 			cleared: () => cleared,
 			send: (payload: unknown) => listener?.({ sender }, payload),
 			fire: (event: "destroyed" | "did-start-loading") => senderEvents.get(event)?.(),
@@ -472,12 +474,10 @@ describe("registerOsIconIpc", () => {
 	});
 
 	it("ignores a message that is not a signal, and says so", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const ipc = ipcHarness();
 		ipc.send({ kind: "elsewhere" });
 		expect(ipc.applied).toEqual([]);
-		expect(warn).toHaveBeenCalled();
-		warn.mockRestore();
+		expect(ipc.log).toHaveBeenCalled();
 	});
 
 	/*

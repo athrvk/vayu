@@ -145,7 +145,7 @@ describe("createQuitShutdown", () => {
 	});
 
 	it("still quits when stopping the children throws", async () => {
-		vi.spyOn(console, "error").mockImplementation(() => {});
+		const log = vi.fn();
 		const stop = vi.fn().mockRejectedValue(new Error("engine wedged"));
 		const quit = vi.fn();
 		const deferred: Array<() => void> = [];
@@ -156,6 +156,7 @@ describe("createQuitShutdown", () => {
 			defer: (run) => {
 				deferred.push(run);
 			},
+			log,
 		});
 
 		shutdown.handleQuit(quitEvent());
@@ -163,6 +164,10 @@ describe("createQuitShutdown", () => {
 		await Promise.resolve();
 		deferred.splice(0).forEach((run) => run());
 
+		expect(log).toHaveBeenCalledWith(
+			"Error during shutdown, quitting anyway",
+			expect.objectContaining({ error: expect.stringContaining("engine wedged") })
+		);
 		expect(quit).toHaveBeenCalledOnce();
 		expect(shutdown.hasStopped()).toBe(true);
 	});
