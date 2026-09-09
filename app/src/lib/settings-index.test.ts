@@ -316,6 +316,42 @@ describe("an engine entry an app panel row edits", () => {
 	});
 });
 
+describe("a dependent entry (#1610)", () => {
+	// `dependsOn` is a `SettingsMain` nesting instruction, not an indexing one:
+	// the dependent gets its own result, findable by its own key and label,
+	// exactly like an entry with no `dependsOn` at all. Revealing it lands on
+	// its own card, which `SettingsMain` already renders directly beneath its
+	// parent's - so the parent is on screen too without this index doing
+	// anything extra for it.
+	// Typed with the extra field inline (never in `SettingsEngineEntrySource`,
+	// which the index has no use for) rather than in the array literal below,
+	// so the excess-property check that guards a typo in the shared fixture
+	// does not also reject the one field this test adds on its own.
+	const dependentEntry: (typeof engineEntries)[number] & { dependsOn: string } = {
+		key: "correlationIdHeader",
+		label: "Header name",
+		description: "Which header the correlation id goes out under.",
+		category: "network_performance",
+		dependsOn: "correlationIdEnabled",
+	};
+	const withDependent = buildSettingsIndex({
+		panels,
+		appSettings,
+		engineEntries: [...engineEntries, dependentEntry],
+		engineCategories,
+	});
+
+	it("is indexed and searchable by its own label", () => {
+		const hits = searchSettings(withDependent, "Header name");
+		expect(hits.map((h) => h.id)).toContain("correlationIdHeader");
+	});
+
+	it("carries its own anchor, not its parent's", () => {
+		const hit = withDependent.find((e) => e.id === "correlationIdHeader");
+		expect(hit?.anchor).toBe("correlationIdHeader");
+	});
+});
+
 describe("the words a moved setting is still found by", () => {
 	// The regression #586's split could cause: an entry that changed category
 	// must stay findable under the word a user already arrives with, and must

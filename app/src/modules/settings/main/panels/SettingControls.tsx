@@ -212,6 +212,7 @@ interface SelectSettingRowProps {
 	 */
 	onChange: (value: string) => void;
 	options: readonly { readonly value: string; readonly label: string }[];
+	disabled?: boolean;
 }
 
 /**
@@ -243,6 +244,7 @@ export function SelectSettingRow({
 	value,
 	onChange,
 	options,
+	disabled,
 }: SelectSettingRowProps) {
 	const triggerId = useId();
 	const descriptionId = `${triggerId}-description`;
@@ -256,7 +258,7 @@ export function SelectSettingRow({
 			>
 				{label}
 			</Label>
-			<Select value={value} onValueChange={onChange}>
+			<Select value={value} onValueChange={onChange} disabled={disabled}>
 				<SelectTrigger
 					id={triggerId}
 					className="h-9 w-48 text-sm"

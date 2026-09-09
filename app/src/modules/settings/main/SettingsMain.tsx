@@ -75,6 +75,41 @@ const SAVE_CONTEXT_ID = "settings";
  */
 const isRestartRequired = (entry: ConfigEntry): boolean => entry.requiresRestart;
 
+/**
+ * Places each entry that names a `dependsOn` immediately after the entry it
+ * names, indented in the render below - so "Header name" always sits under
+ * "Correlation Id" regardless of where its own label would otherwise sort.
+ *
+ * Every other entry keeps the existing alphabetical-by-label order (issue
+ * #1610): only entries with no `dependsOn`, or whose named parent is not in
+ * this list, are sorted and treated as top-level; a dependent whose parent is
+ * missing (filtered out elsewhere, or a data inconsistency) falls back to its
+ * own alphabetical place rather than vanishing.
+ */
+function nestDependents(entries: ConfigEntry[]): ConfigEntry[] {
+	const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+	const dependentsOf = new Map<string, ConfigEntry[]>();
+	const topLevel: ConfigEntry[] = [];
+	for (const entry of entries) {
+		if (entry.dependsOn && byKey.has(entry.dependsOn)) {
+			const siblings = dependentsOf.get(entry.dependsOn) ?? [];
+			siblings.push(entry);
+			dependentsOf.set(entry.dependsOn, siblings);
+		} else {
+			topLevel.push(entry);
+		}
+	}
+	topLevel.sort((a, b) => a.label.localeCompare(b.label));
+
+	const result: ConfigEntry[] = [];
+	for (const entry of topLevel) {
+		result.push(entry);
+		const siblings = dependentsOf.get(entry.key);
+		if (siblings) result.push(...siblings);
+	}
+	return result;
+}
+
 interface EditedValue {
 	value: string;
 	isValid: boolean;
@@ -188,13 +223,14 @@ export default function SettingsMain() {
 	 */
 	const categoryEntries =
 		selectedCategory && configResponse?.entries
-			? configResponse.entries
-					.filter((entry) => entry.category === selectedCategory)
-					// A few entries are edited from an app panel row instead, and a
-					// second editor here would be a second label and a second save
-					// model for one value - see `engine-settings-edited-in-app.ts`.
-					.filter((entry) => appEditorFor(entry.key) === undefined)
-					.sort((a, b) => a.label.localeCompare(b.label))
+			? nestDependents(
+					configResponse.entries
+						.filter((entry) => entry.category === selectedCategory)
+						// A few entries are edited from an app panel row instead, and a
+						// second editor here would be a second label and a second save
+						// model for one value - see `engine-settings-edited-in-app.ts`.
+						.filter((entry) => appEditorFor(entry.key) === undefined)
+				)
 			: [];
 	// The engine marks its internals - a lock pragma, a watchdog's backoff -
 	// with `advanced`. They stay reachable, but below the settings people
@@ -598,6 +634,16 @@ export default function SettingsMain() {
 		const defaultDisplay = isByteUnit(entry.unit)
 			? formatBytes(parseInt(entry.default, 10) || 0)
 			: undefined;
+		// A dependent whose named parent is missing from this payload (a data
+		// inconsistency the seed's `validate_dependencies` should already have
+		// refused) is rendered exactly like an entry with no `dependsOn` at all -
+		// enabled, unindented - rather than permanently disabled with no way in.
+		const parentEntry = entry.dependsOn
+			? configResponse?.entries.find((candidate) => candidate.key === entry.dependsOn)
+			: undefined;
+		const isDependent = parentEntry !== undefined;
+		const dependentDisabled =
+			parentEntry !== undefined && getCurrentValue(parentEntry) !== "true";
 
 		return (
 			<Card
@@ -605,6 +651,7 @@ export default function SettingsMain() {
 				data-setting-anchor={entry.key}
 				className={cn(
 					"transition-colors",
+					isDependent && "ml-6",
 					isModified && !hasError && "border-primary/50",
 					hasError && "border-destructive/50",
 					isPendingRestart && "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10"
@@ -642,6 +689,11 @@ export default function SettingsMain() {
 								)}
 							</div>
 							<CardDescription className="mt-1">{entry.description}</CardDescription>
+							{parentEntry && dependentDisabled && (
+								<p className="text-xs text-muted-foreground mt-1">
+									Turn on {parentEntry.label} to use this
+								</p>
+							)}
 						</div>
 						{isModified && (
 							<Button
@@ -662,6 +714,7 @@ export default function SettingsMain() {
 							<Switch
 								checked={currentValue === "true"}
 								onCheckedChange={(checked) => handleBooleanToggle(entry, checked)}
+								disabled={dependentDisabled}
 								// The setting's name lives in the CardTitle above
 								// and is not associated with the control, so
 								// without this the switch announced as a bare
@@ -694,6 +747,7 @@ export default function SettingsMain() {
 								value={currentValue}
 								onChange={(value) => handleValueChange(entry, value)}
 								options={entry.options}
+								disabled={dependentDisabled}
 							/>
 						) : null
 					) : isNumeric ? (
@@ -732,6 +786,7 @@ export default function SettingsMain() {
 							defaultValue={entry.default}
 							defaultDisplay={defaultDisplay}
 							onResetToDefault={() => handleResetToDefault(entry)}
+							disabled={dependentDisabled}
 						/>
 					) : entry.type === "text" ? (
 						/*
@@ -747,6 +802,7 @@ export default function SettingsMain() {
 							onChange={(e) => handleValueChange(entry, e.target.value)}
 							rows={8}
 							className="font-mono text-xs"
+							disabled={dependentDisabled}
 							// Same as the Switch above: the name is in the
 							// CardTitle, which nothing links to this control.
 							aria-label={entry.label}
@@ -757,6 +813,7 @@ export default function SettingsMain() {
 							value={currentValue}
 							onChange={(e) => handleValueChange(entry, e.target.value)}
 							className="max-w-xs"
+							disabled={dependentDisabled}
 							// Same as the Switch above: the name is in the
 							// CardTitle, which nothing links to this input.
 							aria-label={entry.label}
