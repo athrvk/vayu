@@ -1568,13 +1568,19 @@ accepted from the completion popup. The host owns the editor instance (captured
 through `CodeEditor`'s `onMount`) and passes `onInsert`, so this list never
 learns which editor it sits under.
 
-**Collapsed by default, remembered in `layout-store`** (`scriptSnippetsCollapsed`,
-persisted). The editor is what the panel is for, and component state would forget
-the choice on the next tab switch, which unmounts the panel - the reason the
-GraphQL Variables pane's collapse lives in that store too. The whole header is
-the control, per the composite-row hit-area rule, and the body is rendered only
-while it is open. `cmdk` (`Command`) owns the arrow keys, the highlight, Enter to
-insert and the filter field, rather than a third copy of that keyboard handling.
+**Collapsed by default, remembered by the host** (`scriptSnippetsCollapsed`,
+persisted). The collapsed flag is a controlled prop (`collapsed`,
+`onCollapsedChange`), not this component's own store read (issue #1605): the
+Elements tab can mount a `script.pre` and a `script.post` row on one screen,
+and a single store subscription here would toggle both from one click.
+`ScriptElementForm` seeds its own per-row `useState` from the store's
+persisted default and writes a toggle back to it, so the *next* row a user
+opens still starts where they left one - the reason the GraphQL Variables
+pane's collapse lives in that store too, just no longer read directly here.
+The whole header is the control, per the composite-row hit-area rule, and the
+body is rendered only while it is open. `cmdk` (`Command`) owns the arrow
+keys, the highlight, Enter to insert and the filter field, rather than a
+third copy of that keyboard handling.
 
 ## Shared ElementList (`components/shared/ElementList/`)
 
@@ -1608,6 +1614,18 @@ carries none of the old `ScriptPanel`'s variable-reference chips or inherited/
 legacy notices - those read `useRequestBuilderContext`, which this primitive
 cannot depend on - so inheritance is shown once for the whole list by
 `InheritedElementsNotice` instead of once per script row.
+
+**The editor box has a definite pixel height, resizable by a handle below it**
+(issue #1605). `ElementRow` is an auto-height card, not a bounded ancestor a
+percentage or a `ResizablePanelGroup` could divide, so `CodeEditor`'s default
+`height="100%"` used to resolve against nothing and Monaco laid out at zero
+height with the typed text hidden. `ScriptElementForm` instead sets the box's
+height directly from `layout-store`'s `scriptEditorHeight` (one value for
+every script row, like `graphqlVariablesSize`); a handle below the box - the
+GraphQL body's `ResizableHandle` styling, without the panel group it depends
+on - drags it between `SCRIPT_EDITOR_MIN_HEIGHT` and `SCRIPT_EDITOR_MAX_HEIGHT`
+(`constants/layout.ts`), previewing every pointer-move frame and persisting
+debounced, plus ArrowUp/ArrowDown by `SCRIPT_EDITOR_HEIGHT_STEP`.
 
 **The Add menu groups the catalogue by category**, never a hand-written list,
 so a kind the engine adds needs no change here; `inherit.disable` is excluded

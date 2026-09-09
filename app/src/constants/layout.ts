@@ -137,3 +137,19 @@ export const GRAPHQL_VARIABLES_MAX_SIZE = 75;
  * strip of dead editor under them.
  */
 export const GRAPHQL_PANE_HEADER_HEIGHT = 28;
+
+/* ── Script element form: the editor box ─────────────────────────────────── */
+
+/**
+ * Default and bounds for a `script.pre` / `script.post` element's editor
+ * height (px), and the step a keyboard drag of its handle moves by.
+ *
+ * Pixels, not a percentage of an ancestor: the element card is an auto-height
+ * block (`ElementRow`, `rounded-md border ... p-3`), not a bounded parent a
+ * `ResizablePanelGroup` could divide, so the handle drives the box's own
+ * height directly (issue #1605).
+ */
+export const DEFAULT_SCRIPT_EDITOR_HEIGHT = 160;
+export const SCRIPT_EDITOR_MIN_HEIGHT = 120;
+export const SCRIPT_EDITOR_MAX_HEIGHT = 800;
+export const SCRIPT_EDITOR_HEIGHT_STEP = 16;

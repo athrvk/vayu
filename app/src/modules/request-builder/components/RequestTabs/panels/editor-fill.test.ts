@@ -6,13 +6,12 @@
  */
 
 /**
- * No editor in a request or collection tab is mounted at a pixel height.
+ * No editor's `<CodeEditor>` prop is mounted at a pixel height.
  *
  * Three editors carried three different constants - 320px in `BodyPanel`,
  * 350px in `ScriptPanel`, 320px in the collection's `ScriptTab` - inside panes
  * that already have the window's height, so each showed a slice of an editor
- * over empty panel (#1323). They fill their pane now, with a `min-h-40` floor
- * and no ceiling.
+ * over empty panel (#1323). They fill their pane's `height="100%"` now.
  *
  * The rendered classes are asserted where the component is rendered
  * (`BodyPanel.test.tsx`, `ElementList.test.tsx`); a class arriving in a
@@ -20,6 +19,12 @@
  * coming back, which is the regression this guards: a fourth editor added
  * with `height="400px"` reads as ordinary until someone opens it in a tall
  * window.
+ *
+ * `ScriptElementForm`'s box is the one deliberate exception to "no ceiling"
+ * (issue #1605): it sits in an auto-height card, not a bounded pane, so its
+ * *wrapping* `<div>` carries an inline pixel height the user drags between
+ * `SCRIPT_EDITOR_MIN_HEIGHT` and `SCRIPT_EDITOR_MAX_HEIGHT` - `<CodeEditor>`
+ * itself still takes no `height` prop, which is what this scan reads.
  *
  * `ScriptPanel` and the collection's `ScriptTab` are gone (issue #1512): a
  * script is a `script.pre` / `script.post` element now, and its editor lives

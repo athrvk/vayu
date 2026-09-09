@@ -23,10 +23,15 @@
  * suggestions already use - a second copy of that keyboard handling is the
  * defect `suggestion-list.tsx` was written to end.
  *
- * **Collapsed by default, and remembered in `layout-store`.** The editor is what
- * the panel is for. A list open under every editor would be the wall it replaced
- * with a chevron on it, and component state would forget the choice on the next
- * tab switch, which unmounts the panel.
+ * **Collapsed by default, remembered by the host.** The editor is what the
+ * panel is for. A list open under every editor would be the wall it replaced
+ * with a chevron on it. The collapsed flag is a controlled prop rather than
+ * this component's own `layout-store` read (issue #1605): the Elements tab can
+ * mount a `script.pre` and a `script.post` row on one screen, and a single
+ * store subscription here would toggle both at once. The host (`ScriptElementForm`)
+ * seeds its own per-row state from the store's persisted default and writes a
+ * toggle back to it, so the *next* row a user opens still starts the way they
+ * last left one - only two rows already on screen no longer share the toggle.
  */
 
 import { useState } from "react";
@@ -44,7 +49,6 @@ import {
 	EYEBROW_CLASS,
 } from "@/components/ui";
 import { useScriptCompletionsQuery } from "@/queries";
-import { useLayoutStore } from "@/stores";
 import { countSnippets, snippetsForContext } from "@/lib/script-snippets";
 import type { SnippetInsertion, SnippetPlacement } from "@/lib/editor-snippet";
 import { cn } from "@/lib/utils";
@@ -52,6 +56,10 @@ import { cn } from "@/lib/utils";
 export interface ScriptSnippetsProps {
 	/** Which editor this list sits under. */
 	context: "pre" | "test";
+	/** Whether the list is folded to its header. */
+	collapsed: boolean;
+	/** Called with the toggled value when the header is clicked. */
+	onCollapsedChange: (collapsed: boolean) => void;
 	/**
 	 * Insert the template. The host owns the editor instance, so it owns the
 	 * insertion; this list says which template was chosen and narrates what came
@@ -69,9 +77,12 @@ const PLACEMENT_PHRASE: Record<SnippetPlacement, string> = {
 	"end-of-script": "at the end of the script",
 };
 
-export function ScriptSnippets({ context, onInsert }: ScriptSnippetsProps) {
-	const collapsed = useLayoutStore((s) => s.scriptSnippetsCollapsed);
-	const setCollapsed = useLayoutStore((s) => s.setScriptSnippetsCollapsed);
+export function ScriptSnippets({
+	context,
+	collapsed,
+	onCollapsedChange,
+	onInsert,
+}: ScriptSnippetsProps) {
 	const { data, isPending, isError } = useScriptCompletionsQuery();
 
 	const groups = snippetsForContext(data?.completions, context);
@@ -112,7 +123,7 @@ export function ScriptSnippets({ context, onInsert }: ScriptSnippetsProps) {
 	};
 
 	return (
-		<Collapsible open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
+		<Collapsible open={!collapsed} onOpenChange={(open) => onCollapsedChange(!open)}>
 			{/*
 			 * The whole header is the control, per the composite-row hit-area rule:
 			 * a narrow activator in a wide bar leaves most of the row painting a
