@@ -131,8 +131,8 @@ void seed_observability (ConfigSeeder& seed, int64_t now) {
     "disables retention, so that fallback is immediate.",
     "observability", "60000", "0", "600000", std::nullopt, now }));
 
-    seed (restart_required (keywords ({ "verbosity", "logging", "app" }) (
-    ConfigEntry{ "logLevel", vayu::core::constants::logging::DEFAULT_LEVEL, "enum", "Log Level",
+    seed (restart_required (keywords ({ "verbosity", "logging" }) (ConfigEntry{
+    "logLevel", vayu::core::constants::logging::DEFAULT_LEVEL, "enum", "Log Level",
     "The lowest severity written to Vayu's log files - the engine's and the "
     "app's, side by side in the logs folder. Debug records everything, which "
     "is what a bug report wants and what fills a disk fastest; Warning and "
