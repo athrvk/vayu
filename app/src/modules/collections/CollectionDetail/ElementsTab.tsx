@@ -115,7 +115,6 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 				elements={elements}
 				onChange={setElements}
 				kinds={kindsList}
-				emptyLabel="No elements yet. Add an extractor, assertion, timer or script from the menu below."
 				renderAboveForm={(element) => {
 					if (element.kind !== "script.pre" && element.kind !== "script.post")
 						return null;

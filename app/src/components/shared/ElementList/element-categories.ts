@@ -24,7 +24,21 @@
  * conformance test pins the *known* set to the fixture's effective categories
  * exactly, so a genuinely new category is a visible, deliberate addition
  * here rather than a silent trailing group forever.
+ *
+ * The element card's family icon (issue #1608) is the same map, one level
+ * further: a category the picker groups under also gets one glyph on every
+ * row of that family, so the two never name a category differently.
  */
+
+import {
+	FileSearch,
+	Gauge,
+	GitBranch,
+	ShieldCheck,
+	Terminal,
+	Timer as TimerIcon,
+	type LucideIcon,
+} from "lucide-react";
 
 const CATEGORY_LABELS: Readonly<Record<string, string>> = {
 	extract: "Extract",
@@ -33,6 +47,15 @@ const CATEGORY_LABELS: Readonly<Record<string, string>> = {
 	controller: "Controller",
 	script: "Script",
 	metric: "Metric",
+};
+
+const CATEGORY_ICONS: Readonly<Record<string, LucideIcon>> = {
+	extract: FileSearch,
+	assert: ShieldCheck,
+	timer: TimerIcon,
+	controller: GitBranch,
+	script: Terminal,
+	metric: Gauge,
 };
 
 /** Display order, ascending. A category not listed sorts after all of these. */
@@ -59,4 +82,9 @@ export function categoryLabel(category: string): string {
 export function categoryOrder(category: string): number {
 	const index = CATEGORY_ORDER.indexOf(category);
 	return index === -1 ? CATEGORY_ORDER.length : index;
+}
+
+/** The family icon for an already-`effectiveCategory`'d category; unknown, none. */
+export function categoryIcon(category: string): LucideIcon | undefined {
+	return CATEGORY_ICONS[category];
 }

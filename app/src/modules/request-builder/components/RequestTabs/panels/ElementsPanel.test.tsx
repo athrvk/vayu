@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { useLayoutStore } from "@/stores";
 import type { RequestBuilderContextValue } from "../../../types";
 import type { ElementDef, ElementKindSchema } from "@/types";
@@ -89,6 +89,33 @@ function extractElement(id: string): ElementDef {
 
 function scriptElement(id: string, kind: "script.pre" | "script.post", script: string): ElementDef {
 	return { id, kind, enabled: true, config: { script } };
+}
+
+/** A card's own root, from any text rendered inside its header or body. */
+function rowFor(text: string | RegExp): HTMLElement {
+	return screen.getByText(text).closest("[data-element-row]") as HTMLElement;
+}
+
+/** Expands a card by its title, so its body (the form, `renderAboveForm`) renders. */
+function expandRow(title: string) {
+	fireEvent.click(within(rowFor(title)).getByRole("button", { name: `Expand ${title}` }));
+}
+
+/**
+ * Opens a card's `⋯` menu and clicks the named action - see
+ * `ElementList.test.tsx`'s own `chooseRowAction` for why each step is what
+ * it is (`pointerdown`+`click` to open, waiting for the menu's own node to
+ * actually leave the document before returning).
+ */
+async function chooseRowAction(title: string, action: string) {
+	const trigger = within(rowFor(title)).getByRole("button", {
+		name: `More actions for ${title}`,
+	});
+	fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+	fireEvent.click(trigger, { detail: 1 });
+	const menu = await screen.findByRole("menu");
+	fireEvent.click(await screen.findByRole("menuitem", { name: action }));
+	await waitFor(() => expect(menu.isConnected).toBe(false));
 }
 
 function setContext(overrides: Partial<RequestBuilderContextValue> = {}) {
@@ -207,14 +234,16 @@ describe("ElementsPanel", () => {
 		]);
 	});
 
-	it('calls updateField("elements", ...) when an element is deleted', () => {
+	it('calls updateField("elements", ...) when an element is deleted', async () => {
 		setContext({
 			request: { id: "req_1", collectionId: null, elements: [extractElement("e1")] } as never,
 		});
 
 		render(<ElementsPanel />);
 
-		fireEvent.click(screen.getByRole("button", { name: /delete extract json/i }));
+		// `extractElement`'s config is `{}` - blank, so the menu's Delete asks
+		// nothing and removes it straight away.
+		await chooseRowAction("Extract JSON", "Delete");
 
 		expect(updateField).toHaveBeenCalledWith("elements", []);
 	});
@@ -235,6 +264,7 @@ describe("ElementsPanel", () => {
 			});
 
 			render(<ElementsPanel />);
+			expandRow("Pre-request Script");
 
 			expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
 			expect(screen.getByText("token")).toBeInTheDocument();
@@ -250,6 +280,7 @@ describe("ElementsPanel", () => {
 			});
 
 			render(<ElementsPanel />);
+			expandRow("Test Script");
 
 			expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
 			expect(screen.getByText("{{base_url}}")).toBeInTheDocument();
@@ -265,6 +296,7 @@ describe("ElementsPanel", () => {
 			});
 
 			render(<ElementsPanel />);
+			expandRow("Extract JSON");
 
 			expect(screen.queryByText("Names mentioned:")).not.toBeInTheDocument();
 		});

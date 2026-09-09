@@ -642,8 +642,8 @@ Revealing a result is one mechanism for both halves: the sidebar passes the resu
 
 - `OptionButtons` - the pick-one tile grid. `preview: (isSelected) => ReactNode` per option draws the theme badge, the accent swatch or the roundedness shape, so Appearance no longer re-implements the selected-card style three times.
 - `ToggleRow` - label (a node, for the MCP tool rows' `<code>` and counts), description, `disabled`, `title`. Takes an `anchor` like `NumberSettingRow` does, for the switches search reveals individually (Word wrap, Line numbers, Minimap), and names its box with `data-setting-row` from the same string that names the switch. A string label is wired to the switch with `htmlFor`/`id` as well as naming it through `aria-label`, so the words are part of the hit area - a Radix switch is a `<button>`, which is labelable; a node label has no text to associate, which is what `ariaLabel` is for.
-- `NumberSettingRow` - input, unit suffix, range hint, `aria-invalid` + message, and the Default line. Its `commit` prop is the one thing the four old copies really disagreed about: `"change"` for settings that apply live, `"blur"` for owners that do real work per write (the MCP caps cross IPC). An unparseable draft is never committed - it stays in the field until it is a number again. The description is pointed at with `aria-describedby` rather than only rendered (both ids, in reading order, when there is an error too), because a description like "Only applies while Follow redirects is on" is the reason the field is disabled. `data-setting-row` names the row's box.
-- `SelectSettingRow` - the pick-one row as a dropdown, for a set that reads as a list rather than a tile grid: `OptionButtons` stays the default where a user browses three or four choices, and this is for a value they already know the name of (the request tab's **Protocol**). `useId` pairs the visible label with the trigger and names it, because the trigger's text is the *chosen option*, not the setting. `onChange` hands back a `string` - a `Select` cannot promise the owner's union, so the owner narrows it (`isHttpVersion`) and decides what an unknown value means. Its second consumer is the engine view's `enum` card (`defaultHttpVersion`, `dbSynchronous`, `proxyMode`), which wrote the same row out by hand until issue #747: there the `CardTitle` is the setting's name, so it passes `labelHidden` and the label goes `sr-only` rather than away - it is what names the trigger, exactly as on `NumberSettingRow`. The trigger's width belongs to the row rather than to either caller (`w-48`, where `NumberSettingRow`'s input already stops), so the two control types end at the same place down a card; the engine's longest option label, "From environment", fits it. The card keeps its own guard for an entry whose `options` the engine omitted - rendering nothing is deliberate, and the primitive does not learn about it.
+- `NumberSettingRow` - input, unit suffix, range hint, `aria-invalid` + message, and the Default line. Its `commit` prop is the one thing the four old copies really disagreed about: `"change"` for settings that apply live, `"blur"` for owners that do real work per write (the MCP caps cross IPC). An unparseable draft is never committed - it stays in the field until it is a number again. The description is pointed at with `aria-describedby` rather than only rendered (both ids, in reading order, when there is an error too), because a description like "Only applies while Follow redirects is on" is the reason the field is disabled. `data-setting-row` names the row's box. `compact` is the opt-in denser variant the element card's schema-generated form uses (`text-xs` label, `h-8` input, no width cap, so the field fills a half-width grid column) - opt-in because the settings panels are read one row at a time and keep the roomier default.
+- `SelectSettingRow` - the pick-one row as a dropdown, for a set that reads as a list rather than a tile grid: `OptionButtons` stays the default where a user browses three or four choices, and this is for a value they already know the name of (the request tab's **Protocol**). `useId` pairs the visible label with the trigger and names it, because the trigger's text is the *chosen option*, not the setting. `onChange` hands back a `string` - a `Select` cannot promise the owner's union, so the owner narrows it (`isHttpVersion`) and decides what an unknown value means. Its second consumer is the engine view's `enum` card (`defaultHttpVersion`, `dbSynchronous`, `proxyMode`), which wrote the same row out by hand until issue #747: there the `CardTitle` is the setting's name, so it passes `labelHidden` and the label goes `sr-only` rather than away - it is what names the trigger, exactly as on `NumberSettingRow`. The trigger's width belongs to the row rather than to either caller (`w-48`, where `NumberSettingRow`'s input already stops), so the two control types end at the same place down a card; the engine's longest option label, "From environment", fits it. The card keeps its own guard for an entry whose `options` the engine omitted - rendering nothing is deliberate, and the primitive does not learn about it. It takes `compact` too, alongside `NumberSettingRow`, which drops `w-48` for the same reason that row drops its input cap.
 - `DefaultValueLine` - "Default: x" plus the reset that goes there. Used by `NumberSettingRow` and by the boolean/enum/string engine cards, so every entry type has one.
 
 Three save models coexist and each says which it is: app panels state `AppSettingsPanel.saveNote` (defaulting to `DEFAULT_SAVE_NOTE`, "Changes are saved automatically.") in the `ClientSettingsPanel` header, MCP overrides it, and the engine view states its staged-then-saved model beside the Save bar. Leaving an engine category still flushes its staged edits, and now **says** when one was dropped for being invalid instead of discarding it silently. A card's Revert discards a staged edit; Reset goes to the shipped default - one name each, for the two different things.
@@ -1586,13 +1586,57 @@ third copy of that keyboard handling.
 
 The primitive both Elements tabs bind to (issue #1512): an ordered list of a
 request's or collection's own elements - extractors, assertions, timers,
-controllers and scripts - each row a kind badge, an optional name, an enable
-switch, reorder buttons and delete, with the kind's form underneath. A
-primitive under `components/shared/` takes no feature-module context, so both
-hosts pass their own `elements` array, `onChange` setter and the catalogue
-(`useElementKindsQuery`) as props rather than the component reading either
-host's context - the same rule `request-builder/types.ts` states for why
-`KeyValueEditor` moved out of the request-builder module.
+controllers and scripts - each a **collapsible card** (issue #1608): a family
+icon (one per catalogue category, `element-categories.ts`'s `categoryIcon`),
+the element's name or its kind's label, a one-line **summary** of its config
+while collapsed (`summarize-element.ts` - `in [200, 201]`, `wait 500 ms`,
+`$.token → token (env)`; a kind this module has no template for falls back to
+the kind's own description, and one that is genuinely unconfigured to its
+first two properties as `key: value`), an enable switch, and a `⋯` menu
+(`RowActionsMenu`) for Rename, Move up/down, Duplicate and Delete. Click on
+the header toggles the card; a newly added or duplicated element opens
+expanded, everything else starts collapsed. Alt+Up/Alt+Down on the header's
+own two toggle buttons moves the row, mirroring the menu's Move items.
+**Rename's autofocus is timed off `RowActionsMenu`'s `onCloseAutoFocus`**, not
+a guessed delay: selecting Rename only flags the row's own pending-rename ref,
+and the actual state flip - drafting the name, showing the input - runs from
+that callback, which Radix itself calls once the closing menu's `FocusScope`
+teardown (and the `aria-hidden` it places on the rest of the page while open)
+has actually finished. A raw `setTimeout` landed the autofocus before that
+cleanup reliably completed, focusing an element still marked `aria-hidden` for
+a moment - caught live, not by the jsdom suite, which has no real layout or
+`aria-hidden` enforcement to catch it on. The title span itself is capped
+(`max-w-[55%]`) alongside `truncate`: a user-typed name has no length limit,
+and `truncate` alone never engages without a `max-width` to truncate against -
+an uncapped one rendered at its full content width and pushed the switch and
+the `⋯` menu out of the row. **The expanded card and `GenericElementForm`'s
+own rows run at the app's tightest density** - `space-y-2` and `p-2`/`py-2`
+throughout, `h-8` inputs (not the settings screen's `h-9`), `text-xs` labels -
+because this is where a user reads several fields at once, closer to a form
+than a settings page read one row at a time. The collapsed header (`h-8`,
+matching every other drawer row) is untouched; only what opens beneath it got
+denser.
+**A missing required field names itself, in place of the summary** (issue
+#1635): `missingRequiredKeys` (`lib/elements.ts`) reads the same presence-only
+check `addElement`'s fresh `config: {}` can trigger, and the row shows "Needs
+`<title>`" with a warning dot instead of `summarizeElement`'s preview -
+whether the card is open or collapsed, since a list of collapsed cards is
+exactly where a user needs to spot which one is blocking the save without
+expanding each in turn. `RequestBuilderProvider`'s `handleSave` and
+`ElementsTab`'s `persist` hold the save back for the same reason
+`defaultConfigFor` exists above - a request's whole `elements` array 400s on
+one incomplete member - and throw `SaveBlockedError` instead of sending a
+payload already known to fail; `useSaveManager` reads that type to stay
+"pending" rather than backing off a retry against a payload that will not
+have changed by the next attempt.
+
+**Delete asks nothing for a blank element** (every configured value empty or
+absent) and confirms through `DeleteConfirmDialog` for one with real
+configuration. A primitive under `components/shared/` takes no feature-module
+context, so both hosts pass their own `elements` array, `onChange` setter and
+the catalogue (`useElementKindsQuery`) as props rather than the component
+reading either host's context - the same rule `request-builder/types.ts`
+states for why `KeyValueEditor` moved out of the request-builder module.
 
 **The default form is generated from the kind's JSON Schema**
 (`GenericElementForm.tsx`), the way `SettingsMain.tsx` renders a config entry
@@ -1600,17 +1644,46 @@ by type: string, integer, number, boolean, enum and string-array properties
 map to the same row primitives - `NumberSettingRow` / `SelectSettingRow` /
 `ToggleRow` - `SettingsPanel.tsx` already uses, plus one level of `object`
 nesting for a kind whose config groups two fields (`assert.status.range`'s
-`{min, max}`). A kind the app has never seen is editable the day the engine
-ships it, which is the whole point of the catalogue being schema-carrying
-rather than a label list - `extract.json`'s path field is deliberately
-generic-form only, proving the point rather than special-casing it.
+`{min, max}`). **Labels come from the schema's own `title` and `description`**
+(issue #1607), not the raw property key - `control.throughput`'s `everyN`
+reads "Every Nth", not `everyN`. A `required` property renders before an
+optional one; a property carrying `x-vayu-group: "advanced"` renders instead
+under a disclosure, closed on mount unless the element already has a value
+for one; `x-vayu-unit` (`"ms"` / `"%"` / `"B"`) becomes the numeric field's
+input suffix. A kind the app has never seen is still editable the day the
+engine ships it, which is the whole point of the catalogue being
+schema-carrying rather than a label list - `extract.json`'s path field is
+deliberately generic-form only, proving the point rather than special-casing
+it.
+
+**Two short fields standing next to each other share a line** (`grid-cols-2`,
+the pairing `AuthFields` and `OAuth2Form` already use). `assert.status`'s
+`range` is one idea - "200 to 299" - and saying it as a label, a hint sentence
+and an input stacked twice over spent most of an expanded card on two
+integers. Only a number or an enum pairs: a JSONPath, a variable name or a
+regular expression has no length bound, and a boolean is already horizontal
+(`ToggleRow` is label-left/switch-right), so halving its width only crowds its
+description. And only **exactly two** adjacent - a run of three is a list, not
+a pair (`timer.think`'s `ms` / `minMs` / `maxMs` is a fixed wait beside the two
+bounds of a random one, and pairing by position would claim a relationship the
+schema never declared). Which two of three belong together is knowledge only
+the kind has, and this form knows no kinds: a kind that wants the grouping
+declares it as a nested `object`, the way `assert.status` already does, and is
+paired here for free. The halves are the settings rows' opt-in `compact`
+variant, so each one fills its column instead of stopping at the settings
+screen's `max-w-[12rem]` with the rest of the line empty.
 
 **A bespoke override is the exception, in one map** (`elementForms.ts`), never
-inline in `ElementList`. Phase 0 ships a bespoke form for every `script.*`
+inline in `ElementList`. There are two: `ScriptElementForm`, below, and
+`ModeElementForm` for the five mutually-exclusive-strategy kinds, after it.
+Phase 0 ships a bespoke form for every `script.*`
 kind - `script.pre` / `script.post` and, since issue #1499, `script.setup` /
 `script.teardown` - which render `ScriptElementForm`'s Monaco editor and
 insertable snippets instead of the generic form's plain text field, because
-"the same editor" is what the Elements tab has to keep for a script. It
+"the same editor" is what the Elements tab has to keep for a script. Its lead
+sentence is the kind's own catalogue `description` (issue #1608, absorbed
+there by #1607) rather than a hard-coded pair of strings, so the text is
+authored once and doubles as the card's collapsed-summary fallback. It
 deliberately carries none of the old `ScriptPanel`'s variable-reference chips
 or inherited/legacy notices - those read `useRequestBuilderContext`, which
 this primitive cannot depend on - so inheritance is shown once for the whole
@@ -1627,6 +1700,44 @@ GraphQL body's `ResizableHandle` styling, without the panel group it depends
 on - drags it between `SCRIPT_EDITOR_MIN_HEIGHT` and `SCRIPT_EDITOR_MAX_HEIGHT`
 (`constants/layout.ts`), previewing every pointer-move frame and persisting
 debounced, plus ArrowUp/ArrowDown by `SCRIPT_EDITOR_HEIGHT_STEP`.
+
+**Five kinds pick one strategy instead of showing every one at once**
+(`ModeElementForm.tsx`, with the table in `element-modes.ts`). `assert.status`
+accepts an `in` list **or** a `range`; `timer.think` waits `ms` **or**
+`minMs`/`maxMs` **or** a `gaussian`; `assert.jsonpath` checks `exists` **or**
+`expected` **or** `regex`; `control.throughput` limits by `everyN` **or**
+`percent`; `metric.record`'s `source` reads exactly one of its six keys. The
+engine resolves each by an if/else-if chain or a fixed-priority loop and never
+combines two - but JSON Schema declares them as independent optional siblings,
+so the generic form rendered every alternative's fields at once, with nothing
+saying which one would actually run. That is not only clutter: an element that
+once had a `range` and was then given an `in` kept the `range` invisibly, and
+the engine's own priority could still prefer the hidden one over the fields on
+screen. `metric.record`'s schema comment says why the fix cannot be a
+schema-level `oneOf` (valijson reports "matched N schemas" without naming one),
+so it lives entirely here. **The mode on screen is derived from `config`, by
+the engine's own priority order** - transcribed into `detectionOrder`, one per
+kind, each naming the C++ function it came from - so the card cannot claim one
+strategy while the engine runs another; a blank element starts on the kind's
+stated default (`assert.status` on `in`, `timer.think` on `ms`, which is the
+engine's *fallback* rather than its first check, hence the two orders being
+separate). **Switching modes clears the other strategies' keys**, since a
+leftover is both unreachable in the UI and, with `additionalProperties: false`
+on all five schemas, a save failure. The chosen mode's own value is kept, not
+reset - switching *to* it is what makes that data visible and editable. The
+picker is the `ToggleGroup` segmented control up to three modes and a compact
+`SelectSettingRow` past that (`metric.record`'s six sources), the split
+`SettingControls.tsx` already draws between a few options a user browses and a
+set that reads as a list. Everything below the picker is still
+`GenericElementForm`, over a subset of the same schema: titles, hints, units,
+the advanced disclosure and the two-fields-per-line pairing arrive unchanged,
+so a mode's fields are literally the same rows as every other card's. A mode
+whose key is a boolean *marker* (`exists`, `latency`, `status`, `size`) renders
+no field at all - the engine reads the key's presence and ignores its value, so
+a toggle would offer an "off" that turns nothing off; choosing the mode writes
+`true`. Only the mode *labels* are app-side copy, because a strategy is a
+grouping the schema does not name (`minMs` + `maxMs` are one mode with two
+titles); every field label still comes from the catalogue.
 
 **The Add control is a searchable picker (issue #1604), not a plain dropdown.**
 A `Popover` holds a `Command` (`ElementList/element-categories.ts`'s display
@@ -1655,9 +1766,30 @@ element (`isBlankScriptElement`, `lib/elements.ts`) is now inert everywhere it
 is read - `scriptTextFor`, the Elements tab's badge count, and
 `InheritedElementsNotice`'s count and list - the app-side half of a rule the
 engine pipeline enforces the same way (`docs/engine/elements.md`), so the
-seeding lost its reason to exist. A fresh entity's Elements tab shows the
-existing `emptyLabel` sentence pointing at the Add menu until #1606's app
-child gives it quick-add chips instead.
+seeding lost its reason to exist. **A fresh entity's Elements tab shows a
+sentence plus quick-add chips instead of a bare `emptyLabel` string**
+(issue #1608): `ElementList` itself computes them from whichever kinds it
+finds in the `kinds` prop it was already handed - Extract from JSON, Assert
+status code and Pre-request script always, Setup script only when the
+collection tab's own `kinds` (which, unlike the request tab's, includes the
+`collectionOnly` kinds) offers `script.setup`. A click adds that kind,
+expanded, the same as the picker.
+
+**A newly added element seeds `config` from `defaultConfigFor`, not a bare
+`{}`** - found live: the engine validates a request's whole `elements` array
+on every save, and a script kind's schema requires the `script` key *present*
+(`required: ["script"]`, checked engine-side by `valijson`, key presence only,
+no `minLength`); `config: {}` alone omits it, so quick-adding "Pre-request
+script" and then touching anything else on the request 400s the *entire* save
+with "Missing required property 'script'", not only that element's own. A
+script kind seeds `{ script: "" }` instead - a real, valid value (the engine
+already treats a blank script as a no-op, `is_blank_script_element`), not a
+placeholder. Every other kind still seeds `{}`: several of them have their own
+required, non-blankable string fields (`extract.json`'s `variable`,
+`control.transaction`'s `name`, both `minLength: 1`) that an empty string
+would not satisfy either, and a kind-specific fake placeholder would be worse
+than the failure it dodges - tracked as a follow-up rather than guessed at
+here (issue #1635).
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 

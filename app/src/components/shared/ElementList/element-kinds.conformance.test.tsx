@@ -29,10 +29,12 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
+import { ELEMENT_MODES, modeKeys } from "./element-modes";
 import { ElementList } from "./index";
+import { categoryIcon, effectiveCategory } from "./element-categories";
 import type { ElementDef, ElementKindSchema } from "@/types";
 
 // `script.pre` / `script.post` render the bespoke `ScriptElementForm`, whose
@@ -105,23 +107,89 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 		expect(withBespoke.length + generic.length).toBe(fixture.length);
 		// Every `script.*` kind gets the bespoke Monaco form: `script.pre` /
 		// `script.post` since #1512, `script.setup` / `script.teardown` since
-		// #1499 - this fails loudly if the catalogue ever drops one or the
-		// overrides map is edited without this suite noticing.
+		// #1499. The other five are the mutually-exclusive-strategy kinds
+		// (`element-modes.ts`), whose schemas declare several alternative
+		// strategies as independent optional siblings and which therefore need
+		// a mode picker rather than every alternative's fields at once. This
+		// fails loudly if the catalogue ever drops one or either map is edited
+		// without this suite noticing.
 		expect(withBespoke.sort()).toEqual([
+			"assert.jsonpath",
+			"assert.status",
+			"control.throughput",
+			"metric.record",
 			"script.post",
 			"script.pre",
 			"script.setup",
 			"script.teardown",
+			"timer.think",
 		]);
+	});
+
+	it("names, for every mode-picker kind, properties the live catalogue actually declares", () => {
+		// `element-modes.ts` transcribes each kind's strategies from the
+		// engine's own resolution order. A renamed or dropped property would
+		// otherwise show as a mode whose fields are silently blank, or as a
+		// strategy the picker can no longer reach - neither of which throws.
+		// Mutation check: rename any id in `ELEMENT_MODES` and this reds
+		// naming the kind and the key.
+		for (const [kind, spec] of Object.entries(ELEMENT_MODES)) {
+			const entry = fixture.find((k) => k.kind === kind);
+			expect(entry, `the catalogue no longer serves "${kind}"`).toBeTruthy();
+
+			const top = entry!.configSchema.properties ?? {};
+			// Every one of these five relies on the schema refusing an unknown
+			// key: it is what makes a leftover from a mode switch a save
+			// failure rather than dead data the engine may still prefer.
+			expect(
+				entry!.configSchema.additionalProperties,
+				`${kind} no longer refuses additional properties`
+			).toBe(false);
+
+			for (const name of [...(spec.leadNames ?? []), ...(spec.trailNames ?? [])]) {
+				expect(Object.keys(top), `${kind} declares no "${name}"`).toContain(name);
+			}
+
+			const level = spec.path ? (top[spec.path]?.properties ?? {}) : top;
+			expect(
+				Object.keys(level).length,
+				`${kind}'s mode level "${spec.path ?? "(top)"}" declares nothing`
+			).toBeGreaterThan(0);
+			for (const mode of spec.modes) {
+				for (const key of modeKeys(mode)) {
+					expect(Object.keys(level), `${kind} declares no "${key}"`).toContain(key);
+				}
+				if (mode.render === "nested") {
+					expect(
+						Object.keys(level[mode.id]?.properties ?? {}).length,
+						`${kind}'s "${mode.id}" is rendered as a nested object but declares no children`
+					).toBeGreaterThan(0);
+				}
+			}
+		}
+	});
+
+	it("resolves every declared mode, in an order that is a permutation of them", () => {
+		// The two orders are separate on purpose (the engine's priority, and
+		// how the picker reads), which is exactly how one of them silently
+		// loses a mode. Mutation check: drop an id from any `detectionOrder`
+		// and this reds.
+		for (const [kind, spec] of Object.entries(ELEMENT_MODES)) {
+			expect([...spec.detectionOrder].sort(), `${kind}'s detection order`).toEqual(
+				spec.modes.map((m) => m.id).sort()
+			);
+		}
 	});
 
 	it("renders a schema-driven field for a kind's own declared property, on the generic path", () => {
 		// A kind the app has never special-cased is still editable: pick any
 		// kind that falls through to `GenericElementForm` and assert its own
-		// schema's property names actually reach the DOM. `inherit.disable`
-		// is deliberately excluded from the Add menu but not from this check -
-		// the notice's Disable toggle still has to render its form if the row
-		// is ever shown.
+		// schema's property renders, expanded, under its schema-annotated
+		// `title` (issue #1608) - not the raw property key, which is what the
+		// generic form fell back to before #1607 gave every property one.
+		// `inherit.disable` is deliberately excluded from the Add menu but not
+		// from this check - the notice's Disable toggle still has to render
+		// its form if the row is ever shown.
 		const genericKind = fixture.find(
 			(k) =>
 				!(k.kind in ELEMENT_FORM_OVERRIDES) &&
@@ -135,12 +203,38 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 			enabled: true,
 			config: {},
 		};
-		const { getByText } = render(
+		const { getByRole, getByText } = render(
 			<ElementList elements={[element]} onChange={() => {}} kinds={fixture} />
 		);
+		fireEvent.click(getByRole("button", { name: /^Expand /i }));
 
-		const firstProperty = Object.keys(genericKind!.configSchema.properties ?? {})[0];
-		expect(getByText(firstProperty)).toBeInTheDocument();
+		const firstPropertyName = Object.keys(genericKind!.configSchema.properties ?? {})[0];
+		const firstProperty = genericKind!.configSchema.properties![firstPropertyName];
+		expect(getByText(firstProperty?.title ?? firstPropertyName)).toBeInTheDocument();
+	});
+
+	it("has a family icon for every category the fixture actually uses", () => {
+		// The picker's category map (`element-categories.ts`) and the card's
+		// family-icon map are kept in the same module so the two cannot name a
+		// category differently; this is the icon half of that pairing, checked
+		// against live categories the same way the picker's label map is
+		// (`element-categories.conformance.test.tsx`). `inherit.disable` never
+		// reaches a rendered card - `ElementList` filters it from the Add menu
+		// by kind, and the inheritance notice's own disable toggle has no
+		// family icon either - so it is excluded here the same way that
+		// suite's own category check excludes it. Mutation check: delete one
+		// entry from `CATEGORY_ICONS` and this reddens naming the category.
+		const categories = new Set(
+			fixture
+				.filter((k) => k.kind !== "inherit.disable")
+				.map((k) => effectiveCategory(k.category))
+		);
+		for (const category of categories) {
+			expect(
+				categoryIcon(category),
+				`no family icon for category "${category}"`
+			).toBeTruthy();
+		}
 	});
 });
 

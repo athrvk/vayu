@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { useLayoutStore } from "@/stores";
 import type { Collection, DataContractScope, ElementDef, ElementKindSchema } from "@/types";
 import type { VariableOrigin } from "@/types/domain";
@@ -147,6 +147,16 @@ function renderTab(collection: Collection) {
 
 function openAddMenu() {
 	fireEvent.click(screen.getByRole("button", { name: /add element/i }));
+}
+
+/** A card's own root, from any text rendered inside its header or body. */
+function rowFor(text: string | RegExp): HTMLElement {
+	return screen.getByText(text).closest("[data-element-row]") as HTMLElement;
+}
+
+/** Expands a card by its title, so its body (the form, `renderAboveForm`) renders. */
+function expandRow(title: string) {
+	fireEvent.click(within(rowFor(title)).getByRole("button", { name: `Expand ${title}` }));
 }
 
 beforeEach(() => {
@@ -366,6 +376,7 @@ describe("ElementsTab - the Names-mentioned row (issue #1553)", () => {
 		renderTab(
 			makeCollection([scriptElement("e1", "script.pre", 'pm.environment.get("token");')])
 		);
+		expandRow("Pre-request Script");
 
 		expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
 		expect(screen.getByText("token")).toBeInTheDocument();
@@ -375,6 +386,7 @@ describe("ElementsTab - the Names-mentioned row (issue #1553)", () => {
 		renderTab(
 			makeCollection([scriptElement("e1", "script.post", 'const u = "{{base_url}}";')])
 		);
+		expandRow("Test Script");
 
 		expect(screen.getByText("Names mentioned:")).toBeInTheDocument();
 		expect(screen.getByText("{{base_url}}")).toBeInTheDocument();
@@ -382,6 +394,7 @@ describe("ElementsTab - the Names-mentioned row (issue #1553)", () => {
 
 	it("does not show for a non-script element", () => {
 		renderTab(makeCollection([extractElement("e1")]));
+		expandRow("Extract JSON");
 
 		expect(screen.queryByText("Names mentioned:")).not.toBeInTheDocument();
 	});
@@ -391,6 +404,7 @@ describe("ElementsTab - the Names-mentioned row (issue #1553)", () => {
 		renderTab(
 			makeCollection([scriptElement("e1", "script.pre", 'const e = "{{data.email}}";')])
 		);
+		expandRow("Pre-request Script");
 
 		const chip = screen.getByText("data.email");
 		expect(chip.getAttribute("title")).toContain("declared in Acme API");

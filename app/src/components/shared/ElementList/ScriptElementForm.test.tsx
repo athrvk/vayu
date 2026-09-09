@@ -62,7 +62,14 @@ afterEach(() => {
 
 function renderForm(kind: "script.pre" | "script.post" = "script.pre") {
 	const onChange = vi.fn();
-	render(<ScriptElementForm kind={kind} config={{}} onChange={onChange} />);
+	render(
+		<ScriptElementForm
+			kind={kind}
+			config={{}}
+			description="A test description."
+			onChange={onChange}
+		/>
+	);
 	return {
 		onChange,
 		box: screen.getByTestId(
@@ -197,8 +204,18 @@ describe("the Snippets disclosure, per row", () => {
 	it("keeps two script rows independent - opening one leaves the other closed", () => {
 		render(
 			<>
-				<ScriptElementForm kind="script.pre" config={{}} onChange={() => {}} />
-				<ScriptElementForm kind="script.post" config={{}} onChange={() => {}} />
+				<ScriptElementForm
+					kind="script.pre"
+					config={{}}
+					description="Runs before the request is sent."
+					onChange={() => {}}
+				/>
+				<ScriptElementForm
+					kind="script.post"
+					config={{}}
+					description="Runs after the response is received."
+					onChange={() => {}}
+				/>
 			</>
 		);
 		const [preToggle, postToggle] = screen.getAllByRole("button", { name: /snippets/i });
