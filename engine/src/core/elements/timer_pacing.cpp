@@ -147,8 +147,16 @@ ElementKind make_timer_pacing_kind () {
     kind.config_schema = {
         { "type", "object" },
         { "properties",
-        { { "everyMs", { { "type", "integer" }, { "minimum", 1 } } },
-        { "perUser", { { "type", "boolean" } } } } },
+        { { "everyMs",
+          { { "type", "integer" }, { "minimum", 1 }, { "title", "Cadence" }, { "x-vayu-unit", "ms" },
+          { "description",
+          "How often this node starts, start to start, in "
+          "milliseconds." } } },
+        { "perUser",
+        { { "type", "boolean" }, { "title", "Per user" }, { "x-vayu-group", "advanced" },
+        { "description",
+        "Paces each virtual user independently instead of sharing "
+        "one cadence across all of them." } } } } },
         { "required", { "everyMs" } },
         { "additionalProperties", false },
     };

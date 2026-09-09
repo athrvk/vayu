@@ -154,7 +154,10 @@ make_script_kind (Phase phase, const char* kind, const char* label, const char* 
     element_kind.hot_path      = HotPathClass::Script;
     element_kind.config_schema = {
         { "type", "object" },
-        { "properties", { { "script", { { "type", "string" } } } } },
+        { "properties",
+        { { "script",
+        { { "type", "string" }, { "title", "Script" },
+        { "description", "The JavaScript source to execute." } } } } },
         { "required", nlohmann::json::array ({ "script" }) },
         { "additionalProperties", false },
     };
@@ -173,7 +176,14 @@ make_script_kind (Phase phase, const char* kind, const char* label, const char* 
  * not get it: a run-boundary kind has no inline-or-deferred choice to make.
  */
 void allow_inline_marking (ElementKind& kind) {
-    kind.config_schema["properties"]["inline"] = { { "type", "boolean" } };
+    kind.config_schema["properties"]["inline"] = {
+        { "type", "boolean" },
+        { "title", "Run inline" },
+        { "description",
+        "Runs on the load path's own producer/completion hooks instead of "
+        "the deferred post-run replay." },
+        { "x-vayu-group", "advanced" },
+    };
 }
 
 } // namespace
@@ -191,8 +201,10 @@ bool is_blank_script_element (const std::string& kind, const nlohmann::json& con
 }
 
 ElementKind make_script_pre_kind () {
-    auto kind = make_script_kind (Phase::StepBefore, "script.pre",
-    "Pre-request script", "Runs before the request is sent.");
+    auto kind = make_script_kind (Phase::StepBefore, "script.pre", "Pre-request script",
+    "Runs before the request is sent, with the pm API. Edits to pm.request "
+    "change what is actually sent. Never runs under a load test - only on "
+    "Send and in a collection run.");
     allow_inline_marking (kind);
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ScriptPreElement> (config);
@@ -201,8 +213,10 @@ ElementKind make_script_pre_kind () {
 }
 
 ElementKind make_script_post_kind () {
-    auto kind = make_script_kind (Phase::StepAfter, "script.post",
-    "Post-request script", "Runs after the response is received.");
+    auto kind = make_script_kind (Phase::StepAfter, "script.post", "Post-request script",
+    "Runs after the response is received. Use pm.test() for assertions: "
+    "pm.response.to asserts about the response itself, pm.expect asserts "
+    "about any value handed to it.");
     allow_inline_marking (kind);
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ScriptPostElement> (config);

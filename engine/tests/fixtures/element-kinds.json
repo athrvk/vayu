@@ -6,7 +6,9 @@
       "additionalProperties": false,
       "properties": {
         "elementId": {
+          "description": "The id of an inherited element to drop from this request or collection's resolved list.",
           "minLength": 1,
+          "title": "Element to disable",
           "type": "string"
         }
       },
@@ -29,9 +31,14 @@
       "additionalProperties": false,
       "properties": {
         "inline": {
-          "type": "boolean"
+          "description": "Runs on the load path's own producer/completion hooks instead of the deferred post-run replay.",
+          "title": "Run inline",
+          "type": "boolean",
+          "x-vayu-group": "advanced"
         },
         "script": {
+          "description": "The JavaScript source to execute.",
+          "title": "Script",
           "type": "string"
         }
       },
@@ -40,7 +47,7 @@
       ],
       "type": "object"
     },
-    "description": "Runs before the request is sent.",
+    "description": "Runs before the request is sent, with the pm API. Edits to pm.request change what is actually sent. Never runs under a load test - only on Send and in a collection run.",
     "hotPathClass": "script",
     "kind": "script.pre",
     "label": "Pre-request script",
@@ -56,9 +63,14 @@
       "additionalProperties": false,
       "properties": {
         "inline": {
-          "type": "boolean"
+          "description": "Runs on the load path's own producer/completion hooks instead of the deferred post-run replay.",
+          "title": "Run inline",
+          "type": "boolean",
+          "x-vayu-group": "advanced"
         },
         "script": {
+          "description": "The JavaScript source to execute.",
+          "title": "Script",
           "type": "string"
         }
       },
@@ -67,7 +79,7 @@
       ],
       "type": "object"
     },
-    "description": "Runs after the response is received.",
+    "description": "Runs after the response is received. Use pm.test() for assertions: pm.response.to asserts about the response itself, pm.expect asserts about any value handed to it.",
     "hotPathClass": "script",
     "kind": "script.post",
     "label": "Post-request script",
@@ -83,6 +95,8 @@
       "additionalProperties": false,
       "properties": {
         "script": {
+          "description": "The JavaScript source to execute.",
+          "title": "Script",
           "type": "string"
         }
       },
@@ -107,6 +121,8 @@
       "additionalProperties": false,
       "properties": {
         "script": {
+          "description": "The JavaScript source to execute.",
+          "title": "Script",
           "type": "string"
         }
       },
@@ -131,28 +147,41 @@
       "additionalProperties": false,
       "properties": {
         "default": {
+          "description": "Written to the variable when there is no match.",
+          "title": "Fallback value",
           "type": "string"
         },
         "matchNo": {
-          "type": "integer"
+          "description": "Selects among multiple matches: 1-based index, 0 for random, -1 to write every match.",
+          "title": "Which match",
+          "type": "integer",
+          "x-vayu-group": "advanced"
         },
         "path": {
+          "description": "A JSONPath subset ($.a.b, [n], [*], ..name) locating the value to extract.",
           "pattern": "^\\$(\\.[A-Za-z0-9_]+|\\.\\.[A-Za-z0-9_]+|\\[\\*\\]|\\[-?[0-9]+\\])*$",
+          "title": "JSONPath",
           "type": "string"
         },
         "required": {
+          "description": "Fails the step's assertions when no match is found.",
+          "title": "Required",
           "type": "boolean"
         },
         "scope": {
+          "description": "Which variable scope to write the result into.",
           "enum": [
             "env",
             "collection",
             "globals"
           ],
+          "title": "Store in",
           "type": "string"
         },
         "variable": {
+          "description": "The variable name to write the result into.",
           "minLength": 1,
+          "title": "Variable name",
           "type": "string"
         }
       },
@@ -178,40 +207,57 @@
       "additionalProperties": false,
       "properties": {
         "default": {
+          "description": "Written to the variable when there is no match.",
+          "title": "Fallback value",
           "type": "string"
         },
         "field": {
+          "description": "Which part of the response to search: body, headers, url or status.",
           "enum": [
             "body",
             "headers",
             "url",
             "status"
           ],
+          "title": "Field",
           "type": "string"
         },
         "matchNo": {
-          "type": "integer"
+          "description": "Selects among multiple matches: 1-based index, 0 for random, -1 to write every match.",
+          "title": "Which match",
+          "type": "integer",
+          "x-vayu-group": "advanced"
         },
         "pattern": {
+          "description": "The regular expression to run against the response.",
           "minLength": 1,
+          "title": "Pattern",
           "type": "string"
         },
         "required": {
+          "description": "Fails the step's assertions when no match is found.",
+          "title": "Required",
           "type": "boolean"
         },
         "scope": {
+          "description": "Which variable scope to write the result into.",
           "enum": [
             "env",
             "collection",
             "globals"
           ],
+          "title": "Store in",
           "type": "string"
         },
         "template": {
+          "description": "A $1$-style template of the match's capture groups; $0$ is the whole match.",
+          "title": "Replacement template",
           "type": "string"
         },
         "variable": {
+          "description": "The variable name to write the result into.",
           "minLength": 1,
+          "title": "Variable name",
           "type": "string"
         }
       },
@@ -237,25 +283,35 @@
       "additionalProperties": false,
       "properties": {
         "default": {
+          "description": "Written to the variable when there is no match.",
+          "title": "Fallback value",
           "type": "string"
         },
         "header": {
+          "description": "The response header to read, matched case-insensitively.",
           "minLength": 1,
+          "title": "Header name",
           "type": "string"
         },
         "required": {
+          "description": "Fails the step's assertions when no match is found.",
+          "title": "Required",
           "type": "boolean"
         },
         "scope": {
+          "description": "Which variable scope to write the result into.",
           "enum": [
             "env",
             "collection",
             "globals"
           ],
+          "title": "Store in",
           "type": "string"
         },
         "variable": {
+          "description": "The variable name to write the result into.",
           "minLength": 1,
+          "title": "Variable name",
           "type": "string"
         }
       },
@@ -281,30 +337,45 @@
       "additionalProperties": false,
       "properties": {
         "default": {
+          "description": "Written to the variable when there is no match.",
+          "title": "Fallback value",
           "type": "string"
         },
         "leftBoundary": {
+          "description": "The text immediately before the value to extract.",
+          "title": "Left boundary",
           "type": "string"
         },
         "matchNo": {
-          "type": "integer"
+          "description": "Selects among multiple matches: 1-based index, 0 for random, -1 to write every match.",
+          "title": "Which match",
+          "type": "integer",
+          "x-vayu-group": "advanced"
         },
         "required": {
+          "description": "Fails the step's assertions when no match is found.",
+          "title": "Required",
           "type": "boolean"
         },
         "rightBoundary": {
+          "description": "The text immediately after the value to extract.",
+          "title": "Right boundary",
           "type": "string"
         },
         "scope": {
+          "description": "Which variable scope to write the result into.",
           "enum": [
             "env",
             "collection",
             "globals"
           ],
+          "title": "Store in",
           "type": "string"
         },
         "variable": {
+          "description": "The variable name to write the result into.",
           "minLength": 1,
+          "title": "Variable name",
           "type": "string"
         }
       },
@@ -329,18 +400,25 @@
       "additionalProperties": false,
       "properties": {
         "in": {
+          "description": "A set of status codes the response must match one of.",
           "items": {
             "type": "integer"
           },
+          "title": "Accepted codes",
           "type": "array"
         },
         "range": {
           "additionalProperties": false,
+          "description": "The response status must fall within this inclusive range.",
           "properties": {
             "max": {
+              "description": "The highest acceptable status code, inclusive.",
+              "title": "Maximum",
               "type": "integer"
             },
             "min": {
+              "description": "The lowest acceptable status code, inclusive.",
+              "title": "Minimum",
               "type": "integer"
             }
           },
@@ -348,6 +426,7 @@
             "min",
             "max"
           ],
+          "title": "Accepted range",
           "type": "object"
         }
       },
@@ -369,16 +448,27 @@
       "additionalProperties": false,
       "properties": {
         "exists": {
+          "description": "Passes when at least one match is found.",
+          "title": "Must exist",
           "type": "boolean"
         },
-        "expected": null,
+        "expected": {
+          "description": "The exact value the match must equal.",
+          "title": "Expected value"
+        },
         "negate": {
+          "description": "Flips the assertion's pass/fail verdict.",
+          "title": "Negate",
           "type": "boolean"
         },
         "path": {
+          "description": "A JSONPath subset locating the value to check.",
+          "title": "JSONPath",
           "type": "string"
         },
         "regex": {
+          "description": "A regular expression the match's text must contain.",
+          "title": "Pattern",
           "type": "string"
         }
       },
@@ -403,26 +493,34 @@
       "additionalProperties": false,
       "properties": {
         "field": {
+          "description": "Which part of the response to check: body, headers, url or status.",
           "enum": [
             "body",
             "headers",
             "url",
             "status"
           ],
+          "title": "Field",
           "type": "string"
         },
         "mode": {
+          "description": "How to compare: contains, equals or matches (regular expression).",
           "enum": [
             "contains",
             "equals",
             "matches"
           ],
+          "title": "Mode",
           "type": "string"
         },
         "negate": {
+          "description": "Flips the assertion's pass/fail verdict.",
+          "title": "Negate",
           "type": "boolean"
         },
         "text": {
+          "description": "The text to look for, per the selected mode.",
+          "title": "Text",
           "type": "string"
         }
       },
@@ -447,8 +545,11 @@
       "additionalProperties": false,
       "properties": {
         "maxMs": {
+          "description": "Fails the step when the response takes longer than this.",
           "minimum": 0,
-          "type": "number"
+          "title": "Maximum response time",
+          "type": "number",
+          "x-vayu-unit": "ms"
         }
       },
       "required": [
@@ -472,10 +573,14 @@
       "additionalProperties": false,
       "properties": {
         "bytes": {
+          "description": "The body size to compare against, in bytes.",
           "minimum": 0,
-          "type": "integer"
+          "title": "Body size",
+          "type": "integer",
+          "x-vayu-unit": "B"
         },
         "op": {
+          "description": "How the body size must compare to the bound: less than, less than or equal, greater than, greater than or equal, or equal.",
           "enum": [
             "lt",
             "lte",
@@ -483,6 +588,7 @@
             "gte",
             "eq"
           ],
+          "title": "Comparison",
           "type": "string"
         }
       },
@@ -508,33 +614,50 @@
       "properties": {
         "gaussian": {
           "additionalProperties": false,
+          "description": "A randomly drawn wait following a normal distribution.",
           "properties": {
             "deviationMs": {
+              "description": "How far a drawn wait typically varies from the mean, in milliseconds.",
               "minimum": 0,
-              "type": "number"
+              "title": "Standard deviation",
+              "type": "number",
+              "x-vayu-unit": "ms"
             },
             "meanMs": {
+              "description": "The average wait drawn from the distribution, in milliseconds.",
               "minimum": 0,
-              "type": "number"
+              "title": "Mean",
+              "type": "number",
+              "x-vayu-unit": "ms"
             }
           },
           "required": [
             "meanMs",
             "deviationMs"
           ],
+          "title": "Gaussian wait",
           "type": "object"
         },
         "maxMs": {
+          "description": "The upper bound of a uniformly random wait, in milliseconds.",
           "minimum": 0,
-          "type": "integer"
+          "title": "Maximum wait",
+          "type": "integer",
+          "x-vayu-unit": "ms"
         },
         "minMs": {
+          "description": "The lower bound of a uniformly random wait, in milliseconds.",
           "minimum": 0,
-          "type": "integer"
+          "title": "Minimum wait",
+          "type": "integer",
+          "x-vayu-unit": "ms"
         },
         "ms": {
+          "description": "A fixed wait, in milliseconds, before the next step.",
           "minimum": 0,
-          "type": "integer"
+          "title": "Wait",
+          "type": "integer",
+          "x-vayu-unit": "ms"
         }
       },
       "type": "object"
@@ -555,11 +678,17 @@
       "additionalProperties": false,
       "properties": {
         "everyMs": {
+          "description": "How often this node starts, start to start, in milliseconds.",
           "minimum": 1,
-          "type": "integer"
+          "title": "Cadence",
+          "type": "integer",
+          "x-vayu-unit": "ms"
         },
         "perUser": {
-          "type": "boolean"
+          "description": "Paces each virtual user independently instead of sharing one cadence across all of them.",
+          "title": "Per user",
+          "type": "boolean",
+          "x-vayu-group": "advanced"
         }
       },
       "required": [
@@ -583,10 +712,15 @@
       "additionalProperties": false,
       "properties": {
         "perUser": {
-          "type": "boolean"
+          "description": "Applies the target rate to each virtual user independently instead of sharing one budget across all of them.",
+          "title": "Per user",
+          "type": "boolean",
+          "x-vayu-group": "advanced"
         },
         "targetPerMinute": {
+          "description": "The number of times this node should start per minute.",
           "exclusiveMinimum": 0,
+          "title": "Target rate",
           "type": "number"
         }
       },
@@ -611,7 +745,9 @@
       "additionalProperties": false,
       "properties": {
         "condition": {
+          "description": "A {{variable}} comparison (==, !=, matches or exists) that must hold for this step, or folder, to run.",
           "pattern": "^\\s*\\{\\{[^}]+\\}\\}\\s*(==|!=|matches)\\s*\\S.*$|^\\s*\\{\\{[^}]+\\}\\}\\s*exists\\s*$",
+          "title": "Condition",
           "type": "string"
         }
       },
@@ -652,13 +788,19 @@
       "additionalProperties": false,
       "properties": {
         "cases": {
+          "description": "A map from a variable's value to the folder member's name to route to.",
+          "title": "Cases",
           "type": "object"
         },
         "default": {
+          "description": "The folder member to route to when no case matches the variable's value.",
+          "title": "Default case",
           "type": "string"
         },
         "variable": {
+          "description": "The variable whose resolved value picks which case to route to.",
           "minLength": 1,
+          "title": "Variable",
           "type": "string"
         }
       },
@@ -684,16 +826,24 @@
       "additionalProperties": false,
       "properties": {
         "everyN": {
+          "description": "Runs only every Nth occurrence.",
           "minimum": 1,
+          "title": "Every Nth",
           "type": "integer"
         },
         "perUser": {
-          "type": "boolean"
+          "description": "Counts occurrences per virtual user instead of sharing one counter across all of them.",
+          "title": "Per user",
+          "type": "boolean",
+          "x-vayu-group": "advanced"
         },
         "percent": {
+          "description": "Runs this share of occurrences, decided on the producer's own counter.",
           "maximum": 100,
           "minimum": 0,
-          "type": "number"
+          "title": "Percent",
+          "type": "number",
+          "x-vayu-unit": "%"
         }
       },
       "type": "object"
@@ -714,7 +864,9 @@
       "additionalProperties": false,
       "properties": {
         "count": {
+          "description": "How many times to walk this folder's members per iteration.",
           "minimum": 1,
+          "title": "Repeat count",
           "type": "integer"
         }
       },
@@ -739,10 +891,14 @@
       "additionalProperties": false,
       "properties": {
         "includeTimers": {
+          "description": "Folds a between-member timer wait into the transaction's summed time.",
+          "title": "Include timers",
           "type": "boolean"
         },
         "name": {
+          "description": "The name this folder's summed latency is reported under.",
           "minLength": 1,
+          "title": "Transaction name",
           "type": "string"
         }
       },
@@ -767,17 +923,22 @@
       "additionalProperties": false,
       "properties": {
         "name": {
+          "description": "The name this metric is reported under, and used in a custom.<name>.<stat> threshold.",
           "maxLength": 100,
           "minLength": 1,
+          "title": "Metric name",
           "type": "string"
         },
         "source": {
           "additionalProperties": false,
+          "description": "Where the metric's value comes from.",
           "properties": {
             "condition": {
               "additionalProperties": false,
+              "description": "Records 1 when the condition holds, 0 otherwise (for a rate metric).",
               "properties": {
                 "field": {
+                  "description": "Which part of the response the condition reads: status, header, jsonpath, latency or size.",
                   "enum": [
                     "status",
                     "header",
@@ -785,15 +946,21 @@
                     "latency",
                     "size"
                   ],
+                  "title": "Field",
                   "type": "string"
                 },
                 "header": {
+                  "description": "The response header to read, when field is header.",
+                  "title": "Header name",
                   "type": "string"
                 },
                 "jsonpath": {
+                  "description": "The JSONPath to read, when field is jsonpath.",
+                  "title": "JSONPath",
                   "type": "string"
                 },
                 "operator": {
+                  "description": "How the field's value compares against value.",
                   "enum": [
                     "eq",
                     "ne",
@@ -803,41 +970,59 @@
                     "gte",
                     "contains"
                   ],
+                  "title": "Operator",
                   "type": "string"
                 },
-                "value": {}
+                "value": {
+                  "description": "The value the field is compared against.",
+                  "title": "Value"
+                }
               },
               "required": [
                 "field",
                 "operator",
                 "value"
               ],
+              "title": "Condition",
               "type": "object"
             },
             "header": {
+              "description": "Reads the metric's value from this response header.",
+              "title": "Header name",
               "type": "string"
             },
             "jsonpath": {
+              "description": "Reads the metric's value from the response body at this JSONPath.",
+              "title": "JSONPath",
               "type": "string"
             },
             "latency": {
+              "description": "Records the response's latency.",
+              "title": "Latency",
               "type": "boolean"
             },
             "size": {
+              "description": "Records the response body's size, in bytes.",
+              "title": "Body size",
               "type": "boolean"
             },
             "status": {
+              "description": "Records the response's status code.",
+              "title": "Status code",
               "type": "boolean"
             }
           },
+          "title": "Source",
           "type": "object"
         },
         "type": {
+          "description": "Whether the metric is a trend, a counter or a rate.",
           "enum": [
             "trend",
             "counter",
             "rate"
           ],
+          "title": "Type",
           "type": "string"
         }
       },

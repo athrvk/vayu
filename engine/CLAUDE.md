@@ -474,7 +474,10 @@ logged as a warning: it means a client skipped composition.
   non-empty, not merely because `lifecycleElements` is) - otherwise it can
   only reach the network itself (`pm.sendRequest`) and gate or report on the
   run. Do not add another behaviour column beside `elements`; a new behaviour
-  is an element kind.
+  is an element kind. A kind's labels are in its schema (#1607): every
+  `config_schema` property carries `title` and `description`, so a generated
+  form has words to render instead of falling back to a raw property name -
+  #1608 is what wires the app's own form to read them.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the

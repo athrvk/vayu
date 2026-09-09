@@ -360,10 +360,15 @@ ElementKind make_assert_status_kind () {
     kind.config_schema = {
         { "type", "object" },
         { "properties",
-        { { "in", { { "type", "array" }, { "items", { { "type", "integer" } } } } },
+        { { "in",
+          { { "type", "array" }, { "items", { { "type", "integer" } } }, { "title", "Accepted codes" },
+          { "description", "A set of status codes the response must match one of." } } },
         { "range",
-        { { "type", "object" },
-        { "properties", { { "min", { { "type", "integer" } } }, { "max", { { "type", "integer" } } } } },
+        { { "type", "object" }, { "title", "Accepted range" },
+        { "description", "The response status must fall within this inclusive range." },
+        { "properties",
+        { { "min", { { "type", "integer" }, { "title", "Minimum" }, { "description", "The lowest acceptable status code, inclusive." } } },
+        { "max", { { "type", "integer" }, { "title", "Maximum" }, { "description", "The highest acceptable status code, inclusive." } } } } },
         { "required", nlohmann::json::array ({ "min", "max" }) },
         { "additionalProperties", false } } } } },
         { "additionalProperties", false },
@@ -388,9 +393,19 @@ ElementKind make_assert_jsonpath_kind () {
     kind.config_schema = {
         { "type", "object" },
         { "properties",
-        { { "path", { { "type", "string" } } }, { "expected", {} },
-        { "regex", { { "type", "string" } } }, { "exists", { { "type", "boolean" } } },
-        { "negate", { { "type", "boolean" } } } } },
+        { { "path",
+          { { "type", "string" }, { "title", "JSONPath" },
+          { "description", "A JSONPath subset locating the value to check." } } },
+        { "expected", { { "title", "Expected value" }, { "description", "The exact value the match must equal." } } },
+        { "regex",
+        { { "type", "string" }, { "title", "Pattern" },
+        { "description", "A regular expression the match's text must contain." } } },
+        { "exists",
+        { { "type", "boolean" }, { "title", "Must exist" },
+        { "description", "Passes when at least one match is found." } } },
+        { "negate",
+        { { "type", "boolean" }, { "title", "Negate" },
+        { "description", "Flips the assertion's pass/fail verdict." } } } } },
         { "required", nlohmann::json::array ({ "path" }) },
         { "additionalProperties", false },
     };
@@ -413,10 +428,20 @@ ElementKind make_assert_contains_kind () {
     kind.config_schema = {
         { "type", "object" },
         { "properties",
-        { { "field", { { "type", "string" }, { "enum", { "body", "headers", "url", "status" } } } },
-        { "text", { { "type", "string" } } },
-        { "mode", { { "type", "string" }, { "enum", { "contains", "equals", "matches" } } } },
-        { "negate", { { "type", "boolean" } } } } },
+        { { "field",
+          { { "type", "string" }, { "enum", { "body", "headers", "url", "status" } }, { "title", "Field" },
+          { "description",
+          "Which part of the response to check: body, headers, url "
+          "or status." } } },
+        { "text", { { "type", "string" }, { "title", "Text" }, { "description", "The text to look for, per the selected mode." } } },
+        { "mode",
+        { { "type", "string" }, { "enum", { "contains", "equals", "matches" } }, { "title", "Mode" },
+        { "description",
+        "How to compare: contains, equals or matches (regular "
+        "expression)." } } },
+        { "negate",
+        { { "type", "boolean" }, { "title", "Negate" },
+        { "description", "Flips the assertion's pass/fail verdict." } } } } },
         { "required", nlohmann::json::array ({ "text" }) },
         { "additionalProperties", false },
     };
@@ -438,7 +463,11 @@ ElementKind make_assert_duration_kind () {
     };
     kind.config_schema = {
         { "type", "object" },
-        { "properties", { { "maxMs", { { "type", "number" }, { "minimum", 0 } } } } },
+        { "properties",
+        { { "maxMs",
+        { { "type", "number" }, { "minimum", 0 },
+        { "title", "Maximum response time" }, { "x-vayu-unit", "ms" },
+        { "description", "Fails the step when the response takes longer than this." } } } } },
         { "required", nlohmann::json::array ({ "maxMs" }) },
         { "additionalProperties", false },
     };
@@ -461,8 +490,15 @@ ElementKind make_assert_size_kind () {
     kind.config_schema = {
         { "type", "object" },
         { "properties",
-        { { "bytes", { { "type", "integer" }, { "minimum", 0 } } },
-        { "op", { { "type", "string" }, { "enum", { "lt", "lte", "gt", "gte", "eq" } } } } } },
+        { { "bytes",
+          { { "type", "integer" }, { "minimum", 0 }, { "title", "Body size" }, { "x-vayu-unit", "B" },
+          { "description", "The body size to compare against, in bytes." } } },
+        { "op",
+        { { "type", "string" }, { "enum", { "lt", "lte", "gt", "gte", "eq" } }, { "title", "Comparison" },
+        { "description",
+        "How the body size must compare to the bound: less than, "
+        "less than or equal, greater than, greater than or equal, "
+        "or equal." } } } } },
         { "required", nlohmann::json::array ({ "bytes" }) },
         { "additionalProperties", false },
     };

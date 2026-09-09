@@ -74,7 +74,10 @@ ElementKind make_test_echo_kind () {
     kind.category      = "test";
     kind.hot_path      = HotPathClass::Declarative;
     kind.config_schema = { { "type", "object" },
-        { "properties", { { "message", { { "type", "string" } } } } },
+        { "properties",
+        { { "message",
+        { { "type", "string" }, { "title", "Message" },
+        { "description", "The text this test-only kind echoes back." } } } } },
         { "required", nlohmann::json::array ({ "message" }) },
         { "additionalProperties", false } };
     return kind;
@@ -159,6 +162,53 @@ TEST_F (ElementsRegistryTest, AWellFormedListValidatesCleanly) {
     json{ { "id", "el_2" }, { "kind", "inherit.disable" },
     { "config", { { "elementId", "el_9" } } } } });
     EXPECT_FALSE (Registry::instance ().validate (elements).has_value ());
+}
+
+/**
+ * Recursively asserts every property in a JSON-Schema `properties` map
+ * (issue #1607) carries a non-empty `title` and `description`, and that the
+ * two vendor annotation keywords stay inside their closed sets -
+ * `x-vayu-group` only ever `"advanced"`, `x-vayu-unit` only ever one of
+ * `"ms"`, `"%"`, `"B"`. Descends into a nested object property's own
+ * `properties` (`assert.status`'s `range`, `timer.think`'s `gaussian`,
+ * `metric.record`'s `source` and its own nested `condition`), holding a
+ * nested field to the same rule as a top-level one.
+ */
+void expect_every_property_annotated (const std::string& kind_name, const json& properties) {
+    for (const auto& [name, schema] : properties.items ()) {
+        EXPECT_FALSE (schema.value ("title", std::string{}).empty ())
+        << kind_name << "." << name << " has no title";
+        EXPECT_FALSE (schema.value ("description", std::string{}).empty ())
+        << kind_name << "." << name << " has no description";
+        if (schema.contains ("x-vayu-group")) {
+            EXPECT_EQ (schema["x-vayu-group"], "advanced")
+            << kind_name << "." << name << " has an unknown x-vayu-group";
+        }
+        if (schema.contains ("x-vayu-unit")) {
+            const std::string unit = schema.value ("x-vayu-unit", std::string{});
+            EXPECT_TRUE (unit == "ms" || unit == "%" || unit == "B")
+            << kind_name << "." << name << " has an unknown x-vayu-unit '"
+            << unit << "'";
+        }
+        if (schema.value ("type", std::string{}) == "object" && schema.contains ("properties")) {
+            std::string nested_name = kind_name;
+            nested_name += ".";
+            nested_name += name;
+            expect_every_property_annotated (nested_name, schema["properties"]);
+        }
+    }
+}
+
+TEST_F (ElementsRegistryTest, EveryPropertyOfEveryKindCarriesATitleAndDescription) {
+    const json catalogue = vayu::core::elements_catalogue ();
+    ASSERT_GT (catalogue.size (), 20u);
+    for (const auto& kind : catalogue) {
+        const std::string kind_name = kind["kind"].get<std::string> ();
+        if (!kind.contains ("configSchema") || !kind["configSchema"].contains ("properties")) {
+            continue; // e.g. control.once, whose schema declares no properties at all.
+        }
+        expect_every_property_annotated (kind_name, kind["configSchema"]["properties"]);
+    }
 }
 
 class ElementsRouteTest : public ::testing::Test {

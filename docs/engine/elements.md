@@ -61,6 +61,22 @@ in the engine, the app or MCP touched to make the kind exist and validate. `GET 
 serves the same list; the app and MCP render a kind's editor from its schema, with a bespoke form
 only where one is worth writing by hand.
 
+## Schema annotations
+
+Every property in a kind's `configSchema` carries two standard JSON Schema keywords (issue
+#1607) - `title` (a short label) and `description` (one plain sentence) - so a generated form
+renders words instead of the raw property key. Both are annotation keywords `Registry::validate`'s
+valijson pass never consults; adding them changes nothing about what a config validates against.
+
+Two vendor keywords, both optional: `x-vayu-group: "advanced"` folds a property under a
+disclosure instead of the form's main rows (`timer.pacing.perUser`, `extract.json.matchNo`);
+`x-vayu-unit` renders a numeric suffix beside a property's value and is only ever `"ms"`, `"%"` or
+`"B"` - `timer.pacing.everyMs` and `assert.duration.maxMs` carry `"ms"`, `control.throughput.percent`
+carries `"%"`, `assert.size.bytes` carries `"B"`. A new kind's schema ships `title` and
+`description` on every property from the day it registers;
+`ElementsRegistryTest.EveryPropertyOfEveryKindCarriesATitleAndDescription`
+(`engine/tests/elements_registry_test.cpp`) fails the build on one that does not.
+
 ## Kinds
 
 `inherit.disable` has no `compile`: it is consumed at compose time (`compose_elements`), never

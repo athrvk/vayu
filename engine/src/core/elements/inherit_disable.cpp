@@ -34,7 +34,12 @@ ElementKind make_inherit_disable_kind () {
     kind.hot_path      = HotPathClass::Declarative;
     kind.config_schema = {
         { "type", "object" },
-        { "properties", { { "elementId", { { "type", "string" }, { "minLength", 1 } } } } },
+        { "properties",
+        { { "elementId",
+        { { "type", "string" }, { "minLength", 1 }, { "title", "Element to disable" },
+        { "description",
+        "The id of an inherited element to drop from this request or "
+        "collection's resolved list." } } } } },
         { "required", nlohmann::json::array ({ "elementId" }) },
         { "additionalProperties", false },
     };
