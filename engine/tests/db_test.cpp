@@ -658,7 +658,7 @@ TEST_F (DatabaseTest, ImportedActiveEnvironmentAlsoDeactivatesTheStoredOne) {
 
 // ==================== Index Tests ====================
 
-// Every index declared in make_storage(), each backing a hot query path:
+// Every index declared in make_vayu_storage(), each backing a hot query path:
 // metric_ticks/results by run_id, requests by collection_id, collections by
 // parent_id, runs by start_time. See the comments there for which queries
 // rely on which. Named explicitly rather than counted, because sqlite also
