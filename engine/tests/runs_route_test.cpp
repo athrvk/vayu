@@ -1278,6 +1278,70 @@ TEST_F (RunsRouteTest, ReportOmitsCoverageForARunNotMeasuredAgainstAContract) {
 }
 
 // ---------------------------------------------------------------------------
+// Single-request run element outcomes (issues #1594, #1641)
+// ---------------------------------------------------------------------------
+
+// The engine already wrote a single-request run's per-element tally onto its
+// summary (issue #1594, `RequestElementTallies::build`); the report route
+// dropped the key before this fix (issue #1641). Same whole path as coverage
+// above: computed, stored, handed back unchanged, no name translated.
+TEST_F (RunsRouteTest, ReportCarriesTheElementsBlockTheRunComputed) {
+    seed ({ .id = "run_elements", .start_time = 1000 });
+
+    auto inputs = summary_inputs ();
+    inputs.elements =
+    nlohmann::json::array ({ { { "id", "el_1" }, { "kind", "assert.status" },
+                             { "passed", 9 }, { "failed", 1 }, { "skipped", 0 } },
+    { { "id", "el_2" }, { "kind", "extract.json" }, { "passed", 10 },
+    { "failed", 0 }, { "skipped", 0 } } });
+    db_->update_run_summary (
+    "run_elements", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_elements");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("elements")) << body.dump ();
+    const auto& elements = body["elements"];
+    ASSERT_EQ (elements.size (), 2u);
+    EXPECT_EQ (elements[0]["kind"].get<std::string> (), "assert.status");
+    EXPECT_EQ (elements[0]["passed"].get<size_t> (), 9u);
+    EXPECT_EQ (elements[0]["failed"].get<size_t> (), 1u);
+    EXPECT_EQ (elements[1]["kind"].get<std::string> (), "extract.json");
+}
+
+// The not-measured rule, in both shapes it arrives in: a run whose summary
+// carries no `elements` at all (declared none, or is a scenario run, which
+// never writes this key), and one carrying an empty array (a stored summary
+// from an engine that filtered it, or one hand-edited). Neither reports an
+// element that did not run.
+TEST_F (RunsRouteTest, ReportOmitsElementsForARunThatDeclaredNoneOrRanNone) {
+    seed ({ .id = "run_no_elements", .start_time = 1000 });
+    auto inputs     = summary_inputs ();
+    inputs.elements = std::nullopt;
+    db_->update_run_summary (
+    "run_no_elements", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_no_elements");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("elements")) << body.dump ();
+
+    // A stored summary carrying an empty `elements` array directly - the
+    // shape `build_run_summary_payload` itself never writes (it omits the
+    // key rather than writing `[]`), but the route's own guard must not
+    // trust that upstream discipline blindly.
+    seed ({ .id = "run_empty_elements", .start_time = 1000 });
+    auto without_elements     = summary_inputs ();
+    without_elements.elements = std::nullopt;
+    auto empty_summary = vayu::core::build_run_summary_payload (without_elements);
+    empty_summary["elements"] = nlohmann::json::array ();
+    db_->update_run_summary ("run_empty_elements", empty_summary.dump ());
+
+    auto [empty_status, empty_body] =
+    vayu::http::routes::run_report_response (*db_, "run_empty_elements");
+    ASSERT_EQ (empty_status, 200);
+    EXPECT_FALSE (empty_body.contains ("elements")) << empty_body.dump ();
+}
+
+// ---------------------------------------------------------------------------
 // Sampled schema validation (issue #682)
 // ---------------------------------------------------------------------------
 

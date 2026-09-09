@@ -304,6 +304,15 @@ struct ReportExtras {
     // collection declared neither, or a single-request run, which has no
     // collection to declare them on.
     nlohmann::json lifecycle = nlohmann::json::object ();
+    // A single-request run's own `requestElements` outcomes (issue #1594),
+    // passed through verbatim - the summary already writes them in the
+    // report's `{id, kind, passed, failed, skipped}` shape, the exact
+    // sibling of a scenario run's per-step `scenario.steps[].elements`
+    // (`step_breakdown` above). The two never coexist: `run_manager.cpp`
+    // writes this key only on the branch that has no `scenario_state`.
+    // Empty is every scenario run and every single-request run that
+    // declared no `requestElements`, or one whose elements never ran.
+    nlohmann::json elements = nlohmann::json::array ();
     // What the run did not do (issue #1503): a request sent with an
     // unresolved `{{token}}`, a step whose pre-request script this mode
     // never ran. Verbatim from the summary - the producer already writes the
@@ -569,6 +578,15 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
     if (summary.contains ("lifecycle") && summary["lifecycle"].is_object () &&
     !summary["lifecycle"].empty ()) {
         extras.lifecycle = summary["lifecycle"];
+    }
+
+    // Same pass-through again for a single-request run's own step-level
+    // elements (issue #1594/#1641): the array is the section, an absent or
+    // empty one is a run that declared none or a scenario run, which reports
+    // its own per-step elements under `scenario.steps[].elements` instead.
+    if (summary.contains ("elements") && summary["elements"].is_array () &&
+    !summary["elements"].empty ()) {
+        extras.elements = summary["elements"];
     }
 
     if (summary.contains ("schemaValidation") && summary["schemaValidation"].is_object () &&
@@ -1212,6 +1230,14 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
     // every run whose collection declared neither; see ReportExtras::lifecycle.
     if (!extras.lifecycle.empty ()) {
         json_report["lifecycle"] = extras.lifecycle;
+    }
+
+    // A single-request run's own step-level element outcomes (issue
+    // #1594/#1641). Absent for a scenario run (its per-step elements live
+    // under `scenario.steps[].elements` instead) and for a single-request
+    // run that declared no `requestElements`; see ReportExtras::elements.
+    if (!extras.elements.empty ()) {
+        json_report["elements"] = extras.elements;
     }
 
     // The aggregate verdict, beside the per-response one. `verdict` is derived
