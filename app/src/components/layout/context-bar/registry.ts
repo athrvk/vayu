@@ -36,6 +36,18 @@
  */
 
 import { lazy } from "react";
+import {
+	Braces,
+	Code2,
+	Cookie,
+	FileText,
+	FolderOpen,
+	History,
+	KeyRound,
+	PlayCircle,
+	Settings2,
+	Share2,
+} from "lucide-react";
 import type { Tab } from "@/stores";
 import { AuthContextSection } from "./AuthContextSection";
 import { CodeSection } from "./CodeSection";
@@ -118,14 +130,22 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 		// this request uses, not every name in scope (#1308).
 		id: "variables",
 		title: "Variables used",
+		icon: Braces,
 		appliesTo: onRequestTab,
 		useRelevance: useVariablesRelevance,
 		Component: VariablesSection,
 	},
-	{ id: "auth", title: "Auth", appliesTo: onRequestTab, Component: AuthContextSection },
+	{
+		id: "auth",
+		title: "Auth",
+		icon: KeyRound,
+		appliesTo: onRequestTab,
+		Component: AuthContextSection,
+	},
 	{
 		id: "cookies",
 		title: "Cookies for this host",
+		icon: Cookie,
 		appliesTo: onRequestTab,
 		useRelevance: useCookiesRelevance,
 		Component: CookiesSection,
@@ -137,10 +157,17 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 	 * request tab, for a section that is collapsed by default. There is nothing
 	 * to report empty anyway; a request always composes into something.
 	 */
-	{ id: "code", title: "Code", appliesTo: onRequestTab, Component: CodeSection },
+	{
+		id: "code",
+		title: "Code",
+		icon: Code2,
+		appliesTo: onRequestTab,
+		Component: CodeSection,
+	},
 	{
 		id: "graphql",
 		title: "GraphQL",
+		icon: Share2,
 		appliesTo: onRequestTab,
 		useRelevance: useGraphQLRelevance,
 		Component: GraphQLSection,
@@ -148,6 +175,7 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 	{
 		id: "recent-sends",
 		title: "Recent sends",
+		icon: History,
 		appliesTo: onRequestTab,
 		useRelevance: useRecentSendsRelevance,
 		Component: RecentSendsSection,
@@ -168,31 +196,47 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 	{
 		id: "collection-variables",
 		title: "Variables in this collection",
+		icon: Braces,
 		appliesTo: onCollectionTab,
 		Component: CollectionVariablesSection,
 	},
 	{
 		id: "collection-auth",
 		title: "Auth",
+		icon: KeyRound,
 		appliesTo: onCollectionTab,
 		Component: CollectionAuthSection,
 	},
 	{
 		id: "collection-contents",
 		title: "Contents",
+		icon: FolderOpen,
 		appliesTo: onCollectionTab,
 		Component: CollectionContentsSection,
 	},
 	{
 		id: "collection-last-run",
 		title: "Last run",
+		icon: PlayCircle,
 		appliesTo: onCollectionTab,
 		Component: CollectionLastRunSection,
 	},
 
 	/* The run tab: what was asked for, and what it was asked of. */
-	{ id: "run-config", title: "Run config", appliesTo: onRunTab, Component: RunConfigSection },
-	{ id: "run-source", title: "Source", appliesTo: onRunTab, Component: RunSourceSection },
+	{
+		id: "run-config",
+		title: "Run config",
+		icon: Settings2,
+		appliesTo: onRunTab,
+		Component: RunConfigSection,
+	},
+	{
+		id: "run-source",
+		title: "Source",
+		icon: FileText,
+		appliesTo: onRunTab,
+		Component: RunSourceSection,
+	},
 ];
 
 /** The sections that have something to say about this tab, in registry order. */
