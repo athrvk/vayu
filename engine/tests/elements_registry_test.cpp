@@ -203,7 +203,7 @@ TEST_F (ElementsRegistryTest, EveryPropertyOfEveryKindCarriesATitleAndDescriptio
     const json catalogue = vayu::core::elements_catalogue ();
     ASSERT_GT (catalogue.size (), 20u);
     for (const auto& kind : catalogue) {
-        const std::string kind_name = kind.value ("kind", std::string{});
+        const std::string kind_name = kind["kind"].get<std::string> ();
         if (!kind.contains ("configSchema") || !kind["configSchema"].contains ("properties")) {
             continue; // e.g. control.once, whose schema declares no properties at all.
         }
