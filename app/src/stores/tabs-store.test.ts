@@ -536,6 +536,23 @@ describe("opening a singleton that is already open", () => {
 		expect(useTabsStore.getState().openTabs).toBe(before);
 	});
 
+	const mockServerTab = () =>
+		useTabsStore.getState().openTabs.find((t) => t.type === "mock-server");
+
+	it("retargets the mock-server tab at the entity asked for too, the same as inbox", () => {
+		const store = useTabsStore.getState();
+		store.openTab({ type: "mock-server", entityId: "mock_a" });
+		const opened = mockServerTab()!;
+
+		useTabsStore.getState().openTab({ type: "mock-server", entityId: "mock_b" });
+
+		const { openTabs, activeTabId } = useTabsStore.getState();
+		expect(openTabs.filter((t) => t.type === "mock-server")).toHaveLength(1);
+		expect(mockServerTab()!.id).toBe(opened.id);
+		expect(mockServerTab()!.entityId).toBe("mock_b");
+		expect(activeTabId).toBe(opened.id);
+	});
+
 	it("still dedupes the addressless singletons, which retargeting cannot move", () => {
 		const store = useTabsStore.getState();
 		store.openTab({ type: "settings", entityId: null });

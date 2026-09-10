@@ -17,7 +17,7 @@
 
 // `Zap` stays: here it is the load-test mark, which is what the bolt means
 // throughout the app. `Braces` is the variables mark (see `Dock.tsx`).
-import { Folder, Zap, Braces, Clock, Settings, Inbox } from "lucide-react";
+import { Folder, Zap, Braces, Clock, Settings, Inbox, Radio } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import { requestDetailOptions, runDetailOptions, useCollectionsQuery } from "@/queries";
 import { walkAncestors } from "@/modules/collections/tree-utils";
@@ -107,6 +107,11 @@ export function iconForTab(tab: Tab, runType?: string): typeof Folder | undefine
 		case "inbox":
 			// The same glyph the Launcher tile that opens it carries.
 			return Inbox;
+		case "mock-server":
+			// The Services drawer's own glyph for the group this tab addresses
+			// one row of (`drawer-views.ts`'s `services` entry) - concentric
+			// arcs, the "listening" mark inboxes and issuers share too.
+			return Radio;
 		default:
 			return undefined;
 	}
@@ -161,6 +166,8 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				return { label: "Variables", title: "Variables", icon };
 			case "inbox":
 				return { label: "Inbox", title: "Webhook Inbox", icon };
+			case "mock-server":
+				return { label: "Mock Server", title: "Mock Server", icon };
 			case "dashboard":
 				return { label: "Load Test", title: "Load Test", icon };
 			case "collection": {

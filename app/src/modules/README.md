@@ -68,8 +68,10 @@ Some modules have components displayed in both the sidebar and main content area
 #### `services/`
 
 - **Location:** Sidebar only - the `services` drawer view (issue #502)
-- **Components:** `ServicesPanel.tsx` - the local services (webhook inboxes, OAuth issuers):
-  status, copy-URL, start/stop, and the issuer's start dialog
+- **Components:** `ServicesPanel.tsx` - the local services (webhook inboxes, OAuth issuers, mock
+  servers): status, copy-URL, start/stop, and the issuer's start dialog. A mock-servers row opens
+  the `mock-server` tab (`modules/mock-server/`) rather than expanding in place, the same shape the
+  inbox row already used.
 - **Also exports** `useRunningServices()` and the `useRunningServiceCount()` derived from it, which
   the Dock's ambient indicator reads - one list over all three sources, because they disagree on
   their own terms (a stopped inbox stays listed, a stopped issuer or mock server does not), and
@@ -123,6 +125,18 @@ Some modules have components displayed in both the sidebar and main content area
 - **Usage:**
     ```tsx
     import WelcomeScreen from "@/modules/welcome/WelcomeScreen";
+    ```
+
+#### `mock-server/`
+
+- **Location:** Main content area only - the `mock-server` singleton tab (issue #481 phase 3)
+- **Component:** `MockServerView` - one running mock's route table (mode, hits, serving example) and
+  live activity feed, plus copy-URL and stop. Opened from the Services drawer's mock-servers group,
+  which used to expand this in place; a growing activity log needed the width the inbox tab already
+  claimed for the same reason.
+- **Usage:**
+    ```tsx
+    import MockServerView from "@/modules/mock-server";
     ```
 
 ### Overlay Modules
