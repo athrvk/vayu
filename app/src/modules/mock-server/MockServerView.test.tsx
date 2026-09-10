@@ -110,4 +110,51 @@ describe("MockServerView", () => {
 		render(<MockServerView />);
 		expect(screen.getByText(/no mock running/i)).toBeInTheDocument();
 	});
+
+	it("shows the latency and error-rate summary when errorRatePct is set", () => {
+		vi.mocked(useMockServersQuery).mockReturnValue({
+			data: [{ ...MOCK, latencyMs: 250, errorRatePct: 30 }],
+		} as ReturnType<typeof useMockServersQuery>);
+		render(<MockServerView />);
+		expect(screen.getByText("250ms latency, 30% of answers fail")).toBeInTheDocument();
+	});
+
+	it("labels an injected failure distinctly, regardless of requestId/exampleName", () => {
+		vi.mocked(useMockActivityQuery).mockReturnValue({
+			data: [
+				{
+					...ENTRY,
+					requestId: null,
+					requestName: null,
+					exampleId: null,
+					exampleName: null,
+					status: 500,
+					injectedError: true,
+				},
+			],
+			isError: false,
+		} as ReturnType<typeof useMockActivityQuery>);
+		render(<MockServerView />);
+		expect(screen.getByText("injected failure")).toBeInTheDocument();
+		expect(screen.queryByText("unmatched")).not.toBeInTheDocument();
+	});
+
+	it("still labels a genuine miss as unmatched", () => {
+		vi.mocked(useMockActivityQuery).mockReturnValue({
+			data: [
+				{
+					...ENTRY,
+					requestId: null,
+					requestName: null,
+					exampleId: null,
+					exampleName: null,
+					status: 404,
+					injectedError: false,
+				},
+			],
+			isError: false,
+		} as ReturnType<typeof useMockActivityQuery>);
+		render(<MockServerView />);
+		expect(screen.getByText("unmatched")).toBeInTheDocument();
+	});
 });

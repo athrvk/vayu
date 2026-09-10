@@ -40,6 +40,10 @@ import {
 import { useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 
+function formatTime(ms: number): string {
+	return new Date(ms).toLocaleTimeString();
+}
+
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
 	const copy = useCopy();
@@ -81,58 +85,64 @@ export default function MockServerView() {
 
 	return (
 		<div className="flex h-full min-h-0 flex-col">
-			<header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-				<MockIcon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-				<code className="font-mono text-xs">{mock.url}</code>
-				<Button
-					variant="ghost"
-					size="sm"
-					aria-label="Copy mock server URL"
-					onClick={() => void copy(mock.url, "Mock server URL")}
-				>
-					<Copy className="h-3.5 w-3.5" aria-hidden="true" />
-				</Button>
-				<Badge variant="outline">{mock.collectionName}</Badge>
-
-				{mocks.length > 1 && (
-					<Select value={mock.mockId} onValueChange={show}>
-						<SelectTrigger
-							className="h-7 w-auto gap-1 text-xs"
-							aria-label="Mock server"
-						>
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{ordered.map((option) => (
-								<SelectItem key={option.mockId} value={option.mockId}>
-									{`Port ${option.port}`}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				)}
-
-				<div className="ml-auto">
+			<header className="flex flex-col gap-1 border-b border-border px-3 py-2">
+				<div className="flex flex-wrap items-center gap-2">
+					<MockIcon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+					<code className="font-mono text-xs">{mock.url}</code>
 					<Button
-						variant="outline"
+						variant="ghost"
 						size="sm"
-						onClick={() =>
-							stopMock.mutate(mock.mockId, {
-								onError: (e) =>
-									showToast(
-										e instanceof Error
-											? e.message
-											: "Could not stop the mock server",
-										"error"
-									),
-							})
-						}
-						disabled={stopMock.isPending}
+						aria-label="Copy mock server URL"
+						onClick={() => void copy(mock.url, "Mock server URL")}
 					>
-						<Square className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-						Stop
+						<Copy className="h-3.5 w-3.5" aria-hidden="true" />
 					</Button>
+					<Badge variant="outline">{mock.collectionName}</Badge>
+
+					{mocks.length > 1 && (
+						<Select value={mock.mockId} onValueChange={show}>
+							<SelectTrigger
+								className="h-7 w-auto gap-1 text-xs"
+								aria-label="Mock server"
+							>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{ordered.map((option) => (
+									<SelectItem key={option.mockId} value={option.mockId}>
+										{`Port ${option.port}`}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					)}
+
+					<div className="ml-auto">
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() =>
+								stopMock.mutate(mock.mockId, {
+									onError: (e) =>
+										showToast(
+											e instanceof Error
+												? e.message
+												: "Could not stop the mock server",
+											"error"
+										),
+								})
+							}
+							disabled={stopMock.isPending}
+						>
+							<Square className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+							Stop
+						</Button>
+					</div>
 				</div>
+				<p className="pl-6 text-xs text-muted-foreground">
+					{mock.latencyMs > 0 ? `${mock.latencyMs}ms latency` : "No added latency"}
+					{mock.errorRatePct > 0 && `, ${mock.errorRatePct}% of answers fail`}
+				</p>
 			</header>
 
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -190,8 +200,11 @@ export default function MockServerView() {
 						/>
 					) : (
 						<ul>
-							{activity.map((entry, i) => (
-								<li key={i} className="flex items-center gap-2 py-1 text-xs">
+							{activity.map((entry) => (
+								<li
+									key={`${entry.at}-${entry.path}`}
+									className="flex items-center gap-2 py-1 text-xs"
+								>
 									<span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">
 										{entry.method}
 									</span>
@@ -199,8 +212,10 @@ export default function MockServerView() {
 										{entry.path}
 									</TruncatedText>
 									<span className="shrink-0 text-muted-foreground">
-										{entry.exampleName ??
-											(entry.requestId ? "no example" : "unmatched")}
+										{entry.injectedError
+											? "injected failure"
+											: (entry.exampleName ??
+												(entry.requestId ? "no example" : "unmatched"))}
 									</span>
 									<Badge
 										variant={entry.status >= 500 ? "destructive" : "outline"}
@@ -208,6 +223,9 @@ export default function MockServerView() {
 									>
 										{entry.status}
 									</Badge>
+									<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+										{formatTime(entry.at)}
+									</span>
 								</li>
 							))}
 						</ul>
