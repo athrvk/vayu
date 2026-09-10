@@ -58,7 +58,7 @@ import { fitTabs, makeTextMeasurer, naturalTabWidth } from "./tab-fit";
 import { useTabDescriptors, type TabDescriptor } from "./tab-descriptors";
 // What a tab can do, beside what it is called and for the same reason.
 import { useTabActions } from "./tab-actions";
-import { getMethodColor } from "@/utils";
+import { getMethodColor } from "@/lib/method-display";
 // The tab -> panel ids, shared with Shell, which renders the panel end of the
 // relationship. See tab-aria.ts.
 import { tabElementId, tabPanelElementId } from "./tab-aria";

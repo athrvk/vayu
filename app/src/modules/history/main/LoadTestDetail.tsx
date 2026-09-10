@@ -31,7 +31,8 @@ import {
 	TabLabel,
 	ScrollArea,
 } from "@/components/ui";
-import { formatNumber, loadTestTypeToLabel } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
+import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import { MethodBadge, TruncatedText } from "@/components/shared";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import type { LoadTestConfig } from "@/types";

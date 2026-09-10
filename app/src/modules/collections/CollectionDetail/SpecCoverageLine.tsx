@@ -27,7 +27,7 @@
 
 import { useLastCollectionRunQuery, useRunReportQuery } from "@/queries/runs";
 import { useTabsStore } from "@/stores";
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
 
 interface SpecCoverageLineProps {
 	collectionId: string;

@@ -14,7 +14,7 @@
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { formatNumber } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
 import { isRateLimitedRun, hasPercentileSignal } from "@/modules/dashboard/utils/metricsTransforms";
 import {
 	LatencyPercentilesChart,

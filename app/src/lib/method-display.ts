@@ -5,51 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { LoadTestConfig } from "@/types";
-import { loadTestModeLabel } from "@/constants/load-test-modes";
-
-// Utility Functions
-
-/**
- * Format date to relative time (e.g., "2 hours ago")
- */
-export function formatRelativeTime(timestamp: string | number): string {
-	const date = new Date(timestamp);
-	const now = new Date();
-	const diffMs = now.getTime() - date.getTime();
-
-	const seconds = Math.floor(diffMs / 1000);
-	const minutes = Math.floor(seconds / 60);
-	const hours = Math.floor(minutes / 60);
-	const days = Math.floor(hours / 24);
-
-	if (seconds < 60) return "just now";
-	if (minutes < 60) return `${minutes}m ago`;
-	if (hours < 24) return `${hours}h ago`;
-	if (days < 7) return `${days}d ago`;
-
-	return date.toLocaleString();
-}
-
-/**
- * Format number with thousand separators
- */
-export function formatNumber(num: number | undefined | null): string {
-	if (num === undefined || num === null || isNaN(num)) return "0";
-	return num.toLocaleString();
-}
-
-/**
- * Format percentage
- */
-export function formatPercent(value: number, total: number): string {
-	if (total === 0) return "0%";
-	return `${((value / total) * 100).toFixed(1)}%`;
-}
-
-/**
- * Get HTTP method color class
- */
 /**
  * Returns the CSS variable reference for an HTTP method's color token.
  * Use as: `hsl(${getMethodColor(method)})` for a solid color,
@@ -90,14 +45,4 @@ export function getMethodDisplayLabel(method: string): {
 	const upper = method.toUpperCase();
 	const abbrev = METHOD_ABBREVIATIONS[upper];
 	return abbrev ? { label: abbrev, abbreviated: true } : { label: upper, abbreviated: false };
-}
-
-/**
- * @deprecated Prefer `loadTestModeLabel` from `@/constants/load-test-modes`.
- * Kept as a thin alias so existing call sites keep working; it used to hold its
- * own copy of the names, which is how "Iterations" and "Fixed Iterations" ended
- * up on screen for the same run.
- */
-export function loadTestTypeToLabel(type: LoadTestConfig["mode"] | string): string {
-	return loadTestModeLabel(type);
 }

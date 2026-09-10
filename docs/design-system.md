@@ -778,7 +778,7 @@ These exist but **nothing in `src/` currently uses them** - prefer
 the method selector all take. A second way to spell the same colour is a second
 place for it to drift.
 
-**`getMethodColor(method)`** in `app/src/utils/helpers.ts` returns `var(--method-xxx)` - the raw CSS variable reference. Callers construct full color values:
+**`getMethodColor(method)`** in `app/src/lib/method-display.ts` returns `var(--method-xxx)` - the raw CSS variable reference. Callers construct full color values:
 
 ```tsx
 const c = getMethodColor(method); // e.g. "var(--method-get)"
@@ -3002,5 +3002,5 @@ opt-out.
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
-| `app/src/utils/helpers.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
+| `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |

@@ -23,7 +23,7 @@ import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
 import { osIcon } from "./os-icon";
-import { formatNumber } from "@/utils/helpers";
+import { formatNumber } from "@/lib/format-number";
 import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
 // The batcher throttles UI commits to keep render cost bounded, but every tick

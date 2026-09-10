@@ -6,7 +6,8 @@
  */
 
 import type React from "react";
-import { formatRelativeTime, loadTestTypeToLabel } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
+import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import type { Run } from "@/types";
 import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button } from "@/components/ui";

@@ -55,7 +55,7 @@ import {
 	type TreeLocation,
 } from "@/lib/graphql/schema-tree";
 import type { SchemaEntry } from "@/lib/graphql/schema-cache";
-import { formatRelativeTime } from "@/utils/helpers";
+import { formatRelativeTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 
 /** How many rows to render before the window grows. */

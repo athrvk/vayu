@@ -25,7 +25,7 @@
 
 import { useLastCollectionRunQuery } from "@/queries";
 import { useTabsStore } from "@/stores";
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
 import { SectionEmpty, SectionLoading } from "./Section";
 import { RUN_STATUS_TONE, scenarioSizeLabel } from "./collection-last-run";
 import type { ContextBarSectionProps } from "./types";
