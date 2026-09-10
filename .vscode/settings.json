@@ -60,61 +60,12 @@
         "**/*.log": true
     },
     // =========================================================================
-    // Testing
-    // =========================================================================
-    "testMate.cpp.test.executables": "${workspaceFolder}/engine/build/vayu_tests",
-    // =========================================================================
     // General Editor Settings
     // =========================================================================
     "editor.formatOnSave": true,
-    "editor.rulers": [
-        100
-    ],
-    "editor.renderWhitespace": "boundary",
-    "editor.bracketPairColorization.enabled": true,
     // =========================================================================
     // Terminal
     // =========================================================================
     "terminal.integrated.cwd": "${workspaceFolder}",
-    "cSpell.words": [
-        "ASAN",
-        "Atharva",
-        "BIGNUM",
-        "buildsystems",
-        "ccache",
-        "cutils",
-        "DCMAKE",
-        "DVCPKG",
-        "fsanitize",
-        "httplib",
-        "Kusumbia",
-        "libbf",
-        "LIBC",
-        "libregexp",
-        "libunicode",
-        "memsize",
-        "MSVC",
-        "ncpu",
-        "ngrok",
-        "nlohmann",
-        "NOMINMAX",
-        "NONSTDC",
-        "partialize",
-        "physicalcpu",
-        "QUICKJS",
-        "SIGABRT",
-        "STREQUAL",
-        "TSAN",
-        "vayu",
-        "Wconversion",
-        "Wdouble",
-        "Werror",
-        "Wextra",
-        "Wformat",
-        "winmm",
-        "Wnull",
-        "Wpedantic",
-        "Wsign"
-    ],
     "python.languageServer": "Pylance"
 }

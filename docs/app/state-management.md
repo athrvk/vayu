@@ -794,6 +794,53 @@ against the backend's stored run, whose body the engine truncated at
 
 **Non-persisted** (responses are reloadable from backend).
 
+#### `tab-selection-store.ts` - Active Sub-Tab Per Entity
+
+Three independent maps remembering which sub-tab is showing, per entity id:
+the request builder's tab, the response pane's tab, and the collection
+screen's tab.
+
+**State:**
+```typescript
+{
+  requestTab: Map<string, RequestTab>       // keyed by request id
+  responseTab: Map<string, ResponseTab>     // keyed by request id
+  collectionTab: Map<string, CollectionTab> // keyed by collection id
+}
+```
+
+**Key Methods:**
+```typescript
+const { getRequestTab, setRequestTab } = useTabSelectionStore();
+const { getResponseTab, setResponseTab } = useTabSelectionStore();
+const { getCollectionTab, setCollectionTab } = useTabSelectionStore();
+useTabSelectionStore.getState().clearEntity(id); // drops id from all three maps
+useTabSelectionStore.getState().clearAll();
+```
+
+**Why a store at all.** `Shell.tsx` mounts one workspace tab's surface at a
+time, so `RequestBuilderProvider`, `ResponseViewer` and `CollectionDetail` all
+unmount whenever the user looks at a different tab and remount when they come
+back - and each held its active sub-tab in a bare `useState`, which is gone
+the moment the component is. The same three components also serve *every*
+open tab of their own type without remounting (`RequestBuilder` is not
+recreated per request tab, nor `CollectionDetail` per collection tab), so a
+tab-id change reaching the same component instance needed the same lookup a
+mount-time initializer already had to do - both call sites read and write
+through this store rather than through two different mechanisms.
+
+**In memory only, like `response-store.ts` above**, and for the same reason: a
+sub-tab pick is not worth persisting across a relaunch. Unlike that store,
+this one carries no LRU cap - an entry is one enum value rather than a
+response body, so bounding it buys nothing.
+
+**Eviction by identity:** `clearEntity` runs from `tabs-store`'s
+`closeTabsForEntities`, unconditionally rather than gated on `type` the way
+the response clear is - a collection id keys `collectionTab` exactly as a
+request id keys `requestTab` / `responseTab`, so a collection cascade has to
+evict here too, and `clearEntity` is a harmless no-op for whichever of the
+three maps never held a given id.
+
 #### `appearance-store.ts` - Pre-Paint Interface Preferences
 
 The UI font, the interface scale and the corner roundedness - the three

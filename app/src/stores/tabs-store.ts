@@ -10,6 +10,7 @@ import { persist } from "zustand/middleware";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { useSaveStore, type SaveContext } from "./save-store";
 import { useResponseStore } from "./response-store";
+import { useTabSelectionStore } from "./tab-selection-store";
 import { useEngineStore } from "./engine-store";
 import { useToastStore } from "./toast-store";
 
@@ -694,6 +695,14 @@ export const useTabsStore = create<TabsState>()(
 					const { clearResponse } = useResponseStore.getState();
 					for (const id of ids) clearResponse(id);
 				}
+
+				// A deleted request or collection's remembered sub-tab goes with it
+				// too - unlike the response above, this runs for every `type`: a
+				// collection id keys `collectionTab` the same way a request id keys
+				// `requestTab`/`responseTab`, and `clearEntity` is a harmless no-op
+				// for whichever of the three maps never held the id.
+				const { clearEntity } = useTabSelectionStore.getState();
+				for (const id of ids) clearEntity(id);
 
 				const { openTabs, activeTabId, navHistory, navIndex } = get();
 				const shouldClose = (t: TabLocation) =>

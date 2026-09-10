@@ -70,6 +70,10 @@ export interface TabInfo {
 	badge?: number;
 }
 
+/** The response pane's own tab strip - see `ResponseViewer`. */
+export type ResponseTab =
+	"body" | "headers" | "cookies" | "timing" | "console" | "tests" | "events" | "raw-request";
+
 // ============================================================================
 // Auth Types
 // ============================================================================

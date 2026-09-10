@@ -24,6 +24,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import CollectionDetail from "./index";
 import { useTabsStore } from "@/stores";
+import { useTabSelectionStore } from "@/stores/tab-selection-store";
 
 const collection = {
 	id: "c1",
@@ -70,6 +71,10 @@ beforeEach(() => {
 		activeTabId: "t1",
 		specTabTarget: null,
 	});
+	// The Spec case below persists "c1"'s tab as "spec" - unmounting does not
+	// clear it, so a later case reusing "c1" would otherwise open on Spec
+	// instead of its own default.
+	useTabSelectionStore.getState().clearAll();
 });
 
 describe("a collection pointed at its Spec tab", () => {
