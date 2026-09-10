@@ -333,6 +333,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 				},
 			],
 		}),
+		getMockServerActivity: vi.fn().mockResolvedValue({ data: [] }),
 		stopMockServer: vi.fn().mockResolvedValue({ mockId: "mock_1", stopped: true }),
 		startInbox: vi.fn().mockResolvedValue({
 			inboxId: "inbox_1",
@@ -911,6 +912,31 @@ describe("data-write tools", () => {
 		);
 		expect(res.isError).toBe(true);
 		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
+	test("update_request refuses fixed mode with no example id", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", mockResponseMode: "fixed" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/mockResponseMode/);
+		expect(firstText(res)).toMatch(/mockExampleId/);
+		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
+	test("update_request forwards a mock response mode that needs no example", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", mockResponseMode: "random" },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(payload).toEqual({ mockResponseMode: "random" });
 	});
 
 	test("update_environment sends no body id - the path is the identity", async () => {
@@ -6747,17 +6773,19 @@ describe("mock issuer tools", () => {
 describe("mock server tools", () => {
 	const byName = () => new Map(TOOLS.map((t) => [t.name, t]));
 
-	test("start and stop are execute, the two reads are read, and none opens the world", () => {
+	test("start and stop are execute, the reads are read, and none opens the world", () => {
 		const tools = byName();
 		expect(tools.get("start_mock_server")?.category).toBe("execute");
 		expect(tools.get("stop_mock_server")?.category).toBe("execute");
 		expect(tools.get("list_mock_servers")?.category).toBe("read");
 		expect(tools.get("get_mock_routes")?.category).toBe("read");
+		expect(tools.get("get_mock_activity")?.category).toBe("read");
 		for (const name of [
 			"start_mock_server",
 			"stop_mock_server",
 			"list_mock_servers",
 			"get_mock_routes",
+			"get_mock_activity",
 		]) {
 			// Loopback-only by engine contract (`listener.start ("127.0.0.1", …)`),
 			// so a cautious client must not be told these reach an open world.
@@ -6773,6 +6801,7 @@ describe("mock server tools", () => {
 		expect(byName().get("stop_mock_server")?.invalidates).toEqual(["service"]);
 		expect(byName().get("list_mock_servers")?.invalidates).toEqual([]);
 		expect(byName().get("get_mock_routes")?.invalidates).toEqual([]);
+		expect(byName().get("get_mock_activity")?.invalidates).toEqual([]);
 	});
 
 	test("start sends the collection plus only the knobs the caller named", async () => {
@@ -6900,6 +6929,38 @@ describe("mock server tools", () => {
 		const res = await dispatchTool("get_mock_routes", { mockId: "" }, ctxWith(client));
 		expect(res.isError).toBe(true);
 		expect(client.getMockServerRoutes).not.toHaveBeenCalled();
+	});
+
+	test("activity defaults its limit to 50 and forwards an explicit one", async () => {
+		const client = fakeClient();
+		const defaulted = await dispatchTool(
+			"get_mock_activity",
+			{ mockId: "mock_1" },
+			ctxWith(client)
+		);
+		expect(defaulted.isError).toBeFalsy();
+		expect(client.getMockServerActivity).toHaveBeenCalledWith("mock_1", 50, undefined);
+
+		const limited = await dispatchTool(
+			"get_mock_activity",
+			{ mockId: "mock_1", limit: 10 },
+			ctxWith(client)
+		);
+		expect(limited.isError).toBeFalsy();
+		expect(client.getMockServerActivity).toHaveBeenCalledWith("mock_1", 10, undefined);
+	});
+
+	test("activity surfaces an unknown mock id as a tool error", async () => {
+		const gone = fakeClient({
+			getMockServerActivity: vi
+				.fn()
+				.mockRejectedValue(
+					new EngineRequestError("Engine responded 404", 404, "Mock server not found")
+				),
+		});
+		const res = await dispatchTool("get_mock_activity", { mockId: "mock_9" }, ctxWith(gone));
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/404/);
 	});
 
 	test("stop names the mock, and an unknown id is an error rather than a shrug", async () => {
