@@ -94,6 +94,7 @@ const FORMAT_BADGES = [
 	"Insomnia v4",
 	"OpenAPI 3.0",
 	"OpenAPI 2.0",
+	"JMeter .jmx",
 ];
 
 export function ImportModal() {
@@ -457,7 +458,7 @@ export function ImportModal() {
 		if (picked.length === 0) {
 			if (files.length > 0) {
 				patchTab("file", at, {
-					error: "No .json, .yaml or .yml files in that folder.",
+					error: "No .json, .yaml, .yml or .jmx files in that folder.",
 					phase: "error",
 				});
 			}

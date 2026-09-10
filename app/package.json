@@ -1,6 +1,6 @@
 {
 	"name": "vayu-client",
-	"version": "0.27.0",
+	"version": "0.28.0",
 	"description": "Vayu - High-Performance API Testing Platform",
 	"desktopName": "vayu.desktop",
 	"author": {
@@ -112,5 +112,5 @@
 		"wait-on": "^9.1.0",
 		"zustand": "^5.0.15"
 	},
-	"license": "MIT"
+	"license": "Apache-2.0"
 }

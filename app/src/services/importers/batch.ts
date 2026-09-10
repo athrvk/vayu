@@ -55,7 +55,7 @@ import { UnrecognisedFormatError, type ImportOptions, type ImportResult } from "
  * the silent discard this whole change exists to remove. Those arrive as an
  * "Unrecognised format" row instead, which says so.
  */
-export const IMPORTABLE_EXTENSIONS = [".json", ".yaml", ".yml"] as const;
+export const IMPORTABLE_EXTENSIONS = [".json", ".yaml", ".yml", ".jmx"] as const;
 
 export function isImportableFileName(fileName: string): boolean {
 	const lower = fileName.toLowerCase();

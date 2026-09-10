@@ -2,7 +2,7 @@
   "name": "vayu-engine",
   "description": "High-performance API execution engine",
   "homepage": "https://github.com/vayu/vayu",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "dependencies": [
     {
       "name": "curl",

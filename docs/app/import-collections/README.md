@@ -76,7 +76,8 @@ the parse and the apply.
 
 Entry is per **file**, not per import: the File tab takes a multi-file drop or
 selection, and "Import folder" takes a whole directory (`webkitdirectory`,
-recursing, filtered to `IMPORTABLE_EXTENSIONS` - `.json` / `.yaml` / `.yml`). The
+recursing, filtered to `IMPORTABLE_EXTENSIONS` - `.json` / `.yaml` / `.yml` /
+`.jmx`). The
 URL and Paste tabs are single by construction and travel the same path as a
 one-entry batch, so there is no second flow beside this one to drift from it.
 
