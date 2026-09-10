@@ -44,6 +44,8 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	ToggleGroup,
+	ToggleGroupItem,
 } from "@/components/ui";
 import {
 	useDeleteRequestExampleMutation,
@@ -228,24 +230,24 @@ function MockResponseModeControl({
 			<legend className="px-1 text-[11px] uppercase tracking-wide text-subtle-foreground">
 				Mock response
 			</legend>
-			<label className="flex items-center gap-1.5">
-				<input
-					type="radio"
-					name="mock-response-mode"
-					checked={mode === "first"}
-					onChange={() => setMode("first")}
-				/>
-				First saved example
-			</label>
-			<label className="flex items-center gap-1.5">
-				<input
-					type="radio"
-					name="mock-response-mode"
-					checked={mode === "fixed"}
-					onChange={() => setMode("fixed")}
-				/>
-				Specific example
-			</label>
+			{/*
+			 * A `<span>`, not a `<Label>`: a segmented control is a group of
+			 * buttons with no single labelable control to point `htmlFor` at, so
+			 * the group carries its own `aria-label` instead (the shape
+			 * `ModeElementForm.tsx`'s `ModePicker` uses).
+			 */}
+			<ToggleGroup
+				value={mode}
+				// Radix clears the value when the active segment is pressed again;
+				// this mode always has to be something, never "off".
+				onValueChange={(next) => next && setMode(next as MockResponseMode)}
+				size="xs"
+				aria-label="Mock response"
+			>
+				<ToggleGroupItem value="first">First saved example</ToggleGroupItem>
+				<ToggleGroupItem value="fixed">Specific example</ToggleGroupItem>
+				<ToggleGroupItem value="random">Random</ToggleGroupItem>
+			</ToggleGroup>
 			{mode === "fixed" && (
 				<Select
 					value={request.mockExampleId ?? examples[0]?.id}
@@ -263,15 +265,6 @@ function MockResponseModeControl({
 					</SelectContent>
 				</Select>
 			)}
-			<label className="flex items-center gap-1.5">
-				<input
-					type="radio"
-					name="mock-response-mode"
-					checked={mode === "random"}
-					onChange={() => setMode("random")}
-				/>
-				Random
-			</label>
 		</fieldset>
 	);
 }
