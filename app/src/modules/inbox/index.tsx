@@ -50,6 +50,7 @@ import {
 } from "@/queries";
 import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
+import { formatTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
@@ -58,10 +59,6 @@ import { DeleteInboxDialog } from "./DeleteInboxDialog";
 import { useInboxDeletion } from "./useInboxDeletion";
 import { useInboxLive } from "./useInboxLive";
 import { cannedResponseKey } from "./utils";
-
-function formatTime(ms: number): string {
-	return new Date(ms).toLocaleTimeString();
-}
 
 /**
  * The per-inbox half of capture notifications (issue #1388).

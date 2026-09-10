@@ -39,10 +39,7 @@ import {
 } from "@/queries";
 import { useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
-
-function formatTime(ms: number): string {
-	return new Date(ms).toLocaleTimeString();
-}
+import { formatTime } from "@/lib/format-time";
 
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
