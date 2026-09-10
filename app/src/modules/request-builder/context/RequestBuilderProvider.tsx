@@ -39,6 +39,7 @@ import {
 	useTabsStore,
 	type Tab,
 } from "@/stores";
+import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
 import { apiService } from "@/services";
 import { queryClient } from "@/lib/query-client";
@@ -274,7 +275,25 @@ export default function RequestBuilderProvider({
 	}, [restoredResponse, restoredForId, storeSetResponse]);
 
 	// UI state
-	const [activeTab, setActiveTab] = useState<RequestTab>("params");
+	/*
+	 * Kept per request id (`tab-selection-store`), so the active sub-tab
+	 * survives `Shell.tsx` unmounting this builder when its workspace tab is
+	 * not on screen. The reset block further down restores it again when
+	 * `initialRequest.id` changes without a remount - switching between two
+	 * open request tabs reuses this same provider instance rather than
+	 * remounting it.
+	 */
+	const { getRequestTab, setRequestTab } = useTabSelectionStore();
+	const [activeTab, setActiveTabState] = useState<RequestTab>(
+		() => (initialRequest?.id ? getRequestTab(initialRequest.id) : null) ?? "params"
+	);
+	const setActiveTab = useCallback(
+		(tab: RequestTab) => {
+			setActiveTabState(tab);
+			if (request.id) setRequestTab(request.id, tab);
+		},
+		[request.id, setRequestTab]
+	);
 
 	/*
 	 * The context bar's GraphQL outline scrolls the query editor, and the editor
@@ -306,7 +325,7 @@ export default function RequestBuilderProvider({
 		// was written for is dropped when this provider is handed the next one.
 		serve(useRevealStore.getState().pending);
 		return useRevealStore.subscribe((s) => serve(s.pending));
-	}, [requestId, bodyMode, clearReveal]);
+	}, [requestId, bodyMode, clearReveal, setActiveTab]);
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
@@ -719,6 +738,12 @@ export default function RequestBuilderProvider({
 			 */
 			setLocalResponse(initialResponse ?? null);
 		}
+
+		// Restore or default the active tab for whatever request is now on
+		// screen - the same per-request lookup the mount-time initializer
+		// above uses, needed again here because switching between two open
+		// request tabs reuses this provider instance rather than remounting it.
+		setActiveTabState(requestId ? (getRequestTab(requestId) ?? "params") : "params");
 	} else if (initialRequest && lastReset.collectionId !== collectionId) {
 		/*
 		 * The same request, moved to a different collection underneath us
@@ -1216,6 +1241,7 @@ export default function RequestBuilderProvider({
 			legacyPreScript,
 			legacyPostScript,
 			activeTab,
+			setActiveTab,
 			isExecuting,
 			isStreaming,
 			stopStream,

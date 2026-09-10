@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useTabsStore } from "./tabs-store";
 import { useSaveStore, type SaveContext } from "./save-store";
 import { useResponseStore } from "./response-store";
+import { useTabSelectionStore } from "./tab-selection-store";
 import { useEngineStore } from "./engine-store";
 import { useToastStore } from "./toast-store";
 
@@ -375,6 +376,60 @@ describe("closeTabsForEntities evicts stored responses", () => {
 		storeResponse("r1");
 		useTabsStore.getState().closeTabsForEntities([]);
 		expect(useResponseStore.getState().getResponse("r1")).not.toBeNull();
+	});
+});
+
+/**
+ * A deleted entity's remembered sub-tab goes with it too - the same seam as
+ * the response cache above, mirrored for `tab-selection-store`. Unlike the
+ * response clear, this one is not gated on `type`: a collection id keys
+ * `collectionTab` the same way a request id keys `requestTab`/`responseTab`,
+ * so a collection cascade has to evict here as well as a single request.
+ */
+describe("closeTabsForEntities evicts the remembered sub-tab", () => {
+	beforeEach(() => useTabSelectionStore.getState().clearAll());
+
+	it("drops a deleted request's remembered request-pane and response-pane tabs", () => {
+		useTabsStore.getState().openTab({ type: "request", entityId: "r1" });
+		useTabSelectionStore.getState().setRequestTab("r1", "headers");
+		useTabSelectionStore.getState().setResponseTab("r1", "timing");
+
+		useTabsStore.getState().closeTabsForEntities(["r1"]);
+
+		expect(useTabSelectionStore.getState().getRequestTab("r1")).toBeNull();
+		expect(useTabSelectionStore.getState().getResponseTab("r1")).toBeNull();
+	});
+
+	it("drops a deleted collection's remembered tab in a cascade", () => {
+		useTabSelectionStore.getState().setCollectionTab("col_1", "elements");
+		useTabSelectionStore.getState().setRequestTab("r1", "body");
+
+		useTabsStore.getState().closeTabsForEntities(["col_1", "r1"]);
+
+		expect(useTabSelectionStore.getState().getCollectionTab("col_1")).toBeNull();
+		expect(useTabSelectionStore.getState().getRequestTab("r1")).toBeNull();
+	});
+
+	it("drops the entry even when no tab was open on the entity", () => {
+		useTabSelectionStore.getState().setRequestTab("r_no_tab", "auth");
+
+		useTabsStore.getState().closeTabsForEntities(["r_no_tab"]);
+
+		expect(useTabSelectionStore.getState().getRequestTab("r_no_tab")).toBeNull();
+	});
+
+	it("still evicts for a run-scoped sweep, unlike the response clear", () => {
+		useTabSelectionStore.getState().setCollectionTab("col_1", "data");
+
+		useTabsStore.getState().closeTabsForEntities(["col_1"], "run");
+
+		expect(useTabSelectionStore.getState().getCollectionTab("col_1")).toBeNull();
+	});
+
+	it("leaves everything alone when handed nothing", () => {
+		useTabSelectionStore.getState().setRequestTab("r1", "elements");
+		useTabsStore.getState().closeTabsForEntities([]);
+		expect(useTabSelectionStore.getState().getRequestTab("r1")).toBe("elements");
 	});
 });
 

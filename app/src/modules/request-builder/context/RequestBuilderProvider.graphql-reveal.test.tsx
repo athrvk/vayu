@@ -26,6 +26,7 @@ import { useEffect } from "react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
+import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import type { BodyMode, RequestState } from "../types";
 
 // The provider is wired to variable resolution, the save manager and several
@@ -86,6 +87,11 @@ const reveal = (command: OperationRevealCommand) =>
 beforeEach(() => {
 	seen.activeTab = "";
 	useRevealStore.setState({ pending: null });
+	// Cases below reuse the request id "r1" across mounts - the reveal's own
+	// `setActiveTab("body")` now persists per id in `tab-selection-store`, and
+	// an unmount does not clear it, so a fresh mount for the same id would
+	// otherwise open on the previous case's tab instead of its own default.
+	useTabSelectionStore.getState().clearAll();
 });
 
 describe("a reveal command for the request on screen", () => {

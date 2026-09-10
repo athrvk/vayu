@@ -19,7 +19,7 @@
  * Uses shared ResponseBody component for body display with Pretty/Raw/Preview modes.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { BookmarkPlus } from "lucide-react";
 import {
 	Tabs,
@@ -35,6 +35,7 @@ import {
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
 import { useExecutionEventsStore } from "@/stores";
+import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import { chordKeys } from "@/lib/platform";
 import { SEND_CHORD } from "@/constants/shortcuts";
 import {
@@ -55,14 +56,44 @@ import TestResults from "./TestResults";
 import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
 import SaveAsExampleDialog from "./SaveAsExampleDialog";
-import type { ResponseState } from "../../types";
-
-type ResponseTab =
-	"body" | "headers" | "cookies" | "timing" | "console" | "tests" | "events" | "raw-request";
+import type { ResponseState, ResponseTab } from "../../types";
 
 export default function ResponseViewer() {
 	const { request, response, isExecuting } = useRequestBuilderContext();
-	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
+	const requestId = request.id ?? null;
+
+	/*
+	 * Which sub-tab is showing, kept per request id so it survives both
+	 * `Shell.tsx` unmounting this pane when its workspace tab is not on
+	 * screen, and switching between two open request tabs, which reuses this
+	 * component without remounting it - `request.id` changes underneath the
+	 * same `useState` either way.
+	 */
+	const { getResponseTab, setResponseTab } = useTabSelectionStore();
+	const [activeTab, setActiveTabState] = useState<ResponseTab>(
+		() => (requestId ? getResponseTab(requestId) : null) ?? "body"
+	);
+	const setActiveTab = useCallback(
+		(tab: ResponseTab) => {
+			setActiveTabState(tab);
+			if (requestId) setResponseTab(requestId, tab);
+		},
+		[requestId, setResponseTab]
+	);
+	/*
+	 * The `useState` initializer above only ever runs once, for whichever
+	 * request this pane first rendered for - a later request shown without a
+	 * remount (the tab-switch case above) needs this derived-during-render
+	 * sync instead, the same shape `RequestBuilderProvider`'s per-request
+	 * reset uses, so the previous request's tab never gets a frame to paint
+	 * under the new one.
+	 */
+	const [tabSyncedFor, setTabSyncedFor] = useState(requestId);
+	if (requestId !== tabSyncedFor) {
+		setTabSyncedFor(requestId);
+		setActiveTabState((requestId ? getResponseTab(requestId) : null) ?? "body");
+	}
+
 	const [savingExample, setSavingExample] = useState(false);
 
 	/*
@@ -72,7 +103,6 @@ export default function ResponseViewer() {
 	 * does it: one builder serves every request tab, and rows from a stream
 	 * started elsewhere must not appear under this one.
 	 */
-	const requestId = request.id ?? null;
 	const streamIsMine = useExecutionEventsStore(
 		(s) => !!s.requestId && !!requestId && s.requestId === requestId
 	);

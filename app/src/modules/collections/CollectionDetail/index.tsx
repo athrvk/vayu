@@ -12,13 +12,14 @@
  * navigation-store.navigateToCollection(collectionId).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
 import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 import { useCollectionsQuery, useMultipleCollectionRequests } from "@/queries/collections";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { useTabsStore, useSessionStore } from "@/stores";
+import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import AuthTab from "./AuthTab";
 import DataTab from "./DataTab";
 import ElementsTab from "./ElementsTab";
@@ -27,7 +28,7 @@ import MockServerControl from "./MockServerControl";
 import SpecTab from "./SpecTab";
 import VariablesTab from "./VariablesTab";
 
-type CollectionTab = "info" | "auth" | "elements" | "variables" | "data" | "spec";
+export type CollectionTab = "info" | "auth" | "elements" | "variables" | "data" | "spec";
 
 const TABS: { id: CollectionTab; label: string }[] = [
 	{ id: "info", label: "Info" },
@@ -113,11 +114,51 @@ export default function CollectionDetail() {
 		[collections, selectedCollectionId]
 	);
 
-	const [tab, setTab] = useState<CollectionTab>("info");
+	/*
+	 * Kept per collection id (`tab-selection-store`), so the active sub-tab
+	 * survives `Shell.tsx` unmounting this screen when its workspace tab is
+	 * not on screen. `CollectionDetail` is not remounted when the user
+	 * switches to a sibling collection's tab (`DataTab` above needs the same
+	 * fact), so the derived-during-render sync below restores it again on
+	 * every collection change too.
+	 */
+	const { getCollectionTab, setCollectionTab } = useTabSelectionStore();
+	const initialTab = (): CollectionTab =>
+		(selectedCollectionId ? getCollectionTab(selectedCollectionId) : null) ?? "info";
+	const [tab, setTabState] = useState<CollectionTab>(initialTab);
+	const setTab = useCallback(
+		(next: CollectionTab) => {
+			setTabState(next);
+			if (selectedCollectionId) setCollectionTab(selectedCollectionId, next);
+		},
+		[selectedCollectionId, setCollectionTab]
+	);
 	// Panels are force-mounted from their first visit onwards, not from mount:
 	// a draft can only exist in a tab the user has opened, and two of these
 	// carry a Monaco editor that costs nothing while nobody has asked for it.
-	const [visited, setVisited] = useState<ReadonlySet<CollectionTab>>(() => new Set(["info"]));
+	// Seeded from the restored tab, not a bare "info": a restored "elements"
+	// tab paints its panel this render, and an unseeded `visited` would drop
+	// it - and the draft `TABS_HOLDING_DRAFTS` exists to protect - the moment
+	// the user glanced at a sibling tab.
+	const [visited, setVisited] = useState<ReadonlySet<CollectionTab>>(
+		() => new Set([initialTab()])
+	);
+
+	/*
+	 * The `useState` initializer above only ever runs once, for whichever
+	 * collection this screen first rendered for - a later collection shown
+	 * without a remount (the sibling-tab-switch case above) needs this
+	 * derived-during-render sync instead, the same shape
+	 * `RequestBuilderProvider`'s per-request reset uses, so the previous
+	 * collection's tab never gets a frame to paint under the new one.
+	 */
+	const [tabSyncedFor, setTabSyncedFor] = useState(selectedCollectionId);
+	if (selectedCollectionId !== tabSyncedFor) {
+		setTabSyncedFor(selectedCollectionId);
+		const next = initialTab();
+		setTabState(next);
+		setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
+	}
 
 	/*
 	 * Something outside this screen pointed at a collection's Spec tab - today
@@ -139,7 +180,7 @@ export default function CollectionDetail() {
 		setTab("spec");
 		setVisited((prev) => (prev.has("spec") ? prev : new Set(prev).add("spec")));
 		clearSpecTabTarget();
-	}, [specTabTarget, selectedCollectionId, clearSpecTabTarget]);
+	}, [specTabTarget, selectedCollectionId, clearSpecTabTarget, setTab]);
 
 	// Loading and missing are different answers. `collections` defaults to `[]`,
 	// so a collection tab restored from a previous session resolves to nothing
