@@ -34,7 +34,7 @@ import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { ELEMENT_MODES, modeKeys } from "./element-modes";
 import { ElementList } from "./index";
-import { categoryIcon, effectiveCategory } from "./element-categories";
+import { categoryIcon, effectiveCategory, kindIcon } from "./element-categories";
 import type { ElementDef, ElementKindSchema } from "@/types";
 
 // `script.pre` / `script.post` render the bespoke `ScriptElementForm`, whose
@@ -234,6 +234,20 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 				categoryIcon(category),
 				`no family icon for category "${category}"`
 			).toBeTruthy();
+		}
+	});
+
+	it("resolves an icon for every catalogue kind, its own or the category's", () => {
+		// `kindIcon` is what both `ElementRow`'s header and the Add-element
+		// picker call - this is the guarantee that lets them: a kind with no
+		// entry in `KIND_ICONS` still falls through to its (already-guarded)
+		// category icon above, so neither ever renders blank. Mutation check:
+		// delete one entry from `KIND_ICONS` and this still passes (the
+		// fallback covers it) - the category test above is what catches a
+		// missing *family* icon; this one is about the fallback firing at all.
+		for (const kind of fixture) {
+			if (kind.kind === "inherit.disable") continue;
+			expect(kindIcon(kind), `no icon for kind "${kind.kind}"`).toBeTruthy();
 		}
 	});
 });

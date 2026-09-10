@@ -9,8 +9,8 @@
  * ElementList (issue #1512, reworked into a card list by issue #1608)
  *
  * An ordered list of a request's or collection's own elements - extractors,
- * assertions, timers, controllers and scripts - each a collapsible card: a
- * family icon, the element's name or its kind's label, a one-line summary of
+ * assertions, timers, controllers and scripts - each a collapsible card: an
+ * icon, the element's name or its kind's label, a one-line summary of
  * its config while collapsed, an enable switch, and a `⋯` menu for rename,
  * move, duplicate and delete. The body, shown expanded, is the kind's form:
  * generated from its JSON Schema (`GenericElementForm`) unless a bespoke
@@ -57,12 +57,7 @@ import { useLayoutStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
-import {
-	categoryIcon,
-	categoryLabel,
-	categoryOrder,
-	effectiveCategory,
-} from "./element-categories";
+import { categoryLabel, categoryOrder, effectiveCategory, kindIcon } from "./element-categories";
 import { summarizeElement } from "./summarize-element";
 
 /** The picker's "Recently used" group heading - the cap lives in `layout-store`. */
@@ -198,7 +193,7 @@ function ElementRow({
 	const Bespoke = ELEMENT_FORM_OVERRIDES[element.kind];
 	const label = kindLabel(element.kind, kinds);
 	const title = element.name ?? label;
-	const Icon = schema && categoryIcon(effectiveCategory(schema.category));
+	const Icon = kindIcon(schema);
 	const summary = summarizeElement(element, schema);
 	// Issue #1635: a fresh element's `config` is missing whatever its kind
 	// requires until the user fills the form below, and saving in that state
@@ -306,7 +301,7 @@ function ElementRow({
 						onKeyDown={handleRowKeyDown}
 						className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
 					>
-						{/* eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static CATEGORY_ICONS map (via categoryIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope. */}
+						{/* eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope. */}
 						{Icon && <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
 						{/*
 						 * `shrink-0` keeps a title at its natural width instead of
@@ -539,36 +534,52 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 							<CommandEmpty>No element matches that.</CommandEmpty>
 							{recentKinds.length > 0 && (
 								<CommandGroup heading={RECENTLY_USED_HEADING}>
-									{recentKinds.map((kind) => (
-										<CommandItem
-											key={`recent-${kind.kind}`}
-											value={`recent ${searchValue(kind)}`}
-											onSelect={() => addElement(kind)}
-											className="flex-col items-start gap-0.5"
-										>
-											<span>{kind.label}</span>
-											<TruncatedText className="w-full text-xs text-muted-foreground">
-												{kind.description}
-											</TruncatedText>
-										</CommandItem>
-									))}
+									{recentKinds.map((kind) => {
+										const Icon = kindIcon(kind);
+										return (
+											<CommandItem
+												key={`recent-${kind.kind}`}
+												value={`recent ${searchValue(kind)}`}
+												onSelect={() => addElement(kind)}
+												className="flex-col items-start gap-0.5"
+											>
+												<span className="flex items-center gap-1.5">
+													{Icon && (
+														<Icon className="text-muted-foreground" />
+													)}
+													<span>{kind.label}</span>
+												</span>
+												<TruncatedText className="w-full text-xs text-muted-foreground">
+													{kind.description}
+												</TruncatedText>
+											</CommandItem>
+										);
+									})}
 								</CommandGroup>
 							)}
 							{[...groups.entries()].map(([category, categoryKinds]) => (
 								<CommandGroup key={category} heading={categoryLabel(category)}>
-									{categoryKinds.map((kind) => (
-										<CommandItem
-											key={kind.kind}
-											value={searchValue(kind)}
-											onSelect={() => addElement(kind)}
-											className="flex-col items-start gap-0.5"
-										>
-											<span>{kind.label}</span>
-											<TruncatedText className="w-full text-xs text-muted-foreground">
-												{kind.description}
-											</TruncatedText>
-										</CommandItem>
-									))}
+									{categoryKinds.map((kind) => {
+										const Icon = kindIcon(kind);
+										return (
+											<CommandItem
+												key={kind.kind}
+												value={searchValue(kind)}
+												onSelect={() => addElement(kind)}
+												className="flex-col items-start gap-0.5"
+											>
+												<span className="flex items-center gap-1.5">
+													{Icon && (
+														<Icon className="text-muted-foreground" />
+													)}
+													<span>{kind.label}</span>
+												</span>
+												<TruncatedText className="w-full text-xs text-muted-foreground">
+													{kind.description}
+												</TruncatedText>
+											</CommandItem>
+										);
+									})}
 								</CommandGroup>
 							))}
 						</CommandList>

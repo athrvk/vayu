@@ -249,10 +249,17 @@ function CommandInput({
 	 * `outline-none` below left the one focusable element in the palette with no
 	 * indicator at all: it passes unnoticed only because nothing else in the
 	 * dialog can take focus (#1216).
+	 *
+	 * `rounded-t-lg` matches the `Command` root's own `rounded-lg`: this wrapper
+	 * is the root's first child, flush against its top edge, and the root clips
+	 * (`overflow-hidden`). Square corners here sit inside that rounded mask, so
+	 * the root cuts them off - taking the inset ring's top corners with them.
+	 * `CommandGroup` never hits this because it carries its own `p-1`; this is
+	 * the one child flush enough against the edge to need matching rounding.
 	 */
 	return (
 		<div
-			className="flex items-center border-b border-rule px-3 focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring"
+			className="flex items-center rounded-t-lg border-b border-rule px-3 focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring"
 			cmdk-input-wrapper=""
 		>
 			<Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
