@@ -276,8 +276,9 @@ TEST_F (MockServerTest, TheFirstExampleInStoredOrderIsTheOneServed) {
 
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
-    EXPECT_EQ (routes[0].response.status, 200);
-    EXPECT_EQ (routes[0].response.body, "[]");
+    ASSERT_EQ (routes[0].examples.size (), 2u);
+    EXPECT_EQ (routes[0].examples.front ().status, 200);
+    EXPECT_EQ (routes[0].examples.front ().body, "[]");
 }
 
 TEST_F (MockServerTest, ARequestWithNoExampleStaysInTheTableAsUnservable) {
@@ -324,7 +325,9 @@ TEST_F (MockServerTest, DisabledExampleHeadersAreNotServedAndDuplicatesSurvive) 
 
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
-    const auto& headers = routes[0].response.headers;
+    ASSERT_EQ (routes[0].examples.size (), 1u);
+    const auto headers =
+    vayu::http::example_headers (routes[0].examples.front ().headers);
     ASSERT_EQ (headers.size (), 2u);
     EXPECT_EQ (headers[0].first, "Set-Cookie");
     EXPECT_EQ (headers[0].second, "a=1");
@@ -339,7 +342,10 @@ TEST_F (MockServerTest, AnExampleWithNoContentTypeColumnFallsBackToItsHeader) {
 
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
-    EXPECT_EQ (routes[0].response.content_type, "application/hal+json");
+    ASSERT_EQ (routes[0].examples.size (), 1u);
+    const auto& example = routes[0].examples.front ();
+    const auto headers  = vayu::http::example_headers (example.headers);
+    EXPECT_EQ (vayu::http::example_content_type (example, headers), "application/hal+json");
 }
 
 TEST_F (MockServerTest, ALiteralRouteBeatsATemplatedOneWhateverOrderTheyWereWritten) {
@@ -360,11 +366,11 @@ TEST_F (MockServerTest, ALiteralRouteBeatsATemplatedOneWhateverOrderTheyWereWrit
     << "the wildcard must come first";
     const auto mine = vayu::http::resolve_mock_route (routes, "GET", "/pets/mine");
     ASSERT_HAS_VALUE (mine.route_index);
-    EXPECT_EQ (routes[*mine.route_index].response.body, "literal");
+    EXPECT_EQ (routes[*mine.route_index].examples.front ().body, "literal");
 
     const auto other = vayu::http::resolve_mock_route (routes, "GET", "/pets/42");
     ASSERT_HAS_VALUE (other.route_index);
-    EXPECT_EQ (routes[*other.route_index].response.body, "wildcard");
+    EXPECT_EQ (routes[*other.route_index].examples.front ().body, "wildcard");
 }
 
 TEST_F (MockServerTest, AMethodMismatchIsNamedRatherThanReportedAsAMissingPath) {

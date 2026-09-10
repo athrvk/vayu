@@ -231,8 +231,12 @@ std::expected<MockStartRequest, MockParseError> parse_mock_start (const nlohmann
 
 namespace {
 
-/// The enabled header rows of a stored example, in order and with duplicates
-/// intact - the reason an example stores an array rather than an object.
+bool header_is (const std::string& name, const char* wanted) {
+    return vayu::utils::ascii_lower_equal (name, wanted);
+}
+
+} // namespace
+
 std::vector<std::pair<std::string, std::string>> example_headers (const std::string& blob) {
     std::vector<std::pair<std::string, std::string>> out;
     if (blob.empty ()) {
@@ -261,12 +265,6 @@ std::vector<std::pair<std::string, std::string>> example_headers (const std::str
     return out;
 }
 
-bool header_is (const std::string& name, const char* wanted) {
-    return vayu::utils::ascii_lower_equal (name, wanted);
-}
-
-/// The content type an example is served under: its denormalized column, then
-/// its own `Content-Type` header, then plain text - never a guess at the body.
 std::string example_content_type (const vayu::db::RequestExample& example,
 const std::vector<std::pair<std::string, std::string>>& headers) {
     if (!example.content_type.empty ()) {
@@ -279,8 +277,6 @@ const std::vector<std::pair<std::string, std::string>>& headers) {
     }
     return "text/plain";
 }
-
-} // namespace
 
 std::vector<MockRoute>
 build_mock_routes (vayu::db::Database& db, const std::string& collection_id) {
@@ -318,18 +314,10 @@ build_mock_routes (vayu::db::Database& db, const std::string& collection_id) {
             route.method        = to_string (request.method);
             route.path_template = normalize_mock_path (request.url);
             route.segments      = mock_path_segments (route.path_template);
-
-            const auto examples = db.get_request_examples (request.id);
-            if (!examples.empty ()) {
-                // The first one, in the order phase 1 made a contract.
-                const auto& example    = examples.front ();
-                route.has_response     = true;
-                route.response.status  = example.status;
-                route.response.headers = example_headers (example.headers);
-                route.response.body    = example.body;
-                route.response.content_type =
-                example_content_type (example, route.response.headers);
-            }
+            route.mode = request.mock_response_mode.empty () ? "first" : request.mock_response_mode;
+            route.fixed_example_id = request.mock_example_id;
+            route.examples         = db.get_request_examples (request.id);
+            route.has_response     = !route.examples.empty ();
             routes.push_back (std::move (route));
         }
     }
@@ -464,14 +452,44 @@ nlohmann::json mock_server_info_json (const MockServerInfo& info) {
     return out;
 }
 
-nlohmann::json mock_route_json (const MockRoute& route) {
+nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits) {
     nlohmann::json out;
     out["requestId"]   = route.request_id;
     out["requestName"] = route.request_name;
     out["method"]      = route.method;
     out["path"]        = route.path_template;
     out["hasExample"]  = route.has_response;
-    out["status"]      = route.has_response ? route.response.status : 0;
+    out["mode"]        = route.mode;
+    out["hits"]        = hits;
+    if (!route.has_response) {
+        out["status"] = 0;
+        return out;
+    }
+    // The example that *would* answer for "first"/"fixed" - "random" names
+    // none, since which one answers varies per request (issue #481 phase 3).
+    const vayu::db::RequestExample* named = nullptr;
+    if (route.mode == "fixed" && route.fixed_example_id) {
+        for (const auto& example : route.examples) {
+            if (example.id == *route.fixed_example_id) {
+                named = &example;
+                break;
+            }
+        }
+    }
+    if (!named && route.mode != "random") {
+        // "first", or a "fixed" target that no longer exists - the same
+        // fallback pick_example makes at serve time.
+        named = &route.examples.front ();
+    }
+    if (named) {
+        out["status"]      = named->status;
+        out["exampleName"] = named->name;
+    } else {
+        // "random": the first example's status stands in as a representative
+        // figure, the same value this field reported before a route could
+        // hold more than one example.
+        out["status"] = route.examples.front ().status;
+    }
     return out;
 }
 
@@ -601,19 +619,22 @@ httplib::Response& res) {
         return;
     }
 
-    const MockRoute& route = mock.routes[*match.route_index];
-    res.status             = route.response.status;
-    for (const auto& [name, value] : route.response.headers) {
+    const MockRoute& route  = mock.routes[*match.route_index];
+    const auto& example     = route.examples.front ();
+    const auto headers      = example_headers (example.headers);
+    const auto content_type = example_content_type (example, headers);
+    res.status              = example.status;
+    for (const auto& [name, value] : headers) {
         if (!header_is (name, "content-type")) {
             // Appended rather than set: a repeated `Set-Cookie` is exactly
             // why an example stores its headers as an ordered array.
             res.headers.emplace (name, value);
         }
     }
-    if (!route.response.body.empty ()) {
-        res.set_content (route.response.body, route.response.content_type);
+    if (!example.body.empty ()) {
+        res.set_content (example.body, content_type);
     } else {
-        res.set_header ("Content-Type", route.response.content_type);
+        res.set_header ("Content-Type", content_type);
     }
 }
 
@@ -842,7 +863,7 @@ void handle_mock_routes (RouteContext& ctx, const httplib::Request& req, httplib
     }
     nlohmann::json data = nlohmann::json::array ();
     for (const auto& route : *routes) {
-        data.push_back (mock_route_json (route));
+        data.push_back (mock_route_json (route, 0));
     }
     send_json (res, nlohmann::json{ { "data", std::move (data) } });
 }
