@@ -35,10 +35,24 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Trash2 } from "lucide-react";
 import { ResponseBody, StatusCodeBadge } from "@/components/shared/response-viewer";
-import { Badge, Button, DeleteConfirmDialog } from "@/components/ui";
-import { useDeleteRequestExampleMutation, useRequestExamplesQuery } from "@/queries";
+import {
+	Badge,
+	Button,
+	DeleteConfirmDialog,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui";
+import {
+	useDeleteRequestExampleMutation,
+	useRequestExamplesQuery,
+	useRequestQuery,
+	useUpdateRequestMutation,
+} from "@/queries";
 import { useRequestBuilderContext } from "../../../context";
-import type { RequestExample } from "@/types";
+import type { MockResponseMode, Request, RequestExample } from "@/types";
 
 /**
  * The header map `ResponseBody` reads, from the example's stored entries.
@@ -178,9 +192,94 @@ function ExampleRow({
 	);
 }
 
+/**
+ * Which saved example a mock server answers with (issue #481 phase 3).
+ *
+ * A property of the request, not of any running mock - editing it here takes
+ * effect the next time a mock for this collection starts, exactly like every
+ * other change to a saved example does.
+ *
+ * `mockResponseMode`/`mockExampleId` live on the persisted `Request` and are
+ * written immediately through `useUpdateRequestMutation`, not through the
+ * builder's dirty/save flow - `RequestState` (the context's `request`) never
+ * carries them, so the caller passes the query-backed row instead.
+ */
+function MockResponseModeControl({
+	request,
+	examples,
+}: {
+	request: Request;
+	examples: RequestExample[];
+}) {
+	const updateRequest = useUpdateRequestMutation();
+	const mode = request.mockResponseMode;
+
+	const setMode = (next: MockResponseMode, exampleId?: string) => {
+		if (!request.id) return;
+		updateRequest.mutate({
+			id: request.id,
+			mockResponseMode: next,
+			mockExampleId: next === "fixed" ? (exampleId ?? examples[0]?.id) : null,
+		});
+	};
+
+	return (
+		<fieldset className="flex flex-wrap items-center gap-3 rounded-md border border-rule surface-sunken px-3 py-2 text-xs">
+			<legend className="px-1 text-[11px] uppercase tracking-wide text-subtle-foreground">
+				Mock response
+			</legend>
+			<label className="flex items-center gap-1.5">
+				<input
+					type="radio"
+					name="mock-response-mode"
+					checked={mode === "first"}
+					onChange={() => setMode("first")}
+				/>
+				First saved example
+			</label>
+			<label className="flex items-center gap-1.5">
+				<input
+					type="radio"
+					name="mock-response-mode"
+					checked={mode === "fixed"}
+					onChange={() => setMode("fixed")}
+				/>
+				Specific example
+			</label>
+			{mode === "fixed" && (
+				<Select
+					value={request.mockExampleId ?? examples[0]?.id}
+					onValueChange={(id) => setMode("fixed", id)}
+				>
+					<SelectTrigger className="h-7 w-40 text-xs" aria-label="Example">
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						{examples.map((example) => (
+							<SelectItem key={example.id} value={example.id}>
+								{example.name}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+			)}
+			<label className="flex items-center gap-1.5">
+				<input
+					type="radio"
+					name="mock-response-mode"
+					checked={mode === "random"}
+					onChange={() => setMode("random")}
+				/>
+				Random
+			</label>
+		</fieldset>
+	);
+}
+
 export default function ExamplesPanel() {
 	const { request } = useRequestBuilderContext();
 	const { data: examples, isLoading, isError } = useRequestExamplesQuery(request.id ?? null);
+	const { data: savedRequest } = useRequestQuery(request.id ?? null);
 	const [pendingDelete, setPendingDelete] = useState<RequestExample | null>(null);
 	const deleteExample = useDeleteRequestExampleMutation();
 
@@ -220,6 +319,7 @@ export default function ExamplesPanel() {
 
 	return (
 		<div className="flex flex-col gap-2">
+			{savedRequest && <MockResponseModeControl request={savedRequest} examples={examples} />}
 			{examples.map((example) => (
 				<ExampleRow
 					key={example.id}
