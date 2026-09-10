@@ -7011,6 +7011,7 @@ describe("mock server tools", () => {
 			["start_mock_server", { collectionId: "col_1" }],
 			["list_mock_servers", {}],
 			["get_mock_routes", { mockId: "mock_1" }],
+			["get_mock_activity", { mockId: "mock_1" }],
 			["stop_mock_server", { mockId: "mock_1" }],
 		] as const) {
 			const res = await dispatchTool(tool, args, locked);
@@ -7027,6 +7028,7 @@ describe("mock server tools", () => {
 				"start_mock_server",
 				"list_mock_servers",
 				"get_mock_routes",
+				"get_mock_activity",
 				"stop_mock_server",
 			],
 		});
@@ -7034,6 +7036,7 @@ describe("mock server tools", () => {
 			["start_mock_server", { collectionId: "col_1" }],
 			["list_mock_servers", {}],
 			["get_mock_routes", { mockId: "mock_1" }],
+			["get_mock_activity", { mockId: "mock_1" }],
 			["stop_mock_server", { mockId: "mock_1" }],
 		] as const) {
 			const res = await dispatchTool(tool, args, off);
