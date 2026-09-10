@@ -44,6 +44,7 @@ vi.mock("@/hooks", () => ({
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],
 	}),
+	useVariableWriter: () => ({ updateVariable: vi.fn(), writableScopes: [] }),
 	useSaveManager: (options: {
 		onSave: () => Promise<void>;
 		hasChanges: boolean;

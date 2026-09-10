@@ -32,8 +32,21 @@
 import { DYNAMIC_VARIABLES } from "./dynamic-variables";
 import { iterationVariable } from "./iteration-variables";
 import { isDataVariableName } from "./variable-resolution";
-import { describeBareColumnToken, describeDataToken, type DataTokenTone } from "./data-contract";
-import type { DataContractScope, ResolvedVariable } from "@/types";
+import { castByType } from "./variable-cast";
+import {
+	describeBareColumnToken,
+	describeColumnToken,
+	describeDataToken,
+	type DataTokenTone,
+} from "./data-contract";
+import { scopeAnswer, TEMPLATE_IN_SCRIPT_NOTE } from "./referenced-variables";
+import type {
+	DataContractScope,
+	ResolvedVariable,
+	ScopeVariableOrigin,
+	VariableOrigin,
+	VariableScope,
+} from "@/types";
 
 /** The generator table by name - the same lookup the overlay strip makes. */
 const DYNAMIC_BY_NAME = new Map(DYNAMIC_VARIABLES.map((v) => [v.name, v]));
@@ -71,6 +84,104 @@ export interface VariableTokenContext {
 	variables: Record<string, ResolvedVariable>;
 	/** The data contract in scope, if the collection chain declares one. */
 	dataColumns?: DataContractScope | null;
+	/**
+	 * Every definition of a name, winner and losers alike - needed only for a
+	 * script's single-scope accessor read (`ScriptTokenHint`'s `"scope"` case),
+	 * which answers from one rung of the ladder rather than the winner across
+	 * all of them. Absent for a caller with no such reads to classify (the
+	 * existing body-language callers, and `variable-token-kind.test.ts`).
+	 */
+	getVariableOrigins?: (name: string) => VariableOrigin[];
+}
+
+/**
+ * How a script's mention of a name should be classified, when that differs
+ * from the merged ladder `classifyVariableToken` answers by default.
+ *
+ * A script reaches a variable through a `pm.<accessor>.get(...)` call, and
+ * each accessor reads a different slice of what a body-language `{{name}}`
+ * reads in full (issue #1063's vocabulary, `PM_ACCESSORS` in
+ * `referenced-variables.ts`):
+ *
+ * - `"scope"` - one scope's own answer (`pm.environment.get`,
+ *   `pm.globals.get`, `pm.collectionVariables.get`), independent of whether a
+ *   higher scope also defines the name.
+ * - `"row"` - the bound data row and nothing else (`pm.iterationData.get`),
+ *   so the answer is a column state, never a scope's.
+ * - `"bare"` - not a read at all: a `{{name}}` written into a script outside
+ *   any `pm.variables.replaceIn(...)` call, which the engine sends verbatim
+ *   (D16, `docs/engine/scripting.md`). Muted and informational regardless of
+ *   what the name would otherwise resolve to.
+ *
+ * `pm.variables.get(...)` (the merged read) and a `replaceIn(...)` template
+ * both read the same ladder a body-language token does, so neither carries a
+ * hint - `classifyScriptToken` falls through to `classifyVariableToken`.
+ */
+export type ScriptTokenHint =
+	{ via: "scope"; scope: VariableScope } | { via: "row" } | { via: "bare" };
+
+/**
+ * The muted, no-edit answer for a script's bare `{{name}}` (issue #1220 script
+ * support). One constant because the wording is the chip row's own
+ * `TEMPLATE_IN_SCRIPT_NOTE` (issue #1553) - a second copy here is exactly the
+ * drift that string's own comment warns about.
+ */
+const BARE_SCRIPT_TEMPLATE_KIND: RuntimeToken = {
+	state: "runtime",
+	tone: "muted",
+	description: TEMPLATE_IN_SCRIPT_NOTE,
+	note: 'Wrap it in pm.variables.replaceIn("...") to interpolate it.',
+};
+
+/**
+ * A `ScopeVariableOrigin` as the value a reader gets - the same shape
+ * `useVariableResolver`'s private `resolvedFrom` builds from the ladder's
+ * winner, rebuilt here for one scope's own answer instead. Kept local rather
+ * than imported: that helper is not exported, and a `lib/` module reaching
+ * into a `hooks/` one would invert the layering the two already have.
+ */
+function resolvedFromOrigin(origin: ScopeVariableOrigin): ResolvedVariable {
+	return {
+		value: origin.value,
+		scope: origin.scope,
+		secret: origin.secret,
+		sourceId: origin.sourceId,
+		sourceName: origin.sourceName,
+		type: origin.type,
+		typedValue: castByType(origin.value, origin.type),
+	};
+}
+
+/**
+ * `classifyVariableToken`, plus the three script-only answers a
+ * `ScriptTokenHint` asks for. Every editor's `classify` call goes through this
+ * now; a caller with no hint (every body-language token, `pm.variables.get`,
+ * and a `replaceIn(...)` template) gets exactly what it always got.
+ */
+export function classifyScriptToken(
+	name: string,
+	hint: ScriptTokenHint | undefined,
+	context: VariableTokenContext
+): VariableTokenKind {
+	if (!hint) return classifyVariableToken(name, context);
+
+	if (hint.via === "bare") return BARE_SCRIPT_TEMPLATE_KIND;
+
+	if (hint.via === "row") {
+		return { state: "runtime", ...describeColumnToken(name, context.dataColumns ?? null) };
+	}
+
+	// hint.via === "scope": this accessor's own rung, never the ladder's winner.
+	const origins = context.getVariableOrigins?.(name) ?? [];
+	const own = scopeAnswer(origins, hint.scope);
+	if (!own) return { state: "undefined", info: null };
+	// `scopeAnswer` only ever returns an origin whose `scope` equals the
+	// `VariableScope` it was asked for, so it can never be the `"row"` tier
+	// `VariableOriginScope` also allows - safe to narrow to `ScopeVariableOrigin`.
+	return {
+		state: own.value ? "resolved" : "empty",
+		info: resolvedFromOrigin(own as ScopeVariableOrigin),
+	};
 }
 
 /**

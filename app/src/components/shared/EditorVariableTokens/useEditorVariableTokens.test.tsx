@@ -16,28 +16,39 @@
  * Driven against a Monaco stub rather than a real editor - the API surface used
  * here is six methods, and jsdom has no layout for the real one to measure. The
  * three "does nothing" cases are the load-bearing ones: a response viewer, a
- * script editor and an editor with no provider above it must come out of this
- * hook exactly as they went in.
+ * language with no matcher (`RawRequestResponse`'s `http`, standing in for
+ * anything `VARIABLE_TOKEN_MATCHERS` has not been taught) and an editor with
+ * no provider above it must come out of this hook exactly as they went in.
+ *
+ * Since issue #1220's script support, `javascript` is no longer one of those
+ * three - it has its own matcher (`lib/script-variable-tokens.ts`) - so the
+ * cases below cover a script's per-accessor scoping, its `replaceIn(...)`
+ * templates and its bare, muted, never-editable mentions too.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type * as Monaco from "monaco-editor";
 import type { MonacoApi } from "@/lib/monaco-api";
-import type { ResolvedVariable } from "@/types";
-import { classifyVariableToken } from "@/lib/variable-token-kind";
+import type { ResolvedVariable, VariableOrigin } from "@/types";
+import { classifyScriptToken } from "@/lib/variable-token-kind";
 import { TIMING } from "@/config/timing";
 import { EditorVariableTokensContext, type EditorVariableTokensValue } from "./context";
 import { useEditorVariableTokens } from "./useEditorVariableTokens";
 
 const variables: Record<string, ResolvedVariable> = {};
+let origins: VariableOrigin[] = [];
 
 const openTokenEditor = vi.fn();
 const setHoveredToken = vi.fn();
 
 const contextValue: EditorVariableTokensValue = {
-	classify: (name) => classifyVariableToken(name, { variables }),
-	getVariableOrigins: () => [],
+	classify: (name, scriptHint) =>
+		classifyScriptToken(name, scriptHint, {
+			variables,
+			getVariableOrigins: () => origins,
+		}),
+	getVariableOrigins: () => origins,
 	openTokenEditor,
 	setHoveredToken,
 };
@@ -164,6 +175,7 @@ beforeEach(() => {
 	openTokenEditor.mockClear();
 	setHoveredToken.mockClear();
 	for (const key of Object.keys(variables)) delete variables[key];
+	origins = [];
 });
 
 afterEach(() => {
@@ -283,8 +295,10 @@ describe("useEditorVariableTokens", () => {
 		const rendered = mount(stub);
 
 		hoverAt(stub, 8);
-		// A body mode that left the token languages, with the card still up.
-		act(() => rendered.rerender({ language: "javascript", readOnly: false }));
+		// A body mode that left the languages with a matcher, with the card still
+		// up - "http", `RawRequestResponse`'s own language, which (like every
+		// language absent from `VARIABLE_TOKEN_MATCHERS`) paints nothing.
+		act(() => rendered.rerender({ language: "http", readOnly: false }));
 		// Mutation check: drop the `if (!enabled) hideHover()` and the card hangs
 		// there until some later pointer event happens to arrive.
 		expect(setHoveredToken).toHaveBeenLastCalledWith(null);
@@ -310,10 +324,94 @@ describe("useEditorVariableTokens", () => {
 		expect(openTokenEditor).toHaveBeenCalledTimes(1);
 	});
 
-	it("leaves a script editor alone - the engine never interpolates script source", () => {
-		const stub = stubEditor(["pm.test('{{baseUrl}}')"]);
-		mount(stub, { language: "javascript" });
+	it("leaves an editor with no matcher for its language alone", () => {
+		// "http" - `RawRequestResponse`'s own language - has no entry in
+		// `VARIABLE_TOKEN_MATCHERS`, the same as every response-viewer language.
+		const stub = stubEditor(["GET {{baseUrl}}"]);
+		mount(stub, { language: "http" });
 		expect(stub.decorations.set).not.toHaveBeenCalled();
+	});
+
+	describe("a script editor (issue #1220 script support)", () => {
+		it("paints each accessor's argument, scoped to what it reads", () => {
+			origins = [{ scope: "environment", value: "https://x", enabled: true, winner: true }];
+			const stub = stubEditor(['pm.environment.get("baseUrl");']);
+			mount(stub, { language: "javascript" });
+
+			expect(stub.decorations.set).toHaveBeenCalledTimes(1);
+			const painted = stub.decorations.set.mock.calls[0][0] as Array<{
+				options: { inlineClassName: string };
+			}>;
+			// Resolved from the accessor's own scope - `variable-token-kind.test.ts`
+			// pins the classification itself; this pins that the paint reaches it.
+			expect(painted[0].options.inlineClassName).toBe("vayu-variable-token-resolved");
+		});
+
+		it("paints a replaceIn(...) template like a body-language token", () => {
+			variables.host = { value: "https://x", scope: "environment" };
+			const stub = stubEditor(['pm.variables.replaceIn("{{host}}");']);
+			mount(stub, { language: "javascript" });
+
+			const painted = stub.decorations.set.mock.calls[0][0] as Array<{
+				options: { inlineClassName: string };
+			}>;
+			expect(painted[0].options.inlineClassName).toBe("vayu-variable-token-resolved");
+		});
+
+		it("paints a bare {{name}} muted, whatever the name would otherwise resolve to", () => {
+			variables.host = { value: "https://x", scope: "environment" };
+			const stub = stubEditor(['const u = "{{host}}";']);
+			mount(stub, { language: "javascript" });
+
+			const painted = stub.decorations.set.mock.calls[0][0] as Array<{
+				options: { inlineClassName: string };
+			}>;
+			expect(painted[0].options.inlineClassName).toBe("vayu-variable-token-runtime");
+		});
+
+		it("ignores a setter and a name inside a comment", () => {
+			const stub = stubEditor([
+				'pm.environment.set("baseUrl", "x"); // pm.environment.get("ignored")',
+			]);
+			mount(stub, { language: "javascript" });
+			expect(stub.decorations.set).toHaveBeenCalledWith([]);
+		});
+
+		it("shows the not-interpolated note for a bare token, with no edit action", () => {
+			const stub = stubEditor(['const u = "{{host}}";']);
+			mount(stub, { language: "javascript" });
+
+			hoverAt(stub, 12);
+			expect(setHoveredToken).toHaveBeenCalledTimes(1);
+			expect(setHoveredToken.mock.calls[0][0]).toMatchObject({
+				name: "host",
+				scriptHint: { via: "bare" },
+			});
+		});
+
+		it("never opens a popover for a bare template, even via the edit chord", () => {
+			const stub = stubEditor(['const u = "{{host}}";']);
+			mount(stub, { language: "javascript" });
+
+			stub.moveCaretTo(12);
+			stub.handlers.commands[0].run();
+			expect(openTokenEditor).not.toHaveBeenCalled();
+		});
+
+		it("opens a real accessor read, over its own argument", () => {
+			origins = [{ scope: "environment", value: "https://x", enabled: true, winner: true }];
+			const stub = stubEditor(['pm.environment.get("baseUrl");']);
+			mount(stub, { language: "javascript" });
+
+			// Column 21 is inside "baseUrl" - see `script-variable-tokens.test.ts`
+			// for the same offset math.
+			metaClickAt(stub, 22);
+			expect(openTokenEditor).toHaveBeenCalledTimes(1);
+			expect(openTokenEditor.mock.calls[0][0]).toMatchObject({
+				name: "baseUrl",
+				scriptHint: { via: "scope", scope: "environment" },
+			});
+		});
 	});
 
 	it("does nothing with no provider above it", () => {

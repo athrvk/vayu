@@ -27,16 +27,25 @@
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
-import type { VariableTokenKind } from "./variable-token-kind";
+import type { ScriptTokenHint, VariableTokenKind } from "./variable-token-kind";
+import { scriptVariableTokenRanges } from "./script-variable-tokens";
 
 /** One `{{name}}` found in a model, in Monaco's 1-based line/column space. */
 export interface VariableTokenRange {
 	name: string;
 	lineNumber: number;
-	/** 1-based column of the first `{`. */
+	/** 1-based column of the first `{` (or, for a script's `pm.<accessor>.get(...)`
+	 * argument, the opening quote's next character). */
 	startColumn: number;
-	/** 1-based column just past the final `}`. */
+	/** 1-based column just past the final `}` (or the closing quote). */
 	endColumn: number;
+	/**
+	 * How a script's span should be classified, when that differs from the
+	 * merged ladder (`classifyVariableToken`'s default) - see
+	 * `lib/script-variable-tokens.ts`. Always `undefined` for a body-language
+	 * token, which has only the one reading.
+	 */
+	scriptHint?: ScriptTokenHint;
 }
 
 /**
@@ -106,6 +115,32 @@ const TOKEN_CLASS: Record<string, string> = {
 	undefined: "vayu-variable-token-undefined",
 	"runtime-muted": "vayu-variable-token-runtime",
 	"runtime-warning": "vayu-variable-token-warning",
+};
+
+/** A model's span-finder, for one Monaco `language`. */
+export type VariableTokenMatcher = (model: ScannableModel) => VariableTokenRange[];
+
+/**
+ * Which spans an editor paints, keyed by Monaco `language` (issue #1220 script
+ * support) - what used to be a single regex gated by `BODY_LANGUAGES`
+ * (`useVariableCompletionProvider.ts`), which is the `{{` **completion** list's
+ * own gate and nothing about painting a token that is already there. A
+ * language absent from this map is not decorated at all - the response
+ * viewers' `plaintext`-adjacent modes that carry no variables, and anything
+ * `useEditorVariableTokens` has not been taught yet.
+ *
+ * The four body languages share one matcher: `{{name}}` reads the same in
+ * `json`, `plaintext`, `graphql` and `xml`, so a fifth entry here would be a
+ * fifth copy of the same function. `javascript` gets its own, because a script
+ * names a variable through `pm.*` accessors and `replaceIn(...)` as well as a
+ * bare `{{name}}`, each read differently - see `script-variable-tokens.ts`.
+ */
+export const VARIABLE_TOKEN_MATCHERS: Record<string, VariableTokenMatcher> = {
+	json: variableTokenRanges,
+	plaintext: variableTokenRanges,
+	graphql: variableTokenRanges,
+	xml: variableTokenRanges,
+	javascript: scriptVariableTokenRanges,
 };
 
 /** Which `index.css` class paints a classified token. */

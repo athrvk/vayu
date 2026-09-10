@@ -16,8 +16,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { classifyVariableToken } from "./variable-token-kind";
-import type { DataContractScope, ResolvedVariable } from "@/types";
+import { classifyScriptToken, classifyVariableToken } from "./variable-token-kind";
+import type { DataContractScope, ResolvedVariable, VariableOrigin } from "@/types";
 
 const contract: DataContractScope = {
 	collectionId: "c1",
@@ -105,5 +105,84 @@ describe("classifyVariableToken", () => {
 		expect(kind.state).toBe("undefined");
 		if (kind.state === "runtime") return;
 		expect(kind.info).toBeNull();
+	});
+});
+
+describe("classifyScriptToken", () => {
+	it("falls through to the merged ladder with no hint - pm.variables.get and replaceIn", () => {
+		const kind = classifyScriptToken("baseUrl", undefined, {
+			variables: { baseUrl: { value: "https://x", scope: "environment" } },
+		});
+		expect(kind.state).toBe("resolved");
+	});
+
+	it("answers a single scope's own read, not the ladder's winner", () => {
+		const origins: VariableOrigin[] = [
+			{ scope: "global", value: "https://old", enabled: true, winner: false },
+			{
+				scope: "environment",
+				value: "https://api.example.com",
+				enabled: true,
+				winner: true,
+			},
+		];
+		// pm.collectionVariables.get - nothing at collection scope, even though
+		// the environment (which wins the whole ladder) defines it.
+		const kind = classifyScriptToken(
+			"baseUrl",
+			{ via: "scope", scope: "collection" },
+			{ variables: {}, getVariableOrigins: () => origins }
+		);
+		expect(kind.state).toBe("undefined");
+	});
+
+	it("resolves from the accessor's own scope when that scope defines it", () => {
+		const origins: VariableOrigin[] = [
+			{ scope: "global", value: "https://old", enabled: true, winner: false },
+		];
+		const kind = classifyScriptToken(
+			"baseUrl",
+			{ via: "scope", scope: "global" },
+			{ variables: {}, getVariableOrigins: () => origins }
+		);
+		expect(kind.state).toBe("resolved");
+		if (kind.state === "runtime") return;
+		expect(kind.info?.value).toBe("https://old");
+	});
+
+	it("separates empty from undefined for a single-scope read too", () => {
+		const origins: VariableOrigin[] = [
+			{ scope: "global", value: "", enabled: true, winner: true },
+		];
+		const kind = classifyScriptToken(
+			"token",
+			{ via: "scope", scope: "global" },
+			{ variables: {}, getVariableOrigins: () => origins }
+		);
+		expect(kind.state).toBe("empty");
+	});
+
+	it("a bound row's column answers pm.iterationData.get, not the scopes", () => {
+		const kind = classifyScriptToken(
+			"email",
+			{ via: "row" },
+			{ variables: {}, dataColumns: contract }
+		);
+		expect(kind.state).toBe("runtime");
+		if (kind.state !== "runtime") return;
+		expect(kind.note).toContain("Checkout");
+	});
+
+	it("a bare script template is always muted and informational, whatever the name resolves to", () => {
+		const kind = classifyScriptToken(
+			"baseUrl",
+			{ via: "bare" },
+			{ variables: { baseUrl: { value: "https://x", scope: "environment" } } }
+		);
+		expect(kind.state).toBe("runtime");
+		if (kind.state !== "runtime") return;
+		expect(kind.tone).toBe("muted");
+		expect(kind.description).toMatch(/not interpolated/i);
+		expect(kind.note).toContain("pm.variables.replaceIn");
 	});
 });

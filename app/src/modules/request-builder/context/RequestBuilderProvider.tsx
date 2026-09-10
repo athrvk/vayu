@@ -21,24 +21,18 @@ import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
 import { UNSAVED_AUTO_KEY } from "./auto-record-slot";
 import { retainKeys } from "./retain-keys";
-import { useVariableResolver, useSaveManager } from "@/hooks";
+import { useVariableResolver, useVariableWriter, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
 import { mergeExternalWrite } from "@/lib/field-merge";
 import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
 import {
 	useCollectionAncestors,
-	useGlobalsQuery,
-	useUpdateGlobalsMutation,
 	useCollectionsQuery,
-	useUpdateCollectionMutation,
-	useEnvironmentsQuery,
-	useUpdateEnvironmentMutation,
 	useLastDesignRunQuery,
 	useElementKindsQuery,
 } from "@/queries";
 import {
-	useSessionStore,
 	useResponseStore,
 	useExecutionEventsStore,
 	useBoundRowStore,
@@ -49,14 +43,13 @@ import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/revea
 import { apiService } from "@/services";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries";
-import type { ResolvedElement, VariableValue } from "@/types";
+import type { ResolvedElement } from "@/types";
 import type {
 	RequestState,
 	ResponseState,
 	RequestTab,
 	StreamStartResult,
 	VariableInfo,
-	VariableScope,
 	RequestBuilderContextValue,
 	MergeableRequestField,
 	RequestFieldConflicts,
@@ -658,13 +651,10 @@ export default function RequestBuilderProvider({
 		return forSend ? resolveObject(forSend) : null;
 	}, [request.auth, collectionAncestors, resolveObject]);
 
-	// Variable update mutations
-	const { activeEnvironmentId } = useSessionStore();
-	const { data: globalsData } = useGlobalsQuery();
-	const { data: environments = [] } = useEnvironmentsQuery();
-	const updateGlobalsMutation = useUpdateGlobalsMutation();
-	const updateCollectionMutation = useUpdateCollectionMutation();
-	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
+	// Variable writes - shared with the collection Elements tab, see useVariableWriter.
+	const { updateVariable, writableScopes } = useVariableWriter({
+		collectionId: collectionId || undefined,
+	});
 
 	/*
 	 * Reset when the request the provider was handed changes.
@@ -975,111 +965,6 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * Merge one variable into a scope's map.
-	 *
-	 * Written once rather than three times. The three branches below were
-	 * identical apart from where they wrote, and identical code in three places
-	 * is three places for a rule to diverge - which is what happened: each
-	 * spread the existing entry to keep its flags, so writing a value to a
-	 * variable that was **disabled** preserved `enabled: false`.
-	 *
-	 * That produced exactly the dead end the popover's Create button exists to
-	 * remove. A name disabled at every scope does not resolve, so the token is
-	 * red and the popover offers to create it; the write then landed on the
-	 * disabled entry, kept it disabled, and the token stayed red. The button
-	 * appeared to work and changed nothing visible.
-	 *
-	 * So a write through this path always enables. Setting a value here means
-	 * "make this value apply" - there is no caller for whom writing a value and
-	 * leaving it switched off is the intent, and the variables editor is where
-	 * enabling and disabling actually belongs.
-	 *
-	 * An existing entry is spread, so its `createdAt` - the variables editor's
-	 * row-ordering key - survives untouched, including when it is *absent*, which
-	 * that editor reads as "older than everything". Only a variable created here
-	 * is stamped, so it lands at the bottom of its scope's list rather than above
-	 * every row that already existed (issue #135).
-	 */
-	const mergeVariable = (
-		existing: Record<string, VariableValue> | undefined,
-		name: string,
-		newValue: string
-	): Record<string, VariableValue> => {
-		const current = existing?.[name];
-		return {
-			...existing,
-			[name]: current
-				? { ...current, value: newValue, enabled: true }
-				: { value: newValue, enabled: true, createdAt: Date.now() },
-		};
-	};
-
-	// Update variable value.
-	const updateVariable = useCallback(
-		(name: string, newValue: string, scope: VariableScope) => {
-			switch (scope) {
-				case "global": {
-					if (!globalsData?.variables) return;
-					updateGlobalsMutation.mutate({
-						variables: mergeVariable(globalsData.variables, name, newValue),
-					});
-					break;
-				}
-				case "collection": {
-					if (!collectionId) return;
-					const collection = collections.find((c) => c.id === collectionId);
-					if (!collection) return;
-					updateCollectionMutation.mutate({
-						id: collectionId,
-						variables: mergeVariable(collection.variables, name, newValue),
-					});
-					break;
-				}
-				case "environment": {
-					if (!activeEnvironmentId) return;
-					const environment = environments.find((e) => e.id === activeEnvironmentId);
-					if (!environment) return;
-					updateEnvironmentMutation.mutate({
-						id: activeEnvironmentId,
-						variables: mergeVariable(environment.variables, name, newValue),
-					});
-					break;
-				}
-			}
-		},
-		[
-			globalsData,
-			collections,
-			environments,
-			collectionId,
-			activeEnvironmentId,
-			updateGlobalsMutation,
-			updateCollectionMutation,
-			updateEnvironmentMutation,
-		]
-	);
-
-	/*
-	 * Which scopes `updateVariable` would actually write to, derived from the
-	 * same three guards it opens each branch with.
-	 *
-	 * Kept beside it deliberately: this is the config-defined-in-one-branch,
-	 * re-derived-in-another shape that has bitten this codebase before, so if a
-	 * guard changes above, this list is the next thing in the file to change.
-	 * A caller that offers a scope not in here gets a silent no-op.
-	 */
-	const writableScopes = useMemo((): VariableScope[] => {
-		const scopes: VariableScope[] = [];
-		if (globalsData?.variables) scopes.push("global");
-		if (collectionId && collections.some((c) => c.id === collectionId))
-			scopes.push("collection");
-		if (activeEnvironmentId && environments.some((e) => e.id === activeEnvironmentId)) {
-			scopes.push("environment");
-		}
-		return scopes;
-	}, [globalsData, collections, collectionId, environments, activeEnvironmentId]);
-
-	/*
 	 * The live stream this builder started, if it is still the one the store is
 	 * holding. Selected against `request.id` for the same reason the execute
 	 * result is: one provider serves every request tab, so rows belonging to a
@@ -1363,8 +1248,20 @@ export default function RequestBuilderProvider({
 			 * needs this provider's `updateVariable` and `writableScopes` to edit
 			 * or create anything (issue #1220). Every Monaco editor that
 			 * interpolates variables is somewhere under here.
+			 *
+			 * `contextValue` already carries every field `VariableSupport` needs
+			 * (`resolveString`, `getAllVariables`, `getVariableOrigins`,
+			 * `updateVariable`, `writableScopes`, `dataColumns`), so it is handed
+			 * straight through as `support` rather than read back via
+			 * `useVariableSupport()` - that hook reaches for
+			 * `useRequestBuilderContext()`, which throws with no provider above it,
+			 * and this component has not yet rendered its own
+			 * `<RequestBuilderContext.Provider>` at the point a hook call in its own
+			 * body would run.
 			 */}
-			<EditorVariableTokensProvider>{children}</EditorVariableTokensProvider>
+			<EditorVariableTokensProvider support={contextValue}>
+				{children}
+			</EditorVariableTokensProvider>
 		</RequestBuilderContext.Provider>
 	);
 }

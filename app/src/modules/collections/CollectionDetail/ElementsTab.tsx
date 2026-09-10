@@ -28,15 +28,22 @@
  * directly, since `ScriptElementForm` itself cannot depend on either.
  */
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { Button } from "@/components/ui";
 import { ExternalChangeCallout, ScriptReferencesRow } from "@/components/shared";
 import { ElementList } from "@/components/shared/ElementList";
-import { useDataContract, useDraftSaveContext, useEntityDraft, useVariableResolver } from "@/hooks";
+import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
+import {
+	useDataContract,
+	useDraftSaveContext,
+	useEntityDraft,
+	useVariableResolver,
+	useVariableWriter,
+} from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import { useElementKindsQuery } from "@/queries";
 import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
-import type { Collection, ElementDef } from "@/types";
+import type { Collection, ElementDef, VariableSupport } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
 
 /** How many referenced names get a chip before the rest become a count - the
@@ -53,9 +60,43 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 	const updateCollection = useUpdateCollectionMutation();
 	const { data: kinds } = useElementKindsQuery();
 	const dataColumns = useDataContract(collection.id);
-	const { getAllVariables, getVariableOrigins } = useVariableResolver({
+	const { resolveString, getAllVariables, getVariableOrigins } = useVariableResolver({
 		collectionId: collection.id,
 	});
+	/*
+	 * The write half of the same scope (issue #1651): `useVariableWriter` is
+	 * `RequestBuilderProvider`'s own `updateVariable`/`writableScopes` extracted
+	 * so a tree with no request builder above it can still use them. Global and
+	 * this collection's own variables are writable here; environment is too,
+	 * whenever one is active (`useSessionStore`'s `activeEnvironmentId` is a
+	 * global, session-wide pick, not something scoped to a request) - the same
+	 * three guards `writableScopes` already applies.
+	 */
+	const { updateVariable, writableScopes } = useVariableWriter({ collectionId: collection.id });
+
+	/*
+	 * What every script element's editor paints, hovers and (where a scope is
+	 * writable) opens for a `{{name}}` or a `pm.<accessor>.get(...)` argument
+	 * (issue #1220 script support).
+	 */
+	const variableSupport = useMemo<VariableSupport>(
+		() => ({
+			resolveString,
+			getAllVariables,
+			getVariableOrigins,
+			updateVariable,
+			writableScopes,
+			dataColumns,
+		}),
+		[
+			resolveString,
+			getAllVariables,
+			getVariableOrigins,
+			updateVariable,
+			writableScopes,
+			dataColumns,
+		]
+	);
 
 	const {
 		draft: elements,
@@ -111,26 +152,28 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 				These are saved together, when you press Save Elements - not as you add or edit one.
 			</p>
 
-			<ElementList
-				elements={elements}
-				onChange={setElements}
-				kinds={kindsList}
-				renderAboveForm={(element) => {
-					if (element.kind !== "script.pre" && element.kind !== "script.post")
-						return null;
-					const script =
-						typeof element.config.script === "string" ? element.config.script : "";
-					return (
-						<ScriptReferencesRow
-							script={script}
-							allVariables={getAllVariables()}
-							getVariableOrigins={getVariableOrigins}
-							dataColumns={dataColumns}
-							chipLimit={CHIP_LIMIT}
-						/>
-					);
-				}}
-			/>
+			<EditorVariableTokensProvider support={variableSupport}>
+				<ElementList
+					elements={elements}
+					onChange={setElements}
+					kinds={kindsList}
+					renderAboveForm={(element) => {
+						if (element.kind !== "script.pre" && element.kind !== "script.post")
+							return null;
+						const script =
+							typeof element.config.script === "string" ? element.config.script : "";
+						return (
+							<ScriptReferencesRow
+								script={script}
+								allVariables={getAllVariables()}
+								getVariableOrigins={getVariableOrigins}
+								dataColumns={dataColumns}
+								chipLimit={CHIP_LIMIT}
+							/>
+						);
+					}}
+				/>
+			</EditorVariableTokensProvider>
 
 			<SaveFailed mutation={updateCollection} what="the elements list" />
 

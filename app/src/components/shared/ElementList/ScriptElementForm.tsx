@@ -24,7 +24,18 @@
  * `CodeEditor`'s default `height="100%"` used to resolve against nothing and
  * Monaco laid out at zero height. A drag handle below the box - the GraphQL
  * body's `ResizableHandle` styling, without the panel group it depends on -
- * sets that height directly, in `layout-store`'s `scriptEditorHeight`.
+ * sets that height directly, in `layout-store`'s `scriptEditorHeights`.
+ *
+ * **That height is per element id, not shared across every script row**
+ * (issue #1643). A request or collection can show a `script.pre` and a
+ * `script.post` card at once - each a different element - and the store used
+ * to hold one number for all of them, so dragging either row's handle
+ * resized both. This form is handed the owning element's `id` and reads/
+ * writes that row's own entry in `scriptEditorHeights`, falling back to
+ * `scriptEditorHeightDefault` - a *mount-time* snapshot, not a live
+ * subscription - for a row that has never been dragged, so that default
+ * updating (any row's drag writes it too) never retroactively resizes an
+ * already-mounted row that has its own entry.
  *
  * **Each row's Snippets disclosure is its own `useState`**, seeded once from
  * the store's persisted default and written back to it on toggle. A request
@@ -53,6 +64,8 @@ import {
 import { cn } from "@/lib/utils";
 
 export interface ScriptElementFormProps {
+	/** The owning element's own id - the key into `scriptEditorHeights` (issue #1643). */
+	id: string;
 	kind: string;
 	config: Record<string, unknown>;
 	/** The kind's own catalogue description - the form's lead sentence. */
@@ -81,18 +94,32 @@ function useDebouncedHeightSave(save: (height: number) => void) {
 	);
 }
 
-export function ScriptElementForm({ kind, config, description, onChange }: ScriptElementFormProps) {
+export function ScriptElementForm({
+	id,
+	kind,
+	config,
+	description,
+	onChange,
+}: ScriptElementFormProps) {
 	const script = typeof config.script === "string" ? config.script : "";
 	const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
 	const isPre = kind === "script.pre";
 	const editorLabel = isPre ? "Pre-request script" : "Test script";
 
-	// One store value for every script row (like `graphqlVariablesSize`); a
-	// drag on this row's handle previews locally so the box tracks the pointer
-	// every frame, and the debounced save is what every other row picks up.
-	const storedHeight = useLayoutStore((s) => s.scriptEditorHeight);
+	// This row's own entry, if it has ever been dragged - a live subscription,
+	// so a drag on *this* row's handle re-renders it. The fallback default is
+	// a mount-time snapshot instead (the same `useState(() => store.getState()
+	// .x)` shape `scriptSnippetsCollapsed` below uses): a live subscription to
+	// the default would mean dragging one never-touched row's handle
+	// retroactively resized every *other* never-touched row still mounted,
+	// which is the same bug this store shape exists to fix, one level down.
+	const ownHeight = useLayoutStore((s) => s.scriptEditorHeights[id]);
+	const [mountDefault] = useState(() => useLayoutStore.getState().scriptEditorHeightDefault);
+	const storedHeight = ownHeight ?? mountDefault;
 	const setStoredHeight = useLayoutStore((s) => s.setScriptEditorHeight);
-	const saveHeight = useDebouncedHeightSave(setStoredHeight);
+	const saveHeight = useDebouncedHeightSave(
+		useCallback((h: number) => setStoredHeight(id, h), [id, setStoredHeight])
+	);
 	const [dragHeight, setDragHeight] = useState<number | null>(null);
 	const height = dragHeight ?? storedHeight;
 

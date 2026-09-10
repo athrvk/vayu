@@ -51,7 +51,8 @@ vi.mock("@/queries", async (importOriginal) => ({
 
 beforeEach(() => {
 	useLayoutStore.setState({
-		scriptEditorHeight: DEFAULT_SCRIPT_EDITOR_HEIGHT,
+		scriptEditorHeights: {},
+		scriptEditorHeightDefault: DEFAULT_SCRIPT_EDITOR_HEIGHT,
 		scriptSnippetsCollapsed: true,
 	});
 });
@@ -60,10 +61,11 @@ afterEach(() => {
 	cleanup();
 });
 
-function renderForm(kind: "script.pre" | "script.post" = "script.pre") {
+function renderForm(kind: "script.pre" | "script.post" = "script.pre", id = "s1") {
 	const onChange = vi.fn();
 	render(
 		<ScriptElementForm
+			id={id}
 			kind={kind}
 			config={{}}
 			description="A test description."
@@ -91,7 +93,7 @@ describe("ScriptElementForm's editor box", () => {
 	});
 
 	it("reads whatever height the store already holds", () => {
-		useLayoutStore.setState({ scriptEditorHeight: 240 });
+		useLayoutStore.setState({ scriptEditorHeights: { s1: 240 } });
 		const { box } = renderForm();
 
 		expect(box).toHaveStyle({ height: "240px" });
@@ -116,41 +118,42 @@ describe("the resize handle", () => {
 		const handle = heightHandle();
 
 		act(() => fireEvent.keyDown(handle, { key: "ArrowDown" }));
-		// Debounced, the GraphQLBody `handleVariablesResize` way - not written yet.
-		expect(useLayoutStore.getState().scriptEditorHeight).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
+		// Debounced, the GraphQLBody `handleVariablesResize` way - not written yet,
+		// so "s1" still has no entry of its own.
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBeUndefined();
 		act(() => vi.advanceTimersByTime(200));
-		expect(useLayoutStore.getState().scriptEditorHeight).toBe(
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
 			DEFAULT_SCRIPT_EDITOR_HEIGHT + SCRIPT_EDITOR_HEIGHT_STEP
 		);
 
 		act(() => fireEvent.keyDown(handle, { key: "ArrowUp" }));
 		act(() => vi.advanceTimersByTime(200));
-		expect(useLayoutStore.getState().scriptEditorHeight).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
 
 		vi.useRealTimers();
 	});
 
 	it("clamps at the floor", () => {
 		vi.useFakeTimers();
-		useLayoutStore.setState({ scriptEditorHeight: SCRIPT_EDITOR_MIN_HEIGHT });
+		useLayoutStore.setState({ scriptEditorHeights: { s1: SCRIPT_EDITOR_MIN_HEIGHT } });
 		renderForm();
 
 		act(() => fireEvent.keyDown(heightHandle(), { key: "ArrowUp" }));
 		act(() => vi.advanceTimersByTime(200));
 
-		expect(useLayoutStore.getState().scriptEditorHeight).toBe(SCRIPT_EDITOR_MIN_HEIGHT);
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(SCRIPT_EDITOR_MIN_HEIGHT);
 		vi.useRealTimers();
 	});
 
 	it("clamps at the ceiling", () => {
 		vi.useFakeTimers();
-		useLayoutStore.setState({ scriptEditorHeight: SCRIPT_EDITOR_MAX_HEIGHT });
+		useLayoutStore.setState({ scriptEditorHeights: { s1: SCRIPT_EDITOR_MAX_HEIGHT } });
 		renderForm();
 
 		act(() => fireEvent.keyDown(heightHandle(), { key: "ArrowDown" }));
 		act(() => vi.advanceTimersByTime(200));
 
-		expect(useLayoutStore.getState().scriptEditorHeight).toBe(SCRIPT_EDITOR_MAX_HEIGHT);
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(SCRIPT_EDITOR_MAX_HEIGHT);
 		vi.useRealTimers();
 	});
 
@@ -164,12 +167,13 @@ describe("the resize handle", () => {
 			window.dispatchEvent(new PointerEvent("pointermove", { clientY: 140, pointerId: 1 }))
 		);
 
-		// The frame-by-frame preview: no debounce on the box's own height.
+		// The frame-by-frame preview: no debounce on the box's own height, or on
+		// the store write it eventually causes - "s1" has no entry yet.
 		expect(box).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT + 40}px` });
-		expect(useLayoutStore.getState().scriptEditorHeight).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBeUndefined();
 
 		act(() => vi.advanceTimersByTime(200));
-		expect(useLayoutStore.getState().scriptEditorHeight).toBe(
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
 			DEFAULT_SCRIPT_EDITOR_HEIGHT + 40
 		);
 
@@ -193,10 +197,80 @@ describe("the resize handle", () => {
 		);
 		act(() => vi.advanceTimersByTime(200));
 
-		expect(useLayoutStore.getState().scriptEditorHeight).toBe(SCRIPT_EDITOR_MAX_HEIGHT);
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(SCRIPT_EDITOR_MAX_HEIGHT);
 
 		window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
 		vi.useRealTimers();
+	});
+});
+
+/**
+ * Issue #1643 part 2: `scriptEditorHeight` used to be one number for every
+ * script row, so dragging any one row's handle resized every other one too.
+ * Mutation check: have `ScriptElementForm` key `scriptEditorHeights` by `kind`
+ * instead of `id` (both rows below are `script.pre`/`script.post`, distinct
+ * kinds, so that alone would still pass) - key it by a constant instead, and
+ * the first case here reds because dragging "s1" would then also move "s2".
+ */
+describe("the editor height, per row", () => {
+	function renderTwoRows() {
+		render(
+			<>
+				<ScriptElementForm
+					id="s1"
+					kind="script.pre"
+					config={{}}
+					description="Runs before the request is sent."
+					onChange={() => {}}
+				/>
+				<ScriptElementForm
+					id="s2"
+					kind="script.post"
+					config={{}}
+					description="Runs after the response is received."
+					onChange={() => {}}
+				/>
+			</>
+		);
+		const [preBox, postBox] = screen
+			.getAllByTestId(/^code-editor-/)
+			.map((editor) => editor.parentElement!);
+		const [preHandle, postHandle] = screen.getAllByRole("separator");
+		return { preBox, postBox, preHandle, postHandle };
+	}
+
+	it("dragging one row's handle leaves the other row's height unchanged", () => {
+		vi.useFakeTimers();
+		const { preBox, postBox, preHandle } = renderTwoRows();
+
+		act(() => fireEvent.pointerDown(preHandle, { clientY: 0, pointerId: 1 }));
+		act(() =>
+			window.dispatchEvent(new PointerEvent("pointermove", { clientY: 40, pointerId: 1 }))
+		);
+		act(() => vi.advanceTimersByTime(200));
+		act(() => window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 })));
+
+		expect(preBox).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT + 40}px` });
+		expect(postBox).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT}px` });
+		expect(useLayoutStore.getState().scriptEditorHeights).toEqual({
+			s1: DEFAULT_SCRIPT_EDITOR_HEIGHT + 40,
+		});
+		expect(useLayoutStore.getState().scriptEditorHeightDefault).toBe(
+			DEFAULT_SCRIPT_EDITOR_HEIGHT + 40
+		);
+
+		vi.useRealTimers();
+	});
+
+	it("starts a freshly mounted row with no entry of its own from the shared default", () => {
+		useLayoutStore.setState({
+			scriptEditorHeights: { s1: 300 },
+			scriptEditorHeightDefault: 300,
+		});
+
+		const { box } = renderForm("script.pre", "s3");
+
+		expect(box).toHaveStyle({ height: "300px" });
 	});
 });
 
@@ -205,12 +279,14 @@ describe("the Snippets disclosure, per row", () => {
 		render(
 			<>
 				<ScriptElementForm
+					id="s1"
 					kind="script.pre"
 					config={{}}
 					description="Runs before the request is sent."
 					onChange={() => {}}
 				/>
 				<ScriptElementForm
+					id="s2"
 					kind="script.post"
 					config={{}}
 					description="Runs after the response is received."

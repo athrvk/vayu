@@ -11,6 +11,7 @@ export { useSaveManager } from "./useSaveManager";
 export { useEntityDraft } from "./useEntityDraft";
 export { useDraftSaveContext } from "./useDraftSaveContext";
 export { useVariableResolver } from "./useVariableResolver";
+export { useVariableWriter } from "./useVariableWriter";
 export { useActiveEnvironmentGuard } from "./useActiveEnvironmentGuard";
 export { useVariableCompletionProvider } from "./useVariableCompletionProvider";
 export { useDataContract } from "./useDataContract";

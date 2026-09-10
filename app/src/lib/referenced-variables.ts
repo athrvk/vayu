@@ -103,13 +103,19 @@ export type PmRead = "scope" | "merged" | "row";
  * worth doing on the next change that touches both, rather than widening a paint
  * fix into that file.
  */
-interface PmAccessor {
+export interface PmAccessor {
 	reads: PmRead;
 	/** The one scope this accessor reads, or null when it does not read one. */
 	scope: VariableScope | null;
 }
 
-const PM_ACCESSORS: Record<string, PmAccessor> = {
+/**
+ * Exported so `lib/script-variable-tokens.ts` can build its `pm.<accessor>.get(...)`
+ * spans off the same five names and the same `reads`/`scope` table, rather than
+ * a second list that can drift from this one (issue #1063 is exactly that class
+ * of drift, one surface at a time).
+ */
+export const PM_ACCESSORS: Record<string, PmAccessor> = {
 	environment: { reads: "scope", scope: "environment" },
 	globals: { reads: "scope", scope: "global" },
 	collectionVariables: { reads: "scope", scope: "collection" },

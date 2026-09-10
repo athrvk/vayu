@@ -7,20 +7,27 @@
 
 /**
  * One editor's `{{token}}` affordances: the colour, and the two ways into the
- * popover (issue #1220).
+ * popover (issue #1220; script support added later under the same issue).
  *
- * Called by `CodeEditor` for every instance, and inert unless all three of these
- * hold - so the settings preview, the response viewers and the script editors
- * keep exactly the behaviour they had:
+ * Called by `CodeEditor` for every instance, and inert unless both of these
+ * hold - so the settings preview and the response viewers keep exactly the
+ * behaviour they had:
  *
  *  - a provider is above it, which is what supplies the resolver and the writer;
  *  - the editor is editable, because a response body's `{{x}}` is data someone
  *    was sent, not a variable this app resolves;
- *  - the language is one of `BODY_LANGUAGES`, the same list `{{` completion is
- *    registered for. A script is deliberately not on it: the engine never
- *    interpolates script source, so braces there are literal text (D16 in
- *    `docs/app/variable-resolution.md`), and colouring them would teach a syntax
- *    that does not work.
+ *
+ * and the language has an entry in `VARIABLE_TOKEN_MATCHERS`
+ * (`monaco-variable-tokens.ts`) - `json`, `plaintext`, `graphql` and `xml`
+ * share the plain `{{name}}` matcher, and `javascript` gets its own
+ * (`lib/script-variable-tokens.ts`): a script reaches a variable through
+ * `pm.<accessor>.get(...)`, `pm.variables.replaceIn(...)`, or - not
+ * interpolated at all, so painted muted and read-only - a bare `{{name}}`
+ * (D16, `docs/engine/scripting.md`). This is a different gate from
+ * `BODY_LANGUAGES` in `useVariableCompletionProvider.ts`, which is the `{{`
+ * **completion** list's own list and stays as it is: offering brace
+ * completion in a script would still teach the wrong syntax, even though the
+ * script's *existing* tokens are now worth painting.
  *
  * **It returns a mount callback and holds no state.** The editor arrives through
  * `onMount`, and storing it in `useState` would make a caller that re-invokes
@@ -43,11 +50,10 @@
 import { useCallback, useEffect, useRef } from "react";
 import type * as Monaco from "monaco-editor";
 import type { MonacoApi } from "@/lib/monaco-api";
-import { BODY_LANGUAGES } from "@/hooks/useVariableCompletionProvider";
 import {
-	variableTokenRanges,
-	variableTokensInLine,
+	VARIABLE_TOKEN_MATCHERS,
 	variableTokenClass,
+	type VariableTokenMatcher,
 	type VariableTokenRange,
 } from "@/lib/monaco-variable-tokens";
 import { chordKeybinding } from "@/lib/editor-chords";
@@ -128,6 +134,15 @@ interface Installation {
 	hoverTimer?: ReturnType<typeof setTimeout>;
 	/** The token that tooltip is for, showing or pending - see `hoverAt`. */
 	hovered?: string;
+	/**
+	 * The spans `paint` last found, read back by `hoverAt` instead of scanning
+	 * again. A per-character mouse move used to re-scan the one line under the
+	 * pointer; a script's spans are not line-local (a `replaceIn(...)` argument
+	 * or a block comment can open on an earlier line), so the fix that covers
+	 * every language is to answer from what the last paint already found rather
+	 * than re-deriving a line-local answer per language.
+	 */
+	ranges?: VariableTokenRange[];
 }
 
 /** Identifies a token across mouse moves: the same name, in the same place. */
@@ -143,16 +158,22 @@ export function useEditorVariableTokens({
 	monaco: MonacoApi
 ) => void {
 	const tokens = useEditorVariableTokensContext();
-	const enabled = !!tokens && !readOnly && BODY_LANGUAGES.includes(language);
+	const matcher = VARIABLE_TOKEN_MATCHERS[language];
+	const enabled = !!tokens && !readOnly && !!matcher;
 
 	/*
 	 * What the imperative handlers read. Monaco's callbacks outlive the render
 	 * that registered them, so they must not close over a resolver: they take
 	 * the current one from here, the way `openAtCursor` does for the chord.
 	 */
-	const live = useRef<{ tokens: EditorVariableTokensValue | null; enabled: boolean }>({
+	const live = useRef<{
+		tokens: EditorVariableTokensValue | null;
+		enabled: boolean;
+		matcher: VariableTokenMatcher | undefined;
+	}>({
 		tokens,
 		enabled,
+		matcher,
 	});
 	const mounted = useRef<{
 		editor: Monaco.editor.IStandaloneCodeEditor;
@@ -163,21 +184,31 @@ export function useEditorVariableTokens({
 	const paint = useCallback(() => {
 		const current = installation.current;
 		const context = live.current.tokens;
-		if (!current || !context) return;
+		const matcher = live.current.matcher;
+		if (!current || !context || !matcher) return;
 		const model = current.editor.getModel();
 		if (!model) {
 			current.decorations.clear();
+			current.ranges = [];
 			return;
 		}
+		const ranges = matcher(model);
+		// Cached for `hoverAt`, which answers from the last paint rather than
+		// scanning again on every pointer move - see the field's own comment.
+		current.ranges = ranges;
 		current.decorations.set(
-			variableTokenRanges(model).map((range) => ({
+			ranges.map((range) => ({
 				range: {
 					startLineNumber: range.lineNumber,
 					startColumn: range.startColumn,
 					endLineNumber: range.lineNumber,
 					endColumn: range.endColumn,
 				},
-				options: { inlineClassName: variableTokenClass(context.classify(range.name)) },
+				options: {
+					inlineClassName: variableTokenClass(
+						context.classify(range.name, range.scriptHint)
+					),
+				},
 			}))
 		);
 	}, []);
@@ -213,19 +244,11 @@ export function useEditorVariableTokens({
 				hideHover();
 				return;
 			}
-			const model = editor.getModel();
-			// One line, not the model: this fires per character of pointer travel,
-			// and the token under the pointer is on the line under the pointer.
-			const range =
-				position && model
-					? tokenAtPosition(
-							variableTokensInLine(
-								model.getLineContent(position.lineNumber),
-								position.lineNumber
-							),
-							position
-						)
-					: null;
+			// From the last paint, not a fresh scan: this fires per character of
+			// pointer travel, and a script's spans are not one line's business
+			// alone (a `replaceIn(...)` argument or a bare template can start on an
+			// earlier line than the one under the pointer).
+			const range = position ? tokenAtPosition(current.ranges ?? [], position) : null;
 			if (!range) {
 				hideHover();
 				return;
@@ -240,7 +263,7 @@ export function useEditorVariableTokens({
 				// it is now or does not open at all.
 				const rect = tokenRect(editor, range);
 				if (!rect) return;
-				context.setHoveredToken({ name: range.name, rect });
+				context.setHoveredToken({ name: range.name, rect, scriptHint: range.scriptHint });
 			}, TIMING.TOOLTIP_DELAY_MS);
 		},
 		[hideHover]
@@ -254,14 +277,16 @@ export function useEditorVariableTokens({
 			// Whatever happens next, the pointer's tooltip is not part of it: the
 			// popover that opens carries the same value over the same rectangle.
 			hideHover();
-			// A generator or a bound column has no stored variable to edit, so there
-			// is nothing to open - the hover already said what it is.
-			if (context.classify(range.name).state === "runtime") return;
+			// A generator, a bound column, or a script's bare `{{name}}` (never
+			// interpolated, so never editable) all classify as "runtime" - nothing
+			// stored behind any of them to open. The hover already said what it is.
+			if (context.classify(range.name, range.scriptHint).state === "runtime") return;
 			const rect = tokenRect(editor, range);
 			if (!rect) return;
 			context.openTokenEditor({
 				name: range.name,
 				rect,
+				scriptHint: range.scriptHint,
 				// Closing puts the caret back where it was: an editor that hands focus
 				// away and does not take it back is the defect this program exists to
 				// remove (#1218).
@@ -271,12 +296,13 @@ export function useEditorVariableTokens({
 		[hideHover]
 	);
 
-	/** Find the token at a position and open it. */
+	/** Find the token at a position and open it - a fresh scan, not the paint's cache. */
 	const openAt = useCallback(
 		(editor: Monaco.editor.IStandaloneCodeEditor, position: Monaco.IPosition | null) => {
 			const model = editor.getModel();
-			if (!model || !position) return;
-			const range = tokenAtPosition(variableTokenRanges(model), position);
+			const matcher = live.current.matcher;
+			if (!model || !position || !matcher) return;
+			const range = tokenAtPosition(matcher(model), position);
 			if (range) open(editor, range);
 		},
 		[open]
@@ -339,8 +365,9 @@ export function useEditorVariableTokens({
 				 */
 				if (!event.target.position) return;
 				const model = editor.getModel();
-				if (!model) return;
-				const range = tokenAtPosition(variableTokenRanges(model), event.target.position);
+				const matcher = live.current.matcher;
+				if (!model || !matcher) return;
+				const range = tokenAtPosition(matcher(model), event.target.position);
 				if (!range) return;
 				if (event.event.ctrlKey || event.event.metaKey) event.event.preventDefault();
 				open(editor, range);
@@ -389,14 +416,14 @@ export function useEditorVariableTokens({
 	 * changing, or the provider arriving.
 	 */
 	useEffect(() => {
-		live.current = { tokens, enabled };
+		live.current = { tokens, enabled, matcher };
 		installLatest.current = install;
 		// A card showing over a token this editor has stopped owning goes now,
 		// rather than at whatever pointer event happens to come next.
 		if (!enabled) hideHover();
 		install();
 		paint();
-	}, [tokens, enabled, hideHover, install, paint]);
+	}, [tokens, enabled, matcher, hideHover, install, paint]);
 
 	useEffect(() => {
 		return () => {

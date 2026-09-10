@@ -26,6 +26,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { useLayoutStore } from "@/stores";
+import { useEditorVariableTokensContext } from "@/components/shared/EditorVariableTokens/context";
 import type { Collection, DataContractScope, ElementDef, ElementKindSchema } from "@/types";
 import type { VariableOrigin } from "@/types/domain";
 import ElementsTab from "./ElementsTab";
@@ -58,6 +59,23 @@ const dataContract: { value: DataContractScope | undefined } = { value: undefine
 const allVariables: { value: Record<string, { value: string; scope: string }> } = { value: {} };
 const variableOrigins: { value: Record<string, VariableOrigin[]> } = { value: {} };
 
+/**
+ * Issue #1651: `ElementsTab` builds its `VariableSupport`'s write half from
+ * `useVariableWriter` now, the same hook `RequestBuilderProvider` uses,
+ * rather than the hardcoded `updateVariable: () => {}` / `writableScopes: []`
+ * that made every token in this tab's script editors open read-only.
+ * `useVariableWriter` itself is a real TanStack Query + Zustand hook with its
+ * own suite (`hooks/useVariableWriter.test.ts`); stubbed here at the same
+ * `@/hooks` seam as `useDataContract`/`useVariableResolver` above it, both
+ * because this file stands up no `QueryClientProvider` and because what this
+ * suite guards is the wiring - which `collectionId` this tab passes in - not
+ * the hook's own behavior.
+ */
+const useVariableWriterMock = vi.fn((_opts?: { collectionId?: string }) => ({
+	updateVariable: vi.fn(),
+	writableScopes: [] as string[],
+}));
+
 vi.mock("@/hooks", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/hooks")>()),
 	useDataContract: () => dataContract.value,
@@ -65,6 +83,7 @@ vi.mock("@/hooks", async (importOriginal) => ({
 		getAllVariables: () => allVariables.value,
 		getVariableOrigins: (name: string) => variableOrigins.value[name] ?? [],
 	}),
+	useVariableWriter: (opts: { collectionId?: string }) => useVariableWriterMock(opts),
 }));
 
 function kindSchema(kind: string, label: string, category: string): ElementKindSchema {
@@ -113,10 +132,17 @@ vi.mock("@/queries", async (importOriginal) => ({
 	useScriptCompletionsQuery: () => ({ data: undefined, isPending: true, isError: false }),
 }));
 
-// Monaco does not run under jsdom.
+// Monaco does not run under jsdom. The stand-in reads the real
+// `EditorVariableTokensContext` (not mocked) so the mount test below can prove
+// `ElementsTab` wraps its editors in the provider without needing Monaco at all.
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
-	CodeEditor: () => <div data-testid="code-editor" />,
+	CodeEditor: () => {
+		const tokens = useEditorVariableTokensContext();
+		return (
+			<div data-testid="code-editor" data-has-token-provider={tokens ? "true" : "false"} />
+		);
+	},
 }));
 
 function extractElement(id: string): ElementDef {
@@ -169,6 +195,7 @@ beforeEach(() => {
 	dataContract.value = undefined;
 	allVariables.value = {};
 	variableOrigins.value = {};
+	useVariableWriterMock.mockClear();
 	// `ElementList`'s Add-element picker reads/writes this directly - reset so
 	// one test's pick does not surface as a duplicate "Recently used" row
 	// in the next.
@@ -408,5 +435,53 @@ describe("ElementsTab - the Names-mentioned row (issue #1553)", () => {
 
 		const chip = screen.getByText("data.email");
 		expect(chip.getAttribute("title")).toContain("declared in Acme API");
+	});
+});
+
+/**
+ * Issue #1220 script support: the collection's script elements had the
+ * "Names mentioned" summary above their editor, but the editor itself painted
+ * no `{{token}}` at all - `EditorVariableTokensProvider` was never mounted
+ * here, unlike `RequestBuilderProvider`'s own tree. Monaco does not run under
+ * jsdom (`CodeEditor` above is a stand-in), so this is a mount test: it reads
+ * `useEditorVariableTokensContext()` from inside the mocked editor and asserts
+ * a provider is somewhere above it, rather than asserting a painted class.
+ *
+ * Mutation check: remove `ElementsTab`'s `<EditorVariableTokensProvider>` wrap
+ * and this reds (`data-has-token-provider="false"`); put it back and it's
+ * green.
+ */
+describe("ElementsTab - the token-editing provider (issue #1220 script support)", () => {
+	it("wraps the element list's editors in EditorVariableTokensProvider", () => {
+		renderTab(
+			makeCollection([scriptElement("e1", "script.pre", 'pm.environment.get("token");')])
+		);
+		expandRow("Pre-request Script");
+
+		expect(screen.getByTestId("code-editor")).toHaveAttribute(
+			"data-has-token-provider",
+			"true"
+		);
+	});
+});
+
+/**
+ * Issue #1651: a token's popover used to open read-only in this tab no matter
+ * what - `variableSupport` hardcoded `updateVariable: () => {}` and
+ * `writableScopes: []` rather than reading them from anywhere. Now it reads
+ * them from `useVariableWriter`, the same hook `RequestBuilderProvider` uses,
+ * so a script element here can write global/collection/environment variables
+ * on the same terms a request's own script can.
+ *
+ * Mutation check: hardcode `variableSupport`'s `updateVariable`/`writableScopes`
+ * back to `() => {}`/`[]` and this reds - `useVariableWriterMock` is called
+ * with nothing at all, so the second assertion below (the id it was asked
+ * for) fails first.
+ */
+describe("ElementsTab - the variable writer (issue #1651)", () => {
+	it("builds its VariableSupport's write half from useVariableWriter, scoped to this collection", () => {
+		renderTab(makeCollection([]));
+
+		expect(useVariableWriterMock).toHaveBeenCalledWith({ collectionId: "c1" });
 	});
 });

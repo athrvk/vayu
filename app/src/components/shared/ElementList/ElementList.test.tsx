@@ -32,6 +32,7 @@ import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { useLayoutStore } from "@/stores";
+import { DEFAULT_SCRIPT_EDITOR_HEIGHT } from "@/constants/layout";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import { ElementList } from "./index";
 
@@ -198,7 +199,11 @@ async function chooseRowAction(title: string, action: string) {
 }
 
 beforeEach(() => {
-	useLayoutStore.setState({ recentElementKinds: [] });
+	useLayoutStore.setState({
+		recentElementKinds: [],
+		scriptEditorHeights: {},
+		scriptEditorHeightDefault: DEFAULT_SCRIPT_EDITOR_HEIGHT,
+	});
 });
 
 describe("ElementList - the generic form for a kind with no bespoke override", () => {
@@ -483,6 +488,29 @@ describe("ElementList - enabling, deleting and duplicating a row", () => {
 		expect(next[1].id).not.toBe("e1");
 		expect(next[1].name).toBe("Extract JSON copy");
 		expect(next[1].config).toEqual({ path: "$.token" });
+	});
+
+	/*
+	 * Issue #1608: a duplicated script row should start at its source's own
+	 * editor height, not fall back to the shared default - the same "copy the
+	 * height" the resize independence fix (issue #1643 part 2) makes possible
+	 * once a height belongs to an element id.
+	 */
+	it("copies the source script element's own editor height onto the duplicate", async () => {
+		useLayoutStore.setState({
+			scriptEditorHeights: { s1: 300 },
+			scriptEditorHeightDefault: 160,
+		});
+		const onChange = renderList([scriptElement("s1")]);
+
+		await chooseRowAction("Pre-request Script", "Duplicate");
+
+		const next = onChange.mock.calls[0][0] as ElementDef[];
+		const copyId = next[1].id;
+		expect(useLayoutStore.getState().scriptEditorHeights[copyId]).toBe(300);
+		// Copying is not the user setting a height anywhere - the shared default
+		// a never-dragged row starts from is untouched.
+		expect(useLayoutStore.getState().scriptEditorHeightDefault).toBe(160);
 	});
 });
 

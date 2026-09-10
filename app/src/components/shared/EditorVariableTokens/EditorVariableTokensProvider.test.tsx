@@ -21,7 +21,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
-import type { VariableSupport } from "@/types";
+import type { VariableOrigin, VariableSupport } from "@/types";
 import { EditorVariableTokensProvider } from "./EditorVariableTokensProvider";
 import { useEditorVariableTokensContext, type EditorVariableTokensValue } from "./context";
 
@@ -66,12 +66,8 @@ const support: VariableSupport = {
 	writableScopes: ["environment", "global"],
 };
 
-vi.mock("@/modules/request-builder/hooks/useVariableSupport", () => ({
-	useVariableSupport: () => support,
-}));
-
 /** Renders the provider and hands back the context an editor would hold. */
-function mountProvider() {
+function mountProvider(overrides: Partial<VariableSupport> = {}) {
 	let value: EditorVariableTokensValue | null = null;
 	function Probe() {
 		value = useEditorVariableTokensContext();
@@ -81,7 +77,7 @@ function mountProvider() {
 	// popover's secret-reveal button is a `TooltipIconButton` that needs it.
 	render(
 		<TooltipProvider>
-			<EditorVariableTokensProvider>
+			<EditorVariableTokensProvider support={{ ...support, ...overrides }}>
 				<Probe />
 			</EditorVariableTokensProvider>
 		</TooltipProvider>
@@ -237,5 +233,127 @@ describe("EditorVariableTokensProvider", () => {
 			"https://api.staging.example.com",
 			"environment"
 		);
+	});
+
+	/**
+	 * A script's mention of a name, via `scriptHint` (issue #1220 script
+	 * support). `TokenHoverCard`/`VariablePopover` never see the hint itself -
+	 * they see whatever `classify` and the origins filter turn it into, which
+	 * is what these cases pin.
+	 */
+	describe("a script's scriptHint", () => {
+		it("answers a single scope's own read, not the ladder's winner", () => {
+			const origins: VariableOrigin[] = [
+				{ scope: "global", value: "https://old", enabled: true, winner: false },
+				{
+					scope: "environment",
+					sourceName: "Staging",
+					value: "https://api.example.com",
+					enabled: true,
+					winner: true,
+				},
+			];
+			const tokens = mountProvider({ getVariableOrigins: () => origins });
+			// pm.collectionVariables.get("baseUrl") - nothing at collection scope,
+			// even though the environment wins the whole ladder.
+			act(() =>
+				tokens.setHoveredToken({
+					name: "baseUrl",
+					rect,
+					scriptHint: { via: "scope", scope: "collection" },
+				})
+			);
+			expect(cardText()).toContain("not defined");
+		});
+
+		it("never shows a bound row for a scope read that cannot see it", () => {
+			const origins: VariableOrigin[] = [
+				{ scope: "row", value: "grace@example.com", enabled: true, winner: true },
+				{
+					scope: "environment",
+					sourceName: "Staging",
+					value: "ada@example.com",
+					enabled: true,
+					winner: false,
+				},
+			];
+			const tokens = mountProvider({ getVariableOrigins: () => origins });
+			// pm.environment.get("email") - the row outranks every scope for
+			// pm.variables, but this accessor never reads the row at all.
+			act(() =>
+				tokens.setHoveredToken({
+					name: "email",
+					rect,
+					scriptHint: { via: "scope", scope: "environment" },
+				})
+			);
+			expect(cardText()).toContain("ada@example.com");
+			expect(cardText()).not.toContain("grace@example.com");
+			expect(cardText()).not.toContain("Bound row");
+		});
+
+		it("answers pm.iterationData.get from the declared contract, when no row is bound yet", () => {
+			// "phone" carries no origins in the shared fixture (no scope defines it,
+			// no row bound to it), so this is the "not previewing a row" case.
+			const tokens = mountProvider({
+				dataColumns: { collectionId: "c1", collectionName: "Checkout", columns: ["phone"] },
+			});
+			act(() => tokens.setHoveredToken({ name: "phone", rect, scriptHint: { via: "row" } }));
+			expect(cardText()).toContain("declared in Checkout");
+		});
+
+		it("answers pm.iterationData.get from the bound row itself, once one is picked", () => {
+			// The shared fixture's "email" already carries a row origin (D18) - the
+			// same row a `pm.variables` read would answer from, and what the run
+			// will actually use, so this outranks the abstract column description.
+			const tokens = mountProvider();
+			act(() => tokens.setHoveredToken({ name: "email", rect, scriptHint: { via: "row" } }));
+			expect(cardText()).toContain("grace@example.com");
+			expect(cardText()).toContain("Bound row");
+		});
+
+		it("a bare script template is muted, not-interpolated, and never opens", () => {
+			const tokens = mountProvider();
+			act(() =>
+				tokens.setHoveredToken({ name: "baseUrl", rect, scriptHint: { via: "bare" } })
+			);
+			expect(cardText()).toMatch(/not interpolated/i);
+			expect(cardText()).toContain("pm.variables.replaceIn");
+			expect(cardText()).not.toContain("Click to edit");
+
+			act(() =>
+				tokens.openTokenEditor({ name: "baseUrl", rect, scriptHint: { via: "bare" } })
+			);
+			// The provider itself refuses to render a popover for a "runtime"
+			// classification (`scoped`, above `active && scoped &&`) - belt and
+			// braces beside `useEditorVariableTokens`' own `open()` guard, which is
+			// what actually stops a bare span's `openTokenEditor` from firing in
+			// the running app.
+			expect(screen.queryByRole("textbox")).toBeNull();
+		});
+	});
+
+	describe("a support with no writable scope (the collection Elements tab, issue #1220)", () => {
+		it("shows the value read-only rather than writing through a no-op updateVariable", () => {
+			const tokens = mountProvider({ writableScopes: [] });
+			act(() => tokens.openTokenEditor({ name: "baseUrl", rect }));
+
+			expect(screen.getByText("https://api.example.com")).toBeInTheDocument();
+			expect(screen.queryByDisplayValue("https://api.example.com")).toBeNull();
+			// Mutation check: pass `support.updateVariable` unconditionally and this
+			// fails - the field renders editable and a "Save" would look like it
+			// worked while writing nowhere.
+		});
+
+		it("never promises an edit the hover card cannot deliver", () => {
+			const tokens = mountProvider({ writableScopes: [] });
+			act(() => tokens.setHoveredToken({ name: "baseUrl", rect }));
+
+			// Mutation check: drop the `editable` gate on `TokenHoverCard` and this
+			// fails - the card would say "Click to edit" over a popover that opens
+			// with no field to type into.
+			expect(cardText()).not.toContain("Click to edit");
+			expect(cardText()).toContain("Click for details");
+		});
 	});
 });

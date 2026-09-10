@@ -15,6 +15,9 @@ import {
 	DEFAULT_GRAPHQL_VARIABLES_SIZE,
 	GRAPHQL_VARIABLES_MAX_SIZE,
 	GRAPHQL_VARIABLES_MIN_SIZE,
+	DEFAULT_SCRIPT_EDITOR_HEIGHT,
+	SCRIPT_EDITOR_MIN_HEIGHT,
+	SCRIPT_EDITOR_MAX_HEIGHT,
 } from "@/constants/layout";
 
 /**
@@ -320,5 +323,160 @@ describe("layout-store recent element kinds", () => {
 		// picker's "Recently used" group is empty on every fresh launch.
 		const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "{}");
 		expect(stored.state.recentElementKinds).toEqual(["extract.json"]);
+	});
+});
+
+/**
+ * A `script.pre` / `script.post` element's own editor height (issue #1643
+ * part 2). Used to be one `scriptEditorHeight` for every script row, so
+ * dragging any one row's resize handle silently resized every other one too.
+ */
+describe("layout-store script editor heights", () => {
+	beforeEach(() => {
+		useLayoutStore.setState({
+			scriptEditorHeights: {},
+			scriptEditorHeightDefault: DEFAULT_SCRIPT_EDITOR_HEIGHT,
+		});
+	});
+
+	it("starts with an empty map and the documented default", () => {
+		expect(useLayoutStore.getInitialState().scriptEditorHeights).toEqual({});
+		expect(useLayoutStore.getInitialState().scriptEditorHeightDefault).toBe(
+			DEFAULT_SCRIPT_EDITOR_HEIGHT
+		);
+	});
+
+	it("records a height under its own id and updates the shared default", () => {
+		useLayoutStore.getState().setScriptEditorHeight("el_1", 300);
+
+		expect(useLayoutStore.getState().scriptEditorHeights).toEqual({ el_1: 300 });
+		expect(useLayoutStore.getState().scriptEditorHeightDefault).toBe(300);
+	});
+
+	it("leaves another id's entry untouched", () => {
+		const { setScriptEditorHeight } = useLayoutStore.getState();
+		setScriptEditorHeight("el_1", 300);
+		setScriptEditorHeight("el_2", 500);
+
+		expect(useLayoutStore.getState().scriptEditorHeights).toEqual({ el_1: 300, el_2: 500 });
+		// The default is whichever was set most recently, across every row.
+		expect(useLayoutStore.getState().scriptEditorHeightDefault).toBe(500);
+	});
+
+	it("clamps to the editor's bounds", () => {
+		const { setScriptEditorHeight } = useLayoutStore.getState();
+
+		setScriptEditorHeight("el_1", 10);
+		expect(useLayoutStore.getState().scriptEditorHeights.el_1).toBe(SCRIPT_EDITOR_MIN_HEIGHT);
+
+		setScriptEditorHeight("el_1", 99999);
+		expect(useLayoutStore.getState().scriptEditorHeights.el_1).toBe(SCRIPT_EDITOR_MAX_HEIGHT);
+	});
+
+	/*
+	 * "Least recently set" is insertion order: re-setting an id moves it to the
+	 * end, so it is spared the next time the cap evicts the oldest entry. Ids
+	 * are `el_0` .. `el_200`, not `"0"` .. `"200"` - integer-like string keys
+	 * sort numerically first in JS regardless of insertion order, which would
+	 * make this pass for the wrong reason.
+	 */
+	it("caps at 200 entries, evicting the oldest that was never re-set", () => {
+		const { setScriptEditorHeight } = useLayoutStore.getState();
+
+		for (let i = 0; i < 200; i++) setScriptEditorHeight(`el_${i}`, 200);
+		expect(Object.keys(useLayoutStore.getState().scriptEditorHeights)).toHaveLength(200);
+
+		setScriptEditorHeight("el_200", 200);
+
+		const heights = useLayoutStore.getState().scriptEditorHeights;
+		expect(Object.keys(heights)).toHaveLength(200);
+		expect(heights.el_0).toBeUndefined();
+		expect(heights.el_1).toBe(200);
+		expect(heights.el_200).toBe(200);
+	});
+
+	it("re-setting an id moves it to the end, sparing it from the next eviction", () => {
+		const { setScriptEditorHeight } = useLayoutStore.getState();
+
+		for (let i = 0; i < 200; i++) setScriptEditorHeight(`el_${i}`, 200);
+		setScriptEditorHeight("el_0", 250); // moves el_0 to the end
+		setScriptEditorHeight("el_200", 200); // now evicts el_1, not el_0
+
+		const heights = useLayoutStore.getState().scriptEditorHeights;
+		expect(heights.el_0).toBe(250);
+		expect(heights.el_1).toBeUndefined();
+	});
+
+	describe("copyScriptEditorHeight (duplicate, issue #1608)", () => {
+		it("copies the source's own height onto the new id, leaving the default alone", () => {
+			const { setScriptEditorHeight, copyScriptEditorHeight } = useLayoutStore.getState();
+			setScriptEditorHeight("el_1", 300);
+			setScriptEditorHeight("el_2", 500); // default is now 500
+
+			copyScriptEditorHeight("el_1", "el_1_copy");
+
+			expect(useLayoutStore.getState().scriptEditorHeights.el_1_copy).toBe(300);
+			expect(useLayoutStore.getState().scriptEditorHeightDefault).toBe(500);
+		});
+
+		it("is a no-op when the source has no entry of its own", () => {
+			useLayoutStore.getState().copyScriptEditorHeight("el_never_dragged", "el_copy");
+
+			expect(useLayoutStore.getState().scriptEditorHeights.el_copy).toBeUndefined();
+		});
+	});
+
+	it("survives a restart, both keys", () => {
+		useLayoutStore.getState().setScriptEditorHeight("el_1", 300);
+
+		// Mutation check: drop either key from `partialize` and a per-row height
+		// (or the shared default a fresh row starts from) lasts exactly until
+		// the next launch.
+		const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "{}");
+		expect(stored.state.scriptEditorHeights).toEqual({ el_1: 300 });
+		expect(stored.state.scriptEditorHeightDefault).toBe(300);
+	});
+
+	describe("v4 -> v5 migration", () => {
+		const migrate = (
+			useLayoutStore.persist.getOptions() as unknown as {
+				migrate: (s: unknown, v: number) => Record<string, unknown>;
+			}
+		).migrate;
+
+		it("carries a v4 blob's single height forward as the shared default", () => {
+			const migrated = migrate({ scriptEditorHeight: 300 }, 4);
+			expect(migrated.scriptEditorHeightDefault).toBe(300);
+			expect(migrated.scriptEditorHeights).toEqual({});
+			expect(migrated.scriptEditorHeight).toBeUndefined();
+		});
+
+		it("clamps a stale value that predates today's bounds", () => {
+			const migrated = migrate({ scriptEditorHeight: 5 }, 4);
+			expect(migrated.scriptEditorHeightDefault).toBe(SCRIPT_EDITOR_MIN_HEIGHT);
+		});
+
+		it("falls back to the documented default when the blob has no old key at all", () => {
+			const migrated = migrate({}, 4);
+			expect(migrated.scriptEditorHeightDefault).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
+			expect(migrated.scriptEditorHeights).toEqual({});
+		});
+
+		it("survives a blob where the old key is not a number", () => {
+			const migrated = migrate({ scriptEditorHeight: "tall" }, 4);
+			expect(migrated.scriptEditorHeightDefault).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
+		});
+
+		it("leaves a v5 blob alone", () => {
+			// Re-running the v4 branch on every launch would silently reset a
+			// per-row map back to empty on every launch, which is the difference
+			// between a default and a policy.
+			const migrated = migrate(
+				{ scriptEditorHeights: { el_1: 400 }, scriptEditorHeightDefault: 400 },
+				5
+			);
+			expect(migrated.scriptEditorHeights).toEqual({ el_1: 400 });
+			expect(migrated.scriptEditorHeightDefault).toBe(400);
+		});
 	});
 });

@@ -1713,8 +1713,16 @@ list by `InheritedElementsNotice` instead of once per script row.
 percentage or a `ResizablePanelGroup` could divide, so `CodeEditor`'s default
 `height="100%"` used to resolve against nothing and Monaco laid out at zero
 height with the typed text hidden. `ScriptElementForm` instead sets the box's
-height directly from `layout-store`'s `scriptEditorHeight` (one value for
-every script row, like `graphqlVariablesSize`); a handle below the box - the
+height directly from `layout-store`'s `scriptEditorHeights`, keyed by the
+owning element's own `id` (`ElementRow` passes it) - a request or collection
+can show a `script.pre` and a `script.post` card at once, and a single shared
+value used to mean dragging either one's handle resized both (issue #1643
+part 2). A row with no entry of its own starts from the last height set on
+*any* row, `scriptEditorHeightDefault`, read once at mount rather than
+subscribed to - so a still-mounted row with no entry is never retroactively
+resized by a later drag elsewhere. Duplicate (issue #1608) copies the source
+row's own entry onto the new id, so a duplicated script starts at its
+source's height rather than the default. A handle below the box - the
 GraphQL body's `ResizableHandle` styling, without the panel group it depends
 on - drags it between `SCRIPT_EDITOR_MIN_HEIGHT` and `SCRIPT_EDITOR_MAX_HEIGHT`
 (`constants/layout.ts`), previewing every pointer-move frame and persisting
@@ -1997,19 +2005,46 @@ a token is* is shared: `classifyVariableToken` (`lib/variable-token-kind.ts`)
 lifts the same ladder this section describes out of the paint, so the editors
 and the overlay answer one `{{name}}` identically - the overlay classifies
 each `{{name}}` once per repaint, before any paint, and its five ordered
-checks exist nowhere else (issue #1239). Script editors are excluded: the
-engine never interpolates script source, so `{{name}}` there is literal
-text except inside `pm.variables.replaceIn`. Read-only editors (response
-body, raw request/response, the settings preview) are excluded too - a
-response body's `{{x}}` is data someone was sent, not a token the app owns.
+checks exist nowhere else (issue #1239). Read-only editors (response body,
+raw request/response, the settings preview) are excluded - a response body's
+`{{x}}` is data someone was sent, not a token the app owns.
 
-Excluding them is one mechanism now, not two (issue #1320). The paint, the
-hover card and the popover are all installed by `useEditorVariableTokens` -
-one call, per editor - so a script or read-only editor is excluded simply by
-never calling it; there is no model left to mark and no per-language provider
-left to answer for one anyway. That is simpler than the two mechanisms this
-used to take: a Monaco hover provider is registered per *language*, not per
-editor, so the `json` provider answering for a request body was the same
+**Script (`javascript`) editors are decorated too, on three different
+readings** (issue #1220 script support - `lib/script-variable-tokens.ts`,
+gated per language by `VARIABLE_TOKEN_MATCHERS` in `monaco-variable-tokens.ts`,
+a different gate from `BODY_LANGUAGES`, which stays the `{{` **completion**
+list's own list and does not offer brace completion in a script):
+
+- The string-literal argument of `pm.environment.get(...)`,
+  `pm.globals.get(...)`, `pm.collectionVariables.get(...)`,
+  `pm.variables.get(...)` and `pm.iterationData.get(...)` - a real read,
+  painted and hoverable and (where the scope is writable) editable like a
+  body token, but classified against only what that one accessor can see
+  (`classifyScriptToken`, `lib/variable-token-kind.ts`): one scope's own
+  answer for the first three, the whole merged ladder for `pm.variables` (the
+  same answer a body token gets), and the bound data row alone for
+  `pm.iterationData`. A setter (`pm.environment.set(...)`) is never matched -
+  only `.get` is a read - and a name inside a `//` or `/* */` comment is
+  excluded by the same scan that finds the accessor calls.
+- Every `{{name}}` inside a `pm.variables.replaceIn(...)` call's template
+  argument - the one place a script really is interpolated - gets the full
+  body-language treatment: the merged ladder, no accessor to narrow it.
+- A **bare** `{{name}}` anywhere else in a script is muted
+  (`vayu-variable-token-runtime`) and read-only: hovering explains that the
+  script never interpolates it (the same sentence the "Names mentioned" chip
+  row already gives it, `TEMPLATE_IN_SCRIPT_NOTE` in
+  `lib/referenced-variables.ts`) and names `pm.variables.replaceIn` as the
+  fix, but there is no popover - editing a value the script will never read
+  at runtime would be actively misleading.
+
+Excluding a read-only editor is one mechanism now, not two (issue #1320). The
+paint, the hover card and the popover are all installed by
+`useEditorVariableTokens` - one call, per editor - so a read-only editor is
+excluded simply by never calling it; there is no model left to mark and no
+per-language provider left to answer for one anyway. That is simpler than the
+two mechanisms this used to take: a Monaco hover provider is registered per
+*language*, not per editor, so the `json` provider answering for a request
+body was the same
 object Monaco asked about a response body, and an editor that painted tokens
 had to mark its model (`lib/variable-token-models.ts`, since deleted) for the
 hover to tell them apart. `readOnly` could not decide it either way - that is
@@ -2405,7 +2440,12 @@ to keep from each answering that separately (#938, #1213).
   is bound where the token decorations are - per editor, in
   `useEditorVariableTokens` - because which variable to open is a question only
   the editor holding the caret can answer. Registered only where the tokens are
-  painted, so a read-only viewer and a script editor never carry it.
+  painted, so a read-only viewer never carries it. A script editor does (issue
+  #1220 script support): the caret on a `pm.<accessor>.get(...)` argument or a
+  `replaceIn(...)` template opens the popover the same way a body token does;
+  on a bare `{{name}}` it does nothing, the same guard that keeps a plain click
+  from opening one - there is no stored variable behind a mention the script
+  never reads.
 
 **A read-only editor has no trap to escape**: `tabFocusMode` is simply on for
 it, Tab having nothing to indent in text nobody can type into, so it shows no

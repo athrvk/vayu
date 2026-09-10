@@ -382,6 +382,7 @@ function ElementRow({
 					{renderAboveForm?.(element)}
 					{Bespoke ? (
 						<Bespoke
+							id={element.id}
 							kind={element.kind}
 							config={element.config}
 							description={schema?.description ?? ""}
@@ -425,6 +426,7 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 	const [pickerOpen, setPickerOpen] = useState(false);
 	const recentKindIds = useLayoutStore((s) => s.recentElementKinds);
 	const addRecentElementKind = useLayoutStore((s) => s.addRecentElementKind);
+	const copyScriptEditorHeight = useLayoutStore((s) => s.copyScriptEditorHeight);
 	const recentKinds = recentKindIds
 		.map((kind) => kinds.find((k) => k.kind === kind))
 		.filter((k): k is ElementKindSchema => k !== undefined);
@@ -471,6 +473,10 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 			name: `${original.name ?? kindLabel(original.kind, kinds)} copy`,
 		};
 		setJustAddedId(copy.id);
+		// A duplicated script element starts at its source's own editor height,
+		// not the shared default (issue #1608) - a no-op for every other kind,
+		// since only a script element ever has an entry in `scriptEditorHeights`.
+		copyScriptEditorHeight(original.id, copy.id);
 		onChange([...elements.slice(0, index + 1), copy, ...elements.slice(index + 1)]);
 	}
 

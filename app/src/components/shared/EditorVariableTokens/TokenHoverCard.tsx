@@ -76,10 +76,20 @@ export function TokenHoverCard({
 	request,
 	kind,
 	origins,
+	editable,
 }: {
 	request: TokenHoverRequest;
 	kind: VariableTokenKind;
 	origins: VariableOrigin[];
+	/**
+	 * Whether a click actually writes anything (issue #1220 script support).
+	 * False whenever this token's scope is not one `support.writableScopes`
+	 * lists - "Click to edit" there would promise a save the surface cannot do,
+	 * the same written-never-read shape the `onValueChange` gate in
+	 * `EditorVariableTokensProvider` exists to avoid one layer up. Still worth
+	 * a click: the popover shows the origins list this card does not.
+	 */
+	editable: boolean;
 }) {
 	return (
 		<div
@@ -117,14 +127,21 @@ export function TokenHoverCard({
 					<span className="flex flex-col gap-1">
 						<HoverAnswer kind={kind} origins={origins} />
 						{/*
-						 * What to do about it, for the one class of token that has
-						 * something to do. A field's token is a real element and
-						 * looks pressable; this one is painted text on a canvas, and
-						 * the affordance used to be spelled out by the Monaco hover
-						 * ("⌘-click or ⇧⌘D to edit") this card replaced. A generator
-						 * has no stored variable behind it, so it says nothing.
+						 * What a click does, for the one class of token that has
+						 * anything behind it to open. A field's token is a real
+						 * element and looks pressable; this one is painted text on a
+						 * canvas, and the affordance used to be spelled out by the
+						 * Monaco hover ("⌘-click or ⇧⌘D to edit") this card replaced.
+						 * A generator has no stored variable behind it, so it says
+						 * nothing; a token whose scope is not currently writable still
+						 * opens the popover, for the origins list, but never promises
+						 * a save it cannot do.
 						 */}
-						{kind.state !== "runtime" && <TooltipHint>Click to edit</TooltipHint>}
+						{kind.state !== "runtime" && (
+							<TooltipHint>
+								{editable ? "Click to edit" : "Click for details"}
+							</TooltipHint>
+						)}
 					</span>
 				</TooltipContent>
 			</Tooltip>

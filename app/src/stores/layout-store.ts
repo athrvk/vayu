@@ -95,14 +95,28 @@ interface LayoutState {
 	scriptSnippetsCollapsed: boolean;
 
 	/**
-	 * Height (px) of a `script.pre` / `script.post` element's Monaco editor box.
+	 * Height (px) of a `script.pre` / `script.post` element's Monaco editor box,
+	 * keyed by the element's own id (issue #1643).
 	 *
-	 * One value for every script row, the same "one size across every instance"
-	 * shape `graphqlVariablesSize` uses. Pixels rather than a percentage: the
-	 * element card the editor sits in is auto-height, not a bounded parent a
-	 * percentage could divide against (issue #1605).
+	 * A single shared value here (like `graphqlVariablesSize`, which really is
+	 * one pane) used to mean dragging *any* script row's handle silently
+	 * resized every other script row too - a request or collection can show a
+	 * `script.pre` and a `script.post` card on screen at once, each its own
+	 * element. Capped at `SCRIPT_EDITOR_HEIGHTS_MAX` entries, oldest *set*
+	 * evicted first (re-setting an id's own entry counts as setting it now, so
+	 * it moves to the end): a collection with years of script elements should
+	 * not grow this map without bound in localStorage.
 	 */
-	scriptEditorHeight: number;
+	scriptEditorHeights: Record<string, number>;
+
+	/**
+	 * The height a script row with no entry of its own in `scriptEditorHeights`
+	 * starts at - the last height the user chose on *any* row. Every write to
+	 * the map above updates this too, the same "per-instance state, seeded from
+	 * a shared default" shape `scriptSnippetsCollapsed` uses for its own row's
+	 * disclosure.
+	 */
+	scriptEditorHeightDefault: number;
 
 	/**
 	 * The last five element kinds added through the Add-element picker, most
@@ -156,12 +170,49 @@ interface LayoutState {
 	setGraphqlVariablesSize: (size: number) => void;
 
 	setScriptSnippetsCollapsed: (collapsed: boolean) => void;
-	setScriptEditorHeight: (height: number) => void;
+	/** Clamps, records `id`'s own height, and updates the shared default every never-dragged row starts from. */
+	setScriptEditorHeight: (id: string, height: number) => void;
+	/**
+	 * Copies `fromId`'s recorded height onto `toId` - a duplicated script row
+	 * (issue #1608) starts at its source's height rather than falling back to
+	 * the shared default. A no-op when the source has no entry of its own.
+	 * Deliberately leaves `scriptEditorHeightDefault` untouched: copying on
+	 * Duplicate is not the user setting a height anywhere.
+	 */
+	copyScriptEditorHeight: (fromId: string, toId: string) => void;
 
 	/** Moves `kind` to the front of `recentElementKinds`, capped at five. */
 	addRecentElementKind: (kind: string) => void;
 
 	setPaletteOpen: (open: boolean) => void;
+}
+
+/** Cap for `scriptEditorHeights` - see the field's own comment. */
+const SCRIPT_EDITOR_HEIGHTS_MAX = 200;
+
+function clampScriptEditorHeight(height: number): number {
+	return Math.max(SCRIPT_EDITOR_MIN_HEIGHT, Math.min(SCRIPT_EDITOR_MAX_HEIGHT, height));
+}
+
+/**
+ * Sets `id`'s entry to `height`, moving it to the end of insertion order (the
+ * "least recently set" position an eviction should spare) and evicting the
+ * oldest entry once the map would exceed `SCRIPT_EDITOR_HEIGHTS_MAX`. Object
+ * key order is insertion order here only because element ids are `el_...`
+ * strings, never integer-like - integer-like keys sort numerically first in
+ * JS regardless of insertion order.
+ */
+function withScriptEditorHeight(
+	heights: Record<string, number>,
+	id: string,
+	height: number
+): Record<string, number> {
+	const next = { ...heights };
+	delete next[id];
+	next[id] = height;
+	const keys = Object.keys(next);
+	if (keys.length > SCRIPT_EDITOR_HEIGHTS_MAX) delete next[keys[0]];
+	return next;
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -177,7 +228,8 @@ export const useLayoutStore = create<LayoutState>()(
 			graphqlVariablesCollapsed: false,
 			graphqlVariablesSize: DEFAULT_GRAPHQL_VARIABLES_SIZE,
 			scriptSnippetsCollapsed: true,
-			scriptEditorHeight: DEFAULT_SCRIPT_EDITOR_HEIGHT,
+			scriptEditorHeights: {},
+			scriptEditorHeightDefault: DEFAULT_SCRIPT_EDITOR_HEIGHT,
 			recentElementKinds: [],
 			paletteOpen: false,
 
@@ -224,12 +276,30 @@ export const useLayoutStore = create<LayoutState>()(
 				}),
 
 			setScriptSnippetsCollapsed: (collapsed) => set({ scriptSnippetsCollapsed: collapsed }),
-			setScriptEditorHeight: (height) =>
-				set({
-					scriptEditorHeight: Math.max(
-						SCRIPT_EDITOR_MIN_HEIGHT,
-						Math.min(SCRIPT_EDITOR_MAX_HEIGHT, height)
-					),
+			setScriptEditorHeight: (id, height) =>
+				set((s) => {
+					const clamped = clampScriptEditorHeight(height);
+					return {
+						scriptEditorHeights: withScriptEditorHeight(
+							s.scriptEditorHeights,
+							id,
+							clamped
+						),
+						scriptEditorHeightDefault: clamped,
+					};
+				}),
+			copyScriptEditorHeight: (fromId, toId) =>
+				set((s) => {
+					const source = s.scriptEditorHeights[fromId];
+					return source === undefined
+						? {}
+						: {
+								scriptEditorHeights: withScriptEditorHeight(
+									s.scriptEditorHeights,
+									toId,
+									source
+								),
+							};
 				}),
 
 			addRecentElementKind: (kind) =>
@@ -244,10 +314,11 @@ export const useLayoutStore = create<LayoutState>()(
 		}),
 		{
 			name: STORAGE_KEYS.LAYOUT_STORE,
-			version: 4,
+			version: 5,
 			migrate: (persisted, version) => {
 				const state = persisted as LayoutState & {
 					drawerWidths?: Record<string, number>;
+					scriptEditorHeight?: number;
 				};
 				// v1 could persist a skewed split ratio while panel sizes were
 				// misparsed as pixels - reset to an even split
@@ -279,6 +350,21 @@ export const useLayoutStore = create<LayoutState>()(
 						...CONTEXT_BAR_DEFAULT_COLLAPSED.filter((id) => !collapsed.includes(id)),
 					];
 				}
+				// v4 kept one scriptEditorHeight for every script row (issue #1643):
+				// dragging any one row's resize handle silently resized every other
+				// one too. Split into a per-id map plus the shared default a
+				// never-dragged row starts from; the one old value becomes that
+				// default (clamped - a stale blob could predate today's bounds), and
+				// the map starts empty since a single old number cannot say which of
+				// a user's script elements they had set it while looking at.
+				if (version < 5) {
+					state.scriptEditorHeightDefault =
+						typeof state.scriptEditorHeight === "number"
+							? clampScriptEditorHeight(state.scriptEditorHeight)
+							: DEFAULT_SCRIPT_EDITOR_HEIGHT;
+					state.scriptEditorHeights = {};
+					delete state.scriptEditorHeight;
+				}
 				return state;
 			},
 			partialize: (state) => ({
@@ -292,7 +378,8 @@ export const useLayoutStore = create<LayoutState>()(
 				graphqlVariablesCollapsed: state.graphqlVariablesCollapsed,
 				graphqlVariablesSize: state.graphqlVariablesSize,
 				scriptSnippetsCollapsed: state.scriptSnippetsCollapsed,
-				scriptEditorHeight: state.scriptEditorHeight,
+				scriptEditorHeights: state.scriptEditorHeights,
+				scriptEditorHeightDefault: state.scriptEditorHeightDefault,
 				recentElementKinds: state.recentElementKinds,
 			}),
 		}

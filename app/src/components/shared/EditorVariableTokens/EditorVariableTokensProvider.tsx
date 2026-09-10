@@ -16,16 +16,30 @@
  * measured, with the *same* popover component, the same origins and the same
  * writer behind it. Two popovers would be two answers to "what is this value".
  *
- * Mounted by `RequestBuilderProvider` around its children, because that is what
- * holds `updateVariable` and the scopes it can write to. Everything an editor
- * needs to paint or open a token arrives through the context; an editor with no
- * provider above it paints nothing.
+ * Mounted around whichever tree holds editors that interpolate variables, fed
+ * a `VariableSupport` by the caller - `RequestBuilderProvider` and the
+ * collection's `ElementsTab` each build one from `useVariableResolver` +
+ * `useVariableWriter` (issue #1651), the same `updateVariable`/`writableScopes`
+ * pair under a shared hook rather than the request builder's own, since a
+ * variable's scope was never actually request-shaped - global, a collection's
+ * own, and the session's active environment are all writable from either tree
+ * on the same terms (issue #1220 script support). Taking `support` as a prop
+ * rather than reading `useVariableSupport()` itself is the same #564 move that
+ * type made in the first place: a hook that throws with no
+ * `RequestBuilderProvider` above it is exactly what kept this provider
+ * unusable outside the request builder. Everything an editor needs to paint
+ * or open a token arrives through the context; an editor with no provider
+ * above it paints nothing.
  */
 
 import { useCallback, useMemo, useState } from "react";
 import { VariablePopover } from "@/components/ui";
-import { useVariableSupport } from "@/modules/request-builder/hooks/useVariableSupport";
-import { classifyVariableToken, type VariableTokenKind } from "@/lib/variable-token-kind";
+import {
+	classifyScriptToken,
+	type ScriptTokenHint,
+	type VariableTokenKind,
+} from "@/lib/variable-token-kind";
+import type { VariableOrigin, VariableSupport } from "@/types";
 import {
 	EditorVariableTokensContext,
 	type EditorVariableTokensValue,
@@ -33,6 +47,30 @@ import {
 	type TokenHoverRequest,
 } from "./context";
 import { TokenHoverCard } from "./TokenHoverCard";
+
+/**
+ * The origins a script's span should be judged against - the accessor's own
+ * scope only for a `"scope"` read (never a bound row, which that accessor
+ * cannot see), the row alone for a `"row"` read, none at all for a `"bare"`
+ * mention (it is not a read, so nothing shadows it), and everything for a
+ * caller with no hint - a body-language token, `pm.variables.get`, or a
+ * `replaceIn(...)` template, all of which answer from the whole ladder.
+ *
+ * Filtering matters beyond tidiness: `TokenHoverCard`'s `HoverAnswer` checks
+ * `origins` for a `"row"` entry *before* looking at `kind` at all, so an
+ * unfiltered list would show "Bound row" for `pm.environment.get("email")`
+ * while a row happens to be picked - true of `pm.variables`, false of the one
+ * scope this accessor actually reads.
+ */
+function originsForHint(
+	origins: VariableOrigin[],
+	scriptHint: ScriptTokenHint | undefined
+): VariableOrigin[] {
+	if (!scriptHint) return origins;
+	if (scriptHint.via === "bare") return [];
+	if (scriptHint.via === "row") return origins.filter((o) => o.scope === "row");
+	return origins.filter((o) => o.scope === scriptHint.scope);
+}
 
 /**
  * The open request, plus the sequence number that makes each open a fresh
@@ -44,8 +82,14 @@ interface ActiveRequest extends TokenEditRequest {
 	key: number;
 }
 
-export function EditorVariableTokensProvider({ children }: { children: React.ReactNode }) {
-	const variables = useVariableSupport();
+export function EditorVariableTokensProvider({
+	children,
+	support,
+}: {
+	children: React.ReactNode;
+	/** What every editor under this provider paints, opens and writes through. */
+	support: VariableSupport;
+}) {
 	const [active, setActive] = useState<ActiveRequest | null>(null);
 	const [hovered, setHovered] = useState<TokenHoverRequest | null>(null);
 
@@ -54,13 +98,18 @@ export function EditorVariableTokensProvider({ children }: { children: React.Rea
 	 * whole map on every call, and a body with fifty tokens would otherwise copy
 	 * it fifty times on every keystroke that redraws the decorations.
 	 */
-	const allVariables = useMemo(() => variables.getAllVariables(), [variables]);
-	const dataColumns = variables.dataColumns;
+	const allVariables = useMemo(() => support.getAllVariables(), [support]);
+	const dataColumns = support.dataColumns;
+	const getVariableOrigins = support.getVariableOrigins;
 
 	const classify = useCallback(
-		(name: string): VariableTokenKind =>
-			classifyVariableToken(name, { variables: allVariables, dataColumns }),
-		[allVariables, dataColumns]
+		(name: string, scriptHint?: ScriptTokenHint): VariableTokenKind =>
+			classifyScriptToken(name, scriptHint, {
+				variables: allVariables,
+				dataColumns,
+				getVariableOrigins,
+			}),
+		[allVariables, dataColumns, getVariableOrigins]
 	);
 
 	const openTokenEditor = useCallback((request: TokenEditRequest) => {
@@ -75,11 +124,11 @@ export function EditorVariableTokensProvider({ children }: { children: React.Rea
 	const value = useMemo<EditorVariableTokensValue>(
 		() => ({
 			classify,
-			getVariableOrigins: variables.getVariableOrigins,
+			getVariableOrigins,
 			openTokenEditor,
 			setHoveredToken: setHovered,
 		}),
-		[classify, variables.getVariableOrigins, openTokenEditor]
+		[classify, getVariableOrigins, openTokenEditor]
 	);
 
 	const close = useCallback(() => {
@@ -92,8 +141,20 @@ export function EditorVariableTokensProvider({ children }: { children: React.Rea
 	 * the popover to edit. The editors never ask for one; this is the guard that
 	 * keeps that true rather than an assumption about every future caller.
 	 */
-	const kind = active ? classify(active.name) : null;
+	const kind = active ? classify(active.name, active.scriptHint) : null;
 	const scoped = kind && kind.state !== "runtime" ? kind : null;
+
+	/*
+	 * No scope this support can write to at all (both trees pass
+	 * `useVariableWriter`, so this is rare rather than the collection tab's
+	 * permanent state - see its own comment): fall back to `VariablePopover`'s
+	 * own read-only state rather than handing it a `updateVariable` that would
+	 * appear to save and silently doesn't. `writableScopes` already carries
+	 * this fact for the create picker; this is the same fact read for the edit
+	 * path, which - unlike create - the popover does not gate on
+	 * `writableScopes` itself.
+	 */
+	const canWrite = support.writableScopes.length > 0;
 
 	return (
 		<EditorVariableTokensContext.Provider value={value}>
@@ -104,8 +165,9 @@ export function EditorVariableTokensProvider({ children }: { children: React.Rea
 					// rectangle rather than animating the old one across the editor.
 					key={`${hovered.name}:${hovered.rect.left}:${hovered.rect.top}`}
 					request={hovered}
-					kind={classify(hovered.name)}
-					origins={variables.getVariableOrigins(hovered.name)}
+					kind={classify(hovered.name, hovered.scriptHint)}
+					origins={originsForHint(getVariableOrigins(hovered.name), hovered.scriptHint)}
+					editable={canWrite}
 				/>
 			)}
 			{active && scoped && (
@@ -128,10 +190,10 @@ export function EditorVariableTokensProvider({ children }: { children: React.Rea
 						name={active.name}
 						varInfo={scoped.info}
 						resolved={scoped.state !== "undefined"}
-						onValueChange={variables.updateVariable}
+						onValueChange={canWrite ? support.updateVariable : undefined}
 						saveMode="auto"
-						origins={variables.getVariableOrigins(active.name)}
-						writableScopes={variables.writableScopes}
+						origins={originsForHint(getVariableOrigins(active.name), active.scriptHint)}
+						writableScopes={support.writableScopes}
 						defaultOpen
 						focusOnOpen
 						onOpenChange={(open) => {

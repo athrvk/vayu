@@ -1403,7 +1403,12 @@ It exists only on the merged accessor - the scoped `replaceIn` variants stay
 absent - and its argument must be a string (a non-string is a `TypeError`).
 This is the one sanctioned way to `{{...}}` in a script: script *source* is
 never interpolated (issue #226, D16 - a rewrite cannot tell code from a string
-literal, and splicing values into source is an injection).
+literal, and splicing values into source is an injection). The editor now
+paints that difference rather than leaving it to this page alone: a
+`replaceIn(...)` template's tokens get the full colour and popover a body
+field's do, while a bare `{{name}}` written anywhere else paints muted and its
+hover names this section and `pm.variables.replaceIn` as the fix (issue #1220
+script support, `docs/app/COMPONENTS.md`).
 
 **It resolves the reserved data namespace too** (issue #890), which composition
 deliberately does not: `resolve_template` leaves `{{data.column}}` written as it
