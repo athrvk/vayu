@@ -37,14 +37,30 @@ import {
 	Cloud,
 	ArrowLeft,
 	ArrowRight,
+	Plus,
+	Download,
 } from "lucide-react";
-import { canGoBack, canGoForward, useSessionStore, useTabsStore, useToastStore } from "@/stores";
-import { useEnvironmentsQuery, useSetActiveEnvironmentMutation } from "@/queries";
+import {
+	canGoBack,
+	canGoForward,
+	useImportModalStore,
+	useSessionStore,
+	useTabsStore,
+	useToastStore,
+} from "@/stores";
+import {
+	useCreateEnvironmentMutation,
+	useEnvironmentsQuery,
+	useSetActiveEnvironmentMutation,
+} from "@/queries";
+import { useVariablesStore } from "@/modules/variables/variables-store";
+import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 import {
 	DropdownMenu,
 	DropdownMenuTrigger,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuSeparator,
 	TooltipIconButton,
 } from "@/components/ui";
 import {
@@ -298,8 +314,27 @@ function EnvSwitcher() {
 	const { activeEnvironmentId } = useSessionStore();
 	const { data: environments = [] } = useEnvironmentsQuery();
 	const setActiveEnvironment = useSetActiveEnvironmentMutation();
+	const createEnvironment = useCreateEnvironmentMutation();
+	const { openTab } = useTabsStore();
+	const { setSelectedCategory } = useVariablesStore();
+	const openImport = useImportModalStore((s) => s.open);
 	const showToast = useToastStore((s) => s.showToast);
 	const activeEnv = environments.find((e) => e.id === activeEnvironmentId);
+
+	/*
+	 * Create-then-navigate only, the same as the Variables sidebar's own
+	 * `handleCreateEnvironment` - it does not activate the environment. Creating
+	 * one is not a decision to make it live; that stays a deliberate, separate
+	 * choice through `selectEnvironment` below.
+	 */
+	const createNewEnvironment = async () => {
+		const newEnv = await createEnvironment.mutateAsync({
+			name: DEFAULT_ENVIRONMENT_NAME,
+			variables: {},
+		});
+		setSelectedCategory({ type: "environment", environmentId: newEnv.id });
+		openTab({ type: "variables", entityId: null });
+	};
 
 	/*
 	 * Switching environment is a silent change with loud consequences: every
@@ -391,6 +426,18 @@ function EnvSwitcher() {
 				</button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-44">
+				<DropdownMenuItem
+					onClick={() => void createNewEnvironment()}
+					className="text-xs gap-2"
+				>
+					<Plus className="w-3.5 h-3.5" />
+					<span className="flex-1">New Environment</span>
+				</DropdownMenuItem>
+				<DropdownMenuItem onClick={openImport} className="text-xs gap-2">
+					<Download className="w-3.5 h-3.5" />
+					<span className="flex-1">Import Environment...</span>
+				</DropdownMenuItem>
+				<DropdownMenuSeparator />
 				<DropdownMenuItem onClick={() => selectEnvironment(null)} className="text-xs gap-2">
 					<span className="flex-1">No Environment</span>
 					{!activeEnv && <Check className="w-3.5 h-3.5" />}
