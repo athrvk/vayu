@@ -1339,7 +1339,10 @@ the null-vs-absent rule.
   "stream": false,                   // Optional, consume the response as an event stream.
                                       // Default false - see below
   "specOperation": null,             // Optional, which spec operation this request is - see below
-  "methodSource": null               // Optional, which app setting wrote `method` - see below
+  "methodSource": null,              // Optional, which app setting wrote `method` - see below
+  "mockResponseMode": "first",       // Optional: "first" | "fixed" | "random". Default "first"
+                                      // - which saved example a mock server answers with, see below
+  "mockExampleId": null              // Optional, the example id `mockResponseMode: "fixed"` targets
 }
 ```
 
@@ -1386,6 +1389,16 @@ anything other than the GraphQL switch, so a method the user has since picked is
 never reverted - the same "still ours" contract `KeyValueEntry.source` (issue
 #1481) gives a header row.
 
+**`mockResponseMode` names which saved example a mock server answers with**
+(issue #481 phase 3): `"first"` (the default, absent or `null` on create both
+mean this), `"fixed"` (the example named by `mockExampleId`) or `"random"`.
+Anything else is a `400`, the same way an unrecognized `methodSource` is.
+`mockExampleId` follows the same null-vs-absent rule as `specOperation`: absent
+keeps the current target, `null` clears it, and a non-empty string sets it -
+it is not checked against the request's saved examples at write time, because
+the target can be created afterwards or deleted later, and a mock server falls
+back to `"first"` for either case rather than this write refusing one up front.
+
 **Response:** The created request object, carrying the engine-generated `id`.
 
 **Errors:** `400` if the body carries an `id`
@@ -1395,6 +1408,8 @@ does not exist (message `Collection '<id>' does not exist`), on an unrecognized
 `method`, on a
 `params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`,
 on a `methodSource` that is not `"graphql"` or `null`,
+on a `mockResponseMode` that is not `"first"` / `"fixed"` / `"random"`,
+on a `mockExampleId` that is not a non-empty string or `null`,
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
 names the field and lists the valid values); `413` naming the field, its size
 and the cap, when a serialized `params` / `headers` / `body` / `auth` is over
@@ -1418,9 +1433,10 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
 `PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
-`verifySSL` / `stream` / `specOperation` / `methodSource` leaves the stored
-values untouched; sending `null` resets them to
-`true` / `10` / `true` / `false` / "no operation" / "no marker".
+`verifySSL` / `stream` / `specOperation` / `methodSource` / `mockResponseMode` /
+`mockExampleId` leaves the stored values untouched; sending `null` resets them
+to `true` / `10` / `true` / `false` / "no operation" / "no marker" / `"first"` /
+"no target".
 A non-boolean `followRedirects`, `verifySSL` or `stream`, or a non-integer
 `maxRedirects`, is ignored rather than rejected. `maxRedirects` is clamped to `0..100` on the way in.
 
@@ -1452,7 +1468,9 @@ carry `preRequestScript` / `postRequestScript` at all.
 `collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection
 that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, a malformed `specOperation`, a
-`methodSource` that is not `"graphql"` or `null`, or an
+`methodSource` that is not `"graphql"` or `null`, a `mockResponseMode` that is
+not `"first"` / `"fixed"` / `"random"`, a `mockExampleId` that is not a
+non-empty string or `null`, or an
 `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`; `413` naming the
 field, its size and the cap, when a serialized `params` / `headers` / `body` /
 `auth` is over the engine's field cap (issue #1485,

@@ -484,8 +484,11 @@ logged as a warning: it means a client skipped composition.
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the
   collection cascade take the examples with them. Ordering is a contract: the
-  list comes back by `order`, then `created_at`, then `id`, and a mock server
-  answers with the first. `POST /import/apply` writes them nested on the
+  list comes back by `order`, then `created_at`, then `id`. Since #481 phase 3,
+  a request's own `mock_response_mode` (`"first"` / `"fixed"` / `"random"`,
+  validated the same way `methodSource` is) decides which one a mock server
+  answers with, and `mock_example_id` names the target for `"fixed"`.
+  `POST /import/apply` writes them nested on the
   request item through the same `apply_request_example_fields` applier. Every
   row records an **`origin`** (#588), `import` or `user`, defaulting to
   `import` and `400` on anything else, so the spec sync can replace the first
