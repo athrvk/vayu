@@ -780,6 +780,25 @@ TEST_F (ResourceWriteRouteTest, MethodSourceReadsBackThroughBothSerializers) {
     EXPECT_EQ (listed[0]["methodSource"], created["methodSource"]);
 }
 
+// ---------------------------------------------------------------------------
+// Requests - mockResponseMode / mockExampleId (issue #481 phase 3). Which
+// saved example a mock server answers with.
+// ---------------------------------------------------------------------------
+
+TEST_F (ResourceWriteRouteTest, RequestCreateDefaultsMockResponseModeToFirst) {
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["mockResponseMode"], "first");
+    EXPECT_TRUE (body["mockExampleId"].is_null ());
+    const auto stored_request = db_->get_request (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->mock_response_mode, "first");
+    EXPECT_FALSE (stored_request->mock_example_id.has_value ());
+}
+
 TEST_F (ResourceWriteRouteTest, RequestMalformedKeyValueEntryIsRejected) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,

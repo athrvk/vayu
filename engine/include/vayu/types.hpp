@@ -1102,6 +1102,22 @@ struct Request {
     // it is the identity a re-fetched spec is diffed against (#627) and the key
     // coverage counts by (#629). Two requests may name the same operation.
     std::optional<std::string> spec_operation;
+    // Which of the request's saved examples a mock server answers with
+    // (issue #481 phase 3). "first" (the original, and only, behaviour) is
+    // the default so an existing row with no opinion keeps serving what it
+    // always served. Never anything else - validated at write time in
+    // apply_request_fields, defaulted the same way an unparsable stored
+    // value would be for a real enum column (see engine/CLAUDE.md's
+    // row-struct convention), because this one is a plain TEXT column like
+    // http_version, not a sqlite_orm-mapped enum.
+    std::string mock_response_mode = "first";
+    // The example `mock_response_mode == "fixed"` names. Nullable like
+    // `spec_operation`: nothing to default it to, and NULL is the only
+    // spelling of "no target" for `first` and `random`. A target that no
+    // longer exists (deleted, or suppressed since this was set) is not
+    // refused at write time - `pick_example` falls back to "first" for it -
+    // so this column is never validated against `request_examples`.
+    std::optional<std::string> mock_example_id;
     int64_t created_at = 0;
     int64_t updated_at = 0;
     // When this request was deleted, in Unix ms - NULL while it is live
