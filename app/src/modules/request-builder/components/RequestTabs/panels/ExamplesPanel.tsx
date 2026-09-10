@@ -226,27 +226,30 @@ function MockResponseModeControl({
 	};
 
 	return (
-		<fieldset className="flex flex-wrap items-center gap-3 rounded-md border border-rule surface-sunken px-3 py-2 text-xs">
-			<legend className="px-1 text-[11px] uppercase tracking-wide text-subtle-foreground">
-				Mock response
-			</legend>
+		<div className="flex flex-wrap items-center gap-2">
 			{/*
 			 * A `<span>`, not a `<Label>`: a segmented control is a group of
 			 * buttons with no single labelable control to point `htmlFor` at, so
 			 * the group carries its own `aria-label` instead (the shape
 			 * `ModeElementForm.tsx`'s `ModePicker` uses).
 			 */}
+			<span className="text-xs font-medium">Mock response</span>
 			<ToggleGroup
 				value={mode}
 				// Radix clears the value when the active segment is pressed again;
 				// this mode always has to be something, never "off".
 				onValueChange={(next) => next && setMode(next as MockResponseMode)}
-				size="xs"
+				// `sm` (28px), not the default `xs` (24px): matches the 28px compact
+				// `Select` this row shows in `fixed` mode, so switching into that
+				// mode never changes the row's height (it does when the two
+				// heights differ, because the row is `items-center` and grows to
+				// its tallest child).
+				size="sm"
 				aria-label="Mock response"
 			>
 				<ToggleGroupItem value="first">First saved example</ToggleGroupItem>
-				<ToggleGroupItem value="fixed">Specific example</ToggleGroupItem>
 				<ToggleGroupItem value="random">Random</ToggleGroupItem>
+				<ToggleGroupItem value="fixed">Specific example</ToggleGroupItem>
 			</ToggleGroup>
 			{mode === "fixed" && (
 				<Select
@@ -265,7 +268,7 @@ function MockResponseModeControl({
 					</SelectContent>
 				</Select>
 			)}
-		</fieldset>
+		</div>
 	);
 }
 
