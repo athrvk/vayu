@@ -208,6 +208,14 @@ export interface UpdateRequestRequest {
 	verifySSL?: boolean;
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
+	/** See {@link import("./domain").Request.mockResponseMode}. */
+	mockResponseMode?: import("./domain").MockResponseMode;
+	/**
+	 * `string | null`, same rule as `specOperation` below: absent keeps the
+	 * stored example and an explicit `null` clears it. See
+	 * {@link import("./domain").Request.mockExampleId}.
+	 */
+	mockExampleId?: string | null;
 	/**
 	 * `SpecOperation | null`, like the collection binding above: absent keeps the
 	 * stored operation and an explicit `null` clears it, so stamping and
@@ -1313,10 +1321,34 @@ export interface MockServerRoute {
 	hasExample: boolean;
 	/** The example's status, or 0 when there is no example to serve. */
 	status: number;
+	/** See {@link import("./domain").MockResponseMode}. */
+	mode: import("./domain").MockResponseMode;
+	/** The example that would answer for `"first"`/`"fixed"` - absent for `"random"`. */
+	exampleName?: string;
+	/** How many times this route has answered a request, since the mock started. */
+	hits: number;
 }
 
 export interface ListMockServerRoutesResponse {
 	data: MockServerRoute[];
+}
+
+/** One entry of a mock's activity log, as `GET /mock/:id/activity` reports it. */
+export interface MockActivityEntry {
+	/** Epoch milliseconds. */
+	at: number;
+	method: string;
+	path: string;
+	requestId: string | null;
+	requestName: string | null;
+	exampleId: string | null;
+	exampleName: string | null;
+	status: number;
+	injectedError: boolean;
+}
+
+export interface ListMockServerActivityResponse {
+	data: MockActivityEntry[];
 }
 
 // Health & Config API

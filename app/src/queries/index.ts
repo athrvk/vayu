@@ -124,6 +124,7 @@ export {
 export {
 	useMockServersQuery,
 	useMockServerRoutesQuery,
+	useMockActivityQuery,
 	useStartMockServerMutation,
 	useStopMockServerMutation,
 } from "./mock-server";

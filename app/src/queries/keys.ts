@@ -144,6 +144,7 @@ export const queryKeys = {
 		all: ["mockServer"] as const,
 		list: () => [...queryKeys.mockServer.all, "list"] as const,
 		routes: (mockId: string) => [...queryKeys.mockServer.all, "routes", mockId] as const,
+		activity: (mockId: string) => [...queryKeys.mockServer.all, "activity", mockId] as const,
 	},
 
 	// Warm-cache pass over every collection's requests (see

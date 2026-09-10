@@ -52,6 +52,20 @@ export function useMockServerRoutesQuery(mockId: string | null) {
 	});
 }
 
+/**
+ * One mock's activity log - what it has served, newest first. Polled like
+ * the mock list itself: unlike the route table, this changes on its own as
+ * traffic arrives, with nothing in this window driving it.
+ */
+export function useMockActivityQuery(mockId: string | null) {
+	return useQuery({
+		queryKey: queryKeys.mockServer.activity(mockId ?? ""),
+		queryFn: () => apiService.listMockServerActivity(mockId as string),
+		enabled: mockId !== null,
+		refetchInterval: TIMING.SERVICES_POLL_INTERVAL_MS,
+	});
+}
+
 export function useStartMockServerMutation() {
 	const queryClient = useQueryClient();
 	return useMutation({

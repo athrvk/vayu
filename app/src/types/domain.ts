@@ -74,6 +74,9 @@ export type HeaderRowSource = AutoHeaderSource | "legacy-default";
  */
 export type MethodSource = "graphql";
 
+/** Which saved example a mock server answers with (issue #481 phase 3). */
+export type MockResponseMode = "first" | "fixed" | "random";
+
 export interface KeyValueEntry {
 	key: string;
 	value: string;
@@ -784,6 +787,19 @@ export interface Request {
 	 * existed reads back `false`, which is what it was.
 	 */
 	stream: boolean;
+	/**
+	 * Which saved example a mock server answers with (issue #481 phase 3).
+	 * Always present, unlike `mockExampleId` - a request stored before this
+	 * column existed reads back `"first"`, which is what it always served.
+	 */
+	mockResponseMode: MockResponseMode;
+	/**
+	 * The example {@link mockResponseMode} `"fixed"` names. Optional, on the
+	 * `specOperation` convention above: the engine serializes `null` for a
+	 * request that names none, and `undefined` is how every reader here
+	 * spells that.
+	 */
+	mockExampleId?: string;
 	/**
 	 * Which operation of the collection's bound spec this request is (issue
 	 * #637). Optional rather than always-present, unlike `stream`: the engine

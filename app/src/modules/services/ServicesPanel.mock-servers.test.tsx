@@ -74,6 +74,8 @@ function route(overrides: Partial<MockServerRoute> = {}): MockServerRoute {
 		path: "/pets",
 		hasExample: true,
 		status: 200,
+		mode: "first",
+		hits: 0,
 		...overrides,
 	};
 }
