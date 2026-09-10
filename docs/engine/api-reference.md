@@ -3964,6 +3964,8 @@ diagnosed without sending a request per guess.
       "method": "GET",
       "path": "/pets/{{petId}}",
       "hasExample": true,
+      "mode": "first",
+      "hits": 3,
       "status": 200
     }
   ]
@@ -3971,7 +3973,41 @@ diagnosed without sending a request per guess.
 ```
 
 `status` is `0` when `hasExample` is false - there is no example whose status it
-could be. `404` for an unknown mock.
+could be. `mode` is the request's `mock_response_mode` (`"first"` / `"fixed"` /
+`"random"`); `hits` is how many times this route has answered a request, since
+the mock started. `404` for an unknown mock.
+
+### GET /mock/:mockId/activity
+
+What this mock has served, newest first: `{"data": [...]}`, at most `limit`
+entries (query param, default **50**, capped at **200**; a non-numeric value is
+a `400`). Each entry is one inbound request, whichever of the three ways it was
+handled:
+
+```json
+{
+  "data": [
+    {
+      "at": 1735689600123,
+      "method": "GET",
+      "path": "/pets/1",
+      "requestId": "req_1",
+      "requestName": "Get pet",
+      "exampleId": "ex_1",
+      "exampleName": "200 OK",
+      "status": 200,
+      "injectedError": false
+    }
+  ]
+}
+```
+
+`requestId` / `requestName` are `null` when nothing in the route table matched
+the path at all; `exampleId` / `exampleName` are `null` alongside them, and
+also when the matched route had no saved example (`status: 501`).
+`injectedError: true` marks a synthesized `errorRatePct` failure. `404` for an
+unknown mock. Like the route table, this log is discarded when the mock stops -
+there is nothing to read after that.
 
 ### POST /mock/:mockId/stop
 

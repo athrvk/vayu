@@ -8,6 +8,7 @@
  */
 
 #include "vayu/db/database.hpp"
+#include "vayu/http/mock_activity.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -295,6 +296,11 @@ class MockServerManager {
     /// the same order as routes(). A plain snapshot of the atomics
     /// serve_mock_request bumps - nullopt when the mock does not exist.
     std::optional<std::vector<std::uint64_t>> route_hits (const std::string& mock_id);
+
+    /// @p mock_id's served-request log, newest first, at most @p limit
+    /// entries - nullopt when the mock does not exist.
+    std::optional<std::vector<MockActivityEntry>>
+    activity (const std::string& mock_id, std::size_t limit);
 
     private:
     struct MockServer;

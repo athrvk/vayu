@@ -878,4 +878,56 @@ TEST_F (MockServerTest, ALoadRunCanTargetAMockEndToEnd) {
     EXPECT_GT (summary.value ("total_requests", 0), 0) << summary.dump ();
 }
 
+TEST_F (MockServerTest, ActivityRecordsAServedRequest) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_read_timeout (5);
+    ASSERT_TRUE (client.Get ("/pets"));
+
+    const auto entries = manager.activity (started.info.mock_id, 50);
+    ASSERT_HAS_VALUE (entries);
+    ASSERT_EQ (entries->size (), 1u);
+    EXPECT_EQ ((*entries)[0].method, "GET");
+    EXPECT_EQ ((*entries)[0].path, "/pets");
+    EXPECT_EQ ((*entries)[0].status, 200);
+    ASSERT_HAS_VALUE ((*entries)[0].request_id);
+    EXPECT_EQ (*(*entries)[0].request_id, "req_list");
+}
+
+TEST_F (MockServerTest, ActivityRecordsAnUnmatchedRequestWithNoRequestId) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_read_timeout (5);
+    ASSERT_TRUE (client.Get ("/nowhere"));
+
+    const auto entries = manager.activity (started.info.mock_id, 50);
+    ASSERT_HAS_VALUE (entries);
+    ASSERT_EQ (entries->size (), 1u);
+    EXPECT_FALSE ((*entries)[0].request_id.has_value ());
+    EXPECT_EQ ((*entries)[0].status, 404);
+}
+
+TEST_F (MockServerTest, ActivityIsGoneAfterStop) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+    manager.stop (started.info.mock_id);
+    EXPECT_FALSE (manager.activity (started.info.mock_id, 50).has_value ());
+}
+
 } // namespace

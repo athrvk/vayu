@@ -487,7 +487,12 @@ logged as a warning: it means a client skipped composition.
   list comes back by `order`, then `created_at`, then `id`. Since #481 phase 3,
   a request's own `mock_response_mode` (`"first"` / `"fixed"` / `"random"`,
   validated the same way `methodSource` is) decides which one a mock server
-  answers with, and `mock_example_id` names the target for `"fixed"`.
+  answers with, and `mock_example_id` names the target for `"fixed"`. Since
+  #481 phase 3, each running mock also keeps a bounded `MockActivityLog` of
+  every request it served or missed, read back through
+  `GET /mock/:id/activity` (newest first, capped at `MAX_ACTIVITY_ENTRIES`);
+  like the route table, it holds nothing that outlives the listener and is
+  discarded on stop.
   `POST /import/apply` writes them nested on the
   request item through the same `apply_request_example_fields` applier. Every
   row records an **`origin`** (#588), `import` or `user`, defaulting to
