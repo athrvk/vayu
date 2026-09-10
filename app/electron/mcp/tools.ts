@@ -5557,7 +5557,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it. `mockResponseMode`/`mockExampleId` set which saved example a mock server answers this request with - get_mock_routes shows the effect once a mock is running.",
+			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it. `mockResponseMode`/`mockExampleId` set which saved example a mock server answers this request with (`mockExampleId: null` clears it) - get_mock_routes shows the effect once a mock is running.",
 		annotations: {
 			title: "Update saved request",
 			readOnlyHint: false,
@@ -5595,8 +5595,11 @@ export const TOOLS: McpTool[] = [
 				),
 			mockExampleId: z
 				.string()
+				.nullable()
 				.optional()
-				.describe("The example 'fixed' mode names (an id from list_request_examples)."),
+				.describe(
+					"The example 'fixed' mode names (an id from list_request_examples). Pass null to clear it."
+				),
 			elements: elementsInput("this request"),
 			preRequestScript: storedScriptInput("pre", true),
 			postRequestScript: storedScriptInput("post", true),
@@ -5629,14 +5632,21 @@ export const TOOLS: McpTool[] = [
 			applyRequestSettings(args, payload);
 			const mockResponseMode = args.mockResponseMode as
 				"first" | "fixed" | "random" | undefined;
-			const mockExampleId = str(args, "mockExampleId");
-			if (mockResponseMode === "fixed" && mockExampleId === undefined) {
+			// `str()` treats `null` the same as absent (it only recognizes a
+			// string), which is right for every other field here but wrong for
+			// this one: `mockExampleId: null` is how a caller clears the target,
+			// same as the engine's own null-vs-absent merge-patch rule, so it
+			// needs its own presence check rather than `str()` alone.
+			if ("mockExampleId" in args) {
+				payload.mockExampleId =
+					args.mockExampleId === null ? null : str(args, "mockExampleId");
+			}
+			if (mockResponseMode === "fixed" && !payload.mockExampleId) {
 				return errorResult(
 					'"mockResponseMode": "fixed" needs "mockExampleId" - pass the example it should serve.'
 				);
 			}
 			if (mockResponseMode !== undefined) payload.mockResponseMode = mockResponseMode;
-			if (mockExampleId !== undefined) payload.mockExampleId = mockExampleId;
 			const body = str(args, "body");
 			const bodyType = str(args, "bodyType");
 			if (body !== undefined) {

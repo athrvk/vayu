@@ -939,6 +939,18 @@ describe("data-write tools", () => {
 		expect(payload).toEqual({ mockResponseMode: "random" });
 	});
 
+	test("update_request clears mockExampleId with an explicit null, distinct from omitting it", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_1", mockExampleId: null },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBeFalsy();
+		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(payload).toEqual({ mockExampleId: null });
+	});
+
 	test("update_environment sends no body id - the path is the identity", async () => {
 		// A body id that disagrees with the path is a 400 since #97, and one that
 		// agrees is dead weight. Same reason the renderer's PUT sends a patch only.
