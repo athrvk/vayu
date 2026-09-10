@@ -847,6 +847,20 @@ TEST_F (ResourceWriteRouteTest, RequestInvalidMockResponseModeIsRejected) {
     << "a rejected mode must not be stored under any other name";
 }
 
+TEST_F (ResourceWriteRouteTest, RequestNonStringMockResponseModeIsRejectedCleanly) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "mockResponseMode", 123 } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("mockResponseMode"), std::string::npos)
+    << "a wrong-typed value must get the same field-naming 400 a wrong-valued one does, not a raw nlohmann exception message";
+    const auto stored_request = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->mock_response_mode, "first");
+}
+
 TEST_F (ResourceWriteRouteTest, MockResponseModeReadsBackThroughBothSerializers) {
     const std::string collection = make_collection ();
     auto [status, created]       = create_request_response (*db_,

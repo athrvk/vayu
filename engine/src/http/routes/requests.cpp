@@ -220,11 +220,18 @@ static RouteResult apply_mock_response_mode_field (const nlohmann::json& json,
 std::string& mode,
 std::optional<std::string>& example_id,
 bool is_create) {
-    apply_string_field (json, "mockResponseMode", mode, "first", is_create);
-    if (json.contains ("mockResponseMode") && !json["mockResponseMode"].is_null () &&
-    mode != "first" && mode != "fixed" && mode != "random") {
-        return route_error (400,
-        "Invalid 'mockResponseMode': must be 'first', 'fixed' or 'random'");
+    if (!json.contains ("mockResponseMode")) {
+        if (is_create) {
+            mode = "first";
+        }
+    } else if (const auto& value = json["mockResponseMode"]; value.is_null ()) {
+        mode = "first";
+    } else if (!value.is_string () ||
+    (value.get<std::string> () != "first" && value.get<std::string> () != "fixed" &&
+    value.get<std::string> () != "random")) {
+        return route_error (400, "Invalid 'mockResponseMode': must be 'first', 'fixed' or 'random'");
+    } else {
+        mode = value.get<std::string> ();
     }
     if (!json.contains ("mockExampleId")) {
         if (is_create) {
