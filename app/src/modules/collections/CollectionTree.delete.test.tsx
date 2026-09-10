@@ -31,6 +31,7 @@ import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
 const deleteCollection = vi.fn();
+const stopMockServer = vi.fn();
 
 // root > mid > leaf, each holding one request. Deleting `root` cascades over
 // all of it.
@@ -53,6 +54,13 @@ const TREE_REQUESTS: Array<[string, Array<Record<string, unknown>>]> = [
  */
 let collections = [...TREE];
 let requests = new Map(TREE_REQUESTS);
+/** No mocks running unless a test says otherwise. */
+let mockServers: Array<{
+	mockId: string;
+	collectionId: string;
+	collectionName: string;
+	port: number;
+}> = [];
 
 vi.mock("@/queries", () => ({
 	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
@@ -71,6 +79,8 @@ vi.mock("@/queries", () => ({
 	useDeleteRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useMockServersQuery: () => ({ data: mockServers }),
+	useStopMockServerMutation: () => ({ mutateAsync: stopMockServer, isPending: false }),
 }));
 
 function renderTree() {
@@ -118,8 +128,10 @@ beforeEach(() => {
 	// jsdom implements no scrolling; the reveal effect calls it for an open tab.
 	Element.prototype.scrollIntoView = vi.fn();
 	deleteCollection.mockReset().mockResolvedValue(undefined);
+	stopMockServer.mockReset().mockResolvedValue(undefined);
 	collections = [...TREE];
 	requests = new Map(TREE_REQUESTS);
+	mockServers = [];
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["root", "mid", "leaf"]) });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 });
@@ -280,5 +292,85 @@ describe("confirming a collection delete", () => {
 		// The nested request two levels down is the one a single-level cascade
 		// would leave open on a row the engine has already removed.
 		await waitFor(() => expect(useTabsStore.getState().openTabs).toEqual([]));
+	});
+});
+
+/*
+ * A collection can have a mock server running for it. Deleting it - or a
+ * parent whose descendant has one - stops that mock as part of the delete,
+ * and the dialog says so before the user confirms. `mockServers` is set per
+ * test rather than in `beforeEach`, so the default (no test) case above stays
+ * the "no mock" baseline.
+ */
+describe("deleting a collection with a mock server running", () => {
+	it("shows no warning and behaves exactly as before when nothing is running", async () => {
+		renderTree();
+		await askToDelete("Invoices");
+
+		expect(screen.queryByText(/mock server/i)).not.toBeInTheDocument();
+	});
+
+	it("warns in the dialog when the deleted collection itself has a running mock", async () => {
+		mockServers = [
+			{ mockId: "mock-1", collectionId: "leaf", collectionName: "Invoices", port: 4123 },
+		];
+		renderTree();
+		await askToDelete("Invoices");
+
+		expect(await screen.findByText(/port 4123/)).toBeInTheDocument();
+	});
+
+	it("warns when a descendant sub-collection has the running mock, not just the collection itself", async () => {
+		mockServers = [
+			{ mockId: "mock-1", collectionId: "leaf", collectionName: "Invoices", port: 4123 },
+		];
+		renderTree();
+		// "Acme" is root; "leaf" (Invoices) is two levels below it.
+		await askToDelete("Acme");
+
+		expect(await screen.findByText(/port 4123/)).toBeInTheDocument();
+	});
+
+	it("does not mention or stop a mock running for an unrelated collection", async () => {
+		mockServers = [
+			{ mockId: "mock-other", collectionId: "root", collectionName: "Acme", port: 5000 },
+		];
+		renderTree();
+		await askToDelete("Invoices");
+
+		expect(screen.queryByText(/mock server/i)).not.toBeInTheDocument();
+
+		fireEvent.click(await confirmButton());
+
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalledTimes(1));
+		expect(stopMockServer).not.toHaveBeenCalled();
+	});
+
+	it("stops the running mock once the delete is confirmed", async () => {
+		mockServers = [
+			{ mockId: "mock-1", collectionId: "leaf", collectionName: "Invoices", port: 4123 },
+		];
+		renderTree();
+		await askToDelete("Invoices");
+
+		fireEvent.click(await confirmButton());
+
+		await waitFor(() => expect(stopMockServer).toHaveBeenCalledWith("mock-1"));
+	});
+
+	it("stops every affected mock in a cascade, not just the top-level collection's own", async () => {
+		mockServers = [
+			{ mockId: "mock-root", collectionId: "root", collectionName: "Acme", port: 4000 },
+			{ mockId: "mock-leaf", collectionId: "leaf", collectionName: "Invoices", port: 4123 },
+		];
+		renderTree();
+		await askToDelete("Acme");
+
+		fireEvent.click(await confirmButton());
+
+		await waitFor(() => {
+			expect(stopMockServer).toHaveBeenCalledWith("mock-root");
+			expect(stopMockServer).toHaveBeenCalledWith("mock-leaf");
+		});
 	});
 });

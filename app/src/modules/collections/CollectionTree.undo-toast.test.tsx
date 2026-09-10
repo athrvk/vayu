@@ -58,6 +58,8 @@ vi.mock("@/queries", () => ({
 	useDeleteRequestMutation: () => ({ mutateAsync: deleteRequest, isPending: false }),
 	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: restoreTrash, isPending: false }),
+	useMockServersQuery: () => ({ data: [] }),
+	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 // Only the toast store is replaced; `useTabsStore` and the rest stay real,
