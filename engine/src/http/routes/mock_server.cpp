@@ -499,12 +499,23 @@ nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits) {
 
 namespace {
 
+/// One splitmix64 step of @p counter - the raw 64 bits, before either caller
+/// reduces it to a percentage or an index. Shared so should_inject_error's
+/// error roll and pick_example's random-example roll cannot drift into two
+/// different sequences for what is conceptually the same kind of decision.
+std::uint64_t splitmix64_roll (std::atomic<std::uint64_t>& counter) {
+    std::uint64_t x = counter.fetch_add (0x9E3779B97F4A7C15ULL) + 0x9E3779B97F4A7C15ULL;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+    x ^= x >> 31;
+    return x;
+}
+
 /// Whether this completion should be turned into a synthesized 500.
 ///
 /// 0 and 100 are exact by construction rather than by probability, which is
-/// what makes them the only rates worth a test. In between, the roll is a
-/// splitmix64 of a per-mock counter: decorrelated enough that a run does not
-/// see runs of failures, and deterministic enough to have no global RNG state.
+/// what makes them the only rates worth a test. In between, the roll is
+/// splitmix64_roll of a per-mock counter.
 bool should_inject_error (int rate_pct, std::atomic<std::uint64_t>& counter) {
     if (rate_pct <= 0) {
         return false;
@@ -512,14 +523,30 @@ bool should_inject_error (int rate_pct, std::atomic<std::uint64_t>& counter) {
     if (rate_pct >= 100) {
         return true;
     }
-    std::uint64_t x = counter.fetch_add (0x9E3779B97F4A7C15ULL) + 0x9E3779B97F4A7C15ULL;
-    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
-    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
-    x ^= x >> 31;
-    return std::cmp_less (x % 100, rate_pct);
+    return std::cmp_less (splitmix64_roll (counter) % 100, rate_pct);
 }
 
 } // namespace
+
+const vayu::db::RequestExample&
+pick_example (const MockRoute& route, std::atomic<std::uint64_t>& roll_counter) {
+    if (route.mode == "fixed" && route.fixed_example_id) {
+        for (const auto& example : route.examples) {
+            if (example.id == *route.fixed_example_id) {
+                return example;
+            }
+        }
+        // The target was deleted or suppressed since the mode was set -
+        // fall back to "first" rather than refuse an otherwise-servable
+        // route.
+        return route.examples.front ();
+    }
+    if (route.mode == "random") {
+        const auto roll = splitmix64_roll (roll_counter);
+        return route.examples[roll % route.examples.size ()];
+    }
+    return route.examples.front ();
+}
 
 struct MockServerManager::MockServer {
     std::string id;
@@ -537,6 +564,13 @@ struct MockServerManager::MockServer {
     /// Feeds the error-injection roll. Atomic because every pool thread bumps
     /// it; nothing else about a served response is mutable.
     std::atomic<std::uint64_t> served{ 0 };
+    /// Feeds pick_example's random-example roll - its own counter, separate
+    /// from `served`, so an error-rate roll and an example roll never share
+    /// one sequence.
+    std::atomic<std::uint64_t> example_roll{ 0 };
+    /// One counter per route, same order as `routes`, bumped on every served
+    /// (not missed) response. Read out as a plain snapshot by route_hits().
+    std::vector<std::atomic<std::uint64_t>> hits;
 
     /// Declared last so it is destroyed first: the handler reads everything
     /// above it while the accept loop is alive.
@@ -581,6 +615,8 @@ struct MockConfig {
     const std::vector<MockRoute>& routes;
     /// Feeds the error-injection roll; every pool thread bumps it.
     std::atomic<std::uint64_t>& served;
+    std::vector<std::atomic<std::uint64_t>>& hits;
+    std::atomic<std::uint64_t>& example_roll;
 };
 
 /**
@@ -619,11 +655,12 @@ httplib::Response& res) {
         return;
     }
 
-    const MockRoute& route  = mock.routes[*match.route_index];
-    const auto& example     = route.examples.front ();
+    const MockRoute& route = mock.routes[*match.route_index];
+    mock.hits[*match.route_index].fetch_add (1, std::memory_order_relaxed);
+    const auto& example     = pick_example (route, mock.example_roll);
     const auto headers      = example_headers (example.headers);
     const auto content_type = example_content_type (example, headers);
-    res.status              = example.status;
+    res.status               = example.status;
     for (const auto& [name, value] : headers) {
         if (!header_is (name, "content-type")) {
             // Appended rather than set: a repeated `Set-Cookie` is exactly
@@ -672,6 +709,7 @@ const MockStartRequest& request) {
     server->error_rate_pct  = request.error_rate_pct;
     server->created_at      = routes::now_ms ();
     server->routes          = build_mock_routes (db, request.collection_id);
+    server->hits            = std::vector<std::atomic<std::uint64_t>> (server->routes.size ());
 
     if (server->routes.size () > constants::mock_server::MAX_ROUTES) {
         out.ok            = false;
@@ -721,7 +759,8 @@ const MockStartRequest& request) {
     // unaffected.
     svr.set_pre_routing_handler (
     [config = MockConfig{ server->latency_ms, server->error_rate_pct, raw->routes,
-     raw->served }] (const httplib::Request& req, httplib::Response& res) {
+     raw->served, raw->hits, raw->example_roll }] (const httplib::Request& req,
+    httplib::Response& res) {
         serve_mock_request (config, req, res);
         return httplib::Server::HandlerResponse::Handled;
     });
@@ -796,6 +835,21 @@ std::optional<std::vector<MockRoute>> MockServerManager::routes (const std::stri
     return it->second->routes;
 }
 
+std::optional<std::vector<std::uint64_t>>
+MockServerManager::route_hits (const std::string& mock_id) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    auto it = servers_.find (mock_id);
+    if (it == servers_.end ()) {
+        return std::nullopt;
+    }
+    std::vector<std::uint64_t> out;
+    out.reserve (it->second->hits.size ());
+    for (auto& counter : it->second->hits) {
+        out.push_back (counter.load (std::memory_order_relaxed));
+    }
+    return out;
+}
+
 } // namespace vayu::http
 
 // ---------------------------------------------------------------------------
@@ -857,13 +911,14 @@ void handle_list_mocks (RouteContext& ctx, const httplib::Request&, httplib::Res
 void handle_mock_routes (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     const std::string mock_id = req.matches[1];
     const auto routes         = ctx.mock_server_manager.routes (mock_id);
-    if (!routes) {
+    const auto hits           = ctx.mock_server_manager.route_hits (mock_id);
+    if (!routes || !hits) {
         send_error (res, 404, "Mock server not found");
         return;
     }
     nlohmann::json data = nlohmann::json::array ();
-    for (const auto& route : *routes) {
-        data.push_back (mock_route_json (route, 0));
+    for (std::size_t i = 0; i < routes->size (); ++i) {
+        data.push_back (mock_route_json ((*routes)[i], (*hits)[i]));
     }
     send_json (res, nlohmann::json{ { "data", std::move (data) } });
 }

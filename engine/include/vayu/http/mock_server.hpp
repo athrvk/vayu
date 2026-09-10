@@ -9,6 +9,7 @@
 
 #include "vayu/db/database.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <map>
@@ -207,6 +208,21 @@ MockMatch resolve_mock_route (const std::vector<MockRoute>& routes,
 const std::string& method,
 const std::string& path);
 
+/**
+ * Which of @p route's saved examples answers this request (issue #481 phase 3).
+ *
+ * Caller guarantees `route.has_response` (so `route.examples` is never empty
+ * here). "first" and a "fixed" target that still exists are pinned - the same
+ * example every time, snapshot-stable like the rest of the route table.
+ * "random", and a "fixed" target that no longer exists (deleted or suppressed
+ * since the mode was set), roll @p roll_counter: a splitmix64 sequence,
+ * decorrelated enough that a run does not see the same example twice in a row
+ * by pattern, deterministic enough to have no global RNG state - the same
+ * construction `should_inject_error` uses for its own roll.
+ */
+const vayu::db::RequestExample&
+pick_example (const MockRoute& route, std::atomic<std::uint64_t>& roll_counter);
+
 /** The 404 body a miss answers with - the near-miss is the debugging value. */
 nlohmann::json mock_miss_body (const std::vector<MockRoute>& routes,
 const MockMatch& match,
@@ -274,6 +290,11 @@ class MockServerManager {
     /// The route table @p mock_id is serving, or nullopt when it does not
     /// exist. Const since start(), so this is a copy of an immutable snapshot.
     std::optional<std::vector<MockRoute>> routes (const std::string& mock_id);
+
+    /// How many times each of @p mock_id's routes has answered a request, in
+    /// the same order as routes(). A plain snapshot of the atomics
+    /// serve_mock_request bumps - nullopt when the mock does not exist.
+    std::optional<std::vector<std::uint64_t>> route_hits (const std::string& mock_id);
 
     private:
     struct MockServer;
