@@ -32,6 +32,10 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/mock_server.hpp"
+#include "vayu/http/routes.hpp"
+#include "vayu/http/run_summary_cache.hpp"
+#include "vayu/http/server.hpp"
+#include "vayu/http/sse_stream.hpp"
 
 using nlohmann::json;
 using vayu::http::MockMissKind;
@@ -386,6 +390,77 @@ TEST_F (MockServerTest, PickExampleRandomModeCoversEveryExampleAcrossManyRolls) 
         seen.insert (vayu::http::pick_example (routes[0], roll).id);
     }
     EXPECT_EQ (seen.size (), 20u);
+}
+
+// ---------------------------------------------------------------------------
+// mock_route_json - the wire shape of one route (GET /mock/:id/routes).
+// Exercised directly, on a route built by build_mock_routes, rather than
+// through the HTTP layer - the same shape the resolution tests above use.
+// ---------------------------------------------------------------------------
+
+TEST_F (MockServerTest, MockRouteJsonFirstModeNamesTheFirstExample) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    seed_example ("exa_b", "req_list", 500, "b", "text/plain", json::array (), 1);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+
+    const auto out = vayu::http::mock_route_json (routes[0], 42);
+    EXPECT_EQ (out["mode"], "first");
+    EXPECT_EQ (out["hits"], 42u);
+    EXPECT_EQ (out["exampleName"], "exa_a");
+    EXPECT_EQ (out["status"], 200);
+}
+
+TEST_F (MockServerTest, MockRouteJsonFixedModeFallsBackToFirstWhenTargetMissing) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    vayu::db::Request r;
+    r.id                 = "req_list";
+    r.collection_id      = "col_root";
+    r.mock_response_mode = "fixed";
+    r.mock_example_id    = "exa_gone";
+    r.name               = "req_list";
+    r.method             = vayu::HttpMethod::GET;
+    r.url                = "{{baseUrl}}/pets";
+    r.created_at = 1;
+    r.updated_at = 1;
+    r.order      = 0;
+    db_->save_request (r);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+
+    const auto out = vayu::http::mock_route_json (routes[0], 0);
+    EXPECT_EQ (out["mode"], "fixed");
+    EXPECT_EQ (out["exampleName"], "exa_a");
+    EXPECT_EQ (out["status"], 200);
+}
+
+TEST_F (MockServerTest, MockRouteJsonRandomModeNamesNoExample) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    seed_example ("exa_b", "req_list", 500, "b", "text/plain", json::array (), 1);
+    vayu::db::Request r;
+    r.id                 = "req_list";
+    r.collection_id      = "col_root";
+    r.mock_response_mode = "random";
+    r.name               = "req_list";
+    r.method             = vayu::HttpMethod::GET;
+    r.url                = "{{baseUrl}}/pets";
+    r.created_at = 1;
+    r.updated_at = 1;
+    r.order      = 0;
+    db_->save_request (r);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+
+    const auto out = vayu::http::mock_route_json (routes[0], 0);
+    EXPECT_EQ (out["mode"], "random");
+    // "random" names no example: which one answers varies per request, so
+    // reporting one here would state a fact the field cannot back up.
+    EXPECT_FALSE (out.contains ("exampleName"));
+    EXPECT_EQ (out["status"], 200) << "the first example's status stands in as a "
+                                       "representative figure";
 }
 
 TEST_F (MockServerTest, RouteHitsCountServedResponsesOnlyByRoute) {
@@ -928,6 +1003,82 @@ TEST_F (MockServerTest, ActivityIsGoneAfterStop) {
     ASSERT_TRUE (started.ok) << started.error_message;
     manager.stop (started.info.mock_id);
     EXPECT_FALSE (manager.activity (started.info.mock_id, 50).has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// GET /mock/:id/activity - the "limit" query param, at the HTTP layer rather
+// than through MockServerManager::activity directly (fix wave finding 4a):
+// handle_mock_activity parses the query string itself, and that parse is
+// what a std::stoul call let through un-rejected. limit is parsed before the
+// mock id is looked up, so a bad limit is a 400 whether or not the mock
+// exists.
+// ---------------------------------------------------------------------------
+
+class MockActivityRouteTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_mock_activity_route.db";
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+        ctx_ = std::make_unique<vayu::http::routes::RouteContext> (
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr,
+        authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
+        mock_server_manager_, sse_manager_, run_summary_cache_ });
+        vayu::http::routes::register_mock_server_routes (*ctx_);
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+
+    void TearDown () override {
+        svr_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+        ctx_.reset ();
+        db_.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    httplib::Client client () const {
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (5, 0);
+        return client;
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    httplib::Server svr_;
+    std::thread thread_;
+    int port_ = 0;
+    vayu::core::RunManager run_manager_;
+    vayu::http::OAuth2AuthorizeManager authorize_manager_;
+    vayu::http::CookieJar cookie_jar_;
+    vayu::http::MockIssuerManager mock_issuer_manager_;
+    vayu::http::InboxManager inbox_manager_;
+    vayu::http::MockServerManager mock_server_manager_;
+    vayu::http::SseStreamManager sse_manager_;
+    vayu::http::RunSummaryCache run_summary_cache_;
+    std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
+};
+
+TEST_F (MockActivityRouteTest, LimitZeroIsRejected) {
+    const auto response = client ().Get ("/mock/whatever/activity?limit=0");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 400);
+}
+
+TEST_F (MockActivityRouteTest, LimitNonNumericIsRejected) {
+    const auto response = client ().Get ("/mock/whatever/activity?limit=abc");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 400);
+}
+
+TEST_F (MockActivityRouteTest, LimitNegativeIsRejected) {
+    const auto response = client ().Get ("/mock/whatever/activity?limit=-1");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 400);
 }
 
 } // namespace

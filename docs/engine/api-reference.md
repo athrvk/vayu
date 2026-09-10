@@ -3966,7 +3966,8 @@ diagnosed without sending a request per guess.
       "hasExample": true,
       "mode": "first",
       "hits": 3,
-      "status": 200
+      "status": 200,
+      "exampleName": "200 OK"
     }
   ]
 }
@@ -3975,7 +3976,9 @@ diagnosed without sending a request per guess.
 `status` is `0` when `hasExample` is false - there is no example whose status it
 could be. `mode` is the request's `mock_response_mode` (`"first"` / `"fixed"` /
 `"random"`); `hits` is how many times this route has answered a request, since
-the mock started. `404` for an unknown mock.
+the mock started. `exampleName` is the example that would answer for `"first"`
+or `"fixed"` - it is absent for `"random"`, since which one answers varies per
+request. `404` for an unknown mock.
 
 ### GET /mock/:mockId/activity
 
@@ -4003,8 +4006,11 @@ handled:
 ```
 
 `requestId` / `requestName` are `null` when nothing in the route table matched
-the path at all; `exampleId` / `exampleName` are `null` alongside them, and
-also when the matched route had no saved example (`status: 501`).
+the path at all, and also for an injected failure (`injectedError: true`):
+the error-rate roll happens before route resolution, so an injected 500 never
+reaches route matching, even when a route would have matched. `exampleId` /
+`exampleName` are `null` alongside them, and also when the matched route had
+no saved example (`status: 501`).
 `injectedError: true` marks a synthesized `errorRatePct` failure. `404` for an
 unknown mock. Like the route table, this log is discarded when the mock stops -
 there is nothing to read after that.

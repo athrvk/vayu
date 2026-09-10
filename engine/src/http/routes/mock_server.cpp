@@ -30,6 +30,7 @@
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 
 #include <httplib.h>
 
@@ -967,14 +968,17 @@ void handle_mock_activity (RouteContext& ctx, const httplib::Request& req, httpl
     const std::string mock_id = req.matches[1];
     std::size_t limit         = 50;
     if (req.has_param ("limit")) {
-        try {
-            limit = std::min<std::size_t> (
-            constants::mock_server::MAX_ACTIVITY_ENTRIES,
-            static_cast<std::size_t> (std::stoul (req.get_param_value ("limit"))));
-        } catch (const std::exception&) {
+        // parse_number rejects what std::stoul would silently accept: "0"
+        // (parses fine, but is not positive), a leading "-" (unsigned
+        // from_chars refuses the sign rather than wrapping to a huge value)
+        // and trailing garbage like "5abc" (the ptr != end check).
+        const auto parsed =
+        vayu::utils::parse_number<std::size_t> (req.get_param_value ("limit"));
+        if (!parsed || *parsed == 0) {
             send_error (res, 400, "Invalid 'limit': must be a positive integer");
             return;
         }
+        limit = std::min (*parsed, constants::mock_server::MAX_ACTIVITY_ENTRIES);
     }
     const auto entries = ctx.mock_server_manager.activity (mock_id, limit);
     if (!entries) {
