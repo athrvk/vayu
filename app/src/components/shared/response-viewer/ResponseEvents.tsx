@@ -42,7 +42,7 @@
 
 import { memo, useState } from "react";
 import { ChevronDown, ChevronRight, Radio } from "lucide-react";
-import { Badge, Button } from "@/components/ui";
+import { Badge, Button, Collapsible, CollapsibleContent } from "@/components/ui";
 import { Callout, EmptyState } from "@/components/shared";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { cn } from "@/lib/utils";
@@ -155,66 +155,68 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 
 	return (
 		<div className="border-b border-rule last:border-b-0">
-			<Button
-				type="button"
-				variant="listRow"
-				onClick={() => setExpanded((e) => !e)}
-				aria-expanded={expanded}
-				// The `Button` primitive's own baseline already gives this row its
-				// hover/press transitions (index.css's `:where(button, ...)` rule) -
-				// no hand-rolled `transition-*` needed. `[&_svg]:size-3` overrides
-				// the primitive's default `size-4` glyph, matching this row's
-				// smaller chevron.
-				className="gap-2 px-4 py-1.5 hover:bg-muted/40 [&_svg]:size-3"
-			>
-				<Chevron aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
-				<span className="w-10 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
-					{index + 1}
-				</span>
-				{/*
-				 * `variant="chip"` because this Badge paints its own background:
-				 * every other variant pairs `bg-x` with `hover:bg-x/80`, and
-				 * tailwind-merge replaces `bg-*` but not `hover:bg-*`, so the
-				 * caller's fill would win at rest and the variant's on hover.
-				 */}
-				<Badge variant="chip" className="shrink-0 bg-muted text-muted-foreground">
-					{event.event}
-				</Badge>
-				{event.sourceId && (
-					<span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-						id {event.sourceId}
+			<Collapsible open={expanded} onOpenChange={setExpanded}>
+				<Button
+					type="button"
+					variant="listRow"
+					onClick={() => setExpanded((e) => !e)}
+					aria-expanded={expanded}
+					// The `Button` primitive's own baseline already gives this row its
+					// hover/press transitions (index.css's `:where(button, ...)` rule) -
+					// no hand-rolled `transition-*` needed. `[&_svg]:size-3` overrides
+					// the primitive's default `size-4` glyph, matching this row's
+					// smaller chevron.
+					className="gap-2 px-4 py-1.5 hover:bg-muted/40 [&_svg]:size-3"
+				>
+					<Chevron aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
+					<span className="w-10 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
+						{index + 1}
 					</span>
-				)}
-				{/* `min-w-0` plus `truncate`, or the preview refuses to shrink and
-				    pushes the timestamp out of the row. */}
-				<span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
-					{event.data}
-				</span>
-				{event.dataTruncated && (
-					<Badge variant="chip" className="shrink-0 bg-warning/20 text-warning-text">
-						truncated
+					{/*
+					 * `variant="chip"` because this Badge paints its own background:
+					 * every other variant pairs `bg-x` with `hover:bg-x/80`, and
+					 * tailwind-merge replaces `bg-*` but not `hover:bg-*`, so the
+					 * caller's fill would win at rest and the variant's on hover.
+					 */}
+					<Badge variant="chip" className="shrink-0 bg-muted text-muted-foreground">
+						{event.event}
 					</Badge>
-				)}
-				{at && (
-					<span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-						{at}
-					</span>
-				)}
-			</Button>
-			{expanded && (
-				<div className="px-4 pb-3 pl-16">
-					{event.dataTruncated && (
-						<p className="pb-2 text-xs text-warning-text">
-							Only the first {event.data.length.toLocaleString()} bytes of{" "}
-							{(event.dataBytes ?? event.data.length).toLocaleString()} were kept -
-							raise Stream Event Size Limit in Settings to keep more.
-						</p>
+					{event.sourceId && (
+						<span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+							id {event.sourceId}
+						</span>
 					)}
-					<pre className="max-h-64 overflow-auto rounded-md surface-sunken border border-rule p-3 font-mono text-xs whitespace-pre-wrap break-all">
-						{formatEventData(event.data)}
-					</pre>
-				</div>
-			)}
+					{/* `min-w-0` plus `truncate`, or the preview refuses to shrink and
+				    pushes the timestamp out of the row. */}
+					<span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+						{event.data}
+					</span>
+					{event.dataTruncated && (
+						<Badge variant="chip" className="shrink-0 bg-warning/20 text-warning-text">
+							truncated
+						</Badge>
+					)}
+					{at && (
+						<span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+							{at}
+						</span>
+					)}
+				</Button>
+				<CollapsibleContent>
+					<div className="px-4 pb-3 pl-16">
+						{event.dataTruncated && (
+							<p className="pb-2 text-xs text-warning-text">
+								Only the first {event.data.length.toLocaleString()} bytes of{" "}
+								{(event.dataBytes ?? event.data.length).toLocaleString()} were kept
+								- raise Stream Event Size Limit in Settings to keep more.
+							</p>
+						)}
+						<pre className="max-h-64 overflow-auto rounded-md surface-sunken border border-rule p-3 font-mono text-xs whitespace-pre-wrap break-all">
+							{formatEventData(event.data)}
+						</pre>
+					</div>
+				</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 });

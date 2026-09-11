@@ -51,7 +51,7 @@ import {
 	MinusCircle,
 } from "lucide-react";
 
-import { Button } from "@/components/ui";
+import { Button, Collapsible, CollapsibleContent } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 import { StatusCodeBadge } from "./StatusCodeBadge";
@@ -154,86 +154,90 @@ export function SampledExchange({
 
 	return (
 		<div className={cn("overflow-hidden", className)}>
-			{/* The summary and its actions share a row without sharing a button.
+			<Collapsible open={isExpanded} onOpenChange={onToggle}>
+				{/* The summary and its actions share a row without sharing a button.
 			    With no actions this is one full-width button, exactly as before. */}
-			<div className="flex items-stretch">
-				<Button
-					type="button"
-					variant="listRow"
-					onClick={onToggle}
-					aria-expanded={isExpanded}
-					// The `Button` primitive's own baseline already gives this row its
-					// hover/press transitions (index.css's `:where(button, ...)` rule) -
-					// no hand-rolled `transition-*` needed. `whitespace-normal`
-					// overrides the primitive's default `whitespace-nowrap`: this row
-					// wraps to a second line for a long error (`basis-full` below), and
-					// the base's nowrap is inherited by that text unless undone here.
-					className="flex-1 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 whitespace-normal px-4 py-3 hover:bg-muted/50"
-				>
-					<Chevron className="w-4 h-4 text-muted-foreground shrink-0" />
-
-					<StatusIcon className={cn("w-4 h-4 shrink-0", STATE_TINT[resolved])} />
-
-					<span className="text-xs text-muted-foreground font-mono min-w-8">
-						#{label}
-					</span>
-
-					{title}
-
-					<StatusCodeBadge
-						status={statusCode}
-						statusText={statusText}
-						className="shrink-0"
-					/>
-
-					<span
-						className={cn(
-							"text-sm font-mono shrink-0",
-							isSlow && "text-status-stopped-text"
-						)}
+				<div className="flex items-stretch">
+					<Button
+						type="button"
+						variant="listRow"
+						onClick={onToggle}
+						aria-expanded={isExpanded}
+						// The `Button` primitive's own baseline already gives this row its
+						// hover/press transitions (index.css's `:where(button, ...)` rule) -
+						// no hand-rolled `transition-*` needed. `whitespace-normal`
+						// overrides the primitive's default `whitespace-nowrap`: this row
+						// wraps to a second line for a long error (`basis-full` below), and
+						// the base's nowrap is inherited by that text unless undone here.
+						className="flex-1 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 whitespace-normal px-4 py-3 hover:bg-muted/50"
 					>
-						{latencyMs.toFixed(1)}ms
-					</span>
+						<Chevron className="w-4 h-4 text-muted-foreground shrink-0" />
 
-					<span className="text-xs text-muted-foreground sm:ml-auto">{timestamp}</span>
+						<StatusIcon className={cn("w-4 h-4 shrink-0", STATE_TINT[resolved])} />
 
-					{/* First clause only - the full message is one click away, and a
-					    multi-line curl error would push the row to three lines. */}
-					{isError && error && (
-						<span className="text-xs text-destructive-text truncate basis-full sm:basis-auto sm:max-w-[200px]">
-							{error.split(":")[0]}
+						<span className="text-xs text-muted-foreground font-mono min-w-8">
+							#{label}
 						</span>
-					)}
-				</Button>
 
-				{actions && <div className="flex shrink-0 items-center pr-3">{actions}</div>}
-			</div>
+						{title}
 
-			{isExpanded && (
-				<div className="px-4 py-3 bg-muted/30 border-t border-rule space-y-3">
-					{error && (
-						<div className="space-y-1">
-							<p className="text-xs font-medium text-muted-foreground">Error</p>
-							<p className="bg-destructive/10 text-destructive-text p-2 rounded-md font-mono text-xs break-all">
-								{error}
-							</p>
-						</div>
-					)}
+						<StatusCodeBadge
+							status={statusCode}
+							statusText={statusText}
+							className="shrink-0"
+						/>
 
-					{details}
+						<span
+							className={cn(
+								"text-sm font-mono shrink-0",
+								isSlow && "text-status-stopped-text"
+							)}
+						>
+							{latencyMs.toFixed(1)}ms
+						</span>
 
-					{phases.length > 0 && (
-						<div className="space-y-1">
-							<p className="text-xs font-medium text-muted-foreground">
-								Timing Breakdown
-							</p>
-							<TimingPhaseTiles phases={phases} />
-						</div>
-					)}
+						<span className="text-xs text-muted-foreground sm:ml-auto">
+							{timestamp}
+						</span>
 
-					{children}
+						{/* First clause only - the full message is one click away, and a
+					    multi-line curl error would push the row to three lines. */}
+						{isError && error && (
+							<span className="text-xs text-destructive-text truncate basis-full sm:basis-auto sm:max-w-[200px]">
+								{error.split(":")[0]}
+							</span>
+						)}
+					</Button>
+
+					{actions && <div className="flex shrink-0 items-center pr-3">{actions}</div>}
 				</div>
-			)}
+
+				<CollapsibleContent>
+					<div className="px-4 py-3 bg-muted/30 border-t border-rule space-y-3">
+						{error && (
+							<div className="space-y-1">
+								<p className="text-xs font-medium text-muted-foreground">Error</p>
+								<p className="bg-destructive/10 text-destructive-text p-2 rounded-md font-mono text-xs break-all">
+									{error}
+								</p>
+							</div>
+						)}
+
+						{details}
+
+						{phases.length > 0 && (
+							<div className="space-y-1">
+								<p className="text-xs font-medium text-muted-foreground">
+									Timing Breakdown
+								</p>
+								<TimingPhaseTiles phases={phases} />
+							</div>
+						)}
+
+						{children}
+					</div>
+				</CollapsibleContent>
+			</Collapsible>
 		</div>
 	);
 }
