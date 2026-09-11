@@ -111,7 +111,7 @@ describe("useMockServerRoutesQuery", () => {
 			await waitFor(() => expect(result.current.isSuccess).toBe(true));
 			expect(apiService.listMockServerRoutes).toHaveBeenCalledTimes(1);
 
-			await vi.advanceTimersByTimeAsync(TIMING.SERVICES_POLL_INTERVAL_MS);
+			await vi.advanceTimersByTimeAsync(TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS);
 			await waitFor(() => expect(apiService.listMockServerRoutes).toHaveBeenCalledTimes(2));
 		} finally {
 			vi.useRealTimers();
