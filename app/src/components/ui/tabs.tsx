@@ -146,6 +146,14 @@ function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPr
 				// about Radix's presence model. Inert for a panel that is not
 				// force-mounted, since Radix never renders one.
 				"data-[state=inactive]:hidden",
+				// `.enter-fade` here is `display: none -> block`, not a fresh DOM
+				// node - `@starting-style` fires on either, per spec ("a change of
+				// display type, such as from none to something else"), so switching
+				// back to an already-visited tab fades in exactly like the first
+				// visit. A force-mounted panel (Collection Detail's four) gets this
+				// too: it never truly unmounts, only its `hidden` attribute flips,
+				// which is the same display-type change.
+				"enter-fade",
 				className
 			)}
 			{...props}
