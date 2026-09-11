@@ -98,7 +98,12 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 					{offersTopLevel && (
 						<Button
 							variant="ghost"
-							className="w-full justify-start gap-2 h-8"
+							// `active:scale-100`: this row is full-width, and the
+							// baseline press-feedback shrink (index.css's
+							// `[data-slot="button"]:active`) is 2% of the row's own
+							// box - fine on a compact CTA, a visible glitch on a
+							// full-width one.
+							className="w-full justify-start gap-2 h-8 active:scale-100"
 							onClick={() => onMove(entity, null)}
 						>
 							<FolderTree className="w-4 h-4 shrink-0 text-primary" />
@@ -109,7 +114,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 						<Button
 							key={collection.id}
 							variant="ghost"
-							className="w-full justify-start gap-2 h-8"
+							className="w-full justify-start gap-2 h-8 active:scale-100"
 							style={{ paddingLeft: rowInsetPx(depth) }}
 							onClick={() => onMove(entity, collection.id)}
 						>
