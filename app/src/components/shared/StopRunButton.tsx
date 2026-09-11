@@ -48,10 +48,15 @@ export function StopRunButton({ onStop, isStopping = false, className }: StopRun
 				className
 			)}
 		>
+			{/*
+			 * No `mr-*` here: the `Button` primitive's base string already sets
+			 * `gap-2` on its flex children, so a margin on top of it doubled the
+			 * icon-to-label gap to 8px + 6px.
+			 */}
 			{isStopping ? (
-				<Loader2 className="w-3 h-3 animate-spin mr-1.5" />
+				<Loader2 className="w-3 h-3 animate-spin" />
 			) : (
-				<StopCircle className="w-3 h-3 mr-1.5" />
+				<StopCircle className="w-3 h-3" />
 			)}
 			<LabelSwap label={isStopping ? "Stopping…" : "Stop"} states={["Stop", "Stopping…"]} />
 		</Button>
