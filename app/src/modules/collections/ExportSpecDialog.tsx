@@ -250,7 +250,7 @@ function SummarySkeleton() {
 function ExportSummary({ notes }: { notes: ExportNotes }) {
 	const bound = notes.direction === "document";
 	return (
-		<div className="rounded-md border border-rule surface-sunken p-3 space-y-2">
+		<div className="enter-fade rounded-md border border-rule surface-sunken p-3 space-y-2">
 			<p className="flex items-center gap-2 text-xs font-semibold">
 				<FileJson className="h-3.5 w-3.5 text-primary shrink-0" />
 				{bound ? "This collection's own document, updated" : "A skeleton document"}

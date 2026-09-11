@@ -59,7 +59,12 @@ export function EmptyState({
 }: EmptyStateProps) {
 	if (variant === "inline") {
 		return (
-			<div className={cn("p-8 text-center text-sm text-muted-foreground", className)}>
+			<div
+				className={cn(
+					"enter-fade p-8 text-center text-sm text-muted-foreground",
+					className
+				)}
+			>
 				{title}
 			</div>
 		);
@@ -70,7 +75,7 @@ export function EmptyState({
 			className={cn(
 				// `flex-1` so it fills a flex column parent; `min-h-0` so it can
 				// shrink inside one rather than forcing the parent to scroll.
-				"flex flex-1 min-h-0 flex-col items-center justify-center gap-3 p-8 text-center",
+				"enter-fade flex flex-1 min-h-0 flex-col items-center justify-center gap-3 p-8 text-center",
 				className
 			)}
 		>

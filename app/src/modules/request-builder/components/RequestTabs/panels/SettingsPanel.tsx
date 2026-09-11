@@ -196,7 +196,7 @@ export default function SettingsPanel() {
 				 * warnings in the request builder read as one thing.
 				 */}
 				{!request.verifySSL && (
-					<div className="flex items-start gap-1.5 text-xs text-status-warning-text">
+					<div className="enter-fade flex items-start gap-1.5 text-xs text-status-warning-text">
 						<AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
 						<span>
 							This request accepts any certificate. A machine in the middle can read
@@ -233,7 +233,7 @@ export default function SettingsPanel() {
 			 * applies to the scripts inherited from the collection chain too.
 			 */}
 			{request.stream && (
-				<p className="text-xs text-muted-foreground">
+				<p className="enter-fade text-xs text-muted-foreground">
 					Scripts run, split around the transfer: Pre-request before the stream opens, and
 					Tests once after it ends, reading the whole stream as{" "}
 					<code>pm.response.events</code>. Results appear when the stream finishes, not

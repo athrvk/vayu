@@ -32,6 +32,7 @@ import {
 	TabsTrigger,
 	TabLabel,
 	Textarea,
+	LabelSwap,
 } from "@/components/ui";
 import { useImportModalStore, useTabsStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
@@ -817,7 +818,10 @@ export function ImportModal() {
 								disabled={isBusy}
 							/>
 							<Button onClick={handleFetchUrl} disabled={!url || isBusy}>
-								{isBusy ? "Fetching…" : "Fetch"}
+								<LabelSwap
+									label={isBusy ? "Fetching…" : "Fetch"}
+									states={["Fetch", "Fetching…"]}
+								/>
 							</Button>
 						</div>
 					)}

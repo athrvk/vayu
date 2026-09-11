@@ -397,14 +397,14 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 			<div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
 				{streamError && (
-					<Callout severity="warning" title="Live updates stopped">
+					<Callout severity="warning" title="Live updates stopped" className="enter-fade">
 						{streamError} The run itself is unaffected - reopen this tab once it
 						finishes to read its stored steps.
 					</Callout>
 				)}
 
 				{thinned && (
-					<Callout severity="info" title="Bounded step storage">
+					<Callout severity="info" title="Bounded step storage" className="enter-fade">
 						This run executed {thinned.stepsExecuted.toLocaleString()} steps and kept{" "}
 						{thinned.stepsStored.toLocaleString()}. The{" "}
 						{thinned.stepsDropped.toLocaleString()} not listed were successes - every

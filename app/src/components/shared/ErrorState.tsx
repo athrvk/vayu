@@ -70,7 +70,12 @@ export function ErrorState({
 }: ErrorStateProps) {
 	if (variant === "inline") {
 		return (
-			<div className={cn("flex items-center justify-center gap-2 p-8 text-sm", className)}>
+			<div
+				className={cn(
+					"enter-fade flex items-center justify-center gap-2 p-8 text-sm",
+					className
+				)}
+			>
 				<span className="text-destructive-text">{title}</span>
 				{onRetry && (
 					<Button variant="link" size="sm" onClick={onRetry} className="h-auto p-0">
@@ -85,7 +90,7 @@ export function ErrorState({
 	return (
 		<div
 			className={cn(
-				"flex flex-1 min-h-0 flex-col items-center justify-center gap-3 p-8 text-center",
+				"enter-fade flex flex-1 min-h-0 flex-col items-center justify-center gap-3 p-8 text-center",
 				className
 			)}
 		>

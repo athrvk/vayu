@@ -159,7 +159,12 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 				type="button"
 				onClick={() => setExpanded((e) => !e)}
 				aria-expanded={expanded}
-				className="flex w-full items-center gap-2 px-4 py-1.5 text-left hover:bg-muted/40 transition-colors"
+				// Hand-rolled, not the `ev` primitive, so it carries no
+				// `[data-slot="button"]` and misses the baseline's press-scale
+				// transition - added explicitly, same template as the Send button
+				// in `UrlBar` (`transition-colors` folded into the same
+				// `transition-property` list rather than a second declaration).
+				className="flex w-full items-center gap-2 px-4 py-1.5 text-left hover:bg-muted/40 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]"
 			>
 				<Chevron aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
 				<span className="w-10 shrink-0 text-right font-mono text-[11px] text-muted-foreground">

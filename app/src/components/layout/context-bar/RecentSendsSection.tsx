@@ -79,7 +79,7 @@ export function RecentSendsSection({ tab }: ContextBarSectionProps) {
 							aria-label={`Open send${
 								outcome ? `, status ${outcome.statusCode}` : ""
 							}, ${formatRelativeTime(run.startTime)}`}
-							className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						>
 							{outcome ? (
 								// The code alone, without the reason phrase: five

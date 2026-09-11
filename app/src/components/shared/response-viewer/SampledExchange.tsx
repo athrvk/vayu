@@ -160,7 +160,12 @@ export function SampledExchange({
 					type="button"
 					onClick={onToggle}
 					aria-expanded={isExpanded}
-					className="flex-1 min-w-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+					// Hand-rolled, not the `Button` primitive, so it carries no
+					// `[data-slot="button"]` and misses the baseline's press-scale
+					// transition - added explicitly, same template as the Send button
+					// in `UrlBar` (`transition-colors` folded into the same
+					// `transition-property` list rather than a second declaration).
+					className="flex-1 min-w-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-left hover:bg-muted/50 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]"
 				>
 					<Chevron className="w-4 h-4 text-muted-foreground shrink-0" />
 

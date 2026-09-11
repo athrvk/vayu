@@ -114,7 +114,9 @@ export default function RequestTabs() {
 				{tabs.map((tab) => (
 					<TabsTrigger key={tab.id} value={tab.id}>
 						<TabLabel>{tab.label}</TabLabel>
-						{tab.badge !== undefined && <TabCount value={tab.badge} />}
+						{tab.badge !== undefined && (
+							<TabCount value={tab.badge} className="enter-fade" />
+						)}
 					</TabsTrigger>
 				))}
 			</TabsList>

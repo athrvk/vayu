@@ -102,14 +102,14 @@ function WindowControls() {
 		>
 			<button
 				onClick={() => window.electronAPI?.windowMinimize()}
-				className="h-full px-3 hover:bg-muted/50 transition-colors flex items-center justify-center"
+				className="h-full px-3 hover:bg-muted/50 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center"
 				aria-label="Minimize"
 			>
 				<Minus className="w-4 h-4 text-foreground/70" />
 			</button>
 			<button
 				onClick={() => window.electronAPI?.windowMaximize()}
-				className="h-full px-3 hover:bg-muted/50 transition-colors flex items-center justify-center"
+				className="h-full px-3 hover:bg-muted/50 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center"
 				aria-label={isMaximized ? "Restore" : "Maximize"}
 			>
 				{isMaximized ? (
@@ -120,7 +120,7 @@ function WindowControls() {
 			</button>
 			<button
 				onClick={() => window.electronAPI?.windowClose()}
-				className="h-full px-3 hover:bg-destructive hover:text-destructive-foreground transition-colors flex items-center justify-center group"
+				className="h-full px-3 hover:bg-destructive hover:text-destructive-foreground transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center group"
 				aria-label="Close"
 			>
 				<X className="w-4 h-4 text-foreground/70 group-hover:text-destructive-foreground" />
@@ -386,7 +386,13 @@ function EnvSwitcher() {
 						// rounded-md, not rounded-full: this is an interactive control,
 						// so its corners follow the Appearance → Roundedness setting.
 						// rounded-full is reserved for non-interactive indicators.
-						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0 transition-colors",
+						"flex items-center gap-1.5 max-w-44 text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0",
+						// Explicit property list, not `transition-colors`: a hand-rolled
+						// button carries no `[data-slot="button"]`, so it misses the
+						// baseline's `scale` press-feedback transition (`index.css`) -
+						// added here instead, same duration as the colour properties
+						// (`UrlBar`'s Send button is the worked example).
+						"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]",
 						// Border on both states, transparent when idle, so selecting an
 						// environment does not resize the control by 2px.
 						"border",

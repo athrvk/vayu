@@ -200,7 +200,7 @@ export default function RunItem({
 					// card-on-panel step, itself 1.09. Declaring the surface resolves the
 					// rule to 1.278 dark / 1.304 light; pinning `--border-strong` fixed
 					// dark but pushed light to 1.553.
-					"focus-row group relative surface-card border border-rule cursor-pointer transition-colors overflow-hidden w-full",
+					"focus-row group relative surface-card border border-rule cursor-pointer transition-[background-color,border-color,box-shadow] overflow-hidden w-full",
 					isSelected
 						? "bg-primary/10 hover:bg-primary/15 border-primary/50 ring-1 ring-inset ring-primary/20 shadow-sm"
 						: "hover:border-primary/50 hover:shadow-sm"

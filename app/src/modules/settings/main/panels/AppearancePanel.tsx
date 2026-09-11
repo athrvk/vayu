@@ -310,7 +310,7 @@ export default function AppearancePanel() {
 							 * because it still means something: turning it on keeps
 							 * motion reduced if the system preference later changes.
 							 */
-							<p className="mt-2 text-xs text-muted-foreground">
+							<p className="enter-fade mt-2 text-xs text-muted-foreground">
 								Your system already asks for reduced motion, so Vayu is minimizing
 								animations regardless of this setting.
 							</p>

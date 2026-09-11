@@ -341,7 +341,7 @@ export function GenericElementForm({ schema, config, onChange }: GenericElementF
 						<ChevronRight className="h-3 w-3 transition-transform" />
 						Advanced
 					</CollapsibleTrigger>
-					<CollapsibleContent className="space-y-2 pt-1.5">
+					<CollapsibleContent className="space-y-2 px-1 pt-1.5 pb-1">
 						<PropertyRows
 							names={advancedNames}
 							properties={properties}

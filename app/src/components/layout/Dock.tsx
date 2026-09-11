@@ -215,7 +215,7 @@ function RunningServices() {
 				 */}
 				<button
 					onClick={() => revealDrawerView("services")}
-					className="flex items-center gap-1 text-xs text-status-success-text rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					className="enter-fade flex items-center gap-1 text-xs text-status-success-text rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 				>
 					<span className="w-1.5 h-1.5 rounded-full bg-current" />
 					{count === 1 ? "1 service" : `${count} services`}
@@ -244,7 +244,7 @@ function SaveError() {
 	const label = <span className="text-destructive-text">Not saved</span>;
 
 	if (!message) {
-		return <span className="text-xs text-muted-foreground">{label}</span>;
+		return <span className="enter-fade text-xs text-muted-foreground">{label}</span>;
 	}
 
 	return (
@@ -253,7 +253,7 @@ function SaveError() {
 				<span
 					// eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- TooltipTrigger (Radix) wires focus and blur to reveal and dismiss this tooltip, which is the only keyboard path to the save error text
 					tabIndex={0}
-					className="flex items-center gap-1 text-xs text-muted-foreground cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					className="enter-fade flex items-center gap-1 text-xs text-muted-foreground cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 				>
 					{label}
 					<Info className="w-3 h-3" aria-hidden="true" />
@@ -287,7 +287,7 @@ function PendingRestartButton() {
 				<button
 					onClick={() => void restart()}
 					disabled={isRestarting}
-					className="flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					className="enter-fade flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 				>
 					<RefreshCw
 						className={cn("w-3 h-3", isRestarting && "animate-spin")}
@@ -344,13 +344,15 @@ export function Dock() {
 					 * edit and rendered nowhere.
 					 */}
 					{saveStatus === "pending" && (
-						<span className="text-xs text-muted-foreground">Unsaved changes</span>
+						<span className="enter-fade text-xs text-muted-foreground">
+							Unsaved changes
+						</span>
 					)}
 					{saveStatus === "saving" && (
-						<span className="text-xs text-muted-foreground">Saving…</span>
+						<span className="enter-fade text-xs text-muted-foreground">Saving…</span>
 					)}
 					{saveStatus === "saved" && (
-						<span className="text-xs text-muted-foreground">Saved</span>
+						<span className="enter-fade text-xs text-muted-foreground">Saved</span>
 					)}
 					{/*
 					 * The toast still carries the reason, first - it is the one

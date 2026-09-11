@@ -33,6 +33,7 @@ import {
 	Button,
 	Input,
 	Label,
+	LabelSwap,
 	Switch,
 	Card,
 	CardContent,
@@ -128,7 +129,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 	const { restart, isRestarting } = useEngineRestart();
 
 	return (
-		<div className="bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 px-6 py-3 shrink-0">
+		<div className="enter-fade bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 px-6 py-3 shrink-0">
 			<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
 				<div className="flex items-center gap-3">
 					<div className="flex items-center justify-center w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50">
@@ -165,7 +166,10 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						) : (
 							<RefreshCw className="w-4 h-4 mr-1.5" />
 						)}
-						{isRestarting ? "Restarting..." : "Restart Engine"}
+						<LabelSwap
+							label={isRestarting ? "Restarting..." : "Restart Engine"}
+							states={["Restart Engine", "Restarting..."]}
+						/>
 					</Button>
 				</div>
 			</div>
@@ -690,7 +694,7 @@ export default function SettingsMain() {
 							</div>
 							<CardDescription className="mt-1">{entry.description}</CardDescription>
 							{parentEntry && dependentDisabled && (
-								<p className="text-xs text-muted-foreground mt-1">
+								<p className="enter-fade text-xs text-muted-foreground mt-1">
 									Turn on {parentEntry.label} to use this
 								</p>
 							)}
@@ -922,7 +926,7 @@ export default function SettingsMain() {
 								</span>
 							</button>
 							{showAdvanced && (
-								<div className="grid gap-4 mt-4">
+								<div className="enter-fade grid gap-4 mt-4">
 									{advancedEntries.map(renderEntryCard)}
 								</div>
 							)}

@@ -86,7 +86,7 @@ export function SuggestionList({
 	if (items.length === 0) return null;
 
 	return (
-		<div className={cn("w-64 rounded-lg border bg-popover shadow-md", className)}>
+		<div className={cn("enter-fade w-64 rounded-lg border bg-popover shadow-md", className)}>
 			<Command shouldFilter={false} value={value} onValueChange={onValueChange}>
 				<CommandList>
 					{onListboxState && <CommandListboxProbe onChange={onListboxState} />}

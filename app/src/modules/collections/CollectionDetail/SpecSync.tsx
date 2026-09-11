@@ -51,7 +51,7 @@
 import { useState } from "react";
 import { AlertTriangle, Check, Loader2, RefreshCw, Upload } from "lucide-react";
 
-import { Button, DeleteConfirmDialog } from "@/components/ui";
+import { Button, DeleteConfirmDialog, LabelSwap } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { apiService } from "@/services/api";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
@@ -284,7 +284,14 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 								) : (
 									<Upload className="mr-2 h-4 w-4" />
 								)}
-								{documentOnly ? "Update the stored document" : "Apply selected"}
+								<LabelSwap
+									label={
+										documentOnly
+											? "Update the stored document"
+											: "Apply selected"
+									}
+									states={["Update the stored document", "Apply selected"]}
+								/>
 							</Button>
 							<span className="text-[11px] text-muted-foreground">
 								{applySummary(state.selection)}

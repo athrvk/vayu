@@ -120,10 +120,10 @@ export function WorkspaceBackupCard() {
 					</Button>
 				</div>
 
-				{failure && <p className="text-sm text-status-error-text">{failure}</p>}
+				{failure && <p className="enter-fade text-sm text-status-error-text">{failure}</p>}
 
 				{result && (
-					<div className="surface-sunken rounded-md border border-rule p-3 space-y-1">
+					<div className="enter-fade surface-sunken rounded-md border border-rule p-3 space-y-1">
 						<p className="text-xs text-muted-foreground">
 							Saved {formatSize(result.sizeBytes)} at{" "}
 							{new Date(result.createdAt).toLocaleString()}

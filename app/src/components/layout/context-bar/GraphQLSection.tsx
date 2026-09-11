@@ -140,7 +140,7 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 									})
 								}
 								aria-label={`Go to ${operation.kind} ${operation.name ?? "(anonymous)"} in the editor`}
-								className="flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-[11px] font-mono transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								className="flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-[11px] font-mono transition-colors hover:bg-accent active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							>
 								<span className="text-muted-foreground">{operation.kind}</span>
 								{/* An anonymous operation is the shorthand `{ … }` form,

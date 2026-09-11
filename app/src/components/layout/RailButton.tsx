@@ -80,7 +80,12 @@ export function RailButton({
 					aria-pressed={active}
 					tabIndex={tabIndex}
 					className={cn(
-						"relative flex items-center justify-center w-full h-9 text-xs transition-colors",
+						// Explicit property list, not `transition-colors`: this is a
+						// hand-rolled button with no `[data-slot="button"]`, so it misses
+						// the baseline's `scale` press-feedback transition (`index.css`) -
+						// added here instead, same duration as the colour properties.
+						"relative flex items-center justify-center w-full h-9 text-xs",
+						"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]",
 						variant === "tile" && "rounded-md",
 						active ? activeClass : idleClass
 					)}

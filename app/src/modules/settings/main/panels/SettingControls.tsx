@@ -81,7 +81,8 @@ export function OptionButtons<T extends string | number>({
 						key={String(option.value)}
 						onClick={() => onChange(option.value)}
 						className={cn(
-							"relative flex flex-col gap-0.5 p-3 rounded-lg border-2 transition-colors",
+							"relative flex flex-col gap-0.5 p-3 rounded-lg border-2",
+							"transition-[background-color,color,border-color,scale] duration-150 active:scale-[0.98]",
 							align === "center"
 								? "items-center justify-center text-center"
 								: "items-start text-left",

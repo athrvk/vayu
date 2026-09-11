@@ -130,7 +130,7 @@ export function PanelResizeHandle({
 			onDoubleClick={() => setWidth(defaultWidth)}
 			onKeyDown={onKeyDown}
 			className={cn(
-				"absolute top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/20",
+				"absolute top-0 bottom-0 w-2 cursor-col-resize transition-colors hover:bg-accent/20",
 				// The handle is a 8px strip with no content, so the focus state is
 				// the only thing that makes it findable by keyboard.
 				"focus-visible:bg-accent/40",

@@ -178,7 +178,7 @@ export default function MarkdownRenderer({ children }: { children: string }) {
 						e.stopPropagation();
 						if (href) openExternal(href);
 					}}
-					className="text-primary-text underline underline-offset-2 hover:opacity-80 font-[inherit] text-[inherit]"
+					className="text-primary-text underline underline-offset-2 transition-opacity hover:opacity-80 font-[inherit] text-[inherit]"
 				>
 					{label}
 				</button>

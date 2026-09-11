@@ -74,7 +74,7 @@ function RecoveryBanner() {
 	return (
 		<div
 			role="status"
-			className="flex items-center gap-3 border-b border-border bg-secondary/60 px-4 py-2 text-sm"
+			className="enter-fade flex items-center gap-3 border-b border-border bg-secondary/60 px-4 py-2 text-sm"
 		>
 			<AlertTriangle
 				className={

@@ -113,7 +113,7 @@ export function ActivityRail() {
 							<span
 								aria-hidden="true"
 								data-services-badge
-								className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-status-success-text"
+								className="enter-fade absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-status-success-text"
 							/>
 						)}
 					</RailButton>

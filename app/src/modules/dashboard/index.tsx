@@ -372,7 +372,7 @@ export default function LoadTestDashboard() {
 			 * never read by anything.
 			 */}
 			{(streamError || reportError) && (
-				<div className="px-5 pt-3 shrink-0">
+				<div className="enter-fade px-5 pt-3 shrink-0">
 					{streamError ? (
 						<Callout
 							severity="blocking"
@@ -426,7 +426,8 @@ export default function LoadTestDashboard() {
 						key={tab.id}
 						onClick={() => setActiveView(tab.id)}
 						className={cn(
-							"px-3.5 py-2.5 text-sm border-b-2 -mb-px transition-colors font-[inherit]",
+							"px-3.5 py-2.5 text-sm border-b-2 -mb-px font-[inherit]",
+							"transition-[color,border-color,scale] duration-150 active:scale-[0.98]",
 							activeView === tab.id
 								? "border-primary text-foreground font-semibold"
 								: "border-transparent text-muted-foreground hover:text-foreground"

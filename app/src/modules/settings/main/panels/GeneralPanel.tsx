@@ -168,7 +168,7 @@ export default function GeneralPanel() {
 						onChange={(enabled) => setAutoSave({ enabled })}
 					/>
 					{autoSave.enabled && (
-						<div>
+						<div className="enter-fade">
 							<Eyebrow className="mb-2">Save delay</Eyebrow>
 							<OptionButtons
 								options={AUTO_SAVE_DELAY_OPTIONS}

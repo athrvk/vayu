@@ -131,7 +131,7 @@ function TabItem({
 				}}
 				className={cn(
 					"group relative flex h-full shrink-0 cursor-pointer select-none items-center gap-1.5",
-					"border-r border-border/40 pl-2 pr-2.5 text-sm",
+					"border-r border-border/40 pl-2 pr-2.5 text-sm transition-colors",
 					isActive
 						? // The rule sits on the edge the content is on, and matches the
 							// section tabs. It reads identically in both themes, unlike a
@@ -171,7 +171,12 @@ function TabItem({
 					}}
 					// Absolute, over the trailing padding: in the flow it reserved 22px on
 					// every tab for a control only the hovered or active one ever shows.
-					className="absolute right-0.5 rounded-md p-0.5 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
+					// `transition-[opacity,background-color]`, not `transition-opacity`:
+					// this is `role="button"`, which the baseline (`index.css`) would
+					// otherwise cover for free, but a scoped `transition-*` utility here
+					// overrides that shorthand rather than merging with it - narrowing
+					// coverage to opacity alone and leaving `hover:bg-muted` untransitioned.
+					className="absolute right-0.5 rounded-md p-0.5 opacity-0 transition-[opacity,background-color,scale] duration-150 active:scale-[0.98] hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
 					data-active={isActive}
 				>
 					<X className="w-3 h-3" />
@@ -319,7 +324,7 @@ export function TabStrip() {
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
 						<button
-							className="flex shrink-0 items-center gap-1 border-l border-border/40 px-2 text-xs font-mono text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+							className="flex shrink-0 items-center gap-1 border-l border-border/40 px-2 text-xs font-mono text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
 							aria-label={`${overflowed.length} more tabs`}
 						>
 							+{overflowed.length}
@@ -363,7 +368,7 @@ export function TabStrip() {
 				// (tab-focus.ts), the way the tree's hidden controls are reached.
 				data-tab-new
 				style={{ width: TAB_NEW_BUTTON_WIDTH }}
-				className="flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+				className="flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
 			>
 				<Plus className="w-3.5 h-3.5" />
 			</button>

@@ -26,7 +26,7 @@
  */
 
 import { StopCircle, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, LabelSwap } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 interface StopRunButtonProps {
@@ -49,16 +49,11 @@ export function StopRunButton({ onStop, isStopping = false, className }: StopRun
 			)}
 		>
 			{isStopping ? (
-				<>
-					<Loader2 className="w-3 h-3 animate-spin mr-1.5" />
-					Stopping…
-				</>
+				<Loader2 className="w-3 h-3 animate-spin mr-1.5" />
 			) : (
-				<>
-					<StopCircle className="w-3 h-3 mr-1.5" />
-					Stop
-				</>
+				<StopCircle className="w-3 h-3 mr-1.5" />
 			)}
+			<LabelSwap label={isStopping ? "Stopping…" : "Stop"} states={["Stop", "Stopping…"]} />
 		</Button>
 	);
 }

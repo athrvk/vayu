@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useMemo } from "react";
-import { Button } from "@/components/ui";
+import { Button, LabelSwap } from "@/components/ui";
 import { ExternalChangeCallout, ScriptReferencesRow } from "@/components/shared";
 import { ElementList } from "@/components/shared/ElementList";
 import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
@@ -190,7 +190,10 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 					disabled={!isDirty || updateCollection.isPending || incomplete}
 					className="font-semibold"
 				>
-					{updateCollection.isPending ? "Saving…" : "Save Elements"}
+					<LabelSwap
+						label={updateCollection.isPending ? "Saving…" : "Save Elements"}
+						states={["Save Elements", "Saving…"]}
+					/>
 				</Button>
 				<Button
 					variant="outline"

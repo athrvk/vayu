@@ -61,7 +61,7 @@ export function ImportProgressView({ progress }: { progress: ImportProgress }) {
 	const label = IMPORT_STAGE_LABELS[progress.stage];
 	const detail = detailOf(progress);
 	return (
-		<div className="space-y-2">
+		<div className="enter-fade space-y-2">
 			<div className="flex items-baseline justify-between gap-3">
 				<span className="text-xs font-medium">{label}</span>
 				{detail && (

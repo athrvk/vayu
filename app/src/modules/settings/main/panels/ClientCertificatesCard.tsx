@@ -447,13 +447,15 @@ export function ClientCertificatesCard() {
 						    greyed-out field would be asking for something that
 						    can never be sent. */}
 						{needsKeyFile && (
-							<PathPicker
-								id="client-cert-key-path"
-								label="Private key file"
-								value={draft.keyPath}
-								accept=".pem,.key"
-								onPick={(path) => setDraft((d) => ({ ...d, keyPath: path }))}
-							/>
+							<div className="enter-fade">
+								<PathPicker
+									id="client-cert-key-path"
+									label="Private key file"
+									value={draft.keyPath}
+									accept=".pem,.key"
+									onPick={(path) => setDraft((d) => ({ ...d, keyPath: path }))}
+								/>
+							</div>
 						)}
 
 						<div className="space-y-1.5">

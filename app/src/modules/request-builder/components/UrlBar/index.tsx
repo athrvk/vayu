@@ -50,7 +50,7 @@ import { useEffect, useState } from "react";
 
 import { useRequestBuilderContext } from "../../context";
 import { useDashboardStore, useTabsStore } from "@/stores";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { Tooltip, TooltipContent, TooltipTrigger, LabelSwap } from "@/components/ui";
 import { formatChord, type Chord } from "@/lib/platform";
 import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
 import { cn } from "@/lib/utils";
@@ -243,6 +243,12 @@ export default function UrlBar() {
 						<button
 							onClick={() => void executeRequest()}
 							disabled={!canExecute}
+							// `LabelSwap` renders its live text through a keyed child the
+							// icon-button-labels scan can't see past a component boundary
+							// - the button reads as name-less to the source scan even
+							// though a screen reader announces it fine. The label mirrors
+							// what's already on screen rather than adding new copy.
+							aria-label={isExecuting ? "Sending" : "Send"}
 							className={cn(
 								"h-8 px-4 inline-flex items-center gap-1.5 shrink-0",
 								"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
@@ -256,18 +262,23 @@ export default function UrlBar() {
 								 * button.
 								 */
 								"hover:bg-primary-fill/90 hover:border-primary-fill/90",
-								"disabled:opacity-50 disabled:hover:bg-primary-fill transition-colors",
+								"disabled:opacity-50 disabled:hover:bg-primary-fill",
+								// Hand-rolled rather than the `Button` primitive (see the
+								// comment above), so it doesn't carry `[data-slot="button"]`
+								// and misses the baseline's `scale` press-feedback transition -
+								// added explicitly here instead, at the same duration as the
+								// colour properties rather than the baseline's separate 100ms:
+								// splitting `scale` into its own duration needs a second
+								// `transition-property` utility, and two of those on one
+								// element silently replace each other rather than merging.
+								"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]",
 								sendAlone ? "rounded-md" : "rounded-l-md rounded-r-none"
 							)}
 						>
-							{isExecuting ? (
-								<>
-									<span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-[vayu-spin_0.7s_linear_infinite] inline-block" />
-									Sending
-								</>
-							) : (
-								"Send"
-							)}
+							<LabelSwap
+								label={isExecuting ? "Sending" : "Send"}
+								states={["Send", "Sending"]}
+							/>
 						</button>
 					</Hint>
 				)}
@@ -333,7 +344,11 @@ export default function UrlBar() {
 									// a 2px line and make the pair a pixel taller than Send.
 									"border border-primary/45 border-l-transparent",
 									"rounded-r-md rounded-l-none",
-									"disabled:opacity-50 disabled:hover:bg-primary/10 transition-colors"
+									"disabled:opacity-50 disabled:hover:bg-primary/10",
+									// Hand-rolled, same as Send beside it - see Send's own
+									// comment above for why `scale` needs its own
+									// transition-property here rather than the baseline's.
+									"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]"
 								)}
 							>
 								Load Test

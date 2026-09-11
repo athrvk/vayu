@@ -154,7 +154,7 @@ export function ScriptSnippets({
 			</span>
 
 			<CollapsibleContent className="mt-2">
-				{!collapsed && (
+				{
 					/*
 					 * A card, not a sunken slab, because `Command` declares
 					 * `bg-card surface-card` itself: a `bg-transparent` override
@@ -205,7 +205,7 @@ export function ScriptSnippets({
 							</Command>
 						)}
 					</div>
-				)}
+				}
 			</CollapsibleContent>
 		</Collapsible>
 	);

@@ -85,7 +85,7 @@ export default function PerformanceTab({
 			    uPlot charts, so live + history are identical. */}
 			{hasPercentileData &&
 				(isRampUp ? (
-					<Card>
+					<Card className="enter-fade">
 						<CardHeader className="pb-2">
 							<CardTitle>Response Time vs Concurrency</CardTitle>
 						</CardHeader>
@@ -98,7 +98,7 @@ export default function PerformanceTab({
 						</CardContent>
 					</Card>
 				) : (
-					<Card>
+					<Card className="enter-fade">
 						<CardHeader className="pb-2">
 							<CardTitle>Response Time Percentiles Over Time</CardTitle>
 						</CardHeader>
@@ -120,7 +120,7 @@ export default function PerformanceTab({
 			    scrape failed, which has a section, a failure count and no line
 			    above it, and until now read as an unexplained empty chart. */}
 			{report.monitor && (
-				<Card>
+				<Card className="enter-fade">
 					<CardHeader>
 						<CardTitle>Server Vitals Summary</CardTitle>
 					</CardHeader>
@@ -165,7 +165,7 @@ export default function PerformanceTab({
 			    one request across five phases, so a p99 here is not comparable to
 			    the p99 above. Absent section = no card, as everywhere else. */}
 			{report.timingBreakdown?.phases && (
-				<Card>
+				<Card className="enter-fade">
 					<CardHeader>
 						<CardTitle>Phase Latency Percentiles</CardTitle>
 					</CardHeader>
@@ -177,7 +177,7 @@ export default function PerformanceTab({
 
 			{/* Rate Control */}
 			{report.rateControl && isRateLimitedRun(derived.mode, derived.targetRps) && (
-				<Card>
+				<Card className="enter-fade">
 					<CardHeader>
 						<CardTitle>Rate Control Performance</CardTitle>
 					</CardHeader>

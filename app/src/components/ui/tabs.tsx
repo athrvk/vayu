@@ -113,7 +113,12 @@ function TabsTrigger({
 				// `--primary-text` because this is an indicator, not a label - the
 				// split the design system already draws.
 				"after:absolute after:inset-x-1.5 after:-bottom-px after:h-[2px] after:rounded-full",
-				"after:bg-transparent data-[state=active]:after:bg-primary",
+				// `after:transition-colors` on its own: the trigger's own
+				// `transition-colors` above only covers the trigger's own box, not
+				// this pseudo-element's separately painted background - without it
+				// the underline pops in/out instantly on tab switch instead of
+				// fading with everything else.
+				"after:bg-transparent after:transition-colors data-[state=active]:after:bg-primary",
 				SIZE[size ?? inherited],
 				className
 			)}

@@ -51,7 +51,7 @@ export function CollectionLastRunSection({ tab }: ContextBarSectionProps) {
 			aria-label={`Open collection run, ${tone.label.toLowerCase()}, ${formatRelativeTime(
 				run.startTime
 			)}`}
-			className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
 			<span className={`text-xs shrink-0 ${tone.className}`}>{tone.label}</span>
 			<span className="flex-1 text-xs font-mono tabular-nums text-muted-foreground truncate">

@@ -64,7 +64,7 @@ export function ContextBarSectionFrame({
 				)}
 				{title}
 			</CollapsibleTrigger>
-			<CollapsibleContent className="mt-2">{expanded && children}</CollapsibleContent>
+			<CollapsibleContent className="mt-2">{children}</CollapsibleContent>
 		</Collapsible>
 	);
 }

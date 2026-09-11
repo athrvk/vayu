@@ -165,7 +165,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 	].filter((m) => (HEADLINE_METRICS as readonly string[]).includes(m.metric));
 
 	return (
-		<div className="mb-3 p-3 border rounded-md bg-background/50">
+		<div className="enter-fade mb-3 p-3 border rounded-md bg-background/50">
 			<div className="flex items-center gap-2 mb-2 flex-wrap">
 				<GitCompareArrows className="w-4 h-4 shrink-0 text-muted-foreground" />
 				<span className="text-sm font-medium text-muted-foreground">vs baseline</span>

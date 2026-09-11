@@ -63,7 +63,9 @@ function ScrollBar({
 			)}
 			{...props}
 		>
-			<ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-muted-foreground/30 hover:bg-muted-foreground/50" />
+			{/* `transition-colors` lives here, not just on the scrollbar track above -
+			    the hover fill this class animates is on the thumb itself. */}
+			<ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50" />
 		</ScrollAreaPrimitive.ScrollAreaScrollbar>
 	);
 }

@@ -218,7 +218,7 @@ export default function NotificationsPanel() {
 						 * visible after the choice is made, not only while browsing.
 						 */}
 						{severity?.warn && (
-							<p className="mt-3 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-status-error-text">
+							<p className="enter-fade mt-3 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-status-error-text">
 								{severity.warn}
 							</p>
 						)}
@@ -370,7 +370,7 @@ function SystemNotificationsCard() {
 					<p className="text-xs text-muted-foreground">{previewHint}</p>
 				</div>
 				{unavailableReason && (
-					<p className="mt-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-status-warning-text">
+					<p className="enter-fade mt-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-status-warning-text">
 						{unavailableReason}. Vayu will keep reporting these events as toasts.
 					</p>
 				)}
