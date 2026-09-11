@@ -802,8 +802,8 @@ TEST_F (ResourceWriteRouteTest, RequestCreateDefaultsMockResponseModeToFirst) {
 TEST_F (ResourceWriteRouteTest, RequestUpdateStoresFixedModeAndTarget) {
     const std::string collection = make_collection ();
     const std::string id         = make_request (collection);
-    auto [status, body]          = update_request_response (
-    *db_, id, json{ { "mockResponseMode", "fixed" }, { "mockExampleId", "exa_1" } });
+    auto [status, body]          = update_request_response (*db_, id,
+             json{ { "mockResponseMode", "fixed" }, { "mockExampleId", "exa_1" } });
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["mockResponseMode"], "fixed");
     EXPECT_EQ (body["mockExampleId"], "exa_1");
@@ -812,19 +812,20 @@ TEST_F (ResourceWriteRouteTest, RequestUpdateStoresFixedModeAndTarget) {
 TEST_F (ResourceWriteRouteTest, RequestUpdateKeepsModeWhenAbsent) {
     const std::string collection = make_collection ();
     const std::string id         = make_request (collection);
-    ASSERT_EQ (update_request_response (*db_, id, json{ { "mockResponseMode", "random" } })
-               .first,
-    200);
-    auto [status, body] = update_request_response (*db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (
+    update_request_response (*db_, id, json{ { "mockResponseMode", "random" } }).first, 200);
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "name", "Renamed" } });
     ASSERT_EQ (status, 200);
-    EXPECT_EQ (body["mockResponseMode"], "random") << "an untouched mode must survive a patch";
+    EXPECT_EQ (body["mockResponseMode"], "random")
+    << "an untouched mode must survive a patch";
 }
 
 TEST_F (ResourceWriteRouteTest, RequestUpdateNullMockExampleIdClears) {
     const std::string collection = make_collection ();
     const std::string id         = make_request (collection);
-    ASSERT_EQ (update_request_response (
-               *db_, id, json{ { "mockResponseMode", "fixed" }, { "mockExampleId", "exa_1" } })
+    ASSERT_EQ (update_request_response (*db_, id,
+               json{ { "mockResponseMode", "fixed" }, { "mockExampleId", "exa_1" } })
                .first,
     200);
     auto [status, body] =
@@ -839,7 +840,8 @@ TEST_F (ResourceWriteRouteTest, RequestInvalidMockResponseModeIsRejected) {
     auto [status, body] =
     update_request_response (*db_, id, json{ { "mockResponseMode", "sometimes" } });
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("mockResponseMode"),
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("mockResponseMode"),
     std::string::npos);
     const auto stored_request = db_->get_request (id);
     ASSERT_HAS_VALUE (stored_request);
@@ -855,7 +857,8 @@ TEST_F (ResourceWriteRouteTest, RequestNonStringMockResponseModeIsRejectedCleanl
     EXPECT_EQ (status, 400);
     EXPECT_NE (
     body["error"]["message"].get<std::string> ().find ("mockResponseMode"), std::string::npos)
-    << "a wrong-typed value must get the same field-naming 400 a wrong-valued one does, not a raw nlohmann exception message";
+    << "a wrong-typed value must get the same field-naming 400 a wrong-valued "
+       "one does, not a raw nlohmann exception message";
     const auto stored_request = db_->get_request (id);
     ASSERT_HAS_VALUE (stored_request);
     EXPECT_EQ (stored_request->mock_response_mode, "first");

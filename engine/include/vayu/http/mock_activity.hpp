@@ -44,7 +44,8 @@ struct MockActivityEntry {
  */
 class MockActivityLog {
     public:
-    explicit MockActivityLog (std::size_t capacity) : capacity_ (capacity) {}
+    explicit MockActivityLog (std::size_t capacity) : capacity_ (capacity) {
+    }
 
     /// Appends @p entry, dropping the oldest past capacity.
     void record (MockActivityEntry entry);

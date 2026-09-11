@@ -71,9 +71,9 @@ TEST (MockActivityLog, UnmatchedRequestRecordsWithNoRequestId) {
 
 TEST (MockActivityEntryJson, RendersNullForEveryUnsetOptional) {
     MockActivityEntry entry;
-    entry.method = "GET";
-    entry.path   = "/pets";
-    entry.status = 200;
+    entry.method    = "GET";
+    entry.path      = "/pets";
+    entry.status    = 200;
     const auto json = vayu::http::mock_activity_entry_json (entry);
     EXPECT_TRUE (json["requestId"].is_null ());
     EXPECT_TRUE (json["requestName"].is_null ());

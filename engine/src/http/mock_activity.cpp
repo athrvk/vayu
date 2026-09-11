@@ -13,7 +13,7 @@
 namespace vayu::http {
 
 void MockActivityLog::record (MockActivityEntry entry) {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     entries_.push_back (std::move (entry));
     while (entries_.size () > capacity_) {
         entries_.pop_front ();
@@ -21,7 +21,7 @@ void MockActivityLog::record (MockActivityEntry entry) {
 }
 
 std::vector<MockActivityEntry> MockActivityLog::snapshot (std::size_t limit) const {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     const std::size_t take = std::min (limit, entries_.size ());
     std::vector<MockActivityEntry> out;
     out.reserve (take);
@@ -33,19 +33,21 @@ std::vector<MockActivityEntry> MockActivityLog::snapshot (std::size_t limit) con
 
 nlohmann::json mock_activity_entry_json (const MockActivityEntry& entry) {
     nlohmann::json out;
-    out["at"]     = entry.at_ms;
-    out["method"] = entry.method;
-    out["path"]   = entry.path;
-    out["requestId"] =
-    entry.request_id.has_value () ? nlohmann::json (*entry.request_id) : nlohmann::json (nullptr);
-    out["requestName"] = entry.request_name.has_value () ?
-    nlohmann::json (*entry.request_name) :
-    nlohmann::json (nullptr);
-    out["exampleId"] =
-    entry.example_id.has_value () ? nlohmann::json (*entry.example_id) : nlohmann::json (nullptr);
-    out["exampleName"] = entry.example_name.has_value () ?
-    nlohmann::json (*entry.example_name) :
-    nlohmann::json (nullptr);
+    out["at"]            = entry.at_ms;
+    out["method"]        = entry.method;
+    out["path"]          = entry.path;
+    out["requestId"]     = entry.request_id.has_value () ?
+        nlohmann::json (*entry.request_id) :
+        nlohmann::json (nullptr);
+    out["requestName"]   = entry.request_name.has_value () ?
+      nlohmann::json (*entry.request_name) :
+      nlohmann::json (nullptr);
+    out["exampleId"]     = entry.example_id.has_value () ?
+        nlohmann::json (*entry.example_id) :
+        nlohmann::json (nullptr);
+    out["exampleName"]   = entry.example_name.has_value () ?
+      nlohmann::json (*entry.example_name) :
+      nlohmann::json (nullptr);
     out["status"]        = entry.status;
     out["injectedError"] = entry.injected_error;
     return out;

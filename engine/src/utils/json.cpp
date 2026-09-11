@@ -529,11 +529,11 @@ Json serialize (const vayu::db::Request& r) {
             json["elements"] = Json::array ();
         }
     }
-    json["followRedirects"] = r.follow_redirects;
-    json["maxRedirects"]    = r.max_redirects;
-    json["httpVersion"]     = r.http_version;
-    json["verifySSL"]       = r.verify_ssl;
-    json["stream"]          = r.stream;
+    json["followRedirects"]  = r.follow_redirects;
+    json["maxRedirects"]     = r.max_redirects;
+    json["httpVersion"]      = r.http_version;
+    json["verifySSL"]        = r.verify_ssl;
+    json["stream"]           = r.stream;
     json["mockResponseMode"] = r.mock_response_mode;
     json["mockExampleId"] =
     r.mock_example_id.has_value () ? Json (*r.mock_example_id) : Json (nullptr);
@@ -1301,7 +1301,8 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     out << "\"stream\":" << (r.stream ? "true" : "false") << ",";
     out << "\"mockResponseMode\":" << Json (r.mock_response_mode).dump () << ",";
     out << "\"mockExampleId\":"
-        << (r.mock_example_id.has_value () ? Json (*r.mock_example_id).dump () : "null") << ",";
+        << (r.mock_example_id.has_value () ? Json (*r.mock_example_id).dump () : "null")
+        << ",";
     // Through the same `spec_operation_node` the object serializer uses, so the
     // list route and the single route cannot come to disagree about it.
     out << "\"specOperation\":" << spec_operation_node (r.spec_operation).dump () << ",";

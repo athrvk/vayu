@@ -229,7 +229,8 @@ bool is_create) {
     } else if (!value.is_string () ||
     (value.get<std::string> () != "first" && value.get<std::string> () != "fixed" &&
     value.get<std::string> () != "random")) {
-        return route_error (400, "Invalid 'mockResponseMode': must be 'first', 'fixed' or 'random'");
+        return route_error (
+        400, "Invalid 'mockResponseMode': must be 'first', 'fixed' or 'random'");
     } else {
         mode = value.get<std::string> ();
     }
@@ -368,8 +369,8 @@ bool is_create) {
     // Which saved example a mock server answers with (issue #481 phase 3).
     // Through the shared applier like every other field here, so
     // `POST /import/apply` (which runs this same applier) carries it too.
-    if (auto outcome =
-        apply_mock_response_mode_field (json, r.mock_response_mode, r.mock_example_id, is_create);
+    if (auto outcome = apply_mock_response_mode_field (
+        json, r.mock_response_mode, r.mock_example_id, is_create);
     !outcome) {
         return outcome;
     }

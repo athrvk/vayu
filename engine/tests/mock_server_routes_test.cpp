@@ -301,16 +301,16 @@ TEST_F (MockServerTest, PickExampleFixedModeReturnsTheNamedExample) {
     seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
     seed_example ("exa_b", "req_list", 500, "b", "text/plain", json::array (), 1);
     vayu::db::Request r;
-    r.id                    = "req_list";
-    r.collection_id         = "col_root";
-    r.mock_response_mode    = "fixed";
-    r.mock_example_id       = "exa_b";
-    r.name                  = "req_list";
-    r.method                = vayu::HttpMethod::GET;
-    r.url                   = "{{baseUrl}}/pets";
-    r.created_at = 1;
-    r.updated_at = 1;
-    r.order      = 0;
+    r.id                 = "req_list";
+    r.collection_id      = "col_root";
+    r.mock_response_mode = "fixed";
+    r.mock_example_id    = "exa_b";
+    r.name               = "req_list";
+    r.method             = vayu::HttpMethod::GET;
+    r.url                = "{{baseUrl}}/pets";
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
     db_->save_request (r);
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
@@ -329,9 +329,9 @@ TEST_F (MockServerTest, PickExampleFixedModeFallsBackToFirstWhenTargetMissing) {
     r.name               = "req_list";
     r.method             = vayu::HttpMethod::GET;
     r.url                = "{{baseUrl}}/pets";
-    r.created_at = 1;
-    r.updated_at = 1;
-    r.order      = 0;
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
     db_->save_request (r);
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
@@ -349,9 +349,9 @@ TEST_F (MockServerTest, PickExampleRandomModeWithOneExampleAlwaysReturnsIt) {
     r.name               = "req_list";
     r.method             = vayu::HttpMethod::GET;
     r.url                = "{{baseUrl}}/pets";
-    r.created_at = 1;
-    r.updated_at = 1;
-    r.order      = 0;
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
     db_->save_request (r);
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
@@ -364,8 +364,8 @@ TEST_F (MockServerTest, PickExampleRandomModeWithOneExampleAlwaysReturnsIt) {
 TEST_F (MockServerTest, PickExampleRandomModeCoversEveryExampleAcrossManyRolls) {
     seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
     for (int i = 0; i < 20; ++i) {
-        seed_example ("exa_" + std::to_string (i), "req_list", 200, std::to_string (i),
-        "text/plain", json::array (), i);
+        seed_example ("exa_" + std::to_string (i), "req_list", 200,
+        std::to_string (i), "text/plain", json::array (), i);
     }
     vayu::db::Request r;
     r.id                 = "req_list";
@@ -374,9 +374,9 @@ TEST_F (MockServerTest, PickExampleRandomModeCoversEveryExampleAcrossManyRolls) 
     r.name               = "req_list";
     r.method             = vayu::HttpMethod::GET;
     r.url                = "{{baseUrl}}/pets";
-    r.created_at = 1;
-    r.updated_at = 1;
-    r.order      = 0;
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
     db_->save_request (r);
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
@@ -423,9 +423,9 @@ TEST_F (MockServerTest, MockRouteJsonFixedModeFallsBackToFirstWhenTargetMissing)
     r.name               = "req_list";
     r.method             = vayu::HttpMethod::GET;
     r.url                = "{{baseUrl}}/pets";
-    r.created_at = 1;
-    r.updated_at = 1;
-    r.order      = 0;
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
     db_->save_request (r);
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
@@ -447,9 +447,9 @@ TEST_F (MockServerTest, MockRouteJsonRandomModeNamesNoExample) {
     r.name               = "req_list";
     r.method             = vayu::HttpMethod::GET;
     r.url                = "{{baseUrl}}/pets";
-    r.created_at = 1;
-    r.updated_at = 1;
-    r.order      = 0;
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
     db_->save_request (r);
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
@@ -459,8 +459,9 @@ TEST_F (MockServerTest, MockRouteJsonRandomModeNamesNoExample) {
     // "random" names no example: which one answers varies per request, so
     // reporting one here would state a fact the field cannot back up.
     EXPECT_FALSE (out.contains ("exampleName"));
-    EXPECT_EQ (out["status"], 200) << "the first example's status stands in as a "
-                                       "representative figure";
+    EXPECT_EQ (out["status"], 200)
+    << "the first example's status stands in as a "
+       "representative figure";
 }
 
 TEST_F (MockServerTest, RouteHitsCountServedResponsesOnlyByRoute) {
@@ -479,7 +480,7 @@ TEST_F (MockServerTest, RouteHitsCountServedResponsesOnlyByRoute) {
     ASSERT_TRUE (client.Get ("/nowhere")); // no route at all - counts nowhere
 
     const auto routes = manager.routes (started.info.mock_id);
-    const auto hits    = manager.route_hits (started.info.mock_id);
+    const auto hits   = manager.route_hits (started.info.mock_id);
     ASSERT_HAS_VALUE (routes);
     ASSERT_HAS_VALUE (hits);
     // seed_pet_store() also has a POST /pets sharing this GET route's path
@@ -488,8 +489,7 @@ TEST_F (MockServerTest, RouteHitsCountServedResponsesOnlyByRoute) {
     for (std::size_t i = 0; i < routes->size (); ++i) {
         if ((*routes)[i].method == "GET" && (*routes)[i].path_template == "/pets") {
             EXPECT_EQ ((*hits)[i], 2u);
-        } else if ((*routes)[i].method == "GET" &&
-        (*routes)[i].path_template == "/pets/{{petId}}") {
+        } else if ((*routes)[i].method == "GET" && (*routes)[i].path_template == "/pets/{{petId}}") {
             EXPECT_EQ ((*hits)[i], 1u);
         } else {
             EXPECT_EQ ((*hits)[i], 0u);

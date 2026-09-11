@@ -601,7 +601,7 @@ struct MockServerManager::MockServer {
 MockServerManager::MockServerManager () = default;
 
 MockServerManager::~MockServerManager () {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     for (auto& [id, server] : servers_) {
         // A response inside its configured latency is still holding a listener
         // thread, so the join inside stop() waits up to MAX_LATENCY_MS - which
@@ -720,7 +720,7 @@ const MockStartRequest& request) {
     }
 
     {
-        std::lock_guard<std::mutex> lock (mutex_);
+        std::scoped_lock lock (mutex_);
         if (servers_.size () >= constants::mock_server::MAX_SERVERS) {
             out.ok            = false;
             out.http_status   = 409;
@@ -740,7 +740,7 @@ const MockStartRequest& request) {
     server->error_rate_pct  = request.error_rate_pct;
     server->created_at      = routes::now_ms ();
     server->routes          = build_mock_routes (db, request.collection_id);
-    server->hits            = std::vector<std::atomic<std::uint64_t>> (server->routes.size ());
+    server->hits = std::vector<std::atomic<std::uint64_t>> (server->routes.size ());
 
     if (server->routes.size () > constants::mock_server::MAX_ROUTES) {
         out.ok            = false;
@@ -789,8 +789,8 @@ const MockStartRequest& request) {
     // body is drained by httplib after the response, so keep-alive is
     // unaffected.
     svr.set_pre_routing_handler (
-    [config = MockConfig{ server->latency_ms, server->error_rate_pct, raw->routes,
-     raw->served, raw->hits, raw->example_roll, raw->activity }] (
+    [config = MockConfig{ server->latency_ms, server->error_rate_pct,
+     raw->routes, raw->served, raw->hits, raw->example_roll, raw->activity }] (
     const httplib::Request& req, httplib::Response& res) {
         serve_mock_request (config, req, res);
         return httplib::Server::HandlerResponse::Handled;
@@ -812,7 +812,7 @@ const MockStartRequest& request) {
     server->port = started.port;
 
     {
-        std::lock_guard<std::mutex> lock (mutex_);
+        std::scoped_lock lock (mutex_);
         out.info             = server->info ();
         servers_[server->id] = std::move (server);
     }
@@ -825,7 +825,7 @@ const MockStartRequest& request) {
 }
 
 bool MockServerManager::stop (const std::string& mock_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     auto it = servers_.find (mock_id);
     if (it == servers_.end ()) {
         return false;
@@ -839,7 +839,7 @@ bool MockServerManager::stop (const std::string& mock_id) {
 }
 
 std::optional<MockServerInfo> MockServerManager::get (const std::string& mock_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     auto it = servers_.find (mock_id);
     if (it == servers_.end ()) {
         return std::nullopt;
@@ -848,7 +848,7 @@ std::optional<MockServerInfo> MockServerManager::get (const std::string& mock_id
 }
 
 std::vector<MockServerInfo> MockServerManager::list () {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     std::vector<MockServerInfo> out;
     out.reserve (servers_.size ());
     for (const auto& [id, server] : servers_) {
@@ -858,7 +858,7 @@ std::vector<MockServerInfo> MockServerManager::list () {
 }
 
 std::optional<std::vector<MockRoute>> MockServerManager::routes (const std::string& mock_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     auto it = servers_.find (mock_id);
     if (it == servers_.end ()) {
         return std::nullopt;
@@ -866,9 +866,9 @@ std::optional<std::vector<MockRoute>> MockServerManager::routes (const std::stri
     return it->second->routes;
 }
 
-std::optional<std::vector<std::uint64_t>>
-MockServerManager::route_hits (const std::string& mock_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
+std::optional<std::vector<std::uint64_t>> MockServerManager::route_hits (
+const std::string& mock_id) {
+    std::scoped_lock lock (mutex_);
     auto it = servers_.find (mock_id);
     if (it == servers_.end ()) {
         return std::nullopt;
@@ -883,7 +883,7 @@ MockServerManager::route_hits (const std::string& mock_id) {
 
 std::optional<std::vector<MockActivityEntry>>
 MockServerManager::activity (const std::string& mock_id, std::size_t limit) {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     auto it = servers_.find (mock_id);
     if (it == servers_.end ()) {
         return std::nullopt;
