@@ -256,7 +256,10 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 							</Badge>
 						</CardTitle>
 					</CardHeader>
-					<CardContent className="p-0">
+					{/* `surface-card` declares the `--rule` the strip's dividers read;
+					    a bare `divide-y` on `Card`'s `border bg-card` falls back to
+					    `--border`, invisible in dark (issue #1650). */}
+					<CardContent className="p-0 bg-card surface-card">
 						<SampleRetentionNote
 							sampling={report.sampling}
 							shown={report.results.length}
@@ -265,7 +268,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 						/>
 						<CapturedDataWarning sampling={report.sampling} className="mx-5 mb-3" />
 						<ScrollArea className="h-[400px]">
-							<div className="divide-y">
+							<div className="divide-y divide-rule">
 								{report.results.map((result, index) => {
 									const trace = result.trace;
 									const captured =
@@ -292,7 +295,7 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 											phases={phases}
 											isExpanded={expandedResults.has(index)}
 											onToggle={() => toggleResult(index)}
-											className="border-b last:border-b-0"
+											className="border-b border-rule last:border-b-0"
 											details={
 												trace && (
 													<>

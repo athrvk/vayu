@@ -78,8 +78,9 @@ export default function SampleRequestCard({
 			// per-row radius needed, the same "square on purpose" exception a
 			// full-bleed divider strip already gets there. Status rides the
 			// `StatusIcon` tint alone now, not a second, redundant colour on
-			// the border.
-			className="border-b last:border-b-0"
+			// the border. `border-rule` reads the `surface-card` the parent
+			// `CardContent` declares (issue #1650).
+			className="border-b border-rule last:border-b-0"
 		>
 			{/* The captured exchange, when this run stored one for this row.
 			    Rendering nothing (not an empty heading) when it did not is
