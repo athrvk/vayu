@@ -1158,6 +1158,19 @@ export class EngineClient {
 	}
 
 	/**
+	 * One mock's served-request log: `GET /mock/:id/activity?limit=N` ->
+	 * `{data: [...]}`, newest first. Discarded on stop, like the route table.
+	 */
+	getMockServerActivity(mockId: string, limit: number, signal?: AbortSignal): Promise<unknown> {
+		return this.request(
+			"GET",
+			`/mock/${encodeURIComponent(mockId)}/activity?limit=${limit}`,
+			undefined,
+			signal
+		);
+	}
+
+	/**
 	 * Stop one: `POST /mock/:id/stop`. The record goes with the listener - a mock
 	 * holds nothing that outlives it - so there is no stopped state to read
 	 * afterwards. An unknown id is a 404, surfaced rather than swallowed for the

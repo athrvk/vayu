@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, Clock, Pin } from "lucide-react";
 import { useTabsStore, useLayoutStore, useToastStore } from "@/stores";
 import { ApiError } from "@/services";
@@ -41,6 +41,8 @@ import {
 	DeleteConfirmDialog,
 } from "@/components/ui";
 import RunItem from "./RunItem";
+import { groupRunsByDay } from "./group-runs-by-day";
+import { useHistoryListFocus } from "./useHistoryListFocus";
 import type { Run } from "@/types";
 
 /**
@@ -117,6 +119,15 @@ export default function HistoryList() {
 	const allRuns = flattenRunPages(data);
 	const total = runsTotal(data);
 	const runs = filterRuns(allRuns, { filterType, filterStatus, pinnedOnly, sortBy });
+	// Grouped after sorting/filtering, never before - a group is a label over
+	// whatever order `runs` is already in, not a second decision about it.
+	const runGroups = groupRunsByDay(runs);
+
+	// Roving tabindex over the row activators inside this container - see
+	// useHistoryListFocus's own doc comment for why arrow keys move focus
+	// without opening the row they land on.
+	const listRef = useRef<HTMLDivElement>(null);
+	const { onKeyDown: onListKeyDown, onFocus: onListFocus } = useHistoryListFocus(listRef);
 
 	/*
 	 * A collection run's row carries the collection's id, not its name - the
@@ -338,7 +349,15 @@ export default function HistoryList() {
 					 * Scrollbar styling is a global baseline (index.css) - nothing to
 					 * apply per container, which is what this element was missing.
 					 */}
-					<div className="h-full space-y-2 overflow-y-auto pr-1">
+					{/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- roving tabindex for Up/Down/Home/End between the row activators inside (see useHistoryListFocus); `role="group"` names this as a set of buttons rather than claiming full `listbox`/`tree` semantics an occasionally-day-headered flat list does not have */}
+					<div
+						ref={listRef}
+						role="group"
+						aria-label="Run history"
+						onKeyDown={onListKeyDown}
+						onFocus={onListFocus}
+						className="h-full space-y-1 overflow-y-auto pr-1"
+					>
 						{isLoading && (
 							<ListSkeleton rows={4} leading badge className="enter-fade" />
 						)}
@@ -378,18 +397,31 @@ export default function HistoryList() {
 						)}
 
 						{!isLoading &&
-							runs.map((run) => (
-								<RunItem
-									key={run.id}
-									run={run}
-									onSelect={navigateToRunDetail}
-									onDelete={handleDeleteClick}
-									onToggleBaseline={handleToggleBaseline}
-									isDeleting={deletingId === run.id}
-									isTogglingBaseline={pinningId === run.id}
-									isSelected={selectedRunId === run.id}
-									collectionName={collectionName(run)}
-								/>
+							runGroups.map((group) => (
+								<div key={group.runs[0]?.id ?? group.label} className="space-y-1">
+									{/*
+									 * The day-group header replaces the per-row relative
+									 * timestamp ("8h ago" repeated down a page of same-day
+									 * runs said nothing after the first row) - see
+									 * `group-runs-by-day.ts`.
+									 */}
+									<div className="px-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground first:pt-0">
+										{group.label}
+									</div>
+									{group.runs.map((run) => (
+										<RunItem
+											key={run.id}
+											run={run}
+											onSelect={navigateToRunDetail}
+											onDelete={handleDeleteClick}
+											onToggleBaseline={handleToggleBaseline}
+											isDeleting={deletingId === run.id}
+											isTogglingBaseline={pinningId === run.id}
+											isSelected={selectedRunId === run.id}
+											collectionName={collectionName(run)}
+										/>
+									))}
+								</div>
 							))}
 
 						{/* Older runs page in on demand - the poll only refreshes

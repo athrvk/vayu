@@ -8,7 +8,9 @@
  */
 
 #include "vayu/db/database.hpp"
+#include "vayu/http/mock_activity.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <map>
@@ -36,19 +38,10 @@ struct MockPathSegment {
     bool templated = false;
 };
 
-/** The response one route answers with - a request's first saved example. */
-struct MockResponse {
-    int status = 200;
-    /// In stored order, duplicates intact: an example holds a KeyValueEntry
-    /// array precisely so a repeated `Set-Cookie` survives being re-served.
-    std::vector<std::pair<std::string, std::string>> headers;
-    std::string body;
-    std::string content_type;
-};
-
 /**
  * One entry of a mock's route table: a stored request, its path template, and
- * the example it answers with.
+ * every one of its saved examples (issue #481 phase 3 widened this from just
+ * the first).
  *
  * Built once when the mock starts and const thereafter. A running mock does not
  * hot-reload edits to the collection - restart it - which is what makes the
@@ -63,12 +56,21 @@ struct MockRoute {
     /// what `GET /mock` lists, so a user can see what the mock will answer.
     std::string path_template;
     std::vector<MockPathSegment> segments;
-    /// False when the request has no saved example. The route is kept anyway:
-    /// "this request matched but has nothing to serve" is a far better answer
+    /// This request's saved examples, in stored order, tombstones excluded -
+    /// exactly what `db.get_request_examples` returns. Empty means the request
+    /// has nothing to serve; the route is kept anyway (see `has_response`).
+    std::vector<vayu::db::RequestExample> examples;
+    /// "first" | "fixed" | "random" - the request's `mock_response_mode`,
+    /// resolved into what @p pick_example switches on.
+    std::string mode = "first";
+    /// The example `mode == "fixed"` names. Unset for every other mode, and
+    /// for "fixed" itself when the request names no target.
+    std::optional<std::string> fixed_example_id;
+    /// False when `examples` is empty. The route is kept anyway: "this
+    /// request matched but has nothing to serve" is a far better answer
     /// than "no such route", and it is the one an import that dropped its
     /// examples produces.
     bool has_response = false;
-    MockResponse response;
 };
 
 /** Why a request did not match, so the 404 body can say which near-miss it was. */
@@ -172,6 +174,15 @@ std::string normalize_mock_path (const std::string& url);
 /** Split a normalized path into the segments `resolve_mock_route` matches. */
 std::vector<MockPathSegment> mock_path_segments (const std::string& path);
 
+/// The enabled header rows of a stored example, in order and with duplicates
+/// intact - the reason an example stores an array rather than an object.
+std::vector<std::pair<std::string, std::string>> example_headers (const std::string& blob);
+
+/// The content type an example is served under: its denormalized column, then
+/// its own `Content-Type` header, then plain text - never a guess at the body.
+std::string example_content_type (const vayu::db::RequestExample& example,
+const std::vector<std::pair<std::string, std::string>>& headers);
+
 /**
  * Build a mock's route table from a collection and every collection under it.
  *
@@ -198,6 +209,21 @@ MockMatch resolve_mock_route (const std::vector<MockRoute>& routes,
 const std::string& method,
 const std::string& path);
 
+/**
+ * Which of @p route's saved examples answers this request (issue #481 phase 3).
+ *
+ * Caller guarantees `route.has_response` (so `route.examples` is never empty
+ * here). "first" and a "fixed" target that still exists are pinned - the same
+ * example every time, snapshot-stable like the rest of the route table.
+ * "random", and a "fixed" target that no longer exists (deleted or suppressed
+ * since the mode was set), roll @p roll_counter: a splitmix64 sequence,
+ * decorrelated enough that a run does not see the same example twice in a row
+ * by pattern, deterministic enough to have no global RNG state - the same
+ * construction `should_inject_error` uses for its own roll.
+ */
+const vayu::db::RequestExample&
+pick_example (const MockRoute& route, std::atomic<std::uint64_t>& roll_counter);
+
 /** The 404 body a miss answers with - the near-miss is the debugging value. */
 nlohmann::json mock_miss_body (const std::vector<MockRoute>& routes,
 const MockMatch& match,
@@ -207,8 +233,11 @@ const std::string& path);
 /** The wire shape of a mock, shared by start and list. */
 nlohmann::json mock_server_info_json (const MockServerInfo& info);
 
-/** The wire shape of one route, for `GET /mock/:id/routes`. */
-nlohmann::json mock_route_json (const MockRoute& route);
+/** The wire shape of one route, for `GET /mock/:id/routes`. `hits` is a
+ *  snapshot of that route's serve count, read separately from the manager
+ *  (issue #481 phase 3) since it is mutable state the route table itself is
+ *  not. */
+nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits);
 
 /**
  * Owns the engine's collection mock servers (issue #481 phase 2).
@@ -262,6 +291,16 @@ class MockServerManager {
     /// The route table @p mock_id is serving, or nullopt when it does not
     /// exist. Const since start(), so this is a copy of an immutable snapshot.
     std::optional<std::vector<MockRoute>> routes (const std::string& mock_id);
+
+    /// How many times each of @p mock_id's routes has answered a request, in
+    /// the same order as routes(). A plain snapshot of the atomics
+    /// serve_mock_request bumps - nullopt when the mock does not exist.
+    std::optional<std::vector<std::uint64_t>> route_hits (const std::string& mock_id);
+
+    /// @p mock_id's served-request log, newest first, at most @p limit
+    /// entries - nullopt when the mock does not exist.
+    std::optional<std::vector<MockActivityEntry>>
+    activity (const std::string& mock_id, std::size_t limit);
 
     private:
     struct MockServer;

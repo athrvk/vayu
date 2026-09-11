@@ -5557,7 +5557,7 @@ export const TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it.",
+			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it. `mockResponseMode`/`mockExampleId` set which saved example a mock server answers this request with (`mockExampleId: null` clears it) - get_mock_routes shows the effect once a mock is running.",
 		annotations: {
 			title: "Update saved request",
 			readOnlyHint: false,
@@ -5587,6 +5587,19 @@ export const TOOLS: McpTool[] = [
 				"Replaces the stored block whole - send the mode and its credentials together. Leave it out to keep what is stored."
 			),
 			...requestSettingsInput(),
+			mockResponseMode: z
+				.enum(["first", "fixed", "random"])
+				.optional()
+				.describe(
+					"Which saved example a mock server answers with. 'fixed' requires mockExampleId. Takes effect the next time start_mock_server runs, like every other change to a saved example."
+				),
+			mockExampleId: z
+				.string()
+				.nullable()
+				.optional()
+				.describe(
+					"The example 'fixed' mode names (an id from list_request_examples). Pass null to clear it."
+				),
 			elements: elementsInput("this request"),
 			preRequestScript: storedScriptInput("pre", true),
 			postRequestScript: storedScriptInput("post", true),
@@ -5617,6 +5630,23 @@ export const TOOLS: McpTool[] = [
 			const auth = readAuthArg(args);
 			if (auth) payload.auth = auth;
 			applyRequestSettings(args, payload);
+			const mockResponseMode = args.mockResponseMode as
+				"first" | "fixed" | "random" | undefined;
+			// `str()` treats `null` the same as absent (it only recognizes a
+			// string), which is right for every other field here but wrong for
+			// this one: `mockExampleId: null` is how a caller clears the target,
+			// same as the engine's own null-vs-absent merge-patch rule, so it
+			// needs its own presence check rather than `str()` alone.
+			if ("mockExampleId" in args) {
+				payload.mockExampleId =
+					args.mockExampleId === null ? null : str(args, "mockExampleId");
+			}
+			if (mockResponseMode === "fixed" && !payload.mockExampleId) {
+				return errorResult(
+					'"mockResponseMode": "fixed" needs "mockExampleId" - pass the example it should serve.'
+				);
+			}
+			if (mockResponseMode !== undefined) payload.mockResponseMode = mockResponseMode;
 			const body = str(args, "body");
 			const bodyType = str(args, "bodyType");
 			if (body !== undefined) {
@@ -5643,7 +5673,7 @@ export const TOOLS: McpTool[] = [
 				elementsGiven === undefined
 			) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body, auth, followRedirects, maxRedirects, httpVersion, stream, description, elements, preRequestScript or postRequestScript)."
+					"Pass at least one field to change (name, url, method, headers, body, auth, followRedirects, maxRedirects, httpVersion, stream, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript)."
 				);
 			}
 			// Scripts are `elements` now (issue #1514), and `PUT /requests/:id`
@@ -7814,7 +7844,7 @@ export const TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"List the routes one mock server is serving: method, path template, the saved request behind each, and whether that request has an example (hasExample false means the route answers 501). This is how 'the mock answers 404' gets diagnosed without sending a request per guess. The table is a snapshot taken when the mock started and cannot change under it - editing the collection means restarting the mock - so a second read answers the same thing.",
+			"List the routes one mock server is serving: method, path template, the saved request behind each, and whether that request has an example (hasExample false means the route answers 501). This is how 'the mock answers 404' gets diagnosed without sending a request per guess. The table is a snapshot taken when the mock started and cannot change under it - editing the collection means restarting the mock - so a second read answers the same thing. Each row also carries `mode` (the request's mockResponseMode), `exampleName` (which saved example it currently answers with, when resolvable), and `hits` (how many times this route has been served since the mock started) - the last one does change under repeated reads, unlike the rest of the table.",
 		annotations: {
 			title: "Get mock server routes",
 			readOnlyHint: true,
@@ -7826,6 +7856,35 @@ export const TOOLS: McpTool[] = [
 		},
 		handler: (args, ctx, signal) =>
 			callEngine(() => ctx.client.getMockServerRoutes(requireStr(args, "mockId"), signal)),
+	},
+	{
+		name: "get_mock_activity",
+		category: "read",
+		invalidates: [],
+		description:
+			"What one mock server has served, newest first: method, path, the matched request and example (or unmatched/no-example), status, and whether the response was an injected failure. Discarded when the mock stops, like get_mock_routes' table - a fresh get_mock_activity right after start_mock_server is always empty.",
+		annotations: {
+			title: "Get mock server activity",
+			readOnlyHint: true,
+			idempotentHint: false,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			mockId: z.string().describe("Mock server ID (from start_mock_server)."),
+			limit: z
+				.number()
+				.int()
+				.min(1)
+				.max(200)
+				.optional()
+				.describe("At most this many entries (default 50, max 200)."),
+		},
+		handler: (args, ctx, signal) => {
+			const limit = args.limit as number | undefined;
+			return callEngine(() =>
+				ctx.client.getMockServerActivity(requireStr(args, "mockId"), limit ?? 50, signal)
+			);
+		},
 	},
 	{
 		name: "stop_mock_server",

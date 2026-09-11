@@ -34,6 +34,8 @@ vi.mock("@/queries", () => ({
 	useDeleteRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useMockServersQuery: () => ({ data: [] }),
+	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 const collections = [{ id: "c-1", name: "Acme", order: 0 }] as Collection[];
@@ -69,6 +71,7 @@ const source: Request = {
 	httpVersion: "http1.1",
 	verifySSL: false,
 	stream: true,
+	mockResponseMode: "first",
 	specOperation: { operationId: "getPet", method: "GET", path: "/pets/{id}" },
 	order: 1,
 	createdAt: "2026-01-01T00:00:00.000Z",

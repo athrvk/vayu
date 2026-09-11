@@ -215,7 +215,10 @@ describe("RunItem run types", () => {
 
 		// Prove the scan read something before trusting what it did not find - a
 		// guard that matched nothing would "pass" on an empty list forever.
-		expect(glyphs.length).toBeGreaterThan(3);
+		// 3, not 4: the row's status used to be its own icon (CheckCircle2) and
+		// is a colour dot now, one fewer glyph on every row - this
+		// fixture's remaining three are Folder, ListOrdered and Repeat.
+		expect(glyphs.length).toBeGreaterThan(2);
 		expect(glyphs).not.toContain("unknown");
 		expect(glyphs).toContain("lucide-list-ordered");
 

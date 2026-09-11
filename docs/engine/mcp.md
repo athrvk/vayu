@@ -188,7 +188,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `unbind_spec`          | write    | `GET /collections` (scan) + `PUT /collections/:id` (`openapi: null`) | write toggle; the document and the requests' recorded operations are kept |
 | `import_document`      | write    | `POST /import`                               | write toggle; one transaction - every format the app accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4), detected by content; `meta.skipped` names what the document declared and Vayu cannot represent |
 | `create_request`       | write    | `POST /requests`                             | write toggle; takes the builder's whole surface - auth, `followRedirects` / `maxRedirects` / `httpVersion` / `stream` / `verifySSL`, `elements` (extractors, assertions, timers, scripts) - minus file body parts |
-| `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it |
+| `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `list_trash`           | read     | `GET /trash`                                 | -                          |
 | `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation) |
@@ -221,7 +221,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_mock_issuer`   | execute  | `PUT /mock-issuer/:id` (merge-patch)         | - (live edit of `failureMode` / `slowMs`; an empty patch is refused before the engine sees it) |
 | `start_mock_server`    | execute  | `POST /mock/start`                           | - (loopback-only listener, so no allowlist entry applies); the `latencyMs` ceiling is the engine's |
 | `list_mock_servers`    | read     | `GET /mock`                                  | - (running mocks only - a stopped one has no record) |
-| `get_mock_routes`      | read     | `GET /mock/:id/routes`                       | - (a start-time snapshot, constant under a running mock) |
+| `get_mock_routes`      | read     | `GET /mock/:id/routes`                       | - (a start-time snapshot, constant under a running mock, except each row's `hits` count) |
+| `get_mock_activity`    | read     | `GET /mock/:id/activity?limit=`              | - (newest first, 50 rows by default, 200 max; discarded when the mock stops, and re-fetched to see new entries rather than pushed) |
 | `stop_mock_server`     | execute  | `POST /mock/:id/stop`                        | - (unknown id is a `404`, surfaced as a tool error) |
 | `start_webhook_inbox`  | execute  | `POST /inbox/start`                          | - (loopback-only listener; `bind` / `confirmNonLoopback` are never sent) |
 | `list_webhook_inboxes` | read     | `GET /inbox`                                 | -                          |
@@ -528,7 +529,13 @@ Notes:
   convenience: a defaulted `true` on an unrelated update would silently re-enable
   a certificate check the user turned off. The one exclusion left is deliberate:
   **file body parts**, which name a path on the user's machine an agent cannot
-  choose for them.
+  choose for them. `update_request` also carries `mockResponseMode` /
+  `mockExampleId` (issue #481 phase 3), the same setting the Examples tab's
+  mode picker writes: `fixed` is refused before the engine is called when it
+  names no `mockExampleId`, exactly like the bodyType-without-body refusal
+  above, and the change only takes effect the next time `start_mock_server`
+  runs - a running mock's route table is a snapshot, not a live view of the
+  request.
 - **A skipped certificate check has to leave a record** (issue #795). The
   *stored* `verifySSL: false` is writable over MCP; a *per-call* one is not.
   `run_request` declares `verifySSL` only so that `false` is refused by name -
@@ -772,7 +779,17 @@ Notes:
   a snapshot taken at start and cannot change under a running mock (editing the
   collection means restarting), which is why the renderer holds it at
   `staleTime: Infinity` and a `stop_mock_server` event carries the `mockId` so
-  that cache entry is *dropped* rather than refetched into a `404`.
+  that cache entry is *dropped* rather than refetched into a `404`. Each row's
+  `mode`, `exampleName` and `hits` are the exception - they read off the
+  request's stored mock settings and the mock's own hit counter, so they can
+  change between two reads of the same table even though the routes
+  themselves cannot. `get_mock_activity` is the opposite of that snapshot: it
+  is a log that grows for as long as the mock runs, newest first, so an agent
+  watching a client under test calls it again to see what has arrived since
+  the last read rather than trusting a cached copy - unlike the route table,
+  which is worth fetching only once. It is capped at 200 rows per call (50 by
+  default) and, like the route table, is discarded outright on
+  `stop_mock_server` rather than kept the way an inbox keeps its captures.
 - **The webhook-inbox tools** are the assertion half an agent testing a webhook
   needs (issue #756): `start_webhook_inbox` stands up a
   [local inbox](api-reference.md#webhook-inbox) and returns its URL,

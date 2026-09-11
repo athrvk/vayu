@@ -74,6 +74,9 @@ export type HeaderRowSource = AutoHeaderSource | "legacy-default";
  */
 export type MethodSource = "graphql";
 
+/** Which saved example a mock server answers with (issue #481 phase 3). */
+export type MockResponseMode = "first" | "fixed" | "random";
+
 export interface KeyValueEntry {
 	key: string;
 	value: string;
@@ -785,6 +788,19 @@ export interface Request {
 	 */
 	stream: boolean;
 	/**
+	 * Which saved example a mock server answers with (issue #481 phase 3).
+	 * Always present, unlike `mockExampleId` - a request stored before this
+	 * column existed reads back `"first"`, which is what it always served.
+	 */
+	mockResponseMode: MockResponseMode;
+	/**
+	 * The example {@link mockResponseMode} `"fixed"` names. Optional, on the
+	 * `specOperation` convention above: the engine serializes `null` for a
+	 * request that names none, and `undefined` is how every reader here
+	 * spells that.
+	 */
+	mockExampleId?: string;
+	/**
 	 * Which operation of the collection's bound spec this request is (issue
 	 * #637). Optional rather than always-present, unlike `stream`: the engine
 	 * serializes `null` for a request that names none, and `undefined` is how
@@ -1484,6 +1500,17 @@ export interface RunScenarioSummary {
  */
 export interface RunSummary {
 	url?: string;
+	/**
+	 * The request's name, as the client sent it at run start -
+	 * `execIdentity` in `execute-mapping.ts` is what threads it through
+	 * composition. Never re-read from the requests table server-side, so it
+	 * is exactly what the editor showed at the moment this run started: a
+	 * renamed or since-deleted request does not retroactively change it, and
+	 * a run recorded before this field existed has none. The history row
+	 * falls back to `url` when this is absent or still the default name
+	 * (`DEFAULT_REQUEST_NAME`).
+	 */
+	requestName?: string;
 	method?: string;
 	mode?: string;
 	duration?: string;

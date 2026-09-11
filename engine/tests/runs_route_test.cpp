@@ -173,10 +173,10 @@ TEST_F (RunsRouteTest, PaginationHasMoreAndOffset) {
     EXPECT_EQ (page3["pagination"]["hasMore"], false);
 }
 
-TEST_F (RunsRouteTest, SummaryHasExactlyNineKeysAndOmitsAbsent) {
+TEST_F (RunsRouteTest, SummaryHasExactlyTenKeysAndOmitsAbsent) {
     seed ({ .id = "run_full", .config_snapshot = R"({"url":"https://a/","method":"POST","mode":"constant_rps",
     "duration":"60s","concurrency":100,"comment":"nightly","httpVersion":"http2",
-    "followRedirects":false,"maxRedirects":5,"headers":{"X":"1"}})" });
+    "followRedirects":false,"maxRedirects":5,"requestName":"List pets","headers":{"X":"1"}})" });
     seed ({ .id = "run_sparse", .start_time = 1, .config_snapshot = R"({"url":"https://b/"})" });
 
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
@@ -184,8 +184,8 @@ TEST_F (RunsRouteTest, SummaryHasExactlyNineKeysAndOmitsAbsent) {
     const auto& sparse = body["data"][0]["summary"];
     EXPECT_EQ (body["data"][0]["id"], "run_sparse");
     // url present; httpVersion always defaults to "auto" when absent -
-    // followRedirects/maxRedirects/comment stay omitted, they have no such
-    // engine-side default to fall back to.
+    // followRedirects/maxRedirects/comment/requestName stay omitted, they have
+    // no such engine-side default to fall back to.
     EXPECT_EQ (sparse.size (), 2u);
     EXPECT_EQ (sparse["url"], "https://b/");
     // ASSERT, not EXPECT: operator[] on a missing key of a const json trips
@@ -196,20 +196,34 @@ TEST_F (RunsRouteTest, SummaryHasExactlyNineKeysAndOmitsAbsent) {
     EXPECT_FALSE (sparse.contains ("comment"));
     EXPECT_FALSE (sparse.contains ("followRedirects"));
     EXPECT_FALSE (sparse.contains ("maxRedirects"));
+    EXPECT_FALSE (sparse.contains ("requestName"));
 
     const auto& full = body["data"][1]["summary"];
-    // Exactly the nine documented keys, no more (headers must not leak in).
-    EXPECT_EQ (full.size (), 9u);
+    // Exactly the ten documented keys, no more (headers must not leak in).
+    EXPECT_EQ (full.size (), 10u);
     // ASSERT so a dropped key stops here with a legible failure rather than
     // aborting on the operator[] reads below.
     for (const char* k : { "url", "method", "mode", "duration", "concurrency",
-         "comment", "httpVersion", "followRedirects", "maxRedirects" })
+         "comment", "httpVersion", "followRedirects", "maxRedirects", "requestName" })
         ASSERT_TRUE (full.contains (k)) << k;
     EXPECT_FALSE (full.contains ("headers"));
     EXPECT_EQ (full["concurrency"], 100);
     EXPECT_EQ (full["httpVersion"], "http2");
     EXPECT_EQ (full["followRedirects"], false);
     EXPECT_EQ (full["maxRedirects"], 5);
+    EXPECT_EQ (full["requestName"], "List pets");
+}
+
+// `requestName` is the request's name as the client sent it at run start -
+// never re-read from the requests table (see build_run_summary's doc
+// comment) - which is why a run recorded before this field existed, or one
+// whose client omitted it, is a bare absence rather than a fabricated name.
+TEST_F (RunsRouteTest, SummaryOmitsRequestNameWhenTheSnapshotPredatesIt) {
+    seed ({ .id      = "run_pre_name_field",
+    .config_snapshot = R"({"url":"https://a/","method":"GET"})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    EXPECT_FALSE (body["data"][0]["summary"].contains ("requestName"));
 }
 
 // A raw POST /runs body of `"httpVersion": null` (the client asked for no
@@ -362,6 +376,37 @@ TEST_F (RunsRouteTest, DesignRowWithNoStoredResultOmitsTheKey) {
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
     ASSERT_EQ (body["data"].size (), 1u);
     EXPECT_FALSE (body["data"][0].contains ("resultSummary"));
+}
+
+// A scenario run's report `results` are the steps ScenarioRunView renders
+// one row per - not a sample. Past 100 steps used to be silently dropped,
+// which read as a run that executed fewer steps than it actually did.
+// `maxScenarioStoredSteps` (5,000 by default) is the real bound, already
+// applied at write time; the report must not impose a second, smaller one.
+TEST_F (RunsRouteTest, ScenarioReportKeepsEveryStoredStepPastTheSampleCap) {
+    seed ({ .id = "run_scenario_big", .type = vayu::RunType::Scenario });
+    for (int i = 0; i < 150; i++) {
+        seed_result ("run_scenario_big", 200, 1.0);
+    }
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_scenario_big");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["results"].size (), 150u);
+}
+
+// The sample cap stays for everything else - a design run has one row and a
+// load run's percentiles do not need per-request rows past a representative
+// few, so the report payload does not grow with an unbounded run's result
+// count.
+TEST_F (RunsRouteTest, LoadReportStillSamplesPastTheCap) {
+    seed ({ .id = "run_load_big", .type = vayu::RunType::Load });
+    for (int i = 0; i < 150; i++) {
+        seed_result ("run_load_big", 200, 1.0);
+    }
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_load_big");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["results"].size (), 100u);
 }
 
 TEST_F (RunsRouteTest, MalformedSnapshotYieldsEmptySummaryNot500) {

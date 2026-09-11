@@ -35,10 +35,26 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Trash2 } from "lucide-react";
 import { ResponseBody, StatusCodeBadge } from "@/components/shared/response-viewer";
-import { Badge, Button, DeleteConfirmDialog } from "@/components/ui";
-import { useDeleteRequestExampleMutation, useRequestExamplesQuery } from "@/queries";
+import {
+	Badge,
+	Button,
+	DeleteConfirmDialog,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@/components/ui";
+import {
+	useDeleteRequestExampleMutation,
+	useRequestExamplesQuery,
+	useRequestQuery,
+	useUpdateRequestMutation,
+} from "@/queries";
 import { useRequestBuilderContext } from "../../../context";
-import type { RequestExample } from "@/types";
+import type { MockResponseMode, Request, RequestExample } from "@/types";
 
 /**
  * The header map `ResponseBody` reads, from the example's stored entries.
@@ -178,9 +194,88 @@ function ExampleRow({
 	);
 }
 
+/**
+ * Which saved example a mock server answers with (issue #481 phase 3).
+ *
+ * A property of the request, not of any running mock - editing it here takes
+ * effect the next time a mock for this collection starts, exactly like every
+ * other change to a saved example does.
+ *
+ * `mockResponseMode`/`mockExampleId` live on the persisted `Request` and are
+ * written immediately through `useUpdateRequestMutation`, not through the
+ * builder's dirty/save flow - `RequestState` (the context's `request`) never
+ * carries them, so the caller passes the query-backed row instead.
+ */
+function MockResponseModeControl({
+	request,
+	examples,
+}: {
+	request: Request;
+	examples: RequestExample[];
+}) {
+	const updateRequest = useUpdateRequestMutation();
+	const mode = request.mockResponseMode;
+
+	const setMode = (next: MockResponseMode, exampleId?: string) => {
+		if (!request.id) return;
+		updateRequest.mutate({
+			id: request.id,
+			mockResponseMode: next,
+			mockExampleId: next === "fixed" ? (exampleId ?? examples[0]?.id) : null,
+		});
+	};
+
+	return (
+		<div className="flex flex-wrap items-center gap-2">
+			{/*
+			 * A `<span>`, not a `<Label>`: a segmented control is a group of
+			 * buttons with no single labelable control to point `htmlFor` at, so
+			 * the group carries its own `aria-label` instead (the shape
+			 * `ModeElementForm.tsx`'s `ModePicker` uses).
+			 */}
+			<span className="text-xs font-medium">Mock response</span>
+			<ToggleGroup
+				value={mode}
+				// Radix clears the value when the active segment is pressed again;
+				// this mode always has to be something, never "off".
+				onValueChange={(next) => next && setMode(next as MockResponseMode)}
+				// `sm` (28px), not the default `xs` (24px): matches the 28px compact
+				// `Select` this row shows in `fixed` mode, so switching into that
+				// mode never changes the row's height (it does when the two
+				// heights differ, because the row is `items-center` and grows to
+				// its tallest child).
+				size="sm"
+				aria-label="Mock response"
+			>
+				<ToggleGroupItem value="first">First saved example</ToggleGroupItem>
+				<ToggleGroupItem value="random">Random</ToggleGroupItem>
+				<ToggleGroupItem value="fixed">Specific example</ToggleGroupItem>
+			</ToggleGroup>
+			{mode === "fixed" && (
+				<Select
+					value={request.mockExampleId ?? examples[0]?.id}
+					onValueChange={(id) => setMode("fixed", id)}
+				>
+					<SelectTrigger className="h-7 w-40 text-xs" aria-label="Example">
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						{examples.map((example) => (
+							<SelectItem key={example.id} value={example.id}>
+								{example.name}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+			)}
+		</div>
+	);
+}
+
 export default function ExamplesPanel() {
 	const { request } = useRequestBuilderContext();
 	const { data: examples, isLoading, isError } = useRequestExamplesQuery(request.id ?? null);
+	const { data: savedRequest } = useRequestQuery(request.id ?? null);
 	const [pendingDelete, setPendingDelete] = useState<RequestExample | null>(null);
 	const deleteExample = useDeleteRequestExampleMutation();
 
@@ -220,6 +315,7 @@ export default function ExamplesPanel() {
 
 	return (
 		<div className="flex flex-col gap-2">
+			{savedRequest && <MockResponseModeControl request={savedRequest} examples={examples} />}
 			{examples.map((example) => (
 				<ExampleRow
 					key={example.id}

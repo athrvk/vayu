@@ -21,6 +21,7 @@ import type {
 	RequestAuth,
 	SpecOperation,
 	MethodSource,
+	MockResponseMode,
 } from "@/types";
 import { asRecord, asStr } from "@/lib/json-node";
 import { toElements } from "./elements-transformer";
@@ -103,6 +104,18 @@ function toMethodSource(raw: unknown): MethodSource | undefined {
 	return raw === "graphql" ? "graphql" : undefined;
 }
 
+/**
+ * The mock response mode a stored row names, or the engine default.
+ *
+ * Same "unrecognized reads as the default" rule as `coerceHttpVersion`: a row
+ * stored before this column existed, or one written by a build that added a
+ * mode this one has never heard of, reads as `"first"` - what every row
+ * already behaved as.
+ */
+function coerceMockResponseMode(raw: unknown): MockResponseMode {
+	return raw === "fixed" || raw === "random" ? raw : "first";
+}
+
 export class RequestTransformer {
 	static toFrontend(raw: RawRequest): Request {
 		const id = asStr(raw.id);
@@ -170,6 +183,8 @@ export class RequestTransformer {
 			// Event stream: same rule as the redirect policy - a row stored
 			// before this column existed reads as `false`, which is what it was.
 			stream: typeof raw.stream === "boolean" ? raw.stream : DEFAULT_STREAM,
+			mockResponseMode: coerceMockResponseMode(raw.mockResponseMode),
+			...(asStr(raw.mockExampleId) ? { mockExampleId: asStr(raw.mockExampleId) } : {}),
 			// Spread rather than assigned: `Request.specOperation` is optional
 			// because "names no operation" is spelled as an absent key, and an
 			// explicit `undefined` would show up in the structural comparisons

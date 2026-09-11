@@ -12,7 +12,7 @@
  */
 
 import { cn } from "@/lib/utils";
-import { formatNumber } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
 
 interface LatencyMetricProps {
 	label: string;

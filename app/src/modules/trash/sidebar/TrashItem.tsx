@@ -9,7 +9,7 @@ import { Folder, FileJson, Loader2, RotateCcw, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
 import type { TrashEntry } from "@/types";
 
 interface TrashItemProps {

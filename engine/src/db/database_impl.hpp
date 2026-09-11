@@ -256,6 +256,17 @@ inline auto make_vayu_storage (const std::string& path) {
     // precedent below: a nullable column is ALTER-friendly without one, and
     // NULL is the only spelling of "declares no operation".
     make_column ("spec_operation", &Request::spec_operation),
+    // Which saved example a mock server answers with (issue #481 phase 3).
+    // NOT NULL + default_value so sync_schema() ALTERs it onto an existing
+    // requests table and every pre-existing row backfills to "first" - which
+    // is what every row already behaved as, there being no other mode before
+    // this column existed.
+    make_column ("mock_response_mode", &Request::mock_response_mode,
+    default_value (std::string ("first"))),
+    // The example `mock_response_mode == "fixed"` names. Nullable on the
+    // `spec_operation` precedent above - nothing to backfill a pre-existing
+    // row from, and NULL is the only spelling of "no target".
+    make_column ("mock_example_id", &Request::mock_example_id),
     make_column ("created_at", &Request::created_at),
     make_column ("updated_at", &Request::updated_at),
     // Soft delete (issue #988) - see the collections column above.

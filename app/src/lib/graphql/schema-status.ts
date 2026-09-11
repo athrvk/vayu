@@ -18,7 +18,7 @@
  */
 
 import type { SchemaEntry, SchemaFailure } from "./schema-cache";
-import { formatRelativeTime } from "@/utils/helpers";
+import { formatRelativeTime } from "@/lib/format-time";
 
 /**
  * What the badge says about a failure, per kind.

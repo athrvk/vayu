@@ -31,7 +31,7 @@ import { Button } from "@/components/ui";
 import { useRecentDesignRunsQuery } from "@/queries";
 import { useTabsStore } from "@/stores";
 import { StatusCodeBadge, formatResponseTime } from "@/components/shared";
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
 import type { Run } from "@/types";

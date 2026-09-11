@@ -1339,7 +1339,10 @@ the null-vs-absent rule.
   "stream": false,                   // Optional, consume the response as an event stream.
                                       // Default false - see below
   "specOperation": null,             // Optional, which spec operation this request is - see below
-  "methodSource": null               // Optional, which app setting wrote `method` - see below
+  "methodSource": null,              // Optional, which app setting wrote `method` - see below
+  "mockResponseMode": "first",       // Optional: "first" | "fixed" | "random". Default "first"
+                                      // - which saved example a mock server answers with, see below
+  "mockExampleId": null              // Optional, the example id `mockResponseMode: "fixed"` targets
 }
 ```
 
@@ -1386,6 +1389,16 @@ anything other than the GraphQL switch, so a method the user has since picked is
 never reverted - the same "still ours" contract `KeyValueEntry.source` (issue
 #1481) gives a header row.
 
+**`mockResponseMode` names which saved example a mock server answers with**
+(issue #481 phase 3): `"first"` (the default, absent or `null` on create both
+mean this), `"fixed"` (the example named by `mockExampleId`) or `"random"`.
+Anything else is a `400`, the same way an unrecognized `methodSource` is.
+`mockExampleId` follows the same null-vs-absent rule as `specOperation`: absent
+keeps the current target, `null` clears it, and a non-empty string sets it -
+it is not checked against the request's saved examples at write time, because
+the target can be created afterwards or deleted later, and a mock server falls
+back to `"first"` for either case rather than this write refusing one up front.
+
 **Response:** The created request object, carrying the engine-generated `id`.
 
 **Errors:** `400` if the body carries an `id`
@@ -1395,6 +1408,8 @@ does not exist (message `Collection '<id>' does not exist`), on an unrecognized
 `method`, on a
 `params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`,
 on a `methodSource` that is not `"graphql"` or `null`,
+on a `mockResponseMode` that is not `"first"` / `"fixed"` / `"random"`,
+on a `mockExampleId` that is not a non-empty string or `null`,
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
 names the field and lists the valid values); `413` naming the field, its size
 and the cap, when a serialized `params` / `headers` / `body` / `auth` is over
@@ -1418,9 +1433,10 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
 `PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
-`verifySSL` / `stream` / `specOperation` / `methodSource` leaves the stored
-values untouched; sending `null` resets them to
-`true` / `10` / `true` / `false` / "no operation" / "no marker".
+`verifySSL` / `stream` / `specOperation` / `methodSource` / `mockResponseMode` /
+`mockExampleId` leaves the stored values untouched; sending `null` resets them
+to `true` / `10` / `true` / `false` / "no operation" / "no marker" / `"first"` /
+"no target".
 A non-boolean `followRedirects`, `verifySSL` or `stream`, or a non-integer
 `maxRedirects`, is ignored rather than rejected. `maxRedirects` is clamped to `0..100` on the way in.
 
@@ -1452,7 +1468,9 @@ carry `preRequestScript` / `postRequestScript` at all.
 `collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection
 that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, a malformed `specOperation`, a
-`methodSource` that is not `"graphql"` or `null`, or an
+`methodSource` that is not `"graphql"` or `null`, a `mockResponseMode` that is
+not `"first"` / `"fixed"` / `"random"`, a `mockExampleId` that is not a
+non-empty string or `null`, or an
 `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`; `413` naming the
 field, its size and the cap, when a serialized `params` / `headers` / `body` /
 `auth` is over the engine's field cap (issue #1485,
@@ -3946,14 +3964,56 @@ diagnosed without sending a request per guess.
       "method": "GET",
       "path": "/pets/{{petId}}",
       "hasExample": true,
-      "status": 200
+      "mode": "first",
+      "hits": 3,
+      "status": 200,
+      "exampleName": "200 OK"
     }
   ]
 }
 ```
 
 `status` is `0` when `hasExample` is false - there is no example whose status it
-could be. `404` for an unknown mock.
+could be. `mode` is the request's `mock_response_mode` (`"first"` / `"fixed"` /
+`"random"`); `hits` is how many times this route has answered a request, since
+the mock started. `exampleName` is the example that would answer for `"first"`
+or `"fixed"` - it is absent for `"random"`, since which one answers varies per
+request. `404` for an unknown mock.
+
+### GET /mock/:mockId/activity
+
+What this mock has served, newest first: `{"data": [...]}`, at most `limit`
+entries (query param, default **50**, capped at **200**; a non-numeric value is
+a `400`). Each entry is one inbound request, whichever of the three ways it was
+handled:
+
+```json
+{
+  "data": [
+    {
+      "at": 1735689600123,
+      "method": "GET",
+      "path": "/pets/1",
+      "requestId": "req_1",
+      "requestName": "Get pet",
+      "exampleId": "ex_1",
+      "exampleName": "200 OK",
+      "status": 200,
+      "injectedError": false
+    }
+  ]
+}
+```
+
+`requestId` / `requestName` are `null` when nothing in the route table matched
+the path at all, and also for an injected failure (`injectedError: true`):
+the error-rate roll happens before route resolution, so an injected 500 never
+reaches route matching, even when a route would have matched. `exampleId` /
+`exampleName` are `null` alongside them, and also when the matched route had
+no saved example (`status: 501`).
+`injectedError: true` marks a synthesized `errorRatePct` failure. `404` for an
+unknown mock. Like the route table, this log is discarded when the mock stops -
+there is nothing to read after that.
 
 ### POST /mock/:mockId/stop
 
@@ -6782,12 +6842,22 @@ seconds.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
-**`summary`** carries exactly these nine keys: `url`, `method`, `mode`,
-`duration`, `concurrency`, `comment`, `followRedirects`, `maxRedirects`, and
-`httpVersion`. The first eight are each **omitted** when absent from the
-snapshot (a malformed snapshot yields an empty `summary`, never a `500`);
-`httpVersion` alone is always present. Every run since issue #1488 adds a
-tenth, `acceptEncoding`: `true` when the run negotiated a compressed response
+**`summary`** carries exactly these ten keys: `url`, `method`, `mode`,
+`duration`, `concurrency`, `comment`, `followRedirects`, `maxRedirects`,
+`requestName`, and `httpVersion`. The first nine are each **omitted** when
+absent from the snapshot (a malformed snapshot yields an empty `summary`,
+never a `500`); `httpVersion` alone is always present. `requestName` is the
+request's name **as the client sent it when the run started** -
+never re-read from the requests table, the same trust model `url` and
+`method` already have here - so a request renamed or deleted since does not
+change what a past run's row says it invoked, and a run whose client omitted
+the field (or one recorded before it existed) has no key at all rather than a
+fabricated name. It reaches `config_snapshot` the same way `url`/`method` do:
+whatever the client's `POST /runs` or `POST /execute` body carried; the
+renderer sends it from `execIdentity` (`execute-mapping.ts`), the same field
+[POST /compose](#post-compose)'s `requestId` path already stamps for the
+script sandbox's `pm.info.requestName`. Every run since issue #1488 adds an
+eleventh, `acceptEncoding`: `true` when the run negotiated a compressed response
 (`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
 load run - see [Default request headers](#default-request-headers)), `false`
 when it did not, and **omitted**, not defaulted, for a run recorded before
@@ -6806,7 +6876,7 @@ before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The f
 
 A **collection run** (`type: "scenario"`) carries none of the first eight: its
 work is a sequence, so there is no single `url`, `method` or `mode` to report.
-Its row instead carries a tenth key, `scenario`, present on scenario runs only:
+Its row instead carries a twelfth key, `scenario`, present on scenario runs only:
 
 ```json
 "scenario": {
@@ -6822,7 +6892,7 @@ itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
 four keys is omitted when the stored snapshot has no such key.
 
-**`hasWarnings`** (issue #1527) is `summary`'s eleventh key, `true` on a run
+**`hasWarnings`** (issue #1527) is `summary`'s thirteenth key, `true` on a run
 whose stored `summary.warnings` array (issue #1503) is non-empty and
 **omitted** otherwise - a run still in progress, one whose terminal write
 failed, or one that finished with nothing to say. Unlike the other keys

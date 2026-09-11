@@ -722,6 +722,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/server.cpp
         src/http/managed_listener.cpp
         src/http/request_log.cpp
+        src/http/mock_activity.cpp
         src/http/routes/health.cpp
         src/http/routes/config.cpp
         src/http/routes/workspace.cpp

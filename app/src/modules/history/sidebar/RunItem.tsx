@@ -6,19 +6,16 @@
  */
 
 import type React from "react";
-import { formatRelativeTime, loadTestTypeToLabel } from "@/utils";
+import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import type { Run } from "@/types";
 import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { MethodBadge, RowContextMenu, type RowAction } from "@/components/shared";
-import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
+import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { formatConcurrency } from "@/constants/load-test-modes";
 import {
-	CheckCircle2,
-	XCircle,
 	Activity,
-	StopCircle,
 	Clock,
 	Loader2,
 	Trash2,
@@ -32,6 +29,31 @@ import {
 	PinOff,
 	AlertTriangle,
 } from "lucide-react";
+
+/**
+ * One dot colour per status - the row's only status affordance now.
+ * The word and the left-edge bar this used to carry are gone: `formatTime`'s
+ * per-row relative timestamp repeated "8h ago" down a whole page of rows and,
+ * with a card border and `py-3` around it, the pair cost roughly two lines of
+ * dead space per row for information a day-group header (`HistoryList.tsx`'s
+ * `groupRunsByDay`) or a hover now carries instead. The full word and the
+ * exact timestamp are still there, in the row's `title`.
+ */
+const STATUS_DOT_CLASS: Record<Run["status"], string> = {
+	completed: "bg-status-success",
+	failed: "bg-status-error",
+	running: "bg-status-running animate-pulse",
+	stopped: "bg-status-stopped",
+	pending: "bg-muted-foreground",
+};
+
+const STATUS_LABEL: Record<Run["status"], string> = {
+	completed: "Completed",
+	failed: "Failed",
+	running: "Running",
+	stopped: "Stopped",
+	pending: "Pending",
+};
 
 interface RunItemProps {
 	run: Run;
@@ -75,12 +97,6 @@ export default function RunItem({
 	isSelected = false,
 	collectionName,
 }: RunItemProps) {
-	// Format timestamp to relative time
-	const formatTime = (timestamp: number) => {
-		if (!timestamp) return "Unknown";
-		return formatRelativeTime(new Date(timestamp).toISOString());
-	};
-
 	// Read from the compact list-row summary (paginated GET /runs). The full
 	// configSnapshot lives only on GET /runs/:id, which the list does not fetch.
 	const getRequestInfo = () => {
@@ -106,6 +122,23 @@ export default function RunItem({
 		: undefined;
 
 	/*
+	 * A proper name over a raw URL, when the run recorded one worth showing.
+	 * `requestName` is the request's name *as the client sent it at run
+	 * start* (see `RunSummary.requestName`'s doc comment) - never
+	 * re-read from the requests table - so a request renamed or deleted since
+	 * does not retroactively change what a past run says it invoked.
+	 *
+	 * Excluded when it is still the default: "New Request" identifies nothing
+	 * a bare URL does not already say better, and every request starts out
+	 * named that until a user changes it - showing it here would mean most
+	 * rows traded a URL for a name that means "unnamed".
+	 */
+	const requestName =
+		run.summary?.requestName && run.summary.requestName !== DEFAULT_REQUEST_NAME
+			? run.summary.requestName
+			: null;
+
+	/*
 	 * A collection run has no url and no method - its work is a sequence - so
 	 * every branch above leaves the row with a status and a timestamp and
 	 * nothing else. `summary.scenario` is what it has instead: which collection
@@ -126,22 +159,6 @@ export default function RunItem({
 	// The name if the collection is still there, the id if it is not, and a
 	// plain label if the run predates the descriptor. Never a blank line.
 	const scenarioLabel = collectionName ?? scenario?.collectionId ?? null;
-
-	// Get status icon and color
-	const getStatusIcon = () => {
-		switch (run.status) {
-			case "completed":
-				return <CheckCircle2 className="w-4 h-4 text-status-success-text" />;
-			case "failed":
-				return <XCircle className="w-4 h-4 text-status-error-text" />;
-			case "running":
-				return <Activity className="w-4 h-4 text-status-running-text animate-pulse" />;
-			case "stopped":
-				return <StopCircle className="w-4 h-4 text-status-stopped-text" />;
-			default:
-				return <Clock className="w-4 h-4 text-muted-foreground" />;
-		}
-	};
 
 	// A load run's pin is also its request's comparison baseline, so it keeps
 	// the more specific label; every other type just gets "Pin"/"Unpin".
@@ -187,270 +204,258 @@ export default function RunItem({
 		},
 	];
 
+	// The status word and the exact timestamp - said once, in the tooltip,
+	// rather than on every row (the day-group header above the row already
+	// says which day; a relative "8h ago" repeated down the whole list said
+	// nothing a hover can't say instead). The comment joins it here too: it's
+	// occasional, not the row's identity, so it earns a hover rather than a
+	// permanent line.
+	const rowTitle = [
+		`${STATUS_LABEL[run.status]} · ${
+			run.startTime ? new Date(run.startTime).toLocaleString() : "Unknown time"
+		}`,
+		run.summary?.comment && `"${run.summary.comment}"`,
+	]
+		.filter(Boolean)
+		.join(" — ");
+
+	// A bare fallback identity for the rare row with neither a url nor a
+	// scenario descriptor (a run recorded before either existed, or one still
+	// pending). Never a blank line where the method/name would be.
+	const fallbackIdentity = RUN_KIND_LABEL[run.type];
+
+	// The row's identity text, in priority order: a proper request name, else
+	// the url, else the collection a scenario ran, else the bare fallback.
+	const identitySuffix = requestName ?? requestUrl ?? scenarioLabel;
+	const identityText = identitySuffix ?? fallbackIdentity;
+	// A name replacing the url as the visible text does not hide the url -
+	// it is one hover away, on the same text, the way a truncated url or
+	// collection name already was.
+	const identityTitle = requestName ? (requestUrl ?? undefined) : (identitySuffix ?? undefined);
+
+	const hasMeta =
+		(scenario &&
+			(scenario.stepCount != null ||
+				(scenario.iterations != null && scenario.iterations > 1) ||
+				scenario.recursive)) ||
+		(run.type === "load" &&
+			run.summary &&
+			(run.summary.duration || run.summary.concurrency || loadTestType || protocolLabel));
+
 	return (
 		<RowContextMenu label="More actions for this run" actions={rowActions}>
 			<div
 				className={cn(
-					// focus-row: the card is the perceived target, so it paints the ring
-					// for the activator inside it. It also has overflow-hidden, which
-					// would clip an outset ring - focus-row's is inset.
-					// `surface-card` + `border-rule`, not a hardcoded token. A run row
-					// is a card, and `--border` on `--card` measures 1.003 in dark - the
-					// same colour, so the row had no edge and separated only by the
-					// card-on-panel step, itself 1.09. Declaring the surface resolves the
-					// rule to 1.278 dark / 1.304 light; pinning `--border-strong` fixed
-					// dark but pushed light to 1.553.
-					"focus-row group relative surface-card border border-rule cursor-pointer transition-[background-color,border-color,box-shadow] overflow-hidden w-full",
+					// focus-row: the row is the perceived target, so it paints the
+					// ring for the stretched activator inside it - see RequestItem.tsx,
+					// whose h-8/flat/hover-fill shape this row now shares rather than
+					// the bordered card every row used to be.
+					//
+					// `transition-[background-color,border-color,box-shadow]`, not the
+					// bare `transition-colors` utility: `isSelected` below toggles a
+					// `ring-1` (a box-shadow), which `transition-colors` does not cover,
+					// so the selected state would snap rather than fade in.
+					"focus-row group relative flex flex-col gap-1 rounded-md px-2 py-1.5 cursor-pointer transition-[background-color,border-color,box-shadow]",
 					isSelected
-						? "bg-primary/10 hover:bg-primary/15 border-primary/50 ring-1 ring-inset ring-primary/20 shadow-sm"
-						: "hover:border-primary/50 hover:shadow-sm"
+						? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
+						: "hover:bg-accent"
 				)}
+				title={rowTitle}
 			>
-				{/* Status color indicator */}
-				<div
-					className={cn(
-						"absolute left-0 top-0 bottom-0 w-1",
-						run.status === "completed" && "bg-status-success",
-						run.status === "failed" && "bg-status-error",
-						run.status === "running" && "bg-status-running",
-						run.status === "stopped" && "bg-status-stopped",
-						run.status === "pending" && "bg-muted-foreground"
+				{/* Identity line - one row: status dot, method (or a folder icon for
+				    a run whose work is a sequence), path or collection name, then
+				    the badges and actions a hover or a pinned/warned state reveals. */}
+				<div className="flex h-5 min-w-0 items-center gap-2">
+					<span
+						className={cn(
+							"h-2 w-2 shrink-0 rounded-full",
+							STATUS_DOT_CLASS[run.status]
+						)}
+						aria-hidden="true"
+					/>
+					{method ? (
+						<MethodBadge
+							method={method}
+							variant="text"
+							size="sm"
+							className="w-[5ch] shrink-0"
+						/>
+					) : scenario ? (
+						<Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+					) : null}
+					<span
+						className="min-w-0 flex-1 truncate text-xs font-medium text-foreground"
+						title={identityTitle}
+					>
+						{identityText}
+					</span>
+					{/* `variant="chip"` because this badge paints its own background:
+					    every other variant pairs `bg-x` with a `hover:bg-x/80` that
+					    tailwind-merge would leave behind, turning the chip the accent
+					    colour under the pointer. */}
+					{run.baseline && (
+						<Badge
+							variant="chip"
+							className="shrink-0 gap-1 bg-primary/15 px-1.5 py-0 text-[10px] font-semibold text-primary"
+						>
+							<Pin className="h-2.5 w-2.5" />
+							{isLoadRun ? "Baseline" : "Pinned"}
+						</Badge>
 					)}
-				/>
-
-				<div className="pl-4 pr-3 py-3 min-w-0">
-					{/* Header Row */}
-					<div className="flex items-start justify-between gap-2 mb-2 min-w-0 flex-wrap">
-						<div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
-							<div className="shrink-0">{getStatusIcon()}</div>
-							<span
-								className={cn(
-									"text-xs font-medium capitalize shrink-0",
-									run.status === "completed" && "text-status-success-text",
-									run.status === "failed" && "text-status-error-text",
-									run.status === "running" && "text-status-running-text",
-									run.status === "stopped" && "text-status-stopped-text",
-									run.status === "pending" && "text-muted-foreground"
-								)}
-							>
-								{run.status}
-							</span>
-							<span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
-								•
-							</span>
-							<span className="text-xs text-muted-foreground min-w-0 break-words">
-								{formatTime(run.startTime)}
-							</span>
-							{/* `variant="chip"` because this badge paints its own
-						    background: every other variant pairs `bg-x` with a
-						    `hover:bg-x/80` that tailwind-merge would leave
-						    behind, turning the chip the accent colour under the
-						    pointer. */}
-							{run.baseline && (
-								<Badge
-									variant="chip"
-									className="shrink-0 gap-1 bg-primary/15 text-primary px-1.5 py-0 text-[10px] font-semibold"
-								>
-									<Pin className="w-2.5 h-2.5" />
-									{isLoadRun ? "Baseline" : "Pinned"}
-								</Badge>
-							)}
-							{/* #1527: the run finished with something to say - an
-							    unresolved variable, a pre-request script the load
-							    path skipped - that only its full report shows. No
-							    adjacent text carries this, so the icon names itself. */}
-							{run.summary?.hasWarnings && (
-								<AlertTriangle
-									className="w-3.5 h-3.5 shrink-0 text-warning-text"
-									role="img"
-									aria-label="This run has warnings - see its report"
-								/>
-							)}
-						</div>
-						{/* z-10: sits above the stretched activator below, so delete
-					    stays clickable while the rest of the card selects the run. */}
-						<div className="relative z-10 flex items-center gap-1 shrink-0">
-							{/*
-							 * This slot marks the run types whose *identity line* would
-							 * otherwise be indistinguishable - which is load and design,
-							 * and only those two. Both print a bare URL, so nothing else
-							 * in the row separates a five-minute load test from a single
-							 * send.
-							 *
-							 * A collection run deliberately has no badge here. Its
-							 * identity is a folder name over a steps/iterations line, a
-							 * shape no other run type produces, so a badge would be the
-							 * third glyph in one small card saying the same thing -
-							 * after the folder icon and the step count. It read as
-							 * duplication because it was: the badge and the step count
-							 * were the same glyph.
-							 *
-							 * The purple is raw palette, and stays: measured 3.93 light /
-							 * 4.59 dark against the panel, so it clears the 3.0 icon bar
-							 * in both themes, and there is no violet semantic token to
-							 * move it to. Not every raw palette class is a defect.
-							 */}
-							{run.type === "load" && (
-								<Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />
-							)}
-							{/*
-							 * Pin this run. Every run type gets it: pinning keeps
-							 * the run past retention and finds it again under the
-							 * Pinned filter. A load run's pin is additionally its
-							 * request's comparison baseline, hence the label
-							 * difference above (pinActionLabel/pinTooltip).
-							 *
-							 * Stays visible once pinned - the pin is state, not a
-							 * hover affordance, and a row whose only sign of it
-							 * vanished with the pointer would read as unpinned.
-							 */}
-							{onToggleBaseline && (
-								<Button
-									variant="rowAction"
-									size="icon"
-									onClick={(e) => onToggleBaseline(run.id, !run.baseline, e)}
-									disabled={isTogglingBaseline}
-									aria-label={pinActionLabel}
-									aria-pressed={!!run.baseline}
-									title={pinTooltip}
-									className={cn(
-										"h-6 w-6 transition-opacity",
-										run.baseline || isTogglingBaseline
-											? "opacity-100"
-											: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-									)}
-								>
-									{isTogglingBaseline ? (
-										<Loader2 className="w-3 h-3 animate-spin" />
-									) : run.baseline ? (
-										<PinOff className="w-3 h-3" />
-									) : (
-										<Pin className="w-3 h-3" />
-									)}
-								</Button>
-							)}
+					{/* #1527: the run finished with something to say - an unresolved
+					    variable, a pre-request script the load path skipped - that
+					    only its full report shows. No adjacent text carries this, so
+					    the icon names itself. */}
+					{run.summary?.hasWarnings && (
+						<AlertTriangle
+							className="h-3.5 w-3.5 shrink-0 text-warning-text"
+							role="img"
+							aria-label="This run has warnings - see its report"
+						/>
+					)}
+					{/*
+					 * This slot marks the run types whose identity line would
+					 * otherwise be indistinguishable - which is load and design, and
+					 * only those two. Both print a bare URL, so nothing else in the
+					 * row separates a five-minute load test from a single send.
+					 *
+					 * A collection run deliberately has no badge here. Its identity
+					 * is a folder icon and a name, a shape no other run type
+					 * produces, so a badge would be a second glyph saying the same
+					 * thing the folder icon already says.
+					 *
+					 * The purple is raw palette, and stays: measured 3.93 light /
+					 * 4.59 dark against the panel, so it clears the 3.0 icon bar in
+					 * both themes, and there is no violet semantic token to move it
+					 * to. Not every raw palette class is a defect.
+					 */}
+					{run.type === "load" && (
+						<Zap className="h-3.5 w-3.5 shrink-0 text-purple-500" />
+					)}
+					{/* z-10: sits above the stretched activator below, so these stay
+					    clickable while the rest of the row selects the run. */}
+					<div className="relative z-10 flex shrink-0 items-center gap-1">
+						{/*
+						 * Pin this run. Every run type gets it: pinning keeps the run
+						 * past retention and finds it again under the Pinned filter.
+						 * A load run's pin is additionally its request's comparison
+						 * baseline, hence the label difference above
+						 * (pinActionLabel/pinTooltip).
+						 *
+						 * Stays visible once pinned - the pin is state, not a hover
+						 * affordance, and a row whose only sign of it vanished with
+						 * the pointer would read as unpinned.
+						 */}
+						{onToggleBaseline && (
 							<Button
-								variant="rowActionDestructive"
+								variant="rowAction"
 								size="icon"
-								onClick={(e) => onDelete(run.id, e)}
-								disabled={isDeleting}
-								aria-label={`Delete run`}
+								onClick={(e) => onToggleBaseline(run.id, !run.baseline, e)}
+								disabled={isTogglingBaseline}
+								aria-label={pinActionLabel}
+								aria-pressed={!!run.baseline}
+								title={pinTooltip}
 								className={cn(
 									"h-6 w-6 transition-opacity",
-									isDeleting
+									run.baseline || isTogglingBaseline
 										? "opacity-100"
 										: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 								)}
 							>
-								{isDeleting ? (
-									<Loader2 className="w-3 h-3 animate-spin" />
+								{isTogglingBaseline ? (
+									<Loader2 className="h-3 w-3 animate-spin" />
+								) : run.baseline ? (
+									<PinOff className="h-3 w-3" />
 								) : (
-									<Trash2 className="w-3 h-3" />
+									<Pin className="h-3 w-3" />
 								)}
 							</Button>
-						</div>
+						)}
+						<Button
+							variant="rowActionDestructive"
+							size="icon"
+							onClick={(e) => onDelete(run.id, e)}
+							disabled={isDeleting}
+							aria-label="Delete run"
+							className={cn(
+								"h-6 w-6 transition-opacity",
+								isDeleting
+									? "opacity-100"
+									: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+							)}
+						>
+							{isDeleting ? (
+								<Loader2 className="h-3 w-3 animate-spin" />
+							) : (
+								<Trash2 className="h-3 w-3" />
+							)}
+						</Button>
 					</div>
-
-					{/* Request Info */}
-					{requestUrl && (
-						<div className="flex items-start gap-2 mb-1.5 min-w-0 flex-wrap">
-							{method && <MethodBadge method={method} className="h-5" />}
-							<p
-								className="text-xs text-foreground font-medium break-words flex-1 min-w-0 leading-5"
-								title={requestUrl}
-							>
-								{requestUrl}
-							</p>
-						</div>
-					)}
-
-					{/* What ran, for a run whose work is a sequence - the row's only
-				    identity. Gated on the descriptor rather than on the run type,
-				    so a scenario *load* run (`type: "load"`, no url, no method)
-				    gets it too. */}
-					{scenario && scenarioLabel && (
-						<div className="flex items-start gap-2 mb-1.5 min-w-0">
-							<Folder className="w-3.5 h-3.5 mt-0.5 text-muted-foreground shrink-0" />
-							<p
-								className="text-xs text-foreground font-medium break-words flex-1 min-w-0 leading-5"
-								title={scenarioLabel}
-							>
-								{scenarioLabel}
-							</p>
-						</div>
-					)}
-
-					{scenario && (
-						<div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1.5 flex-wrap">
-							{scenario.stepCount != null && (
-								<span className="flex items-center gap-1 shrink-0">
-									<ListOrdered className="w-3 h-3" />
-									{scenario.stepCount} step{scenario.stepCount === 1 ? "" : "s"}
-								</span>
-							)}
-							{/* One pass is the default and saying so on every row is noise;
-						    more than one is the thing that changes what the run was. */}
-							{scenario.iterations != null && scenario.iterations > 1 && (
-								<span className="flex items-center gap-1 shrink-0">
-									<Repeat className="w-3 h-3" />
-									{scenario.iterations} iterations
-								</span>
-							)}
-							{scenario.recursive && (
-								<span className="flex items-center gap-1 shrink-0">
-									<FolderTree className="w-3 h-3" />
-									Sub-folders
-								</span>
-							)}
-						</div>
-					)}
-
-					{/* Config Info (if load test) */}
-					{run.type === "load" && run.summary && (
-						<div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1.5 flex-wrap">
-							{run.summary.duration && (
-								<span className="flex items-center gap-1 shrink-0">
-									<Clock className="w-3 h-3" />
-									{run.summary.duration}
-								</span>
-							)}
-							{run.summary.concurrency && (
-								<span className="flex items-center gap-1 shrink-0">
-									<Activity className="w-3 h-3" />
-									{formatConcurrency(run.summary.concurrency)}
-								</span>
-							)}
-							{loadTestType && (
-								<span className="flex items-center gap-1 shrink-0">
-									<Zap className="w-3 h-3" />
-									{loadTestTypeToLabel(loadTestType)}
-								</span>
-							)}
-							{protocolLabel && (
-								<span className="flex items-center gap-1 shrink-0">
-									<Network className="w-3 h-3" />
-									{protocolLabel}
-								</span>
-							)}
-						</div>
-					)}
-
-					{/* Comment if exists */}
-					{run.summary?.comment && (
-						<p className="text-xs text-muted-foreground italic mt-1.5 break-words">
-							"{run.summary.comment}"
-						</p>
-					)}
 				</div>
 
+				{/* Meta line(s) - unchanged content, one line tighter than before.
+				    A collection run's step/iteration/sub-folder facts, or a load
+				    run's duration/concurrency/type/protocol; never both, since
+				    scenario and run.type === "load" && summary are mutually
+				    exclusive in what they read. Omitted entirely rather than an
+				    empty `pl-[1.625rem]` row when neither applies. */}
+				{hasMeta && (
+					<div className="flex flex-wrap items-center gap-3 pl-[1.625rem] text-[10px] text-muted-foreground">
+						{scenario?.stepCount != null && (
+							<span className="flex shrink-0 items-center gap-1">
+								<ListOrdered className="h-3 w-3" />
+								{scenario.stepCount} step{scenario.stepCount === 1 ? "" : "s"}
+							</span>
+						)}
+						{/* One pass is the default and saying so on every row is noise;
+					    more than one is the thing that changes what the run was. */}
+						{scenario?.iterations != null && scenario.iterations > 1 && (
+							<span className="flex shrink-0 items-center gap-1">
+								<Repeat className="h-3 w-3" />
+								{scenario.iterations} iterations
+							</span>
+						)}
+						{scenario?.recursive && (
+							<span className="flex shrink-0 items-center gap-1">
+								<FolderTree className="h-3 w-3" />
+								Sub-folders
+							</span>
+						)}
+						{run.type === "load" && run.summary?.duration && (
+							<span className="flex shrink-0 items-center gap-1">
+								<Clock className="h-3 w-3" />
+								{run.summary.duration}
+							</span>
+						)}
+						{run.type === "load" && run.summary?.concurrency && (
+							<span className="flex shrink-0 items-center gap-1">
+								<Activity className="h-3 w-3" />
+								{formatConcurrency(run.summary.concurrency)}
+							</span>
+						)}
+						{run.type === "load" && loadTestType && (
+							<span className="flex shrink-0 items-center gap-1">
+								<Zap className="h-3 w-3" />
+								{loadTestTypeToLabel(loadTestType)}
+							</span>
+						)}
+						{run.type === "load" && protocolLabel && (
+							<span className="flex shrink-0 items-center gap-1">
+								<Network className="h-3 w-3" />
+								{protocolLabel}
+							</span>
+						)}
+					</div>
+				)}
+
 				{/*
-				 * The card used to be a <div onClick>: clickable by mouse, but not
+				 * The row used to be a <div onClick>: clickable by mouse, but not
 				 * focusable, not in the tab order and not operable by Enter or Space.
-				 * A keyboard user could reach "Delete run" inside a card but had no way
+				 * A keyboard user could reach "Delete run" inside a row but had no way
 				 * to *open* one - the destructive action was reachable and the primary
 				 * one was not.
 				 *
-				 * A stretched activator keeps the whole card clickable while being a
+				 * A stretched activator keeps the whole row clickable while being a
 				 * real button. It is last in the DOM and absolutely positioned so it
 				 * covers the content without disturbing layout; the actions group above
 				 * carries z-10 to stay on top of it.
@@ -462,9 +467,18 @@ export default function RunItem({
 					// with no url after it was a row a screen-reader user could not tell
 					// apart from any other row in the list.
 					aria-label={`Open ${RUN_KIND_LABEL[run.type]} run, ${run.status}${
-						requestUrl ? `, ${requestUrl}` : scenarioLabel ? `, ${scenarioLabel}` : ""
+						identitySuffix ? `, ${identitySuffix}` : ""
 					}`}
 					className="absolute inset-0 z-0 cursor-pointer"
+					// Marks this button as one stop of `useHistoryListFocus`'s roving
+					// tabindex - one Tab stop for the whole list, Up/Down/Home/End move
+					// it. Starts at -1; the hook promotes exactly one to 0, the same
+					// shape `useRovingTreeFocus` uses for the collection tree. A real
+					// `<button>` already activates on Enter/Space with no handler of
+					// the hook's own, unlike a tree row (a div wrapping its own
+					// activate button), so nothing else here has to change.
+					data-history-activate
+					tabIndex={-1}
 				/>
 			</div>
 		</RowContextMenu>

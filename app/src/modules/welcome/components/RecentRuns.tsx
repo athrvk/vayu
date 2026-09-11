@@ -29,7 +29,7 @@ import { ChevronRight } from "lucide-react";
 import { useTabsStore } from "@/stores";
 import { MethodBadge, TruncatedText } from "@/components/shared";
 import { Button, Eyebrow } from "@/components/ui";
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
 import type { Run } from "@/types";
 
 const RECENT_RUN_LIMIT = 5;

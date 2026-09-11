@@ -25,7 +25,7 @@
  */
 
 import { cn } from "@/lib/utils";
-import { formatNumber } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
 import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";

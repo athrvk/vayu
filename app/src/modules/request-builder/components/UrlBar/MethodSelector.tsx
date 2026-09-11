@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { useRequestBuilderContext } from "../../context";
 import { HTTP_METHODS } from "@/constants/http";
-import { getMethodColor } from "@/utils";
+import { getMethodColor } from "@/lib/method-display";
 import type { HttpMethod } from "@/types";
 
 export default function MethodSelector() {

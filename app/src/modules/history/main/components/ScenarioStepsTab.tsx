@@ -30,7 +30,7 @@ import { Fragment } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
-import { formatNumber } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
 import type { RunScenarioStepStat } from "@/types";
 
 export interface ScenarioStepsTabProps {

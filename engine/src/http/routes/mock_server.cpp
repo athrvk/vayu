@@ -24,11 +24,13 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/http/managed_listener.hpp"
+#include "vayu/http/mock_activity.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 
 #include <httplib.h>
 
@@ -231,8 +233,12 @@ std::expected<MockStartRequest, MockParseError> parse_mock_start (const nlohmann
 
 namespace {
 
-/// The enabled header rows of a stored example, in order and with duplicates
-/// intact - the reason an example stores an array rather than an object.
+bool header_is (const std::string& name, const char* wanted) {
+    return vayu::utils::ascii_lower_equal (name, wanted);
+}
+
+} // namespace
+
 std::vector<std::pair<std::string, std::string>> example_headers (const std::string& blob) {
     std::vector<std::pair<std::string, std::string>> out;
     if (blob.empty ()) {
@@ -261,12 +267,6 @@ std::vector<std::pair<std::string, std::string>> example_headers (const std::str
     return out;
 }
 
-bool header_is (const std::string& name, const char* wanted) {
-    return vayu::utils::ascii_lower_equal (name, wanted);
-}
-
-/// The content type an example is served under: its denormalized column, then
-/// its own `Content-Type` header, then plain text - never a guess at the body.
 std::string example_content_type (const vayu::db::RequestExample& example,
 const std::vector<std::pair<std::string, std::string>>& headers) {
     if (!example.content_type.empty ()) {
@@ -279,8 +279,6 @@ const std::vector<std::pair<std::string, std::string>>& headers) {
     }
     return "text/plain";
 }
-
-} // namespace
 
 std::vector<MockRoute>
 build_mock_routes (vayu::db::Database& db, const std::string& collection_id) {
@@ -318,18 +316,10 @@ build_mock_routes (vayu::db::Database& db, const std::string& collection_id) {
             route.method        = to_string (request.method);
             route.path_template = normalize_mock_path (request.url);
             route.segments      = mock_path_segments (route.path_template);
-
-            const auto examples = db.get_request_examples (request.id);
-            if (!examples.empty ()) {
-                // The first one, in the order phase 1 made a contract.
-                const auto& example    = examples.front ();
-                route.has_response     = true;
-                route.response.status  = example.status;
-                route.response.headers = example_headers (example.headers);
-                route.response.body    = example.body;
-                route.response.content_type =
-                example_content_type (example, route.response.headers);
-            }
+            route.mode = request.mock_response_mode.empty () ? "first" : request.mock_response_mode;
+            route.fixed_example_id = request.mock_example_id;
+            route.examples         = db.get_request_examples (request.id);
+            route.has_response     = !route.examples.empty ();
             routes.push_back (std::move (route));
         }
     }
@@ -464,14 +454,44 @@ nlohmann::json mock_server_info_json (const MockServerInfo& info) {
     return out;
 }
 
-nlohmann::json mock_route_json (const MockRoute& route) {
+nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits) {
     nlohmann::json out;
     out["requestId"]   = route.request_id;
     out["requestName"] = route.request_name;
     out["method"]      = route.method;
     out["path"]        = route.path_template;
     out["hasExample"]  = route.has_response;
-    out["status"]      = route.has_response ? route.response.status : 0;
+    out["mode"]        = route.mode;
+    out["hits"]        = hits;
+    if (!route.has_response) {
+        out["status"] = 0;
+        return out;
+    }
+    // The example that *would* answer for "first"/"fixed" - "random" names
+    // none, since which one answers varies per request (issue #481 phase 3).
+    const vayu::db::RequestExample* named = nullptr;
+    if (route.mode == "fixed" && route.fixed_example_id) {
+        for (const auto& example : route.examples) {
+            if (example.id == *route.fixed_example_id) {
+                named = &example;
+                break;
+            }
+        }
+    }
+    if (!named && route.mode != "random") {
+        // "first", or a "fixed" target that no longer exists - the same
+        // fallback pick_example makes at serve time.
+        named = &route.examples.front ();
+    }
+    if (named) {
+        out["status"]      = named->status;
+        out["exampleName"] = named->name;
+    } else {
+        // "random": the first example's status stands in as a representative
+        // figure, the same value this field reported before a route could
+        // hold more than one example.
+        out["status"] = route.examples.front ().status;
+    }
     return out;
 }
 
@@ -481,12 +501,23 @@ nlohmann::json mock_route_json (const MockRoute& route) {
 
 namespace {
 
+/// One splitmix64 step of @p counter - the raw 64 bits, before either caller
+/// reduces it to a percentage or an index. Shared so should_inject_error's
+/// error roll and pick_example's random-example roll cannot drift into two
+/// different sequences for what is conceptually the same kind of decision.
+std::uint64_t splitmix64_roll (std::atomic<std::uint64_t>& counter) {
+    std::uint64_t x = counter.fetch_add (0x9E3779B97F4A7C15ULL) + 0x9E3779B97F4A7C15ULL;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+    x ^= x >> 31;
+    return x;
+}
+
 /// Whether this completion should be turned into a synthesized 500.
 ///
 /// 0 and 100 are exact by construction rather than by probability, which is
-/// what makes them the only rates worth a test. In between, the roll is a
-/// splitmix64 of a per-mock counter: decorrelated enough that a run does not
-/// see runs of failures, and deterministic enough to have no global RNG state.
+/// what makes them the only rates worth a test. In between, the roll is
+/// splitmix64_roll of a per-mock counter.
 bool should_inject_error (int rate_pct, std::atomic<std::uint64_t>& counter) {
     if (rate_pct <= 0) {
         return false;
@@ -494,14 +525,30 @@ bool should_inject_error (int rate_pct, std::atomic<std::uint64_t>& counter) {
     if (rate_pct >= 100) {
         return true;
     }
-    std::uint64_t x = counter.fetch_add (0x9E3779B97F4A7C15ULL) + 0x9E3779B97F4A7C15ULL;
-    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
-    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
-    x ^= x >> 31;
-    return std::cmp_less (x % 100, rate_pct);
+    return std::cmp_less (splitmix64_roll (counter) % 100, rate_pct);
 }
 
 } // namespace
+
+const vayu::db::RequestExample&
+pick_example (const MockRoute& route, std::atomic<std::uint64_t>& roll_counter) {
+    if (route.mode == "fixed" && route.fixed_example_id) {
+        for (const auto& example : route.examples) {
+            if (example.id == *route.fixed_example_id) {
+                return example;
+            }
+        }
+        // The target was deleted or suppressed since the mode was set -
+        // fall back to "first" rather than refuse an otherwise-servable
+        // route.
+        return route.examples.front ();
+    }
+    if (route.mode == "random") {
+        const auto roll = splitmix64_roll (roll_counter);
+        return route.examples[roll % route.examples.size ()];
+    }
+    return route.examples.front ();
+}
 
 struct MockServerManager::MockServer {
     std::string id;
@@ -519,6 +566,17 @@ struct MockServerManager::MockServer {
     /// Feeds the error-injection roll. Atomic because every pool thread bumps
     /// it; nothing else about a served response is mutable.
     std::atomic<std::uint64_t> served{ 0 };
+    /// Feeds pick_example's random-example roll - its own counter, separate
+    /// from `served`, so an error-rate roll and an example roll never share
+    /// one sequence.
+    std::atomic<std::uint64_t> example_roll{ 0 };
+    /// One counter per route, same order as `routes`, bumped on every served
+    /// (not missed) response. Read out as a plain snapshot by route_hits().
+    std::vector<std::atomic<std::uint64_t>> hits;
+    /// Bounded log of what this mock has served (issue #481 phase 3), sized
+    /// once at construction - never resized, so its own mutex is the only
+    /// lock a listener thread ever takes here.
+    MockActivityLog activity{ constants::mock_server::MAX_ACTIVITY_ENTRIES };
 
     /// Declared last so it is destroyed first: the handler reads everything
     /// above it while the accept loop is alive.
@@ -543,7 +601,7 @@ struct MockServerManager::MockServer {
 MockServerManager::MockServerManager () = default;
 
 MockServerManager::~MockServerManager () {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     for (auto& [id, server] : servers_) {
         // A response inside its configured latency is still holding a listener
         // thread, so the join inside stop() waits up to MAX_LATENCY_MS - which
@@ -563,6 +621,9 @@ struct MockConfig {
     const std::vector<MockRoute>& routes;
     /// Feeds the error-injection roll; every pool thread bumps it.
     std::atomic<std::uint64_t>& served;
+    std::vector<std::atomic<std::uint64_t>>& hits;
+    std::atomic<std::uint64_t>& example_roll;
+    MockActivityLog& activity;
 };
 
 /**
@@ -583,7 +644,16 @@ httplib::Response& res) {
     if (mock.latency_ms > 0) {
         std::this_thread::sleep_for (std::chrono::milliseconds (mock.latency_ms));
     }
+
+    MockActivityEntry entry;
+    entry.at_ms  = routes::now_ms ();
+    entry.method = req.method;
+    entry.path   = req.path;
+
     if (should_inject_error (mock.error_rate_pct, mock.served)) {
+        entry.status         = 500;
+        entry.injected_error = true;
+        mock.activity.record (entry);
         res.status = 500;
         res.set_content (
         routes::error_body (500,
@@ -595,25 +665,44 @@ httplib::Response& res) {
 
     const auto match = resolve_mock_route (mock.routes, req.method, req.path);
     if (!match.route_index) {
+        if (match.matched_route) {
+            const MockRoute& matched = mock.routes[*match.matched_route];
+            entry.request_id         = matched.request_id;
+            entry.request_name       = matched.request_name;
+        }
         const auto body = mock_miss_body (mock.routes, match, req.method, req.path);
-        res.status = match.miss == MockMissKind::NoExample ? 501 : 404;
+        entry.status = match.miss == MockMissKind::NoExample ? 501 : 404;
+        mock.activity.record (entry);
+        res.status = entry.status;
         res.set_content (body.dump (), "application/json");
         return;
     }
 
     const MockRoute& route = mock.routes[*match.route_index];
-    res.status             = route.response.status;
-    for (const auto& [name, value] : route.response.headers) {
+    mock.hits[*match.route_index].fetch_add (1, std::memory_order_relaxed);
+    const auto& example     = pick_example (route, mock.example_roll);
+    const auto headers      = example_headers (example.headers);
+    const auto content_type = example_content_type (example, headers);
+
+    entry.request_id   = route.request_id;
+    entry.request_name = route.request_name;
+    entry.example_id   = example.id;
+    entry.example_name = example.name;
+    entry.status       = example.status;
+    mock.activity.record (entry);
+
+    res.status = example.status;
+    for (const auto& [name, value] : headers) {
         if (!header_is (name, "content-type")) {
             // Appended rather than set: a repeated `Set-Cookie` is exactly
             // why an example stores its headers as an ordered array.
             res.headers.emplace (name, value);
         }
     }
-    if (!route.response.body.empty ()) {
-        res.set_content (route.response.body, route.response.content_type);
+    if (!example.body.empty ()) {
+        res.set_content (example.body, content_type);
     } else {
-        res.set_header ("Content-Type", route.response.content_type);
+        res.set_header ("Content-Type", content_type);
     }
 }
 
@@ -631,7 +720,7 @@ const MockStartRequest& request) {
     }
 
     {
-        std::lock_guard<std::mutex> lock (mutex_);
+        std::scoped_lock lock (mutex_);
         if (servers_.size () >= constants::mock_server::MAX_SERVERS) {
             out.ok            = false;
             out.http_status   = 409;
@@ -651,6 +740,7 @@ const MockStartRequest& request) {
     server->error_rate_pct  = request.error_rate_pct;
     server->created_at      = routes::now_ms ();
     server->routes          = build_mock_routes (db, request.collection_id);
+    server->hits = std::vector<std::atomic<std::uint64_t>> (server->routes.size ());
 
     if (server->routes.size () > constants::mock_server::MAX_ROUTES) {
         out.ok            = false;
@@ -699,8 +789,9 @@ const MockStartRequest& request) {
     // body is drained by httplib after the response, so keep-alive is
     // unaffected.
     svr.set_pre_routing_handler (
-    [config = MockConfig{ server->latency_ms, server->error_rate_pct, raw->routes,
-     raw->served }] (const httplib::Request& req, httplib::Response& res) {
+    [config = MockConfig{ server->latency_ms, server->error_rate_pct,
+     raw->routes, raw->served, raw->hits, raw->example_roll, raw->activity }] (
+    const httplib::Request& req, httplib::Response& res) {
         serve_mock_request (config, req, res);
         return httplib::Server::HandlerResponse::Handled;
     });
@@ -721,7 +812,7 @@ const MockStartRequest& request) {
     server->port = started.port;
 
     {
-        std::lock_guard<std::mutex> lock (mutex_);
+        std::scoped_lock lock (mutex_);
         out.info             = server->info ();
         servers_[server->id] = std::move (server);
     }
@@ -734,7 +825,7 @@ const MockStartRequest& request) {
 }
 
 bool MockServerManager::stop (const std::string& mock_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     auto it = servers_.find (mock_id);
     if (it == servers_.end ()) {
         return false;
@@ -748,7 +839,7 @@ bool MockServerManager::stop (const std::string& mock_id) {
 }
 
 std::optional<MockServerInfo> MockServerManager::get (const std::string& mock_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     auto it = servers_.find (mock_id);
     if (it == servers_.end ()) {
         return std::nullopt;
@@ -757,7 +848,7 @@ std::optional<MockServerInfo> MockServerManager::get (const std::string& mock_id
 }
 
 std::vector<MockServerInfo> MockServerManager::list () {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     std::vector<MockServerInfo> out;
     out.reserve (servers_.size ());
     for (const auto& [id, server] : servers_) {
@@ -767,12 +858,37 @@ std::vector<MockServerInfo> MockServerManager::list () {
 }
 
 std::optional<std::vector<MockRoute>> MockServerManager::routes (const std::string& mock_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
+    std::scoped_lock lock (mutex_);
     auto it = servers_.find (mock_id);
     if (it == servers_.end ()) {
         return std::nullopt;
     }
     return it->second->routes;
+}
+
+std::optional<std::vector<std::uint64_t>> MockServerManager::route_hits (
+const std::string& mock_id) {
+    std::scoped_lock lock (mutex_);
+    auto it = servers_.find (mock_id);
+    if (it == servers_.end ()) {
+        return std::nullopt;
+    }
+    std::vector<std::uint64_t> out;
+    out.reserve (it->second->hits.size ());
+    for (auto& counter : it->second->hits) {
+        out.push_back (counter.load (std::memory_order_relaxed));
+    }
+    return out;
+}
+
+std::optional<std::vector<MockActivityEntry>>
+MockServerManager::activity (const std::string& mock_id, std::size_t limit) {
+    std::scoped_lock lock (mutex_);
+    auto it = servers_.find (mock_id);
+    if (it == servers_.end ()) {
+        return std::nullopt;
+    }
+    return it->second->activity.snapshot (limit);
 }
 
 } // namespace vayu::http
@@ -836,13 +952,42 @@ void handle_list_mocks (RouteContext& ctx, const httplib::Request&, httplib::Res
 void handle_mock_routes (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     const std::string mock_id = req.matches[1];
     const auto routes         = ctx.mock_server_manager.routes (mock_id);
-    if (!routes) {
+    const auto hits           = ctx.mock_server_manager.route_hits (mock_id);
+    if (!routes || !hits) {
         send_error (res, 404, "Mock server not found");
         return;
     }
     nlohmann::json data = nlohmann::json::array ();
-    for (const auto& route : *routes) {
-        data.push_back (mock_route_json (route));
+    for (std::size_t i = 0; i < routes->size (); ++i) {
+        data.push_back (mock_route_json ((*routes)[i], (*hits)[i]));
+    }
+    send_json (res, nlohmann::json{ { "data", std::move (data) } });
+}
+
+void handle_mock_activity (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const std::string mock_id = req.matches[1];
+    std::size_t limit         = 50;
+    if (req.has_param ("limit")) {
+        // parse_number rejects what std::stoul would silently accept: "0"
+        // (parses fine, but is not positive), a leading "-" (unsigned
+        // from_chars refuses the sign rather than wrapping to a huge value)
+        // and trailing garbage like "5abc" (the ptr != end check).
+        const auto parsed =
+        vayu::utils::parse_number<std::size_t> (req.get_param_value ("limit"));
+        if (!parsed || *parsed == 0) {
+            send_error (res, 400, "Invalid 'limit': must be a positive integer");
+            return;
+        }
+        limit = std::min (*parsed, constants::mock_server::MAX_ACTIVITY_ENTRIES);
+    }
+    const auto entries = ctx.mock_server_manager.activity (mock_id, limit);
+    if (!entries) {
+        send_error (res, 404, "Mock server not found");
+        return;
+    }
+    nlohmann::json data = nlohmann::json::array ();
+    for (const auto& entry : *entries) {
+        data.push_back (mock_activity_entry_json (entry));
     }
     send_json (res, nlohmann::json{ { "data", std::move (data) } });
 }
@@ -888,6 +1033,17 @@ void register_mock_server_routes (RouteContext& ctx) {
     ctx.server.Get (R"(/mock/([^/]+)/routes)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_mock_routes (ctx, req, res);
+    });
+
+    /**
+     * GET /mock/:id/activity?limit=N
+     * What this mock has served, newest first - at most `limit` entries
+     * (default 50, capped at MAX_ACTIVITY_ENTRIES). Discarded when the mock
+     * stops, like the route table.
+     */
+    ctx.server.Get (R"(/mock/([^/]+)/activity)",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_mock_activity (ctx, req, res);
     });
 }
 

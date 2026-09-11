@@ -15,7 +15,15 @@ import { useEngineStore } from "./engine-store";
 import { useToastStore } from "./toast-store";
 
 export type TabType =
-	"welcome" | "request" | "collection" | "dashboard" | "run" | "variables" | "settings" | "inbox";
+	| "welcome"
+	| "request"
+	| "collection"
+	| "dashboard"
+	| "run"
+	| "variables"
+	| "settings"
+	| "inbox"
+	| "mock-server";
 
 export interface Tab {
 	id: string; // unique tab instance ID (nanoid or crypto.randomUUID)
@@ -53,7 +61,7 @@ export const MAX_OPEN_TABS = 12;
  * The others are always opened with a null `entityId`, for which retargeting is
  * a no-op.
  */
-const SINGLETON_TYPES: TabType[] = ["welcome", "variables", "settings", "inbox"];
+const SINGLETON_TYPES: TabType[] = ["welcome", "variables", "settings", "inbox", "mock-server"];
 
 // These tab types are exempt from LRU auto-close
 const LRU_EXEMPT_TYPES: TabType[] = ["dashboard"];
@@ -442,6 +450,10 @@ function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
 			 * two are indistinguishable to the next reader - which is how a
 			 * dirty Settings tab became LRU-evictable.
 			 */
+			return false;
+		case "mock-server":
+			// Same reasoning as "inbox": a mock's route table and activity log
+			// are engine state with no draft of this tab's own.
 			return false;
 		// welcome, dashboard and run register no save context at all.
 		default:

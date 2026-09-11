@@ -36,7 +36,7 @@ import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useLiveCommandSurfaceStore, type CommandContext } from "@/lib/commands";
 import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
 import { chordKeys, isMac } from "@/lib/platform";
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
 import { RECENT_LIMIT } from "./ranking";
 
 /**

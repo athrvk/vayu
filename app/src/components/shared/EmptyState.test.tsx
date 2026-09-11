@@ -54,6 +54,15 @@ describe("EmptyState", () => {
 		expect(screen.queryByRole("button")).toBeNull();
 	});
 
+	it("carries extra icon classes through, e.g. a spin for a loading pane", () => {
+		// A loading state that reuses this pane rather than a bespoke spinner -
+		// ScenarioRunView's reopened-stored-run case is the first caller.
+		const { container } = render(
+			<EmptyState icon={Inbox} title="Loading" iconClassName="animate-spin" />
+		);
+		expect(container.querySelector("svg")).toHaveClass("animate-spin");
+	});
+
 	it("renders a bare title with no description or icon", () => {
 		// Degrades to a single centred line, for call sites that have nothing
 		// useful to add beyond the heading.

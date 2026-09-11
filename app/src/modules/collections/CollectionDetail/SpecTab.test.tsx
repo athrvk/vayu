@@ -205,6 +205,7 @@ const request = (id: string, url: string, specOperation?: Request["specOperation
 		verifySSL: true,
 		httpVersion: "auto",
 		stream: false,
+		mockResponseMode: "first",
 		specOperation,
 		order: 0,
 		createdAt: "2026-01-01T00:00:00.000Z",

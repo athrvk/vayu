@@ -13,7 +13,7 @@
  * presentational reads off {@link DashboardDerived}; InfoChip copy via TOOLTIPS.
  */
 
-import { formatNumber } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
 import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
