@@ -141,12 +141,25 @@ const METRIC_RECORD: ElementConfigSchema = {
 	required: ["name", "type", "source"],
 };
 
-/** The picker's chosen segment, by its `aria-checked` radio. */
+/**
+ * The picker's chosen segment, by its `aria-checked` radio.
+ *
+ * `ToggleGroupItem` reserves its active-state width by rendering the label
+ * twice, once visibly and once `aria-hidden` at the bold weight the active
+ * state uses (`toggle-group.tsx`'s width-reservation comment) - `aria-hidden`
+ * removes a node from the accessible name (and from what a sighted user
+ * reads) but not from `textContent`, which walks every descendant text node
+ * regardless. Reading `chosen.textContent` directly doubles the label; this
+ * strips the hidden twin first; so it reads the one copy a user actually sees.
+ */
 function activeSegment(): string {
 	const chosen = screen
 		.getAllByRole("radio")
 		.find((el) => el.getAttribute("aria-checked") === "true");
-	return chosen?.textContent ?? "";
+	if (!chosen) return "";
+	const clone = chosen.cloneNode(true) as HTMLElement;
+	clone.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
+	return clone.textContent ?? "";
 }
 
 /**
