@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import MockServerView from "./index";
 import {
 	useMockActivityQuery,
@@ -96,6 +96,14 @@ describe("MockServerView", () => {
 		expect(routes.getByText("/pets")).toBeInTheDocument();
 		expect(routes.getByText("Default")).toBeInTheDocument();
 		expect(routes.getByText("3")).toBeInTheDocument();
+	});
+
+	it("opens the collection this mock serves, so a page load is not a dead end", () => {
+		render(<MockServerView />);
+		fireEvent.click(screen.getByRole("button", { name: /open collection/i }));
+		expect(useTabsStore.getState().openTabs).toContainEqual(
+			expect.objectContaining({ type: "collection", entityId: "col_1" })
+		);
 	});
 
 	it("shows the activity feed", () => {

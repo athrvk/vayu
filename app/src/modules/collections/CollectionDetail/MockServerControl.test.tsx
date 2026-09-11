@@ -25,7 +25,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
-import { useToastStore } from "@/stores";
+import { useTabsStore, useToastStore } from "@/stores";
 import type { MockServer } from "@/types";
 import MockServerControl from "./MockServerControl";
 import { mockForCollection } from "./mock-server-selection";
@@ -84,6 +84,7 @@ beforeEach(() => {
 	writeText.mockReset().mockResolvedValue(undefined);
 	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
 	useToastStore.setState({ toasts: [] });
+	useTabsStore.setState({ openTabs: [], activeTabId: null });
 });
 
 describe("picking the mock this header is about", () => {
@@ -142,6 +143,16 @@ describe("the collection header's mock-server control", () => {
 		// The count that explains a mock answering 501: reported, not left to be
 		// discovered one request at a time.
 		expect(screen.getByText(/3 routes, 1 without an example/i)).toBeInTheDocument();
+	});
+
+	it("opens the running mock's own tab, so its routes and activity are one click away", async () => {
+		listMockServers.mockResolvedValue([mock()]);
+		renderControl();
+
+		fireEvent.click(await screen.findByRole("button", { name: /open mock server/i }));
+		expect(useTabsStore.getState().openTabs).toContainEqual(
+			expect.objectContaining({ type: "mock-server", entityId: "mock_a" })
+		);
 	});
 
 	it("keeps showing the start button when only another collection has a mock", async () => {

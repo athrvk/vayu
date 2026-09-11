@@ -27,7 +27,7 @@
  * defaults-only case worth one click.
  */
 
-import { Copy, Play, ServerCog, SlidersHorizontal, Square } from "lucide-react";
+import { Copy, ExternalLink, Play, ServerCog, SlidersHorizontal, Square } from "lucide-react";
 import { useState } from "react";
 import { Button, TooltipIconButton } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
@@ -36,7 +36,7 @@ import {
 	useStartMockServerMutation,
 	useStopMockServerMutation,
 } from "@/queries";
-import { useToastStore } from "@/stores";
+import { useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { mockForCollection } from "./mock-server-selection";
 import { StartMockServerDialog } from "./StartMockServerDialog";
@@ -45,6 +45,7 @@ import type { MockServerOptions } from "./mock-server-options";
 export default function MockServerControl({ collectionId }: { collectionId: string }) {
 	const showToast = useToastStore((s) => s.showToast);
 	const copy = useCopy();
+	const openTab = useTabsStore((s) => s.openTab);
 	const mocksQuery = useMockServersQuery();
 	const startMock = useStartMockServerMutation();
 	const stopMock = useStopMockServerMutation();
@@ -146,6 +147,12 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 						`, ${running.routesWithoutExample} without an example`}
 				</span>
 			</span>
+			<TooltipIconButton
+				label="Open mock server"
+				tooltipHint="View its route table and activity log"
+				icon={<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
+				onClick={() => openTab({ type: "mock-server", entityId: running.mockId })}
+			/>
 			<TooltipIconButton
 				label="Copy mock server URL"
 				tooltipHint={running.url}
