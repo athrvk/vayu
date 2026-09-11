@@ -274,12 +274,19 @@ export default function LoadTestConfigDialog({
 	const [sloMs, setSloMs] = useState(() =>
 		restore(saved.sloMs ?? sloThresholdMs, sloThresholdMs, "SLO_MS")
 	);
-	const [budgets, setBudgets] = useState<BudgetDraft>(
-		() =>
-			saved.budgets ?? {
-				...emptyBudgetDraft(),
-				latencyP99Ms: String(sloThresholdMs),
-			}
+	const [budgets, setBudgets] = useState<BudgetDraft>(() =>
+		// Merged onto `emptyBudgetDraft()` rather than swapped wholesale: a
+		// budget saved by an older build predates whatever field this build
+		// added since (`maxAssertionFailureRatePct` did not always exist),
+		// and `budgetError` reads every current `BUDGET_FIELDS` key
+		// unconditionally - a stale saved object missing one crashed the
+		// dialog outright on `undefined.trim()` rather than just carrying a
+		// blank for the field it never knew about.
+		({
+			...emptyBudgetDraft(),
+			latencyP99Ms: String(sloThresholdMs),
+			...saved.budgets,
+		})
 	);
 	const [customBudgets, setCustomBudgets] = useState<CustomBudgetDraft[]>(
 		() => saved.customBudgets ?? []
@@ -297,7 +304,14 @@ export default function LoadTestConfigDialog({
 	 */
 	const monitorSettings = useMonitorSettings();
 	const [monitor, setMonitor] = useState<MonitorDraft>(
-		() => saved.monitor ?? emptyMonitorDraft(monitorSettings.defaultIntervalMs)
+		// Merged onto `emptyMonitorDraft()`, the same reason `budgets` above is:
+		// a field `MonitorDraft` adds later would otherwise be missing from a
+		// block an older build saved, and `monitorError` reads `draft.url`
+		// unconditionally.
+		() => ({
+			...emptyMonitorDraft(monitorSettings.defaultIntervalMs),
+			...saved.monitor,
+		})
 	);
 	const [monitorOpen, setMonitorOpen] = useState(false);
 	const [comment, setComment] = useState(""); // Per-run: never restored.
