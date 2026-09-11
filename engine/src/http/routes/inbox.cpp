@@ -559,12 +559,20 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     Inbox* raw                       = inbox.get ();
     httplib::Server::Handler capture = [raw, &db] (const httplib::Request& req,
                                        httplib::Response& res) {
-        // An inbox has nothing to route around the way a mock server does: it
-        // already answers every method, OPTIONS included, with the one canned
-        // response, so a preflight is captured as a delivery like any other
-        // and just needs the CORS headers a browser-hosted sender expects to
-        // see on the answer.
         routes::apply_cors_headers (req, res);
+
+        // A real preflight must get a 2xx or the browser aborts before the
+        // actual request ever arrives - so it answers 204 here and returns
+        // before the capture, the canned delay and the canned status, the
+        // same way the mock server does. A canned status configured to
+        // exercise a sender's retry path (500, 429, a redirect) would
+        // otherwise be handed to the preflight itself and break every
+        // browser-hosted sender silently.
+        if (req.has_header ("Access-Control-Request-Method")) {
+            res.status = 204;
+            routes::finalize_cors_expose_headers (res);
+            return;
+        }
 
         vayu::db::InboxRequest capture_row;
         capture_row.inbox_id    = raw->id;

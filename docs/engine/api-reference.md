@@ -3654,12 +3654,18 @@ path or a deeply nested tenant route is recorded like any other (issue #1140).
 **CORS is on by default, with no setting to turn it off** - the same reflected
 `Access-Control-Allow-Origin` / `-Allow-Credentials` / `Vary` pair a mock
 server sends (see [Mock Server](#mock-server)), so a browser-hosted sender can
-read the canned response. Unlike a mock server, an inbox has nothing to route
-around: an `OPTIONS` preflight is not synthesized separately, it is captured
-as a delivery like any other and answered with the canned response, CORS
-headers included - `Access-Control-Allow-Methods` and `-Allow-Headers` echo
-what the browser asked for on that request the same way they would on a
-synthesized one.
+read the canned response. A real preflight (a request carrying
+`Access-Control-Request-Method`) is answered `204` and never reaches the
+capture, the canned delay or the canned status - a preflight must get a 2xx
+or the browser aborts before the real request arrives, so a canned response
+configured with a non-2xx status (to exercise a sender's retry path) would
+otherwise break every browser-hosted sender silently. A header the canned
+response sets that names `Access-Control-*` or `Vary` is dropped rather than
+echoed, since the engine already answered those; a credentialed request
+(`Origin` present and not the literal `null`) rewrites a wildcard
+`Access-Control-Expose-Headers` into the canned response's own header names,
+per the Fetch spec's rule that `*` there is a literal name, not a wildcard,
+under credentials.
 
 ### POST /inbox/start
 
