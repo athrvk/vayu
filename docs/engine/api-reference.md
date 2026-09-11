@@ -2529,6 +2529,28 @@ compares a stored request against, deliberately excludes scripts and auth so a
 re-sync never silently overwrites what a user edited locally, and an element
 can carry a script.
 
+**`x-vayu-mock`** carries a request's `mockResponseMode` (issue #1649) the same
+way `x-vayu-elements` carries its `elements` - written only when the mode is
+not `"first"`, the default every unconfigured request already has, so an
+operation with no mock opinion gains no key at all. `{"mode": "random"}` needs
+no target; `{"mode": "fixed", "example": "<key>"}` names the `examples` map
+key (or the doubled key a name collision suffixed, `add_named_examples`'s
+usual rule) the chosen example was written under, resolved by value rather
+than assumed - a target this export could not itself write (a truncated body,
+no recorded media type, a response the document does not declare) is the same
+"nothing to name" case as the mode staying `"first"`, and gets no key either.
+Gated on `dialect.writable` exactly like `x-vayu-elements`: nothing is written
+into a Swagger 2.0 document's operations at all. The importer reads it back
+next to `x-vayu-elements`, matching `example` against the imported example
+that carries the same OpenAPI `examples` map key (the engine-side-only
+`specExampleKey` provenance field, issue #1457) and setting
+`mockResponseMode` / `mockExampleId` on the imported request; a key the
+document no longer has an example for degrades the way `elements_invalid`
+does - counted as `mock_example_missing` in `meta.skipped` and left on
+`pick_example`'s own `"first"` default rather than naming a target that is
+not there. Not read on the sync/diff path, for the same reason
+`x-vayu-elements` is not.
+
 **Errors:** `400` for a missing or empty `collectionId`, or a `format` other
 than `json`/`yaml`. `404` when the collection does not exist. `409` when the
 collection's binding names a document that is not stored, or when the stored

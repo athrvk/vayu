@@ -199,6 +199,15 @@ export interface SkippedItem {
 		 */
 		| "elements_invalid"
 		/**
+		 * A request's `x-vayu-mock` named a `"fixed"` target - an `examples` map
+		 * key - that this operation's response no longer declares (issue #1649):
+		 * hand-edited out, or the entry the exporter suffixed is gone. Dropped the
+		 * way `elements_invalid` is: the request keeps no `mockResponseMode` at
+		 * all, which is `pick_example`'s own "first" default at runtime, rather
+		 * than naming a target that is not there.
+		 */
+		| "mock_example_missing"
+		/**
 		 * A `.jmx` test plan's own class name, for one this parser has no mapping
 		 * for at all (issue #1518) - JMeter's own class list is open-ended (every
 		 * third-party plugin adds more), so this is not a closed set the way every

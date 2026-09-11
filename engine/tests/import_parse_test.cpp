@@ -578,6 +578,70 @@ TEST (ImportParse, ReadsXVayuElementsIntoTheImportedRequest) {
     EXPECT_EQ (request.at ("elements")[0].at ("kind"), "extract.json");
 }
 
+/// `x-vayu-mock` (issue #1649) resolves its `"fixed"` target by matching
+/// `example` against the imported example that came from the same `examples`
+/// map key - `mockExampleIndex`, a position rather than an id nothing has
+/// minted yet at parse time.
+TEST (ImportParse, ReadsAFixedXVayuMockAsAnExampleIndex) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/pets":{"get":{"responses":{"200":{"description":"ok","content":
+        {"application/json":{"examples":{
+            "first":{"value":{"id":"p1"}},
+            "second":{"value":{"id":"p2"}}
+        }}}}},
+        "x-vayu-mock":{"mode":"fixed","example":"first"}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections")[0]);
+    EXPECT_EQ (request.at ("mockResponseMode"), "fixed");
+    // `first_named_example_entry` only ever reads the first entry of the map
+    // per status (`declared_example_value`), so "first" is what actually
+    // imports as this operation's one example - index 0 - which is exactly
+    // the entry `x-vayu-mock` names here.
+    ASSERT_TRUE (request.contains ("examples"));
+    EXPECT_EQ (request.at ("examples").size (), 1);
+    EXPECT_EQ (request.at ("mockExampleIndex"), 0);
+}
+
+/// `"random"` needs no target and is applied outright.
+TEST (ImportParse, ReadsARandomXVayuMock) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/pets":{"get":{"responses":{},
+        "x-vayu-mock":{"mode":"random"}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections")[0]);
+    EXPECT_EQ (request.at ("mockResponseMode"), "random");
+    EXPECT_FALSE (request.contains ("mockExampleIndex"));
+}
+
+/// A `"fixed"` target naming an `examples` key this operation's response no
+/// longer declares (hand-edited, or the entry the exporter suffixed is gone)
+/// degrades the way `elements_invalid` does: counted, and the request keeps
+/// no `mockResponseMode` at all, which is `pick_example`'s own "first"
+/// default.
+TEST (ImportParse, CountsAFixedXVayuMockNamingAMissingExample) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/pets":{"get":{"responses":{"200":{"description":"ok","content":
+        {"application/json":{"examples":{"kept":{"value":{"id":"p1"}}}}}}},
+        "x-vayu-mock":{"mode":"fixed","example":"gone"}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (parsed.result.at ("collections")[0]);
+    EXPECT_FALSE (request.contains ("mockResponseMode"));
+    EXPECT_FALSE (request.contains ("mockExampleIndex"));
+    const nlohmann::ordered_json& skipped =
+    parsed.result.at ("meta").at ("skipped");
+    const bool counted = std::any_of (
+    skipped.begin (), skipped.end (), [] (const nlohmann::ordered_json& item) {
+        return item.at ("kind") == "mock_example_missing";
+    });
+    EXPECT_TRUE (counted);
+}
+
 /// A hand-edited `x-vayu-elements` that fails the registry (an unknown kind,
 /// here) is dropped and counted rather than applied or refusing the whole
 /// document - the same "nothing dropped quietly, nothing invalid applied"

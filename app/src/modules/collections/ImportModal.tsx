@@ -1506,6 +1506,10 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 		"element that failed validation and was not imported",
 		"elements that failed validation and were not imported",
 	],
+	mock_example_missing: [
+		"request whose fixed mock example is no longer in the document, so it mocks the first example instead",
+		"requests whose fixed mock example is no longer in the document, so they mock the first example instead",
+	],
 };
 
 function skippedLabel(kind: SkippedItem["kind"], count: number): string {

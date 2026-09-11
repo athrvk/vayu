@@ -779,8 +779,21 @@ std::vector<vayu::db::RequestExample>& examples_out) {
         !outcome) {
             return outcome;
         }
+        const size_t examples_start = examples_out.size ();
         if (auto outcome = build_example_rows (item, r.id, temp, now, examples_out); !outcome) {
             return outcome;
+        }
+        // `mockExampleIndex` (issue #1649): a transient wire field naming, by
+        // position among this item's own examples, an OpenAPI import's
+        // `x-vayu-mock` `"fixed"` target - never a stored column, and
+        // resolved only now that `build_example_rows` just minted the real
+        // ids no id existed for when the parser wrote this field.
+        if (const auto index_field = item.find ("mockExampleIndex");
+        index_field != item.end () && index_field->is_number_unsigned ()) {
+            const size_t index = examples_start + index_field->get<size_t> ();
+            if (index < examples_out.size ()) {
+                r.mock_example_id = examples_out[index].id;
+            }
         }
         out.push_back (std::move (r));
     }

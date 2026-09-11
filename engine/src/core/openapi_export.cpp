@@ -632,6 +632,83 @@ ExportDirection direction) {
     }
 }
 
+/**
+ * The `examples` map key @p value already sits under in @p media, or
+ * `nullopt` when it went in bare as the singular `example` (a key-addressed
+ * vendor extension has nothing to name there) or is not present at all.
+ *
+ * A value comparison, the same one `disposition_of` already makes
+ * (`same_value`), rather than a key threaded through `write_named_examples` /
+ * `add_named_examples`: the write pipeline already decides a value's key by
+ * equality, so reading it back off the finished object costs one pass where a
+ * second out-parameter on every layer down to `add_named_examples` would cost
+ * several - and it answers the *already-declared* case too, where nothing
+ * about the write pipeline touched this value at all.
+ */
+std::optional<std::string> written_key_for (const Json& media, const Json& value) {
+    const auto map = media.find ("examples");
+    if (map == media.end () || !map->is_object ()) {
+        return std::nullopt;
+    }
+    for (auto entry = map->begin (); entry != map->end (); ++entry) {
+        const auto value_member = entry->find ("value");
+        if (entry->is_object () && value_member != entry->end () &&
+        same_value (*value_member, value)) {
+            return entry.key ();
+        }
+    }
+    return std::nullopt;
+}
+
+/**
+ * The `x-vayu-mock.example` key for @p entry's `"fixed"` target, or
+ * `nullopt` when it cannot be named - the target was deleted
+ * (`mock_example_index` absent), filtered before writing (a truncated body,
+ * no recorded media type), the response or media type this document does not
+ * declare, or written bare as a singular `example`. Read off @p responses
+ * *after* `write_response_examples` has run, or off a bound document's own
+ * declared responses when the target was already there and nothing wrote it
+ * again (`ExampleDisposition::AlreadyDeclared`).
+ */
+std::optional<std::string>
+resolve_mock_key (const Json& responses, const ExportRequest& entry) {
+    if (!entry.mock_example_index || *entry.mock_example_index >= entry.examples.size ()) {
+        return std::nullopt;
+    }
+    const ExportExample& target = entry.examples[*entry.mock_example_index];
+    const auto response = responses.find (std::to_string (target.status));
+    if (response == responses.end ()) {
+        return std::nullopt;
+    }
+    const Json* media = declared_media_of (&*response, target.content_type);
+    return media == nullptr ? std::nullopt :
+                              written_key_for (*media, example_value (target.body));
+}
+
+/**
+ * `x-vayu-mock` (issue #1649): which of a request's saved examples a mock
+ * server answers with, written beside `x-vayu-elements` under the same
+ * "additive, never a rewrite" reasoning (`patch_operation` below) - only when
+ * the mode is not `"first"`, the value every unconfigured row already has, so
+ * an operation nobody set a mock choice on gains no key at all.
+ *
+ * A `"fixed"` target this export cannot name writes nothing, the same
+ * "no opinion, serve first" answer `pick_example` gives a target this stale
+ * at runtime (issue #481 phase 3) - there is no other honest key to give it.
+ */
+void write_mock_extension (Json& operation, const ExportRequest& entry, const Json* responses) {
+    if (entry.mock_response_mode == "random") {
+        operation["x-vayu-mock"] = Json{ { "mode", "random" } };
+        return;
+    }
+    if (entry.mock_response_mode != "fixed" || responses == nullptr) {
+        return;
+    }
+    if (const auto key = resolve_mock_key (*responses, entry)) {
+        operation["x-vayu-mock"] = Json{ { "mode", "fixed" }, { "example", *key } };
+    }
+}
+
 /** A document assembled, or the sentence saying why it could not be. */
 struct Assembly {
     Json document;
@@ -933,11 +1010,13 @@ ExportNotes& notes) {
     if (entry.elements.is_array () && !entry.elements.empty ()) {
         operation["x-vayu-elements"] = entry.elements;
     }
-    if (entry.examples.empty ()) {
-        return;
+    if (!entry.examples.empty ()) {
+        write_response_examples (child_record (operation, "responses"),
+        entry.examples, notes, ExportDirection::Bound);
     }
-    write_response_examples (child_record (operation, "responses"),
-    entry.examples, notes, ExportDirection::Bound);
+    const auto responses = operation.find ("responses");
+    write_mock_extension (
+    operation, entry, responses == operation.end () ? nullptr : &*responses);
 }
 
 /**
@@ -1571,7 +1650,10 @@ SecuritySchemeRegistry& schemes) {
         // one claim this export is most likely to be believed about.
         Json responses = Json::object ();
         write_response_examples (responses, entry.examples, notes, ExportDirection::Skeleton);
+        write_mock_extension (operation, entry, &responses);
         operation["responses"] = std::move (responses);
+    } else {
+        write_mock_extension (operation, entry, nullptr);
     }
     return operation;
 }

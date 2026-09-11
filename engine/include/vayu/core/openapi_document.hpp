@@ -418,6 +418,16 @@ struct SpecRequestDraft {
      */
     std::optional<nlohmann::ordered_json> elements;
     /**
+     * The operation's `x-vayu-mock` object (issue #1649) - `{"mode": "fixed",
+     * "example": "<key>"}` or `{"mode": "random"}` - copied verbatim when the
+     * operation carries the key at all; absent when it does not, exactly like
+     * @ref elements and for the same reason: import-only, resolved by
+     * `parse_openapi` against this same draft's own `examples` (each
+     * carrying the `spec_example_key` the exporter named it under) and left
+     * unread by `spec_request_drafts_of`'s (sync/diff) callers.
+     */
+    std::optional<nlohmann::ordered_json> mock;
+    /**
      * Whether the `paths` key this hangs off is a path at all - see
      * `import_drafts_of`. Always true for a draft `spec_request_drafts_of`
      * returned, since a diff only ever sees identified operations.

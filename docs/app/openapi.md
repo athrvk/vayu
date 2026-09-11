@@ -572,6 +572,9 @@ included - are not one of the eight: they carry through under `x-vayu-elements`,
 a vendor extension key beside `x-vayu-enabled` (issue #1518), rather than
 being dropped. A bound export writes it too, onto an operation the document
 already declares; nothing is written into a Swagger 2.0 document either way.
+A request's mock response mode is the same story under its own key,
+`x-vayu-mock` (issue #1649): a `fixed` or `random` choice carries through
+instead of every mock route reverting to `first` on re-import.
 
 A large document takes a moment to put together, and the dialog says so without
 moving anything: on the first read it holds the summary's shape until the

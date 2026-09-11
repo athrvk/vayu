@@ -1176,6 +1176,10 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         elements != nullptr && elements->is_array ()) {
             entry.elements = *elements;
         }
+        if (const json* mock = prop (operation, "x-vayu-mock");
+        mock != nullptr && mock->is_object ()) {
+            entry.mock = *mock;
+        }
 
         DraftRequest& draft = entry.draft;
         name_draft (operation, walked, draft);

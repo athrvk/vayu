@@ -2411,6 +2411,46 @@ json draft_body (const DraftBody& body) {
     return json{ { "mode", body.mode }, { "content", body.content } };
 }
 
+/**
+ * `x-vayu-mock` (issue #1649) onto @p request - which saved example a mock
+ * server answers with. `"random"` needs no target; `"fixed"` names the
+ * `examples` map key the exporter wrote it under (`spec_example_key`, issue
+ * #1457, is exactly that key), resolved here to a position in @p examples
+ * rather than an id - no id exists yet for a row this import has not
+ * created. A key the document no longer carries an example for degrades the
+ * way `elements_invalid` does: counted, and the request keeps
+ * `pick_example`'s own "first" default rather than naming a target that is
+ * not there.
+ */
+void apply_mock_extension (const std::optional<nlohmann::ordered_json>& mock,
+const std::vector<DraftExample>& examples,
+json& request,
+ImportTally& tally) {
+    if (!mock || !mock->is_object ()) {
+        return;
+    }
+    const std::string mode = mock->value ("mode", "");
+    if (mode == "random") {
+        request["mockResponseMode"] = "random";
+        return;
+    }
+    if (mode != "fixed") {
+        return;
+    }
+    const std::string key = mock->value ("example", "");
+    const auto found      = std::find_if (
+    examples.begin (), examples.end (), [&key] (const DraftExample& example) {
+        return example.spec_example_key && *example.spec_example_key == key;
+    });
+    if (found == examples.end ()) {
+        tally.add ("mock_example_missing");
+        return;
+    }
+    request["mockResponseMode"] = "fixed";
+    request["mockExampleIndex"] =
+    static_cast<size_t> (std::distance (examples.begin (), found));
+}
+
 json draft_request (const SpecRequestDraft& entry, ImportTally& tally) {
     const DraftRequest& draft = entry.draft;
     json params               = json::array ();
@@ -2463,6 +2503,7 @@ json draft_request (const SpecRequestDraft& entry, ImportTally& tally) {
             request["elements"] = *entry.elements;
         }
     }
+    apply_mock_extension (entry.mock, draft.examples, request, tally);
     if (!examples.empty ()) {
         request["examples"] = std::move (examples);
     }
@@ -2790,8 +2831,8 @@ int order) {
     item["body"]             = draft.at ("body");
     item["bodyType"] = draft.at ("body").at ("mode"); // the engine never derives this
     item["auth"] = draft.at ("auth");
-    for (const char* optional : { "followRedirects", "maxRedirects",
-         "verifySSL", "examples", "specOperation", "elements" }) {
+    for (const char* optional : { "followRedirects", "maxRedirects", "verifySSL", "examples",
+         "specOperation", "elements", "mockResponseMode", "mockExampleIndex" }) {
         carry (draft, item, optional);
     }
     item["order"] = order;
