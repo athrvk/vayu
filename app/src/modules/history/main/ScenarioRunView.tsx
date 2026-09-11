@@ -450,19 +450,40 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 				{steps.length === 0 ? (
 					/*
-					 * "Nothing yet" and "nothing at all" are different answers,
-					 * and the run's own status is what tells them apart. The
-					 * stream is not enough on its own: a tab reopened onto a run
-					 * that is still executing - after a relaunch, or from
-					 * History - has no live steps and no stored ones either, and
-					 * telling that reader the run recorded nothing would be
-					 * wrong about a run that is still going.
+					 * Three different answers, not two - "still running", "still
+					 * loading" and "nothing at all" all read as the same blank
+					 * list otherwise. The stream is not enough on its own: a tab
+					 * reopened onto a run that is still executing - after a
+					 * relaunch, or from History - has no live steps and no
+					 * stored ones either, and telling that reader the run
+					 * recorded nothing would be wrong about a run that is still
+					 * going.
+					 *
+					 * `isLoading` is checked second, not folded into the first
+					 * branch: a live run's own report fetch is *also* loading
+					 * before its first refetch, and "waiting for the first
+					 * step" is the truer sentence for that case, since the run
+					 * has nothing stored yet regardless of network state. A
+					 * completed run reopened from History has no live signal at
+					 * all, so this branch is the only one that ever fires for
+					 * it - a spinning icon rather than the same static one every
+					 * other empty state uses, so a genuinely slow fetch reads as
+					 * in progress rather than as a run that finished with
+					 * nothing to show.
 					 */
-					isLoading || isStreaming || inProgress ? (
+					isStreaming || inProgress ? (
 						<EmptyState
 							icon={Loader2}
+							iconClassName="animate-spin"
 							title="Waiting for the first step"
 							description="Steps appear here as the run executes them."
+						/>
+					) : isLoading ? (
+						<EmptyState
+							icon={Loader2}
+							iconClassName="animate-spin"
+							title="Loading this run's steps"
+							description="Fetching the stored results for this run."
 						/>
 					) : (
 						<EmptyState

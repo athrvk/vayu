@@ -637,12 +637,31 @@ describe("empty and loading", () => {
 		expect(screen.getByText(/no steps recorded/i)).toBeTruthy();
 	});
 
-	it("waits rather than claiming emptiness while the report is loading", () => {
+	/*
+	 * A reopened, completed run and a live one need different sentences, not
+	 * the same "waiting for the first step" for both - a run finished long ago
+	 * has nothing left to execute, so telling its reader to wait for it to run
+	 * is wrong about a fetch that is merely slow. `isLoading` fires for both
+	 * cases (the report's own first-fetch state), so status is what tells
+	 * them apart, exactly as it already does for the empty-vs-loading split
+	 * one level up.
+	 */
+	it("says it is loading, not waiting to execute, for a completed run's slow report fetch", () => {
 		reportQuery.isLoading = true;
 
 		render(<ScenarioRunView run={RUN} />);
 
-		expect(screen.getByText(/waiting for the first step/i)).toBeTruthy();
+		expect(screen.getByText(/loading this run's steps/i)).toBeTruthy();
+		expect(screen.queryByText(/waiting for the first step/i)).toBeNull();
 		expect(screen.queryByText(/no steps recorded/i)).toBeNull();
+	});
+
+	it("still waits for the first step on a live run's slow report fetch", () => {
+		reportQuery.isLoading = true;
+
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+
+		expect(screen.getByText(/waiting for the first step/i)).toBeTruthy();
+		expect(screen.queryByText(/loading this run's steps/i)).toBeNull();
 	});
 });
