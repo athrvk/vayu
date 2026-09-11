@@ -968,11 +968,15 @@ TEST_F (MockServerTest, ActivityRecordsAServedRequest) {
     const auto entries = manager.activity (started.info.mock_id, 50);
     ASSERT_HAS_VALUE (entries);
     ASSERT_EQ (entries->size (), 1u);
-    EXPECT_EQ ((*entries)[0].method, "GET");
-    EXPECT_EQ ((*entries)[0].path, "/pets");
-    EXPECT_EQ ((*entries)[0].status, 200);
-    ASSERT_HAS_VALUE ((*entries)[0].request_id);
-    EXPECT_EQ (*(*entries)[0].request_id, "req_list");
+    // One binding, read through it - (*entries)[0] written twice (a guard and
+    // a use) is two expressions to bugprone-unchecked-optional-access, which
+    // cannot connect them even though they are textually identical.
+    const auto& entry = (*entries)[0];
+    EXPECT_EQ (entry.method, "GET");
+    EXPECT_EQ (entry.path, "/pets");
+    EXPECT_EQ (entry.status, 200);
+    ASSERT_HAS_VALUE (entry.request_id);
+    EXPECT_EQ (*entry.request_id, "req_list");
 }
 
 TEST_F (MockServerTest, ActivityRecordsAnUnmatchedRequestWithNoRequestId) {
