@@ -37,7 +37,7 @@ import {
 	Button,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
 import { useUpdateRequestMutation } from "@/queries";
 import { useToastStore } from "@/stores";
 import type { Request, Run } from "@/types";

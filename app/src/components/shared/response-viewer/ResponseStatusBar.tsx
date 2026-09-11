@@ -24,7 +24,7 @@ import { AlertTriangle, Clock, FileText, History, ShieldCheck } from "lucide-rea
 import { cn } from "@/lib/utils";
 import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
 import { formatResponseTime, formatSize } from "./utils";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import { ValidationChip } from "./ValidationChip";

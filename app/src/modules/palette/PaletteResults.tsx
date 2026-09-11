@@ -29,7 +29,8 @@
 
 import { useMemo } from "react";
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, Kbd } from "@/components/ui";
-import { formatRelativeTime, getMethodColor } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
+import { getMethodColor } from "@/lib/method-display";
 import { chordKeys } from "@/lib/platform";
 import type { CommandContext } from "@/lib/commands";
 import { PALETTE_GROUP_LABELS, type PaletteItem } from "./types";

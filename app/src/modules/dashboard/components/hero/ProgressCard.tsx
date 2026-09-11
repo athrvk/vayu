@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatNumber } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
 import { TOOLTIPS } from "../tooltips";
 import { computeEta } from "../../utils/computeEta";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";

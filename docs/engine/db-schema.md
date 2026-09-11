@@ -416,6 +416,8 @@ Stores individual HTTP request definitions.
 | `verify_ssl`          | INTEGER | Boolean; verify the TLS certificate; default 1       |
 | `stream`              | INTEGER | Boolean; consume the response as SSE; default 0      |
 | `spec_operation`      | TEXT    | JSON: which spec operation this is; NULL when none   |
+| `mock_response_mode`  | TEXT    | Which saved example a mock server answers with; default `'first'` (issue #481 phase 3) |
+| `mock_example_id`     | TEXT    | The example id `mock_response_mode == 'fixed'` names; NULL when none |
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
 | `deleted_at`          | INTEGER | Unix ms; NULL while the request is live (issue #988) |
@@ -1012,7 +1014,8 @@ toward `failed`. The writer is
 drift apart silently.
 
 Do not confuse this **results** summary with the `summary` key on a `GET /runs` list row - that
-one is a derived view of `config_snapshot` (url/method/mode/duration/concurrency/comment) and is
+one is a derived view of `config_snapshot`
+(url/method/mode/duration/concurrency/comment/requestName) and is
 never stored. It is built once per run id and held in a bounded in-memory cache
 for as long as the process lives (issue #1150), which is sound only because
 `config_snapshot` is write-once: `create_run` sets it, and every later write to a

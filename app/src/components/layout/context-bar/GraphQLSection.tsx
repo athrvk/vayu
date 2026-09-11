@@ -48,7 +48,7 @@ import { useRequestQuery } from "@/queries";
 import { useSchemaCache } from "@/lib/graphql/schema-cache";
 import { documentOutline, parseGraphQLBody } from "@/lib/graphql/graphql-body";
 import { useRevealStore } from "@/lib/graphql/reveal-store";
-import { formatRelativeTime } from "@/utils/helpers";
+import { formatRelativeTime } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";

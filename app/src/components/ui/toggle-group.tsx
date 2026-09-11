@@ -26,7 +26,17 @@
  * Built on Radix's ToggleGroup, so arrow-key movement and roving focus arrive
  * with it. Like `Tabs`, every state change is a `data-[state=]` variant rather
  * than a swapped class: the class list is identical either way and only the
- * attribute moves, so activating a segment cannot shift layout.
+ * attribute moves.
+ *
+ * **The class list being static is not enough on its own.** `data-[state=on]:
+ * font-semibold` still changes the rendered *weight* of an active segment's
+ * text, and a heavier weight is wider - so without help, activating a segment
+ * shoves every segment (and anything sitting beside the group) sideways.
+ * `tabs.tsx` hit this exact bug (`TabLabel`'s doc comment names it) and fixed
+ * it by reserving the bold width up front, in the primitive, rather than at
+ * each call site; `ToggleGroupItem` does the same thing here: its children
+ * render twice, stacked in one grid cell, with a `font-semibold` hidden copy
+ * sizing the column so the visible copy's own weight never changes the box.
  *
  * **Sizes are the app's band steps**, not new numbers. `xs` is 24px and `sm` is
  * 28px, matching `tabs.tsx` - the response toolbar sits an `xs` control on a
@@ -47,8 +57,15 @@ const TRACK: Record<SegmentSize, string> = {
 };
 
 const ITEM: Record<SegmentSize, string> = {
-	xs: "h-5 px-2 text-[11px] gap-1",
-	sm: "h-6 px-2.5 text-xs gap-1.5",
+	xs: "h-5 px-2 text-[11px]",
+	sm: "h-6 px-2.5 text-xs",
+};
+
+// The gap sits on the inner content spans, not the item itself - see
+// `ToggleGroupItem`'s width-reservation comment below.
+const ITEM_GAP: Record<SegmentSize, string> = {
+	xs: "gap-1",
+	sm: "gap-1.5",
 };
 
 const SegmentSizeContext = React.createContext<SegmentSize>("xs");
@@ -107,9 +124,11 @@ function ToggleGroup({ className, size = "xs", ...props }: ToggleGroupProps) {
 function ToggleGroupItem({
 	className,
 	size,
+	children,
 	...props
 }: React.ComponentProps<typeof ToggleGroupPrimitive.Item> & { size?: SegmentSize }) {
 	const inherited = React.useContext(SegmentSizeContext);
+	const itemSize = size ?? inherited;
 	return (
 		<ToggleGroupPrimitive.Item
 			data-slot="toggle-group-item"
@@ -153,11 +172,37 @@ function ToggleGroupItem({
 				 */
 				"data-[state=on]:bg-accent data-[state=on]:text-foreground",
 				"data-[state=on]:font-semibold data-[state=on]:shadow-sm",
-				ITEM[size ?? inherited],
+				ITEM[itemSize],
 				className
 			)}
 			{...props}
-		/>
+		>
+			{/*
+			 * Width reservation (see the file-level comment): the children render
+			 * twice, stacked in one grid cell, so the column is always as wide as
+			 * the bold form - the visible copy's own weight (medium at rest, the
+			 * `data-[state=on]` semibold above once active) never changes the box.
+			 * `font-weight` is inherited, so the visible copy needs no weight class
+			 * of its own; it just takes whatever this item currently has.
+			 */}
+			<span className="grid">
+				<span
+					data-slot="toggle-group-item-reserve"
+					aria-hidden="true"
+					className={cn(
+						"invisible col-start-1 row-start-1 flex h-0 items-center font-semibold",
+						ITEM_GAP[itemSize]
+					)}
+				>
+					{children}
+				</span>
+				<span
+					className={cn("col-start-1 row-start-1 flex items-center", ITEM_GAP[itemSize])}
+				>
+					{children}
+				</span>
+			</span>
+		</ToggleGroupPrimitive.Item>
 	);
 }
 

@@ -43,6 +43,12 @@ interface EmptyStateProps {
 	description?: string;
 	/** `pane` only. Decorative, so it is hidden from assistive tech. */
 	icon?: LucideIcon;
+	/**
+	 * Extra classes on the icon itself - `animate-spin` for a loading state
+	 * that reuses this pane rather than a bespoke spinner, e.g. a stored
+	 * run's report still in flight. `pane` only.
+	 */
+	iconClassName?: string;
 	/** A Button, usually `variant="link"`. `pane` only. */
 	action?: ReactNode;
 	variant?: "pane" | "inline";
@@ -53,6 +59,7 @@ export function EmptyState({
 	title,
 	description,
 	icon: Icon,
+	iconClassName,
 	action,
 	variant = "pane",
 	className,
@@ -76,7 +83,12 @@ export function EmptyState({
 		>
 			{/* lucide hides icons by default; stated anyway so the intent survives
 			    a swap of the icon set. */}
-			{Icon && <Icon className="h-12 w-12 text-muted-foreground/40" aria-hidden="true" />}
+			{Icon && (
+				<Icon
+					className={cn("h-12 w-12 text-muted-foreground/40", iconClassName)}
+					aria-hidden="true"
+				/>
+			)}
 			<div className="max-w-sm">
 				<p className="text-md font-semibold text-foreground">{title}</p>
 				{description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}

@@ -203,6 +203,56 @@ bool is_create) {
 }
 
 /**
+ * Applies `mockResponseMode` / `mockExampleId` (issue #481 phase 3) - which
+ * saved example a mock server answers with. Same null-vs-absent rule as
+ * `methodSource`: `mockResponseMode` absent-on-create defaults to "first"
+ * (through the shared string applier below, since it is a plain enum-shaped
+ * string like `httpVersion`, not a nullable marker); `mockExampleId` absent
+ * keeps, `null` clears, exactly like `specOperation`.
+ *
+ * `mockExampleId` is not checked against `request_examples` here: the target
+ * can be created after this write (a caller free to reorder create-example
+ * and set-mode), and a target later deleted must not retroactively make this
+ * row invalid - `pick_example` (mock_server.cpp) falls back to "first" for
+ * either case rather than this applier refusing one up front.
+ */
+static RouteResult apply_mock_response_mode_field (const nlohmann::json& json,
+std::string& mode,
+std::optional<std::string>& example_id,
+bool is_create) {
+    if (!json.contains ("mockResponseMode")) {
+        if (is_create) {
+            mode = "first";
+        }
+    } else if (const auto& value = json["mockResponseMode"]; value.is_null ()) {
+        mode = "first";
+    } else if (!value.is_string () ||
+    (value.get<std::string> () != "first" && value.get<std::string> () != "fixed" &&
+    value.get<std::string> () != "random")) {
+        return route_error (
+        400, "Invalid 'mockResponseMode': must be 'first', 'fixed' or 'random'");
+    } else {
+        mode = value.get<std::string> ();
+    }
+    if (!json.contains ("mockExampleId")) {
+        if (is_create) {
+            example_id = std::nullopt;
+        }
+        return {};
+    }
+    const auto& value = json["mockExampleId"];
+    if (value.is_null ()) {
+        example_id = std::nullopt;
+        return {};
+    }
+    if (!value.is_string () || value.get<std::string> ().empty ()) {
+        return route_error (400, "Invalid 'mockExampleId': must be a non-empty string or null");
+    }
+    example_id = value.get<std::string> ();
+    return {};
+}
+
+/**
  * Applies the request body onto `r` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
  * verbs cannot drift apart on what a field means.
@@ -312,6 +362,15 @@ bool is_create) {
     // and an importer that recovered the operation a request came from must be
     // able to store it in the one call that writes the tree.
     if (auto outcome = apply_spec_operation_field (json, r.spec_operation, is_create);
+    !outcome) {
+        return outcome;
+    }
+
+    // Which saved example a mock server answers with (issue #481 phase 3).
+    // Through the shared applier like every other field here, so
+    // `POST /import/apply` (which runs this same applier) carries it too.
+    if (auto outcome = apply_mock_response_mode_field (
+        json, r.mock_response_mode, r.mock_example_id, is_create);
     !outcome) {
         return outcome;
     }

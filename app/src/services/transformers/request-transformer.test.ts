@@ -217,3 +217,39 @@ describe("RequestTransformer truncated fields", () => {
 		expect(req.truncatedFields).toEqual(["body"]);
 	});
 });
+
+/**
+ * `mockResponseMode` / `mockExampleId` (issue #481 phase 3) name which saved
+ * example a mock server answers with. `mockResponseMode` is always present,
+ * same "unrecognized reads as the default" rule as `httpVersion` above; a row
+ * stored before this column existed already behaved as `"first"`.
+ * `mockExampleId` follows the absent-key rule `specOperation` and
+ * `methodSource` above follow.
+ */
+describe("RequestTransformer mock response mode", () => {
+	it("carries a stored mode and example id through", () => {
+		const req = RequestTransformer.toFrontend({
+			...base,
+			mockResponseMode: "random",
+			mockExampleId: "exa_1",
+		});
+		expect(req.mockResponseMode).toBe("random");
+		expect(req.mockExampleId).toBe("exa_1");
+	});
+
+	it("defaults to first when the field is absent", () => {
+		const req = RequestTransformer.toFrontend({ ...base });
+		expect(req.mockResponseMode).toBe("first");
+		expect("mockExampleId" in req).toBe(false);
+	});
+
+	it("defaults to first for a mode this build does not recognize", () => {
+		const req = RequestTransformer.toFrontend({
+			...base,
+			mockResponseMode: "sometimes",
+			mockExampleId: null,
+		});
+		expect(req.mockResponseMode).toBe("first");
+		expect("mockExampleId" in req).toBe(false);
+	});
+});

@@ -14,7 +14,7 @@
 import { Activity, Clock, Globe, Calendar, Table2, Timer } from "lucide-react";
 import type { RunMetadataProps } from "../types";
 import { formatDuration } from "../utils/format";
-import { loadTestTypeToLabel } from "@/utils";
+import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import { LoadTestConfig } from "@/types";
 import { MethodBadge } from "@/components/shared";
 

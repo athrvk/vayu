@@ -19,7 +19,7 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
-import { formatNumber } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
 import type { RunReport } from "@/types/domain";
 
 export interface RequestElementsSummaryProps {

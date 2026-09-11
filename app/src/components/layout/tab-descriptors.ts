@@ -17,7 +17,7 @@
 
 // `Zap` stays: here it is the load-test mark, which is what the bolt means
 // throughout the app. `Braces` is the variables mark (see `Dock.tsx`).
-import { Folder, Zap, Braces, Clock, Settings, Inbox } from "lucide-react";
+import { Folder, Zap, Braces, Clock, Settings, Inbox, Radio } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import { requestDetailOptions, runDetailOptions, useCollectionsQuery } from "@/queries";
 import { walkAncestors } from "@/modules/collections/tree-utils";
@@ -89,14 +89,21 @@ export interface TabDescriptor {
  * finished load test now takes the same `Zap` as the live dashboard, because it
  * is the same thing at a later time.
  */
-export function iconForTab(tab: Tab, runType?: string): typeof Folder | undefined {
+export function iconForTab(
+	tab: Tab,
+	runType?: string,
+	isCollectionRun?: boolean
+): typeof Folder | undefined {
 	switch (tab.type) {
 		case "collection":
 			return Folder;
 		case "dashboard":
 			return Zap;
 		case "run":
-			return runType === "load" ? Zap : Clock;
+			// A collection run's work is a sequence, the same identity a plain
+			// collection tab has - so it gets that tab's icon rather than the
+			// load/design pair below, which both mean "one request".
+			return isCollectionRun ? Folder : runType === "load" ? Zap : Clock;
 		case "variables":
 			// The Dock and the welcome Launcher both open this view from a `Braces`
 			// control; the tab it opened carried no icon at all, so the glyph the
@@ -107,6 +114,11 @@ export function iconForTab(tab: Tab, runType?: string): typeof Folder | undefine
 		case "inbox":
 			// The same glyph the Launcher tile that opens it carries.
 			return Inbox;
+		case "mock-server":
+			// The Services drawer's own glyph for the group this tab addresses
+			// one row of (`drawer-views.ts`'s `services` entry) - concentric
+			// arcs, the "listening" mark inboxes and issuers share too.
+			return Radio;
 		default:
 			return undefined;
 	}
@@ -150,7 +162,19 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 	return tabs.map((tab, i) => {
 		const request = requests[i]?.data;
 		const run = runs[i]?.data;
-		const icon = iconForTab(tab, run?.type);
+		/*
+		 * A collection run has no url or no method - its work is a sequence -
+		 * so it is read off the snapshot's own scenario manifest, the full
+		 * shape `configSnapshot` carries (GET /runs/:id), unlike the list
+		 * row's derived `summary.scenario`. Read wherever the manifest is
+		 * present rather than gated on `run.type === "scenario"`: a scenario
+		 * *load* run (#357) is `type: "load"` but still has no url/method of
+		 * its own, the same reason the history row reads its descriptor the
+		 * same way.
+		 */
+		const scenario = run?.configSnapshot?.scenario as { collectionId?: string } | undefined;
+		const collectionId = scenario?.collectionId;
+		const icon = iconForTab(tab, run?.type, Boolean(collectionId));
 
 		switch (tab.type) {
 			case "welcome":
@@ -161,6 +185,8 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				return { label: "Variables", title: "Variables", icon };
 			case "inbox":
 				return { label: "Inbox", title: "Webhook Inbox", icon };
+			case "mock-server":
+				return { label: "Mock Server", title: "Mock Server", icon };
 			case "dashboard":
 				return { label: "Load Test", title: "Load Test", icon };
 			case "collection": {
@@ -189,10 +215,24 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				};
 			}
 			case "run": {
-				// A run tab is a past design run or load test. "Run" told none of
-				// them apart. Show what actually ran: the snapshot's method and
-				// path, the same shape a request tab uses. The path comes from the
-				// stored snapshot (resolved when it was sent), so it survives the
+				// A run tab is a past design run, load test, or collection run.
+				// "Run" told none of them apart. A collection run has no url or
+				// method to show, so it is named for the collection it ran
+				// instead - the id if that collection has since been deleted,
+				// never a blank tab, the same fallback the history row uses.
+				if (run && collectionId) {
+					const name =
+						collections.find((c) => c.id === collectionId)?.name ?? collectionId;
+					return {
+						label: name,
+						title: `Collection run: ${name}`,
+						icon,
+						isPath: false,
+					};
+				}
+				// A design run or load test: the snapshot's method and path, the
+				// same shape a request tab uses. The path comes from the stored
+				// snapshot (resolved when it was sent), so it survives the
 				// request being renamed or deleted.
 				const snapshot = run?.configSnapshot;
 				const kind = run?.type === "load" ? "Load test" : "Design run";

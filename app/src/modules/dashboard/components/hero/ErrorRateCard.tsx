@@ -7,7 +7,7 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { formatNumber } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
 import { InfoChip } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell } from "./HeroCardShell";

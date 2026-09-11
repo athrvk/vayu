@@ -106,3 +106,13 @@ export function formatConcurrency(concurrency: number): string {
 
 /** The unit `formatConcurrency` speaks. Exported for the guards that pin it. */
 export const CONCURRENCY_UNIT = "VUs";
+
+/**
+ * @deprecated Prefer `loadTestModeLabel` above.
+ * Kept as a thin alias so existing call sites keep working; it used to hold its
+ * own copy of the names, which is how "Iterations" and "Fixed Iterations" ended
+ * up on screen for the same run.
+ */
+export function loadTestTypeToLabel(type: LoadTestMode | string): string {
+	return loadTestModeLabel(type);
+}

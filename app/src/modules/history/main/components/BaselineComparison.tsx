@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { formatNumber } from "@/utils";
+import { formatNumber } from "@/lib/format-number";
 import { compareReports, deltaVerdict, type MetricDelta } from "@/lib/run-compare";
 import { useBaselineRunQuery, useRunQuery, useRunReportQuery } from "@/queries";
 import type { RunReport } from "@/types";

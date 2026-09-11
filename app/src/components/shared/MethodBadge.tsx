@@ -54,7 +54,7 @@
  * container and lets colour alone carry the signal.
  */
 
-import { getMethodColor, getMethodDisplayLabel } from "@/utils";
+import { getMethodColor, getMethodDisplayLabel } from "@/lib/method-display";
 import { cn } from "@/lib/utils";
 
 /**

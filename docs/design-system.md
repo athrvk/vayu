@@ -778,7 +778,7 @@ These exist but **nothing in `src/` currently uses them** - prefer
 the method selector all take. A second way to spell the same colour is a second
 place for it to drift.
 
-**`getMethodColor(method)`** in `app/src/utils/helpers.ts` returns `var(--method-xxx)` - the raw CSS variable reference. Callers construct full color values:
+**`getMethodColor(method)`** in `app/src/lib/method-display.ts` returns `var(--method-xxx)` - the raw CSS variable reference. Callers construct full color values:
 
 ```tsx
 const c = getMethodColor(method); // e.g. "var(--method-get)"
@@ -1516,7 +1516,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **19 directives across 13 files**, listed
+file that provides the missing half. **20 directives across 14 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1564,6 +1564,12 @@ not rule names - two of these lines silence two rules at once.
 - `modules/collections/RequestItem.tsx` (1) -
   `jsx-a11y/click-events-have-key-events`, the same tree path as its sibling
   above.
+- `modules/history/sidebar/HistoryList.tsx` (1) -
+  `jsx-a11y/no-noninteractive-element-interactions` on the `role="group"` run
+  list: roving tabindex for Up/Down/Home/End between the row activators inside
+  (`useHistoryListFocus`), the same shape `ActivityRail` uses, on a group
+  rather than a widget role because this flat, occasionally day-headered list
+  has no `listbox`/`tree` selection model to claim.
 - `modules/variables/sidebar/VariablesCategoryTree.tsx` (2) -
   `jsx-a11y/interactive-supports-focus` on the tree and
   `jsx-a11y/click-events-have-key-events` on its rows.
@@ -3002,5 +3008,5 @@ opt-out.
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
-| `app/src/utils/helpers.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
+| `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |

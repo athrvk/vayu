@@ -38,7 +38,7 @@ import { useLayoutStore, useTabsStore } from "@/stores";
 import { useCollectionsQuery, useRunSearchQuery } from "@/queries";
 import { useHistoryStore } from "@/modules/history/history-store";
 import { RUN_KIND_LABEL } from "@/modules/history/types";
-import { formatRelativeTime } from "@/utils";
+import { formatRelativeTime } from "@/lib/format-time";
 import type { Collection, Run } from "@/types";
 import { type PaletteItem } from "../types";
 

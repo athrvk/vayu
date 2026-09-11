@@ -962,6 +962,11 @@ constexpr size_t MAX_ROUTES = 2000;
 /// is bounded well below any client timeout, exactly as the inbox's canned
 /// delay is.
 constexpr int MAX_LATENCY_MS = 30000;
+
+/// Activity entries kept per mock (issue #481 phase 3). A running mock's
+/// own memory, not the database - bounded so a mock hammered by a load run
+/// does not grow without limit for the whole time it stays up.
+constexpr size_t MAX_ACTIVITY_ENTRIES = 200;
 } // namespace mock_server
 
 /**

@@ -38,6 +38,8 @@ vi.mock("@/queries", () => ({
 	useDeleteRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateRequestMutation: () => ({ mutateAsync: updateRequest, isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useMockServersQuery: () => ({ data: [] }),
+	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 const collections = [{ id: "c-1", name: "Acme", order: 0 }] as Collection[];

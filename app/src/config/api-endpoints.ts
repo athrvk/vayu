@@ -268,6 +268,7 @@ export const API_ENDPOINTS = {
 	MOCK_SERVER_START: `/mock/start`,
 	MOCK_SERVER_STOP: (mockId: string) => `/mock/${mockId}/stop`,
 	MOCK_SERVER_ROUTES: (mockId: string) => `/mock/${mockId}/routes`,
+	MOCK_SERVER_ACTIVITY: (mockId: string) => `/mock/${mockId}/activity`,
 
 	// OAuth 2.0
 	OAUTH2_TOKEN: `/oauth2/token`,

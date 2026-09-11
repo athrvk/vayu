@@ -114,7 +114,7 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
-// The compact list-row summary: exactly the nine keys the history/dashboard
+// The compact list-row summary: exactly the ten keys the history/dashboard
 // list UIs read, each omitted when absent from the snapshot (httpVersion
 // excepted - see add_http_version), plus `acceptEncoding` (issue #1488) and
 // `scenario` on a collection run only, both omitted rather than defaulted
@@ -125,13 +125,24 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
 // part of the immutable config_snapshot this function reads, so it is
 // merged into the row by `get_runs_response` after this (possibly cached)
 // object is retrieved.
+//
+// `requestName` is the request's name *as the client sent it*, never
+// re-read from the requests table: the same trust model `url` and
+// `method` already have here (this function never joins against
+// `vayu::db::Request`, so an edited-since-run name would disagree with a
+// DB read anyway) and the reason the field has to come from the client at
+// all - Send executes editor state, which may be an unsaved name, or belong
+// to a request deleted since. `execIdentity` (app's `execute-mapping.ts`) is
+// the one place that reads it off the editor and threads it through
+// composition; a name is what a history row falls back to a bare URL
+// without.
 nlohmann::json build_run_summary (const std::string& config_snapshot) {
     nlohmann::json summary = nlohmann::json::object ();
     try {
         auto config = nlohmann::json::parse (config_snapshot);
         if (config.is_object ()) {
-            for (const char* key : { "url", "method", "mode", "duration",
-                 "concurrency", "comment", "followRedirects", "maxRedirects" }) {
+            for (const char* key : { "url", "method", "mode", "duration", "concurrency",
+                 "comment", "followRedirects", "maxRedirects", "requestName" }) {
                 add_if_present (summary, config, key);
             }
             add_http_version (summary, config);
@@ -1380,14 +1391,23 @@ double target_rps) {
 }
 
 /**
- * A sample of the run's own exchanges. The row id travels so a client can ask
+ * A sample of the run's own exchanges, for a design or load run - a design
+ * run has exactly one and a load run's percentiles do not need per-request
+ * rows past a representative few. The row id travels so a client can ask
  * `GET /runs/:id/samples` for the captured bodies, which deliberately do not
  * ride this payload (see run_samples_response).
+ *
+ * A `Scenario` run's `results` are not a sample: they are the steps
+ * `ScenarioRunView` renders one row per, already bounded at write time by
+ * `maxScenarioStoredSteps` (`scenario_runner.cpp`) rather than by this
+ * function - the 100-row sample cap silently dropped every step past the
+ * 100th, which read as a run that executed only 100 steps to a reader who
+ * had just been told (by the same report) that it ran more.
  */
-nlohmann::json build_report_results (const std::vector<vayu::db::Result>& results) {
-    // Include sample of request/response results
+nlohmann::json build_report_results (const std::vector<vayu::db::Result>& results,
+bool is_scenario_run) {
     nlohmann::json results_array = nlohmann::json::array ();
-    size_t max_results           = 100;
+    size_t max_results           = is_scenario_run ? results.size () : 100;
     size_t count                 = 0;
     for (const auto& result : results) {
         if (count >= max_results)
@@ -1460,7 +1480,8 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
 
     nlohmann::json json_report = build_report_body (report, extras, target_rps);
     json_report["metadata"]    = build_report_metadata (run_id, *run);
-    json_report["results"]     = build_report_results (results);
+    json_report["results"] =
+    build_report_results (results, run->type == vayu::RunType::Scenario);
 
     return { 200, json_report };
 }
@@ -1779,8 +1800,9 @@ void register_run_routes (RouteContext& ctx) {
      * GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=
      * Lists test runs (both "design" single requests and "load" tests), newest
      * first. Rows carry a compact `summary` (url/method/mode/duration/
-     * concurrency/comment/httpVersion/followRedirects/maxRedirects) instead of
-     * the full config_snapshot, wrapped in the `{data, pagination}` envelope.
+     * concurrency/comment/httpVersion/followRedirects/maxRedirects/
+     * requestName) instead of the full config_snapshot, wrapped in the
+     * `{data, pagination}` envelope.
      * See build_run_summary for the authoritative key list - keep this in step
      * with it. A design run's row also carries `resultSummary`
      * (statusCode + latencyMs); see get_runs_response.

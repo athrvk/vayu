@@ -780,6 +780,103 @@ TEST_F (ResourceWriteRouteTest, MethodSourceReadsBackThroughBothSerializers) {
     EXPECT_EQ (listed[0]["methodSource"], created["methodSource"]);
 }
 
+// ---------------------------------------------------------------------------
+// Requests - mockResponseMode / mockExampleId (issue #481 phase 3). Which
+// saved example a mock server answers with.
+// ---------------------------------------------------------------------------
+
+TEST_F (ResourceWriteRouteTest, RequestCreateDefaultsMockResponseModeToFirst) {
+    const std::string collection = make_collection ();
+    auto [status, body]          = create_request_response (*db_,
+             json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+             { "url", "https://example.com" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["mockResponseMode"], "first");
+    EXPECT_TRUE (body["mockExampleId"].is_null ());
+    const auto stored_request = db_->get_request (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->mock_response_mode, "first");
+    EXPECT_FALSE (stored_request->mock_example_id.has_value ());
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateStoresFixedModeAndTarget) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    auto [status, body]          = update_request_response (*db_, id,
+             json{ { "mockResponseMode", "fixed" }, { "mockExampleId", "exa_1" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["mockResponseMode"], "fixed");
+    EXPECT_EQ (body["mockExampleId"], "exa_1");
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateKeepsModeWhenAbsent) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (
+    update_request_response (*db_, id, json{ { "mockResponseMode", "random" } }).first, 200);
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["mockResponseMode"], "random")
+    << "an untouched mode must survive a patch";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateNullMockExampleIdClears) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    ASSERT_EQ (update_request_response (*db_, id,
+               json{ { "mockResponseMode", "fixed" }, { "mockExampleId", "exa_1" } })
+               .first,
+    200);
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "mockExampleId", nullptr } });
+    ASSERT_EQ (status, 200);
+    EXPECT_TRUE (body["mockExampleId"].is_null ());
+}
+
+TEST_F (ResourceWriteRouteTest, RequestInvalidMockResponseModeIsRejected) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "mockResponseMode", "sometimes" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("mockResponseMode"),
+    std::string::npos);
+    const auto stored_request = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->mock_response_mode, "first")
+    << "a rejected mode must not be stored under any other name";
+}
+
+TEST_F (ResourceWriteRouteTest, RequestNonStringMockResponseModeIsRejectedCleanly) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    auto [status, body] =
+    update_request_response (*db_, id, json{ { "mockResponseMode", 123 } });
+    EXPECT_EQ (status, 400);
+    EXPECT_NE (
+    body["error"]["message"].get<std::string> ().find ("mockResponseMode"), std::string::npos)
+    << "a wrong-typed value must get the same field-naming 400 a wrong-valued "
+       "one does, not a raw nlohmann exception message";
+    const auto stored_request = db_->get_request (id);
+    ASSERT_HAS_VALUE (stored_request);
+    EXPECT_EQ (stored_request->mock_response_mode, "first");
+}
+
+TEST_F (ResourceWriteRouteTest, MockResponseModeReadsBackThroughBothSerializers) {
+    const std::string collection = make_collection ();
+    auto [status, created]       = create_request_response (*db_,
+          json{ { "collectionId", collection }, { "name", "R" }, { "method", "GET" },
+          { "url", "https://example.com" }, { "mockResponseMode", "random" } });
+    ASSERT_EQ (status, 200);
+    const json listed =
+    json::parse (vayu::http::routes::list_requests_body (*db_, collection));
+    ASSERT_EQ (listed.size (), 1u);
+    ASSERT_TRUE (listed[0].contains ("mockResponseMode"));
+    EXPECT_EQ (listed[0]["mockResponseMode"], created["mockResponseMode"]);
+}
+
 TEST_F (ResourceWriteRouteTest, RequestMalformedKeyValueEntryIsRejected) {
     const std::string collection = make_collection ();
     auto [status, body]          = create_request_response (*db_,

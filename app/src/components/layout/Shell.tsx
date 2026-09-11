@@ -74,6 +74,7 @@ const WelcomeScreen = lazy(() => import("@/modules/welcome/WelcomeScreen"));
 const SettingsMain = lazy(() => import("@/modules/settings/main/SettingsMain"));
 const VariablesMain = lazy(() => import("@/modules/variables/main/VariablesMain"));
 const InboxView = lazy(() => import("@/modules/inbox"));
+const MockServerView = lazy(() => import("@/modules/mock-server"));
 
 /**
  * What the skeleton says while a surface's chunk loads. Named per tab type
@@ -89,6 +90,7 @@ const LOADING_LABEL: Record<TabType, string> = {
 	variables: "Loading variables",
 	settings: "Loading settings",
 	inbox: "Loading inbox",
+	"mock-server": "Loading mock server",
 };
 
 function renderTabContent(tab: Tab | null): React.ReactNode {
@@ -110,6 +112,8 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 			return <SettingsMain />;
 		case "inbox":
 			return <InboxView />;
+		case "mock-server":
+			return <MockServerView />;
 		default:
 			return null;
 	}

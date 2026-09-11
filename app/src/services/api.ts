@@ -112,6 +112,8 @@ import type {
 	MockServerRoute,
 	ListMockServersResponse,
 	ListMockServerRoutesResponse,
+	MockActivityEntry,
+	ListMockServerActivityResponse,
 	StartMockServerRequest,
 	StopMockServerResponse,
 } from "@/types";
@@ -671,6 +673,14 @@ export const apiService = {
 	async listMockServerRoutes(mockId: string): Promise<MockServerRoute[]> {
 		const response = await httpClient.get<ListMockServerRoutesResponse>(
 			API_ENDPOINTS.MOCK_SERVER_ROUTES(mockId)
+		);
+		return response.data;
+	},
+
+	/** What a running mock has served, newest first. */
+	async listMockServerActivity(mockId: string, limit = 50): Promise<MockActivityEntry[]> {
+		const response = await httpClient.get<ListMockServerActivityResponse>(
+			`${API_ENDPOINTS.MOCK_SERVER_ACTIVITY(mockId)}?limit=${limit}`
 		);
 		return response.data;
 	},

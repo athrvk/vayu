@@ -17,6 +17,8 @@ import {
 	useDeleteRequestMutation,
 	useUpdateRequestMutation,
 	useRestoreTrashMutation,
+	useMockServersQuery,
+	useStopMockServerMutation,
 } from "@/queries";
 import { restoreNotice } from "@/modules/trash";
 import { collectDescendantEntityIds } from "./tree-utils";
@@ -71,6 +73,13 @@ export interface DeleteConfirmTarget {
 	type: "collection" | "request";
 	id: string;
 	name: string;
+	/**
+	 * Mocks running for this collection or any descendant sub-collection, only
+	 * ever populated for `type: "collection"` - stopping them is a one-way
+	 * side effect of the delete, not something Undo brings back (a running
+	 * mock is engine-process state, not a database row).
+	 */
+	runningMocks?: { mockId: string; collectionName: string; port: number }[];
 }
 
 export interface TreeCrud {
@@ -103,6 +112,8 @@ export function useTreeCrud({
 	const deleteRequestMutation = useDeleteRequestMutation();
 	const updateRequestMutation = useUpdateRequestMutation();
 	const restoreTrashMutation = useRestoreTrashMutation();
+	const stopMockServerMutation = useStopMockServerMutation();
+	const { data: mockServers = [] } = useMockServersQuery();
 	const showToast = useToastStore((s) => s.showToast);
 
 	const [creatingCollection, setCreatingCollection] = useState(false);
@@ -417,9 +428,30 @@ export function useTreeCrud({
 	// Named, so the ⋯ menu's Delete and the row's hidden `data-tree-delete`
 	// control (the Delete key's target) open the very same dialog rather than
 	// being two copies of one object literal that can drift apart.
-	const handleCollectionDeleteClick = useCallback((id: string, name: string) => {
-		setDeleteConfirm({ type: "collection", id, name });
-	}, []);
+	const handleCollectionDeleteClick = useCallback(
+		(id: string, name: string) => {
+			// Same walk `handleDeleteCollection` runs before the mutation - the
+			// affected set here is only used to filter the running mocks list,
+			// never to close tabs or touch the mutation itself.
+			const affected = collectDescendantEntityIds(id, collections, (cid) =>
+				getRequestsByCollection(cid).map((r) => r.id)
+			);
+			const runningMocks = mockServers
+				.filter((mock) => affected.has(mock.collectionId))
+				.map((mock) => ({
+					mockId: mock.mockId,
+					collectionName: mock.collectionName,
+					port: mock.port,
+				}));
+			setDeleteConfirm({
+				type: "collection",
+				id,
+				name,
+				runningMocks: runningMocks.length > 0 ? runningMocks : undefined,
+			});
+		},
+		[collections, getRequestsByCollection, mockServers]
+	);
 
 	const handleRequestDeleteClick = useCallback((requestId: string, requestName: string) => {
 		setDeleteConfirm({ type: "request", id: requestId, name: requestName });
@@ -549,7 +581,11 @@ export function useTreeCrud({
 	// the time the undo toast is raised the delete has already invalidated the
 	// collections cache, so the row it would have been read from is gone.
 	const handleDeleteCollection = useCallback(
-		async (collectionId: string, name: string) => {
+		async (
+			collectionId: string,
+			name: string,
+			runningMocks?: DeleteConfirmTarget["runningMocks"]
+		) => {
 			setDeletingCollectionId(collectionId);
 			// Gather the collection, its descendant folders, and every request they
 			// contain: deleting a collection cascades, so all their tabs go stale.
@@ -565,11 +601,32 @@ export function useTreeCrud({
 				offerUndo(collectionId, name, "collection", restoreClientState);
 			} catch (error) {
 				reportFailure(error, "Failed to delete collection");
+				return;
 			} finally {
 				// Only now: the dialog stays up, with its confirm button spinning,
 				// for as long as the delete is actually running.
 				setDeleteConfirm(null);
 				setDeletingCollectionId(null);
+			}
+
+			// Best-effort, after the collection is already gone: the mock is
+			// engine-process state, not a database row, so it does not come back
+			// on Undo and a failure to stop it here must not fail (or re-run) the
+			// delete that already succeeded. Parallel, not sequential - one mock
+			// refusing to stop must not hold up the others.
+			if (runningMocks && runningMocks.length > 0) {
+				const results = await Promise.allSettled(
+					runningMocks.map((mock) => stopMockServerMutation.mutateAsync(mock.mockId))
+				);
+				const failedCount = results.filter((r) => r.status === "rejected").length;
+				if (failedCount > 0) {
+					showToast(
+						failedCount === 1
+							? "A mock server for the deleted collection could not be stopped."
+							: `${failedCount} mock servers for the deleted collection could not be stopped.`,
+						"error"
+					);
+				}
 			}
 		},
 		[
@@ -580,6 +637,8 @@ export function useTreeCrud({
 			captureClientState,
 			offerUndo,
 			reportFailure,
+			stopMockServerMutation,
+			showToast,
 		]
 	);
 
@@ -609,7 +668,11 @@ export function useTreeCrud({
 		// the next render on; this covers the frame before that.
 		if (deletingCollectionId || deletingRequestId) return;
 		if (deleteConfirm.type === "collection") {
-			void handleDeleteCollection(deleteConfirm.id, deleteConfirm.name);
+			void handleDeleteCollection(
+				deleteConfirm.id,
+				deleteConfirm.name,
+				deleteConfirm.runningMocks
+			);
 		} else {
 			void handleDeleteRequest(deleteConfirm.id, deleteConfirm.name);
 		}

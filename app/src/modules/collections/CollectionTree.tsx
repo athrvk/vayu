@@ -386,13 +386,33 @@ export default function CollectionTree() {
 							: "Delete request?"
 					}
 					description={
-						// What the engine does is a soft delete (issue #988): the row is
-						// stamped and kept, and the Trash view (issue #989) is where it
-						// is restored from. So the copy says where it went rather than
-						// "cannot be undone", which stopped being true.
-						panel.deleteConfirm?.type === "collection"
-							? `"${panel.deleteConfirm?.name}" and all its requests will be moved to the Trash, where they can be restored.`
-							: `"${panel.deleteConfirm?.name}" will be moved to the Trash, where it can be restored.`
+						<>
+							{/* What the engine does is a soft delete (issue #988): the row
+							    is stamped and kept, and the Trash view (issue #989) is where
+							    it is restored from. So the copy says where it went rather
+							    than "cannot be undone", which stopped being true. */}
+							{panel.deleteConfirm?.type === "collection"
+								? `"${panel.deleteConfirm?.name}" and all its requests will be moved to the Trash, where they can be restored.`
+								: `"${panel.deleteConfirm?.name}" will be moved to the Trash, where it can be restored.`}
+							{/* A running mock is engine-process state, not a database row
+							    (unlike the delete itself), so it does not come back on
+							    Undo - stopping it here is the one irreversible part of an
+							    otherwise-reversible action, worth calling out on its own
+							    line rather than folding into the sentence above. */}
+							{panel.deleteConfirm?.runningMocks &&
+								panel.deleteConfirm.runningMocks.length > 0 && (
+									<span className="mt-2 block">
+										{panel.deleteConfirm.runningMocks.length === 1
+											? `A mock server is running for this collection (port ${panel.deleteConfirm.runningMocks[0].port}) - it will be stopped.`
+											: `${panel.deleteConfirm.runningMocks.length} mock servers are running for this collection and its sub-collections - they will be stopped: ${panel.deleteConfirm.runningMocks
+													.map(
+														(mock) =>
+															`${mock.collectionName} (port ${mock.port})`
+													)
+													.join(", ")}.`}
+									</span>
+								)}
+						</>
 					}
 					onConfirm={panel.confirmDelete}
 					// The row this dialog was opened from may stop existing, so

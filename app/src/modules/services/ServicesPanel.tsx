@@ -17,7 +17,8 @@
  * It is a drawer view rather than a tab because that is what the shell already
  * says navigation is - the Dock's left group switches drawer views, and a
  * service is a thing you consult while working in a request, not a document you
- * open. The inbox keeps its tab as the detail surface (a capture list needs the
+ * open. The inbox and, since #481 phase 3, the mock server each keep a tab as
+ * their detail surface (a capture list or a growing activity log needs the
  * width); an issuer has no detail surface, so its whole management fits a row
  * that expands plus one dialog, and no new TabType.
  *
@@ -26,7 +27,9 @@
  * to serve, and this drawer has none selected. The collection header owns the
  * start (`CollectionDetail/MockServerControl`); this owns the list, so a mock
  * started from any collection - or from curl - can be found and stopped in the
- * one place every other running listener is.
+ * one place every other running listener is. A row opens the mock-server tab
+ * (`modules/mock-server/`) rather than expanding in place, the same shape the
+ * inbox row already used.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -51,7 +54,6 @@ import {
 import {
 	useInboxesQuery,
 	useMockIssuersQuery,
-	useMockServerRoutesQuery,
 	useMockServersQuery,
 	useStartInboxMutation,
 	useStopInboxMutation,
@@ -565,133 +567,60 @@ function IssuerDelayControl({
 }
 
 /**
- * One running mock server, expanding to the table it is serving.
- *
- * The route table is the answer to the only question this surface gets asked -
- * "why did the mock 404 that?" - and it is a start-time snapshot, so it is
- * fetched once when the row is opened rather than polled. A row that carried
- * only a URL would leave the user sending requests to find out what the mock
- * knows about.
+ * One running mock server. Opens the mock-server tab rather than expanding in
+ * place (issue #481 phase 3) - once the tab existed to hold a live activity
+ * feed, keeping a second, narrower route table here duplicated it for no
+ * reason the inbox row's own history didn't already answer the same way.
  */
-function MockServerRow({
-	mock,
-	expanded,
-	onToggle,
-}: {
-	mock: MockServer;
-	expanded: boolean;
-	onToggle: () => void;
-}) {
+function MockServerRow({ mock }: { mock: MockServer }) {
 	const showToast = useToastStore((s) => s.showToast);
 	const copy = useCopy();
+	const openTab = useTabsStore((s) => s.openTab);
 	const stopMock = useStopMockServerMutation();
-	const routesQuery = useMockServerRoutesQuery(expanded ? mock.mockId : null);
-	const routes = routesQuery.data ?? [];
 
 	return (
-		<>
-			<ServiceRow
-				// Every listed mock is running: stopping one drops it from the
-				// engine's list rather than leaving a stopped record, since a mock
-				// holds nothing that outlives its listener. Same as an issuer,
-				// unlike an inbox and its captures.
-				running
-				onActivate={onToggle}
-				actionLabel={`${expanded ? "Collapse" : "Expand"} mock server on port ${mock.port}`}
-				leading={
-					expanded ? (
-						<ChevronDown
-							className="h-3 w-3 shrink-0 text-muted-foreground"
-							aria-hidden="true"
-						/>
-					) : (
-						<ChevronRight
-							className="h-3 w-3 shrink-0 text-muted-foreground"
-							aria-hidden="true"
-						/>
-					)
-				}
-				actions={
-					<>
-						<TooltipIconButton
-							label="Copy mock server URL"
-							tooltipHint={mock.url}
-							icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-							onClick={() => void copy(mock.url, "Mock server URL")}
-						/>
-						<TooltipIconButton
-							label={`Stop mock server on port ${mock.port}`}
-							icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
-							disabled={stopMock.isPending}
-							onClick={() =>
-								stopMock.mutate(mock.mockId, {
-									onError: (error) =>
-										showToast(
-											error instanceof Error
-												? error.message
-												: "Could not stop the mock server",
-											"error"
-										),
-								})
-							}
-						/>
-					</>
-				}
-			>
-				{/* The collection is what distinguishes one mock from another -
-				    two mocks of one collection differ only by port, and a column
-				    of near-identical loopback URLs is what the inbox rows learned
-				    not to lead with. */}
-				<TruncatedText className="text-xs">{mock.collectionName}</TruncatedText>
-				<span className="shrink-0 text-xs text-muted-foreground">Port {mock.port}</span>
-			</ServiceRow>
-
-			{expanded && (
-				<div className="surface-sunken rounded-md border-l-2 border-rule pl-2 ml-4 mr-1 mb-2">
-					<IssuerDetailRow
-						label="Base URL"
-						value={mock.url}
-						copyLabel="Copy mock server URL"
-						onCopy={() => void copy(mock.url, "Mock server URL")}
+		<ServiceRow
+			// Every listed mock is running: stopping one drops it from the
+			// engine's list rather than leaving a stopped record, since a mock
+			// holds nothing that outlives its listener. Same as an issuer,
+			// unlike an inbox and its captures.
+			running
+			onActivate={() => openTab({ type: "mock-server", entityId: mock.mockId })}
+			actionLabel="Open mock server"
+			actions={
+				<>
+					<TooltipIconButton
+						label="Copy mock server URL"
+						tooltipHint={mock.url}
+						icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+						onClick={() => void copy(mock.url, "Mock server URL")}
 					/>
-					<p className="py-1 text-xs text-muted-foreground">
-						{mock.latencyMs > 0 ? `${mock.latencyMs}ms latency` : "No added latency"}
-						{mock.errorRatePct > 0 && `, ${mock.errorRatePct}% of answers fail`}
-						{mock.routesWithoutExample > 0 &&
-							`, ${mock.routesWithoutExample} of ${mock.routeCount} routes have no example`}
-					</p>
-					{routesQuery.isError ? (
-						<ErrorState
-							variant="inline"
-							title="Couldn't load the routes"
-							className={cn("justify-start", GROUP_NOTE_CLASS)}
-							onRetry={() => void routesQuery.refetch()}
-						/>
-					) : (
-						<ul className="max-h-48 overflow-y-auto py-1">
-							{routes.map((route) => (
-								<li
-									key={`${route.method} ${route.path} ${route.requestId}`}
-									className="flex items-center gap-1.5 py-0.5"
-								>
-									<span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">
-										{route.method}
-									</span>
-									<TruncatedText className="min-w-0 flex-1 font-mono text-xs">
-										{route.path}
-									</TruncatedText>
-									{/* A route with no example answers 501, so it is
-									    marked rather than listed as if it served. */}
-									<span className="shrink-0 text-[11px] text-muted-foreground">
-										{route.hasExample ? route.status : "no example"}
-									</span>
-								</li>
-							))}
-						</ul>
-					)}
-				</div>
-			)}
-		</>
+					<TooltipIconButton
+						label={`Stop mock server on port ${mock.port}`}
+						icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
+						disabled={stopMock.isPending}
+						onClick={() =>
+							stopMock.mutate(mock.mockId, {
+								onError: (error) =>
+									showToast(
+										error instanceof Error
+											? error.message
+											: "Could not stop the mock server",
+										"error"
+									),
+							})
+						}
+					/>
+				</>
+			}
+		>
+			{/* The collection is what distinguishes one mock from another -
+			    two mocks of one collection differ only by port, and a column
+			    of near-identical loopback URLs is what the inbox rows learned
+			    not to lead with. */}
+			<TruncatedText className="text-xs">{mock.collectionName}</TruncatedText>
+			<span className="shrink-0 text-xs text-muted-foreground">Port {mock.port}</span>
+		</ServiceRow>
 	);
 }
 
@@ -726,7 +655,6 @@ export default function ServicesPanel() {
 	const mocksQuery = useMockServersQuery();
 	const startInbox = useStartInboxMutation();
 	const [expandedIssuerId, setExpandedIssuerId] = useState<string | null>(null);
-	const [expandedMockId, setExpandedMockId] = useState<string | null>(null);
 	const [newIssuerOpen, setNewIssuerOpen] = useState(false);
 	const { flashedId: flashedInboxId, flash: flashInbox } = useRowFlash();
 
@@ -876,18 +804,7 @@ export default function ServicesPanel() {
 							title="No mock running. Open a collection and start one to serve its saved example responses on a local URL - a free upstream to build or load-test against."
 						/>
 					) : (
-						orderedMocks.map((mock) => (
-							<MockServerRow
-								key={mock.mockId}
-								mock={mock}
-								expanded={expandedMockId === mock.mockId}
-								onToggle={() =>
-									setExpandedMockId((current) =>
-										current === mock.mockId ? null : mock.mockId
-									)
-								}
-							/>
-						))
+						orderedMocks.map((mock) => <MockServerRow key={mock.mockId} mock={mock} />)
 					)}
 				</ServiceGroup>
 			</div>

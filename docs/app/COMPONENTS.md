@@ -45,7 +45,8 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
     │   ├── <HistoryDetail />            // type="run"         modules/history/main/
     │   ├── <VariablesMain />            // type="variables"   modules/variables/main/
     │   ├── <SettingsMain />             // type="settings"    modules/settings/main/ (content pane; tree is in the Drawer)
-    │   └── <InboxView />                // type="inbox"       modules/inbox/
+    │   ├── <InboxView />                // type="inbox"       modules/inbox/
+    │   └── <MockServerView />           // type="mock-server" modules/mock-server/
     ├── <ContextBar />                   // components/layout/ContextBar.tsx - 252px; sections from context-bar/registry.ts; push ≥1200px / overlay <1200px
     ├── <ContextRail />                  // components/layout/ContextRail.tsx - w-[var(--rail-width)]; one icon per applicable context-bar section
     └── <Dock />                         // components/layout/Dock.tsx - ambient status only (engine/save state, pending restart)
@@ -880,15 +881,11 @@ both activate it.
   the start (`CollectionDetail/MockServerControl`); this group owns the list, so a mock started from
   any collection - or from an MCP tool, or curl - can be found and stopped where every other running
   listener is. A mock row leads with the **collection name** (two mocks of one collection differ
-  only by port) and expands in place to its base URL, its latency/error-rate line, and the **route
-  table** from `GET /mock/:id/routes` - the answer to the only question this surface gets asked,
-  "why did the mock 404 that?". The latency/error-rate line **reports**, and correctly offers no
-  control: both are set when the mock starts (the collection header's options dialog, issue #570)
-  and are start-time for the same reason the route table is, so a live switch here - the shape the
-  issuer row's `failureMode` takes - would need a `PUT /mock/:id` the engine deliberately does not
-  have. The table is fetched when the row is opened and never polled: it is
-  a start-time snapshot that cannot change under a running mock. Stopping a mock removes it from the
-  list, like an issuer and unlike an inbox, because a mock holds nothing that outlives its listener.
+  only by port) and **opens the `mock-server` tab** (issue #481 phase 3, `modules/mock-server/`)
+  rather than expanding in place - the same shape the inbox row already used, taken once a mock also
+  kept a live activity log and not just a start-time route table. Stopping a mock removes it from
+  the list, like an issuer and unlike an inbox, because a mock holds nothing that outlives its
+  listener.
 
   Row semantics, all from issue #555. An inbox row **leads with `Port NNNN`** and demotes the URL
   behind it: the port is the part that varies and the part a user names an inbox by, while three
@@ -939,14 +936,48 @@ because it stops nothing: the app keeps serving with no window until Quit.
   one-line summary. Shared so the badge, the live switch and the dialog cannot name a mode
   differently.
 
-**No new tab type.** An issuer's whole management surface fits a row plus a dialog, and a `TabType`
-costs three switch statements and the coverage guard. The inbox keeps its tab because a capture
-list needs the width.
+**No new tab type for an issuer.** Its whole management surface fits a row plus a dialog, and a
+`TabType` costs three switch statements and the coverage guard. The inbox and, since #481 phase 3,
+the mock server each keep a tab, because a capture list or a growing activity log needs the width -
+see [Mock Server](#mock-server-modulesmock-server) below.
 
 **Data:** `queries/inbox.ts` and `queries/mock-issuer.ts`, both polled at
 `TIMING.SERVICES_POLL_INTERVAL_MS`. They are polled rather than driven by this app's own mutations
 alone because the MCP tools and a bare curl reach the same engine routes - an indicator that only
 knew what this window started would contradict its own promise.
+
+## Mock Server (`modules/mock-server/`)
+
+The detail surface for one running mock (issue #481 phase 3). Rendered for the singleton
+`mock-server` tab, on the same terms as [Webhook Inbox](#webhook-inbox-modulesinbox): the Services
+drawer's mock-servers row used to expand in place to a route table, which was enough while a route
+table was the only thing there was to see. Once a mock also keeps a live `GET /mock/:id/activity`
+log, it needs a surface that can grow while it is watched.
+
+- `index.tsx` (`MockServerView`, screen `"mock-server"`) - the mock's base URL with a copy control,
+  the collection it serves, a stop button, and (with more than one mock running) a `Select`
+  switcher ordered by port, the same reasoning `InboxView`'s switcher follows: the engine lists
+  mocks in map order, which is not stable across polls, and a switcher whose entries move under the
+  pointer is worse than none. Below the header, two sections: **Routes**, the same start-time
+  snapshot the drawer row used to show inline (`GET /mock/:id/routes`, now carrying `mode`,
+  `exampleName` and `hits` per route from Task 8's Examples-tab mode selection) - fetched once and
+  never polled, since it cannot change under a running mock - and **Activity**, the live feed of
+  what the mock has actually served, polled like the mock list itself.
+- **One tab, not one per mock**, and **the tab's own `entityId` is the address**, exactly as the
+  inbox tab: a mock is engine-process state with no id worth restoring across a restart, and the
+  address is read from the tab rather than mirrored into local state - the drawer row and this
+  view's own switcher are the only two writers, so they cannot disagree about which mock is on
+  screen. An address the engine no longer lists (a tab restored after a restart, or the addressed
+  mock stopped elsewhere) falls back to the lowest-numbered port, the same fallback `InboxView`
+  uses.
+- **Entry point:** the **Services** drawer's mock-servers group, whose row opens this tab addressed
+  at the mock it names rather than expanding in place (`ServicesPanel.tsx`'s `MockServerRow`) -
+  see [Services](#services-modulesservices).
+
+**Data:** `queries/mock-server.ts`. The mock list and the activity log are polled at
+`TIMING.SERVICES_POLL_INTERVAL_MS`, for the same reason the inbox and issuer lists are: an MCP tool
+or a bare curl can start, stop or drive traffic at a mock this window did not touch. The route
+table is not polled - see above.
 
 ## Welcome (`modules/welcome/`)
 

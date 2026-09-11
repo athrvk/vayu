@@ -26,12 +26,11 @@ import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore, useToastStore } from "@/stores";
-import type { MockServer, MockServerRoute } from "@/types";
+import type { MockServer } from "@/types";
 import ServicesPanel from "./ServicesPanel";
 
 const listMockServers = vi.fn();
 const stopMockServer = vi.fn();
-const listMockServerRoutes = vi.fn();
 
 vi.mock("@/services/api", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/services/api")>();
@@ -43,7 +42,6 @@ vi.mock("@/services/api", async (importOriginal) => {
 			listMockIssuers: () => Promise.resolve([]),
 			listMockServers: () => listMockServers(),
 			stopMockServer: (...a: unknown[]) => stopMockServer(...a),
-			listMockServerRoutes: (...a: unknown[]) => listMockServerRoutes(...a),
 		},
 	};
 });
@@ -66,18 +64,6 @@ function mock(overrides: Partial<MockServer> = {}): MockServer {
 	};
 }
 
-function route(overrides: Partial<MockServerRoute> = {}): MockServerRoute {
-	return {
-		requestId: "req_1",
-		requestName: "List pets",
-		method: "GET",
-		path: "/pets",
-		hasExample: true,
-		status: 200,
-		...overrides,
-	};
-}
-
 function renderPanel() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
@@ -93,7 +79,6 @@ beforeEach(() => {
 	cleanup();
 	listMockServers.mockReset().mockResolvedValue([]);
 	stopMockServer.mockReset().mockResolvedValue({ mockId: "mock_a", stopped: true });
-	listMockServerRoutes.mockReset().mockResolvedValue([]);
 	writeText.mockReset().mockResolvedValue(undefined);
 	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
@@ -127,39 +112,36 @@ describe("the mock servers group", () => {
 	});
 
 	/*
-	 * The route table is the answer to the only question this surface gets
-	 * asked - "why did the mock 404 that?" - and it is why `GET /mock/:id/routes`
-	 * exists. Without a reader it would be the repo's most repeated defect over
-	 * again: a field written and never displayed.
+	 * The route table moved to the mock-server tab (issue #481 phase 3): the
+	 * row's job here is just to open it, addressed at the mock it names.
 	 */
-	it("shows the table the mock is serving when a row is expanded", async () => {
-		listMockServers.mockResolvedValue([mock({ routeCount: 2, routesWithoutExample: 1 })]);
-		listMockServerRoutes.mockResolvedValue([
-			route(),
-			route({
-				requestId: "req_2",
-				requestName: "Get pet",
-				path: "/pets/{{petId}}",
-				hasExample: false,
-				status: 0,
-			}),
+	it("opens the mock-server tab addressed at the row's own mock", async () => {
+		listMockServers.mockResolvedValue([mock()]);
+		renderPanel();
+
+		fireEvent.click(await screen.findByRole("button", { name: /open mock server/i }));
+
+		expect(useTabsStore.getState().openTabs).toContainEqual(
+			expect.objectContaining({ type: "mock-server", entityId: "mock_a" })
+		);
+	});
+
+	it("retargets the tab rather than opening a second one for a different mock", async () => {
+		listMockServers.mockResolvedValue([
+			mock({ mockId: "mock_a", port: 43100 }),
+			mock({ mockId: "mock_b", port: 43200 }),
 		]);
 		renderPanel();
 
-		// Not fetched until the row is opened - the table is a start-time
-		// snapshot, so there is nothing to load for a row nobody is reading.
-		await screen.findByText("Pet Store");
-		expect(listMockServerRoutes).not.toHaveBeenCalled();
+		const activators = await screen.findAllByRole("button", { name: /open mock server/i });
+		fireEvent.click(activators[0]);
+		fireEvent.click(activators[1]);
 
-		fireEvent.click(screen.getByRole("button", { name: /expand mock server on port 43100/i }));
-
-		expect(await screen.findByText("/pets")).toBeInTheDocument();
-		expect(screen.getByText("/pets/{{petId}}")).toBeInTheDocument();
-		expect(listMockServerRoutes).toHaveBeenCalledWith("mock_a");
-		// A route with no example answers 501, so it is marked rather than
-		// listed as though it served.
-		expect(screen.getByText("no example")).toBeInTheDocument();
-		expect(screen.getByText(/1 of 2 routes have no example/i)).toBeInTheDocument();
+		const mockServerTabs = useTabsStore
+			.getState()
+			.openTabs.filter((t) => t.type === "mock-server");
+		expect(mockServerTabs).toHaveLength(1);
+		expect(mockServerTabs[0].entityId).toBe("mock_b");
 	});
 
 	it("copies the base URL rather than making it read off the row", async () => {
@@ -198,30 +180,13 @@ describe("the mock servers group", () => {
 		);
 	});
 
-	it("keeps a failed route fetch inside the row it belongs to", async () => {
-		listMockServers.mockResolvedValue([mock()]);
-		listMockServerRoutes.mockRejectedValue(new Error("nope"));
-		renderPanel();
-
-		fireEvent.click(
-			await screen.findByRole("button", { name: /expand mock server on port 43100/i })
-		);
-		expect(await screen.findByText(/Couldn't load the routes/i)).toBeInTheDocument();
-		// The row itself is still there and still stoppable.
-		expect(
-			screen.getByRole("button", { name: /stop mock server on port 43100/i })
-		).toBeInTheDocument();
-	});
-
 	it("names the accessible row content rather than replacing it", async () => {
 		listMockServers.mockResolvedValue([mock()]);
 		renderPanel();
 
 		// The same rule the inbox and issuer rows follow: the verb is prefixed
 		// sr-only text, so a screen reader still hears the collection and port.
-		const activator = await screen.findByRole("button", {
-			name: /expand mock server on port 43100/i,
-		});
+		const activator = await screen.findByRole("button", { name: /open mock server/i });
 		expect(within(activator).getByText("Pet Store")).toBeInTheDocument();
 		expect(within(activator).getByText("Port 43100")).toBeInTheDocument();
 	});

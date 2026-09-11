@@ -20,6 +20,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -31,6 +32,10 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/mock_server.hpp"
+#include "vayu/http/routes.hpp"
+#include "vayu/http/run_summary_cache.hpp"
+#include "vayu/http/server.hpp"
+#include "vayu/http/sse_stream.hpp"
 
 using nlohmann::json;
 using vayu::http::MockMissKind;
@@ -276,8 +281,220 @@ TEST_F (MockServerTest, TheFirstExampleInStoredOrderIsTheOneServed) {
 
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
-    EXPECT_EQ (routes[0].response.status, 200);
-    EXPECT_EQ (routes[0].response.body, "[]");
+    ASSERT_EQ (routes[0].examples.size (), 2u);
+    EXPECT_EQ (routes[0].examples.front ().status, 200);
+    EXPECT_EQ (routes[0].examples.front ().body, "[]");
+}
+
+TEST_F (MockServerTest, PickExampleFirstModeIsExamplesFront) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    seed_example ("exa_b", "req_list", 500, "b", "text/plain", json::array (), 1);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+    std::atomic<std::uint64_t> roll{ 0 };
+    EXPECT_EQ (vayu::http::pick_example (routes[0], roll).id, "exa_a");
+}
+
+TEST_F (MockServerTest, PickExampleFixedModeReturnsTheNamedExample) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    seed_example ("exa_b", "req_list", 500, "b", "text/plain", json::array (), 1);
+    vayu::db::Request r;
+    r.id                 = "req_list";
+    r.collection_id      = "col_root";
+    r.mock_response_mode = "fixed";
+    r.mock_example_id    = "exa_b";
+    r.name               = "req_list";
+    r.method             = vayu::HttpMethod::GET;
+    r.url                = "{{baseUrl}}/pets";
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
+    db_->save_request (r);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+    std::atomic<std::uint64_t> roll{ 0 };
+    EXPECT_EQ (vayu::http::pick_example (routes[0], roll).id, "exa_b");
+}
+
+TEST_F (MockServerTest, PickExampleFixedModeFallsBackToFirstWhenTargetMissing) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    vayu::db::Request r;
+    r.id                 = "req_list";
+    r.collection_id      = "col_root";
+    r.mock_response_mode = "fixed";
+    r.mock_example_id    = "exa_gone";
+    r.name               = "req_list";
+    r.method             = vayu::HttpMethod::GET;
+    r.url                = "{{baseUrl}}/pets";
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
+    db_->save_request (r);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+    std::atomic<std::uint64_t> roll{ 0 };
+    EXPECT_EQ (vayu::http::pick_example (routes[0], roll).id, "exa_a");
+}
+
+TEST_F (MockServerTest, PickExampleRandomModeWithOneExampleAlwaysReturnsIt) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    vayu::db::Request r;
+    r.id                 = "req_list";
+    r.collection_id      = "col_root";
+    r.mock_response_mode = "random";
+    r.name               = "req_list";
+    r.method             = vayu::HttpMethod::GET;
+    r.url                = "{{baseUrl}}/pets";
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
+    db_->save_request (r);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+    std::atomic<std::uint64_t> roll{ 0 };
+    for (int i = 0; i < 20; ++i) {
+        EXPECT_EQ (vayu::http::pick_example (routes[0], roll).id, "exa_a");
+    }
+}
+
+TEST_F (MockServerTest, PickExampleRandomModeCoversEveryExampleAcrossManyRolls) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    for (int i = 0; i < 20; ++i) {
+        seed_example ("exa_" + std::to_string (i), "req_list", 200,
+        std::to_string (i), "text/plain", json::array (), i);
+    }
+    vayu::db::Request r;
+    r.id                 = "req_list";
+    r.collection_id      = "col_root";
+    r.mock_response_mode = "random";
+    r.name               = "req_list";
+    r.method             = vayu::HttpMethod::GET;
+    r.url                = "{{baseUrl}}/pets";
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
+    db_->save_request (r);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+    std::atomic<std::uint64_t> roll{ 0 };
+    std::set<std::string> seen;
+    // Coverage, not a hardcoded sequence: 20 examples, 2000 rolls is enough
+    // that a real modulo-of-splitmix64 distribution hits every one, and a
+    // mutation that pins the index (e.g. always returning examples[0]) fails
+    // this immediately - the mutation check for this test.
+    for (int i = 0; i < 2000; ++i) {
+        seen.insert (vayu::http::pick_example (routes[0], roll).id);
+    }
+    EXPECT_EQ (seen.size (), 20u);
+}
+
+// ---------------------------------------------------------------------------
+// mock_route_json - the wire shape of one route (GET /mock/:id/routes).
+// Exercised directly, on a route built by build_mock_routes, rather than
+// through the HTTP layer - the same shape the resolution tests above use.
+// ---------------------------------------------------------------------------
+
+TEST_F (MockServerTest, MockRouteJsonFirstModeNamesTheFirstExample) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    seed_example ("exa_b", "req_list", 500, "b", "text/plain", json::array (), 1);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+
+    const auto out = vayu::http::mock_route_json (routes[0], 42);
+    EXPECT_EQ (out["mode"], "first");
+    EXPECT_EQ (out["hits"], 42u);
+    EXPECT_EQ (out["exampleName"], "exa_a");
+    EXPECT_EQ (out["status"], 200);
+}
+
+TEST_F (MockServerTest, MockRouteJsonFixedModeFallsBackToFirstWhenTargetMissing) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    vayu::db::Request r;
+    r.id                 = "req_list";
+    r.collection_id      = "col_root";
+    r.mock_response_mode = "fixed";
+    r.mock_example_id    = "exa_gone";
+    r.name               = "req_list";
+    r.method             = vayu::HttpMethod::GET;
+    r.url                = "{{baseUrl}}/pets";
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
+    db_->save_request (r);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+
+    const auto out = vayu::http::mock_route_json (routes[0], 0);
+    EXPECT_EQ (out["mode"], "fixed");
+    EXPECT_EQ (out["exampleName"], "exa_a");
+    EXPECT_EQ (out["status"], 200);
+}
+
+TEST_F (MockServerTest, MockRouteJsonRandomModeNamesNoExample) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_a", "req_list", 200, "a", "text/plain", json::array (), 0);
+    seed_example ("exa_b", "req_list", 500, "b", "text/plain", json::array (), 1);
+    vayu::db::Request r;
+    r.id                 = "req_list";
+    r.collection_id      = "col_root";
+    r.mock_response_mode = "random";
+    r.name               = "req_list";
+    r.method             = vayu::HttpMethod::GET;
+    r.url                = "{{baseUrl}}/pets";
+    r.created_at         = 1;
+    r.updated_at         = 1;
+    r.order              = 0;
+    db_->save_request (r);
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 1u);
+
+    const auto out = vayu::http::mock_route_json (routes[0], 0);
+    EXPECT_EQ (out["mode"], "random");
+    // "random" names no example: which one answers varies per request, so
+    // reporting one here would state a fact the field cannot back up.
+    EXPECT_FALSE (out.contains ("exampleName"));
+    EXPECT_EQ (out["status"], 200)
+    << "the first example's status stands in as a "
+       "representative figure";
+}
+
+TEST_F (MockServerTest, RouteHitsCountServedResponsesOnlyByRoute) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_read_timeout (5);
+    ASSERT_TRUE (client.Get ("/pets"));
+    ASSERT_TRUE (client.Get ("/pets"));
+    ASSERT_TRUE (client.Get ("/pets/7"));
+    ASSERT_TRUE (client.Get ("/nowhere")); // no route at all - counts nowhere
+
+    const auto routes = manager.routes (started.info.mock_id);
+    const auto hits   = manager.route_hits (started.info.mock_id);
+    ASSERT_HAS_VALUE (routes);
+    ASSERT_HAS_VALUE (hits);
+    // seed_pet_store() also has a POST /pets sharing this GET route's path
+    // template, so the method is checked too - path_template alone cannot
+    // tell the two apart.
+    for (std::size_t i = 0; i < routes->size (); ++i) {
+        if ((*routes)[i].method == "GET" && (*routes)[i].path_template == "/pets") {
+            EXPECT_EQ ((*hits)[i], 2u);
+        } else if ((*routes)[i].method == "GET" && (*routes)[i].path_template == "/pets/{{petId}}") {
+            EXPECT_EQ ((*hits)[i], 1u);
+        } else {
+            EXPECT_EQ ((*hits)[i], 0u);
+        }
+    }
 }
 
 TEST_F (MockServerTest, ARequestWithNoExampleStaysInTheTableAsUnservable) {
@@ -324,7 +541,9 @@ TEST_F (MockServerTest, DisabledExampleHeadersAreNotServedAndDuplicatesSurvive) 
 
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
-    const auto& headers = routes[0].response.headers;
+    ASSERT_EQ (routes[0].examples.size (), 1u);
+    const auto headers =
+    vayu::http::example_headers (routes[0].examples.front ().headers);
     ASSERT_EQ (headers.size (), 2u);
     EXPECT_EQ (headers[0].first, "Set-Cookie");
     EXPECT_EQ (headers[0].second, "a=1");
@@ -339,7 +558,10 @@ TEST_F (MockServerTest, AnExampleWithNoContentTypeColumnFallsBackToItsHeader) {
 
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     ASSERT_EQ (routes.size (), 1u);
-    EXPECT_EQ (routes[0].response.content_type, "application/hal+json");
+    ASSERT_EQ (routes[0].examples.size (), 1u);
+    const auto& example = routes[0].examples.front ();
+    const auto headers  = vayu::http::example_headers (example.headers);
+    EXPECT_EQ (vayu::http::example_content_type (example, headers), "application/hal+json");
 }
 
 TEST_F (MockServerTest, ALiteralRouteBeatsATemplatedOneWhateverOrderTheyWereWritten) {
@@ -360,11 +582,11 @@ TEST_F (MockServerTest, ALiteralRouteBeatsATemplatedOneWhateverOrderTheyWereWrit
     << "the wildcard must come first";
     const auto mine = vayu::http::resolve_mock_route (routes, "GET", "/pets/mine");
     ASSERT_HAS_VALUE (mine.route_index);
-    EXPECT_EQ (routes[*mine.route_index].response.body, "literal");
+    EXPECT_EQ (routes[*mine.route_index].examples.front ().body, "literal");
 
     const auto other = vayu::http::resolve_mock_route (routes, "GET", "/pets/42");
     ASSERT_HAS_VALUE (other.route_index);
-    EXPECT_EQ (routes[*other.route_index].response.body, "wildcard");
+    EXPECT_EQ (routes[*other.route_index].examples.front ().body, "wildcard");
 }
 
 TEST_F (MockServerTest, AMethodMismatchIsNamedRatherThanReportedAsAMissingPath) {
@@ -729,6 +951,138 @@ TEST_F (MockServerTest, ALoadRunCanTargetAMockEndToEnd) {
     EXPECT_GT (summary["status_codes"].value ("200", 0), 0)
     << "no request to the mock was answered 200: " << summary.dump ();
     EXPECT_GT (summary.value ("total_requests", 0), 0) << summary.dump ();
+}
+
+TEST_F (MockServerTest, ActivityRecordsAServedRequest) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_read_timeout (5);
+    ASSERT_TRUE (client.Get ("/pets"));
+
+    const auto entries = manager.activity (started.info.mock_id, 50);
+    ASSERT_HAS_VALUE (entries);
+    ASSERT_EQ (entries->size (), 1u);
+    // One binding, read through it - (*entries)[0] written twice (a guard and
+    // a use) is two expressions to bugprone-unchecked-optional-access, which
+    // cannot connect them even though they are textually identical.
+    const auto& entry = (*entries)[0];
+    EXPECT_EQ (entry.method, "GET");
+    EXPECT_EQ (entry.path, "/pets");
+    EXPECT_EQ (entry.status, 200);
+    ASSERT_HAS_VALUE (entry.request_id);
+    EXPECT_EQ (*entry.request_id, "req_list");
+}
+
+TEST_F (MockServerTest, ActivityRecordsAnUnmatchedRequestWithNoRequestId) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_read_timeout (5);
+    ASSERT_TRUE (client.Get ("/nowhere"));
+
+    const auto entries = manager.activity (started.info.mock_id, 50);
+    ASSERT_HAS_VALUE (entries);
+    ASSERT_EQ (entries->size (), 1u);
+    EXPECT_FALSE ((*entries)[0].request_id.has_value ());
+    EXPECT_EQ ((*entries)[0].status, 404);
+}
+
+TEST_F (MockServerTest, ActivityIsGoneAfterStop) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+    manager.stop (started.info.mock_id);
+    EXPECT_FALSE (manager.activity (started.info.mock_id, 50).has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// GET /mock/:id/activity - the "limit" query param, at the HTTP layer rather
+// than through MockServerManager::activity directly (fix wave finding 4a):
+// handle_mock_activity parses the query string itself, and that parse is
+// what a std::stoul call let through un-rejected. limit is parsed before the
+// mock id is looked up, so a bad limit is a 400 whether or not the mock
+// exists.
+// ---------------------------------------------------------------------------
+
+class MockActivityRouteTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_mock_activity_route.db";
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+        ctx_ = std::make_unique<vayu::http::routes::RouteContext> (
+        vayu::http::routes::RouteContext{ svr_, *db_, run_manager_, nullptr,
+        authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
+        mock_server_manager_, sse_manager_, run_summary_cache_ });
+        vayu::http::routes::register_mock_server_routes (*ctx_);
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+
+    void TearDown () override {
+        svr_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+        ctx_.reset ();
+        db_.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    httplib::Client client () const {
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (5, 0);
+        return client;
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    httplib::Server svr_;
+    std::thread thread_;
+    int port_ = 0;
+    vayu::core::RunManager run_manager_;
+    vayu::http::OAuth2AuthorizeManager authorize_manager_;
+    vayu::http::CookieJar cookie_jar_;
+    vayu::http::MockIssuerManager mock_issuer_manager_;
+    vayu::http::InboxManager inbox_manager_;
+    vayu::http::MockServerManager mock_server_manager_;
+    vayu::http::SseStreamManager sse_manager_;
+    vayu::http::RunSummaryCache run_summary_cache_;
+    std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
+};
+
+TEST_F (MockActivityRouteTest, LimitZeroIsRejected) {
+    const auto response = client ().Get ("/mock/whatever/activity?limit=0");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 400);
+}
+
+TEST_F (MockActivityRouteTest, LimitNonNumericIsRejected) {
+    const auto response = client ().Get ("/mock/whatever/activity?limit=abc");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 400);
+}
+
+TEST_F (MockActivityRouteTest, LimitNegativeIsRejected) {
+    const auto response = client ().Get ("/mock/whatever/activity?limit=-1");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 400);
 }
 
 } // namespace
