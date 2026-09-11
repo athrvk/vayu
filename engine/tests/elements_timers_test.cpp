@@ -1026,11 +1026,21 @@ TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesPacingUnderLoad) {
 // clear of the unpaced one. Mutation check: reverting the `shared.timers_override`
 // guard reds this on the floor alone - a paced run measures 18, an unpaced
 // one 39-40, and 30 sits between them with margin on both sides.
+//
+// The window is 8s rather than the 4s the numbers above describe: on the
+// TSan/macOS CI leg the instrumentation overhead alone ate nearly all of
+// that margin (one run measured 29 unpaced, under the 30 floor). Both sides
+// scale with wall-clock time - paced linearly with the shared rate (2/s;
+// 2*8 + 10 unpaced-first-pass = 26, still under 30), unpaced roughly
+// linearly with whatever the box can sustain - so doubling the window
+// roughly doubles the unpaced count while the paced count stays well clear
+// of the floor, restoring the separation a slow sanitizer build had
+// squeezed out.
 TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesThroughputUnderLoad) {
     auto execution =
     plan_with ({ vayu::tests::timer_throughput_element_json ("el_rate", 120.0) });
 
-    auto config        = load_config ("4s");
+    auto config        = load_config ("8s");
     config["elements"] = json{ { "timers", "off" } };
 
     auto state = run (config, execution);
@@ -1040,7 +1050,7 @@ TEST_F (ElementsTimersLoadTest, ElementsTimersOffSilencesThroughputUnderLoad) {
     EXPECT_GT (executed, 30u)
     << "elements.timers: \"off\" did not silence timer.throughput's shared "
        "budget under load - got "
-    << executed << " requests over 4s, still in the paced range";
+    << executed << " requests over 8s, still in the paced range";
 }
 
 // Issue #1620: `"off"` reached `scheduled_ready_delay_ms` (the reopen fix
