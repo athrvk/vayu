@@ -63,8 +63,11 @@ export default function SamplesTab({ report }: TabProps) {
 			</CardHeader>
 			{/* `p-0` + a `divide-y` strip below, matching the dashboard's live
 			    sample list (`RequestResponseView.tsx`) - a flat row per sample,
-			    not a boxed card per row. */}
-			<CardContent className="p-0">
+			    not a boxed card per row. `surface-card` declares the `--rule`
+			    the strip's dividers read; a bare `divide-y` on `Card`'s
+			    `border bg-card` falls back to `--border`, invisible in dark
+			    (issue #1650). */}
+			<CardContent className="p-0 bg-card surface-card">
 				<SampleRetentionNote
 					sampling={report.sampling}
 					shown={samples.length}
@@ -72,7 +75,7 @@ export default function SamplesTab({ report }: TabProps) {
 					className="mx-5 mb-3"
 				/>
 				<CapturedDataWarning sampling={report.sampling} className="mx-5 mb-3" />
-				<div className="divide-y">
+				<div className="divide-y divide-rule">
 					{samples.map((sample: SampleResult, idx: number) => (
 						<SampleRequestCard
 							key={idx}
