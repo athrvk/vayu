@@ -79,7 +79,7 @@ export default function SampleRequestCard({
 			// full-bleed divider strip already gets there. Status rides the
 			// `StatusIcon` tint alone now, not a second, redundant colour on
 			// the border.
-			className="border-b last:border-b-0 transition-colors"
+			className="border-b last:border-b-0"
 		>
 			{/* The captured exchange, when this run stored one for this row.
 			    Rendering nothing (not an empty heading) when it did not is
