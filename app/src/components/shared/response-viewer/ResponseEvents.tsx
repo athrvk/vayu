@@ -206,7 +206,7 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 					)}
 				</Button>
 				<CollapsibleContent>
-					<div className="px-4 pb-3 pl-16">
+					<div className="px-4 pt-1 pb-3 pl-16">
 						{event.dataTruncated && (
 							<p className="pb-2 text-xs text-warning-text">
 								Only the first {event.data.length.toLocaleString()} bytes of{" "}

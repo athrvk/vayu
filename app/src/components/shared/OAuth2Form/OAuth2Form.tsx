@@ -217,7 +217,7 @@ export default function OAuth2Form({
 					/>
 					Advanced
 				</CollapsibleTrigger>
-				<CollapsibleContent className="pt-4 space-y-4">
+				<CollapsibleContent className="pt-4 px-1 pb-1 space-y-4">
 					<div className="grid grid-cols-2 gap-4">
 						{field(
 							"Client Authentication",

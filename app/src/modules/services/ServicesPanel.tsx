@@ -420,7 +420,7 @@ function IssuerRow({
 			    also what this is: the nested detail slab of the row above, the
 			    same treatment the settings cookie rows and the console panes use. */}
 			<CollapsibleContent>
-				<div className="surface-sunken rounded-md border-l-2 border-rule pl-2 ml-4 mr-1 mb-2">
+				<div className="surface-sunken rounded-md border-l-2 border-rule pl-2 ml-4 mr-1 mt-1 mb-2">
 					<IssuerDetailRow
 						label="Token"
 						value={issuer.tokenUrl}
