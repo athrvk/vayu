@@ -237,6 +237,26 @@ bool header_is (const std::string& name, const char* wanted) {
     return vayu::utils::ascii_lower_equal (name, wanted);
 }
 
+/**
+ * True for a header that describes the *wire encoding* of the response an
+ * example was captured from - `Content-Encoding`, `Content-Length` and
+ * `Transfer-Encoding` - rather than its content. A mock always serves an
+ * example's stored body as literal, already-decoded bytes, never actually
+ * compressed or chunked the way the original transfer may have been, so
+ * replaying one of these verbatim is a lie about what is on the wire: curl
+ * silently shows the plain bytes it never asked to have decoded, but a
+ * browser's `fetch` honours `Content-Encoding` unconditionally and fails the
+ * whole request trying to gunzip plain text. httplib recomputes
+ * `Content-Length` itself from `set_content` and manages `Transfer-Encoding`
+ * on its own, so this is belt-and-braces for those two; `Content-Encoding` is
+ * the one httplib has no opinion on and the one that actually broke a
+ * browser.
+ */
+bool header_is_stale_transfer_encoding (const std::string& name) {
+    return header_is (name, "content-encoding") ||
+    header_is (name, "content-length") || header_is (name, "transfer-encoding");
+}
+
 } // namespace
 
 std::vector<std::pair<std::string, std::string>> example_headers (const std::string& blob) {
@@ -706,7 +726,7 @@ httplib::Response& res) {
 
     res.status = example.status;
     for (const auto& [name, value] : headers) {
-        if (!header_is (name, "content-type")) {
+        if (!header_is (name, "content-type") && !header_is_stale_transfer_encoding (name)) {
             // Appended rather than set: a repeated `Set-Cookie` is exactly
             // why an example stores its headers as an ordered array.
             res.headers.emplace (name, value);

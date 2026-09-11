@@ -714,6 +714,43 @@ TEST_F (MockServerTest, AStartedMockServesItsExamplesAndReportsItsTable) {
     EXPECT_FALSE (manager.routes ("mock_nope").has_value ());
 }
 
+TEST_F (MockServerTest, AStaleContentEncodingFromTheCapturedResponseIsDroppedNotReplayed) {
+    // An example imported or saved from a real response can carry the
+    // Content-Encoding the original transfer used (gzip, br, ...) - but the
+    // mock always serves the example's stored body as literal, already-
+    // decoded bytes. Replaying that header verbatim tells the client to
+    // decompress plain text: curl silently shows it uncompressed, but a
+    // browser's fetch honours the header and fails the request outright
+    // (net::ERR_CONTENT_DECODING_FAILED) before any JSON is visible.
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
+    json::array ({ json{ { "key", "Content-Encoding" }, { "value", "gzip" }, { "enabled", true } },
+    json{ { "key", "X-Custom" }, { "value", "kept" }, { "enabled", true } } }));
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    // httplib::Client advertises "Accept-Encoding: gzip, deflate" itself when
+    // built with zlib, and a server built the same way is then free to
+    // *actually* compress the response - which is a legitimate Content-Encoding
+    // this test has nothing to say about. Asking for "identity" is what isolates
+    // the stale, never-really-compressed header the fix is for.
+    const httplib::Headers no_compression = { { "Accept-Encoding", "identity" } };
+    const auto listed = client.Get ("/pets", no_compression);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->status, 200);
+    EXPECT_EQ (listed->body, R"([{"id":1}])");
+    EXPECT_FALSE (listed->has_header ("Content-Encoding"));
+    EXPECT_EQ (listed->get_header_value ("X-Custom"), "kept");
+}
+
 // ---------------------------------------------------------------------------
 // CORS: a mock server answers a browser page on another origin, not only
 // curl. A preflight on a path with no stored OPTIONS route is synthesized
