@@ -238,19 +238,12 @@ bool header_is (const std::string& name, const char* wanted) {
 }
 
 /**
- * True for a header that describes the *wire encoding* of the response an
- * example was captured from - `Content-Encoding`, `Content-Length` and
- * `Transfer-Encoding` - rather than its content. A mock always serves an
- * example's stored body as literal, already-decoded bytes, never actually
- * compressed or chunked the way the original transfer may have been, so
- * replaying one of these verbatim is a lie about what is on the wire: curl
- * silently shows the plain bytes it never asked to have decoded, but a
- * browser's `fetch` honours `Content-Encoding` unconditionally and fails the
- * whole request trying to gunzip plain text. httplib recomputes
- * `Content-Length` itself from `set_content` and manages `Transfer-Encoding`
- * on its own, so this is belt-and-braces for those two; `Content-Encoding` is
- * the one httplib has no opinion on and the one that actually broke a
- * browser.
+ * True for a header describing the *wire encoding* the example was captured
+ * with - `Content-Encoding`, `Content-Length`, `Transfer-Encoding` - rather
+ * than its content. A mock always serves the stored body as literal,
+ * already-decoded bytes, so replaying `Content-Encoding` verbatim is a lie a
+ * browser's `fetch` believes and fails trying to gunzip plain text; the
+ * other two httplib recomputes itself and this is belt-and-braces.
  */
 bool header_is_stale_transfer_encoding (const std::string& name) {
     return header_is (name, "content-encoding") ||
@@ -726,9 +719,12 @@ httplib::Response& res) {
 
     res.status = example.status;
     for (const auto& [name, value] : headers) {
-        if (!header_is (name, "content-type") && !header_is_stale_transfer_encoding (name)) {
+        if (!header_is (name, "content-type") && !header_is_stale_transfer_encoding (name) &&
+        !routes::is_cors_response_header (name)) {
             // Appended rather than set: a repeated `Set-Cookie` is exactly
-            // why an example stores its headers as an ordered array.
+            // why an example stores its headers as an ordered array. CORS
+            // headers are skipped outright - apply_cors_headers already
+            // answered, and append would duplicate it.
             res.headers.emplace (name, value);
         }
     }

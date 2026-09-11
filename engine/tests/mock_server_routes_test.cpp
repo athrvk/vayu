@@ -888,6 +888,35 @@ TEST_F (MockServerTest, APreflightForAPathWithAStoredOptionsRouteIsServedForReal
     "https://app.example.test");
 }
 
+TEST_F (MockServerTest, AnExamplesOwnCorsHeaderIsNotDuplicatedByTheListener) {
+    // An example captured from a real CORS API, or one a user added as a
+    // pre-#1647 workaround, can carry its own Access-Control-Allow-Origin.
+    // apply_cors_headers already wrote the listener's answer, so replaying
+    // that header would duplicate it - and a browser rejects a response
+    // carrying two values for the same CORS header outright.
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
+    json::array ({ json{ { "key", "Access-Control-Allow-Origin" },
+    { "value", "*" }, { "enabled", true } } }));
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto listed = client.Get ("/pets", with_origin);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->headers.count ("Access-Control-Allow-Origin"), 1u);
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+}
+
 TEST_F (MockServerTest, APathPastTheRegexRouteLimitStillReachesTheRouteTable) {
     // cpp-httplib 0.53.1 refuses a regex route outright for any path longer
     // than CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256), rather than risk

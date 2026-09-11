@@ -425,6 +425,23 @@ TEST_F (InboxListenerTest, ACaptureWithNoOriginGetsTheWildcard) {
     EXPECT_FALSE (posted->has_header ("Access-Control-Allow-Credentials"));
 }
 
+TEST_F (InboxListenerTest, ACannedHeaderNamedAccessControlIsNotDuplicated) {
+    // A canned response that itself sets Access-Control-Allow-Origin (a
+    // pre-#1647 workaround, most likely) must not produce two copies of the
+    // header - apply_cors_headers already answered, and set_header appends.
+    InboxStartRequest request;
+    request.response.headers = { { "Access-Control-Allow-Origin", "https://old.example.test" } };
+    auto started = start (request);
+    auto client  = client_for (started.info);
+
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto posted = client.Post ("/hook", with_origin, "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->headers.count ("Access-Control-Allow-Origin"), 1u);
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+}
+
 TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
     auto started = start ();
     auto client  = client_for (started.info);

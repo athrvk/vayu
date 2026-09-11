@@ -610,7 +610,12 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         res.status                     = canned.status;
         const std::string content_type = content_type_of (canned.headers);
         for (const auto& [name, value] : canned.headers) {
-            if (!vayu::utils::ascii_lower_equal (name, "content-type")) {
+            // `Content-Type` is set below from the resolved value, and a
+            // stored `Access-Control-*` / `Vary` is skipped outright:
+            // apply_cors_headers already answered, and set_header appends
+            // rather than replaces, so echoing one would duplicate it.
+            if (!vayu::utils::ascii_lower_equal (name, "content-type") &&
+            !routes::is_cors_response_header (name)) {
                 res.set_header (name, value);
             }
         }

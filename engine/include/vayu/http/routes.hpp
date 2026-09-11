@@ -36,6 +36,7 @@
 // see it. Included here so route TUs keep naming it through routes.hpp.
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/run_summary_cache.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -266,6 +267,24 @@ inline void apply_cors_headers (const httplib::Request& req, httplib::Response& 
         }
         res.set_header ("Access-Control-Max-Age", "600");
     }
+}
+
+/**
+ * @brief Whether a replayed example/canned header must be dropped rather
+ *        than echoed - `Access-Control-*` or `Vary`.
+ *
+ * `apply_cors_headers` above already wrote the listener's own CORS answer,
+ * and `set_header` / `headers.emplace` both append rather than replace, so a
+ * captured or stored header of the same name becomes a duplicate on the wire
+ * - which Fetch rejects outright, not merely ignores.
+ */
+inline bool is_cors_response_header (std::string_view name) {
+    static constexpr std::string_view kPrefix = "access-control-";
+    if (name.size () >= kPrefix.size () &&
+    vayu::utils::ascii_lower_equal (name.substr (0, kPrefix.size ()), kPrefix)) {
+        return true;
+    }
+    return vayu::utils::ascii_lower_equal (name, "vary");
 }
 
 /**
