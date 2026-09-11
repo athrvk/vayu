@@ -196,6 +196,23 @@ struct ExportRequest {
      * field added in the middle would silently shift every value after it.
      */
     nlohmann::json elements = nlohmann::json::array ();
+    /// "first" | "fixed" | "random" - mirrors `db::Request::mock_response_mode`
+    /// (issue #1649), written as `x-vayu-mock` beside `x-vayu-elements` so a
+    /// re-import keeps what the exporter's user configured instead of
+    /// reverting every mock route to "first".
+    std::string mock_response_mode = "first";
+    /**
+     * Which of `examples` above is the `mock_response_mode == "fixed"`
+     * target, absent when the mode is not `"fixed"` or the stored
+     * `mock_example_id` no longer names one of this request's examples.
+     *
+     * An index into `examples`, not the target's name: two examples can
+     * share a name (`free_key` in `openapi_export.cpp` suffixes the second),
+     * so only the specific `ExportExample` object - found by matching the
+     * stored id before it is discarded, not its name - says which document
+     * key ends up naming it.
+     */
+    std::optional<size_t> mock_example_index = std::nullopt;
 };
 
 /** What a skeleton names the API after. */

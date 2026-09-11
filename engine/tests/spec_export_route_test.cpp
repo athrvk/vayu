@@ -23,6 +23,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -53,6 +54,13 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json> create_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
 const nlohmann::json& json);
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
+// Defined in import.cpp - the combined parse-and-apply `POST /import`, used
+// here for the round trip a mock mode's `x-vayu-mock` export exists for.
+std::pair<int, nlohmann::json>
+import_response (vayu::db::Database& db, const nlohmann::json& body);
 } // namespace vayu::http::routes
 
 namespace {
@@ -254,6 +262,78 @@ TEST_F (SpecExportRouteTest, ExportsAFreeFormCollectionAsASkeleton) {
     EXPECT_EQ (document["openapi"], "3.1.0");
     EXPECT_EQ (document["info"]["title"], "Pets API");
     EXPECT_TRUE (document["paths"].contains ("/pets"));
+}
+
+/**
+ * The route-level round trip issue #1649 exists for: a request's `"fixed"`
+ * mock target, exported as OpenAPI and imported into a fresh collection,
+ * comes back naming *that collection's own copy* of the same example rather
+ * than reverting to `"first"`.
+ *
+ * Three stored examples, not two: the importer's `examples_v3` keeps only the
+ * *first* named example of each status (`declared_example_value`), so the
+ * fixed target - the second example this request ever gained - is put under
+ * its own status (201) rather than sharing the first one's (200), and a third
+ * example beside it there forces that status into a named `examples` map
+ * (`add_named_examples`) instead of the bare, unaddressable `example` a lone
+ * one would get. That makes the target both the first of its own status
+ * (so it survives import) and a named map entry (so `x-vayu-mock` has a key
+ * to give it) - the two properties this round trip needs at once.
+ */
+TEST_F (SpecExportRouteTest, RoundTripsAFixedMockModeThroughXVayuMock) {
+    const std::string listed = create_request (root_, "GET", "{{baseUrl}}/pets");
+    add_example (listed,
+    json{ { "name", "ok" }, { "status", 200 }, { "origin", "user" },
+    { "body", R"({"id":"p0"})" }, { "contentType", "application/json" } });
+    add_example (listed,
+    json{ { "name", "created" }, { "status", 201 }, { "origin", "user" },
+    { "body", R"({"id":"p1"})" }, { "contentType", "application/json" } });
+    add_example (listed,
+    json{ { "name", "created also" }, { "status", 201 }, { "origin", "user" },
+    { "body", R"({"id":"p2"})" }, { "contentType", "application/json" } });
+    const auto stored_examples = db_->get_request_examples (listed);
+    ASSERT_EQ (stored_examples.size (), 3);
+    const std::string target_example_id = stored_examples[1].id; // "created"
+
+    auto [update_status, update_body] = routes::update_request_response (*db_, listed,
+    json{ { "mockResponseMode", "fixed" }, { "mockExampleId", target_example_id } });
+    ASSERT_EQ (update_status, 200) << update_body.dump ();
+
+    const std::string text = export_collection ()["text"].get<std::string> ();
+
+    auto [import_status, imported] =
+    routes::import_response (*db_, json{ { "content", text } });
+    ASSERT_EQ (import_status, 200) << imported.dump ();
+
+    // The import created new collections alongside `root_` - a root plus, since
+    // this operation carries no tags, a `pets` sub-collection its path names
+    // (`folder_of`) - so the new request is gathered across all of them rather
+    // than assumed to sit directly under the new root.
+    std::vector<vayu::db::Request> new_requests;
+    for (const auto& c : db_->get_collections ()) {
+        if (c.id == root_) {
+            continue;
+        }
+        for (auto& request : db_->get_requests_in_collection (c.id)) {
+            new_requests.push_back (std::move (request));
+        }
+    }
+    ASSERT_EQ (new_requests.size (), 1);
+    const vayu::db::Request& new_request = new_requests.front ();
+    EXPECT_EQ (new_request.mock_response_mode, "fixed");
+    ASSERT_HAS_VALUE (new_request.mock_example_id);
+
+    const auto new_examples = db_->get_request_examples (new_request.id);
+    const auto target       = std::find_if (new_examples.begin (),
+          new_examples.end (), [&] (const vayu::db::RequestExample& example) {
+        return example.id == *new_request.mock_example_id;
+    });
+    ASSERT_NE (target, new_examples.end ());
+    // The body a "fixed" mock would actually serve - the proof that this
+    // resolved to "created" (`p1`) and not "created also" (`p2`) or the
+    // unrelated 200 example (`p0`).
+    EXPECT_EQ (json::parse (target->body), json::parse (R"({"id":"p1"})"));
+    EXPECT_EQ (target->status, 201);
 }
 
 TEST_F (SpecExportRouteTest, WritesYamlWhenAskedForIt) {

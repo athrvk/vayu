@@ -588,11 +588,13 @@ logged as a warning: it means a client skipped composition.
     variable default, a row's toggle as `x-vayu-enabled`, a request's or the
     collection's own `elements` (scripts included) as `x-vayu-elements`
     (#1518, read back by the importer and validated against the registry
-    before it reaches a stored request) - and counts what it cannot (other
-    variables, unmapped bodies, form values, execution settings, extra
-    example headers) in `ExportNotes`. The subtree walk stops at
-    a collection bound to a *different* document and not at one bound to the
-    same (#721), as a predicate on `collection_subtree_ids`. YAML output is
+    before it reaches a stored request), a request's `mock_response_mode` as
+    `x-vayu-mock` (#1649, its `"fixed"` target named by the `examples` map key
+    it resolves to rather than an id nothing has minted yet) - and counts
+    what it cannot (other variables, unmapped bodies, form values, execution
+    settings, extra example headers) in `ExportNotes`. The subtree walk stops
+    at a collection bound to a *different* document and not at one bound to
+    the same (#721), as a predicate on `collection_subtree_ids`. YAML output is
     `core::emit_yaml`, beside the reader on purpose: `plain_scalar` decides
     quoting, and split across two files a document would export as
     `swagger: 2.0` and re-import as a number.

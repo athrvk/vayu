@@ -295,6 +295,59 @@ TEST (BoundExport, WritesOneStoredExampleAsExampleAndSeveralAsANamedMap) {
     EXPECT_EQ (exported.notes.examples_written, 3);
 }
 
+TEST (BoundExport, WritesXVayuMockOnAFixedTargetAndNoneOnFirstOrMissing) {
+    std::vector<ExportRequest> requests = bound_requests ();
+    // request[0] ("first", the default): no opinion, no key at all.
+    requests[0].examples = { example () };
+    // request[1] ("fixed", index 1 of two): names the key its target was
+    // written under. Two examples, not one, so the write lands in a named
+    // `examples` map rather than the bare `example` a lone one gets (see
+    // `WritesNoXVayuMockForAFixedTargetThatIsItsStatussOnlyExample` in the
+    // skeleton section for that case).
+    requests[1].examples = { example ("created", 201, R"({"id":"p1"})"),
+        example ("created too", 201, R"({"id":"p2"})") };
+    requests[1].mock_response_mode = "fixed";
+    requests[1].mock_example_index = 1;
+    // request[2] ("fixed", pointing past its own empty `examples`): the
+    // stored `mock_example_id` named a row that no longer exists by the time
+    // this export ran - `build_export_request` never sets an index for one,
+    // which this asserts degrades exactly like "first" rather than crashing
+    // or naming a key nothing backs.
+    requests[2].mock_response_mode = "fixed";
+
+    const Exported exported = export_json (requests, bound_fixture ());
+    EXPECT_FALSE (operation_of (exported.document, "/pets", "get").contains ("x-vayu-mock"));
+    EXPECT_EQ (operation_of (exported.document, "/pets", "post")["x-vayu-mock"],
+    json::parse (R"({"mode":"fixed","example":"created too"})"));
+    EXPECT_FALSE (
+    operation_of (exported.document, "/pets/{petId}", "delete").contains ("x-vayu-mock"));
+}
+
+TEST (BoundExport, NamesTheSuffixedKeyWhenTheFixedExampleSharesAName) {
+    std::vector<ExportRequest> requests = bound_requests ();
+    // Two examples of the same status+media type sharing a name: `free_key`
+    // suffixes the second to "created-2", and the `x-vayu-mock` this writes
+    // for the second example must name that suffixed key, not the wanted one
+    // a naive re-derivation (matching by name alone) would give.
+    requests[1].examples = { example ("created", 201, R"({"id":"p1"})"),
+        example ("created", 201, R"({"id":"p2"})") };
+    requests[1].mock_response_mode = "fixed";
+    requests[1].mock_example_index = 1;
+
+    const Exported exported = export_json (requests, bound_fixture ());
+    EXPECT_EQ (operation_of (exported.document, "/pets", "post")["x-vayu-mock"],
+    json::parse (R"({"mode":"fixed","example":"created-2"})"));
+}
+
+TEST (BoundExport, WritesXVayuMockForRandomModeEvenWithNoExamples) {
+    std::vector<ExportRequest> requests = bound_requests ();
+    requests[0].mock_response_mode      = "random";
+
+    const Exported exported = export_json (requests, bound_fixture ());
+    EXPECT_EQ (operation_of (exported.document, "/pets", "get")["x-vayu-mock"],
+    json::parse (R"({"mode":"random"})"));
+}
+
 TEST (BoundExport, WritesNothingIntoADocumentNobodyEdited) {
     const std::string content           = refs_fixture ();
     std::vector<ExportRequest> requests = refs_requests ();
@@ -600,14 +653,17 @@ TEST (BoundExport, RemovesFromASwagger20DocumentButWritesNothingIntoIt) {
     R"("get":{"operationId":"listPets","responses":{"200":{"description":"ok"}}},)"
     R"("post":{"operationId":"createPet","responses":{"200":{"description":"ok"}}}}}})";
     ExportRequest listed = bound_request ("GET", "{{baseUrl}}/pets", "listPets", "/pets");
-    listed.examples = { example () };
+    listed.examples           = { example () };
+    listed.mock_response_mode = "fixed";
+    listed.mock_example_index = 0;
 
     const Exported exported = export_json ({ listed }, swagger);
     EXPECT_FALSE (exported.document["paths"]["/pets"].contains ("post"));
-    const json& response =
-    operation_of (exported.document, "/pets", "get")["responses"]["200"];
+    const json& operation = operation_of (exported.document, "/pets", "get");
+    const json& response  = operation["responses"]["200"];
     EXPECT_FALSE (response.contains ("content"));
     EXPECT_FALSE (response.contains ("examples"));
+    EXPECT_FALSE (operation.contains ("x-vayu-mock"));
     EXPECT_TRUE (exported.notes.vocabulary_not_written);
     EXPECT_EQ (exported.notes.dialect, "Swagger 2.0");
     EXPECT_EQ (exported.notes.examples_written, 0);
@@ -886,6 +942,55 @@ TEST (SkeletonExport, WritesResponsesFromStoredExamplesAndNothingElse) {
     // A body that is not JSON is the text it is, never dropped.
     EXPECT_EQ (responses["500"]["content"]["text/plain"]["example"], "boom");
     EXPECT_EQ (exported.notes.examples_written, 2);
+}
+
+TEST (SkeletonExport, WritesXVayuMockBesideXVayuElementsAndNoneOnFirst) {
+    // Two examples of the same status+media type, so the second lands in a
+    // named `examples` map rather than bare - see the sibling test below for
+    // what happens when there is only one.
+    ExportRequest fixed      = request ("GET", "{{baseUrl}}/pets");
+    fixed.examples           = { example ("one", 200, R"({"id":"p1"})"),
+                  example ("two", 200, R"({"id":"p2"})") };
+    fixed.mock_response_mode = "fixed";
+    fixed.mock_example_index = 1;
+
+    ExportRequest first = request ("POST", "{{baseUrl}}/pets");
+    first.examples      = { example ("created", 201, R"({"id":"p1"})") };
+
+    const Exported exported = export_json ({ fixed, first });
+    EXPECT_EQ (operation_of (exported.document, "/pets", "get")["x-vayu-mock"],
+    json::parse (R"({"mode":"fixed","example":"two"})"));
+    EXPECT_FALSE (operation_of (exported.document, "/pets", "post").contains ("x-vayu-mock"));
+}
+
+TEST (SkeletonExport, WritesNoXVayuMockForAFixedTargetThatIsItsStatussOnlyExample) {
+    // A single example of its status+media type is written bare, as the
+    // singular `example`, never a named `examples` map entry (`free_key`'s
+    // whole reason to exist is a *second* example of the same pair) - so a
+    // `fixed` target here has no key to be named by. Behaviourally this is
+    // no loss: with one example, "first" and "fixed" already pick the same
+    // response, and there is no other honest key to write.
+    ExportRequest entry      = request ("GET", "{{baseUrl}}/pets");
+    entry.examples           = { example () };
+    entry.mock_response_mode = "fixed";
+    entry.mock_example_index = 0;
+
+    const Exported exported = export_json ({ entry });
+    const json& operation   = operation_of (exported.document, "/pets", "get");
+    EXPECT_TRUE (operation["responses"]["200"]["content"]["application/json"].contains ("example"));
+    EXPECT_FALSE (operation.contains ("x-vayu-mock"));
+}
+
+TEST (SkeletonExport, WritesXVayuMockForRandomModeWithNoStoredExamples) {
+    ExportRequest entry      = request ("GET", "{{baseUrl}}/pets");
+    entry.mock_response_mode = "random";
+
+    const Exported exported = export_json ({ entry });
+    EXPECT_EQ (operation_of (exported.document, "/pets", "get")["x-vayu-mock"],
+    json::parse (R"({"mode":"random"})"));
+    // No stored example and no "fixed" target: the operation gets the mode
+    // but still no invented response.
+    EXPECT_FALSE (operation_of (exported.document, "/pets", "get").contains ("responses"));
 }
 
 TEST (SkeletonExport, StripsARepeatedStatusPrefixInsteadOfAccretingOneOnEveryReimport) {

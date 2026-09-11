@@ -332,7 +332,12 @@ const std::string& folder_collection_id) {
     entry.verify_ssl       = row.verify_ssl;
     entry.stream           = row.stream;
     entry.folder_path = folder_path_of (collections, root_id, folder_collection_id);
+    entry.mock_response_mode = row.mock_response_mode;
     for (const auto& example : db.get_request_examples (row.id)) {
+        if (row.mock_response_mode == "fixed" && row.mock_example_id &&
+        *row.mock_example_id == example.id) {
+            entry.mock_example_index = entry.examples.size ();
+        }
         entry.examples.push_back ({ example.name, example.status, example.body,
         example.content_type, example.body_truncated,
         example.origin == vayu::core::constants::request_example::ORIGIN_IMPORT,
