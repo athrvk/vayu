@@ -17,9 +17,13 @@
  * Services drawer and the collection header both promise to show a running mock
  * wherever it was started from.
  *
- * The route table is *not* polled. It is a snapshot taken when the mock started
- * and it cannot change under a running mock - editing the collection means
- * restarting - so a poll would re-fetch a constant every few seconds.
+ * The route table's *shape* is not re-fetched on mount - it is a snapshot
+ * taken when the mock started and cannot change under a running mock, editing
+ * the collection means restarting. Each route's `hits`, though, changes live
+ * as traffic arrives (the engine's own docs for `GET /mock/:id/routes` say
+ * so), so the query still polls at the same interval as the activity log -
+ * `staleTime: Infinity` only means mounting a second reader of the same query
+ * does not force a redundant fetch, not that the interval stops firing.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -49,6 +53,7 @@ export function useMockServerRoutesQuery(mockId: string | null) {
 		queryFn: () => apiService.listMockServerRoutes(mockId as string),
 		enabled: mockId !== null,
 		staleTime: Infinity,
+		refetchInterval: TIMING.SERVICES_POLL_INTERVAL_MS,
 	});
 }
 
