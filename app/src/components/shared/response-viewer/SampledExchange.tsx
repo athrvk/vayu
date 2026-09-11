@@ -169,7 +169,11 @@ export function SampledExchange({
 						// overrides the primitive's default `whitespace-nowrap`: this row
 						// wraps to a second line for a long error (`basis-full` below), and
 						// the base's nowrap is inherited by that text unless undone here.
-						className="flex-1 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 whitespace-normal px-4 py-3 hover:bg-muted/50"
+						// `rounded-none` overrides the base's `rounded-md`: every caller of
+						// this component renders it as a full-bleed, edge-to-edge row (a
+						// `divide-y` list, or a `border-b` strip), never an inset one, so a
+						// rounded hover fill floats oddly inside the row's own square edges.
+						className="flex-1 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 whitespace-normal rounded-none px-4 py-3 hover:bg-muted/50"
 					>
 						<Chevron className="w-4 h-4 text-muted-foreground shrink-0" />
 

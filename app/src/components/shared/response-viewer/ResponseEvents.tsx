@@ -165,8 +165,11 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 					// hover/press transitions (index.css's `:where(button, ...)` rule) -
 					// no hand-rolled `transition-*` needed. `[&_svg]:size-3` overrides
 					// the primitive's default `size-4` glyph, matching this row's
-					// smaller chevron.
-					className="gap-2 px-4 py-1.5 hover:bg-muted/40 [&_svg]:size-3"
+					// smaller chevron. `rounded-none` overrides the base's `rounded-md`:
+					// this row is full-bleed inside its list (`border-b last:border-b-0`
+					// below), so a rounded hover fill would float oddly inside its own
+					// square edges.
+					className="gap-2 rounded-none px-4 py-1.5 hover:bg-muted/40 [&_svg]:size-3"
 				>
 					<Chevron aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
 					<span className="w-10 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
