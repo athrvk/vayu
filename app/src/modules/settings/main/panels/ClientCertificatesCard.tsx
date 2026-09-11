@@ -301,11 +301,15 @@ export function ClientCertificatesCard() {
 				) : certificates.length === 0 ? (
 					<p className="text-sm text-muted-foreground">No certificates registered.</p>
 				) : (
-					<div className="space-y-2">
+					<div>
 						{certificates.map((certificate) => (
+							// Flat hairline row, not a boxed card per entry - the
+							// list convention every other repeated-item list in the
+							// app uses (`RunItem`, `SampleRequestCard`), not the
+							// one-off "boxes within a box" look this used to have.
 							<div
 								key={certificate.id}
-								className="rounded-md border border-rule surface-sunken p-3 flex items-start justify-between gap-4"
+								className="border-b border-rule py-3 last:border-b-0 flex items-start justify-between gap-4"
 							>
 								<div className="min-w-0 space-y-1">
 									<div className="flex items-center gap-2">

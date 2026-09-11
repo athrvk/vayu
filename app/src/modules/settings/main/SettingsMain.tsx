@@ -465,7 +465,12 @@ export default function SettingsMain() {
 	if (appPanel) {
 		const Panel = APP_PANEL_COMPONENTS[appPanel.id];
 		return (
+			// Keyed on the category, so switching between two client panels
+			// remounts this rather than re-rendering the same instance with new
+			// props - `ClientSettingsPanel`'s own `enter-fade` only fires on that
+			// remount.
 			<ClientSettingsPanel
+				key={selectedCategory}
 				title={appPanel.label}
 				description={appPanel.description}
 				saveNote={appPanel.saveNote ?? DEFAULT_SAVE_NOTE}
@@ -839,7 +844,10 @@ export default function SettingsMain() {
 	};
 
 	return (
-		<div className="flex-1 flex flex-col overflow-hidden">
+		// Keyed on the category, so switching between two engine categories
+		// remounts this rather than re-rendering the same instance with new
+		// content - `enter-fade` only fires on that remount.
+		<div key={selectedCategory} className="flex-1 flex flex-col overflow-hidden enter-fade">
 			{/* Restart Required Banner */}
 			{pendingRestart && (
 				<RestartRequiredBanner
