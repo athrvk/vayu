@@ -23,7 +23,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TabStrip } from "./TabStrip";
 import { useTabsStore } from "@/stores";
 
-const state = vi.hoisted(() => ({ run: undefined as unknown }));
+const state = vi.hoisted(() => ({
+	run: undefined as unknown,
+	collections: [] as { id: string; name: string }[],
+}));
 
 vi.mock("@/queries", () => ({
 	/*
@@ -44,7 +47,7 @@ vi.mock("@/queries", () => ({
 		initialData: state.run,
 		enabled: false,
 	}),
-	useCollectionsQuery: () => ({ data: [] }),
+	useCollectionsQuery: () => ({ data: state.collections }),
 }));
 
 vi.mock("@/hooks/useVariableResolver", () => ({
@@ -66,6 +69,7 @@ function renderWithRunTab() {
 describe("run tab title", () => {
 	beforeEach(() => {
 		state.run = undefined;
+		state.collections = [];
 		useTabsStore.setState({ openTabs: [], activeTabId: null });
 	});
 
@@ -114,5 +118,66 @@ describe("run tab title", () => {
 		state.run = undefined; // query not settled yet
 		renderWithRunTab();
 		expect(screen.getByRole("tab").getAttribute("title")).toBe("Run");
+	});
+
+	/*
+	 * A collection run has no url or method - its work is a sequence - so a
+	 * tab for one used to fall all the way through to "Design run", the same
+	 * bug the history row had before it read `summary.scenario` (#357):
+	 * nothing distinguished it from a bare single-request send.
+	 */
+	it("names a collection run by the collection it ran, not 'Design run'", () => {
+		state.collections = [{ id: "col_1", name: "Checkout flow" }];
+		state.run = {
+			id: "run_1",
+			type: "scenario",
+			status: "completed",
+			startTime: 0,
+			endTime: 0,
+			configSnapshot: { scenario: { collectionId: "col_1", stepCount: 3 } },
+		};
+		renderWithRunTab();
+
+		const tab = screen.getByRole("tab");
+		expect(tab.textContent).toContain("Checkout flow");
+		expect(tab.textContent).not.toContain("Design run");
+		expect(tab.getAttribute("title")).toBe("Collection run: Checkout flow");
+	});
+
+	it("falls back to the collection id when the folder is gone", () => {
+		state.collections = [];
+		state.run = {
+			id: "run_1",
+			type: "scenario",
+			status: "completed",
+			startTime: 0,
+			endTime: 0,
+			configSnapshot: { scenario: { collectionId: "col_gone" } },
+		};
+		renderWithRunTab();
+
+		expect(screen.getByRole("tab").textContent).toContain("col_gone");
+	});
+
+	/*
+	 * A scenario *load* run (#357's sibling case) is `type: "load"` - it
+	 * publishes ticks and reports percentiles like any load run - but it has
+	 * no url or method either, for the same reason a plain collection run
+	 * has none. Gating on `run.type === "scenario"` would leave this one
+	 * reading "Load test" instead.
+	 */
+	it("names a scenario load run by its collection too, despite type: load", () => {
+		state.collections = [{ id: "col_1", name: "Checkout flow" }];
+		state.run = {
+			id: "run_1",
+			type: "load",
+			status: "completed",
+			startTime: 0,
+			endTime: 0,
+			configSnapshot: { scenario: { collectionId: "col_1" } },
+		};
+		renderWithRunTab();
+
+		expect(screen.getByRole("tab").getAttribute("title")).toBe("Collection run: Checkout flow");
 	});
 });
