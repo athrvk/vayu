@@ -442,6 +442,22 @@ TEST_F (InboxListenerTest, ACannedHeaderNamedAccessControlIsNotDuplicated) {
     "https://app.example.test");
 }
 
+TEST_F (InboxListenerTest, CredentialedExposeHeadersNamesTheCannedResponsesOwnHeaders) {
+    InboxStartRequest request;
+    request.response.headers = { { "X-Custom", "v" } };
+    auto started             = start (request);
+    auto client              = client_for (started.info);
+
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto credentialed = client.Post ("/hook", with_origin, "{}", "application/json");
+    ASSERT_TRUE (credentialed);
+    EXPECT_EQ (credentialed->get_header_value ("Access-Control-Expose-Headers"), "X-Custom");
+
+    const auto anonymous = client.Post ("/hook", "{}", "application/json");
+    ASSERT_TRUE (anonymous);
+    EXPECT_EQ (anonymous->get_header_value ("Access-Control-Expose-Headers"), "*");
+}
+
 TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
     auto started = start ();
     auto client  = client_for (started.info);

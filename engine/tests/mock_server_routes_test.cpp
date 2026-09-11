@@ -917,6 +917,36 @@ TEST_F (MockServerTest, AnExamplesOwnCorsHeaderIsNotDuplicatedByTheListener) {
     "https://app.example.test");
 }
 
+TEST_F (MockServerTest, CredentialedExposeHeadersNamesTheExamplesOwnHeadersNotAWildcard) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
+    json::array ({ json{ { "key", "X-Custom" }, { "value", "v" }, { "enabled", true } } }));
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    // Credentials mode "include" (an Origin was sent): the Fetch spec reads
+    // "*" here as the literal header name "*", not a wildcard, so a
+    // credentialed page could read no example header at all if this stayed
+    // "*" - it must name X-Custom instead.
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto credentialed = client.Get ("/pets", with_origin);
+    ASSERT_TRUE (credentialed);
+    EXPECT_EQ (credentialed->get_header_value ("Access-Control-Expose-Headers"), "X-Custom");
+
+    // No Origin: not a credentialed fetch, and the wildcard is exactly right.
+    const auto anonymous = client.Get ("/pets");
+    ASSERT_TRUE (anonymous);
+    EXPECT_EQ (anonymous->get_header_value ("Access-Control-Expose-Headers"), "*");
+}
+
 TEST_F (MockServerTest, APathPastTheRegexRouteLimitStillReachesTheRouteTable) {
     // cpp-httplib 0.53.1 refuses a regex route outright for any path longer
     // than CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256), rather than risk

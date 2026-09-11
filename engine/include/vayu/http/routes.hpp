@@ -288,6 +288,54 @@ inline bool is_cors_response_header (std::string_view name) {
 }
 
 /**
+ * @brief Rewrite a wildcard `Access-Control-Expose-Headers` for a
+ *        credentialed response.
+ *
+ * Per the Fetch spec, `*` there is the literal header name `*`, not a
+ * wildcard, whenever the request's credentials mode is `include` - exactly
+ * the case `apply_cors_headers` marks with `Access-Control-Allow-Credentials`.
+ * Call this as the last statement on every path that writes response
+ * headers, so a credentialed page can still read a header an example or
+ * canned response set.
+ */
+inline void finalize_cors_expose_headers (httplib::Response& res) {
+    if (!res.has_header ("Access-Control-Allow-Credentials")) {
+        return;
+    }
+    static const std::unordered_set<std::string> kSafelisted{
+        "cache-control",
+        "content-language",
+        "content-length",
+        "content-type",
+        "expires",
+        "last-modified",
+        "pragma",
+    };
+    std::vector<std::string> names;
+    std::unordered_set<std::string> seen;
+    for (const auto& [name, value] : res.headers) {
+        (void)value;
+        if (is_cors_response_header (name)) {
+            continue;
+        }
+        const std::string lowered = vayu::utils::ascii_lower (name);
+        if (kSafelisted.count (lowered) || !seen.insert (lowered).second) {
+            continue;
+        }
+        names.push_back (name);
+    }
+    std::string joined;
+    for (const auto& name : names) {
+        if (!joined.empty ()) {
+            joined += ", ";
+        }
+        joined += name;
+    }
+    res.headers.erase ("Access-Control-Expose-Headers");
+    res.set_header ("Access-Control-Expose-Headers", joined);
+}
+
+/**
  * @brief Wrap a handler so a deprecated-alias registration is distinguishable
  *        in the logs from its canonical counterpart.
  *

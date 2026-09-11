@@ -664,6 +664,7 @@ httplib::Response& res) {
     if (req.method == "OPTIONS" &&
     !resolve_mock_route (mock.routes, req.method, req.path).route_index) {
         res.status = 204;
+        routes::finalize_cors_expose_headers (res);
         return;
     }
 
@@ -686,6 +687,7 @@ httplib::Response& res) {
         "Injected failure (errorRatePct=" + std::to_string (mock.error_rate_pct) + ")", "mock_injected_error")
         .dump (),
         "application/json");
+        routes::finalize_cors_expose_headers (res);
         return;
     }
 
@@ -701,6 +703,7 @@ httplib::Response& res) {
         mock.activity.record (entry);
         res.status = entry.status;
         res.set_content (body.dump (), "application/json");
+        routes::finalize_cors_expose_headers (res);
         return;
     }
 
@@ -733,6 +736,7 @@ httplib::Response& res) {
     } else {
         res.set_header ("Content-Type", content_type);
     }
+    routes::finalize_cors_expose_headers (res);
 }
 
 MockServerManager::StartResult MockServerManager::start (vayu::db::Database& db,

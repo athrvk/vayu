@@ -595,6 +595,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
             res.set_content (routes::error_body (500, "Inbox capture could not be stored", "inbox_store_failed")
                              .dump (),
             "application/json");
+            routes::finalize_cors_expose_headers (res);
             return;
         }
 
@@ -624,6 +625,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         } else if (!content_type.empty ()) {
             res.set_header ("Content-Type", content_type);
         }
+        routes::finalize_cors_expose_headers (res);
     };
 
     // Every method cpp-httplib will route, on the one literal path the listener
