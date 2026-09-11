@@ -43,6 +43,8 @@ import {
 } from "@/components/shared";
 import {
 	Badge,
+	Collapsible,
+	CollapsibleContent,
 	Input,
 	Select,
 	SelectContent,
@@ -365,7 +367,7 @@ function IssuerRow({
 	const setFailureMode = (failureMode: MockIssuerFailureMode) => update({ failureMode });
 
 	return (
-		<>
+		<Collapsible open={expanded} onOpenChange={onToggle}>
 			<ServiceRow
 				// Every listed issuer is running: stopping one drops it from the
 				// engine's list rather than leaving a stopped record behind, which
@@ -417,7 +419,7 @@ function IssuerRow({
 			    `--panel` in dark measures 1.07 and is simply not there. Sunken is
 			    also what this is: the nested detail slab of the row above, the
 			    same treatment the settings cookie rows and the console panes use. */}
-			{expanded && (
+			<CollapsibleContent>
 				<div className="surface-sunken rounded-md border-l-2 border-rule pl-2 ml-4 mr-1 mb-2">
 					<IssuerDetailRow
 						label="Token"
@@ -499,8 +501,8 @@ function IssuerRow({
 						/>
 					)}
 				</div>
-			)}
-		</>
+			</CollapsibleContent>
+		</Collapsible>
 	);
 }
 
