@@ -892,13 +892,38 @@
 	 * Paint properties only - never layout, so this cannot cause reflow jank.
 	 * 150ms is the interaction-state duration; entrances stay at 200ms.
 	 * The reduced-motion rule below collapses this app-wide when enabled.
+	 *
+	 * `scale` rides in this one shorthand rather than a second rule on
+	 * `[data-slot="button"]`: a `transition:` shorthand resets every
+	 * sub-property, so a later rule at the same specificity (`:where()` is
+	 * always 0) would have replaced this list instead of adding to it, and
+	 * every Button's hover/press colour change would have stopped
+	 * transitioning. `scale` is 100ms/ease-out - faster than the 150ms colour
+	 * fade, because press feedback should read quicker than a colour change -
+	 * and it is inert everywhere except `[data-slot="button"]:active` below,
+	 * the only place anything sets `scale` at all.
 	 */
 	:where(button, [role="button"], a[href], summary) {
 		transition:
 			background-color 150ms ease,
 			color 150ms ease,
 			border-color 150ms ease,
-			opacity 150ms ease;
+			opacity 150ms ease,
+			scale 100ms ease-out;
+	}
+
+	/*
+	 * Press feedback, scoped to the `Button` primitive (`[data-slot="button"]`)
+	 * rather than every element the transition list above covers: a full-width
+	 * row or a plain text link visibly shrinking by 2% reads as a glitch, not a
+	 * press, so this stays off `a[href]` and `[role="button"]`.
+	 *
+	 * `scale`, not `transform: scale()` - the standalone property composes with
+	 * any `transform` the element already carries rather than clobbering it
+	 * (same reasoning as the Dialog `translate` comment further down).
+	 */
+	:where([data-slot="button"]):active {
+		scale: 0.98;
 	}
 
 	/*
@@ -956,6 +981,32 @@
 	.focus-row :focus-visible:not(.focus-self) {
 		outline: none;
 	}
+}
+
+/*
+ * Motion vocabulary - one curve pair and one duration per tier, so every
+ * entrance/exit in the app reads as the same hand rather than each surface
+ * inventing its own. Decelerate in, accelerate out: a surface arriving should
+ * only ever slow down (`ease`'s accelerate-then-decelerate reads as lag on the
+ * first frames), and leaving is quicker than arriving because the decision is
+ * already made - getting out of the way should not cost the user time.
+ *
+ * Tiers, by how far a surface travels: panel (Dialog - the whole view dims),
+ * menu (Popover/DropdownMenu/Select/ContextMenu - anchored chrome), tooltip
+ * (smallest, must be near-instant or it reads as lag on hover).
+ *
+ * The reduced-motion rule near the end of this file collapses every
+ * `animation-duration` it feeds, regardless of which tier.
+ */
+:root {
+	--ease-enter: cubic-bezier(0.2, 0, 0, 1);
+	--ease-exit: cubic-bezier(0.4, 0, 1, 1);
+	--dur-panel-in: 180ms;
+	--dur-panel-out: 130ms;
+	--dur-menu-in: 140ms;
+	--dur-menu-out: 100ms;
+	--dur-tooltip-in: 100ms;
+	--dur-tooltip-out: 80ms;
 }
 
 /*
@@ -1026,6 +1077,44 @@
 	}
 	to {
 		opacity: 0;
+	}
+}
+
+/*
+ * Rail collapse (Drawer, ContextBar).
+ *
+ * Both sidebars used to `return null` and pop at a fixed pixel width with no
+ * transition either direction. Radix's `CollapsibleContent` already measures
+ * both axes of its content - `--radix-collapsible-content-width` exists
+ * alongside the `-height` one `CollapsibleContent` (`collapsible.tsx`) reads -
+ * so this borrows the same primitive on the other axis rather than hand-timing
+ * a width against a value read from the layout store.
+ *
+ * Hand-rolled `animation:`, not tw-animate-css's generated `animate-*`
+ * utilities, for the same reason Dialog is: those utilities exist for the
+ * vertical case already (`animate-collapsible-down`/`-up`), and there is no
+ * horizontal sibling to reuse - writing one into `@theme` for a single
+ * two-consumer case is more machinery than two keyframes plus a class.
+ *
+ * `overflow-hidden` is permanent while open, same trade-off `collapsible.tsx`
+ * documents: a control flush against this box's edge needs its own clearance,
+ * not `.panel-clip` (`docs/design-system.md`).
+ */
+@keyframes rail-collapse-in {
+	from {
+		width: 0;
+	}
+	to {
+		width: var(--radix-collapsible-content-width);
+	}
+}
+
+@keyframes rail-collapse-out {
+	from {
+		width: var(--radix-collapsible-content-width);
+	}
+	to {
+		width: 0;
 	}
 }
 
@@ -1105,21 +1194,95 @@
 
 	/* Decelerate in, accelerate out - the standard pairing for a surface that
 	   arrives and then leaves. Overlay and panel share a duration so they land
-	   together. */
+	   together. Values from the motion vocabulary above `:root` block. */
 	.dialog-panel[data-state="open"] {
-		animation: dialog-in 180ms cubic-bezier(0.2, 0, 0, 1);
+		animation: dialog-in var(--dur-panel-in) var(--ease-enter);
 	}
 
 	.dialog-panel[data-state="closed"] {
-		animation: dialog-out 130ms cubic-bezier(0.4, 0, 1, 1);
+		animation: dialog-out var(--dur-panel-out) var(--ease-exit);
 	}
 
 	.dialog-overlay[data-state="open"] {
-		animation: dialog-overlay-in 180ms cubic-bezier(0.2, 0, 0, 1);
+		animation: dialog-overlay-in var(--dur-panel-in) var(--ease-enter);
 	}
 
 	.dialog-overlay[data-state="closed"] {
-		animation: dialog-overlay-out 130ms cubic-bezier(0.4, 0, 1, 1);
+		animation: dialog-overlay-out var(--dur-panel-out) var(--ease-exit);
+	}
+
+	.rail-collapse {
+		overflow: hidden;
+	}
+
+	.rail-collapse[data-state="open"] {
+		animation: rail-collapse-in var(--dur-panel-in) var(--ease-enter);
+	}
+
+	.rail-collapse[data-state="closed"] {
+		animation: rail-collapse-out var(--dur-panel-out) var(--ease-exit);
+	}
+
+	/*
+	 * Anchored chrome (Popover, DropdownMenu, Select, ContextMenu, Tooltip).
+	 * These keep tw-animate-css's own `animate-in`/`animate-out` stack
+	 * (fade + zoom-95 + a small directional slide from the Radix-exposed
+	 * `transform-origin`) - unlike Dialog there is no centring hack to
+	 * cancel and no overlay to sync, so replacing it would be a hand-rolled
+	 * copy of a primitive that already works (see repo CLAUDE.md). What tw-
+	 * animate-css does not give on its own is Dialog's decelerate-in /
+	 * accelerate-out asymmetry - both directions read `ease` at the same
+	 * duration. It reads `--tw-duration`/`--tw-ease` if set, ahead of its
+	 * `.15s`/`ease` defaults, so setting those here is enough to bring
+	 * anchored chrome onto the same curve pair as Dialog without touching
+	 * the per-component class stacks.
+	 */
+	.motion-menu {
+		--tw-duration: var(--dur-menu-in);
+		--tw-ease: var(--ease-enter);
+	}
+
+	.motion-menu[data-state="closed"] {
+		--tw-duration: var(--dur-menu-out);
+		--tw-ease: var(--ease-exit);
+	}
+
+	/* Same idea, faster - a tooltip that lags reads as broken, not gentle. */
+	.motion-tooltip {
+		--tw-duration: var(--dur-tooltip-in);
+		--tw-ease: var(--ease-enter);
+	}
+
+	.motion-tooltip[data-state="closed"] {
+		--tw-duration: var(--dur-tooltip-out);
+		--tw-ease: var(--ease-exit);
+	}
+
+	/*
+	 * A clean mount fading in rather than popping onto screen - EmptyState is
+	 * the one call site, reused at ~20 places, so this is the highest-leverage
+	 * single class in this file. `@starting-style` gives the "from" state for
+	 * the very first frame after the element exists in the DOM; without it
+	 * there is nothing to transition *from* and `opacity: 1` just paints
+	 * immediately. Entry only - React removes a conditionally-rendered node
+	 * synchronously, so there is no exit half without JS-driven motion, which
+	 * the Motion section of docs/design-system.md rules out.
+	 */
+	.enter-fade {
+		opacity: 1;
+		/*
+		 * `--enter-fade-duration` defaults to the menu tier - right for the small
+		 * surfaces `.enter-fade` was built for (a declared-defaults block, an
+		 * empty state). A caller whose mount is panel-scale (a full sidebar page,
+		 * not a strip of chrome) overrides it at the usage site, the same
+		 * `--tw-*`-style hook `.motion-menu`/`.motion-tooltip` use, e.g.
+		 * `[--enter-fade-duration:var(--dur-panel-in)]`.
+		 */
+		transition: opacity var(--enter-fade-duration, var(--dur-menu-in)) var(--ease-enter);
+
+		@starting-style {
+			opacity: 0;
+		}
 	}
 }
 

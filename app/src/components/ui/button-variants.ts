@@ -12,7 +12,12 @@ import { cva } from "class-variance-authority";
  * component and a value cannot be hot-reloaded (`react-refresh/only-export-components`).
  */
 export const buttonVariants = cva(
-	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+	// No `transition-colors` here: it is a `@layer utilities` class, which
+	// beats the `@layer base` baseline transition in index.css that already
+	// covers this element (`button, [role="button"], a[href], summary`,
+	// including `scale` for press feedback) - a utility here would win the
+	// cascade and replace that whole list.
+	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
 	{
 		variants: {
 			variant: {
