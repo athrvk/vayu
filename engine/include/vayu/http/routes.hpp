@@ -227,29 +227,21 @@ inline void send_json (httplib::Response& res, const nlohmann::json& data) {
 /**
  * @brief CORS headers for a listener a browser page may call directly - a
  *        mock server or a webhook inbox, never the management API, which
- *        already sets its own fixed trio in `server.cpp`.
+ *        sets its own fixed trio in `server.cpp`.
  *
- * The management API's headers are wrong here: they name one client (the
- * renderer) with a known header set, while a mock or inbox answers whatever a
- * real endpoint would - an unknown caller sending a bearer token, an
- * idempotency key, anything. So this reflects the request's own asks rather
- * than presetting a list that works in the demo and fails the first time a
- * page sends a header nobody wrote in.
- *
- * `Access-Control-Allow-Origin: *` cannot pair with `credentials: "include"`
- * per the Fetch spec, so an `Origin` header switches to echoing it plus
- * `Access-Control-Allow-Credentials` and `Vary: Origin`; absent, the request
- * is not a CORS fetch at all (curl, the app itself) and the wildcard is
- * simplest. `Access-Control-Expose-Headers: *` lets a page's `fetch` read a
- * header an example or a canned response set, and unlike Allow-Origin, the
- * Fetch spec permits that wildcard even in credentialed mode. On an OPTIONS
- * preflight, `Access-Control-Request-Method` / `-Headers` are echoed back as
- * the matching `Allow-*` pair - never a fixed list, for the same reason as
- * the Origin echo - and `Access-Control-Max-Age` caps how long the browser
- * may cache that answer before asking again.
+ * Reflects the request's own asks (origin, requested method/headers) rather
+ * than a fixed list, since a mock or inbox stands in for an arbitrary real
+ * endpoint. `Access-Control-Allow-Origin: *` cannot pair with
+ * `Allow-Credentials: true`, so a present `Origin` - the literal `null` a
+ * sandboxed frame or `file://` page sends excluded, since that is not a
+ * credential-safe origin - switches to echoing it. A preflight is detected
+ * by `Access-Control-Request-Method`, not `method == "OPTIONS"`: a bare
+ * OPTIONS carrying neither is not one and gets no synthesized answer here.
  */
 inline void apply_cors_headers (const httplib::Request& req, httplib::Response& res) {
-    if (const auto origin = req.get_header_value ("Origin"); !origin.empty ()) {
+    const auto origin       = req.get_header_value ("Origin");
+    const bool credentialed = !origin.empty () && origin != "null";
+    if (credentialed) {
         res.set_header ("Access-Control-Allow-Origin", origin);
         res.set_header ("Access-Control-Allow-Credentials", "true");
         res.set_header ("Vary", "Origin");
@@ -258,7 +250,7 @@ inline void apply_cors_headers (const httplib::Request& req, httplib::Response& 
     }
     res.set_header ("Access-Control-Expose-Headers", "*");
 
-    if (req.method == "OPTIONS") {
+    if (req.has_header ("Access-Control-Request-Method")) {
         res.set_header ("Access-Control-Allow-Methods",
         req.get_header_value ("Access-Control-Request-Method"));
         if (req.has_header ("Access-Control-Request-Headers")) {

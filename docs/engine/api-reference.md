@@ -3910,18 +3910,26 @@ outcomes are distinct rather than one blanket 404:
 answers whatever calls it - most often a browser page on another origin, not
 only curl - so every response carries `Access-Control-Allow-Origin`, echoing
 the request's `Origin` header (with `Access-Control-Allow-Credentials: true`
-and `Vary: Origin`) when present, or `*` when it is not, plus
-`Access-Control-Expose-Headers: *` so a page's `fetch` can read a header the
-example set. This applies to a miss too - a 404 with no CORS headers reads in
-a browser as an opaque "CORS error" instead of the `mock_no_route` /
-`mock_method_mismatch` / `mock_no_example` body above. An `OPTIONS` preflight
-on a path with no example stored under `OPTIONS` itself is answered
-synthetically (`204`, `Access-Control-Allow-Methods` /
+and `Vary: Origin`) when present and not the literal `null` a sandboxed frame
+or `file://` page sends, or `*` otherwise, plus `Access-Control-Expose-Headers:
+*` so a page's `fetch` can read a header the example set - rewritten to the
+example's own header names on a credentialed response, since the Fetch spec
+reads `*` there as a literal name, not a wildcard, once credentials are in
+play. A header the example itself carries under `Access-Control-*` or `Vary`
+is dropped rather than echoed, since the engine already answered those. This
+applies to a miss too - a 404 with no CORS headers reads in a browser as an
+opaque "CORS error" instead of the `mock_no_route` / `mock_method_mismatch` /
+`mock_no_example` body above.
+
+A **real preflight** - a request carrying `Access-Control-Request-Method` -
+is always answered synthetically (`204`, `Access-Control-Allow-Methods` /
 `-Allow-Headers` echoing what the browser asked for,
-`Access-Control-Max-Age: 600`) rather than served as a miss - it does not
-count toward a route's `hits` or appear in `GET /mock/:mockId/activity`. An
-example deliberately saved under `OPTIONS` is served as a real response
-instead, CORS headers added the same way as any other route.
+`Access-Control-Max-Age: 600`), whether or not a route is stored for that
+path under `OPTIONS`: breaking the preflight to surface a stored route's
+`404`/`501` would break the browser request behind it for nothing. It does
+not count toward a route's `hits` or appear in `GET /mock/:mockId/activity`.
+A plain `OPTIONS` request carrying neither header is ordinary traffic and is
+served or missed like any other verb.
 
 **Bounds** (rails, not settings): at most **8** mock servers at once (a listener
 thread each), at most **2000** routes in one table, and `latencyMs` capped at

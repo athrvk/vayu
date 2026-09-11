@@ -947,6 +947,54 @@ TEST_F (MockServerTest, CredentialedExposeHeadersNamesTheExamplesOwnHeadersNotAW
     EXPECT_EQ (anonymous->get_header_value ("Access-Control-Expose-Headers"), "*");
 }
 
+TEST_F (MockServerTest, APlainOptionsWithNoPreflightHeaderIsResolvedThroughTheRouteTable) {
+    // No Access-Control-Request-Method: not a browser preflight, so it goes
+    // through resolve_mock_route like any other verb - a method mismatch
+    // here, since /pets is stored for GET and POST but not OPTIONS - and
+    // gets a real activity row rather than being swallowed as a 204.
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const auto plain = client.Options ("/pets");
+    ASSERT_TRUE (plain) << "no response from the mock";
+    EXPECT_EQ (plain->status, 404);
+    EXPECT_EQ (json::parse (plain->body)["error"]["code"], "mock_method_mismatch");
+
+    const auto activity = manager.activity (started.info.mock_id, 10);
+    ASSERT_HAS_VALUE (activity);
+    EXPECT_EQ (activity->size (), 1u);
+}
+
+TEST_F (MockServerTest, ANullOriginIsTreatedAsNonCredentialed) {
+    // The literal string "null" is what a sandboxed iframe or a file:// page
+    // sends as Origin - echoing it back with Allow-Credentials: true is the
+    // textbook CORS misconfiguration.
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers null_origin = { { "Origin", "null" } };
+    const auto listed                  = client.Get ("/pets", null_origin);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (listed->has_header ("Access-Control-Allow-Credentials"));
+}
+
 TEST_F (MockServerTest, APathPastTheRegexRouteLimitStillReachesTheRouteTable) {
     // cpp-httplib 0.53.1 refuses a regex route outright for any path longer
     // than CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256), rather than risk

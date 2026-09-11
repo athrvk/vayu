@@ -458,6 +458,20 @@ TEST_F (InboxListenerTest, CredentialedExposeHeadersNamesTheCannedResponsesOwnHe
     EXPECT_EQ (anonymous->get_header_value ("Access-Control-Expose-Headers"), "*");
 }
 
+TEST_F (InboxListenerTest, ANullOriginIsTreatedAsNonCredentialed) {
+    // The literal "null" Origin a sandboxed iframe or a file:// page sends is
+    // not a credential-safe origin, and an inbox can bind non-loopback, so
+    // echoing it with Allow-Credentials: true is not confined to 127.0.0.1.
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    const httplib::Headers null_origin = { { "Origin", "null" } };
+    const auto posted = client.Post ("/hook", null_origin, "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (posted->has_header ("Access-Control-Allow-Credentials"));
+}
+
 TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
     auto started = start ();
     auto client  = client_for (started.info);

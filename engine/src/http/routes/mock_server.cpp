@@ -655,14 +655,12 @@ const httplib::Request& req,
 httplib::Response& res) {
     routes::apply_cors_headers (req, res);
 
-    // A CORS preflight is browser plumbing, not application traffic: unless a
-    // route was deliberately stored for OPTIONS itself (an API that documents
-    // its own preflight), it skips the latency, the error roll and the
-    // activity log rather than being served as the miss it technically is -
-    // resolve_mock_route runs a second time below on the served path, cheap
-    // against a route table capped at MAX_ROUTES.
-    if (req.method == "OPTIONS" &&
-    !resolve_mock_route (mock.routes, req.method, req.path).route_index) {
+    // A real preflight (Access-Control-Request-Method present) is browser
+    // plumbing, not application traffic, and always gets the synthesized
+    // 204 - breaking one to surface a stored route's 404/501 helps nobody,
+    // route_index or not. A plain `OPTIONS` with neither header is ordinary
+    // traffic and falls through to the route table below like any other verb.
+    if (req.has_header ("Access-Control-Request-Method")) {
         res.status = 204;
         routes::finalize_cors_expose_headers (res);
         return;
