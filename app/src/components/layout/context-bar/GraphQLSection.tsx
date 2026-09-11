@@ -44,6 +44,7 @@
  */
 
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui";
 import { useRequestQuery } from "@/queries";
 import { useSchemaCache } from "@/lib/graphql/schema-cache";
 import { documentOutline, parseGraphQLBody } from "@/lib/graphql/graphql-body";
@@ -130,8 +131,9 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 							 * div with an onClick would have been the keyboard-only
 							 * user losing the feature instead.
 							 */}
-							<button
+							<Button
 								type="button"
+								variant="listRow"
 								onClick={() =>
 									revealOperation({
 										requestId: request.id ?? null,
@@ -140,7 +142,7 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 									})
 								}
 								aria-label={`Go to ${operation.kind} ${operation.name ?? "(anonymous)"} in the editor`}
-								className="flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-[11px] font-mono transition-colors hover:bg-accent active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								className="gap-1 px-1 py-0.5 text-[11px] font-mono hover:bg-accent"
 							>
 								<span className="text-muted-foreground">{operation.kind}</span>
 								{/* An anonymous operation is the shorthand `{ … }` form,
@@ -153,7 +155,7 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 								>
 									{operation.name ?? "(anonymous)"}
 								</span>
-							</button>
+							</Button>
 						</li>
 					))}
 				</ul>

@@ -23,6 +23,7 @@
  * you are editing.
  */
 
+import { Button } from "@/components/ui";
 import { useLastCollectionRunQuery } from "@/queries";
 import { useTabsStore } from "@/stores";
 import { formatRelativeTime } from "@/utils";
@@ -45,13 +46,14 @@ export function CollectionLastRunSection({ tab }: ContextBarSectionProps) {
 	const size = scenarioSizeLabel(run);
 
 	return (
-		<button
+		<Button
 			type="button"
+			variant="listRow"
 			onClick={() => openTab({ type: "run", entityId: run.id })}
 			aria-label={`Open collection run, ${tone.label.toLowerCase()}, ${formatRelativeTime(
 				run.startTime
 			)}`}
-			className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			className="gap-2 px-1 py-1 hover:bg-accent"
 		>
 			<span className={`text-xs shrink-0 ${tone.className}`}>{tone.label}</span>
 			<span className="flex-1 text-xs font-mono tabular-nums text-muted-foreground truncate">
@@ -60,6 +62,6 @@ export function CollectionLastRunSection({ tab }: ContextBarSectionProps) {
 			<span className="text-[11px] font-mono tabular-nums text-muted-foreground shrink-0">
 				{formatRelativeTime(run.startTime)}
 			</span>
-		</button>
+		</Button>
 	);
 }

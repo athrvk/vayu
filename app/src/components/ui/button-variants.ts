@@ -55,6 +55,26 @@ export const buttonVariants = cva(
 				 */
 				rowActionDestructive:
 					"text-muted-foreground hover:bg-accent-active hover:text-destructive-text",
+				/*
+				 * A full-width, left-aligned clickable row - the shape a summary row
+				 * or a "recent items" entry needs, and `default`'s fixed-height,
+				 * content-fit, centered shape cannot give. Deliberately not named
+				 * `row` - the "Row Actions" section above already owns that word for
+				 * the small hover-revealed `⋯`/delete controls on a row, a different
+				 * thing at a different scale.
+				 *
+				 * Only the axis-level shape lives here: `justify-center` flips to
+				 * `justify-start`, `text-left` beats the base's implicit centering.
+				 * Padding, gap, text size and icon size stay with the caller's own
+				 * `className` - the call sites this converts span three different
+				 * padding/text scales (a context-bar row is not a welcome-screen
+				 * row), and a single opinion here would renormalize all of them.
+				 * `h-auto` lives in `compoundVariants` below, not here: cva
+				 * concatenates `size`'s classes after `variant`'s, so a height set
+				 * in this string loses to `size`'s default `h-9` once both pass
+				 * through the same `cn()` merge.
+				 */
+				listRow: "w-full justify-start text-left",
 			},
 			size: {
 				default: "h-9 px-4 py-2",
@@ -63,6 +83,7 @@ export const buttonVariants = cva(
 				icon: "h-9 w-9",
 			},
 		},
+		compoundVariants: [{ variant: "listRow", class: "h-auto" }],
 		defaultVariants: {
 			variant: "default",
 			size: "default",

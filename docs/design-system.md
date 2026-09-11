@@ -1678,6 +1678,30 @@ request rows, environment rows and history rows all take it.
 
 ---
 
+## Full-Width List Rows
+
+**`Button`'s `listRow` variant** is for a summary row that spans its
+container and opens something on click - a stream event, a sampled exchange,
+a collection's last run, a recent send, a GraphQL operation, a recent-runs
+entry. Not `row` - that name already belongs to Row Actions above, a smaller
+control at a different scale.
+
+It carries only the axis-level shape: `w-full`, `justify-start` in place of
+the default's `justify-center`, `text-left`, and `h-auto` overriding the
+default size's fixed `h-9` (in `compoundVariants`, not the variant string
+itself - `cva` concatenates `size`'s classes after `variant`'s, so a height
+set beside `w-full`/`justify-start` would lose to the default size once both
+pass through the same `cn()` merge; `button-variants.test.ts` mutation-checks
+this). Padding, gap, text size and icon size stay with the caller's own
+`className`: the rows this variant serves span three different scales (a
+context-bar row is not a welcome-screen row), and a fixed opinion here would
+renormalize all of them. A caller whose icons are not the base's default
+16px overrides with `[&_svg]:size-N`; a caller whose content wraps to a
+second line (rather than truncating) needs `whitespace-normal`, since the
+base string's `whitespace-nowrap` is otherwise inherited by every child.
+
+---
+
 ## Drawer Panel Frame
 
 **Every drawer view renders inside `DrawerPanel`** (`components/shared`). It owns

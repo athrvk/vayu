@@ -28,7 +28,7 @@
 import { ChevronRight } from "lucide-react";
 import { useTabsStore } from "@/stores";
 import { MethodBadge, TruncatedText } from "@/components/shared";
-import { Eyebrow } from "@/components/ui";
+import { Button, Eyebrow } from "@/components/ui";
 import { formatRelativeTime } from "@/utils";
 import type { Run } from "@/types";
 
@@ -81,14 +81,18 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 					const url = run.summary?.url;
 					const method = run.summary?.method;
 					return (
-						<button
+						<Button
 							key={run.id}
 							type="button"
+							variant="listRow"
 							onClick={() => openTab({ type: "run", entityId: run.id })}
 							aria-label={`Open ${run.type === "load" ? "load test" : "request"} run${
 								url ? `, ${url}` : ""
 							}${status ? `, ${status.text.toLowerCase()}` : ""}`}
-							className="group flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							// `justify-between` overrides the variant's `justify-start`:
+							// this row's two content groups (identity, meta) split to the
+							// ends rather than packing left.
+							className="group justify-between gap-3 px-2 py-1.5 hover:bg-accent"
 						>
 							<span className="flex min-w-0 flex-1 items-center gap-2">
 								<span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase">
@@ -123,7 +127,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 								)}
 								<ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
 							</span>
-						</button>
+						</Button>
 					);
 				})}
 			</div>

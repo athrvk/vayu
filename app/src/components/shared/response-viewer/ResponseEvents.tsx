@@ -42,7 +42,7 @@
 
 import { memo, useState } from "react";
 import { ChevronDown, ChevronRight, Radio } from "lucide-react";
-import { Badge } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { Callout, EmptyState } from "@/components/shared";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { cn } from "@/lib/utils";
@@ -155,16 +155,17 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 
 	return (
 		<div className="border-b border-rule last:border-b-0">
-			<button
+			<Button
 				type="button"
+				variant="listRow"
 				onClick={() => setExpanded((e) => !e)}
 				aria-expanded={expanded}
-				// Hand-rolled, not the `ev` primitive, so it carries no
-				// `[data-slot="button"]` and misses the baseline's press-scale
-				// transition - added explicitly, same template as the Send button
-				// in `UrlBar` (`transition-colors` folded into the same
-				// `transition-property` list rather than a second declaration).
-				className="flex w-full items-center gap-2 px-4 py-1.5 text-left hover:bg-muted/40 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]"
+				// The `Button` primitive's own baseline already gives this row its
+				// hover/press transitions (index.css's `:where(button, ...)` rule) -
+				// no hand-rolled `transition-*` needed. `[&_svg]:size-3` overrides
+				// the primitive's default `size-4` glyph, matching this row's
+				// smaller chevron.
+				className="gap-2 px-4 py-1.5 hover:bg-muted/40 [&_svg]:size-3"
 			>
 				<Chevron aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
 				<span className="w-10 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
@@ -199,7 +200,7 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 						{at}
 					</span>
 				)}
-			</button>
+			</Button>
 			{expanded && (
 				<div className="px-4 pb-3 pl-16">
 					{event.dataTruncated && (

@@ -51,6 +51,7 @@ import {
 	MinusCircle,
 } from "lucide-react";
 
+import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 import { StatusCodeBadge } from "./StatusCodeBadge";
@@ -156,16 +157,18 @@ export function SampledExchange({
 			{/* The summary and its actions share a row without sharing a button.
 			    With no actions this is one full-width button, exactly as before. */}
 			<div className="flex items-stretch">
-				<button
+				<Button
 					type="button"
+					variant="listRow"
 					onClick={onToggle}
 					aria-expanded={isExpanded}
-					// Hand-rolled, not the `Button` primitive, so it carries no
-					// `[data-slot="button"]` and misses the baseline's press-scale
-					// transition - added explicitly, same template as the Send button
-					// in `UrlBar` (`transition-colors` folded into the same
-					// `transition-property` list rather than a second declaration).
-					className="flex-1 min-w-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-left hover:bg-muted/50 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]"
+					// The `Button` primitive's own baseline already gives this row its
+					// hover/press transitions (index.css's `:where(button, ...)` rule) -
+					// no hand-rolled `transition-*` needed. `whitespace-normal`
+					// overrides the primitive's default `whitespace-nowrap`: this row
+					// wraps to a second line for a long error (`basis-full` below), and
+					// the base's nowrap is inherited by that text unless undone here.
+					className="flex-1 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 whitespace-normal px-4 py-3 hover:bg-muted/50"
 				>
 					<Chevron className="w-4 h-4 text-muted-foreground shrink-0" />
 
@@ -201,7 +204,7 @@ export function SampledExchange({
 							{error.split(":")[0]}
 						</span>
 					)}
-				</button>
+				</Button>
 
 				{actions && <div className="flex shrink-0 items-center pr-3">{actions}</div>}
 			</div>
