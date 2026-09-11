@@ -1014,7 +1014,8 @@ toward `failed`. The writer is
 drift apart silently.
 
 Do not confuse this **results** summary with the `summary` key on a `GET /runs` list row - that
-one is a derived view of `config_snapshot` (url/method/mode/duration/concurrency/comment) and is
+one is a derived view of `config_snapshot`
+(url/method/mode/duration/concurrency/comment/requestName) and is
 never stored. It is built once per run id and held in a bounded in-memory cache
 for as long as the process lives (issue #1150), which is sound only because
 `config_snapshot` is write-once: `create_run` sets it, and every later write to a

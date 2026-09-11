@@ -1500,6 +1500,17 @@ export interface RunScenarioSummary {
  */
 export interface RunSummary {
 	url?: string;
+	/**
+	 * The request's name, as the client sent it at run start -
+	 * `execIdentity` in `execute-mapping.ts` is what threads it through
+	 * composition. Never re-read from the requests table server-side, so it
+	 * is exactly what the editor showed at the moment this run started: a
+	 * renamed or since-deleted request does not retroactively change it, and
+	 * a run recorded before this field existed has none. The history row
+	 * falls back to `url` when this is absent or still the default name
+	 * (`DEFAULT_REQUEST_NAME`).
+	 */
+	requestName?: string;
 	method?: string;
 	mode?: string;
 	duration?: string;

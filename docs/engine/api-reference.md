@@ -6842,12 +6842,22 @@ seconds.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
-**`summary`** carries exactly these nine keys: `url`, `method`, `mode`,
-`duration`, `concurrency`, `comment`, `followRedirects`, `maxRedirects`, and
-`httpVersion`. The first eight are each **omitted** when absent from the
-snapshot (a malformed snapshot yields an empty `summary`, never a `500`);
-`httpVersion` alone is always present. Every run since issue #1488 adds a
-tenth, `acceptEncoding`: `true` when the run negotiated a compressed response
+**`summary`** carries exactly these ten keys: `url`, `method`, `mode`,
+`duration`, `concurrency`, `comment`, `followRedirects`, `maxRedirects`,
+`requestName`, and `httpVersion`. The first nine are each **omitted** when
+absent from the snapshot (a malformed snapshot yields an empty `summary`,
+never a `500`); `httpVersion` alone is always present. `requestName` is the
+request's name **as the client sent it when the run started** -
+never re-read from the requests table, the same trust model `url` and
+`method` already have here - so a request renamed or deleted since does not
+change what a past run's row says it invoked, and a run whose client omitted
+the field (or one recorded before it existed) has no key at all rather than a
+fabricated name. It reaches `config_snapshot` the same way `url`/`method` do:
+whatever the client's `POST /runs` or `POST /execute` body carried; the
+renderer sends it from `execIdentity` (`execute-mapping.ts`), the same field
+[POST /compose](#post-compose)'s `requestId` path already stamps for the
+script sandbox's `pm.info.requestName`. Every run since issue #1488 adds an
+eleventh, `acceptEncoding`: `true` when the run negotiated a compressed response
 (`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
 load run - see [Default request headers](#default-request-headers)), `false`
 when it did not, and **omitted**, not defaulted, for a run recorded before
@@ -6866,7 +6876,7 @@ before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The f
 
 A **collection run** (`type: "scenario"`) carries none of the first eight: its
 work is a sequence, so there is no single `url`, `method` or `mode` to report.
-Its row instead carries a tenth key, `scenario`, present on scenario runs only:
+Its row instead carries a twelfth key, `scenario`, present on scenario runs only:
 
 ```json
 "scenario": {
@@ -6882,7 +6892,7 @@ itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
 four keys is omitted when the stored snapshot has no such key.
 
-**`hasWarnings`** (issue #1527) is `summary`'s eleventh key, `true` on a run
+**`hasWarnings`** (issue #1527) is `summary`'s thirteenth key, `true` on a run
 whose stored `summary.warnings` array (issue #1503) is non-empty and
 **omitted** otherwise - a run still in progress, one whose terminal write
 failed, or one that finished with nothing to say. Unlike the other keys

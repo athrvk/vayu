@@ -724,6 +724,13 @@ export default function RequestBuilder() {
 						// test that verified where Send did not would fail on
 						// every request against the host the user opted out for.
 						verifySSL: pendingLoadTestRequest.verifySSL,
+						// The name in the editor right now - Send's
+						// own compose call already carries this (see
+						// `composeForSend`); the load dialog composes separately
+						// and was the one caller that dropped it. Rides through
+						// composition into `config_snapshot`, which is where the
+						// history row's `requestName` comes from.
+						...execIdentity(pendingLoadTestRequest),
 					},
 					collectionId: fetchedRequest.collectionId,
 					environmentId: activeEnvironmentId || undefined,
