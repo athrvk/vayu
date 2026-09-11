@@ -1260,8 +1260,10 @@
 
 	/*
 	 * A clean mount fading in rather than popping onto screen - EmptyState is
-	 * the one call site, reused at ~20 places, so this is the highest-leverage
-	 * single class in this file. `@starting-style` gives the "from" state for
+	 * one call site among several dozen (Dock, TabStrip, TabsContent,
+	 * LabelSwap, Drawer, settings panels, ...), so this is the
+	 * highest-leverage single class in this file. `@starting-style` gives the
+	 * "from" state for
 	 * the very first frame after the element exists in the DOM; without it
 	 * there is nothing to transition *from* and `opacity: 1` just paints
 	 * immediately. Entry only - React removes a conditionally-rendered node
