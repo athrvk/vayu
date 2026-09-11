@@ -69,10 +69,12 @@ export const buttonVariants = cva(
 				 * `className` - the call sites this converts span three different
 				 * padding/text scales (a context-bar row is not a welcome-screen
 				 * row), and a single opinion here would renormalize all of them.
-				 * `h-auto` lives in `compoundVariants` below, not here: cva
-				 * concatenates `size`'s classes after `variant`'s, so a height set
-				 * in this string loses to `size`'s default `h-9` once both pass
-				 * through the same `cn()` merge.
+				 * `h-auto` and `active:scale-100` live in `compoundVariants` below,
+				 * not here: cva concatenates `size`'s classes after `variant`'s, so a
+				 * height set in this string loses to `size`'s default `h-9` once both
+				 * pass through the same `cn()` merge, and the base string's own
+				 * `active:scale` (below `compoundVariants` in the final class list)
+				 * would win over a `scale-100` set here for the same reason.
 				 */
 				listRow: "w-full justify-start text-left",
 			},
@@ -83,7 +85,21 @@ export const buttonVariants = cva(
 				icon: "h-9 w-9",
 			},
 		},
-		compoundVariants: [{ variant: "listRow", class: "h-auto" }],
+		compoundVariants: [
+			{
+				variant: "listRow",
+				// `active:scale-100`: the baseline press-feedback shrink
+				// (`index.css`'s `[data-slot="button"]:active`) is 2% of the
+				// element's own box, which reads fine on a compact, content-fit
+				// CTA and reads as a glitch on a full-width row - the same
+				// distinction that comment already draws for `a[href]`/
+				// `[role="button"]`, just not extended to a `Button` rendering as
+				// one. Measured: a 1290px row (`SampledExchange`, snug inside its
+				// own 1px border) shrinks by 13px on each side, visibly detaching
+				// from the border it needs to stay flush against.
+				class: "h-auto active:scale-100",
+			},
+		],
 		defaultVariants: {
 			variant: "default",
 			size: "default",

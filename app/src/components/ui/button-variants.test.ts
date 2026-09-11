@@ -34,4 +34,15 @@ describe("buttonVariants listRow", () => {
 		expect(classes).toContain("justify-between");
 		expect(classes).not.toMatch(/(^|\s)justify-start(\s|$)/);
 	});
+
+	// The baseline press-feedback shrink (index.css's `[data-slot="button"]:active`)
+	// is 2% of the element's own box - fine on a compact, content-fit CTA, a
+	// visible glitch on a full-width row (measured: a 1290px row shrinks 13px per
+	// side). Mutation-checked: dropping `active:scale-100` from the
+	// `compoundVariants` entry lets this fail while every other test stays green,
+	// since jsdom never renders `:active` and so never visibly breaks.
+	it("suppresses the baseline's active:scale press feedback", () => {
+		const classes = cn(buttonVariants({ variant: "listRow" }));
+		expect(classes).toContain("active:scale-100");
+	});
 });
