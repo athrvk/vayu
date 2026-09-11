@@ -22,9 +22,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardStore, useToastStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
-import { cn } from "@/lib/utils";
 import { EmptyState, Callout } from "@/components/shared";
-import { Button } from "@/components/ui";
+import { Button, Tabs, TabsList, TabsTrigger, TabsContent, TabLabel } from "@/components/ui";
 import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
 import { TIMING } from "@/config/timing";
 import type { DashboardView, DisplayMetrics } from "./types";
@@ -348,7 +347,11 @@ export default function LoadTestDashboard() {
 	}
 
 	return (
-		<div className="flex-1 flex flex-col overflow-hidden">
+		<Tabs
+			value={activeView}
+			onValueChange={(next) => setActiveView(next as DashboardView)}
+			className="flex-1 flex flex-col overflow-hidden"
+		>
 			{/* Compact single-row header */}
 			<DashboardHeader
 				runId={currentRunId}
@@ -417,53 +420,43 @@ export default function LoadTestDashboard() {
 			)}
 
 			{/* Tab bar */}
-			<div className="flex border-b border-border bg-panel px-5 shrink-0">
-				{[
-					{ id: "metrics" as DashboardView, label: "Metrics" },
-					{ id: "request-response" as DashboardView, label: "Request / Response" },
-				].map((tab) => (
-					<button
-						key={tab.id}
-						onClick={() => setActiveView(tab.id)}
-						className={cn(
-							"px-3.5 py-2.5 text-sm border-b-2 -mb-px font-[inherit]",
-							"transition-[color,border-color,scale] duration-150 active:scale-[0.98]",
-							activeView === tab.id
-								? "border-primary text-foreground font-semibold"
-								: "border-transparent text-muted-foreground hover:text-foreground"
-						)}
-					>
-						{tab.label}
-					</button>
-				))}
-			</div>
+			<TabsList
+				size="sm"
+				className="border-b border-border bg-panel px-5 shrink-0 justify-start"
+			>
+				<TabsTrigger value="metrics">
+					<TabLabel>Metrics</TabLabel>
+				</TabsTrigger>
+				<TabsTrigger value="request-response">
+					<TabLabel>Request / Response</TabLabel>
+				</TabsTrigger>
+			</TabsList>
 
 			{/* Content */}
-			<div className="flex-1 overflow-auto bg-background">
-				{activeView === "metrics" ? (
-					<MetricsView
-						metrics={displayMetrics}
-						historicalMetrics={historicalMetrics}
-						isCompleted={mode === "completed"}
-						finalReport={finalReport}
-						targetRps={
-							displayConfiguration?.targetRps ??
-							finalReport?.metadata?.configuration?.targetRps
-						}
-						concurrency={rampCfg?.concurrency}
-						mode={displayConfiguration?.mode}
-						rampConfig={{
-							rampUpDurationSeconds:
-								parseInt(String(rampCfg?.rampUpDuration ?? ""), 10) || undefined,
-							startConcurrency: rampCfg?.startConcurrency,
-							targetConcurrency: rampCfg?.concurrency,
-						}}
-					/>
-				) : (
-					<RequestResponseView report={finalReport} />
-				)}
-			</div>
-		</div>
+			<TabsContent value="metrics" className="flex-1 overflow-auto bg-background">
+				<MetricsView
+					metrics={displayMetrics}
+					historicalMetrics={historicalMetrics}
+					isCompleted={mode === "completed"}
+					finalReport={finalReport}
+					targetRps={
+						displayConfiguration?.targetRps ??
+						finalReport?.metadata?.configuration?.targetRps
+					}
+					concurrency={rampCfg?.concurrency}
+					mode={displayConfiguration?.mode}
+					rampConfig={{
+						rampUpDurationSeconds:
+							parseInt(String(rampCfg?.rampUpDuration ?? ""), 10) || undefined,
+						startConcurrency: rampCfg?.startConcurrency,
+						targetConcurrency: rampCfg?.concurrency,
+					}}
+				/>
+			</TabsContent>
+			<TabsContent value="request-response" className="flex-1 overflow-auto bg-background">
+				<RequestResponseView report={finalReport} />
+			</TabsContent>
+		</Tabs>
 	);
 }
 
