@@ -286,13 +286,16 @@ const INVALIDATORS: Record<
 	 * `run` family's trade taken again and for the same reason: a stale answer
 	 * is a lie, a refetch is a wait.
 	 *
-	 * A mock's route table needs the same drop for the other half of that
-	 * reason. `useMockServerRoutesQuery` holds it at `staleTime: Infinity`
-	 * because it is a start-time snapshot, so an invalidation would not refetch
-	 * it - and after a `stop_mock_server` there is nothing to refetch anyway:
-	 * the record dies with the listener and the id now 404s. Dropping the entry
-	 * is what `useStopMockServerMutation` already does app-side, for the same
-	 * reason `useDeleteInboxMutation` removes rather than invalidates.
+	 * A mock's route table needs the same drop for a different reason.
+	 * `invalidateQueries` refetches an active query regardless of its
+	 * `staleTime` - `useMockServerRoutesQuery`'s `staleTime: Infinity` only
+	 * stops a second mount from forcing a redundant fetch, it is not a shield
+	 * from invalidation - but after a `stop_mock_server` there is nothing to
+	 * refetch: the record dies with the listener and the id now 404s, so an
+	 * invalidation here would just leave an error state describing a table
+	 * that no longer exists. Dropping the entry is what
+	 * `useStopMockServerMutation` already does app-side, for the same reason
+	 * `useDeleteInboxMutation` removes rather than invalidates.
 	 */
 	service: (queryClient, event) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.inbox.list() });
