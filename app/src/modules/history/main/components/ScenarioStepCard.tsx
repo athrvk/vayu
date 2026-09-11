@@ -232,7 +232,12 @@ function ScenarioStepCard({
 			isExpanded={isExpanded}
 			onToggle={() => onToggle(step)}
 			className={cn(
-				"border border-rule",
+				// The list sits on the canvas (`ScenarioRunView`'s scroll container
+				// declares no surface of its own), so `border-rule` already
+				// resolves to `:root`'s default - the canvas/panel value - with
+				// nothing extra to declare, unlike `SampleRequestCard`'s row, which
+				// sits inside a `Card`.
+				"border border-rule rounded-md",
 				step.outcome === "failed" || step.outcome === "errored"
 					? "border-destructive/30"
 					: step.outcome === "passed" && "border-status-success/20"

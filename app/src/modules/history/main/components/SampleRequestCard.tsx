@@ -75,7 +75,14 @@ export default function SampleRequestCard({
 			isExpanded={isExpanded}
 			onToggle={onToggle}
 			className={cn(
-				"border transition-colors",
+				// `surface-card` declares `--rule` for this row: the ambient
+				// background here is already the card's (`SamplesTab` renders it
+				// straight inside `CardContent`, with no surface of its own), but
+				// the `Card` primitive only sets `bg-card` - it does not declare
+				// the surface class - so a bare `border-rule` would fall back to
+				// `:root`'s default and read the same as `--border` on a card in
+				// dark mode, which is the same colour as the card.
+				"surface-card border border-rule rounded-md transition-colors",
 				isError && "border-destructive/30",
 				// status-success, matching the CheckCircle2 this border frames.
 				isSuccess && "border-status-success/20"
