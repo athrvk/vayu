@@ -559,6 +559,13 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     Inbox* raw                       = inbox.get ();
     httplib::Server::Handler capture = [raw, &db] (const httplib::Request& req,
                                        httplib::Response& res) {
+        // An inbox has nothing to route around the way a mock server does: it
+        // already answers every method, OPTIONS included, with the one canned
+        // response, so a preflight is captured as a delivery like any other
+        // and just needs the CORS headers a browser-hosted sender expects to
+        // see on the answer.
+        routes::apply_cors_headers (req, res);
+
         vayu::db::InboxRequest capture_row;
         capture_row.inbox_id    = raw->id;
         capture_row.received_at = routes::now_ms ();

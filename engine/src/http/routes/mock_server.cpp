@@ -640,6 +640,19 @@ struct MockConfig {
 void serve_mock_request (const MockConfig& mock,
 const httplib::Request& req,
 httplib::Response& res) {
+    routes::apply_cors_headers (req, res);
+
+    // A CORS preflight is browser plumbing, not application traffic: unless a
+    // route was deliberately stored for OPTIONS itself (an API that documents
+    // its own preflight), it skips the latency, the error roll and the
+    // activity log rather than being served as the miss it technically is -
+    // resolve_mock_route runs a second time below on the served path, cheap
+    // against a route table capped at MAX_ROUTES.
+    if (req.method == "OPTIONS" &&
+    !resolve_mock_route (mock.routes, req.method, req.path).route_index) {
+        res.status = 204;
+        return;
+    }
 
     if (mock.latency_ms > 0) {
         std::this_thread::sleep_for (std::chrono::milliseconds (mock.latency_ms));

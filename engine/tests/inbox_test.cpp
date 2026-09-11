@@ -381,6 +381,50 @@ TEST_F (InboxListenerTest, ServesTheCannedResponseIncludingItsDelay) {
     EXPECT_GE (elapsed, 120);
 }
 
+// ---------------------------------------------------------------------------
+// CORS: an inbox already answers every method on the one path
+// it owns, OPTIONS included, with the canned response - so a preflight is
+// captured like any other delivery. What was missing is the CORS headers a
+// browser-hosted sender needs to see that answer at all.
+// ---------------------------------------------------------------------------
+
+TEST_F (InboxListenerTest, APreflightIsReflectedAndStillCapturedAsADelivery) {
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    const httplib::Headers preflight_headers = {
+        { "Origin", "https://app.example.test" },
+        { "Access-Control-Request-Method", "POST" },
+        { "Access-Control-Request-Headers", "X-Signature" },
+    };
+    const auto preflight = client.Options ("/hook", preflight_headers);
+    ASSERT_TRUE (preflight) << "no response from the inbox";
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    EXPECT_EQ (preflight->get_header_value ("Vary"), "Origin");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Methods"), "POST");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Headers"), "X-Signature");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Max-Age"), "600");
+
+    // Unlike a mock server's synthesized preflight, an inbox has nothing to
+    // route around: the OPTIONS request is a delivery like any other and is
+    // captured as one.
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 10, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    EXPECT_EQ (captures.front ().method, "OPTIONS");
+}
+
+TEST_F (InboxListenerTest, ACaptureWithNoOriginGetsTheWildcard) {
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    auto posted = client.Post ("/hook", "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (posted->has_header ("Access-Control-Allow-Credentials"));
+}
+
 TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
     auto started = start ();
     auto client  = client_for (started.info);

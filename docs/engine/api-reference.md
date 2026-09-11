@@ -3651,6 +3651,16 @@ literally: an inbox routes every request to its capture without matching the
 path against anything, so a signed callback URL, a per-delivery token in the
 path or a deeply nested tenant route is recorded like any other (issue #1140).
 
+**CORS is on by default, with no setting to turn it off** - the same reflected
+`Access-Control-Allow-Origin` / `-Allow-Credentials` / `Vary` pair a mock
+server sends (see [Mock Server](#mock-server)), so a browser-hosted sender can
+read the canned response. Unlike a mock server, an inbox has nothing to route
+around: an `OPTIONS` preflight is not synthesized separately, it is captured
+as a delivery like any other and answered with the canned response, CORS
+headers included - `Access-Control-Allow-Methods` and `-Allow-Headers` echo
+what the browser asked for on that request the same way they would on a
+synthesized one.
+
 ### POST /inbox/start
 
 Start a listener. Every field is optional - an empty body starts a loopback
@@ -3895,6 +3905,23 @@ outcomes are distinct rather than one blanket 404:
 | No request has that path | 404 | `mock_no_route` | The method and path, and how many routes are served |
 | The path matches, the method does not | 404 | `mock_method_mismatch` | The matching path template and the methods it *is* served for |
 | A route matched but its request has no saved example | 501 | `mock_no_example` | The request's name, and that an example must be saved or imported |
+
+**CORS is on by default, with no setting to turn it off.** A mock server
+answers whatever calls it - most often a browser page on another origin, not
+only curl - so every response carries `Access-Control-Allow-Origin`, echoing
+the request's `Origin` header (with `Access-Control-Allow-Credentials: true`
+and `Vary: Origin`) when present, or `*` when it is not, plus
+`Access-Control-Expose-Headers: *` so a page's `fetch` can read a header the
+example set. This applies to a miss too - a 404 with no CORS headers reads in
+a browser as an opaque "CORS error" instead of the `mock_no_route` /
+`mock_method_mismatch` / `mock_no_example` body above. An `OPTIONS` preflight
+on a path with no example stored under `OPTIONS` itself is answered
+synthetically (`204`, `Access-Control-Allow-Methods` /
+`-Allow-Headers` echoing what the browser asked for,
+`Access-Control-Max-Age: 600`) rather than served as a miss - it does not
+count toward a route's `hits` or appear in `GET /mock/:mockId/activity`. An
+example deliberately saved under `OPTIONS` is served as a real response
+instead, CORS headers added the same way as any other route.
 
 **Bounds** (rails, not settings): at most **8** mock servers at once (a listener
 thread each), at most **2000** routes in one table, and `latencyMs` capped at
