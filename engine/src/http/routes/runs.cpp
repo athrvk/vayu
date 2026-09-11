@@ -1391,14 +1391,23 @@ double target_rps) {
 }
 
 /**
- * A sample of the run's own exchanges. The row id travels so a client can ask
+ * A sample of the run's own exchanges, for a design or load run - a design
+ * run has exactly one and a load run's percentiles do not need per-request
+ * rows past a representative few. The row id travels so a client can ask
  * `GET /runs/:id/samples` for the captured bodies, which deliberately do not
  * ride this payload (see run_samples_response).
+ *
+ * A `Scenario` run's `results` are not a sample: they are the steps
+ * `ScenarioRunView` renders one row per, already bounded at write time by
+ * `maxScenarioStoredSteps` (`scenario_runner.cpp`) rather than by this
+ * function - the 100-row sample cap silently dropped every step past the
+ * 100th, which read as a run that executed only 100 steps to a reader who
+ * had just been told (by the same report) that it ran more.
  */
-nlohmann::json build_report_results (const std::vector<vayu::db::Result>& results) {
-    // Include sample of request/response results
+nlohmann::json build_report_results (const std::vector<vayu::db::Result>& results,
+bool is_scenario_run) {
     nlohmann::json results_array = nlohmann::json::array ();
-    size_t max_results           = 100;
+    size_t max_results           = is_scenario_run ? results.size () : 100;
     size_t count                 = 0;
     for (const auto& result : results) {
         if (count >= max_results)
@@ -1471,7 +1480,8 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
 
     nlohmann::json json_report = build_report_body (report, extras, target_rps);
     json_report["metadata"]    = build_report_metadata (run_id, *run);
-    json_report["results"]     = build_report_results (results);
+    json_report["results"] =
+    build_report_results (results, run->type == vayu::RunType::Scenario);
 
     return { 200, json_report };
 }

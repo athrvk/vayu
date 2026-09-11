@@ -378,6 +378,37 @@ TEST_F (RunsRouteTest, DesignRowWithNoStoredResultOmitsTheKey) {
     EXPECT_FALSE (body["data"][0].contains ("resultSummary"));
 }
 
+// A scenario run's report `results` are the steps ScenarioRunView renders
+// one row per - not a sample. Past 100 steps used to be silently dropped,
+// which read as a run that executed fewer steps than it actually did.
+// `maxScenarioStoredSteps` (5,000 by default) is the real bound, already
+// applied at write time; the report must not impose a second, smaller one.
+TEST_F (RunsRouteTest, ScenarioReportKeepsEveryStoredStepPastTheSampleCap) {
+    seed ({ .id = "run_scenario_big", .type = vayu::RunType::Scenario });
+    for (int i = 0; i < 150; i++) {
+        seed_result ("run_scenario_big", 200, 1.0);
+    }
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_scenario_big");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["results"].size (), 150u);
+}
+
+// The sample cap stays for everything else - a design run has one row and a
+// load run's percentiles do not need per-request rows past a representative
+// few, so the report payload does not grow with an unbounded run's result
+// count.
+TEST_F (RunsRouteTest, LoadReportStillSamplesPastTheCap) {
+    seed ({ .id = "run_load_big", .type = vayu::RunType::Load });
+    for (int i = 0; i < 150; i++) {
+        seed_result ("run_load_big", 200, 1.0);
+    }
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_load_big");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["results"].size (), 100u);
+}
+
 TEST_F (RunsRouteTest, MalformedSnapshotYieldsEmptySummaryNot500) {
     seed ({ .id = "run_bad", .config_snapshot = "not valid json {{{" });
 
