@@ -402,7 +402,8 @@ Spec tab counts it.
 `MockServerControl.tsx` is the header's right-hand control and the only surface that can **start** a
 mock server (issue #481 phase 2), because it is the only one holding a collection. With none running
 for this collection it is a **Run mock server** button; with one running it is a chip carrying the
-base URL, the route count and how many of those routes have no example, plus copy and stop. It picks
+base URL, the route count and how many of those routes have no example, plus copy, an **Open mock
+server** link to the `mock-server` tab and stop. It picks
 its mock by `collectionId` and, when several match, by the **lowest port** - nothing stops a user
 starting two mocks of one collection, and the engine's list order is not stable across polls. There
 is deliberately no restart: a mock's route table is a start-time snapshot, so stop-and-start is the
@@ -955,14 +956,16 @@ table was the only thing there was to see. Once a mock also keeps a live `GET /m
 log, it needs a surface that can grow while it is watched.
 
 - `index.tsx` (`MockServerView`, screen `"mock-server"`) - the mock's base URL with a copy control,
-  the collection it serves, a stop button, and (with more than one mock running) a `Select`
-  switcher ordered by port, the same reasoning `InboxView`'s switcher follows: the engine lists
-  mocks in map order, which is not stable across polls, and a switcher whose entries move under the
-  pointer is worse than none. Below the header, two sections: **Routes**, the same start-time
-  snapshot the drawer row used to show inline (`GET /mock/:id/routes`, now carrying `mode`,
-  `exampleName` and `hits` per route from Task 8's Examples-tab mode selection) - fetched once and
-  never polled, since it cannot change under a running mock - and **Activity**, the live feed of
-  what the mock has actually served, polled like the mock list itself.
+  the collection it serves, a stop button, an **Open collection** link back to it, and (with more
+  than one mock running) a `Select` switcher ordered by port, the same reasoning `InboxView`'s
+  switcher follows: the engine lists mocks in map order, which is not stable across polls, and a
+  switcher whose entries move under the pointer is worse than none. Below the header, two sections:
+  **Routes**, the same start-time snapshot the drawer row used to show inline (`GET
+  /mock/:id/routes`, now carrying `mode`, `exampleName` and `hits` per route from Task 8's
+  Examples-tab mode selection) - and **Activity**, the live feed of what the mock has actually
+  served. Both poll at `TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS`: the route table's *shape* is a
+  start-time snapshot, but each route's `hits` moves live as traffic arrives, so it joined the fast
+  interval alongside Activity rather than the mock list's slower one.
 - **One tab, not one per mock**, and **the tab's own `entityId` is the address**, exactly as the
   inbox tab: a mock is engine-process state with no id worth restoring across a restart, and the
   address is read from the tab rather than mirrored into local state - the drawer row and this
@@ -971,13 +974,14 @@ log, it needs a surface that can grow while it is watched.
   mock stopped elsewhere) falls back to the lowest-numbered port, the same fallback `InboxView`
   uses.
 - **Entry point:** the **Services** drawer's mock-servers group, whose row opens this tab addressed
-  at the mock it names rather than expanding in place (`ServicesPanel.tsx`'s `MockServerRow`) -
-  see [Services](#services-modulesservices).
+  at the mock it names rather than expanding in place (`ServicesPanel.tsx`'s `MockServerRow`, which
+  carries its own **Open mock server** action) - see [Services](#services-modulesservices).
 
-**Data:** `queries/mock-server.ts`. The mock list and the activity log are polled at
-`TIMING.SERVICES_POLL_INTERVAL_MS`, for the same reason the inbox and issuer lists are: an MCP tool
-or a bare curl can start, stop or drive traffic at a mock this window did not touch. The route
-table is not polled - see above.
+**Data:** `queries/mock-server.ts`. The mock list is polled at `TIMING.SERVICES_POLL_INTERVAL_MS`,
+for the same reason the inbox and issuer lists are: an MCP tool or a bare curl can start or stop a
+mock this window did not touch. The route table and the activity log are polled at the faster
+`TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS` instead, since traffic - and so `hits` - can change between
+`SERVICES_POLL_INTERVAL_MS` ticks - see above.
 
 ## Welcome (`modules/welcome/`)
 
