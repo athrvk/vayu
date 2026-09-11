@@ -57,7 +57,7 @@ export function HeroValue({
 		<div className="flex items-baseline gap-1 mt-0.5">
 			<span
 				className={cn(
-					"text-hero font-bold leading-none font-mono tabular-nums",
+					"text-hero font-bold leading-none font-mono tabular-nums transition-colors duration-150",
 					!color && "text-foreground"
 				)}
 				style={color ? { color } : undefined}
@@ -85,7 +85,11 @@ export function MiniBar({
 	return (
 		<div className="relative mt-2 h-1 rounded-sm border border-border bg-accent overflow-hidden">
 			<div
-				className="absolute inset-y-0 left-0"
+				// `transition-[width,background-color]`: both the fill's width and
+				// its tier colour change live while a load test runs, and neither
+				// had a transition - the bar jumped to its new length and its new
+				// colour popped on the same tick.
+				className="absolute inset-y-0 left-0 transition-[width,background-color] duration-150"
 				style={{ width: `${pct}%`, background: color }}
 			/>
 			{showTarget && (
