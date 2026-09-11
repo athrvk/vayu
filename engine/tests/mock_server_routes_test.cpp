@@ -995,6 +995,40 @@ TEST_F (MockServerTest, ANullOriginIsTreatedAsNonCredentialed) {
     EXPECT_FALSE (listed->has_header ("Access-Control-Allow-Credentials"));
 }
 
+TEST_F (MockServerTest, APreflightIsExemptFromLatencyTheErrorRollAndActivity) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id  = "col_root";
+    request.latency_ms     = 200;
+    request.error_rate_pct = 100;
+    const auto started     = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers preflight_headers = {
+        { "Origin", "https://app.example.test" },
+        { "Access-Control-Request-Method", "POST" },
+    };
+    const auto before    = std::chrono::steady_clock::now ();
+    const auto preflight = client.Options ("/pets", preflight_headers);
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - before)
+                            .count ();
+    ASSERT_TRUE (preflight) << "no response from the mock";
+    // Neither the 200ms latency nor the 100% error rate applies to a
+    // synthesized preflight - both are skipped by the same early return.
+    EXPECT_EQ (preflight->status, 204);
+    EXPECT_LT (elapsed_ms, 100);
+
+    const auto activity = manager.activity (started.info.mock_id, 10);
+    ASSERT_HAS_VALUE (activity);
+    EXPECT_TRUE (activity->empty ());
+}
+
 TEST_F (MockServerTest, APathPastTheRegexRouteLimitStillReachesTheRouteTable) {
     // cpp-httplib 0.53.1 refuses a regex route outright for any path longer
     // than CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256), rather than risk
