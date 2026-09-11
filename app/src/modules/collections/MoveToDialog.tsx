@@ -97,8 +97,8 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 				<DialogBody className="max-h-72">
 					{offersTopLevel && (
 						<Button
-							variant="ghost"
-							className="w-full justify-start gap-2 h-8"
+							variant="listRow"
+							className="gap-2 h-8"
 							onClick={() => onMove(entity, null)}
 						>
 							<FolderTree className="w-4 h-4 shrink-0 text-primary" />
@@ -108,8 +108,8 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 					{candidates.map(({ collection, depth }) => (
 						<Button
 							key={collection.id}
-							variant="ghost"
-							className="w-full justify-start gap-2 h-8"
+							variant="listRow"
+							className="gap-2 h-8"
 							style={{ paddingLeft: rowInsetPx(depth) }}
 							onClick={() => onMove(entity, collection.id)}
 						>

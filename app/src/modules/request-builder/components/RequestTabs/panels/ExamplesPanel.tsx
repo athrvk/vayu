@@ -166,7 +166,7 @@ function ExampleRow({
 			</div>
 
 			{open && (
-				<div className="flex flex-col gap-3 border-t border-rule px-3 py-3">
+				<div className="enter-fade flex flex-col gap-3 border-t border-rule px-3 py-3">
 					{example.headers.length > 0 && (
 						<div className="flex flex-col gap-1">
 							<div className="text-[11px] uppercase tracking-wide text-subtle-foreground">

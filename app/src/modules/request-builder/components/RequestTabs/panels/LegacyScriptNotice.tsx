@@ -45,7 +45,7 @@ export default function LegacyScriptNotice({ variant, script }: LegacyScriptNoti
 	if (!script?.trim()) return null;
 
 	return (
-		<div className="space-y-2">
+		<div className="enter-fade space-y-2">
 			<Callout severity="warning" title="Recorded before scripts were split by origin">
 				this run stored one {VARIANT_LABEL[variant]} with the collection's parts glued to
 				the request's own, and nothing marks where each began - so they cannot be separated

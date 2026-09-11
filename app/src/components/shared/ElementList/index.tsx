@@ -35,6 +35,8 @@ import { useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ChevronRight, Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import {
 	Button,
+	Collapsible,
+	CollapsibleContent,
 	Command,
 	CommandEmpty,
 	CommandGroup,
@@ -263,122 +265,124 @@ function ElementRow({
 			)}
 			data-element-row={element.kind}
 		>
-			<div className="flex h-8 items-center gap-1 px-2">
-				<button
-					type="button"
-					aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
-					aria-expanded={open}
-					onClick={() => setOpen((o) => !o)}
-					onKeyDown={handleRowKeyDown}
-					className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-				>
-					<ChevronRight
-						className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")}
-					/>
-				</button>
-				{renaming ? (
-					<Input
-						autoFocus
-						value={nameDraft}
-						placeholder={label}
-						className="h-6 flex-1"
-						onChange={(e) => setNameDraft(e.target.value)}
-						onBlur={commitRename}
-						onKeyDown={(e) => {
-							if (isCommitEnter(e)) {
-								e.preventDefault();
-								commitRename();
-							} else if (e.key === "Escape") {
-								e.preventDefault();
-								setRenaming(false);
-							}
-						}}
-					/>
-				) : (
+			<Collapsible open={open} onOpenChange={setOpen}>
+				<div className="flex h-8 items-center gap-1 px-2">
 					<button
 						type="button"
+						aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
+						aria-expanded={open}
 						onClick={() => setOpen((o) => !o)}
 						onKeyDown={handleRowKeyDown}
-						className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
+						className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
 					>
-						{/* eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope. */}
-						{Icon && <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-						{/*
-						 * `shrink-0` keeps a title at its natural width instead of
-						 * ceding space in the flex distribution - the summary
-						 * (`TruncatedText` below, `min-w-0 flex-1`) is the one meant
-						 * to visually degrade first, so a short kind label like
-						 * "Assert status code" always renders whole. `shrink-0`
-						 * alone never truncates, though: a user-typed `name` has no
-						 * length limit, and an unbounded box still renders at its
-						 * full content width regardless of flex-shrink, pushing the
-						 * summary, the enable switch and the `⋯` menu out of the row
-						 * instead of yielding to them. `max-w-[55%]` is the cap
-						 * `truncate` needs to actually engage for that case, without
-						 * touching the common short-title case (`shrink-0` still
-						 * wins there, well under the cap).
-						 */}
-						<span className="max-w-[55%] shrink-0 truncate text-sm">
-							<span className="font-medium">{title}</span>
-							{element.name && (
-								<span className="ml-1.5 text-muted-foreground">{label}</span>
-							)}
-						</span>
-						{/*
-						 * A missing required field (issue #1635) takes the summary's
-						 * spot rather than sharing the row with it - both being
-						 * `min-w-0 flex-1` would split what little room is left
-						 * after the title, and "why isn't this saving" outranks the
-						 * config preview. Shown whether the card is open or
-						 * collapsed: a list of collapsed cards is exactly where a
-						 * user needs to spot which one is blocking the save
-						 * without expanding each in turn.
-						 */}
-						{missingLabels.length > 0 ? (
-							<span
-								className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground"
-								data-element-incomplete
-							>
-								<span
-									className="h-2 w-2 shrink-0 rounded-full bg-warning"
-									aria-hidden
-								/>
-								<TruncatedText>{`Needs ${missingLabels.join(", ")}`}</TruncatedText>
-							</span>
-						) : (
-							!open &&
-							summary && (
-								<TruncatedText className="min-w-0 flex-1 text-xs text-muted-foreground">
-									{summary}
-								</TruncatedText>
-							)
-						)}
+						<ChevronRight
+							className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")}
+						/>
 					</button>
-				)}
-				<Switch
-					checked={element.enabled}
-					aria-label={`Enable ${label}`}
-					className="shrink-0"
-					onCheckedChange={(enabled) => onUpdate({ ...element, enabled })}
-				/>
-				<RowActionsMenu
-					label={`More actions for ${label}`}
-					actions={actions}
-					onCloseAutoFocus={(e) => {
-						if (!pendingRenameRef.current) return;
-						pendingRenameRef.current = false;
-						// Skip Radix's default (focus the trigger) - the rename
-						// input is about to mount with `autoFocus` and claim focus
-						// itself; landing it on the trigger first just to lose it
-						// again a render later would flash focus across two controls.
-						e.preventDefault();
-						setNameDraft(element.name ?? "");
-						setRenaming(true);
-					}}
-				/>
-			</div>
-			{open && (
-				<div className="space-y-2 border-t border-rule px-2 py-2">
+					{renaming ? (
+						<Input
+							autoFocus
+							value={nameDraft}
+							placeholder={label}
+							className="h-6 flex-1"
+							onChange={(e) => setNameDraft(e.target.value)}
+							onBlur={commitRename}
+							onKeyDown={(e) => {
+								if (isCommitEnter(e)) {
+									e.preventDefault();
+									commitRename();
+								} else if (e.key === "Escape") {
+									e.preventDefault();
+									setRenaming(false);
+								}
+							}}
+						/>
+					) : (
+						<button
+							type="button"
+							onClick={() => setOpen((o) => !o)}
+							onKeyDown={handleRowKeyDown}
+							className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
+						>
+							{Icon && (
+								// eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope.
+								<Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+							)}
+							{/*
+							 * `shrink-0` keeps a title at its natural width instead of
+							 * ceding space in the flex distribution - the summary
+							 * (`TruncatedText` below, `min-w-0 flex-1`) is the one meant
+							 * to visually degrade first, so a short kind label like
+							 * "Assert status code" always renders whole. `shrink-0`
+							 * alone never truncates, though: a user-typed `name` has no
+							 * length limit, and an unbounded box still renders at its
+							 * full content width regardless of flex-shrink, pushing the
+							 * summary, the enable switch and the `⋯` menu out of the row
+							 * instead of yielding to them. `max-w-[55%]` is the cap
+							 * `truncate` needs to actually engage for that case, without
+							 * touching the common short-title case (`shrink-0` still
+							 * wins there, well under the cap).
+							 */}
+							<span className="max-w-[55%] shrink-0 truncate text-sm">
+								<span className="font-medium">{title}</span>
+								{element.name && (
+									<span className="ml-1.5 text-muted-foreground">{label}</span>
+								)}
+							</span>
+							{/*
+							 * A missing required field (issue #1635) takes the summary's
+							 * spot rather than sharing the row with it - both being
+							 * `min-w-0 flex-1` would split what little room is left
+							 * after the title, and "why isn't this saving" outranks the
+							 * config preview. Shown whether the card is open or
+							 * collapsed: a list of collapsed cards is exactly where a
+							 * user needs to spot which one is blocking the save
+							 * without expanding each in turn.
+							 */}
+							{missingLabels.length > 0 ? (
+								<span
+									className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground"
+									data-element-incomplete
+								>
+									<span
+										className="h-2 w-2 shrink-0 rounded-full bg-warning"
+										aria-hidden
+									/>
+									<TruncatedText>{`Needs ${missingLabels.join(", ")}`}</TruncatedText>
+								</span>
+							) : (
+								!open &&
+								summary && (
+									<TruncatedText className="min-w-0 flex-1 text-xs text-muted-foreground">
+										{summary}
+									</TruncatedText>
+								)
+							)}
+						</button>
+					)}
+					<Switch
+						checked={element.enabled}
+						aria-label={`Enable ${label}`}
+						className="shrink-0"
+						onCheckedChange={(enabled) => onUpdate({ ...element, enabled })}
+					/>
+					<RowActionsMenu
+						label={`More actions for ${label}`}
+						actions={actions}
+						onCloseAutoFocus={(e) => {
+							if (!pendingRenameRef.current) return;
+							pendingRenameRef.current = false;
+							// Skip Radix's default (focus the trigger) - the rename
+							// input is about to mount with `autoFocus` and claim focus
+							// itself; landing it on the trigger first just to lose it
+							// again a render later would flash focus across two controls.
+							e.preventDefault();
+							setNameDraft(element.name ?? "");
+							setRenaming(true);
+						}}
+					/>
+				</div>
+				<CollapsibleContent className="space-y-2 border-t border-rule px-2 py-2">
 					{renderAboveForm?.(element)}
 					{Bespoke ? (
 						<Bespoke
@@ -405,8 +409,8 @@ function ElementRow({
 							This engine no longer registers kind &quot;{element.kind}&quot;.
 						</p>
 					)}
-				</div>
-			)}
+				</CollapsibleContent>
+			</Collapsible>
 			<DeleteConfirmDialog
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
@@ -483,7 +487,7 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 	return (
 		<div className="space-y-2">
 			{elements.length === 0 ? (
-				<div className="space-y-2 rounded-md border border-dashed border-rule p-3 text-center">
+				<div className="enter-fade space-y-2 rounded-md border border-dashed border-rule p-3 text-center">
 					<p className="text-sm text-muted-foreground">
 						No elements yet. Add one from the menu below, or start with:
 					</p>

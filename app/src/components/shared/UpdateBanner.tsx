@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { ArrowUpCircle, Check, Copy, ExternalLink, Power, RotateCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LabelSwap } from "@/components/ui/label-swap";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 
 /**
@@ -34,7 +35,7 @@ function UpdateBanner() {
 	};
 
 	return (
-		<div className="flex items-center gap-3 border-b border-border bg-secondary/60 px-4 py-2 text-sm">
+		<div className="enter-fade flex items-center gap-3 border-b border-border bg-secondary/60 px-4 py-2 text-sm">
 			<ArrowUpCircle className="size-4 shrink-0 text-primary" />
 			<span className="flex-1 truncate text-secondary-foreground">
 				{readyToInstall
@@ -51,7 +52,10 @@ function UpdateBanner() {
 				<>
 					<Button size="sm" variant="secondary" onClick={copyInstallCommand}>
 						{copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-						{copied ? "Copied" : "Copy install command"}
+						<LabelSwap
+							label={copied ? "Copied" : "Copy install command"}
+							states={["Copied", "Copy install command"]}
+						/>
 					</Button>
 					{/*
 					 * The installer cannot replace a bundle whose processes are

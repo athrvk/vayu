@@ -358,14 +358,16 @@ export default function HistoryList() {
 						onFocus={onListFocus}
 						className="h-full space-y-1 overflow-y-auto pr-1"
 					>
-						{isLoading && <ListSkeleton rows={4} leading badge />}
+						{isLoading && (
+							<ListSkeleton rows={4} leading badge className="enter-fade" />
+						)}
 
 						{!isLoading && showError && (
 							// `h-full` for the same reason as the empty state below:
 							// the parent is a scroll container, not a flex column, so
 							// the pane variant's `flex-1` has nothing to grow against.
 							<ErrorState
-								className="h-full"
+								className="h-full enter-fade"
 								title="Couldn't load run history"
 								detail={error instanceof Error ? error.message : undefined}
 								onRetry={() => void refetch()}

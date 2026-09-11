@@ -48,7 +48,7 @@ import {
 } from "@/queries";
 import { useEngine } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
-import { Button, Badge } from "@/components/ui";
+import { Button, Badge, LabelSwap } from "@/components/ui";
 import { ErrorState } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
 import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
@@ -424,7 +424,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						) : (
 							<PinIcon className="w-3.5 h-3.5 mr-1.5" />
 						)}
-						{pinLabel}
+						<LabelSwap label={pinLabel} states={["Pin", "Unpin"]} />
 					</Button>
 					{/*
 					 * The Save button exists only while the request does. When it has

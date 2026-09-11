@@ -1086,3 +1086,60 @@ describe("server monitoring", () => {
 		expect(metrics().value).toBe("up");
 	});
 });
+
+/**
+ * A memo written by an older build predates whatever field `BudgetDraft` or
+ * `MonitorDraft` gained since - `maxAssertionFailureRatePct` did not always
+ * exist. `budgetError`/`monitorError` read every field of their draft
+ * unconditionally, so restoring that stale shape wholesale (rather than
+ * merged onto the empty draft) crashed the dialog outright on open with
+ * "Cannot read properties of undefined (reading 'trim')", before a user ever
+ * got to see a field, let alone a validation message.
+ */
+describe("a saved config missing a field a newer build added", () => {
+	it("opens without crashing when a saved budget predates a field", () => {
+		localStorage.setItem(
+			STORAGE_KEYS.LAST_LOAD_TEST_CONFIG,
+			JSON.stringify({
+				budgets: {
+					latencyP50Ms: "",
+					latencyP95Ms: "",
+					latencyP99Ms: "500",
+					maxErrorRatePct: "",
+					minThroughputRps: "",
+					// `maxAssertionFailureRatePct` intentionally absent.
+				},
+			})
+		);
+		expect(() => open()).not.toThrow();
+		expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+	});
+
+	it("opens without crashing when a saved monitor block predates a field", () => {
+		localStorage.setItem(
+			STORAGE_KEYS.LAST_LOAD_TEST_CONFIG,
+			JSON.stringify({ monitor: { url: "http://localhost:9100/metrics" } })
+		);
+		expect(() => open()).not.toThrow();
+		expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+	});
+
+	it("still keeps every value the stale budget did carry", () => {
+		localStorage.setItem(
+			STORAGE_KEYS.LAST_LOAD_TEST_CONFIG,
+			JSON.stringify({
+				budgets: {
+					latencyP50Ms: "",
+					latencyP95Ms: "",
+					latencyP99Ms: "500",
+					maxErrorRatePct: "2",
+					minThroughputRps: "",
+				},
+			})
+		);
+		open();
+		fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
+		expect(screen.getByLabelText(/p99 latency at most/i)).toHaveValue(500);
+		expect(screen.getByLabelText(/error rate at most/i)).toHaveValue(2);
+	});
+});

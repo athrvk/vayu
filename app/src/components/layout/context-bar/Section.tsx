@@ -8,12 +8,12 @@
 /**
  * The collapsible frame every context-bar section is drawn in.
  *
- * The body is rendered only while the section is expanded, which is the whole
- * mechanism behind "a collapsed section costs nothing": its hooks never run, so
- * its queries are never registered. Relying on `CollapsibleContent` alone to
- * unmount would tie that guarantee to a Radix implementation detail, and this is
- * a guarantee the bar makes to the user - the bar is open on every request tab,
- * and a user who collapsed the Code section did so to stop it composing.
+ * "A collapsed section costs nothing" rests on `CollapsibleContent` unmounting
+ * closed children (Radix's `CollapsibleContentImpl` renders `isOpen && children`),
+ * not on a guard here - a manual `{expanded && children}` would unmount
+ * immediately and skip the ~200ms close animation. The one consequence: a
+ * collapsed section's body stays mounted, hooks and all, for that animation's
+ * duration before Radix drops it.
  *
  * A section's `useRelevance` hook (see `types.ts`) is the one thing that does
  * run while it is collapsed, so the guarantee is now precisely "no *section*
@@ -64,7 +64,7 @@ export function ContextBarSectionFrame({
 				)}
 				{title}
 			</CollapsibleTrigger>
-			<CollapsibleContent className="mt-2">{expanded && children}</CollapsibleContent>
+			<CollapsibleContent className="mt-2">{children}</CollapsibleContent>
 		</Collapsible>
 	);
 }

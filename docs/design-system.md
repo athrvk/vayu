@@ -905,6 +905,19 @@ cannot see inside a `Popover`, this one is guarded by a rendered-class check
 in `variable-popover.test.tsx` rather than by `tooltip-value-layout.test.ts`'s
 block scan.
 
+**The root `TooltipProvider` (`main.tsx`) sets `disableHoverableContent`.**
+Every `TooltipContent` in the app is read-only text - no tooltip carries a
+link or a button - so none needs the grace-area gap hoverable content exists
+for. Radix's default builds that gap as a polygon from the pointer's exit
+point to the content's edges and only closes once a later `pointermove` lands
+outside it; a fast flick across two adjacent triggers (the rail's icons,
+stacked with no gap) can exit the first with its last tracked position
+already over the second, and no further move ever lands outside the hull -
+the first tooltip stays open and the second never does, until some unrelated
+move happens to land outside it. `disableHoverableContent` closes on leave
+immediately instead, which is also the macOS system tooltip's own behaviour.
+→ `tooltip-delay.test.tsx`
+
 | Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
 |--------|-----------|----------|----------|
 | `sunset` | `24 90% 46%` | `24 95% 58%` | `24 90% 46%` |
@@ -1237,9 +1250,11 @@ Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animati
 | `vayu-pulse` | 1.6s | ease-in-out | `animate-vayu-pulse` | Live indicators (100→35% opacity) |
 | `vayu-fadepulse` | 2s | ease-in-out | `animate-vayu-fadepulse` | Subtle breathe (90→50% opacity) |
 | `accordion-down/up` | 0.2s | ease-out | `animate-accordion-down/up` | Radix accordion |
+| `collapsible-down/up` | 0.2s | `--ease-enter` / `--ease-exit` | `animate-collapsible-down/up` | `CollapsibleContent`'s height (from `tw-animate-css`) |
 | `fade-in` | 0.2s | ease-out | `animate-fade-in` | General reveal |
 | `slide-in` | 0.2s | ease-out | `animate-slide-in` | Dropdown/panel entry |
 | interaction state | 0.15s | ease | *(baseline in `index.css`)* | Hover/active colour changes on interactive elements |
+| press feedback | 0.1s | ease-out | *(baseline, `[data-slot="button"]`)* | `scale: 0.98` on `:active` |
 
 **Spinner pattern:**
 ```tsx
@@ -1250,6 +1265,36 @@ Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animati
 ```tsx
 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
 ```
+
+### Motion vocabulary (entrances and exits)
+
+One curve pair and one duration per tier, declared once as CSS custom properties in `index.css` (just above the Dialog presentation rules) so every surface that arrives or leaves reads as the same hand. Decelerate in (`--ease-enter`), accelerate out (`--ease-exit`) - a surface arriving should only ever slow down, and leaving is quicker than arriving because the decision is already made.
+
+| Token | Value | Tier |
+|-------|-------|------|
+| `--ease-enter` | `cubic-bezier(0.2, 0, 0, 1)` | all |
+| `--ease-exit` | `cubic-bezier(0.4, 0, 1, 1)` | all |
+| `--dur-panel-in` / `--dur-panel-out` | 180ms / 130ms | Dialog - the whole view dims |
+| `--dur-menu-in` / `--dur-menu-out` | 140ms / 100ms | Popover, DropdownMenu, Select, ContextMenu |
+| `--dur-tooltip-in` / `--dur-tooltip-out` | 100ms / 80ms | Tooltip - must read near-instant |
+
+**Dialog** (`.dialog-panel`/`.dialog-overlay`) consumes these directly in hand-written `@keyframes` - see the comment above them for why it does not use `tw-animate-css`'s stock utility stack (a centring hack it does not need, no overlay-sync problem the others don't have).
+
+**Popover, DropdownMenu, Select, ContextMenu and Tooltip** keep `tw-animate-css`'s `animate-in`/`animate-out` stack (fade + `zoom-95` + a small directional slide from the Radix-exposed `transform-origin`) - there is no centring hack to cancel and no overlay to sync, so replacing it would be a hand-rolled copy of a primitive that already works. What it does not give on its own is Dialog's decelerate-in/accelerate-out asymmetry - both directions run `ease` at the same duration by default. It reads `--tw-duration`/`--tw-ease` ahead of its own defaults, so two small classes are enough: `.motion-menu` (menu tier) and `.motion-tooltip` (tooltip tier), each with a `[data-state="closed"]` variant swapping in the exit curve/duration. Add whichever one to a new anchored-chrome primitive's content class list; never hand-roll its keyframes.
+
+**Toast** cannot use either mechanism as-is: the store (`stores/toast-store.ts`) holds a dismissed toast for exactly `TIMING.TOAST_EXIT_MS` (200ms) before dropping the node, and that number has to equal the exit animation's duration or the node either lingers or gets cut off mid-flight. So `toast-variants.ts` keeps its own pinned `duration-200` (which doubles as `--tw-duration`, feeding the same `animate-in`/`animate-out` mechanism above) and only borrows the curve: `[--tw-ease:var(--ease-enter)] data-[state=closed]:[--tw-ease:var(--ease-exit)]`. Its swipe-cancel snap-back is a `transition-[translate,opacity]`, not `transition-all` - see the comment in that file for why `all` was there and what it actually needed.
+
+**`.enter-fade`** is for a plain conditional mount with no Radix `data-state` to key off - `@starting-style` gives the "from" opacity for the element's first frame, so it fades in instead of popping on screen. Entry only: React removes a conditionally-rendered node synchronously, so there is no exit half without JS-driven motion, which is out of scope (see Motion, below). `EmptyState` is one call site among several - see `app/src/components/shared/EmptyState.tsx`, `app/src/components/ui/suggestion-list.tsx` and `code-editor.tsx`'s `LeaveEditorHint` for the plain-mount shape, and `LabelSwap` (`label-swap.tsx`) below for the label-swap shape built on the same class. Its duration defaults to the menu tier via `--enter-fade-duration, var(--dur-menu-in)` - right for the small surfaces above, but a mount that is panel-scale rather than a strip of chrome overrides it at the call site, `--tw-*`-style: `Drawer.tsx`'s sidebar-page swap (`key={drawerView}` plus `enter-fade [--enter-fade-duration:var(--dur-panel-in)]` on the wrapper, so switching Collections/History/Variables/etc. fades rather than pops) is the one call site so far.
+
+**`TabsContent`** (`tabs.tsx`) is the one place `.enter-fade` sits on an element that *does* carry a Radix `data-state` - `data-[state=inactive]:hidden` toggles the native `hidden` attribute rather than mounting/unmounting, so there is no conditional-render moment for `.enter-fade` to key off in the usual sense. `@starting-style` fires on any change of display type, `none` to something else included, which is exactly what a `hidden` toggle is - so the same class still applies, and re-fires on every switch back to an already-visited tab, not just the first. A force-mounted panel (`forceMount`, e.g. Collection Detail's four draft-preserving tabs) gets the same fade for the same reason: it never truly unmounts, only its `hidden` attribute flips.
+
+**`LabelSwap`** (`app/src/components/ui/label-swap.tsx`) is for a button/badge/status label that changes text in place - "Send" → "Sending" → "Send". It solves two problems together, both of which a naive `key={label}` + `.enter-fade` on the bare text gets wrong: the text fading is not the only thing that changes (the *box* resizes too, since "Sending" is wider than "Send", and Apple's version never moves the control around it), and the fade needs the DOM node to actually remount for `@starting-style` to fire again. The fix for the first is `TabLabel`'s (`tabs.tsx`) width-reservation trick generalised to more than one word: every candidate string in `states` sits in the same CSS grid cell, `invisible` and `h-0`, so the column is sized by the widest one while only the visible text contributes height; `aria-hidden="true"` on those twins keeps a screen reader from hearing every candidate read out. The fix for the second is `key={label}` on the live span, which remounts it - and therefore replays `.enter-fade` - every time `label` changes. `states` must be the finite, enumerable set the caller already knows; it is not inferred by watching `label` over renders (that would start too narrow and still jump the first time a wider state appears), and a data-derived label (a count, a status string from a payload) has no fixed "widest" to reserve, so `LabelSwap` is the wrong fit for one.
+
+**`CollapsibleContent`** (`app/src/components/ui/collapsible.tsx`) is the one disclosure that animates its own height, and it does it with `tw-animate-css`'s stock `collapsible-down`/`collapsible-up` keyed off Radix's `data-state`. Radix measures the open box into `--radix-collapsible-content-height` and those keyframes already read it, so there is nothing to hand-roll: the class list is `overflow-hidden` (what makes the height clip rather than squash) plus `data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up`. The curve is borrowed the Toast way, file-local, because the generated `--animate-collapsible-*` value reads `--tw-ease` ahead of its own `ease-out`: `[--tw-ease:var(--ease-enter)]` with a `data-[state=closed]` twin swapping in `--ease-exit`. The duration stays tw-animate-css's 200ms - the three tier tokens are all about chrome arriving over the view, and inline content pushing its siblings down is not that.
+
+Two things a caller has to know. **`overflow-hidden` is permanent while the section is open, not just while it animates**, so this box does clip an outset focus ring - and it deliberately does *not* answer that with `.panel-clip`. The same `Input`, `Switch` or row-enable checkbox renders both inside a disclosure and outside one, so tucking the ring inward here would give one control two looks depending on where it sits: the clearance-over-tucking rule below, which `key-value-parity.test.tsx` already guards for the checkbox. A consumer whose control sits flush against the box's left, right or bottom edge adds clearance of its own - `px-3 py-3`, the way the load-test dialog's disclosures do it. **"A collapsed section costs nothing" rests on `CollapsibleContent` itself, not on a caller-side guard.** Radix's `CollapsibleContentImpl` renders `isOpen && children`, so closed content is unmounted - hooks stop, queries stop - without `context-bar/Section.tsx` or `ScriptSnippets.tsx` re-deriving that with their own `{expanded && children}`. A manual guard would unmount the instant the trigger toggles and skip the 200ms close keyframe entirely, since Radix would be animating an already-empty box. The one behavioural consequence of leaving it to Radix: a collapsed section's children stay mounted, hooks and all, for the ~200ms close animation before Radix drops them.
+
+**Press feedback** (`scale: 0.98` on `[data-slot="button"]:active`) uses the standalone `scale` property, not `transform: scale()`, so it composes with any `transform` the element already carries rather than clobbering it - same reasoning as the `translate` note in the Dialog comment. `scale` is listed in the *same* baseline `transition:` shorthand as the colour properties (`background-color, color, border-color, opacity, scale`), not a second rule on `[data-slot="button"]`: a `transition:` shorthand resets every sub-property, so a second rule at the same `:where()` specificity would have replaced the colour list instead of adding to it, and every Button's hover fade would have silently stopped transitioning. `scale` is inert on everything except `[data-slot="button"]:active`, the only place anything sets it. `button-variants.ts` deliberately does not carry Tailwind's `transition-colors` utility - that class lives in `@layer utilities`, which beats the `@layer base` baseline, so it would win the cascade and replace that whole list.
 
 ---
 
@@ -1649,6 +1694,30 @@ list's shape - the first destructive action gets a separator above it -
 and `RowActionBody` holds what an item draws, so the `⋯` dropdown and the
 context menu cannot describe a row's actions differently. Collection rows,
 request rows, environment rows and history rows all take it.
+
+---
+
+## Full-Width List Rows
+
+**`Button`'s `listRow` variant** is for a summary row that spans its
+container and opens something on click - a stream event, a sampled exchange,
+a collection's last run, a recent send, a GraphQL operation, a recent-runs
+entry. Not `row` - that name already belongs to Row Actions above, a smaller
+control at a different scale.
+
+It carries only the axis-level shape: `w-full`, `justify-start` in place of
+the default's `justify-center`, `text-left`, and `h-auto` overriding the
+default size's fixed `h-9` (in `compoundVariants`, not the variant string
+itself - `cva` concatenates `size`'s classes after `variant`'s, so a height
+set beside `w-full`/`justify-start` would lose to the default size once both
+pass through the same `cn()` merge; `button-variants.test.ts` mutation-checks
+this). Padding, gap, text size and icon size stay with the caller's own
+`className`: the rows this variant serves span three different scales (a
+context-bar row is not a welcome-screen row), and a fixed opinion here would
+renormalize all of them. A caller whose icons are not the base's default
+16px overrides with `[&_svg]:size-N`; a caller whose content wraps to a
+second line (rather than truncating) needs `whitespace-normal`, since the
+base string's `whitespace-nowrap` is otherwise inherited by every child.
 
 ---
 

@@ -137,9 +137,12 @@ export function CookiesCard() {
 						</div>
 
 						{scopes.map((scope) => (
+							// Flat hairline row per environment, not a boxed card -
+							// matches the list convention every other repeated-item
+							// list in the app uses.
 							<div
 								key={scope.environmentId ?? ""}
-								className="rounded-md border border-rule surface-sunken p-3 space-y-2"
+								className="border-b border-rule py-3 last:border-b-0 space-y-2"
 							>
 								<div className="flex items-center justify-between gap-4">
 									<span className="text-sm font-medium text-foreground">

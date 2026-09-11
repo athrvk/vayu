@@ -98,13 +98,19 @@ export default function SettingsCategoryTree() {
 		return (
 			<button
 				key={category}
+				data-active={isSelected}
 				onClick={() => selectCategory(category)}
 				className={cn(
 					// h-8: shared drawer row height (see CollectionItem).
+					// A stable base plus a `data-active` modifier, not a full
+					// class-swap ternary: swapping the whole string makes
+					// `transition-colors` interpolate between two structurally
+					// different class lists instead of one changing value, so the
+					// selected state snapped instead of fading in - the same bug
+					// already fixed in `TabStrip.tsx`.
 					"w-full flex h-8 items-center gap-3 px-4 text-left text-sm transition-colors",
-					isSelected
-						? "bg-primary/10 text-primary font-medium"
-						: "text-foreground hover:bg-accent"
+					"data-[active=false]:text-foreground data-[active=false]:hover:bg-accent",
+					"data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-medium"
 				)}
 			>
 				<Icon className="w-4 h-4 shrink-0" />

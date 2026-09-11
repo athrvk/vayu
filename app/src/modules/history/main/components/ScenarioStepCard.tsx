@@ -231,12 +231,15 @@ function ScenarioStepCard({
 			phases={phases}
 			isExpanded={isExpanded}
 			onToggle={() => onToggle(step)}
-			className={cn(
-				"border border-rule",
-				step.outcome === "failed" || step.outcome === "errored"
-					? "border-destructive/30"
-					: step.outcome === "passed" && "border-status-success/20"
-			)}
+			// No per-row border: `ScenarioRunView` wraps the step list in a
+			// `divide-y`, matching `SampleRequestCard`'s row - a flat hairline
+			// list, not a boxed card per step. No `border-b last:border-b-0`
+			// here either, unlike that sibling: each step sits inside its own
+			// `skip-offscreen` virtualization wrapper, so this row is always the
+			// sole (and therefore always "last") child of *that* div - the
+			// divide-y border between steps has to come from the shared parent,
+			// where `:last-child` means the actual last step. Status rides the
+			// icon tint alone, the same call `SampleRequestCard` made.
 		>
 			{!response && (
 				<p className="text-xs text-muted-foreground">

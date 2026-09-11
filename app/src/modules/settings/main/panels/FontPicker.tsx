@@ -53,7 +53,8 @@ function FontTile({
 		<button
 			onClick={onClick}
 			className={cn(
-				"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-colors",
+				"relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left",
+				"transition-[background-color,color,border-color,scale] duration-150 active:scale-[0.98]",
 				"hover:bg-accent hover:border-accent-foreground/20",
 				selected ? "border-primary bg-primary/5" : "border-border"
 			)}
@@ -105,7 +106,7 @@ export function FontPicker({
 				/>
 			</div>
 			{value === "custom" && (
-				<div>
+				<div className="enter-fade">
 					<Input
 						value={customValue}
 						onChange={(e) => onCustomChange(e.target.value)}

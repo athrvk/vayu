@@ -34,13 +34,56 @@
  * `"context"`).
  */
 
-import { useCallback } from "react";
-import { useLayoutStore, useTabsStore } from "@/stores";
+import { useCallback, useEffect, useRef } from "react";
+import { useLayoutStore, useTabsStore, type Tab } from "@/stores";
 import { scrollWithin } from "@/lib/scroll-within";
 import { contextBarHasContent } from "./context-bar-content";
 import { sectionsForTab } from "./context-bar/registry";
-import type { ContextBarSection } from "./context-bar/types";
+import type { ContextBarSection, SectionRelevance } from "./context-bar/types";
 import { RailButton } from "./RailButton";
+
+/** A section that declares no relevance hook has content by definition - the
+ *  same fallback `ContextBarSectionSlot` (`ContextBar.tsx`) uses, duplicated
+ *  rather than imported: it is a one-line stand-in, and importing a component
+ *  file's internal here for it would be the bigger coupling. */
+function useAlwaysContent(): SectionRelevance {
+	return "content";
+}
+
+/**
+ * Calls one section's relevance hook and reports the verdict up, without
+ * rendering anything of its own.
+ *
+ * A component of its own, not a loop over `sections` in `ContextRail` itself,
+ * for the same rules-of-hooks reason `ContextBarSectionSlot` is: the
+ * applicable section list changes with the tab, so a hook called at list
+ * position N in one render and position N in a differently-shaped list next
+ * render is not the same hook call. Keyed by `section.id` (stable, unique -
+ * `registry.test.tsx` pins it), every instance keeps its own hook identity
+ * across a section list that grows, shrinks or reorders.
+ *
+ * Calling the same relevance hook a second time (once here, once in
+ * `ContextBarSectionSlot`) is not a second query: `SectionRelevanceHook`'s own
+ * contract (`types.ts`) is to read the same cache entry the section component
+ * reads, which is the whole point of it being a hook rather than a plain
+ * function.
+ */
+function RelevanceReporter({
+	section,
+	tab,
+	onRelevance,
+}: {
+	section: ContextBarSection;
+	tab: Tab;
+	onRelevance: (id: string, relevance: SectionRelevance) => void;
+}) {
+	const useRelevance = section.useRelevance ?? useAlwaysContent;
+	const relevance = useRelevance(tab);
+	useEffect(() => {
+		onRelevance(section.id, relevance);
+	}, [section.id, relevance, onRelevance]);
+	return null;
+}
 
 export function ContextRail() {
 	const {
@@ -51,6 +94,13 @@ export function ContextRail() {
 	} = useLayoutStore();
 	const { openTabs, activeTabId } = useTabsStore();
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
+
+	// Read by `onSectionClick` only, never for rendering - a ref rather than
+	// state, so a relevance answer settling does not itself cost a render.
+	const relevanceRef = useRef<Map<string, SectionRelevance>>(new Map());
+	const onRelevance = useCallback((id: string, relevance: SectionRelevance) => {
+		relevanceRef.current.set(id, relevance);
+	}, []);
 
 	/**
 	 * Scroll to `sectionId` once the DOM has actually caught up.
@@ -76,8 +126,27 @@ export function ContextRail() {
 	const onSectionClick = useCallback(
 		(section: ContextBarSection, sections: readonly ContextBarSection[]) => {
 			const wasCollapsed = contextBarCollapsedSections.includes(section.id);
+			// A section whose relevance is `"hidden"` or `{ empty }` renders
+			// `ContextBarSectionEmptyHeader` (`Section.tsx`) - a plain header with
+			// no trigger - rather than `ContextBarSectionFrame`'s real collapse
+			// chrome. It never enters `contextBarCollapsedSections`, because there
+			// is no toggle to add it with, so counting every section id not in
+			// that list (the old check) treated it as permanently "expanded": on a
+			// tab where any section has nothing to say, `expandedIds.length` could
+			// never fall back to 1, and a rail click could open sections but never
+			// close the bar. `relevanceRef` (`RelevanceReporter` above) is the real
+			// signal; a section this rail has not heard from yet (relevance still
+			// unsettled, or the map genuinely has nothing for it) defaults to
+			// `"content"` rather than being excluded - the same reason
+			// `SectionRelevanceHook`'s own contract picks `"content"` for "not
+			// known yet" (`types.ts`): treating an unsettled section as expanded
+			// is the safer failure (a click that scrolls to it instead of closing
+			// the bar), not the other way around.
 			const expandedIds = sections
-				.filter((s) => !contextBarCollapsedSections.includes(s.id))
+				.filter((s) => {
+					if (contextBarCollapsedSections.includes(s.id)) return false;
+					return (relevanceRef.current.get(s.id) ?? "content") === "content";
+				})
 				.map((s) => s.id);
 			const isOnlyExpanded =
 				!wasCollapsed && expandedIds.length === 1 && expandedIds[0] === section.id;
@@ -101,6 +170,9 @@ export function ContextRail() {
 
 	if (!contextBarHasContent(activeTab)) return null;
 
+	// Non-null past the guard above: `contextBarHasContent` is false without
+	// one, the same reasoning `ContextBar.tsx`'s identical guard uses.
+	const tab = activeTab!;
 	const sections = sectionsForTab(activeTab);
 
 	return (
@@ -108,6 +180,18 @@ export function ContextRail() {
 			className="flex flex-col items-center gap-1 w-[var(--rail-width)] shrink-0 pt-2 border-l border-border bg-panel"
 			aria-label="Context sections"
 		>
+			{/* Relevance probes, not rendered chrome - `onSectionClick` is the only
+			    reader, and it needs nothing while the bar is closed (opening it
+			    never depends on which sections currently have content). */}
+			{contextBarOpen &&
+				sections.map((section) => (
+					<RelevanceReporter
+						key={section.id}
+						section={section}
+						tab={tab}
+						onRelevance={onRelevance}
+					/>
+				))}
 			{sections.map((section) => {
 				const expanded = !contextBarCollapsedSections.includes(section.id);
 				const Icon = section.icon;

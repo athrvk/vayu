@@ -397,14 +397,14 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 			<div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
 				{streamError && (
-					<Callout severity="warning" title="Live updates stopped">
+					<Callout severity="warning" title="Live updates stopped" className="enter-fade">
 						{streamError} The run itself is unaffected - reopen this tab once it
 						finishes to read its stored steps.
 					</Callout>
 				)}
 
 				{thinned && (
-					<Callout severity="info" title="Bounded step storage">
+					<Callout severity="info" title="Bounded step storage" className="enter-fade">
 						This run executed {thinned.stepsExecuted.toLocaleString()} steps and kept{" "}
 						{thinned.stepsStored.toLocaleString()}. The{" "}
 						{thinned.stepsDropped.toLocaleString()} not listed were successes - every
@@ -510,26 +510,35 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					/>
 				) : (
 					<>
-						{rendered.map((step) => (
-							/*
-							 * `skip-offscreen` per card, sized for a card rather
-							 * than for a console line: the browser skips layout and
-							 * paint for the ones scrolled past, which is what keeps
-							 * a filled store's list responsive after it has grown.
-							 */
-							<div
-								key={stepKey(step)}
-								className="skip-offscreen [--skip-offscreen-size:3.5rem]"
-							>
-								<ScenarioStepCard
-									step={step}
-									showIteration={showIteration}
-									isExpanded={expanded === stepKey(step)}
-									onToggle={toggle}
-									runId={run.id}
-								/>
-							</div>
-						))}
+						{/* `divide-y`, not per-step `space-y` - the flat hairline
+						    list every other list surface in the app uses
+						    (`RunItem`, `RecentRuns`, `SampleRequestCard`), not a
+						    boxed card per step. */}
+						<div className="divide-y">
+							{rendered.map((step) => (
+								/*
+								 * `skip-offscreen` per card, sized for a flat row
+								 * rather than for a console line: the browser skips
+								 * layout and paint for the ones scrolled past, which
+								 * is what keeps a filled store's list responsive
+								 * after it has grown. Smaller than before now that
+								 * the row is a flat divide-y strip rather than a
+								 * bordered, padded, gapped card.
+								 */
+								<div
+									key={stepKey(step)}
+									className="skip-offscreen [--skip-offscreen-size:3rem]"
+								>
+									<ScenarioStepCard
+										step={step}
+										showIteration={showIteration}
+										isExpanded={expanded === stepKey(step)}
+										onToggle={toggle}
+										runId={run.id}
+									/>
+								</div>
+							))}
+						</div>
 						{hasMore && (
 							/*
 							 * The sentinel. Reaching it renders the next slice -

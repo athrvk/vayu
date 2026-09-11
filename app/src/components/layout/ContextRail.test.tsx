@@ -17,6 +17,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useLayoutStore, useTabsStore, type TabType } from "@/stores";
 import { sectionsForTab } from "./context-bar/registry";
@@ -33,9 +34,13 @@ function openTabOfType(type: TabType, entityId = ENTITY_TYPES.includes(type) ? `
 
 function renderRail() {
 	return render(
-		<TooltipProvider>
-			<ContextRail />
-		</TooltipProvider>
+		<QueryClientProvider
+			client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+		>
+			<TooltipProvider>
+				<ContextRail />
+			</TooltipProvider>
+		</QueryClientProvider>
 	);
 }
 
@@ -132,6 +137,33 @@ describe("ContextRail - clicking a section", () => {
 			contextBarCollapsedSections: others,
 		});
 		renderRail();
+		screen.getByRole("button", { name: "Auth" }).click();
+
+		expect(useLayoutStore.getState().contextBarOpen).toBe(false);
+	});
+
+	it("collapses the bar on the only real section, even alongside a hidden section with no toggle to collapse", async () => {
+		// GraphQL's relevance hook (`useGraphQLRelevance`, `relevance.ts`) reads
+		// `useRequestQuery`, which this test's bare `entityId` never backs with
+		// real request data - so it resolves "hidden" deterministically, the same
+		// as it would for any non-GraphQL request. A hidden section renders
+		// `ContextBarSectionEmptyHeader` (`Section.tsx`), which has no toggle at
+		// all, so it can never be added to `contextBarCollapsedSections`. That is
+		// exactly the shape that broke `isOnlyExpanded` before this fix: GraphQL
+		// counted as permanently "expanded" alongside Auth (never collapsed,
+		// because never collapsible), `expandedIds.length` was 2 instead of 1, and
+		// the bar never closed - "the right rail only expands, never collapses".
+		const others = sectionsForTab({ id: "t1", type: "request", entityId: null })
+			.map((s) => s.id)
+			.filter((id) => id !== "auth" && id !== "graphql");
+		useLayoutStore.setState({
+			contextBarOpen: true,
+			contextBarCollapsedSections: others,
+		});
+		renderRail();
+		// The relevance probes settle via an effect - let them land before the
+		// click needs their answer.
+		await act(async () => {});
 		screen.getByRole("button", { name: "Auth" }).click();
 
 		expect(useLayoutStore.getState().contextBarOpen).toBe(false);

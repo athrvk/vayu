@@ -381,6 +381,135 @@ TEST_F (InboxListenerTest, ServesTheCannedResponseIncludingItsDelay) {
     EXPECT_GE (elapsed, 120);
 }
 
+// ---------------------------------------------------------------------------
+// CORS: a real preflight (Access-Control-Request-Method present) is answered
+// 204 and returns before the capture, the canned delay and the canned
+// status - a preflight must get a 2xx or the browser aborts before the real
+// request ever arrives, so a canned response configured with a non-2xx
+// status to exercise a sender's retry path would otherwise break every
+// browser-hosted sender silently.
+// ---------------------------------------------------------------------------
+
+TEST_F (InboxListenerTest, APreflightIsAnswered204AndNeverReachesTheCapture) {
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    const httplib::Headers preflight_headers = {
+        { "Origin", "https://app.example.test" },
+        { "Access-Control-Request-Method", "POST" },
+        { "Access-Control-Request-Headers", "X-Signature" },
+    };
+    const auto preflight = client.Options ("/hook", preflight_headers);
+    ASSERT_TRUE (preflight) << "no response from the inbox";
+    EXPECT_EQ (preflight->status, 204);
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    EXPECT_EQ (preflight->get_header_value ("Vary"), "Origin");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Methods"), "POST");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Headers"), "X-Signature");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Max-Age"), "600");
+
+    EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 0);
+}
+
+TEST_F (InboxListenerTest, APreflightGetsA204NotTheCannedStatusAndBurnsNoCapture) {
+    // A canned status configured to exercise a sender's retry path (500,
+    // here) must never answer the preflight itself - the browser aborts on
+    // anything but 2xx and the real POST never arrives.
+    InboxStartRequest request;
+    request.response.status = 500;
+    auto started            = start (request);
+    auto client             = client_for (started.info);
+
+    const httplib::Headers preflight_headers = {
+        { "Access-Control-Request-Method", "POST" },
+    };
+    const auto preflight = client.Options ("/hook", preflight_headers);
+    ASSERT_TRUE (preflight) << "no response from the inbox";
+    EXPECT_EQ (preflight->status, 204);
+    EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 0);
+
+    // The real request behind it is captured and answered with the canned
+    // status normally.
+    const auto posted = client.Post ("/hook", "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->status, 500);
+    EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 1);
+}
+
+TEST_F (InboxListenerTest, APlainOptionsWithNoPreflightHeaderIsCapturedAsADelivery) {
+    // No Access-Control-Request-Method: not a browser preflight, so it is
+    // captured and answered with the canned response like any other verb.
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    const auto plain = client.Options ("/hook");
+    ASSERT_TRUE (plain) << "no response from the inbox";
+    EXPECT_EQ (plain->status, 200);
+
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 10, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    EXPECT_EQ (captures.front ().method, "OPTIONS");
+}
+
+TEST_F (InboxListenerTest, ACaptureWithNoOriginGetsTheWildcard) {
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    auto posted = client.Post ("/hook", "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (posted->has_header ("Access-Control-Allow-Credentials"));
+}
+
+TEST_F (InboxListenerTest, ACannedHeaderNamedAccessControlIsNotDuplicated) {
+    // A canned response that itself sets Access-Control-Allow-Origin (a
+    // pre-#1647 workaround, most likely) must not produce two copies of the
+    // header - apply_cors_headers already answered, and set_header appends.
+    InboxStartRequest request;
+    request.response.headers = { { "Access-Control-Allow-Origin", "https://old.example.test" } };
+    auto started = start (request);
+    auto client  = client_for (started.info);
+
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto posted = client.Post ("/hook", with_origin, "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->headers.count ("Access-Control-Allow-Origin"), 1u);
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+}
+
+TEST_F (InboxListenerTest, CredentialedExposeHeadersNamesTheCannedResponsesOwnHeaders) {
+    InboxStartRequest request;
+    request.response.headers = { { "X-Custom", "v" } };
+    auto started             = start (request);
+    auto client              = client_for (started.info);
+
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto credentialed = client.Post ("/hook", with_origin, "{}", "application/json");
+    ASSERT_TRUE (credentialed);
+    EXPECT_EQ (credentialed->get_header_value ("Access-Control-Expose-Headers"), "X-Custom");
+
+    const auto anonymous = client.Post ("/hook", "{}", "application/json");
+    ASSERT_TRUE (anonymous);
+    EXPECT_EQ (anonymous->get_header_value ("Access-Control-Expose-Headers"), "*");
+}
+
+TEST_F (InboxListenerTest, ANullOriginIsTreatedAsNonCredentialed) {
+    // The literal "null" Origin a sandboxed iframe or a file:// page sends is
+    // not a credential-safe origin, and an inbox can bind non-loopback, so
+    // echoing it with Allow-Credentials: true is not confined to 127.0.0.1.
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    const httplib::Headers null_origin = { { "Origin", "null" } };
+    const auto posted = client.Post ("/hook", null_origin, "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (posted->has_header ("Access-Control-Allow-Credentials"));
+}
+
 TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
     auto started = start ();
     auto client  = client_for (started.info);

@@ -97,22 +97,21 @@ export function VariablesSection({ tab }: ContextBarSectionProps) {
 						)}
 						All in scope ({rest.length})
 					</CollapsibleTrigger>
-					<CollapsibleContent className="mt-1 space-y-1">
-						{showAll &&
-							rest.map(([name, resolved]) => (
-								<VariableRow
-									key={name}
-									name={name}
-									resolved={resolved}
-									marker={
-										<VariableScopeBadge
-											scope={resolved.scope}
-											className="shrink-0"
-										/>
-									}
-									onCommit={(input) => commitValue(name, resolved, input)}
-								/>
-							))}
+					<CollapsibleContent className="mt-1 space-y-1 px-1 pb-1">
+						{rest.map(([name, resolved]) => (
+							<VariableRow
+								key={name}
+								name={name}
+								resolved={resolved}
+								marker={
+									<VariableScopeBadge
+										scope={resolved.scope}
+										className="shrink-0"
+									/>
+								}
+								onCommit={(input) => commitValue(name, resolved, input)}
+							/>
+						))}
 					</CollapsibleContent>
 				</Collapsible>
 			)}

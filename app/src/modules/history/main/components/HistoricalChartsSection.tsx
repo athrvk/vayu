@@ -82,7 +82,7 @@ export default function HistoricalChartsSection({
 	return (
 		<div className="space-y-4">
 			{isFetchingMore && progress && (
-				<div className="flex items-center gap-2 text-sm text-muted-foreground">
+				<div className="enter-fade flex items-center gap-2 text-sm text-muted-foreground">
 					<Loader2 className="h-4 w-4 animate-spin" />
 					<span>
 						Loading more data... ({progress.loaded.toLocaleString()} /{" "}
@@ -135,7 +135,7 @@ export default function HistoricalChartsSection({
 			{/* The same row the live dashboard draws, on the same sync group -
 			    absent for a run that scraped nothing rather than an empty card. */}
 			{monitorSamples.length > 0 && (
-				<Card>
+				<Card className="enter-fade">
 					<CardHeader className="pb-2">
 						<CardTitle>Server Vitals</CardTitle>
 					</CardHeader>
@@ -155,7 +155,7 @@ export default function HistoricalChartsSection({
 			{/* Custom metrics - absent for a run that recorded no metric.record /
 			    pm.metrics value, same "no card" rule the vitals row above follows. */}
 			{data.some(hasCustomMetrics) && (
-				<Card>
+				<Card className="enter-fade">
 					<CardHeader className="pb-2">
 						<CardTitle>Custom Metrics</CardTitle>
 					</CardHeader>

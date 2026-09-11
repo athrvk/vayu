@@ -129,16 +129,47 @@ function TabItem({
 					// Middle-click closes, like browsers
 					if (e.button === 1) closeTab(tab.id);
 				}}
+				data-active={isActive}
 				className={cn(
+					// `key={tab.id}` (below, where this is mapped) makes a genuinely
+					// new tab a fresh node - `.enter-fade` fades it in rather than
+					// popping it into a strip full of tabs that did not just move.
+					// An existing tab re-rendering keeps its node, so this never
+					// re-fires for one - only a real open does.
+					"enter-fade",
 					"group relative flex h-full shrink-0 cursor-pointer select-none items-center gap-1.5",
 					"border-r border-border/40 pl-2 pr-2.5 text-sm",
-					isActive
-						? // The rule sits on the edge the content is on, and matches the
-							// section tabs. It reads identically in both themes, unlike a
-							// surface shift, which light mode carries far more weakly
-							// (see --tab-active).
-							"bg-tab-active text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary"
-						: "border-b border-b-border bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+					// The rule sits on the edge the content is on, and matches the
+					// section tabs. It reads identically in both themes, unlike a
+					// surface shift, which light mode carries far more weakly (see
+					// --tab-active). A stable base plus a `data-active` modifier
+					// rather than the two-branch ternary this replaced: that ternary
+					// swapped the *entire* class string, so the active tab's `after:`
+					// bar and the inactive tab's `border-b` never coexisted as the
+					// same element with a changing value - one was simply absent,
+					// which nothing can transition between. Both are always present
+					// now, `border-b-border`/`after:bg-transparent` at rest, so
+					// switching the active tab only ever changes a colour.
+					// `after:transition-colors` is its own line: a pseudo-element
+					// paints its background separately from the box it is on, so the
+					// element's own colour transition does not reach it.
+					//
+					// `transition-[...]` explicit, not `transition-colors`: this
+					// element also carries `.enter-fade`, whose own `transition:
+					// opacity ...` is a full shorthand that a plain `transition-colors`
+					// utility (a different, later-cascading `@layer utilities` rule)
+					// silently replaces rather than merges with - confirmed live via
+					// computed `transitionProperty`, opacity was missing from the list
+					// entirely and a new tab never faded in. Naming every property
+					// this element transitions in one utility is the same fix applied
+					// everywhere else this bug turned up this session.
+					"transition-[background-color,color,border-color,opacity] duration-150",
+					"bg-transparent text-muted-foreground",
+					"border-b border-b-border",
+					"data-[active=false]:hover:bg-muted/50 data-[active=false]:hover:text-foreground",
+					"data-[active=true]:bg-tab-active data-[active=true]:text-foreground data-[active=true]:border-b-transparent",
+					"after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-transparent after:transition-colors",
+					"data-[active=true]:after:bg-primary"
 				)}
 			>
 				{/* The method, as 2px of colour rather than up to 36px of text. */}
@@ -171,7 +202,12 @@ function TabItem({
 					}}
 					// Absolute, over the trailing padding: in the flow it reserved 22px on
 					// every tab for a control only the hovered or active one ever shows.
-					className="absolute right-0.5 rounded-md p-0.5 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
+					// `transition-[opacity,background-color]`, not `transition-opacity`:
+					// this is `role="button"`, which the baseline (`index.css`) would
+					// otherwise cover for free, but a scoped `transition-*` utility here
+					// overrides that shorthand rather than merging with it - narrowing
+					// coverage to opacity alone and leaving `hover:bg-muted` untransitioned.
+					className="absolute right-0.5 rounded-md p-0.5 opacity-0 transition-[opacity,background-color,scale] duration-150 active:scale-[0.98] hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
 					data-active={isActive}
 				>
 					<X className="w-3 h-3" />
@@ -319,7 +355,7 @@ export function TabStrip() {
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
 						<button
-							className="flex shrink-0 items-center gap-1 border-l border-border/40 px-2 text-xs font-mono text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+							className="flex shrink-0 items-center gap-1 border-l border-border/40 px-2 text-xs font-mono text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
 							aria-label={`${overflowed.length} more tabs`}
 						>
 							+{overflowed.length}
@@ -363,7 +399,7 @@ export function TabStrip() {
 				// (tab-focus.ts), the way the tree's hidden controls are reached.
 				data-tab-new
 				style={{ width: TAB_NEW_BUTTON_WIDTH }}
-				className="flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+				className="flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
 			>
 				<Plus className="w-3.5 h-3.5" />
 			</button>

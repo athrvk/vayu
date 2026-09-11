@@ -32,7 +32,7 @@ export function ContentTypeNotice({ value, onUndo, onDismiss }: ContentTypeNotic
 	return (
 		// `/10` and `/30`, matching the accent tint the Load Test button and the
 		// variable popover already use - not a bespoke opacity.
-		<div className="flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/10 px-2.5 py-1.5 text-xs">
+		<div className="enter-fade flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/10 px-2.5 py-1.5 text-xs">
 			<span>
 				Added{" "}
 				<code className="font-mono">

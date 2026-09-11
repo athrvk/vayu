@@ -120,4 +120,14 @@ describe("SampledExchange", () => {
 
 		expect(screen.queryByText("Timing Breakdown")).toBeNull();
 	});
+
+	it("squares off the row's own corners", () => {
+		// Every caller renders this row full-bleed (a `divide-y` list or a
+		// `border-b` strip), never inset - a rounded hover fill floating inside
+		// the row's own square edges is what this overrides the Button
+		// primitive's baseline `rounded-md` to avoid.
+		render(<SampledExchange {...base} />);
+
+		expect(screen.getByRole("button").className).toMatch(/\brounded-none\b/);
+	});
 });

@@ -61,23 +61,31 @@ export default function SamplesTab({ report }: TabProps) {
 					</Badge>
 				</div>
 			</CardHeader>
-			<CardContent className="space-y-2">
+			{/* `p-0` + a `divide-y` strip below, matching the dashboard's live
+			    sample list (`RequestResponseView.tsx`) - a flat row per sample,
+			    not a boxed card per row. */}
+			<CardContent className="p-0">
 				<SampleRetentionNote
 					sampling={report.sampling}
 					shown={samples.length}
 					budget="traces"
+					className="mx-5 mb-3"
 				/>
-				<CapturedDataWarning sampling={report.sampling} />
-				{samples.map((sample: SampleResult, idx: number) => (
-					<SampleRequestCard
-						key={idx}
-						sample={sample}
-						index={idx}
-						isExpanded={expandedIndex === idx}
-						onToggle={() => setExpandedIndex(expandedIndex === idx ? null : idx)}
-						captured={sample.id === undefined ? undefined : captured?.get(sample.id)}
-					/>
-				))}
+				<CapturedDataWarning sampling={report.sampling} className="mx-5 mb-3" />
+				<div className="divide-y">
+					{samples.map((sample: SampleResult, idx: number) => (
+						<SampleRequestCard
+							key={idx}
+							sample={sample}
+							index={idx}
+							isExpanded={expandedIndex === idx}
+							onToggle={() => setExpandedIndex(expandedIndex === idx ? null : idx)}
+							captured={
+								sample.id === undefined ? undefined : captured?.get(sample.id)
+							}
+						/>
+					))}
+				</div>
 			</CardContent>
 		</Card>
 	);

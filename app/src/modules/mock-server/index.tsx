@@ -20,7 +20,7 @@
  * view's own switcher writes - never mirrored into local state.
  */
 
-import { Copy, Radio as MockIcon, Square } from "lucide-react";
+import { Copy, ExternalLink, Radio as MockIcon, Square } from "lucide-react";
 import {
 	Badge,
 	Button,
@@ -95,6 +95,15 @@ export default function MockServerView() {
 						<Copy className="h-3.5 w-3.5" aria-hidden="true" />
 					</Button>
 					<Badge variant="outline">{mock.collectionName}</Badge>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-7 gap-1.5 px-2 text-xs"
+						onClick={() => openTab({ type: "collection", entityId: mock.collectionId })}
+					>
+						<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+						Open collection
+					</Button>
 
 					{mocks.length > 1 && (
 						<Select value={mock.mockId} onValueChange={show}>

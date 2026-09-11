@@ -559,6 +559,21 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     Inbox* raw                       = inbox.get ();
     httplib::Server::Handler capture = [raw, &db] (const httplib::Request& req,
                                        httplib::Response& res) {
+        routes::apply_cors_headers (req, res);
+
+        // A real preflight must get a 2xx or the browser aborts before the
+        // actual request ever arrives - so it answers 204 here and returns
+        // before the capture, the canned delay and the canned status, the
+        // same way the mock server does. A canned status configured to
+        // exercise a sender's retry path (500, 429, a redirect) would
+        // otherwise be handed to the preflight itself and break every
+        // browser-hosted sender silently.
+        if (req.has_header ("Access-Control-Request-Method")) {
+            res.status = 204;
+            routes::finalize_cors_expose_headers (res);
+            return;
+        }
+
         vayu::db::InboxRequest capture_row;
         capture_row.inbox_id    = raw->id;
         capture_row.received_at = routes::now_ms ();
@@ -588,6 +603,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
             res.set_content (routes::error_body (500, "Inbox capture could not be stored", "inbox_store_failed")
                              .dump (),
             "application/json");
+            routes::finalize_cors_expose_headers (res);
             return;
         }
 
@@ -603,7 +619,12 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         res.status                     = canned.status;
         const std::string content_type = content_type_of (canned.headers);
         for (const auto& [name, value] : canned.headers) {
-            if (!vayu::utils::ascii_lower_equal (name, "content-type")) {
+            // `Content-Type` is set below from the resolved value, and a
+            // stored `Access-Control-*` / `Vary` is skipped outright:
+            // apply_cors_headers already answered, and set_header appends
+            // rather than replaces, so echoing one would duplicate it.
+            if (!vayu::utils::ascii_lower_equal (name, "content-type") &&
+            !routes::is_cors_response_header (name)) {
                 res.set_header (name, value);
             }
         }
@@ -612,6 +633,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         } else if (!content_type.empty ()) {
             res.set_header ("Content-Type", content_type);
         }
+        routes::finalize_cors_expose_headers (res);
     };
 
     // Every method cpp-httplib will route, on the one literal path the listener

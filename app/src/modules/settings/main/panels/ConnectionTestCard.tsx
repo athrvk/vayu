@@ -158,13 +158,13 @@ export function ConnectionTestCard() {
 				</div>
 
 				{failure && (
-					<p className="text-sm text-status-error-text">
+					<p className="enter-fade text-sm text-status-error-text">
 						The test could not be run: {failure}
 					</p>
 				)}
 
 				{result && outcome && (
-					<div className="surface-sunken rounded-md border border-rule p-3 space-y-2">
+					<div className="enter-fade surface-sunken rounded-md border border-rule p-3 space-y-2">
 						<div className="flex items-center gap-2">
 							<Badge variant="chip" className={cn("shrink-0", outcome.chip)}>
 								{outcome.label}

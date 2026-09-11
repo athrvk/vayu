@@ -46,6 +46,7 @@ import {
 	Button,
 	Input,
 	Label,
+	LabelSwap,
 	Switch,
 	Badge,
 	Card,
@@ -224,16 +225,11 @@ function CopyButton({
 			className={cn("h-7 px-2 text-xs shrink-0", className)}
 		>
 			{copied ? (
-				<>
-					<Check className="w-3.5 h-3.5 mr-1 text-success-text" />
-					Copied
-				</>
+				<Check className="w-3.5 h-3.5 mr-1 text-success-text" />
 			) : (
-				<>
-					<Copy className="w-3.5 h-3.5 mr-1" />
-					Copy
-				</>
+				<Copy className="w-3.5 h-3.5 mr-1" />
 			)}
+			<LabelSwap label={copied ? "Copied" : "Copy"} states={["Copy", "Copied"]} />
 		</Button>
 	);
 }
@@ -518,7 +514,7 @@ export default function McpSettingsPanel() {
 	return (
 		<>
 			{!hasElectron && (
-				<Callout severity="warning" title="Desktop only">
+				<Callout className="enter-fade" severity="warning" title="Desktop only">
 					MCP settings are only available in the desktop app. Run Vayu via Electron to
 					configure the MCP server.
 				</Callout>
@@ -528,6 +524,7 @@ export default function McpSettingsPanel() {
 			    rather than offering defaults that would overwrite the real config. */}
 			{loadFailed && (
 				<Callout
+					className="enter-fade"
 					severity="blocking"
 					title="Couldn't load MCP settings"
 					action={
@@ -612,6 +609,7 @@ export default function McpSettingsPanel() {
 					{/* Enabled but not listening - usually a port conflict. Offer a retry. */}
 					{!isLoading && enabled && !running && (
 						<Callout
+							className="enter-fade"
 							severity="warning"
 							title="Enabled but not listening"
 							action={
@@ -786,7 +784,11 @@ export default function McpSettingsPanel() {
 					/>
 
 					{config?.allowAll && (
-						<Callout severity="warning" title="All hosts are allowed">
+						<Callout
+							className="enter-fade"
+							severity="warning"
+							title="All hosts are allowed"
+						>
 							the per-host list below is ignored until you turn this off.
 						</Callout>
 					)}

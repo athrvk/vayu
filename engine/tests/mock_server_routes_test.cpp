@@ -714,6 +714,321 @@ TEST_F (MockServerTest, AStartedMockServesItsExamplesAndReportsItsTable) {
     EXPECT_FALSE (manager.routes ("mock_nope").has_value ());
 }
 
+TEST_F (MockServerTest, AStaleContentEncodingFromTheCapturedResponseIsDroppedNotReplayed) {
+    // An example imported or saved from a real response can carry the
+    // Content-Encoding the original transfer used (gzip, br, ...) - but the
+    // mock always serves the example's stored body as literal, already-
+    // decoded bytes. Replaying that header verbatim tells the client to
+    // decompress plain text: curl silently shows it uncompressed, but a
+    // browser's fetch honours the header and fails the request outright
+    // (net::ERR_CONTENT_DECODING_FAILED) before any JSON is visible.
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
+    json::array ({ json{ { "key", "Content-Encoding" }, { "value", "gzip" }, { "enabled", true } },
+    json{ { "key", "X-Custom" }, { "value", "kept" }, { "enabled", true } } }));
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    // httplib::Client advertises "Accept-Encoding: gzip, deflate" itself when
+    // built with zlib, and a server built the same way is then free to
+    // *actually* compress the response - which is a legitimate Content-Encoding
+    // this test has nothing to say about. Asking for "identity" is what isolates
+    // the stale, never-really-compressed header the fix is for.
+    const httplib::Headers no_compression = { { "Accept-Encoding", "identity" } };
+    const auto listed = client.Get ("/pets", no_compression);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->status, 200);
+    EXPECT_EQ (listed->body, R"([{"id":1}])");
+    EXPECT_FALSE (listed->has_header ("Content-Encoding"));
+    EXPECT_EQ (listed->get_header_value ("X-Custom"), "kept");
+}
+
+// ---------------------------------------------------------------------------
+// CORS: a mock server answers a browser page on another origin, not only
+// curl. A preflight on a path with no stored OPTIONS route is synthesized
+// rather than served as a miss; every other response, hit or miss, carries
+// the same reflected Origin/credentials pair.
+// ---------------------------------------------------------------------------
+
+TEST_F (MockServerTest, APreflightWithNoStoredOptionsRouteReflectsWhatWasAsked) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers preflight_headers = {
+        { "Origin", "https://app.example.test" },
+        { "Access-Control-Request-Method", "POST" },
+        { "Access-Control-Request-Headers", "X-Custom-Header" },
+    };
+    const auto preflight = client.Options ("/pets", preflight_headers);
+    ASSERT_TRUE (preflight) << "no response from the mock";
+    EXPECT_EQ (preflight->status, 204);
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    EXPECT_EQ (preflight->get_header_value ("Vary"), "Origin");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Methods"), "POST");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Headers"), "X-Custom-Header");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Max-Age"), "600");
+
+    // Browser plumbing, not a served route - the GET /pets route's own hit
+    // count must be untouched by an OPTIONS preflight on the same path.
+    const auto table = manager.routes (started.info.mock_id);
+    const auto hits  = manager.route_hits (started.info.mock_id);
+    ASSERT_HAS_VALUE (table);
+    ASSERT_HAS_VALUE (hits);
+    for (std::size_t i = 0; i < table->size (); ++i) {
+        if ((*table)[i].method == "GET" && (*table)[i].path_template == "/pets") {
+            EXPECT_EQ ((*hits)[i], 0u);
+        }
+    }
+}
+
+TEST_F (MockServerTest, AServedResponseWithNoOriginGetsTheWildcard) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const auto listed = client.Get ("/pets");
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->status, 200);
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (listed->has_header ("Access-Control-Allow-Credentials"));
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Expose-Headers"), "*");
+}
+
+TEST_F (MockServerTest, AServedResponseWithAnOriginEchoesItAndAllowsCredentials) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto listed = client.Get ("/pets", with_origin);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    EXPECT_EQ (listed->get_header_value ("Vary"), "Origin");
+}
+
+TEST_F (MockServerTest, AMissStillCarriesTheRequestingOriginSoTheRealErrorReachesTheBrowser) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto unknown = client.Get ("/orders", with_origin);
+    ASSERT_TRUE (unknown);
+    EXPECT_EQ (unknown->status, 404);
+    EXPECT_EQ (unknown->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+}
+
+TEST_F (MockServerTest, APreflightForAPathWithAStoredOptionsRouteIsServedForReal) {
+    // A deliberately mocked OPTIONS example (an API that documents its own
+    // preflight) is not a browser preflight to swallow - resolve_mock_route
+    // finds it, so it is served like any other route, with CORS headers added
+    // on top rather than a synthesized 204 in its place.
+    seed_pet_store ();
+    seed_request ("req_opt", "col_pets", vayu::HttpMethod::OPTIONS, "{{baseUrl}}/pets");
+    seed_example ("exa_opt", "req_opt", 200, R"({"documented":true})");
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers preflight_headers = { { "Origin", "https://app.example.test" } };
+    const auto preflight = client.Options ("/pets", preflight_headers);
+    ASSERT_TRUE (preflight);
+    EXPECT_EQ (preflight->status, 200);
+    EXPECT_EQ (preflight->body, R"({"documented":true})");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+}
+
+TEST_F (MockServerTest, AnExamplesOwnCorsHeaderIsNotDuplicatedByTheListener) {
+    // An example captured from a real CORS API, or one a user added as a
+    // pre-#1647 workaround, can carry its own Access-Control-Allow-Origin.
+    // apply_cors_headers already wrote the listener's answer, so replaying
+    // that header would duplicate it - and a browser rejects a response
+    // carrying two values for the same CORS header outright.
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
+    json::array ({ json{ { "key", "Access-Control-Allow-Origin" },
+    { "value", "*" }, { "enabled", true } } }));
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto listed = client.Get ("/pets", with_origin);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->headers.count ("Access-Control-Allow-Origin"), 1u);
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"),
+    "https://app.example.test");
+}
+
+TEST_F (MockServerTest, CredentialedExposeHeadersNamesTheExamplesOwnHeadersNotAWildcard) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
+    json::array ({ json{ { "key", "X-Custom" }, { "value", "v" }, { "enabled", true } } }));
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    // Credentials mode "include" (an Origin was sent): the Fetch spec reads
+    // "*" here as the literal header name "*", not a wildcard, so a
+    // credentialed page could read no example header at all if this stayed
+    // "*" - it must name X-Custom instead.
+    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const auto credentialed = client.Get ("/pets", with_origin);
+    ASSERT_TRUE (credentialed);
+    EXPECT_EQ (credentialed->get_header_value ("Access-Control-Expose-Headers"), "X-Custom");
+
+    // No Origin: not a credentialed fetch, and the wildcard is exactly right.
+    const auto anonymous = client.Get ("/pets");
+    ASSERT_TRUE (anonymous);
+    EXPECT_EQ (anonymous->get_header_value ("Access-Control-Expose-Headers"), "*");
+}
+
+TEST_F (MockServerTest, APlainOptionsWithNoPreflightHeaderIsResolvedThroughTheRouteTable) {
+    // No Access-Control-Request-Method: not a browser preflight, so it goes
+    // through resolve_mock_route like any other verb - a method mismatch
+    // here, since /pets is stored for GET and POST but not OPTIONS - and
+    // gets a real activity row rather than being swallowed as a 204.
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const auto plain = client.Options ("/pets");
+    ASSERT_TRUE (plain) << "no response from the mock";
+    EXPECT_EQ (plain->status, 404);
+    EXPECT_EQ (json::parse (plain->body)["error"]["code"], "mock_method_mismatch");
+
+    const auto activity = manager.activity (started.info.mock_id, 10);
+    ASSERT_HAS_VALUE (activity);
+    EXPECT_EQ (activity->size (), 1u);
+}
+
+TEST_F (MockServerTest, ANullOriginIsTreatedAsNonCredentialed) {
+    // The literal string "null" is what a sandboxed iframe or a file:// page
+    // sends as Origin - echoing it back with Allow-Credentials: true is the
+    // textbook CORS misconfiguration.
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers null_origin = { { "Origin", "null" } };
+    const auto listed                  = client.Get ("/pets", null_origin);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (listed->has_header ("Access-Control-Allow-Credentials"));
+}
+
+TEST_F (MockServerTest, APreflightIsExemptFromLatencyTheErrorRollAndActivity) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id  = "col_root";
+    request.latency_ms     = 200;
+    request.error_rate_pct = 100;
+    const auto started     = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers preflight_headers = {
+        { "Origin", "https://app.example.test" },
+        { "Access-Control-Request-Method", "POST" },
+    };
+    const auto before    = std::chrono::steady_clock::now ();
+    const auto preflight = client.Options ("/pets", preflight_headers);
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - before)
+                            .count ();
+    ASSERT_TRUE (preflight) << "no response from the mock";
+    // Neither the 200ms latency nor the 100% error rate applies to a
+    // synthesized preflight - both are skipped by the same early return.
+    EXPECT_EQ (preflight->status, 204);
+    EXPECT_LT (elapsed_ms, 100);
+
+    const auto activity = manager.activity (started.info.mock_id, 10);
+    ASSERT_HAS_VALUE (activity);
+    EXPECT_TRUE (activity->empty ());
+}
+
 TEST_F (MockServerTest, APathPastTheRegexRouteLimitStillReachesTheRouteTable) {
     // cpp-httplib 0.53.1 refuses a regex route outright for any path longer
     // than CPPHTTPLIB_REGEX_ROUTE_PATH_MAX_LENGTH (256), rather than risk

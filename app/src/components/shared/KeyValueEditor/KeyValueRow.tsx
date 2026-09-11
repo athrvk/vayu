@@ -76,7 +76,7 @@ function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) 
 				<button
 					type="button"
 					aria-label={`Resolved value of ${label}`}
-					className="flex h-8 w-5 items-center justify-center rounded-md text-subtle-foreground transition-colors hover:text-primary-text focus-visible:text-primary-text focus-visible:outline-none"
+					className="flex h-8 w-5 items-center justify-center rounded-md text-subtle-foreground transition-[color,scale] duration-150 hover:text-primary-text focus-visible:text-primary-text focus-visible:outline-none active:scale-[0.98]"
 				>
 					<Sigma className="h-3 w-3" />
 				</button>

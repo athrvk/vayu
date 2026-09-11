@@ -43,7 +43,7 @@ export function DetailSkeleton({ label, rows = 4, className }: DetailSkeletonPro
 	return (
 		// role=status on the wrapper, aria-hidden on the bars: a screen reader
 		// gets the label once instead of reading a fake heading and four fake rows.
-		<div className={cn("flex-1 p-6", className)} role="status" aria-label={label}>
+		<div className={cn("enter-fade flex-1 p-6", className)} role="status" aria-label={label}>
 			<div className="space-y-3" aria-hidden="true">
 				<Skeleton className="h-6 w-48 rounded-md" />
 				<Skeleton className="h-4 w-72 rounded-md" />

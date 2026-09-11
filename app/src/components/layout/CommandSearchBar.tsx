@@ -48,7 +48,12 @@ export function CommandSearchBar({ className }: { className?: string }) {
 				// Sunken against --panel, so it reads as a field rather than as a
 				// button: the title row is the panel surface, and a control painted
 				// in the same colour as its bar has no edge to be found by.
-				"bg-background text-xs text-muted-foreground transition-colors",
+				"bg-background text-xs text-muted-foreground",
+				// Explicit property list, not `transition-colors`: this is a
+				// hand-rolled button with no `[data-slot="button"]`, so it misses the
+				// baseline's `scale` press-feedback transition (`index.css`) - added
+				// here instead, same duration as the colour properties.
+				"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]",
 				"hover:bg-accent hover:text-foreground",
 				"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				className

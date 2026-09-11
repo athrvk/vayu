@@ -25,11 +25,12 @@
 
 import { Suspense } from "react";
 import { X } from "lucide-react";
+import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { cn } from "@/lib/utils";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { useLayoutStore, useTabsStore } from "@/stores";
 import { DEFAULT_CONTEXT_BAR_WIDTH } from "@/constants/layout";
-import { TooltipIconButton } from "@/components/ui";
+import { Collapsible, TooltipIconButton } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
 import { regionProps } from "./region-focus";
 import { sectionsForTab } from "./context-bar/registry";
@@ -114,82 +115,99 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 	const { openTabs, activeTabId } = useTabsStore();
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 
-	if (!contextBarOpen || !contextBarHasContent(activeTab)) return null;
+	// Nothing to show is a different case from closed (below): it never
+	// animates, because there is nothing behind it to reveal - a tab with no
+	// applicable section is not "collapsed", it just has no bar.
+	if (!contextBarHasContent(activeTab)) return null;
 
 	// `activeTab` is non-null here: `contextBarHasContent` is false without one.
 	const sections = sectionsForTab(activeTab);
 	const tab = activeTab!;
 
 	return (
-		/* <aside>, so the bar is a landmark a screen reader can jump to, the same
-		   way the Drawer facing it across the window already is. It was an
-		   anonymous <div>, so the left panel could be reached by landmark
-		   navigation and the right one could not.
+		// `Collapsible` only wires `contextBarOpen` to Radix's open/closed
+		// machinery - `asChild` on both it and `CollapsibleContent` (used
+		// directly, not the vertical-only wrapper in `collapsible.tsx`) means
+		// neither renders a DOM node of its own, so the `<aside>` below *is*
+		// the animated element rather than sitting inside two wrapper divs -
+		// closed-and-settled is still nothing in the tree, exactly as the
+		// plain `return null` it replaces was.
+		<Collapsible asChild open={contextBarOpen} onOpenChange={setContextBarOpen}>
+			<CollapsiblePrimitive.CollapsibleContent asChild className="rail-collapse">
+				{/* <aside>, so the bar is a landmark a screen reader can jump to, the
+				   same way the Drawer facing it across the window already is. It was
+				   an anonymous <div>, so the left panel could be reached by landmark
+				   navigation and the right one could not.
 
-		   No `border-l` here: the resize handle paints its own 1px hairline, and
-		   the two together drew a doubled 2px edge - the Drawer's identical handle
-		   is what the single line should look like. */
-		<aside
-			className={cn(
-				"flex flex-col shrink-0 bg-panel",
-				mode === "overlay" ? "absolute right-0 top-0 bottom-0 shadow-lg z-10" : "relative"
-			)}
-			style={{ width: contextBarWidth }}
-			aria-label="Context sidebar"
-			// A stop in the F6 cycle - see `region-focus.ts`.
-			{...regionProps("context")}
-		>
-			<PanelResizeHandle
-				side="left"
-				width={contextBarWidth}
-				setWidth={setContextBarWidth}
-				defaultWidth={DEFAULT_CONTEXT_BAR_WIDTH}
-				label="Resize context bar"
-			/>
+				   No `border-l` here: the resize handle paints its own 1px hairline,
+				   and the two together drew a doubled 2px edge - the Drawer's
+				   identical handle is what the single line should look like. */}
+				<aside
+					className={cn(
+						"flex flex-col shrink-0 bg-panel",
+						mode === "overlay"
+							? "absolute right-0 top-0 bottom-0 shadow-lg z-10"
+							: "relative"
+					)}
+					style={{ width: contextBarWidth }}
+					aria-label="Context sidebar"
+					// A stop in the F6 cycle - see `region-focus.ts`.
+					{...regionProps("context")}
+				>
+					<PanelResizeHandle
+						side="left"
+						width={contextBarWidth}
+						setWidth={setContextBarWidth}
+						defaultWidth={DEFAULT_CONTEXT_BAR_WIDTH}
+						label="Resize context bar"
+					/>
 
-			{/* Header */}
-			<div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-				<span className="text-xs font-medium text-foreground">Context</span>
-				<TooltipIconButton
-					label="Close context bar"
-					icon={<X className="w-3.5 h-3.5" />}
-					className="h-6 w-6"
-					tooltipSide="bottom"
-					onClick={() => setContextBarOpen(false)}
-				/>
-			</div>
-
-			{/* The sections.
-
-			    The scroll lives here rather than on the root. With it on the root,
-			    the root was both the scroll container and the handle's positioning
-			    context, so scrolling the list carried the drag strip, the header
-			    and the close button out of view and left the lower edge
-			    un-draggable - `Drawer.tsx` puts the overflow on an inner wrapper
-			    for exactly this reason. `min-h-0` because a flex child's default
-			    `min-height: auto` refuses to shrink below its content, which would
-			    push the overflow back up to the root. */}
-			<div
-				className="flex-1 min-h-0 overflow-y-auto px-3 py-1 divide-y divide-border"
-				// Where the Context Rail's `scrollWithin` call scrolls, and nothing
-				// above it - see `app/CLAUDE.md`'s "Reveal inside the scroller you
-				// mean" rule (#1612).
-				data-context-bar-scroller
-			>
-				{sections.map((section) => (
-					// The wrapper, not `ContextBarSectionSlot` itself, carries the
-					// anchor: a "hidden" relevance verdict renders nothing at all, and
-					// an id on an element that may not exist is not a scroll target.
-					<div key={section.id} data-context-bar-section={section.id}>
-						<ContextBarSectionSlot
-							section={section}
-							tab={tab}
-							expanded={!contextBarCollapsedSections.includes(section.id)}
-							onToggle={() => toggleContextBarSection(section.id)}
+					{/* Header */}
+					<div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+						<span className="text-xs font-medium text-foreground">Context</span>
+						<TooltipIconButton
+							label="Close context bar"
+							icon={<X className="w-3.5 h-3.5" />}
+							className="h-6 w-6"
+							tooltipSide="bottom"
+							onClick={() => setContextBarOpen(false)}
 						/>
 					</div>
-				))}
-			</div>
-		</aside>
+
+					{/* The sections.
+
+					    The scroll lives here rather than on the root. With it on the
+					    root, the root was both the scroll container and the handle's
+					    positioning context, so scrolling the list carried the drag
+					    strip, the header and the close button out of view and left the
+					    lower edge un-draggable - `Drawer.tsx` puts the overflow on an
+					    inner wrapper for exactly this reason. `min-h-0` because a flex
+					    child's default `min-height: auto` refuses to shrink below its
+					    content, which would push the overflow back up to the root. */}
+					<div
+						className="flex-1 min-h-0 overflow-y-auto px-3 py-1 divide-y divide-border"
+						// Where the Context Rail's `scrollWithin` call scrolls, and
+						// nothing above it - see `app/CLAUDE.md`'s "Reveal inside the
+						// scroller you mean" rule (#1612).
+						data-context-bar-scroller
+					>
+						{sections.map((section) => (
+							// The wrapper, not `ContextBarSectionSlot` itself, carries the
+							// anchor: a "hidden" relevance verdict renders nothing at all,
+							// and an id on an element that may not exist is not a scroll
+							// target.
+							<div key={section.id} data-context-bar-section={section.id}>
+								<ContextBarSectionSlot
+									section={section}
+									tab={tab}
+									expanded={!contextBarCollapsedSections.includes(section.id)}
+									onToggle={() => toggleContextBarSection(section.id)}
+								/>
+							</div>
+						))}
+					</div>
+				</aside>
+			</CollapsiblePrimitive.CollapsibleContent>
+		</Collapsible>
 	);
 }

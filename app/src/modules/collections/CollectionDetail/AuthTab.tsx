@@ -37,6 +37,7 @@ import { Lock } from "lucide-react";
 
 import {
 	Button,
+	LabelSwap,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -284,7 +285,10 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 					disabled={!isDirty || updateCollection.isPending}
 					className="font-semibold"
 				>
-					{updateCollection.isPending ? "Saving…" : "Save Auth"}
+					<LabelSwap
+						label={updateCollection.isPending ? "Saving…" : "Save Auth"}
+						states={["Save Auth", "Saving…"]}
+					/>
 				</Button>
 				<Button
 					variant="outline"

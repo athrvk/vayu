@@ -289,11 +289,15 @@ the field but not the range. There is no update verb: `latencyMs` and
 mock, but a run pointed at one has to be able to say which configuration
 produced its numbers, so they are frozen at start like the route table.
 
-`listMockServerRoutes` is **not** polled: the route table is a snapshot taken
-when the mock started and a running mock does not reload the collection, so it is
-fetched once per expanded row (`staleTime: Infinity`). Stopping drops the record
-engine-side - unlike an inbox, which stays listed with `running: false` - so the
-mutation *removes* the routes cache entry instead of invalidating it, which would
+`listMockServerRoutes` **is** polled, at `MOCK_ACTIVITY_POLL_INTERVAL_MS`, even
+though it carries `staleTime: Infinity`: the route table's *shape* is a
+snapshot taken when the mock started and a running mock does not reload the
+collection, but each route's `hits` changes live as traffic arrives, so the
+poll is what keeps that count current. `staleTime: Infinity` only means
+mounting a second reader of the same query does not force a redundant fetch -
+it does not stop the interval firing. Stopping drops the record engine-side -
+unlike an inbox, which stays listed with `running: false` - so the mutation
+*removes* the routes cache entry instead of invalidating it, which would
 refetch an id the engine now answers `404` for.
 
 #### Create vs update

@@ -219,4 +219,18 @@ describe("the Events tab", () => {
 
 		expect(screen.getByText(/"a": 1/)).toBeTruthy();
 	});
+
+	it("squares off each row's corners - it is full-bleed in the list, never inset", () => {
+		state.response = okResponse({
+			events: [event('{"a":1}')],
+			totalEvents: 1,
+			eventsTruncated: false,
+			streamEndReason: "completed",
+		});
+		renderViewer();
+		openEventsTab();
+
+		const row = screen.getByRole("button", { expanded: false });
+		expect(row.className).toMatch(/\brounded-none\b/);
+	});
 });

@@ -167,7 +167,11 @@ describe("the Send / Load Test group", () => {
 		// label, in the one row that has no width to spare. The icons went for
 		// the same reason.
 		renderBar(true);
-		expect(send().textContent?.trim()).toBe("Send");
+		// Send's raw textContent also carries LabelSwap's width-reservation
+		// twins ("Sending", aria-hidden), so read the live label span rather
+		// than the button's full text - see label-swap.test.tsx for the
+		// component-level assertion on the reservation itself.
+		expect(send().querySelector(".enter-fade")?.textContent?.trim()).toBe("Send");
 		expect(loadTest().textContent?.trim()).toBe("Load Test");
 	});
 
@@ -258,10 +262,18 @@ describe("button hover states", () => {
 		);
 	});
 
-	it("transitions colour, since colour is what changes", () => {
+	it("transitions colour and press scale, same as Send beside it", () => {
 		renderBar(true);
+		// Both list their transition properties explicitly rather than via the
+		// `transition-colors` utility, because both also transition `scale` for
+		// press feedback (see the className comment in UrlBar) - same effect,
+		// spelled out instead of shorthand.
 		for (const name of [/send/i, /load test/i]) {
-			expect(screen.getByRole("button", { name }).className).toContain("transition-colors");
+			const className = screen.getByRole("button", { name }).className;
+			for (const property of ["background-color", "color", "border-color", "scale"]) {
+				expect(className).toContain(property);
+			}
+			expect(className).toContain("active:scale-[0.98]");
 		}
 	});
 

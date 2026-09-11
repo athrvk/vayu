@@ -69,7 +69,7 @@ export function ThroughputTwinCard({
 				<p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-2">
 					<span
 						className={cn(
-							"inline-block px-1.5 py-px rounded-sm font-mono text-[10px] font-semibold",
+							"inline-block px-1.5 py-px rounded-sm font-mono text-[10px] font-semibold transition-colors duration-150",
 							deltaOk
 								? "bg-success/10 text-success-text"
 								: "bg-destructive/10 text-destructive-text"

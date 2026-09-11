@@ -127,7 +127,7 @@ const DEFAULT_OPTIONS = {
  */
 function LeaveEditorHint() {
 	return (
-		<div className="pointer-events-none absolute bottom-1.5 right-3 z-10 flex items-center gap-1 rounded-md border border-border-strong bg-popover px-1.5 py-1 text-popover-foreground shadow-md">
+		<div className="enter-fade pointer-events-none absolute bottom-1.5 right-3 z-10 flex items-center gap-1 rounded-md border border-border-strong bg-popover px-1.5 py-1 text-popover-foreground shadow-md">
 			<span className="text-[10px] leading-none text-muted-foreground">Leave editor</span>
 			{chordKeys(LEAVE_EDITOR_CHORD).map((cap) => (
 				<Kbd key={cap} size="sm">

@@ -358,7 +358,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 			 * same call `schema-cache` makes when it keeps the last good schema.
 			 */}
 			{schema && status === "error" && (
-				<p className="flex items-center gap-1 px-2 py-1 m-0 text-[10px] text-warning-text border-b border-border shrink-0">
+				<p className="enter-fade flex items-center gap-1 px-2 py-1 m-0 text-[10px] text-warning-text border-b border-border shrink-0">
 					<AlertCircle className="w-3 h-3 shrink-0" />
 					{age ? `${age}. Refresh failed.` : "Refresh failed."}
 				</p>
@@ -371,7 +371,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 			 * contrast is tuned.
 			 */}
 			{notice && (
-				<div className="px-2 py-1.5 shrink-0" data-testid="explorer-notice">
+				<div className="enter-fade px-2 py-1.5 shrink-0" data-testid="explorer-notice">
 					<Callout severity="info">{notice}</Callout>
 				</div>
 			)}

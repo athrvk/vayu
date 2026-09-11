@@ -12,7 +12,12 @@ import { cva } from "class-variance-authority";
  * component and a value cannot be hot-reloaded (`react-refresh/only-export-components`).
  */
 export const buttonVariants = cva(
-	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+	// No `transition-colors` here: it is a `@layer utilities` class, which
+	// beats the `@layer base` baseline transition in index.css that already
+	// covers this element (`button, [role="button"], a[href], summary`,
+	// including `scale` for press feedback) - a utility here would win the
+	// cascade and replace that whole list.
+	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
 	{
 		variants: {
 			variant: {
@@ -50,6 +55,28 @@ export const buttonVariants = cva(
 				 */
 				rowActionDestructive:
 					"text-muted-foreground hover:bg-accent-active hover:text-destructive-text",
+				/*
+				 * A full-width, left-aligned clickable row - the shape a summary row
+				 * or a "recent items" entry needs, and `default`'s fixed-height,
+				 * content-fit, centered shape cannot give. Deliberately not named
+				 * `row` - the "Row Actions" section above already owns that word for
+				 * the small hover-revealed `⋯`/delete controls on a row, a different
+				 * thing at a different scale.
+				 *
+				 * Only the axis-level shape lives here: `justify-center` flips to
+				 * `justify-start`, `text-left` beats the base's implicit centering.
+				 * Padding, gap, text size and icon size stay with the caller's own
+				 * `className` - the call sites this converts span three different
+				 * padding/text scales (a context-bar row is not a welcome-screen
+				 * row), and a single opinion here would renormalize all of them.
+				 * `h-auto` and `active:scale-100` live in `compoundVariants` below,
+				 * not here: cva concatenates `size`'s classes after `variant`'s, so a
+				 * height set in this string loses to `size`'s default `h-9` once both
+				 * pass through the same `cn()` merge, and the base string's own
+				 * `active:scale` (below `compoundVariants` in the final class list)
+				 * would win over a `scale-100` set here for the same reason.
+				 */
+				listRow: "w-full justify-start text-left",
 			},
 			size: {
 				default: "h-9 px-4 py-2",
@@ -58,6 +85,21 @@ export const buttonVariants = cva(
 				icon: "h-9 w-9",
 			},
 		},
+		compoundVariants: [
+			{
+				variant: "listRow",
+				// `active:scale-100`: the baseline press-feedback shrink
+				// (`index.css`'s `[data-slot="button"]:active`) is 2% of the
+				// element's own box, which reads fine on a compact, content-fit
+				// CTA and reads as a glitch on a full-width row - the same
+				// distinction that comment already draws for `a[href]`/
+				// `[role="button"]`, just not extended to a `Button` rendering as
+				// one. Measured: a 1290px row (`SampledExchange`, snug inside its
+				// own 1px border) shrinks by 13px on each side, visibly detaching
+				// from the border it needs to stay flush against.
+				class: "h-auto active:scale-100",
+			},
+		],
 		defaultVariants: {
 			variant: "default",
 			size: "default",

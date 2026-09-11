@@ -52,10 +52,23 @@ export const toastVariants = cva(
 		// duration-200 is pinned rather than left to the default because the store
 		// holds a dismissed toast for exactly TIMING.TOAST_EXIT_MS before dropping
 		// it. The two have to agree: shorter here and the node lingers after the
-		// animation, longer and it is cut off mid-flight.
-		"transition-all duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
+		// animation, longer and it is cut off mid-flight. It doubles as the
+		// enter/exit animation duration (tw-animate-css falls back to the same
+		// `--tw-duration` this sets) and the swipe-cancel snap-back transition
+		// below, so touch it only together with TIMING.TOAST_EXIT_MS.
+		//
+		// Decelerate in, accelerate out, same pair as Dialog and anchored chrome
+		// (see the `:root` motion vocabulary in index.css) - only the curve, not
+		// the duration, since the duration is the pinned value above.
+		"[--tw-ease:var(--ease-enter)] data-[state=closed]:[--tw-ease:var(--ease-exit)]",
+		"duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
 		"data-[state=open]:slide-in-from-bottom-2 data-[state=open]:fade-in-0",
 		"data-[state=closed]:slide-out-to-right-full data-[state=closed]:fade-out-80",
+		// Explicit paint properties, not `transition-all` (design system rule -
+		// `all` can animate layout properties). `translate` is the one this
+		// component actually needs a transition for: the swipe-cancel snap-back
+		// below. `opacity` rides along for free and costs nothing extra.
+		"transition-[translate,opacity] duration-200",
 		// Swipe follows the pointer, then animates out past the threshold.
 		"data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none",
 		"data-[swipe=cancel]:translate-x-0",

@@ -36,6 +36,7 @@
 // see it. Included here so route TUs keep naming it through routes.hpp.
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/run_summary_cache.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -221,6 +222,109 @@ std::string_view code = {}) {
  */
 inline void send_json (httplib::Response& res, const nlohmann::json& data) {
     res.set_content (data.dump (), "application/json");
+}
+
+/**
+ * @brief CORS headers for a listener a browser page may call directly - a
+ *        mock server or a webhook inbox, never the management API, which
+ *        sets its own fixed trio in `server.cpp`.
+ *
+ * Reflects the request's own asks (origin, requested method/headers) rather
+ * than a fixed list, since a mock or inbox stands in for an arbitrary real
+ * endpoint. `Access-Control-Allow-Origin: *` cannot pair with
+ * `Allow-Credentials: true`, so a present `Origin` - the literal `null` a
+ * sandboxed frame or `file://` page sends excluded, since that is not a
+ * credential-safe origin - switches to echoing it. A preflight is detected
+ * by `Access-Control-Request-Method`, not `method == "OPTIONS"`: a bare
+ * OPTIONS carrying neither is not one and gets no synthesized answer here.
+ */
+inline void apply_cors_headers (const httplib::Request& req, httplib::Response& res) {
+    const auto origin       = req.get_header_value ("Origin");
+    const bool credentialed = !origin.empty () && origin != "null";
+    if (credentialed) {
+        res.set_header ("Access-Control-Allow-Origin", origin);
+        res.set_header ("Access-Control-Allow-Credentials", "true");
+        res.set_header ("Vary", "Origin");
+    } else {
+        res.set_header ("Access-Control-Allow-Origin", "*");
+    }
+    res.set_header ("Access-Control-Expose-Headers", "*");
+
+    if (req.has_header ("Access-Control-Request-Method")) {
+        res.set_header ("Access-Control-Allow-Methods",
+        req.get_header_value ("Access-Control-Request-Method"));
+        if (req.has_header ("Access-Control-Request-Headers")) {
+            res.set_header ("Access-Control-Allow-Headers",
+            req.get_header_value ("Access-Control-Request-Headers"));
+        }
+        res.set_header ("Access-Control-Max-Age", "600");
+    }
+}
+
+/**
+ * @brief Whether a replayed example/canned header must be dropped rather
+ *        than echoed - `Access-Control-*` or `Vary`.
+ *
+ * `apply_cors_headers` above already wrote the listener's own CORS answer,
+ * and `set_header` / `headers.emplace` both append rather than replace, so a
+ * captured or stored header of the same name becomes a duplicate on the wire
+ * - which Fetch rejects outright, not merely ignores.
+ */
+inline bool is_cors_response_header (std::string_view name) {
+    static constexpr std::string_view kPrefix = "access-control-";
+    if (name.size () >= kPrefix.size () &&
+    vayu::utils::ascii_lower_equal (name.substr (0, kPrefix.size ()), kPrefix)) {
+        return true;
+    }
+    return vayu::utils::ascii_lower_equal (name, "vary");
+}
+
+/**
+ * @brief Rewrite a wildcard `Access-Control-Expose-Headers` for a
+ *        credentialed response.
+ *
+ * Per the Fetch spec, `*` there is the literal header name `*`, not a
+ * wildcard, whenever the request's credentials mode is `include` - exactly
+ * the case `apply_cors_headers` marks with `Access-Control-Allow-Credentials`.
+ * Call this as the last statement on every path that writes response
+ * headers, so a credentialed page can still read a header an example or
+ * canned response set.
+ */
+inline void finalize_cors_expose_headers (httplib::Response& res) {
+    if (!res.has_header ("Access-Control-Allow-Credentials")) {
+        return;
+    }
+    static const std::unordered_set<std::string> kSafelisted{
+        "cache-control",
+        "content-language",
+        "content-length",
+        "content-type",
+        "expires",
+        "last-modified",
+        "pragma",
+    };
+    std::vector<std::string> names;
+    std::unordered_set<std::string> seen;
+    for (const auto& [name, value] : res.headers) {
+        (void)value;
+        if (is_cors_response_header (name)) {
+            continue;
+        }
+        const std::string lowered = vayu::utils::ascii_lower (name);
+        if (kSafelisted.count (lowered) || !seen.insert (lowered).second) {
+            continue;
+        }
+        names.push_back (name);
+    }
+    std::string joined;
+    for (const auto& name : names) {
+        if (!joined.empty ()) {
+            joined += ", ";
+        }
+        joined += name;
+    }
+    res.headers.erase ("Access-Control-Expose-Headers");
+    res.set_header ("Access-Control-Expose-Headers", joined);
 }
 
 /**

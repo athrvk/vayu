@@ -19,6 +19,7 @@
  */
 
 import { Skeleton } from "@/components/ui";
+import { cn } from "@/lib/utils";
 
 interface ListSkeletonProps {
 	/** Rows to draw. Keep near the number the list usually shows. */
@@ -40,7 +41,7 @@ export function ListSkeleton({
 		// aria-hidden + role=status on the wrapper: the placeholder bars carry no
 		// information, but their presence does. A screen reader gets "Loading"
 		// once instead of reading a fake list.
-		<div className={className} role="status" aria-label="Loading">
+		<div className={cn("enter-fade", className)} role="status" aria-label="Loading">
 			<div className="space-y-2 py-2" aria-hidden="true">
 				{Array.from({ length: rows }, (_, i) => (
 					<div key={i} className="flex items-center gap-2 px-2 py-1.5">

@@ -3651,6 +3651,22 @@ literally: an inbox routes every request to its capture without matching the
 path against anything, so a signed callback URL, a per-delivery token in the
 path or a deeply nested tenant route is recorded like any other (issue #1140).
 
+**CORS is on by default, with no setting to turn it off** - the same reflected
+`Access-Control-Allow-Origin` / `-Allow-Credentials` / `Vary` pair a mock
+server sends (see [Mock Server](#mock-server)), so a browser-hosted sender can
+read the canned response. A real preflight (a request carrying
+`Access-Control-Request-Method`) is answered `204` and never reaches the
+capture, the canned delay or the canned status - a preflight must get a 2xx
+or the browser aborts before the real request arrives, so a canned response
+configured with a non-2xx status (to exercise a sender's retry path) would
+otherwise break every browser-hosted sender silently. A header the canned
+response sets that names `Access-Control-*` or `Vary` is dropped rather than
+echoed, since the engine already answered those; a credentialed request
+(`Origin` present and not the literal `null`) rewrites a wildcard
+`Access-Control-Expose-Headers` into the canned response's own header names,
+per the Fetch spec's rule that `*` there is a literal name, not a wildcard,
+under credentials.
+
 ### POST /inbox/start
 
 Start a listener. Every field is optional - an empty body starts a loopback
@@ -3895,6 +3911,31 @@ outcomes are distinct rather than one blanket 404:
 | No request has that path | 404 | `mock_no_route` | The method and path, and how many routes are served |
 | The path matches, the method does not | 404 | `mock_method_mismatch` | The matching path template and the methods it *is* served for |
 | A route matched but its request has no saved example | 501 | `mock_no_example` | The request's name, and that an example must be saved or imported |
+
+**CORS is on by default, with no setting to turn it off.** A mock server
+answers whatever calls it - most often a browser page on another origin, not
+only curl - so every response carries `Access-Control-Allow-Origin`, echoing
+the request's `Origin` header (with `Access-Control-Allow-Credentials: true`
+and `Vary: Origin`) when present and not the literal `null` a sandboxed frame
+or `file://` page sends, or `*` otherwise, plus `Access-Control-Expose-Headers:
+*` so a page's `fetch` can read a header the example set - rewritten to the
+example's own header names on a credentialed response, since the Fetch spec
+reads `*` there as a literal name, not a wildcard, once credentials are in
+play. A header the example itself carries under `Access-Control-*` or `Vary`
+is dropped rather than echoed, since the engine already answered those. This
+applies to a miss too - a 404 with no CORS headers reads in a browser as an
+opaque "CORS error" instead of the `mock_no_route` / `mock_method_mismatch` /
+`mock_no_example` body above.
+
+A **real preflight** - a request carrying `Access-Control-Request-Method` -
+is always answered synthetically (`204`, `Access-Control-Allow-Methods` /
+`-Allow-Headers` echoing what the browser asked for,
+`Access-Control-Max-Age: 600`), whether or not a route is stored for that
+path under `OPTIONS`: breaking the preflight to surface a stored route's
+`404`/`501` would break the browser request behind it for nothing. It does
+not count toward a route's `hits` or appear in `GET /mock/:mockId/activity`.
+A plain `OPTIONS` request carrying neither header is ordinary traffic and is
+served or missed like any other verb.
 
 **Bounds** (rails, not settings): at most **8** mock servers at once (a listener
 thread each), at most **2000** routes in one table, and `latencyMs` capped at

@@ -17,9 +17,14 @@
  * Services drawer and the collection header both promise to show a running mock
  * wherever it was started from.
  *
- * The route table is *not* polled. It is a snapshot taken when the mock started
- * and it cannot change under a running mock - editing the collection means
- * restarting - so a poll would re-fetch a constant every few seconds.
+ * The route table's *shape* is not re-fetched on mount - it is a snapshot
+ * taken when the mock started and cannot change under a running mock, editing
+ * the collection means restarting. Each route's `hits`, though, changes live
+ * as traffic arrives (the engine's own docs for `GET /mock/:id/routes` say
+ * so), so the query still polls, at `TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS`
+ * like the activity log - `staleTime: Infinity` only means mounting a second
+ * reader of the same query does not force a redundant fetch, not that the
+ * interval stops firing.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -49,12 +54,13 @@ export function useMockServerRoutesQuery(mockId: string | null) {
 		queryFn: () => apiService.listMockServerRoutes(mockId as string),
 		enabled: mockId !== null,
 		staleTime: Infinity,
+		refetchInterval: TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS,
 	});
 }
 
 /**
  * One mock's activity log - what it has served, newest first. Polled like
- * the mock list itself: unlike the route table, this changes on its own as
+ * the route table: unlike the route table's shape, this changes on its own as
  * traffic arrives, with nothing in this window driving it.
  */
 export function useMockActivityQuery(mockId: string | null) {
@@ -62,7 +68,7 @@ export function useMockActivityQuery(mockId: string | null) {
 		queryKey: queryKeys.mockServer.activity(mockId ?? ""),
 		queryFn: () => apiService.listMockServerActivity(mockId as string),
 		enabled: mockId !== null,
-		refetchInterval: TIMING.SERVICES_POLL_INTERVAL_MS,
+		refetchInterval: TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS,
 	});
 }
 

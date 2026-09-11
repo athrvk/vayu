@@ -164,7 +164,7 @@ export default function HeadersPanel() {
 				/>
 
 				{declared.length > 0 && (
-					<div className="surface-sunken border border-rule rounded-md p-2 space-y-1">
+					<div className="enter-fade surface-sunken border border-rule rounded-md p-2 space-y-1">
 						<div className="px-1">
 							<Eyebrow>Added by Vayu</Eyebrow>
 							<p className="text-xs text-muted-foreground mt-0.5">

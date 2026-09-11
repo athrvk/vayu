@@ -237,6 +237,19 @@ bool header_is (const std::string& name, const char* wanted) {
     return vayu::utils::ascii_lower_equal (name, wanted);
 }
 
+/**
+ * True for a header describing the *wire encoding* the example was captured
+ * with - `Content-Encoding`, `Content-Length`, `Transfer-Encoding` - rather
+ * than its content. A mock always serves the stored body as literal,
+ * already-decoded bytes, so replaying `Content-Encoding` verbatim is a lie a
+ * browser's `fetch` believes and fails trying to gunzip plain text; the
+ * other two httplib recomputes itself and this is belt-and-braces.
+ */
+bool header_is_stale_transfer_encoding (const std::string& name) {
+    return header_is (name, "content-encoding") ||
+    header_is (name, "content-length") || header_is (name, "transfer-encoding");
+}
+
 } // namespace
 
 std::vector<std::pair<std::string, std::string>> example_headers (const std::string& blob) {
@@ -640,6 +653,18 @@ struct MockConfig {
 void serve_mock_request (const MockConfig& mock,
 const httplib::Request& req,
 httplib::Response& res) {
+    routes::apply_cors_headers (req, res);
+
+    // A real preflight (Access-Control-Request-Method present) is browser
+    // plumbing, not application traffic, and always gets the synthesized
+    // 204 - breaking one to surface a stored route's 404/501 helps nobody,
+    // route_index or not. A plain `OPTIONS` with neither header is ordinary
+    // traffic and falls through to the route table below like any other verb.
+    if (req.has_header ("Access-Control-Request-Method")) {
+        res.status = 204;
+        routes::finalize_cors_expose_headers (res);
+        return;
+    }
 
     if (mock.latency_ms > 0) {
         std::this_thread::sleep_for (std::chrono::milliseconds (mock.latency_ms));
@@ -660,6 +685,7 @@ httplib::Response& res) {
         "Injected failure (errorRatePct=" + std::to_string (mock.error_rate_pct) + ")", "mock_injected_error")
         .dump (),
         "application/json");
+        routes::finalize_cors_expose_headers (res);
         return;
     }
 
@@ -675,6 +701,7 @@ httplib::Response& res) {
         mock.activity.record (entry);
         res.status = entry.status;
         res.set_content (body.dump (), "application/json");
+        routes::finalize_cors_expose_headers (res);
         return;
     }
 
@@ -693,9 +720,12 @@ httplib::Response& res) {
 
     res.status = example.status;
     for (const auto& [name, value] : headers) {
-        if (!header_is (name, "content-type")) {
+        if (!header_is (name, "content-type") && !header_is_stale_transfer_encoding (name) &&
+        !routes::is_cors_response_header (name)) {
             // Appended rather than set: a repeated `Set-Cookie` is exactly
-            // why an example stores its headers as an ordered array.
+            // why an example stores its headers as an ordered array. CORS
+            // headers are skipped outright - apply_cors_headers already
+            // answered, and append would duplicate it.
             res.headers.emplace (name, value);
         }
     }
@@ -704,6 +734,7 @@ httplib::Response& res) {
     } else {
         res.set_header ("Content-Type", content_type);
     }
+    routes::finalize_cors_expose_headers (res);
 }
 
 MockServerManager::StartResult MockServerManager::start (vayu::db::Database& db,

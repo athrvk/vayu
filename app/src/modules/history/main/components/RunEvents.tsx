@@ -58,7 +58,7 @@ export function RunEvents({ anomalies, sleeps, className }: RunEventsProps) {
 	if ((!anomalies || anomalies.length === 0) && hostSleeps.length === 0) return null;
 
 	return (
-		<Card className={className}>
+		<Card className={cn("enter-fade", className)}>
 			<CardHeader>
 				<CardTitle>Events</CardTitle>
 			</CardHeader>

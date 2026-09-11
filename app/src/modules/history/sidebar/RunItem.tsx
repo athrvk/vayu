@@ -250,7 +250,12 @@ export default function RunItem({
 					// ring for the stretched activator inside it - see RequestItem.tsx,
 					// whose h-8/flat/hover-fill shape this row now shares rather than
 					// the bordered card every row used to be.
-					"focus-row group relative flex flex-col gap-1 rounded-md px-2 py-1.5 cursor-pointer transition-colors",
+					//
+					// `transition-[background-color,border-color,box-shadow]`, not the
+					// bare `transition-colors` utility: `isSelected` below toggles a
+					// `ring-1` (a box-shadow), which `transition-colors` does not cover,
+					// so the selected state would snap rather than fade in.
+					"focus-row group relative flex flex-col gap-1 rounded-md px-2 py-1.5 cursor-pointer transition-[background-color,border-color,box-shadow]",
 					isSelected
 						? "bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15"
 						: "hover:bg-accent"

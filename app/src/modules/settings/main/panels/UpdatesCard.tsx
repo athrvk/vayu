@@ -28,7 +28,15 @@
 
 import { useState } from "react";
 import { ArrowUpCircle, Check, Copy, ExternalLink, Loader2, Power, RefreshCw } from "lucide-react";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import {
+	Button,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+	LabelSwap,
+} from "@/components/ui";
 import type { UpdateCheckResult } from "@/types/electron";
 import { appSetting } from "../app-settings";
 
@@ -131,7 +139,10 @@ export function UpdatesCard() {
 										) : (
 											<Copy className="w-4 h-4 mr-1.5" />
 										)}
-										{copied ? "Copied" : "Copy install command"}
+										<LabelSwap
+											label={copied ? "Copied" : "Copy install command"}
+											states={["Copy install command", "Copied"]}
+										/>
 									</Button>
 									{/*
 									 * The installer has to close Vayu before it

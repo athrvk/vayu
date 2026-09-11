@@ -127,6 +127,7 @@ function TotalRequestsStat({ d }: { d: DashboardDerived }) {
 					failed{" "}
 					<span
 						className={cn(
+							"transition-colors duration-150",
 							d.failedRequests > 0 ? "text-destructive-text" : "text-muted-foreground"
 						)}
 					>

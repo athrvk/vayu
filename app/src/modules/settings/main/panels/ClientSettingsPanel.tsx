@@ -40,7 +40,10 @@ export default function ClientSettingsPanel({
 	useRevealedSetting();
 
 	return (
-		<div className="flex-1 flex flex-col overflow-hidden">
+		// `enter-fade`: the caller keys this panel on the selected category
+		// (`SettingsMain.tsx`), so switching categories remounts it - without a
+		// fade, that remount was an instant content swap.
+		<div className="flex-1 flex flex-col overflow-hidden enter-fade">
 			{/* Header */}
 			<div className="border-b border-border px-6 py-4 shrink-0">
 				<div className="max-w-3xl mx-auto w-full">

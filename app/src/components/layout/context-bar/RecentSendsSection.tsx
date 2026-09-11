@@ -27,6 +27,7 @@
  * the one send worth looking at, and the History tab is where you look at it.
  */
 
+import { Button } from "@/components/ui";
 import { useRecentDesignRunsQuery } from "@/queries";
 import { useTabsStore } from "@/stores";
 import { StatusCodeBadge, formatResponseTime } from "@/components/shared";
@@ -73,13 +74,14 @@ export function RecentSendsSection({ tab }: ContextBarSectionProps) {
 				const outcome = run.resultSummary;
 				return (
 					<li key={run.id}>
-						<button
+						<Button
 							type="button"
+							variant="listRow"
 							onClick={() => openTab({ type: "run", entityId: run.id })}
 							aria-label={`Open send${
 								outcome ? `, status ${outcome.statusCode}` : ""
 							}, ${formatRelativeTime(run.startTime)}`}
-							className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							className="gap-2 px-1 py-1 hover:bg-accent"
 						>
 							{outcome ? (
 								// The code alone, without the reason phrase: five
@@ -97,7 +99,7 @@ export function RecentSendsSection({ tab }: ContextBarSectionProps) {
 							<span className="text-[11px] font-mono tabular-nums text-muted-foreground shrink-0">
 								{formatRelativeTime(run.startTime)}
 							</span>
-						</button>
+						</Button>
 					</li>
 				);
 			})}

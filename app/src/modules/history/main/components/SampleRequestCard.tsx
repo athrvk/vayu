@@ -10,9 +10,12 @@
  *
  * A single stored sampled request, expandable. The row, the expansion chrome,
  * the error block and the timing tiles are the shared `SampledExchange` - the
- * dashboard's live sample list renders the same shell (#76). What is left here
- * is what is genuinely history's: the outcome-tinted card border, a stored
- * run's date formatting, and the response section.
+ * dashboard's live sample list renders the same shell (#76), as a flat
+ * `divide-y` strip (`RequestResponseView.tsx`) rather than a boxed card per
+ * row - which is what this now matches too, rather than the two drifting into
+ * different shapes for the same component. What is left here is what is
+ * genuinely history's: a stored run's date formatting and the response
+ * section.
  *
  * The response comes from `GET /runs/:id/samples` (issue #174), not from the
  * trace. This card used to read `sample.trace.request.headers` and
@@ -23,7 +26,6 @@
  * iterations and lives once in `runs.config_snapshot`.
  */
 
-import { cn } from "@/lib/utils";
 import {
 	UnifiedResponseViewer,
 	SampledExchange,
@@ -49,9 +51,6 @@ export default function SampleRequestCard({
 	onToggle,
 	captured,
 }: SampleRequestCardProps) {
-	const isError = !!sample.error || sample.statusCode === 0;
-	const isSuccess = sample.statusCode >= 200 && sample.statusCode < 300;
-
 	// A stored sample is dating a run, not placing a moment inside one, so this
 	// side wants the day where the dashboard's live row wants milliseconds.
 	const timestamp = new Date(sample.timestamp).toLocaleString();
@@ -74,12 +73,13 @@ export default function SampleRequestCard({
 			phases={phases}
 			isExpanded={isExpanded}
 			onToggle={onToggle}
-			className={cn(
-				"border transition-colors",
-				isError && "border-destructive/30",
-				// status-success, matching the CheckCircle2 this border frames.
-				isSuccess && "border-status-success/20"
-			)}
+			// Flat divide-y strip, matching the dashboard's live list
+			// (`RequestResponseView.tsx`) rather than a boxed card per row - no
+			// per-row radius needed, the same "square on purpose" exception a
+			// full-bleed divider strip already gets there. Status rides the
+			// `StatusIcon` tint alone now, not a second, redundant colour on
+			// the border.
+			className="border-b last:border-b-0"
 		>
 			{/* The captured exchange, when this run stored one for this row.
 			    Rendering nothing (not an empty heading) when it did not is
