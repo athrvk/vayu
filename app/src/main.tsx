@@ -53,8 +53,22 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 				 * itself as "used across the app" and reached none of it.
 				 *
 				 * A nested provider is now the exception that has to justify itself.
+				 *
+				 * `disableHoverableContent`: every `TooltipContent` in this app is
+				 * read-only text (`rg TooltipContent -A0 src --glob '*.tsx'` finds no
+				 * interactive element inside one) - none needs the grace-area gap
+				 * hoverable content exists for. Radix's default builds that gap as a
+				 * polygon from the pointer's *exit point* to the content's edges, and
+				 * only closes once a later `pointermove` lands outside it - so a fast
+				 * flick across two adjacent triggers (the rail's icons, stacked with
+				 * no gap) can exit trigger A with its last tracked position already
+				 * over trigger B, and no further move ever lands outside that hull.
+				 * The first tooltip then never closes and the second never opens,
+				 * until some other move does land outside it. `disableHoverableContent`
+				 * closes on leave immediately instead - matching every read-only
+				 * tooltip's own content, and the macOS system tooltip it mirrors.
 				 */}
-				<TooltipProvider delayDuration={TIMING.TOOLTIP_DELAY_MS}>
+				<TooltipProvider delayDuration={TIMING.TOOLTIP_DELAY_MS} disableHoverableContent>
 					<App />
 				</TooltipProvider>
 				<ReactQueryDevtools initialIsOpen={false} />

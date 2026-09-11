@@ -905,6 +905,19 @@ cannot see inside a `Popover`, this one is guarded by a rendered-class check
 in `variable-popover.test.tsx` rather than by `tooltip-value-layout.test.ts`'s
 block scan.
 
+**The root `TooltipProvider` (`main.tsx`) sets `disableHoverableContent`.**
+Every `TooltipContent` in the app is read-only text - no tooltip carries a
+link or a button - so none needs the grace-area gap hoverable content exists
+for. Radix's default builds that gap as a polygon from the pointer's exit
+point to the content's edges and only closes once a later `pointermove` lands
+outside it; a fast flick across two adjacent triggers (the rail's icons,
+stacked with no gap) can exit the first with its last tracked position
+already over the second, and no further move ever lands outside the hull -
+the first tooltip stays open and the second never does, until some unrelated
+move happens to land outside it. `disableHoverableContent` closes on leave
+immediately instead, which is also the macOS system tooltip's own behaviour.
+→ `tooltip-delay.test.tsx`
+
 | Scheme | Light (`--primary` = `--primary-fill`) | Dark `--primary` | Dark `--primary-fill` |
 |--------|-----------|----------|----------|
 | `sunset` | `24 90% 46%` | `24 95% 58%` | `24 90% 46%` |

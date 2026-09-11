@@ -66,7 +66,13 @@ describe("the root provider", () => {
 	const main = readFileSync(MAIN, "utf8");
 
 	it("passes the shared delay rather than taking Radix's default", () => {
-		expect(main).toMatch(/<TooltipProvider\s+delayDuration=\{TIMING\.TOOLTIP_DELAY_MS\}>/);
+		// `[^>]*` around the prop, not an anchored `>` right after it: the root
+		// provider also sets `disableHoverableContent` (see its own comment), and
+		// this assertion is about the delay surviving, not about being the tag's
+		// only prop.
+		expect(main).toMatch(
+			/<TooltipProvider\b[^>]*\bdelayDuration=\{TIMING\.TOOLTIP_DELAY_MS\}[^>]*>/
+		);
 	});
 
 	it("uses a delay that is actually faster than the default it replaced", () => {
@@ -74,6 +80,15 @@ describe("the root provider", () => {
 		// while every assertion above still passed.
 		expect(TIMING.TOOLTIP_DELAY_MS).toBeGreaterThan(0);
 		expect(TIMING.TOOLTIP_DELAY_MS).toBeLessThan(700);
+	});
+
+	it("disables hoverable content, so leaving a trigger closes it immediately", () => {
+		// Every TooltipContent in the app is read-only text - none needs the
+		// grace-area gap hoverable content exists for, and that gap is exactly
+		// what let a fast flick between adjacent triggers (the rail's icons)
+		// leave the first tooltip stuck open and the second never open at all -
+		// see the design-system.md paragraph this test is linked from.
+		expect(main).toMatch(/<TooltipProvider\b[^>]*\bdisableHoverableContent\b[^>]*>/);
 	});
 });
 
