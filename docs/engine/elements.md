@@ -496,4 +496,4 @@ only `extract.*`, `assert.*`, `timer.think` and `script.pre`/`script.post`
 - #1501 - load-time cookies that round out the kind table.
 - #1516 - the app's `ElementList` primitive and editor.
 - #1517 - MCP's `elements` fields and the `vayu://elements/kinds` resource.
-- #1518 - Postman/OpenAPI round-trip and a JMeter `.jmx` importer.
+- #1518 - OpenAPI round-trip (`x-vayu-elements`), Postman import, and a JMeter `.jmx` importer.

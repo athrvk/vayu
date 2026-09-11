@@ -217,7 +217,7 @@ export default function RunItem({
 		run.summary?.comment && `"${run.summary.comment}"`,
 	]
 		.filter(Boolean)
-		.join(" — ");
+		.join(" - ");
 
 	// A bare fallback identity for the rare row with neither a url nor a
 	// scenario descriptor (a run recorded before either existed, or one still
