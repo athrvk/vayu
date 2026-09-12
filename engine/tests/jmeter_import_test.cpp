@@ -323,6 +323,157 @@ TEST (JmeterImport, BoundaryExtractorMapsOntoTheNewExtractBoundaryKind) {
     EXPECT_EQ (request.at ("elements").at (0).at ("config").at ("rightBoundary"), "\"");
 }
 
+/**
+ * `enabled="false"` on a sampler must exclude it - and everything nested
+ * under it, since JMeter itself never runs a disabled element's children
+ * either - rather than importing it as active with no way to turn it back
+ * off (issue #1444). Mutation check: removing the `jmeter_enabled` guard in
+ * `for_each_paired_child` reds `requests.size ()` to 2 with nothing counted.
+ */
+TEST (JmeterImport, ADisabledSamplerIsExcludedAndCounted) {
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Active">
+      <stringProp name="HTTPSampler.path">/active</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+    <HTTPSamplerProxy testname="Off" enabled="false">
+      <stringProp name="HTTPSampler.path">/off</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& requests =
+    parsed.result.at ("collections").at (0).at ("requests");
+    ASSERT_EQ (requests.size (), 1u);
+    EXPECT_EQ (requests.at (0).at ("name"), "Active");
+    EXPECT_TRUE (has_skipped_kind (parsed.result.at ("meta"), "HTTPSamplerProxy_disabled"));
+}
+
+/// `HTTPSampler.follow_redirects` (and its "Redirect Automatically" sibling)
+/// carries through to the stored request rather than always defaulting true
+/// (issue #1444).
+TEST (JmeterImport, FollowRedirectsIsRead) {
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="NoFollow">
+      <stringProp name="HTTPSampler.path">/x</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+      <boolProp name="HTTPSampler.follow_redirects">false</boolProp>
+      <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_FALSE (first_request (parsed.result.at ("collections").at (0))
+    .at ("followRedirects")
+    .get<bool> ());
+}
+
+/**
+ * `Assertion.test_field` values with no `assert.contains` field to land on
+ * (Request Data, Request Headers, Response Message, Document) are refused
+ * rather than silently collapsed onto "body", which would assert against
+ * text the source never named as its target (issue #1444). `sample_label`
+ * ("URL Sampled") does have a home - `assert.contains`'s own "url" field.
+ */
+TEST (JmeterImport, AssertionTestFieldMapsUrlAndRefusesTheRest) {
+    const char* url_plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Page">
+      <stringProp name="HTTPSampler.path">/page</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree>
+      <ResponseAssertion testname="URL check">
+        <collectionProp name="Asserion.test_strings">
+          <stringProp name="1">/page</stringProp>
+        </collectionProp>
+        <stringProp name="Assertion.test_field">Assertion.sample_label</stringProp>
+        <intProp name="Assertion.test_type">2</intProp>
+      </ResponseAssertion>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse url_parsed = parse_import (url_plan, {}, {});
+    ASSERT_TRUE (url_parsed.ok ()) << url_parsed.error;
+    const nlohmann::ordered_json& request =
+    first_request (url_parsed.result.at ("collections").at (0));
+    ASSERT_TRUE (request.contains ("elements"));
+    EXPECT_EQ (request.at ("elements").at (0).at ("config").at ("field"), "url");
+
+    const char* message_plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Page">
+      <stringProp name="HTTPSampler.path">/page</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree>
+      <ResponseAssertion testname="Message check">
+        <collectionProp name="Asserion.test_strings">
+          <stringProp name="1">OK</stringProp>
+        </collectionProp>
+        <stringProp name="Assertion.test_field">Assertion.response_message</stringProp>
+        <intProp name="Assertion.test_type">2</intProp>
+      </ResponseAssertion>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse message_parsed = parse_import (message_plan, {}, {});
+    ASSERT_TRUE (message_parsed.ok ()) << message_parsed.error;
+    const nlohmann::ordered_json& unmapped =
+    first_request (message_parsed.result.at ("collections").at (0));
+    EXPECT_FALSE (unmapped.contains ("elements"));
+    EXPECT_TRUE (has_skipped_kind (
+    message_parsed.result.at ("meta"), "ResponseAssertion_unrecognised"));
+}
+
+/// `HTTPsampler.Files` (a multipart file upload) has no formdata-part model
+/// to build yet (issue #1657) - counted rather than dropped with nothing
+/// said, since it is nested inside the sampler tag itself and would
+/// otherwise never reach the generic sibling-tag tally.
+TEST (JmeterImport, FileUploadArgsAreCountedRatherThanDroppedSilently) {
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Upload">
+      <stringProp name="HTTPSampler.path">/upload</stringProp>
+      <stringProp name="HTTPSampler.method">POST</stringProp>
+      <elementProp name="HTTPsampler.Files" elementType="HTTPFileArgs">
+        <collectionProp name="HTTPFileArgs.files">
+          <elementProp name="/tmp/a.png" elementType="HTTPFileArg">
+            <stringProp name="File.path">/tmp/a.png</stringProp>
+            <stringProp name="File.paramname">file</stringProp>
+            <stringProp name="File.mimetype">image/png</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_TRUE (has_skipped_kind (parsed.result.at ("meta"), "HTTPsampler.Files"));
+}
+
 TEST (JmeterImport, RefusesXmlThatIsNotAJmeterPlan) {
     vayu::core::ImportTally tally;
     EXPECT_THROW (
