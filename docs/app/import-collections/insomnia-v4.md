@@ -70,6 +70,8 @@ Key internal functions: `parse` (entry), `buildCollection`, `buildRequest`, `ins
 
 A sixth kind, `file_body`, does not come from a resource `_type` at all: it counts bodies Vayu cannot store - binary bodies, and a `multipart/form-data` file param that names no path (a file *part* with a path imports as a file row; see [Body mapping](#body-mapping)) - and is appended once, after the walk, when the count is non-zero.
 
+A seventh kind, `path_variables`, is informational rather than lossy (see the `pathParameters[]` row above): it counts once per request whose URL carried a `:key` → `{{key}}` substitution, and is appended per collection/folder node once that node's own subtree is walked.
+
 ## Field mapping
 
 ### Collection (workspace / request_group)
@@ -94,8 +96,9 @@ Built by `buildRequest`.
 | `name` | `name` | Falls back to `"Untitled"`. |
 | `description` | `description` | Falls back to `""`. |
 | `method` | `method` | Upper-cased; restricted to `GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS`, otherwise defaults to `GET`. |
-| `url` | `url` | `normalize_template_vars(as_string(url))` - taken verbatim, query string and all. The parse then **appends** the enabled `parameters[]` to it (see [The url/params invariant](./README.md#the-urlparams-invariant)), which is what Insomnia itself does with its two query sources on send: a URL written `https://x/y?a=1` beside a `b=2` parameter stores as `https://x/y?a=1&b=2`. |
+| `url` | `url` | `normalize_template_vars(as_string(url))` - taken verbatim, query string and all - then run through the same `:key` → `{{key}}` rewrite `pathParameters[]` (below) declares. The parse then **appends** the enabled `parameters[]` to it (see [The url/params invariant](./README.md#the-urlparams-invariant)), which is what Insomnia itself does with its two query sources on send: a URL written `https://x/y?a=1` beside a `b=2` parameter stores as `https://x/y?a=1&b=2`. |
 | `parameters[]` (`{name,value,disabled,description}`) | `params` | `map_key_values`: `name → key`, `disabled !== true → enabled`. A string `description` is forwarded (any other type is ignored). Rows without a `key` are dropped. Enabled rows also join the `url`, per the row above. |
+| `pathParameters[]` (`{name,value}`) | `url` template + `variables` | The same `:key` path-segment rewrite Postman's `url.variable[]` gets (see the [Postman doc](./postman.md), "Path variables"): every entry's `:key` segment in the URL is rewritten to `{{key}}`, and the entry's `value` is recorded once per key. Recorded keys are merged into the *nearest enclosing* collection's `variables` (the request's own workspace or request_group, not necessarily the root) once that node's own subtree is walked, skipping a key already declared there explicitly. Counted as `path_variables`, informational rather than lossy - the value survives as a variable. |
 | `headers[]` (`{name,value,disabled,description}`) | `headers` | Same mapping as params. |
 | `settingFollowRedirects` (`"global" \| "on" \| "off"`) | `followRedirects` | `"off" → false`, `"on" → true`; `"global"` (Insomnia's default, meaning "use the app setting", which follows redirects) and an absent field leave the draft field **absent**, so the engine default (`true`) applies. Insomnia has no per-request redirect limit, so `maxRedirects` is never imported. |
 | `body` | `body` | Via `insomniaBody`. See [Body mapping](#body-mapping). |

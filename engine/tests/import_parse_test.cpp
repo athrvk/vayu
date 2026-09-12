@@ -255,6 +255,50 @@ TEST (ImportParse, StepsOverACycleInAnInsomniaFolderTree) {
     EXPECT_EQ (parsed.result.at ("meta").at ("folderCount"), 2);
 }
 
+TEST (InsomniaImport, SubstitutesAPathVariableIntoATemplateAndACollectionVariable) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W"},
+        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://api.example.com/users/:userId",
+            "pathParameters":[{"name":"userId","value":"42"}]}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& collection = parsed.result.at ("collections")[0];
+    EXPECT_EQ (collection.at ("requests")[0].at ("url"),
+    "https://api.example.com/users/{{userId}}");
+    ASSERT_TRUE (collection.at ("variables").contains ("userId"));
+    EXPECT_EQ (collection.at ("variables").at ("userId").at ("value"), "42");
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("path_variables"), 1);
+}
+
+TEST (InsomniaImport, KeepsAnExplicitEnvironmentVariableOverAPathVariableOfTheSameName) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W","environment":{"userId":"explicit"}},
+        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://api.example.com/users/:userId",
+            "pathParameters":[{"name":"userId","value":"42"}]}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("variables").at ("userId").at ("value"), "explicit");
+}
+
+TEST (InsomniaImport, FoldsAFolderRequestsPathVariableIntoTheFoldersOwnVariablesNotTheWorkspaces) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W"},
+        {"_id":"grp","_type":"request_group","parentId":"wrk","name":"G"},
+        {"_id":"req","_type":"request","parentId":"grp","name":"R","method":"get",
+            "url":"https://api.example.com/users/:userId",
+            "pathParameters":[{"name":"userId","value":"42"}]}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& collection = parsed.result.at ("collections")[0];
+    EXPECT_FALSE (collection.at ("variables").contains ("userId"));
+    const json& folder = collection.at ("children")[0];
+    EXPECT_EQ (folder.at ("variables").at ("userId").at ("value"), "42");
+}
+
 TEST (ImportParse, GatingTheOptionsChangesWhatTheCountsPromise) {
     const std::string document = R"({"_postman_variable_scope":"environment","name":"Prod",
         "values":[{"key":"host","value":"x"}]})";

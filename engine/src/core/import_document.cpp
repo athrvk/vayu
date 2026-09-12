@@ -1057,14 +1057,19 @@ std::string host_path_url (const json* url) {
     return host.empty () && !has_path ? std::string () : out;
 }
 
-/// `substitutePathVariables(base, variable[])`: Postman's `:key` path segments
-/// as Vayu's `{{key}}` template. The first value seen for a key is recorded
-/// into @p counts so the caller can give the template something to resolve
-/// against; counted once per URL that carried at least one substitution,
-/// which is a mapping (the value survives as a variable), not a loss.
+/// `substitutePathVariables(base, variable[])`: a `:key` path segment as
+/// Vayu's `{{key}}` template - Postman's `url.variable[]`, and (via
+/// `insomnia_path_variable_rows`) Insomnia's `pathParameters[]`, both read
+/// into the same `{key, value}` row shape first. The first value seen for a
+/// key is recorded into @p path_variables so the caller can give the template
+/// something to resolve against; @p skipped_count is incremented once per URL
+/// that carried at least one substitution, which is a mapping (the value
+/// survives as a variable), not a loss - the "path_variables" tally kind
+/// reads accordingly in both formats.
 std::string substitute_path_variables (const std::string& base,
 const json* declared,
-PostmanCounts& counts) {
+json& path_variables,
+int& skipped_count) {
     if (declared == nullptr || !declared->is_array () || declared->empty ()) {
         return base;
     }
@@ -1088,14 +1093,14 @@ PostmanCounts& counts) {
             continue;
         }
         out.replace (at, token.size (), "{{" + *declared_key + "}}");
-        if (!counts.path_variables.contains (*declared_key)) {
-            counts.path_variables[*declared_key] =
+        if (!path_variables.contains (*declared_key)) {
+            path_variables[*declared_key] =
             json{ { "value", normalize_vars (as_string (prop (record, "value"))) },
                 { "enabled", true } };
         }
     }
     if (out != base) {
-        counts.skipped_path_variables += 1;
+        skipped_count += 1;
     }
     return out;
 }
@@ -1122,9 +1127,9 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     const size_t question = raw.find ('?');
     const std::string base_raw =
     question == std::string::npos ? raw : raw.substr (0, question);
-    const std::string base =
-    substitute_path_variables (base_raw, prop (url, "variable"), counts);
-    json structured = map_key_values (prop (url, "query"));
+    const std::string base = substitute_path_variables (base_raw,
+    prop (url, "variable"), counts.path_variables, counts.skipped_path_variables);
+    json structured        = map_key_values (prop (url, "query"));
     // `query[]` wins when it has anything - it carries disabled state and
     // descriptions that `raw` cannot. Falling back to `raw` matters for
     // hand-written or script-generated collections that populate only `raw`.
@@ -1475,10 +1480,11 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
 /// things Vayu genuinely cannot store.
 struct InsomniaCounts {
     ImportOptions options;
-    int non_executable = 0;
-    int file_body      = 0;
-    int requests       = 0;
-    int folders        = 0;
+    int non_executable         = 0;
+    int file_body              = 0;
+    int requests               = 0;
+    int folders                = 0;
+    int skipped_path_variables = 0;
 };
 
 /// A row array that may be absent but must not be another type.
@@ -1521,6 +1527,13 @@ json kv_rows (const json* rows) {
         }
     }
     return mapped;
+}
+
+/// Insomnia's `pathParameters[]` (`{name, value}`) as the `{key, value}` rows
+/// `substitute_path_variables` reads - the same `name` -> `key` conversion
+/// `kv_row` already does for query/header rows.
+json insomnia_path_variable_rows (const json* rows) {
+    return kv_rows (rows);
 }
 
 /**
@@ -1856,21 +1869,25 @@ class InsomniaTree {
         return found == by_parent_.end () ? NONE : found->second;
     }
 
-    json build_request (const json* resource) {
+    json build_request (const json* resource, json& path_variables) {
         counts_.requests += 1;
         json body = insomnia_body (prop (resource, "body"), counts_);
         const json params =
         kv_rows (rows_or_throw (prop (resource, "parameters"), "`parameters`"));
         const json headers =
         kv_rows (rows_or_throw (prop (resource, "headers"), "`headers`"));
-        const json* description = prop (resource, "description");
+        const json* description       = prop (resource, "description");
+        const json path_variable_rows = insomnia_path_variable_rows (
+        rows_or_throw (prop (resource, "pathParameters"), "`pathParameters`"));
 
         json request;
         request["name"] = resource_name (resource, "Untitled");
         request["description"] =
         description == nullptr || description->is_null () ? json ("") : *description;
         request["method"] = to_method (prop (resource, "method"));
-        request["url"]    = normalize_vars (as_string (prop (resource, "url")));
+        request["url"]    = substitute_path_variables (
+        normalize_vars (as_string (prop (resource, "url"))),
+        &path_variable_rows, path_variables, counts_.skipped_path_variables);
         request["params"] = map_key_values (&params);
         request["headers"] = with_required_content_type (map_key_values (&headers), body);
         request["body"] = std::move (body);
@@ -1884,12 +1901,12 @@ class InsomniaTree {
     }
 
     /** One child of a folder, by the resource type it declares. */
-    void add_child (const json* child, json& children, json& requests) {
+    void add_child (const json* child, json& children, json& requests, json& path_variables) {
         if (type_is (child, "request_group")) {
             counts_.folders += 1;
             children.push_back (build_collection (child, /*workspace=*/false));
         } else if (type_is (child, "request")) {
-            requests.push_back (build_request (child));
+            requests.push_back (build_request (child, path_variables));
         } else if (type_is (child, "grpc_request")) {
             tally_.add ("grpc");
         } else if (type_is (child, "websocket_request")) {
@@ -1909,10 +1926,11 @@ class InsomniaTree {
         if (!visited_.insert (id).second) {
             throw MalformedImport ("resource \"" + id + "\" appears twice in the folder tree");
         }
-        json children = json::array ();
-        json requests = json::array ();
+        json children       = json::array ();
+        json requests       = json::array ();
+        json path_variables = json::object ();
         for (const json* child : children_of (node)) {
-            add_child (child, children, requests);
+            add_child (child, children, requests, path_variables);
         }
         json auth = insomnia_auth (prop (node, "authentication"), counts_);
         const json* description = prop (node, "description");
@@ -1924,6 +1942,15 @@ class InsomniaTree {
         collection["variables"] = workspace ?
         to_env_vars (as_record (prop (node, "environment"))) :
         json::object ();
+        // Path variables are collected while walking this node's own requests,
+        // then merged once so an explicit environment/folder variable of the
+        // same name is never overwritten by one only a request's URL implied -
+        // the same rule `parse_postman` applies at its single root collection.
+        for (auto& [key, value] : path_variables.items ()) {
+            if (!collection["variables"].contains (key)) {
+                collection["variables"][key] = value;
+            }
+        }
         // Collections never inherit.
         collection["auth"] =
         auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
@@ -1993,6 +2020,7 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
     json environments = tree.environments ();
 
     tree.tally ().add ("file_body", tree.counts ().file_body);
+    tree.tally ().add ("path_variables", tree.counts ().skipped_path_variables);
 
     json meta;
     meta["format"]           = "Insomnia Export v4";
