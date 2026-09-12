@@ -104,6 +104,8 @@ Same `pmFolder` mapping. A folder node has `name`/`description`/`variable`/`auth
 | `item.protocolProfileBehavior.maxRedirects` | `maxRedirects` | only when it is a finite number; otherwise **absent** (engine default `10`) |
 | `item.protocolProfileBehavior.strictSSL` | `verifySSL` | only when it is a boolean; otherwise **absent** (engine default `true`) |
 | `item.response[]` | `examples` | via `pmExamples` (see [Saved responses](#saved-responses)); **absent** when the item saved none |
+| `request.certificate` | - | not yet imported (issue #1656) - Vayu's client certificates belong to a host, not a request; counted as `certificate` |
+| `request.proxy` | - | not yet imported (issue #1656) - Vayu has no per-request proxy override; counted as `proxy_config` |
 
 ### Saved responses
 
@@ -151,7 +153,7 @@ Values of the wrong type are ignored rather than coerced (a `"false"` string wou
 
 ## Body mapping
 
-`pmBody(body, ctx)` switches on `body.mode`. A missing `body` or missing `body.mode` → `{ mode: "none" }`.
+`pmBody(body, ctx)` switches on `body.mode`. A missing `body` or missing `body.mode` → `{ mode: "none" }`. `body.disabled: true` ("prevent request body from being sent") is checked first and also imports as `{ mode: "none" }` regardless of `mode` - counted as `disabled_body` (issue #1444) rather than sending a body the user had turned off.
 
 | Postman `body.mode` | Vayu `RequestBody` | Notes |
 |---------------------|--------------------|-------|
@@ -233,7 +235,7 @@ Postman **collection** files do not embed environments, so this parser always re
 
 **`importScripts`** is honored: when `opts.importScripts` is false, `pmRequest` and `pmFolder` emit `""` for both `preRequestScript` and `postRequestScript` (the `join_exec` call is gated behind the flag). When true, `join_exec` joins the event's `script.exec` array with `\n` (or returns the string form, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
-**`meta.skipped`** - this parser populates: `file_body` (from `formdata` file fields and `file`-mode bodies), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (`hawk`/`oauth1`/`edgegrid`/a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `path_variables` and `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `invalid_percent_encoding` (a query key or value whose invalid `%` escape changes when rejoined into the URL, see [URL handling](#url-handling)), and `variable_metadata` (a collection, folder, environment or globals variable's `description` or non-`secret` `type`). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
+**`meta.skipped`** - this parser populates: `file_body` (from `formdata` file fields and `file`-mode bodies), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (`hawk`/`oauth1`/`edgegrid`/a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `path_variables` and `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `invalid_percent_encoding` (a query key or value whose invalid `%` escape changes when rejoined into the URL, see [URL handling](#url-handling)), `variable_metadata` (a collection, folder, environment or globals variable's `description` or non-`secret` `type`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), and `certificate` / `proxy_config` (a request's own `certificate` or `proxy` override - Vayu's client certificates belong to a host, not a request, per `engine/CLAUDE.md`, and there is no per-request proxy override at all; neither is mapped yet, see [issue #1656](https://github.com/athrvk/vayu/issues/1656)). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 
 **`meta.nonExecutableAuth`** - populated: incremented once per **request** whose mapped auth mode is `digest`, `aws`, or `ntlm`. These auths are stored on the draft (with their `config`) but Vayu has no execution path for them. `oauth2` is now mapped to an executable config and does **not** count.
 

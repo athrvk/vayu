@@ -76,6 +76,19 @@ export interface SkippedItem {
 		 */
 		| "duplicate_operation_id"
 		/**
+		 * An OpenAPI 3.1 top-level `webhooks` entry's own operation. A webhook
+		 * describes what the API sends *to* a callback URL the user registers
+		 * elsewhere, not a request Vayu can send, so it is counted rather than
+		 * imported as a request that could never actually be sent.
+		 */
+		| "webhook_operations"
+		/**
+		 * An operation declared `deprecated: true`. Vayu's request model has no
+		 * deprecated flag, so the operation imports identically to a current
+		 * one - counted so the marker's loss is at least named.
+		 */
+		| "deprecated_operation"
+		/**
 		 * A parameter declared `in: "cookie"` (issue #719). Vayu's request model
 		 * has no cookie-parameter row - cookies are the jar's, not a request
 		 * field - so the declaration is dropped. Counted rather than mapped onto a
@@ -155,6 +168,14 @@ export interface SkippedItem {
 		 */
 		| "security_unmapped_type"
 		/**
+		 * An OpenAPI 3.x `apiKey` scheme naming `in: "cookie"` - a placement
+		 * Vayu's apikey mode has no slot for (only header/query), so
+		 * reinterpreting it as a header would send the credential somewhere
+		 * the document never named (issue #1444). The request keeps
+		 * `{ mode: "inherit" }`.
+		 */
+		| "security_unmapped_apikey_cookie"
+		/**
 		 * An OpenAPI document declaring more than one `servers` entry (issue
 		 * #1444). Only `servers[0]` becomes the collection's `baseUrl`; each
 		 * further entry names an environment the import does not create.
@@ -190,6 +211,28 @@ export interface SkippedItem {
 		 * secret flag, which both import.
 		 */
 		| "variable_metadata"
+		/**
+		 * A Postman request body whose own `disabled` flag was `true` ("prevent
+		 * request body from being sent"). Vayu has no disabled-body toggle to
+		 * preserve the switch itself, so the body imports as `{ mode: "none" }`
+		 * rather than active - sending it anyway is the one outcome the user's
+		 * own setting can never be worth keeping.
+		 */
+		| "disabled_body"
+		/**
+		 * A Postman request's own `certificate` (a client certificate scoped to
+		 * that one request). Vayu's client certificates belong to a host, not a
+		 * request (engine/CLAUDE.md), so importing one means writing a registry
+		 * entry beside the collection rather than a request field - not yet
+		 * built (issue #1656). Counted so the loss is not silent.
+		 */
+		| "certificate"
+		/**
+		 * A Postman request's own `proxy` override. Vayu has no per-request
+		 * proxy override to import it into - not yet built (issue #1656).
+		 * Counted so the loss is not silent.
+		 */
+		| "proxy_config"
 		/**
 		 * An `x-vayu-elements` array (an OpenAPI document a Vayu export wrote) that
 		 * failed the element registry - an unknown kind, a config the wrong shape -

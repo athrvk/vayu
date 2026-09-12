@@ -2442,6 +2442,7 @@
               "config": {
                 "grantType": "client_credentials",
                 "accessTokenUrl": "https://auth.example.com/token",
+                "refreshTokenUrl": "",
                 "clientId": "{{clientId}}",
                 "clientSecret": "{{clientSecret}}",
                 "scope": "read write",
@@ -2605,6 +2606,7 @@
               "config": {
                 "grantType": "client_credentials",
                 "accessTokenUrl": "https://auth.example.com/token",
+                "refreshTokenUrl": "",
                 "clientId": "{{clientId}}",
                 "clientSecret": "{{clientSecret}}",
                 "scope": "read write",

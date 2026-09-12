@@ -1432,6 +1432,14 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 		"operation whose operationId was already used (identified by path instead)",
 		"operations whose operationId was already used (identified by path instead)",
 	],
+	webhook_operations: [
+		"webhook operation (describes what the API sends you, not a request Vayu can send)",
+		"webhook operations (describe what the API sends you, not requests Vayu can send)",
+	],
+	deprecated_operation: [
+		"deprecated operation (imported the same as a current one - Vayu has no deprecated flag)",
+		"deprecated operations (imported the same as current ones - Vayu has no deprecated flag)",
+	],
 	// The three below name what the *request* lost rather than the spec construct
 	// that was skipped (issue #719): a reader of this line is deciding what to
 	// finish by hand after the import, and "cookie parameter" alone does not say
@@ -1480,6 +1488,10 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 		"operation's security scheme of a type Vayu cannot map - request kept the collection's auth",
 		"operations' security schemes of a type Vayu cannot map - requests kept the collection's auth",
 	],
+	security_unmapped_apikey_cookie: [
+		"operation's apiKey security scheme placed in a cookie, which Vayu cannot send - request kept the collection's auth",
+		"operations' apiKey security schemes placed in a cookie, which Vayu cannot send - requests kept the collection's auth",
+	],
 	servers_dropped: [
 		"additional server URL (only the first becomes the collection's baseUrl)",
 		"additional server URLs (only the first becomes the collection's baseUrl)",
@@ -1497,6 +1509,18 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 	variable_metadata: [
 		"variable's description or type, which Vayu does not store",
 		"variables' descriptions or types, which Vayu does not store",
+	],
+	disabled_body: [
+		"request body Postman had turned off - imported with no body rather than sent anyway",
+		"request bodies Postman had turned off - imported with no body rather than sent anyway",
+	],
+	certificate: [
+		"request-level client certificate (Vayu certificates are per-host, not per-request - not yet imported)",
+		"request-level client certificates (Vayu certificates are per-host, not per-request - not yet imported)",
+	],
+	proxy_config: [
+		"request-level proxy override (not yet imported)",
+		"request-level proxy overrides (not yet imported)",
 	],
 	invalid_percent_encoding: [
 		"query value with an invalid % escape, changed when rejoined into the URL",

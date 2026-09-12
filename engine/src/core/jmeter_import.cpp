@@ -267,8 +267,24 @@ std::optional<KindConfig> parse_response_assertion (const pugi::xml_node& el) {
     // own default ("contains") already is.
     const std::string mode =
     (long_prop (el, "Assertion.test_type", 2) & 8) != 0 ? "equals" : "contains";
-    const std::string target =
-    field == "Assertion.response_headers" ? "headers" : "body";
+    std::string target;
+    if (field == "Assertion.response_headers") {
+        target = "headers";
+    } else if (field == "Assertion.sample_label") {
+        // JMeter's "URL Sampled" - the request's own URL, `assert.contains`'s
+        // "url" field.
+        target = "url";
+    } else if (field.empty () || field == "Assertion.response_data") {
+        target = "body";
+    } else {
+        // Request Data, Request Headers, Response Message, or Document (a
+        // parsed-DOM view of the body) - none has an `assert.contains` field
+        // to land on. Guessing "body" would assert against text the source
+        // never named as its target; refused instead, tallied by the caller
+        // the same way any other recognised class this parser could not
+        // extract enough from is.
+        return std::nullopt;
+    }
     return KindConfig{ "assert.contains",
         json{ { "field", target }, { "text", texts.front () }, { "mode", mode } } };
 }
@@ -477,8 +493,9 @@ std::optional<KindConfig> parse_controller (std::string_view tag, const pugi::xm
     }
     // `SwitchController` selects by list index or a JMeter variable, neither
     // of which maps onto `control.switch`'s named-case grammar without
-    // inventing case names JMeter never declared - left unmapped, same as an
-    // unrecognised controller: the folder still imports as a plain grouping.
+    // inventing case names JMeter never declared - left unmapped; the folder
+    // still imports as a plain grouping, tallied by the caller like any other
+    // recognised class this parser could not extract enough from.
     return std::nullopt;
 }
 
@@ -531,12 +548,25 @@ void merge_http_defaults (const pugi::xml_node& el, json& variables) {
 // The walk itself.
 // ---------------------------------------------------------------------------
 
+/// Whether a JMeter element runs at all - the `enabled="false"` attribute the
+/// GUI writes when a user toggles an element off. Absent means true, JMeter's
+/// own default for an element the format never bothered to state either way.
+bool jmeter_enabled (const pugi::xml_node& el) {
+    return el.attribute ("enabled").as_bool (true);
+}
+
 /// A `<hashTree>`'s direct children, paired: a test element followed by its
 /// own (possibly empty) `<hashTree>`, in document order - JMeter's own
 /// serialization shape. @p visit receives the element and that following
 /// tree, an empty node when there is none.
+///
+/// A disabled element - and everything nested under it, since JMeter itself
+/// never runs a disabled element's children either - is skipped here rather
+/// than by each caller: this is the one place every walk in the file passes
+/// through, so a caller cannot forget the check the way a request the user
+/// turned off silently reappearing as active on import would suggest one did.
 template <typename Visit>
-void for_each_paired_child (const pugi::xml_node& hash_tree, Visit&& visit) {
+void for_each_paired_child (Ctx& ctx, const pugi::xml_node& hash_tree, Visit&& visit) {
     pugi::xml_node child = hash_tree.first_child ();
     while (child) {
         if (std::string_view (child.name ()) == "hashTree") {
@@ -551,6 +581,11 @@ void for_each_paired_child (const pugi::xml_node& hash_tree, Visit&& visit) {
         if (next && std::string_view (next.name ()) == "hashTree") {
             own_tree = next;
             next     = next.next_sibling ();
+        }
+        if (!jmeter_enabled (element)) {
+            ctx.tally.add (std::string (element.name ()) + "_disabled");
+            child = next;
+            continue;
         }
         visit (element, own_tree);
         child = next;
@@ -572,9 +607,10 @@ void walk_hash_tree (const pugi::xml_node& hash_tree, Sink sink, Ctx& ctx);
 /// realistic "log in during setup" plan) has no `script.setup`/`.teardown`
 /// equivalent and is counted instead, per the issue's own mapping (the table
 /// names only the script case).
-std::string collect_group_script (const pugi::xml_node& group_tree) {
+std::string collect_group_script (Ctx& ctx, const pugi::xml_node& group_tree) {
     std::string script;
-    for_each_paired_child (group_tree, [&] (const pugi::xml_node& el, const pugi::xml_node&) {
+    for_each_paired_child (
+    ctx, group_tree, [&] (const pugi::xml_node& el, const pugi::xml_node&) {
         const std::string_view tag = el.name ();
         if (tag != "JSR223PreProcessor" && tag != "JSR223PostProcessor" &&
         tag != "JSR223Sampler" && tag != "BeanShellPreProcessor" &&
@@ -606,7 +642,17 @@ json header_manager_rows (const pugi::xml_node& header_manager) {
 /// A sampler's own `HTTPsampler.Arguments`: the raw-body case when
 /// `postBodyRaw` is set and there is exactly the one argument that shape
 /// implies, query/form rows otherwise.
-void apply_sampler_arguments (const pugi::xml_node& el, json& params, json& body) {
+void apply_sampler_arguments (Ctx& ctx, const pugi::xml_node& el, json& params, json& body) {
+    // `HTTPsampler.Files` (`HTTPFileArgs`/`HTTPFileArg`) - a multipart file
+    // upload - is nested inside the sampler itself rather than a sibling tag
+    // `for_each_paired_child` would tally on its own, so a file upload this
+    // parser has no formdata-part model to build yet (issue #1657) is
+    // counted here instead of being dropped with nothing said, the same
+    // "nothing dropped quietly" rule the sibling-tag fallback already follows.
+    if (const pugi::xml_node files = element_prop (el, "HTTPsampler.Files");
+    files && collection_prop (files, "HTTPFileArgs.files").first_child ()) {
+        ctx.tally.add ("HTTPsampler.Files");
+    }
     const pugi::xml_node arguments = element_prop (el, "HTTPsampler.Arguments");
     if (!arguments) {
         return;
@@ -626,7 +672,8 @@ void apply_sampler_arguments (const pugi::xml_node& el, json& params, json& body
 /// merged into @p headers, any recognised extractor/assertion/timer/processor
 /// into @p elements, everything else tallied by tag.
 void collect_sampler_scope (Ctx& ctx, const pugi::xml_node& own_tree, json& headers, json& elements) {
-    for_each_paired_child (own_tree, [&] (const pugi::xml_node& child, const pugi::xml_node&) {
+    for_each_paired_child (
+    ctx, own_tree, [&] (const pugi::xml_node& child, const pugi::xml_node&) {
         const std::string_view tag = child.name ();
         if (tag == "HeaderManager") {
             for (auto& header : header_manager_rows (child)) {
@@ -661,10 +708,16 @@ json build_http_sampler (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_nod
 
     json params = json::array ();
     json body   = json{ { "mode", "none" } };
-    apply_sampler_arguments (el, params, body);
+    apply_sampler_arguments (ctx, el, params, body);
     request["params"] = std::move (params);
     request["body"]   = std::move (body);
     request["auth"]   = json{ { "mode", "inherit" } };
+    // JMeter offers two mutually-exclusive ways to follow a redirect - its own
+    // "Follow Redirects" (the default) and HttpClient's "Redirect
+    // Automatically" - either one means Vayu's single `followRedirects` is
+    // true; only unchecking both turns it off.
+    request["followRedirects"] = bool_prop (el, "HTTPSampler.follow_redirects", true) ||
+    bool_prop (el, "HTTPSampler.auto_redirects", false);
 
     json headers  = json::array ();
     json elements = json::array ();
@@ -693,6 +746,16 @@ Sink parent) {
         if (auto built = make_valid_element (ctx, kc->first, std::move (kc->second))) {
             folder["elements"].push_back (std::move (*built));
         }
+    } else {
+        // A controller tag this parser recognises but could not build a
+        // `control.*` element for - a `SwitchController`, a `LoopController`
+        // set to JMeter's "forever" (`loops <= 0`), or an `IfController` whose
+        // condition does not match `translate_if_condition`'s grammar. The
+        // folder still imports and still groups its members, but the logic
+        // that shaped it is gone, so it is tallied the same way
+        // `build_leaf_element` tallies a recognised class it could not
+        // extract enough from - never silently, per issue #1443.
+        ctx.tally.add (std::string (tag) + "_unrecognised");
     }
     if (own_tree) {
         walk_hash_tree (own_tree,
@@ -723,7 +786,8 @@ void flatten_into_sink (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node
 /// as unrecognised when it carries none (see `collect_group_script`).
 void dispatch_lifecycle_group (Ctx& ctx, std::string_view tag, const pugi::xml_node& own_tree, Sink sink) {
     if (ctx.options.import_scripts && own_tree) {
-        if (const std::string script = collect_group_script (own_tree); !script.empty ()) {
+        if (const std::string script = collect_group_script (ctx, own_tree);
+        !script.empty ()) {
             const char* kind = tag == "SetupThreadGroup" ? "script.setup" : "script.teardown";
             if (auto built = make_valid_element (ctx, kind, json{ { "script", script } })) {
                 sink.elements.push_back (std::move (*built));
@@ -782,8 +846,8 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
 }
 
 void walk_hash_tree (const pugi::xml_node& hash_tree, Sink sink, Ctx& ctx) {
-    for_each_paired_child (
-    hash_tree, [&] (const pugi::xml_node& el, const pugi::xml_node& own_tree) {
+    for_each_paired_child (ctx, hash_tree,
+    [&] (const pugi::xml_node& el, const pugi::xml_node& own_tree) {
         dispatch_child (ctx, el, own_tree, sink);
     });
 }

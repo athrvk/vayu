@@ -366,9 +366,10 @@ std::string nv (const std::string& value) {
 /// header as Bearer, auto-fetch and auto-refresh on.
 json default_oauth2_config () {
     return json{ { "grantType", "client_credentials" }, { "accessTokenUrl", "" },
-        { "clientId", "" }, { "clientSecret", "" }, { "scope", "" },
-        { "credentialsPlacement", "basic_auth_header" }, { "tokenPlacement", "header" },
-        { "headerPrefix", "Bearer" }, { "pkce", true }, { "autoFetchToken", true },
+        { "refreshTokenUrl", "" }, { "clientId", "" }, { "clientSecret", "" },
+        { "scope", "" }, { "credentialsPlacement", "basic_auth_header" },
+        { "tokenPlacement", "header" }, { "headerPrefix", "Bearer" },
+        { "pkce", true }, { "autoFetchToken", true },
         { "autoRefreshToken", true }, { "useEmbeddedBrowser", false } };
 }
 
@@ -585,10 +586,11 @@ std::string scope_string (const json* scopes) {
 json map_openapi_v3_oauth2 (const json* scheme) {
     const json* flows = as_record (prop (scheme, "flows"));
     if (const json* flow = as_record (prop (flows, "clientCredentials"))) {
-        json config              = openapi_oauth2_base ();
-        config["grantType"]      = "client_credentials";
-        config["accessTokenUrl"] = nv (prop (flow, "tokenUrl"));
-        config["scope"]          = scope_string (prop (flow, "scopes"));
+        json config               = openapi_oauth2_base ();
+        config["grantType"]       = "client_credentials";
+        config["accessTokenUrl"]  = nv (prop (flow, "tokenUrl"));
+        config["refreshTokenUrl"] = nv (prop (flow, "refreshUrl"));
+        config["scope"]           = scope_string (prop (flow, "scopes"));
         return oauth2_auth (std::move (config));
     }
     if (const json* flow = as_record (prop (flows, "authorizationCode"))) {
@@ -597,14 +599,16 @@ json map_openapi_v3_oauth2 (const json* scheme) {
         config["pkce"]             = true;
         config["authorizationUrl"] = nv (prop (flow, "authorizationUrl"));
         config["accessTokenUrl"]   = nv (prop (flow, "tokenUrl"));
+        config["refreshTokenUrl"]  = nv (prop (flow, "refreshUrl"));
         config["scope"]            = scope_string (prop (flow, "scopes"));
         return oauth2_auth (std::move (config));
     }
     if (const json* flow = as_record (prop (flows, "password"))) {
-        json config              = openapi_oauth2_base ();
-        config["grantType"]      = "password";
-        config["accessTokenUrl"] = nv (prop (flow, "tokenUrl"));
-        config["scope"]          = scope_string (prop (flow, "scopes"));
+        json config               = openapi_oauth2_base ();
+        config["grantType"]       = "password";
+        config["accessTokenUrl"]  = nv (prop (flow, "tokenUrl"));
+        config["refreshTokenUrl"] = nv (prop (flow, "refreshUrl"));
+        config["scope"]           = scope_string (prop (flow, "scopes"));
         return oauth2_auth (std::move (config));
     }
     if (const json* flow = as_record (prop (flows, "implicit"))) {
@@ -612,10 +616,17 @@ json map_openapi_v3_oauth2 (const json* scheme) {
         config["grantType"]        = "authorization_code";
         config["pkce"]             = true;
         config["authorizationUrl"] = nv (prop (flow, "authorizationUrl"));
-        config["scope"]            = scope_string (prop (flow, "scopes"));
+        // The Implicit flow has no token endpoint of its own, so no
+        // `refreshUrl` either per the specification - nothing to read.
+        config["scope"] = scope_string (prop (flow, "scopes"));
         return oauth2_auth (std::move (config));
     }
-    return oauth2_auth (openapi_oauth2_base ());
+    // A `flows` object naming none of the four the specification defines - a
+    // malformed document, since the specification requires at least one. A
+    // fabricated client_credentials config with blank URLs would be
+    // indistinguishable from a genuinely declared one; `none` is left for the
+    // caller to tally the same way any other unmapped scheme is.
+    return json{ { "mode", "none" } };
 }
 
 /// `mapSwaggerOAuth2(scheme)`: 2.0's single `flow` field.
@@ -641,7 +652,12 @@ json map_swagger_oauth2 (const json* scheme) {
         config["pkce"]             = true;
         config["authorizationUrl"] = nv (prop (scheme, "authorizationUrl"));
     } else {
-        return oauth2_auth (openapi_oauth2_base ());
+        // `flow` missing, misspelled, or of the wrong type - the
+        // specification's four values are the only ones defined. A
+        // fabricated client_credentials config with blank URLs would be
+        // indistinguishable from a genuinely declared one; `none` is left
+        // for the caller to tally the same way any other unmapped scheme is.
+        return json{ { "mode", "none" } };
     }
     return oauth2_auth (std::move (config));
 }
@@ -738,6 +754,9 @@ struct PostmanCounts {
     int skipped_path_variables     = 0;
     int skipped_url_without_raw    = 0;
     int skipped_variable_metadata  = 0;
+    int disabled_body              = 0;
+    int skipped_certificate        = 0;
+    int skipped_proxy              = 0;
     // A Postman oauth2 detail carrying `state` (never stored) or a pre-fetched
     // `accessToken` alongside an explicit grant config (nowhere to seed it) -
     // see `map_postman_oauth2` (issue #1460).
@@ -864,6 +883,15 @@ json raw_body (const std::string& content, const std::string* language) {
 json pm_body (const json* body, PostmanCounts& counts) {
     const json* node = as_record (body);
     if (node == nullptr || !truthy (prop (node, "mode"))) {
+        return json{ { "mode", "none" } };
+    }
+    if (const json* disabled = prop (node, "disabled");
+    disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ()) {
+        // Postman's own "prevent request body from being sent" toggle. Vayu
+        // has no disabled-body concept to preserve the switch itself, but
+        // sending the body anyway - the request-time effect the user turned
+        // off - is the one outcome importing it active can never be worth.
+        counts.disabled_body += 1;
         return json{ { "mode", "none" } };
     }
     const std::string* mode = as_str (prop (node, "mode"));
@@ -1057,14 +1085,19 @@ std::string host_path_url (const json* url) {
     return host.empty () && !has_path ? std::string () : out;
 }
 
-/// `substitutePathVariables(base, variable[])`: Postman's `:key` path segments
-/// as Vayu's `{{key}}` template. The first value seen for a key is recorded
-/// into @p counts so the caller can give the template something to resolve
-/// against; counted once per URL that carried at least one substitution,
-/// which is a mapping (the value survives as a variable), not a loss.
+/// `substitutePathVariables(base, variable[])`: a `:key` path segment as
+/// Vayu's `{{key}}` template - Postman's `url.variable[]`, and (via
+/// `insomnia_path_variable_rows`) Insomnia's `pathParameters[]`, both read
+/// into the same `{key, value}` row shape first. The first value seen for a
+/// key is recorded into @p path_variables so the caller can give the template
+/// something to resolve against; @p skipped_count is incremented once per URL
+/// that carried at least one substitution, which is a mapping (the value
+/// survives as a variable), not a loss - the "path_variables" tally kind
+/// reads accordingly in both formats.
 std::string substitute_path_variables (const std::string& base,
 const json* declared,
-PostmanCounts& counts) {
+json& path_variables,
+int& skipped_count) {
     if (declared == nullptr || !declared->is_array () || declared->empty ()) {
         return base;
     }
@@ -1088,14 +1121,14 @@ PostmanCounts& counts) {
             continue;
         }
         out.replace (at, token.size (), "{{" + *declared_key + "}}");
-        if (!counts.path_variables.contains (*declared_key)) {
-            counts.path_variables[*declared_key] =
+        if (!path_variables.contains (*declared_key)) {
+            path_variables[*declared_key] =
             json{ { "value", normalize_vars (as_string (prop (record, "value"))) },
                 { "enabled", true } };
         }
     }
     if (out != base) {
-        counts.skipped_path_variables += 1;
+        skipped_count += 1;
     }
     return out;
 }
@@ -1122,9 +1155,9 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     const size_t question = raw.find ('?');
     const std::string base_raw =
     question == std::string::npos ? raw : raw.substr (0, question);
-    const std::string base =
-    substitute_path_variables (base_raw, prop (url, "variable"), counts);
-    json structured = map_key_values (prop (url, "query"));
+    const std::string base = substitute_path_variables (base_raw,
+    prop (url, "variable"), counts.path_variables, counts.skipped_path_variables);
+    json structured        = map_key_values (prop (url, "query"));
     // `query[]` wins when it has anything - it carries disabled state and
     // descriptions that `raw` cannot. Falling back to `raw` matters for
     // hand-written or script-generated collections that populate only `raw`.
@@ -1260,6 +1293,16 @@ json pm_request (const json* item, PostmanCounts& counts) {
         counts.non_executable += 1;
     }
     counts.requests += 1;
+    if (truthy (prop (rq, "certificate"))) {
+        // A client certificate belongs to a host in Vayu, not a request
+        // (engine/CLAUDE.md), so importing one means writing a registry entry
+        // beside the collection rather than a request field - deferred to
+        // issue #1656; counted so the loss is not silent in the meantime.
+        counts.skipped_certificate += 1;
+    }
+    if (truthy (prop (rq, "proxy"))) {
+        counts.skipped_proxy += 1;
+    }
     const std::vector<const json*> events = pm_events (item);
     json body                             = pm_body (prop (rq, "body"), counts);
     json examples                         = pm_examples (item, counts);
@@ -1389,6 +1432,9 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("url_without_raw", counts.skipped_url_without_raw);
     tally.add ("invalid_percent_encoding", counts.invalid_percent_encoding);
     tally.add ("variable_metadata", counts.skipped_variable_metadata);
+    tally.add ("disabled_body", counts.disabled_body);
+    tally.add ("certificate", counts.skipped_certificate);
+    tally.add ("proxy_config", counts.skipped_proxy);
 
     json meta;
     meta["format"]              = format;
@@ -1475,10 +1521,11 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
 /// things Vayu genuinely cannot store.
 struct InsomniaCounts {
     ImportOptions options;
-    int non_executable = 0;
-    int file_body      = 0;
-    int requests       = 0;
-    int folders        = 0;
+    int non_executable         = 0;
+    int file_body              = 0;
+    int requests               = 0;
+    int folders                = 0;
+    int skipped_path_variables = 0;
 };
 
 /// A row array that may be absent but must not be another type.
@@ -1521,6 +1568,13 @@ json kv_rows (const json* rows) {
         }
     }
     return mapped;
+}
+
+/// Insomnia's `pathParameters[]` (`{name, value}`) as the `{key, value}` rows
+/// `substitute_path_variables` reads - the same `name` -> `key` conversion
+/// `kv_row` already does for query/header rows.
+json insomnia_path_variable_rows (const json* rows) {
+    return kv_rows (rows);
 }
 
 /**
@@ -1596,6 +1650,15 @@ json insomnia_auth (const json* auth, InsomniaCounts& counts) {
         // bag (stored, not executed).
         counts.non_executable += 1;
         return json{ { "mode", "aws" }, { "config", insomnia_config (node) } };
+    }
+    if (named == "none") {
+        // Insomnia's own explicit "No Auth" - distinct from an absent
+        // `authentication` object, which means "inherit". An explicit `none`
+        // must terminate inheritance the same way Postman's own `noauth`
+        // does in `map_postman_auth`: falling through to `inherit` here would
+        // send a folder's credentials to a request the user explicitly opted
+        // out of them for.
+        return json{ { "mode", "none" } };
     }
     return json{ { "mode", "inherit" } };
 }
@@ -1856,21 +1919,25 @@ class InsomniaTree {
         return found == by_parent_.end () ? NONE : found->second;
     }
 
-    json build_request (const json* resource) {
+    json build_request (const json* resource, json& path_variables) {
         counts_.requests += 1;
         json body = insomnia_body (prop (resource, "body"), counts_);
         const json params =
         kv_rows (rows_or_throw (prop (resource, "parameters"), "`parameters`"));
         const json headers =
         kv_rows (rows_or_throw (prop (resource, "headers"), "`headers`"));
-        const json* description = prop (resource, "description");
+        const json* description       = prop (resource, "description");
+        const json path_variable_rows = insomnia_path_variable_rows (
+        rows_or_throw (prop (resource, "pathParameters"), "`pathParameters`"));
 
         json request;
         request["name"] = resource_name (resource, "Untitled");
         request["description"] =
         description == nullptr || description->is_null () ? json ("") : *description;
         request["method"] = to_method (prop (resource, "method"));
-        request["url"]    = normalize_vars (as_string (prop (resource, "url")));
+        request["url"]    = substitute_path_variables (
+        normalize_vars (as_string (prop (resource, "url"))),
+        &path_variable_rows, path_variables, counts_.skipped_path_variables);
         request["params"] = map_key_values (&params);
         request["headers"] = with_required_content_type (map_key_values (&headers), body);
         request["body"] = std::move (body);
@@ -1884,12 +1951,12 @@ class InsomniaTree {
     }
 
     /** One child of a folder, by the resource type it declares. */
-    void add_child (const json* child, json& children, json& requests) {
+    void add_child (const json* child, json& children, json& requests, json& path_variables) {
         if (type_is (child, "request_group")) {
             counts_.folders += 1;
             children.push_back (build_collection (child, /*workspace=*/false));
         } else if (type_is (child, "request")) {
-            requests.push_back (build_request (child));
+            requests.push_back (build_request (child, path_variables));
         } else if (type_is (child, "grpc_request")) {
             tally_.add ("grpc");
         } else if (type_is (child, "websocket_request")) {
@@ -1909,10 +1976,11 @@ class InsomniaTree {
         if (!visited_.insert (id).second) {
             throw MalformedImport ("resource \"" + id + "\" appears twice in the folder tree");
         }
-        json children = json::array ();
-        json requests = json::array ();
+        json children       = json::array ();
+        json requests       = json::array ();
+        json path_variables = json::object ();
         for (const json* child : children_of (node)) {
-            add_child (child, children, requests);
+            add_child (child, children, requests, path_variables);
         }
         json auth = insomnia_auth (prop (node, "authentication"), counts_);
         const json* description = prop (node, "description");
@@ -1924,6 +1992,15 @@ class InsomniaTree {
         collection["variables"] = workspace ?
         to_env_vars (as_record (prop (node, "environment"))) :
         json::object ();
+        // Path variables are collected while walking this node's own requests,
+        // then merged once so an explicit environment/folder variable of the
+        // same name is never overwritten by one only a request's URL implied -
+        // the same rule `parse_postman` applies at its single root collection.
+        for (auto& [key, value] : path_variables.items ()) {
+            if (!collection["variables"].contains (key)) {
+                collection["variables"][key] = value;
+            }
+        }
         // Collections never inherit.
         collection["auth"] =
         auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
@@ -1993,6 +2070,7 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
     json environments = tree.environments ();
 
     tree.tally ().add ("file_body", tree.counts ().file_body);
+    tree.tally ().add ("path_variables", tree.counts ().skipped_path_variables);
 
     json meta;
     meta["format"]           = "Insomnia Export v4";
@@ -2231,8 +2309,16 @@ json scheme_to_auth_v3 (const json* scheme) {
         return json{ { "mode", "basic" }, { "username", "" }, { "password", "" } };
     }
     if (*type == "apiKey") {
+        const json* in = prop (node, "in");
+        // 3.x's apiKey has a third placement `cookie`, which Vayu's apikey
+        // mode has no slot for (only header/query) - reinterpreting it as a
+        // header would send the credential somewhere the document never
+        // named, so this is left unmapped like any other scheme Vayu cannot
+        // execute, not silently misplaced.
+        if (in != nullptr && *in == "cookie") {
+            return json{ { "mode", "none" } };
+        }
         const std::string* name = as_str (prop (node, "name"));
-        const json* in          = prop (node, "in");
         return json{ { "mode", "apikey" },
             { "key", name == nullptr ? "" : *name }, { "value", "" },
             { "in", in != nullptr && *in == "query" ? "query" : "header" } };
@@ -2305,6 +2391,12 @@ std::string_view unmapped_security_kind (const json* scheme) {
     }
     if (type != nullptr && *type == "openIdConnect") {
         return "security_unmapped_openidconnect";
+    }
+    if (type != nullptr && *type == "apiKey") {
+        const json* in = prop (node, "in");
+        if (in != nullptr && *in == "cookie") {
+            return "security_unmapped_apikey_cookie";
+        }
     }
     return "security_unmapped_type";
 }
@@ -2613,6 +2705,20 @@ class OperationFolders {
     bool pathed_ = false;
 };
 
+/// The collection's own auth, built from its primary scheme - and tallied
+/// when that scheme is one Vayu cannot map, the same way an operation-level
+/// override tallies the identical scheme (`operation_auth_override`). Not
+/// tallied when `scheme.node` is null: that is "the document declares no
+/// security" (`scheme_to_auth_v3 (nullptr)` also answers `none`), which has
+/// nothing to report - only a *declared* scheme Vayu could not map is a loss.
+json collection_primary_auth (const PrimaryScheme& scheme, bool v3, ImportTally& tally) {
+    json auth = v3 ? scheme_to_auth_v3 (scheme.node) : scheme_to_auth_v2 (scheme.node);
+    if (scheme.node != nullptr && auth.at ("mode") == "none") {
+        tally.add (unmapped_security_kind (scheme.node));
+    }
+    return auth;
+}
+
 json parse_openapi (const json& document,
 const std::string& raw,
 const ImportSource& source,
@@ -2679,10 +2785,9 @@ walk::Dialect dialect) {
     root["variables"]   = base_url.empty () ?
       json::object () :
       json{ { "baseUrl", { { "value", base_url }, { "enabled", true } } } };
-    root["auth"] =
-    v3 ? scheme_to_auth_v3 (scheme.node) : scheme_to_auth_v2 (scheme.node);
-    root["children"] = folders.children ();
-    root["requests"] = folders.root_requests ();
+    root["auth"]        = collection_primary_auth (scheme, v3, tally);
+    root["children"]    = folders.children ();
+    root["requests"]    = folders.root_requests ();
     // The document itself, so the import can store it and bind this collection
     // to it in the same atomic call (#637). `raw` and not a re-serialization:
     // the engine hashes the bytes it stores, and a sync compares against that

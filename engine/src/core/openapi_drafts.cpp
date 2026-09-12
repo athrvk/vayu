@@ -320,12 +320,22 @@ class Sampler {
         }
         if (type == "array") {
             const json* items = prop (node, "items");
-            if (!truthy (items)) {
-                return json::array ();
+            if (truthy (items)) {
+                json sampled = json::array ();
+                sampled.push_back (walk (items, depth + 1, std::move (seen)));
+                return sampled;
             }
-            json sampled = json::array ();
-            sampled.push_back (walk (items, depth + 1, std::move (seen)));
-            return sampled;
+            // 3.1's JSON-Schema-2020-12 tuple form: `items` absent,
+            // `prefixItems` naming each position's own schema instead.
+            if (const json* tuple = prop (node, "prefixItems");
+            tuple != nullptr && tuple->is_array () && !tuple->empty ()) {
+                json sampled = json::array ();
+                for (const json& position : *tuple) {
+                    sampled.push_back (walk (&position, depth + 1, seen));
+                }
+                return sampled;
+            }
+            return json::array ();
         }
         // No type, or one this sampler has no stub for: fall back to walking the
         // properties, which is what a schema with only `properties` declares.
@@ -618,6 +628,12 @@ DeclaredExampleValue declared_example_value (const json* media) {
  * the schema says. An `example` is authored as "a realistic value for this
  * parameter" - written for exactly this - while a `default` only describes what
  * the server assumes when the parameter is absent, so it comes last.
+ *
+ * A Parameter Object declares exactly one of `schema` or `content` (the
+ * latter for a value that needs a media type to be parsed at all, e.g. a
+ * JSON object serialized into a query string) - when `schema` is absent,
+ * `content`'s one entry is read as the same {example, examples, schema}
+ * shape a `schema`-based parameter would carry.
  */
 const json* declared_param_value_v3 (const Sampler& sampler, const json* param) {
     if (const json* example = prop (param, "example")) {
@@ -627,6 +643,23 @@ const json* declared_param_value_v3 (const Sampler& sampler, const json* param) 
         return named;
     }
     const json* schema = as_record (sampler.deref (prop (param, "schema")));
+    const json* media  = nullptr;
+    if (schema == nullptr) {
+        if (const json* content = as_record (prop (param, "content"));
+        content != nullptr && !content->empty ()) {
+            media  = as_record (&content->begin ().value ());
+            schema = as_record (sampler.deref (prop (media, "schema")));
+        }
+    }
+    if (media != nullptr) {
+        if (const json* example = prop (media, "example");
+        example != nullptr && !example->is_null ()) {
+            return example;
+        }
+        if (const json* named = first_named_example (prop (media, "examples"))) {
+            return named;
+        }
+    }
     if (const json* example = prop (schema, "example");
     example != nullptr && !example->is_null ()) {
         return example;
@@ -1183,6 +1216,14 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
 
         DraftRequest& draft = entry.draft;
         name_draft (operation, walked, draft);
+        if (const json* deprecated = prop (operation, "deprecated"); deprecated != nullptr &&
+        deprecated->is_boolean () && deprecated->get<bool> ()) {
+            // Vayu's request model has no deprecated flag to carry the marker
+            // into, so the operation imports identically to a current one;
+            // counted so the loss is at least named (issue #1444's "nothing
+            // dropped quietly").
+            tally_add_count (tally, "deprecated_operation", 1);
+        }
 
         std::vector<DraftField> form_fields;
         read_draft_parameters (document, walked, dialect, sampler, tally, draft, form_fields);
@@ -1208,6 +1249,7 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
     tally_add_count (tally, "malformed_spec", notes.malformed_spec);
     tally_add_count (tally, "unsupported_method", notes.unsupported_method);
     tally_add_count (tally, "duplicate_operation_id", notes.duplicate_operation_id);
+    tally_add_count (tally, "webhook_operations", notes.webhook_operations);
     return drafts;
 }
 
@@ -1243,15 +1285,16 @@ nlohmann::ordered_json ImportTally::items () const {
     // enumerating every JMeter plugin class in advance) is appended after,
     // in `counts_`'s own insertion order, rather than the `nothing dropped
     // quietly` rule silently losing it to a list it was never going to fit.
-    static constexpr auto ORDER = std::to_array<const char*> (
-    { "websocket", "grpc", "api_spec", "unit_test", "file_body",
-    "malformed_item", "unsupported_method", "malformed_spec", "example_no_status",
-    "default_response", "external_ref", "duplicate_operation_id", "cookie_param",
+    static constexpr auto ORDER = std::to_array<const char*> ({ "websocket", "grpc",
+    "api_spec", "unit_test", "file_body", "malformed_item", "unsupported_method",
+    "malformed_spec", "example_no_status", "default_response", "external_ref",
+    "duplicate_operation_id", "webhook_operations", "deprecated_operation", "cookie_param",
     "unmapped_body", "unresolved_base_url", "servers_dropped", "unsupported_auth",
     "security_unmapped_or", "security_unmapped_and", "security_unmapped_scheme",
     "security_unmapped_mutualtls", "security_unmapped_openidconnect",
-    "security_unmapped_type", "oauth2_dropped_field", "path_variables",
-    "url_without_raw", "invalid_percent_encoding", "variable_metadata" });
+    "security_unmapped_type", "security_unmapped_apikey_cookie", "oauth2_dropped_field",
+    "path_variables", "url_without_raw", "invalid_percent_encoding",
+    "variable_metadata", "disabled_body", "certificate", "proxy_config" });
 
     nlohmann::ordered_json items = nlohmann::ordered_json::array ();
     std::unordered_set<std::string> emitted;

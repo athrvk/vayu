@@ -240,6 +240,14 @@ struct WalkNotes {
      * should have to discover from a diff.
      */
     int duplicate_operation_id = 0;
+    /**
+     * A 3.1 top-level `webhooks` entry's own operation (issue #1444's
+     * "OpenAPI should be fully compliant" bar). A webhook describes what the
+     * API sends *to* a callback URL the user registers elsewhere, not a
+     * request Vayu can send, so it is counted rather than walked into a
+     * (nonsensical) sendable request the way a `paths` operation is.
+     */
+    int webhook_operations = 0;
 };
 
 /// One operation the document declares, as every reader of one sees it: the
@@ -347,12 +355,37 @@ std::vector<WalkedOperation>& walked) {
     }
 }
 
+/// Every HTTP-method key a 3.1 `webhooks` entry's Path Item Object declares,
+/// counted rather than walked - see `WalkNotes::webhook_operations`.
+inline void note_webhook_operations (const nlohmann::ordered_json& document, WalkNotes& notes) {
+    const nlohmann::ordered_json* webhooks = find_object (document, "webhooks");
+    if (webhooks == nullptr) {
+        return;
+    }
+    for (auto entry = webhooks->begin (); entry != webhooks->end (); ++entry) {
+        const nlohmann::ordered_json* item =
+        resolve_single_hop (document, entry.value ());
+        if (item == nullptr) {
+            continue;
+        }
+        for (const char* method : HTTP_METHODS) {
+            if (const auto found = item->find (method);
+            found != item->end () && found->is_object ()) {
+                notes.webhook_operations += 1;
+            }
+        }
+    }
+}
+
 inline std::vector<WalkedOperation>
 walk_operations (const nlohmann::ordered_json& document, WalkNotes* notes = nullptr) {
     std::vector<WalkedOperation> walked;
     const Dialect dialect = spec_dialect (document);
     if (dialect == Dialect::None) {
         return walked;
+    }
+    if (notes != nullptr) {
+        note_webhook_operations (document, *notes);
     }
     const nlohmann::ordered_json* paths = find_object (document, "paths");
     if (paths == nullptr) {

@@ -188,6 +188,8 @@ A spec's `parameters` list declares what an operation **accepts**, not what ever
 
 Value precedence is the parameter's own `example`, then the first entry of its `examples` map (unwrapped by `first_named_example`), then the schema's `example`, then the schema's `default` - the same "concrete example beats generated stub" order [`buildBody`](#request-body-generation) uses, and a `default` only describes what the server assumes when the parameter is **absent**, so it ranks last. The `schema` is followed one `$ref` hop (`deref`).
 
+A Parameter Object declares exactly one of `schema` or `content` (the latter for a value that needs a media type to be parsed at all, e.g. a JSON object serialized into a query string) - when `schema` is absent, `declared_param_value_v3` reads `content`'s one media type entry through the same {`example`, `examples`, `schema.example`/`schema.default`} precedence a `schema`-based parameter gets, rather than importing value-less.
+
 Only scalars become a value. An array or object is serialized by the parameter's `style`/`explode`, which this parser does not read, and one row holds one string - so such a parameter imports value-less, like one declaring nothing. A declared `""` is value-less too: an empty-value row writes as a bare key, so `?q=` is not a shape the Params table can hold.
 
 Why optional value-less parameters import **disabled** (issues #622, #658): the row is documentation ("this endpoint accepts `verbose`"), not intent ("send `verbose` always"). Enabled, a query row joined the stored URL as `?verbose`, which some APIs read as `verbose=true`, and a header row claimed an `X-Request-Id:` with nothing in it - both a wire change nobody chose. Disabled, the row is still listed in its table one click from use.
@@ -237,6 +239,7 @@ JSON is preferred: `findJsonMedia` is checked first and takes precedence over te
   - **`examples`** is 3.1's plural replacement for `example`; its **first** entry is used when there is no singular `example`. An empty `examples: []` is ignored.
 - **`allOf` / `oneOf` / `anyOf` - first branch.** If any of these is a non-empty array, the walker recurses into **`branch[0]` only** (precedence `allOf` → `oneOf` → `anyOf`). It does not merge `allOf` members; it just samples the first.
 - **Type arrays (3.1).** 3.1 writes a nullable field as `type: ["string", "null"]` where 3.0 wrote `nullable: true`. The walker samples the **first non-`"null"`** member, so such a field gets the typed stub the user edits rather than the `{}` an unmatched type used to produce. A type whose only member is `"null"` (and the scalar `type: "null"`) samples as `null`.
+- **`prefixItems` (3.1).** 3.1's JSON-Schema-2020-12 tuple form omits `items` and names each position's own schema in `prefixItems` instead; the walker samples every entry positionally (`[sample(prefixItems[0]), sample(prefixItems[1]), ...]`) when `items` is absent, rather than the empty array a schema with neither would otherwise produce.
 - **Type defaults:**
 
   | `schema.type` | Sample value |
@@ -269,8 +272,9 @@ Collection auth is built the same way it always was, and every request still def
 |------------------|--------------------|
 | `type: "http"`, `scheme: "bearer"` | `{ mode: "bearer", token: "" }` |
 | `type: "http"`, `scheme: "basic"` | `{ mode: "basic", username: "", password: "" }` |
-| `type: "apiKey"` | `{ mode: "apikey", key: scheme.name ?? "", value: "", in: scheme.in === "query" ? "query" : "header" }` |
-| `type: "oauth2"` | `{ mode: "oauth2", config: OAuth2Config }` via `map_openapi_v3_oauth2` - picks the first usable flow (`clientCredentials` → `authorizationCode`+PKCE → `password` → `implicit`→auth-code+PKCE), fills its `tokenUrl`/`authorizationUrl`/`scope`, and seeds `clientId`/`clientSecret` as `{{clientId}}`/`{{clientSecret}}` placeholders |
+| `type: "apiKey"`, `in: "header"` / `"query"` | `{ mode: "apikey", key: scheme.name ?? "", value: "", in: scheme.in === "query" ? "query" : "header" }` |
+| `type: "apiKey"`, `in: "cookie"` | `{ mode: "none" }`, counted as `security_unmapped_apikey_cookie` (issue #1444) - Vayu's apikey mode has only header/query placements, and reinterpreting a cookie-placed key as a header would send the credential somewhere the document never named |
+| `type: "oauth2"` | `{ mode: "oauth2", config: OAuth2Config }` via `map_openapi_v3_oauth2` - picks the first usable flow (`clientCredentials` → `authorizationCode`+PKCE → `password` → `implicit`→auth-code+PKCE), fills its `tokenUrl`/`authorizationUrl`/`refreshUrl`/`scope` (`refreshUrl` absent from `implicit`, which has no token endpoint), and seeds `clientId`/`clientSecret` as `{{clientId}}`/`{{clientSecret}}` placeholders. A `flows` object naming none of the four the specification defines is `{ mode: "none" }`, counted the same as any other unmapped scheme - never a fabricated `client_credentials` config with blank URLs, which would be indistinguishable from a genuinely declared one |
 | missing / any other type (incl. `openIdConnect`, `http` with other schemes) | `{ mode: "none" }` |
 
 **A per-operation `security` overrides that default** (issue #1444), because inheriting unconditionally sent a collection's bearer token to an endpoint the document declared unauthenticated:
@@ -294,10 +298,12 @@ Dropped / not represented:
 - **Scripts:** all `preRequestScript` / `postRequestScript` are `""` (OpenAPI has no scripts; `importScripts` has no effect here).
 - **Environments:** none produced (`environments: []`, `meta.environmentCount: 0`). OpenAPI has no environment concept; `servers[0]` becomes a single `baseUrl` collection variable.
 - **Additional servers:** only `servers[0]` is used; other entries and per-operation `servers` overrides are dropped and counted as `servers_dropped` (issue #1444).
+- **3.1 top-level `webhooks`:** each entry's own operations are counted (`webhook_operations`) rather than imported - a webhook describes what the API sends *to* a callback URL the user registers elsewhere, not a request Vayu can send.
 - **Callbacks, links, security scopes:** not consumed. (Response schemas and examples *are*, since issue #481 - see [Documented responses](#documented-responses).) An operation's `security` itself **is** consumed since issue #1444 - see [Auth / security](#auth--security) - but the scopes a requirement names within it are not: only which scheme is used is mapped.
 - **Response headers** (`responses[code].headers`): not imported. An example's headers carry only the media type it was stored under.
 - **Cookie parameters** and **path parameters as params**: not emitted (path params live in the URL only).
 - **`authorization` / `content-type` header parameters:** dropped (Vayu manages them).
+- **`deprecated`:** an operation's own flag has nowhere to land on Vayu's request model, so it imports identically to a current operation - counted (`deprecated_operation`) rather than silently ignored.
 - **Multi-tag grouping:** only the first tag groups an operation.
 - **Root `tags[]` entries no operation references:** not turned into folders - see the path fallback in [Tree structure](#tree-structure).
 - **`trace` operations:** dropped - `HttpMethod` has no `"TRACE"`. Counted as `unsupported_method` (see [Tree structure](#tree-structure)), not silently omitted.
@@ -325,6 +331,9 @@ Dropped / not represented:
 | `security_unmapped_mutualtls` | an operation's `security` names a `mutualTLS` scheme - `schemeToAuth` has no mode for it (issue #1444) |
 | `security_unmapped_openidconnect` | an operation's `security` names an `openIdConnect` scheme - `schemeToAuth` has no mode for it (issue #1444) |
 | `security_unmapped_type` | an operation's `security` names a scheme of any other type `schemeToAuth` has no mode for - an `http` scheme other than bearer/basic, or a scheme with no readable `type` (issue #1444) |
+| `security_unmapped_apikey_cookie` | an `apiKey` scheme names `in: "cookie"` - see the auth table above (issue #1444) |
+| `webhook_operations` | a 3.1 top-level `webhooks` entry's own operation - it describes what the API sends *to* a callback, not a request Vayu can send, so it is counted rather than imported as zero requests with nothing said (issue #1444) |
+| `deprecated_operation` | an operation declared `deprecated: true` - Vayu's request model has no deprecated flag, so the operation imports identically to a current one (issue #1444) |
 
 An import with nothing to report still yields `skipped: []` - only non-zero kinds are emitted.
 
