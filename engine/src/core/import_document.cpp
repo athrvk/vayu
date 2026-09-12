@@ -366,9 +366,10 @@ std::string nv (const std::string& value) {
 /// header as Bearer, auto-fetch and auto-refresh on.
 json default_oauth2_config () {
     return json{ { "grantType", "client_credentials" }, { "accessTokenUrl", "" },
-        { "clientId", "" }, { "clientSecret", "" }, { "scope", "" },
-        { "credentialsPlacement", "basic_auth_header" }, { "tokenPlacement", "header" },
-        { "headerPrefix", "Bearer" }, { "pkce", true }, { "autoFetchToken", true },
+        { "refreshTokenUrl", "" }, { "clientId", "" }, { "clientSecret", "" },
+        { "scope", "" }, { "credentialsPlacement", "basic_auth_header" },
+        { "tokenPlacement", "header" }, { "headerPrefix", "Bearer" },
+        { "pkce", true }, { "autoFetchToken", true },
         { "autoRefreshToken", true }, { "useEmbeddedBrowser", false } };
 }
 
@@ -585,10 +586,11 @@ std::string scope_string (const json* scopes) {
 json map_openapi_v3_oauth2 (const json* scheme) {
     const json* flows = as_record (prop (scheme, "flows"));
     if (const json* flow = as_record (prop (flows, "clientCredentials"))) {
-        json config              = openapi_oauth2_base ();
-        config["grantType"]      = "client_credentials";
-        config["accessTokenUrl"] = nv (prop (flow, "tokenUrl"));
-        config["scope"]          = scope_string (prop (flow, "scopes"));
+        json config               = openapi_oauth2_base ();
+        config["grantType"]       = "client_credentials";
+        config["accessTokenUrl"]  = nv (prop (flow, "tokenUrl"));
+        config["refreshTokenUrl"] = nv (prop (flow, "refreshUrl"));
+        config["scope"]           = scope_string (prop (flow, "scopes"));
         return oauth2_auth (std::move (config));
     }
     if (const json* flow = as_record (prop (flows, "authorizationCode"))) {
@@ -597,14 +599,16 @@ json map_openapi_v3_oauth2 (const json* scheme) {
         config["pkce"]             = true;
         config["authorizationUrl"] = nv (prop (flow, "authorizationUrl"));
         config["accessTokenUrl"]   = nv (prop (flow, "tokenUrl"));
+        config["refreshTokenUrl"]  = nv (prop (flow, "refreshUrl"));
         config["scope"]            = scope_string (prop (flow, "scopes"));
         return oauth2_auth (std::move (config));
     }
     if (const json* flow = as_record (prop (flows, "password"))) {
-        json config              = openapi_oauth2_base ();
-        config["grantType"]      = "password";
-        config["accessTokenUrl"] = nv (prop (flow, "tokenUrl"));
-        config["scope"]          = scope_string (prop (flow, "scopes"));
+        json config               = openapi_oauth2_base ();
+        config["grantType"]       = "password";
+        config["accessTokenUrl"]  = nv (prop (flow, "tokenUrl"));
+        config["refreshTokenUrl"] = nv (prop (flow, "refreshUrl"));
+        config["scope"]           = scope_string (prop (flow, "scopes"));
         return oauth2_auth (std::move (config));
     }
     if (const json* flow = as_record (prop (flows, "implicit"))) {
@@ -612,10 +616,17 @@ json map_openapi_v3_oauth2 (const json* scheme) {
         config["grantType"]        = "authorization_code";
         config["pkce"]             = true;
         config["authorizationUrl"] = nv (prop (flow, "authorizationUrl"));
-        config["scope"]            = scope_string (prop (flow, "scopes"));
+        // The Implicit flow has no token endpoint of its own, so no
+        // `refreshUrl` either per the specification - nothing to read.
+        config["scope"] = scope_string (prop (flow, "scopes"));
         return oauth2_auth (std::move (config));
     }
-    return oauth2_auth (openapi_oauth2_base ());
+    // A `flows` object naming none of the four the specification defines - a
+    // malformed document, since the specification requires at least one. A
+    // fabricated client_credentials config with blank URLs would be
+    // indistinguishable from a genuinely declared one; `none` is left for the
+    // caller to tally the same way any other unmapped scheme is.
+    return json{ { "mode", "none" } };
 }
 
 /// `mapSwaggerOAuth2(scheme)`: 2.0's single `flow` field.
@@ -641,7 +652,12 @@ json map_swagger_oauth2 (const json* scheme) {
         config["pkce"]             = true;
         config["authorizationUrl"] = nv (prop (scheme, "authorizationUrl"));
     } else {
-        return oauth2_auth (openapi_oauth2_base ());
+        // `flow` missing, misspelled, or of the wrong type - the
+        // specification's four values are the only ones defined. A
+        // fabricated client_credentials config with blank URLs would be
+        // indistinguishable from a genuinely declared one; `none` is left
+        // for the caller to tally the same way any other unmapped scheme is.
+        return json{ { "mode", "none" } };
     }
     return oauth2_auth (std::move (config));
 }
@@ -738,6 +754,9 @@ struct PostmanCounts {
     int skipped_path_variables     = 0;
     int skipped_url_without_raw    = 0;
     int skipped_variable_metadata  = 0;
+    int disabled_body              = 0;
+    int skipped_certificate        = 0;
+    int skipped_proxy              = 0;
     // A Postman oauth2 detail carrying `state` (never stored) or a pre-fetched
     // `accessToken` alongside an explicit grant config (nowhere to seed it) -
     // see `map_postman_oauth2` (issue #1460).
@@ -864,6 +883,15 @@ json raw_body (const std::string& content, const std::string* language) {
 json pm_body (const json* body, PostmanCounts& counts) {
     const json* node = as_record (body);
     if (node == nullptr || !truthy (prop (node, "mode"))) {
+        return json{ { "mode", "none" } };
+    }
+    if (const json* disabled = prop (node, "disabled");
+    disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ()) {
+        // Postman's own "prevent request body from being sent" toggle. Vayu
+        // has no disabled-body concept to preserve the switch itself, but
+        // sending the body anyway - the request-time effect the user turned
+        // off - is the one outcome importing it active can never be worth.
+        counts.disabled_body += 1;
         return json{ { "mode", "none" } };
     }
     const std::string* mode = as_str (prop (node, "mode"));
@@ -1265,6 +1293,16 @@ json pm_request (const json* item, PostmanCounts& counts) {
         counts.non_executable += 1;
     }
     counts.requests += 1;
+    if (truthy (prop (rq, "certificate"))) {
+        // A client certificate belongs to a host in Vayu, not a request
+        // (engine/CLAUDE.md), so importing one means writing a registry entry
+        // beside the collection rather than a request field - deferred to
+        // issue #1656; counted so the loss is not silent in the meantime.
+        counts.skipped_certificate += 1;
+    }
+    if (truthy (prop (rq, "proxy"))) {
+        counts.skipped_proxy += 1;
+    }
     const std::vector<const json*> events = pm_events (item);
     json body                             = pm_body (prop (rq, "body"), counts);
     json examples                         = pm_examples (item, counts);
@@ -1394,6 +1432,9 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("url_without_raw", counts.skipped_url_without_raw);
     tally.add ("invalid_percent_encoding", counts.invalid_percent_encoding);
     tally.add ("variable_metadata", counts.skipped_variable_metadata);
+    tally.add ("disabled_body", counts.disabled_body);
+    tally.add ("certificate", counts.skipped_certificate);
+    tally.add ("proxy_config", counts.skipped_proxy);
 
     json meta;
     meta["format"]              = format;
@@ -1609,6 +1650,15 @@ json insomnia_auth (const json* auth, InsomniaCounts& counts) {
         // bag (stored, not executed).
         counts.non_executable += 1;
         return json{ { "mode", "aws" }, { "config", insomnia_config (node) } };
+    }
+    if (named == "none") {
+        // Insomnia's own explicit "No Auth" - distinct from an absent
+        // `authentication` object, which means "inherit". An explicit `none`
+        // must terminate inheritance the same way Postman's own `noauth`
+        // does in `map_postman_auth`: falling through to `inherit` here would
+        // send a folder's credentials to a request the user explicitly opted
+        // out of them for.
+        return json{ { "mode", "none" } };
     }
     return json{ { "mode", "inherit" } };
 }
@@ -2259,8 +2309,16 @@ json scheme_to_auth_v3 (const json* scheme) {
         return json{ { "mode", "basic" }, { "username", "" }, { "password", "" } };
     }
     if (*type == "apiKey") {
+        const json* in = prop (node, "in");
+        // 3.x's apiKey has a third placement `cookie`, which Vayu's apikey
+        // mode has no slot for (only header/query) - reinterpreting it as a
+        // header would send the credential somewhere the document never
+        // named, so this is left unmapped like any other scheme Vayu cannot
+        // execute, not silently misplaced.
+        if (in != nullptr && *in == "cookie") {
+            return json{ { "mode", "none" } };
+        }
         const std::string* name = as_str (prop (node, "name"));
-        const json* in          = prop (node, "in");
         return json{ { "mode", "apikey" },
             { "key", name == nullptr ? "" : *name }, { "value", "" },
             { "in", in != nullptr && *in == "query" ? "query" : "header" } };
@@ -2333,6 +2391,12 @@ std::string_view unmapped_security_kind (const json* scheme) {
     }
     if (type != nullptr && *type == "openIdConnect") {
         return "security_unmapped_openidconnect";
+    }
+    if (type != nullptr && *type == "apiKey") {
+        const json* in = prop (node, "in");
+        if (in != nullptr && *in == "cookie") {
+            return "security_unmapped_apikey_cookie";
+        }
     }
     return "security_unmapped_type";
 }
@@ -2641,6 +2705,20 @@ class OperationFolders {
     bool pathed_ = false;
 };
 
+/// The collection's own auth, built from its primary scheme - and tallied
+/// when that scheme is one Vayu cannot map, the same way an operation-level
+/// override tallies the identical scheme (`operation_auth_override`). Not
+/// tallied when `scheme.node` is null: that is "the document declares no
+/// security" (`scheme_to_auth_v3 (nullptr)` also answers `none`), which has
+/// nothing to report - only a *declared* scheme Vayu could not map is a loss.
+json collection_primary_auth (const PrimaryScheme& scheme, bool v3, ImportTally& tally) {
+    json auth = v3 ? scheme_to_auth_v3 (scheme.node) : scheme_to_auth_v2 (scheme.node);
+    if (scheme.node != nullptr && auth.at ("mode") == "none") {
+        tally.add (unmapped_security_kind (scheme.node));
+    }
+    return auth;
+}
+
 json parse_openapi (const json& document,
 const std::string& raw,
 const ImportSource& source,
@@ -2707,10 +2785,9 @@ walk::Dialect dialect) {
     root["variables"]   = base_url.empty () ?
       json::object () :
       json{ { "baseUrl", { { "value", base_url }, { "enabled", true } } } };
-    root["auth"] =
-    v3 ? scheme_to_auth_v3 (scheme.node) : scheme_to_auth_v2 (scheme.node);
-    root["children"] = folders.children ();
-    root["requests"] = folders.root_requests ();
+    root["auth"]        = collection_primary_auth (scheme, v3, tally);
+    root["children"]    = folders.children ();
+    root["requests"]    = folders.root_requests ();
     // The document itself, so the import can store it and bind this collection
     // to it in the same atomic call (#637). `raw` and not a re-serialization:
     // the engine hashes the bytes it stores, and a sync compares against that

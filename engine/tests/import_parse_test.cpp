@@ -299,6 +299,27 @@ TEST (InsomniaImport, FoldsAFolderRequestsPathVariableIntoTheFoldersOwnVariables
     EXPECT_EQ (folder.at ("variables").at ("userId").at ("value"), "42");
 }
 
+/**
+ * Insomnia's explicit "No Auth" (`type: "none"`) must terminate inheritance
+ * the same way Postman's `noauth` already does - falling through to
+ * `inherit` would send a folder's credentials to a request the user
+ * explicitly opted out of them for (issue #1444). Mutation check: removing
+ * the `named == "none"` branch in `insomnia_auth` reds `mode` to `inherit`.
+ */
+TEST (InsomniaImport, ExplicitNoneAuthTerminatesInheritanceRatherThanFallingBackToIt) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W"},
+        {"_id":"grp","_type":"request_group","parentId":"wrk","name":"G",
+            "authentication":{"type":"bearer","token":"secret"}},
+        {"_id":"req","_type":"request","parentId":"grp","name":"R","method":"get",
+            "url":"https://api.example.com/public",
+            "authentication":{"type":"none"}}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& folder = parsed.result.at ("collections")[0].at ("children")[0];
+    EXPECT_EQ (folder.at ("requests")[0].at ("auth").at ("mode"), "none");
+}
+
 TEST (ImportParse, GatingTheOptionsChangesWhatTheCountsPromise) {
     const std::string document = R"({"_postman_variable_scope":"environment","name":"Prod",
         "values":[{"key":"host","value":"x"}]})";
@@ -558,6 +579,141 @@ TEST (ImportParse, OperationSecurityNamingAnUndeclaredSchemeStaysInheritedAndIsC
     1);
 }
 
+/**
+ * A 3.x `apiKey` scheme placed in a cookie has no slot in Vayu's apikey mode
+ * (only header/query) - reinterpreting it as a header would send the
+ * credential somewhere the document never named, so it stays unmapped and
+ * counted under its own kind rather than silently becoming a header (issue
+ * #1444). Mutation check: dropping the `*in == "cookie"` guard in
+ * `scheme_to_auth_v3` reds this to `apikey`/`header`.
+ */
+TEST (ImportParse, ApiKeySchemeInACookieStaysUnmappedRatherThanBecomingAHeader) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{
+            "cookieAuth":{"type":"apiKey","in":"cookie","name":"session"}}},
+        "security":[{"cookieAuth":[]}],
+        "paths":{"/x":{"get":{"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& collection = parsed.result.at ("collections")[0];
+    EXPECT_EQ (collection.at ("auth").at ("mode"), "none");
+    EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("security_unmapped_apikey_cookie"),
+    1);
+}
+
+/**
+ * An oauth2 scheme whose `flows` names none of the specification's four -
+ * a malformed document - must not fabricate a plausible-looking
+ * client_credentials config with blank URLs, since that would be
+ * indistinguishable from a genuinely declared one (issue #1444). Mutation
+ * check: reverting the `map_openapi_v3_oauth2`/`map_swagger_oauth2` else
+ * branches to `oauth2_auth (openapi_oauth2_base ())` reds `auth.mode` to
+ * `"oauth2"` with nothing counted.
+ */
+TEST (ImportParse, Oauth2WithNoRecognisedFlowStaysUnmappedRatherThanFabricatingAConfig) {
+    const ImportParse v3 = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{"o":{"type":"oauth2","flows":{}}}},
+        "security":[{"o":[]}],
+        "paths":{"/x":{"get":{"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (v3.ok ()) << v3.error;
+    EXPECT_EQ (v3.result.at ("collections")[0].at ("auth").at ("mode"), "none");
+    EXPECT_EQ (
+    skip_counts (v3.result.at ("meta").at ("skipped")).at ("security_unmapped_type"), 1);
+
+    const ImportParse v2 = parse_import (R"({"swagger":"2.0","info":{"title":"T"},
+        "securityDefinitions":{"o":{"type":"oauth2","flow":"bogus"}},
+        "security":[{"o":[]}],
+        "paths":{"/x":{"get":{"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (v2.ok ()) << v2.error;
+    EXPECT_EQ (v2.result.at ("collections")[0].at ("auth").at ("mode"), "none");
+    EXPECT_EQ (
+    skip_counts (v2.result.at ("meta").at ("skipped")).at ("security_unmapped_type"), 1);
+}
+
+/// A 3.x OAuth flow's `refreshUrl` lands in `OAuth2Config.refreshTokenUrl`,
+/// the same field Postman's own oauth2 import already fills (issue #1444).
+TEST (ImportParse, OAuthFlowRefreshUrlIsRead) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "components":{"securitySchemes":{"o":{"type":"oauth2","flows":{
+            "authorizationCode":{"authorizationUrl":"https://a","tokenUrl":"https://t",
+                "refreshUrl":"https://r","scopes":{}}}}}},
+        "security":[{"o":[]}],
+        "paths":{"/x":{"get":{"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("collections")[0].at ("auth").at ("config").at ("refreshTokenUrl"),
+    "https://r");
+}
+
+/**
+ * A 3.1 top-level `webhooks` entry describes what the API sends *to* a
+ * callback, not a request Vayu can send - counted rather than silently
+ * imported as zero requests with nothing said (issue #1444). Mutation check:
+ * removing the `note_webhook_operations` call in `walk_operations` reds this
+ * to an empty `skipped` list.
+ */
+TEST (ImportParse, WebhookOperationsAreCountedNotSilentlyDropped) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.1.0","info":{"title":"T"},
+        "webhooks":{"newPet":{"post":{"responses":{}}},"deletedPet":{"post":{"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("meta").at ("requestCount"), 0);
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("webhook_operations"), 2);
+}
+
+/// An operation's `deprecated: true` has nowhere to land on Vayu's request
+/// model, so it is counted rather than imported identically to a current
+/// operation with nothing said (issue #1444).
+TEST (ImportParse, DeprecatedOperationIsCounted) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/old":{"get":{"deprecated":true,"responses":{}}},
+                 "/new":{"get":{"responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("deprecated_operation"), 1);
+}
+
+/// A 3.x parameter naming `content` instead of `schema` (a value that needs a
+/// media type to parse, e.g. a JSON object serialized into a query string)
+/// still gets an example value rather than importing empty/disabled (issue
+/// #1444).
+TEST (ImportParse, ParameterContentIsReadWhenSchemaIsAbsent) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
+        "paths":{"/x":{"get":{"parameters":[
+            {"name":"filter","in":"query","content":{"application/json":{
+                "schema":{"type":"string"},"example":"active"}}}],
+            "responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& params =
+    first_request (parsed.result.at ("collections")[0]).at ("params");
+    ASSERT_EQ (params.size (), 1u);
+    EXPECT_EQ (params[0].at ("key"), "filter");
+    EXPECT_EQ (params[0].at ("value"), "active");
+    EXPECT_TRUE (params[0].at ("enabled").get<bool> ());
+}
+
+/// 3.1's JSON-Schema-2020-12 tuple form (`prefixItems`, no `items`) samples
+/// each position rather than an empty array (issue #1444).
+TEST (ImportParse, PrefixItemsSamplesEachTuplePosition) {
+    const ImportParse parsed = parse_import (R"({"openapi":"3.1.0","info":{"title":"T"},
+        "paths":{"/x":{"post":{"requestBody":{"content":{"application/json":{"schema":{
+            "type":"array","prefixItems":[{"type":"string"},{"type":"integer"}]}}}},
+            "responses":{}}}}})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& body =
+    first_request (parsed.result.at ("collections")[0]).at ("body");
+    const nlohmann::json sampled =
+    nlohmann::json::parse (body.at ("content").get<std::string> ());
+    ASSERT_TRUE (sampled.is_array ());
+    EXPECT_EQ (sampled.size (), 2u);
+}
+
 /// An operation with no `security` key at all keeps today's answer.
 TEST (ImportParse, OperationWithNoSecurityKeyInheritsAndCountsNothing) {
     const ImportParse parsed = parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},
@@ -740,6 +896,42 @@ TEST (PostmanImport, CountsAnUnsupportedMethodAndFallsBackToGet) {
     EXPECT_EQ (request.at ("method"), "GET");
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("unsupported_method"), 1);
+}
+
+/// A body's own `disabled: true` ("prevent request body from being sent")
+/// must not still be sent - counted rather than silently ignored (issue
+/// #1444).
+TEST (PostmanImport, ADisabledBodyImportsAsNoneAndIsCounted) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"raw","raw":"{}","disabled":true}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("body").at (
+    "mode"),
+    "none");
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("disabled_body"), 1);
+}
+
+/// A request-level `certificate` or `proxy` override has nowhere to land yet
+/// (issue #1656) - counted rather than silently dropped.
+TEST (PostmanImport, CertificateAndProxyAreCountedRatherThanDroppedSilently) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://x.com",
+            "certificate":{"name":"c","matches":["https://x.com"]},
+            "proxy":{"host":"proxy.example.com","port":8080}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::json counts =
+    skip_counts (parsed.result.at ("meta").at ("skipped"));
+    EXPECT_EQ (counts.at ("certificate"), 1);
+    EXPECT_EQ (counts.at ("proxy_config"), 1);
 }
 
 TEST (PostmanImport, CountsAnUnsupportedAuthTypeButNotAnExplicitNoAuth) {
