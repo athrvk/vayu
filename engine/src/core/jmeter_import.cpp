@@ -477,8 +477,9 @@ std::optional<KindConfig> parse_controller (std::string_view tag, const pugi::xm
     }
     // `SwitchController` selects by list index or a JMeter variable, neither
     // of which maps onto `control.switch`'s named-case grammar without
-    // inventing case names JMeter never declared - left unmapped, same as an
-    // unrecognised controller: the folder still imports as a plain grouping.
+    // inventing case names JMeter never declared - left unmapped; the folder
+    // still imports as a plain grouping, tallied by the caller like any other
+    // recognised class this parser could not extract enough from.
     return std::nullopt;
 }
 
@@ -693,6 +694,16 @@ Sink parent) {
         if (auto built = make_valid_element (ctx, kc->first, std::move (kc->second))) {
             folder["elements"].push_back (std::move (*built));
         }
+    } else {
+        // A controller tag this parser recognises but could not build a
+        // `control.*` element for - a `SwitchController`, a `LoopController`
+        // set to JMeter's "forever" (`loops <= 0`), or an `IfController` whose
+        // condition does not match `translate_if_condition`'s grammar. The
+        // folder still imports and still groups its members, but the logic
+        // that shaped it is gone, so it is tallied the same way
+        // `build_leaf_element` tallies a recognised class it could not
+        // extract enough from - never silently, per issue #1443.
+        ctx.tally.add (std::string (tag) + "_unrecognised");
     }
     if (own_tree) {
         walk_hash_tree (own_tree,

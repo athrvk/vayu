@@ -216,6 +216,84 @@ TEST (JmeterImport, AnIfControllerBecomesAFolderWithAControlIfElement) {
     EXPECT_EQ (folder.at ("requests").at (0).at ("name"), "Checkout");
 }
 
+TEST (JmeterImport, AnIfControllerWithAnUnparseableConditionIsTalliedNotDroppedSilently) {
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <ThreadGroup testname="Users"/><hashTree>
+      <IfController testname="Only gold tier">
+        <stringProp name="IfController.condition">${__javaScript("${tier}" == "gold")}</stringProp>
+      </IfController>
+      <hashTree>
+        <HTTPSamplerProxy testname="Checkout">
+          <stringProp name="HTTPSampler.path">/checkout</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& collection = parsed.result.at ("collections").at (0);
+    ASSERT_EQ (collection.at ("children").size (), 1);
+    const nlohmann::ordered_json& folder = collection.at ("children").at (0);
+    EXPECT_FALSE (folder.contains ("elements"));
+    ASSERT_EQ (folder.at ("requests").size (), 1);
+    EXPECT_TRUE (has_skipped_kind (parsed.result.at ("meta"), "IfController_unrecognised"));
+}
+
+TEST (JmeterImport, ASwitchControllerIsTalliedNotDroppedSilently) {
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <ThreadGroup testname="Users"/><hashTree>
+      <SwitchController testname="By tier">
+        <stringProp name="SwitchController.selection">gold</stringProp>
+      </SwitchController>
+      <hashTree>
+        <HTTPSamplerProxy testname="Checkout">
+          <stringProp name="HTTPSampler.path">/checkout</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_TRUE (has_skipped_kind (parsed.result.at ("meta"), "SwitchController_unrecognised"));
+}
+
+TEST (JmeterImport, ALoopControllerSetToForeverIsTalliedNotDroppedSilently) {
+    const char* plan         = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <ThreadGroup testname="Users"/><hashTree>
+      <LoopController testname="Forever">
+        <boolProp name="LoopController.continue_forever">true</boolProp>
+        <stringProp name="LoopController.loops">-1</stringProp>
+      </LoopController>
+      <hashTree>
+        <HTTPSamplerProxy testname="Poll">
+          <stringProp name="HTTPSampler.path">/poll</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_TRUE (has_skipped_kind (parsed.result.at ("meta"), "LoopController_unrecognised"));
+}
+
 TEST (JmeterImport, BoundaryExtractorMapsOntoTheNewExtractBoundaryKind) {
     const char* plan         = R"jmx(<?xml version="1.0"?>
 <jmeterTestPlan version="1.2"><hashTree>
