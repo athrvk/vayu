@@ -1085,6 +1085,22 @@ std::string host_path_url (const json* url) {
     return host.empty () && !has_path ? std::string () : out;
 }
 
+/// The declared `{key, value}` row (Postman's `url.variable[]` shape) whose
+/// `key` is @p key, or `nullptr` when @p declared has none - pulled out of
+/// `substitute_path_variables` so that function's own branching stays
+/// readable.
+const json* find_declared_path_variable (const json& declared, const std::string& key) {
+    for (const json& row : declared) {
+        const json* record = as_record (&row);
+        const std::string* declared_key =
+        record == nullptr ? nullptr : as_str (prop (record, "key"));
+        if (declared_key != nullptr && *declared_key == key) {
+            return record;
+        }
+    }
+    return nullptr;
+}
+
 /// `substitutePathVariables(base, variable[])`: a `:key` path segment as
 /// Vayu's `{{key}}` template - Postman's `url.variable[]`, and (via
 /// `insomnia_path_variable_rows`) Insomnia's `pathParameters[]`, both read
@@ -1094,6 +1110,15 @@ std::string host_path_url (const json* url) {
 /// that carried at least one substitution, which is a mapping (the value
 /// survives as a variable), not a loss - the "path_variables" tally kind
 /// reads accordingly in both formats.
+///
+/// The query string and fragment are split off first - a `:` inside a query
+/// value (a timestamp `t=12:30`, a scoped tag, a port in a redirect URL) is
+/// ordinary text, never a path-variable token - and the path is then walked
+/// one `/`-delimited segment at a time; a segment is a candidate only when it
+/// is exactly `:key` for a declared key, which gives the left boundary a
+/// substring search cannot and finds every occurrence, not just the first
+/// (`/:id/copies/:id` rewrites both). @p base carries the query string
+/// verbatim on both callers now, so a caller no longer has to split it first.
 std::string substitute_path_variables (const std::string& base,
 const json* declared,
 json& path_variables,
@@ -1101,36 +1126,44 @@ int& skipped_count) {
     if (declared == nullptr || !declared->is_array () || declared->empty ()) {
         return base;
     }
-    std::string out = base;
-    for (const json& row : *declared) {
-        const json* record = as_record (&row);
-        const std::string* declared_key =
-        record == nullptr ? nullptr : as_str (prop (record, "key"));
-        if (declared_key == nullptr || declared_key->empty ()) {
-            continue;
+    const size_t split = base.find_first_of ("?#");
+    const std::string path = split == std::string::npos ? base : base.substr (0, split);
+    const std::string rest =
+    split == std::string::npos ? std::string () : base.substr (split);
+
+    std::string out;
+    out.reserve (path.size ());
+    bool substituted = false;
+    size_t pos       = 0;
+    while (true) {
+        const size_t next = path.find ('/', pos);
+        const std::string segment =
+        path.substr (pos, next == std::string::npos ? std::string::npos : next - pos);
+        const json* record = segment.size () > 1 && segment.front () == ':' ?
+        find_declared_path_variable (*declared, segment.substr (1)) :
+        nullptr;
+        if (record == nullptr) {
+            out += segment;
+        } else {
+            const std::string key = segment.substr (1);
+            out += "{{" + key + "}}";
+            substituted = true;
+            if (!path_variables.contains (key)) {
+                path_variables[key] =
+                json{ { "value", normalize_vars (as_string (prop (record, "value"))) },
+                    { "enabled", true } };
+            }
         }
-        const std::string token = ":" + *declared_key;
-        const size_t at         = out.find (token);
-        if (at == std::string::npos) {
-            continue;
+        if (next == std::string::npos) {
+            break;
         }
-        // A genuine path segment - `:key` followed by `/`, `?` or the end -
-        // rather than a value that merely contains the substring.
-        const size_t after = at + token.size ();
-        if (after != out.size () && out[after] != '/' && out[after] != '?') {
-            continue;
-        }
-        out.replace (at, token.size (), "{{" + *declared_key + "}}");
-        if (!path_variables.contains (*declared_key)) {
-            path_variables[*declared_key] =
-            json{ { "value", normalize_vars (as_string (prop (record, "value"))) },
-                { "enabled", true } };
-        }
+        out += '/';
+        pos = next + 1;
     }
-    if (out != base) {
+    if (substituted) {
         skipped_count += 1;
     }
-    return out;
+    return out + rest;
 }
 
 /// A Postman `url`, which is a string in v2.0 and either shape in v2.1.

@@ -675,3 +675,47 @@ describe("which window the update events reach", () => {
 		expect(win.webContents.send).not.toHaveBeenCalled();
 	});
 });
+
+describe("download progress", () => {
+	/**
+	 * `download-progress` only exists so the silent path's banner can render a
+	 * bar while the download is in flight (issue #1662). Mutation check:
+	 * removing the listener in `updater.ts` reds this - `listeners.get` would
+	 * find nothing to call and `send` is asserted, not merely "did not throw".
+	 */
+	it("forwards electron-updater's own progress fields, unchanged", async () => {
+		const { initAutoUpdater } = await loadUpdater("win32");
+		initAutoUpdater(getWindow);
+		const win = currentWindow!;
+
+		listeners.get("download-progress")?.({
+			percent: 42,
+			bytesPerSecond: 512_000,
+			transferred: 4_200_000,
+			total: 10_000_000,
+		});
+
+		expect(win.webContents.send).toHaveBeenCalledWith("update:downloadProgress", {
+			percent: 42,
+			bytesPerSecond: 512_000,
+			transferred: 4_200_000,
+			total: 10_000_000,
+		});
+	});
+
+	it("drops the event rather than sending into a destroyed window", async () => {
+		const { initAutoUpdater } = await loadUpdater("win32");
+		initAutoUpdater(getWindow);
+		const win = currentWindow!;
+		win.destroyed = true;
+
+		listeners.get("download-progress")?.({
+			percent: 10,
+			bytesPerSecond: 1,
+			transferred: 1,
+			total: 10,
+		});
+
+		expect(win.webContents.send).not.toHaveBeenCalled();
+	});
+});

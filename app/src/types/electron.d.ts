@@ -150,6 +150,15 @@ interface UpdateAvailableInfo {
 	installCommand?: string;
 }
 
+/** Mirrors `UpdateDownloadProgress` in `electron/updater.ts`. */
+interface UpdateDownloadProgress {
+	/** 0-100. */
+	percent: number;
+	bytesPerSecond: number;
+	transferred: number;
+	total: number;
+}
+
 /**
  * Outcome of a check the user asked for. Mirrors `UpdateCheckResult` in
  * `electron/updater.ts`; the two are separated only by the process boundary.
@@ -233,6 +242,8 @@ interface ElectronAPI {
 	// Auto-update
 	onUpdateAvailable: (callback: (info: UpdateAvailableInfo) => void) => () => void;
 	onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
+	/** Silent strategies only (Windows, Linux AppImage) - see updater.ts. */
+	onDownloadProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
 	restartToInstallUpdate: () => Promise<void>;
 	checkForUpdates: () => Promise<UpdateCheckResult>;
 	openReleasePage: (url: string) => Promise<void>;

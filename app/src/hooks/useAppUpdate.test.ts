@@ -29,13 +29,21 @@ type AvailableCb = (info: {
 	installCommand?: string;
 }) => void;
 type DownloadedCb = (info: { version: string }) => void;
+type ProgressCb = (progress: {
+	percent: number;
+	bytesPerSecond: number;
+	transferred: number;
+	total: number;
+}) => void;
 
 let availableCb: AvailableCb | null;
 let downloadedCb: DownloadedCb | null;
+let progressCb: ProgressCb | null;
 
 beforeEach(() => {
 	availableCb = null;
 	downloadedCb = null;
+	progressCb = null;
 	mockNotifyPost.mockClear();
 	(window as unknown as { electronAPI: unknown }).electronAPI = {
 		onUpdateAvailable: (cb: AvailableCb) => {
@@ -48,6 +56,12 @@ beforeEach(() => {
 			downloadedCb = cb;
 			return () => {
 				downloadedCb = null;
+			};
+		},
+		onDownloadProgress: (cb: ProgressCb) => {
+			progressCb = cb;
+			return () => {
+				progressCb = null;
 			};
 		},
 		restartToInstallUpdate: vi.fn(),
@@ -160,5 +174,61 @@ describe("useAppUpdate", () => {
 			result.current.dismiss();
 		});
 		expect(result.current.update).toBeNull();
+	});
+
+	/**
+	 * A download in flight is itself actionable enough to show, not only its
+	 * completion (issue #1662) - the silent path's banner has something to
+	 * render (a bar) as soon as a percentage exists.
+	 */
+	test("a silent update in flight shows the banner with its progress", () => {
+		const { result } = renderHook(() => useAppUpdate());
+		act(() => {
+			availableCb?.({ version: "1.2.3", strategy: "silent", releaseUrl: "u" });
+		});
+		expect(result.current.update).toBeNull();
+		expect(result.current.downloadProgress).toBeNull();
+
+		act(() => {
+			progressCb?.({ percent: 42, bytesPerSecond: 1, transferred: 1, total: 1 });
+		});
+		expect(result.current.update?.version).toBe("1.2.3");
+		expect(result.current.readyToInstall).toBe(false);
+		expect(result.current.downloadProgress).toBeCloseTo(0.42);
+
+		act(() => {
+			downloadedCb?.({ version: "1.2.3" });
+		});
+		// Once ready, the banner switches to the restart button - the bar's job
+		// is done, and a stale 100% left behind would fight that button for the
+		// same row.
+		expect(result.current.downloadProgress).toBeNull();
+		expect(result.current.readyToInstall).toBe(true);
+	});
+
+	/**
+	 * Dismissing the progress bar is "not right now", not "never tell me it's
+	 * ready" - the user could not have dismissed a restart prompt that did not
+	 * exist yet when they clicked it. Mutation check: drop the
+	 * `setDismissed(false)` call in `onUpdateDownloaded` and this reds.
+	 */
+	test("dismissing mid-download does not swallow the eventual ready-to-install banner", () => {
+		const { result } = renderHook(() => useAppUpdate());
+		act(() => {
+			availableCb?.({ version: "1.2.3", strategy: "silent", releaseUrl: "u" });
+		});
+		act(() => {
+			progressCb?.({ percent: 10, bytesPerSecond: 1, transferred: 1, total: 1 });
+		});
+		act(() => {
+			result.current.dismiss();
+		});
+		expect(result.current.update).toBeNull();
+
+		act(() => {
+			downloadedCb?.({ version: "1.2.3" });
+		});
+		expect(result.current.update?.version).toBe("1.2.3");
+		expect(result.current.readyToInstall).toBe(true);
 	});
 });

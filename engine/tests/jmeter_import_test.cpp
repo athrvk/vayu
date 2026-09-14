@@ -18,6 +18,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -442,6 +444,105 @@ TEST (JmeterImport, AssertionTestFieldMapsUrlAndRefusesTheRest) {
     EXPECT_FALSE (unmapped.contains ("elements"));
     EXPECT_TRUE (has_skipped_kind (
     message_parsed.result.at ("meta"), "ResponseAssertion_unrecognised"));
+}
+
+/// A `Response Assertion` plan with one pattern string and a given
+/// `Assertion.test_type` bitmask, against the response body (the default
+/// `Assertion.test_field`).
+nlohmann::ordered_json
+response_assertion_plan (long test_type, const std::vector<std::string>& texts) {
+    std::string strings;
+    for (size_t i = 0; i < texts.size (); ++i) {
+        strings += "<stringProp name=\"" + std::to_string (i + 1) + "\">" +
+        texts[i] + "</stringProp>";
+    }
+    const std::string jmx = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Page">
+      <stringProp name="HTTPSampler.path">/page</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree>
+      <ResponseAssertion testname="Check">
+        <collectionProp name="Asserion.test_strings">)jmx" +
+    strings + R"jmx(</collectionProp>
+        <intProp name="Assertion.test_type">)jmx" +
+    std::to_string (test_type) + R"jmx(</intProp>
+      </ResponseAssertion>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (jmx, {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return parsed.result;
+}
+
+/**
+ * The `Not` bit (4) inverts the assertion (issue #1660): a Response
+ * Assertion with `test_type` `6` (Contains + Not), `20` (Substring + Not) or
+ * `12` (Equals + Not) imports as `assert.contains` with `negate: true`, and
+ * the pattern-kind bits (1 Matches, 2 Contains, 16 Substring) resolve to the
+ * mode that assertion type actually performs in JMeter: Matches and Contains
+ * are both a regular-expression search (`mode: "matches"`), only Substring is
+ * a plain text search (`mode: "contains"`).
+ */
+TEST (JmeterImport, ResponseAssertionNotBitInvertsTheMappedAssertion) {
+    {
+        const nlohmann::ordered_json result = response_assertion_plan (6, { "error" });
+        const nlohmann::ordered_json& config =
+        first_request (result.at ("collections").at (0)).at ("elements").at (0).at ("config");
+        EXPECT_EQ (config.at ("negate").get<bool> (), true);
+        EXPECT_EQ (config.at ("mode").get<std::string> (), "matches");
+    }
+    {
+        const nlohmann::ordered_json result = response_assertion_plan (20, { "error" });
+        const nlohmann::ordered_json& config =
+        first_request (result.at ("collections").at (0)).at ("elements").at (0).at ("config");
+        EXPECT_EQ (config.at ("negate").get<bool> (), true);
+        EXPECT_EQ (config.at ("mode").get<std::string> (), "contains");
+    }
+    {
+        const nlohmann::ordered_json result = response_assertion_plan (12, { "error" });
+        const nlohmann::ordered_json& config =
+        first_request (result.at ("collections").at (0)).at ("elements").at (0).at ("config");
+        EXPECT_EQ (config.at ("negate").get<bool> (), true);
+        EXPECT_EQ (config.at ("mode").get<std::string> (), "equals");
+    }
+    {
+        const nlohmann::ordered_json result =
+        response_assertion_plan (1, { R"(id":\s*\d+)" });
+        const nlohmann::ordered_json& config =
+        first_request (result.at ("collections").at (0)).at ("elements").at (0).at ("config");
+        EXPECT_EQ (config.at ("mode").get<std::string> (), "matches");
+        EXPECT_EQ (config.at ("text").get<std::string> (), R"(id":\s*\d+)");
+    }
+}
+
+/**
+ * The `Or` bit (32) means "any of these patterns passes"; with more than one
+ * pattern this parser has no Vayu kind that expresses that, so it refuses the
+ * assertion and tallies `ResponseAssertion_or` rather than emitting ANDed
+ * rows that would mean something else (issue #1660). A single pattern with
+ * Or set is unaffected - the existing `test_type: 2` shape still holds.
+ */
+TEST (JmeterImport, ResponseAssertionOrWithMultiplePatternsIsTalliedNotAnded) {
+    const nlohmann::ordered_json or_result =
+    response_assertion_plan (34, { "foo", "bar" });
+    EXPECT_FALSE (first_request (or_result.at ("collections").at (0)).contains ("elements"));
+    EXPECT_TRUE (has_skipped_kind (or_result.at ("meta"), "ResponseAssertion_or"));
+
+    const nlohmann::ordered_json single_result = response_assertion_plan (2, { "foo" });
+    const nlohmann::ordered_json& config =
+    first_request (single_result.at ("collections").at (0))
+    .at ("elements")
+    .at (0)
+    .at ("config");
+    EXPECT_EQ (config.at ("field").get<std::string> (), "body");
+    EXPECT_EQ (config.at ("mode").get<std::string> (), "matches");
+    EXPECT_EQ (config.at ("negate").get<bool> (), false);
 }
 
 /// `HTTPsampler.Files` (a multipart file upload) has no formdata-part model
