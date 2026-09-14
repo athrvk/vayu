@@ -9,7 +9,7 @@
  * Type definitions for Electron API exposed via preload
  */
 
-import type { ThemeSource } from "./ui";
+import type { ThemeSource, ColorScheme } from "./ui";
 import type {
 	McpDataChangedEvent,
 	McpSafetyConfig,
@@ -22,6 +22,10 @@ import type {
 interface ThemeInfo {
 	shouldUseDarkColors: boolean;
 	themeSource: ThemeSource;
+}
+
+interface AccentSchemeInfo {
+	accentScheme: ColorScheme | null;
 }
 
 /**
@@ -195,6 +199,11 @@ interface ElectronAPI {
 	getTheme: () => Promise<ThemeInfo>;
 	setTheme: (source: ThemeSource) => Promise<ThemeInfo>;
 	onThemeChanged: (callback: (theme: ThemeInfo) => void) => () => void;
+
+	// Accent color scheme (Windows and macOS only). Returns null on platforms that
+	// don't support system accent colors (Linux) or if no accent color is available.
+	getAccentScheme: () => Promise<AccentSchemeInfo>;
+	onAccentSchemeChanged: (callback: (data: AccentSchemeInfo) => void) => () => void;
 
 	// Window controls for custom titlebar
 	windowMinimize: () => void;
