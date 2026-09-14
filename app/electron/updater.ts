@@ -49,6 +49,19 @@ export interface UpdateAvailablePayload {
 }
 
 /**
+ * electron-updater's own `ProgressInfo`, narrowed to the fields the banner
+ * renders - only the silent strategies set `autoDownload`, so this only ever
+ * fires on Windows and the Linux AppImage build.
+ */
+export interface UpdateDownloadProgress {
+	/** 0-100. */
+	percent: number;
+	bytesPerSecond: number;
+	transferred: number;
+	total: number;
+}
+
+/**
  * Outcome of a user-initiated check.
  *
  * The periodic check stays silent, so it produces no result - only a check the
@@ -337,6 +350,20 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 		send("update:available", payload);
 		endCheckCycle();
 		settleCheck({ status: "available", ...payload });
+	});
+
+	// Silent strategies only: `autoDownload` above is what makes this fire at
+	// all. Sent as its own channel rather than folded into `update:available`
+	// - the banner needs to redraw on every tick, and a payload built once at
+	// "available" has nothing left to update.
+	autoUpdater.on("download-progress", (progress) => {
+		const payload: UpdateDownloadProgress = {
+			percent: progress.percent,
+			bytesPerSecond: progress.bytesPerSecond,
+			transferred: progress.transferred,
+			total: progress.total,
+		};
+		send("update:downloadProgress", payload);
 	});
 
 	autoUpdater.on("update-downloaded", (info) => {

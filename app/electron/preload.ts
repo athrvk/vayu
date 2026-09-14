@@ -144,6 +144,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		ipcRenderer.on("update:downloaded", handler);
 		return () => ipcRenderer.removeListener("update:downloaded", handler);
 	},
+	// Silent strategies only (Windows, Linux AppImage) - see updater.ts.
+	onDownloadProgress: (
+		callback: (progress: {
+			percent: number;
+			bytesPerSecond: number;
+			transferred: number;
+			total: number;
+		}) => void
+	) => {
+		const handler = (_event: unknown, progress: unknown) =>
+			callback(progress as Parameters<typeof callback>[0]);
+		ipcRenderer.on("update:downloadProgress", handler);
+		return () => ipcRenderer.removeListener("update:downloadProgress", handler);
+	},
 	restartToInstallUpdate: (): Promise<void> => ipcRenderer.invoke("update:restartToInstall"),
 	// Shape mirrors `UpdateCheckResult` in updater.ts, inlined because this file
 	// is a CommonJS script and must not grow imports.
