@@ -95,3 +95,45 @@ describe("the Windows installer's data directory", () => {
 		expect(script).not.toMatch(asDirectory);
 	});
 });
+
+/**
+ * A silent install or uninstall (winget, or electron-updater's own
+ * `quitAndInstall()`) has nobody to answer a `MessageBox` - NSIS does not
+ * suppress a raw `MessageBox` under `/S` on its own, so an unguarded one
+ * blocks an unattended update forever on a dialog nobody can see. Every
+ * macro that raises one must check `IfSilent` first and skip straight to its
+ * default answer (issue #1662): close the running app without asking in
+ * `customInit`, and keep the user's data without asking in `customUnInstall`.
+ *
+ * Mutation check: delete either `IfSilent` line and the corresponding case
+ * below reds, because the macro body no longer contains it ahead of its
+ * `MessageBox`.
+ */
+describe("a silent install or uninstall never blocks on a MessageBox", () => {
+	function macroBody(name: string): string {
+		const [match] = macros().filter(([macroName]) => macroName === name);
+		expect(match, `installer.nsh has no ${name} macro`).toBeDefined();
+		return match![1];
+	}
+
+	it.each([
+		["customInit", "closeApp"],
+		["customUnInstall", "keepData"],
+	])("%s checks IfSilent before its MessageBox, defaulting to %s", (name, silentTarget) => {
+		const body = macroBody(name);
+		// The real instruction, not a mention of the word in a comment above it
+		// (this file's own explanatory comments say "MessageBox" ahead of the
+		// line that raises one).
+		const messageBoxAt = body.search(/^\s*MessageBox\s+MB_/m);
+		const ifSilentAt = body.indexOf("IfSilent");
+		expect(messageBoxAt, `${name} has no MessageBox instruction`).toBeGreaterThan(-1);
+		expect(ifSilentAt, `${name} raises a MessageBox with no IfSilent guard`).toBeGreaterThan(
+			-1
+		);
+		expect(ifSilentAt, `${name}'s IfSilent guard runs after its MessageBox`).toBeLessThan(
+			messageBoxAt
+		);
+		const ifSilentLine = body.slice(ifSilentAt, body.indexOf("\n", ifSilentAt));
+		expect(ifSilentLine).toContain(silentTarget);
+	});
+});
