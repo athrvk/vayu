@@ -76,6 +76,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("theme:changed", handler);
 	},
 
+	// Accent color scheme (Windows and macOS only)
+	getAccentScheme: (): Promise<{ accentScheme: string | null }> =>
+		ipcRenderer.invoke("accent:get"),
+	onAccentSchemeChanged: (callback: (data: { accentScheme: string | null }) => void) => {
+		const handler = (_event: unknown, data: { accentScheme: string | null }) => callback(data);
+		ipcRenderer.on("accent:changed", handler);
+		return () => ipcRenderer.removeListener("accent:changed", handler);
+	},
+
 	// Window controls for custom titlebar
 	windowMinimize: () => ipcRenderer.send("window:minimize"),
 	windowMaximize: () => ipcRenderer.send("window:maximize"),

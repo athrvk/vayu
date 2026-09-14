@@ -32,6 +32,8 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 	const [colorScheme, setColorScheme] = useState<ColorScheme>(DEFAULT_COLOR_SCHEME);
 	const [isDark, setIsDark] = useState(false);
 	const [isLoading, setIsLoading] = useState(true);
+	const [matchSystemAccent, setMatchSystemAccent] = useState(false);
+	const [supportsAccent, setSupportsAccent] = useState(false);
 
 	// Apply theme to document. `scheme` is required (not defaulted from state) so
 	// this callback stays stable across accent changes - otherwise the init
@@ -59,6 +61,7 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 	useEffect(() => {
 		const initTheme = async () => {
 			let source: ThemeSource = "system";
+			let accentSupported = false;
 
 			// Load from localStorage
 			const savedSource = localStorage.getItem(
@@ -66,12 +69,26 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 			) as ThemeSource | null;
 			const rawScheme = localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME);
 			const scheme: ColorScheme = isColorScheme(rawScheme) ? rawScheme : DEFAULT_COLOR_SCHEME;
+			const savedMatchAccent = localStorage.getItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT);
+			const shouldMatchAccent = savedMatchAccent === "true";
 
 			if (window.electronAPI) {
 				// Get theme from Electron
 				const theme = await window.electronAPI.getTheme();
 				source = theme.themeSource as ThemeSource;
 				applyTheme(theme.shouldUseDarkColors, scheme);
+
+				// Check if accent color is supported. The main process answers
+				// `accent:get` on every platform, but only resolves a scheme on
+				// Windows/macOS - Linux has no OS accent color, so accentScheme
+				// comes back null there and the toggle must not appear at all.
+				const accentInfo = await window.electronAPI.getAccentScheme();
+				accentSupported = accentInfo.accentScheme !== null;
+
+				// If match system accent is enabled and we have an accent color, use it
+				if (shouldMatchAccent && accentInfo.accentScheme) {
+					setColorScheme(accentInfo.accentScheme);
+				}
 			} else {
 				// Fallback: check localStorage or system preference
 				if (savedSource) {
@@ -92,6 +109,8 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 
 			setThemeSource(source);
 			setColorScheme(scheme);
+			setMatchSystemAccent(shouldMatchAccent);
+			setSupportsAccent(accentSupported);
 			setIsLoading(false);
 		};
 
@@ -102,11 +121,29 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 	useEffect(() => {
 		if (window.electronAPI) {
 			// Listen for Electron theme changes
-			const cleanup = window.electronAPI.onThemeChanged((theme) => {
+			const themeCleanup = window.electronAPI.onThemeChanged((theme) => {
 				setThemeSource(theme.themeSource as ThemeSource);
 				applyTheme(theme.shouldUseDarkColors, colorScheme);
 			});
-			return cleanup;
+
+			// Listen for accent color changes (if matching is enabled and supported)
+			let accentCleanup: (() => void) | undefined;
+			if (matchSystemAccent && supportsAccent) {
+				accentCleanup = window.electronAPI.onAccentSchemeChanged((data) => {
+					if (data.accentScheme && matchSystemAccent) {
+						setColorScheme(data.accentScheme);
+						applyTheme(
+							document.documentElement.classList.contains("dark"),
+							data.accentScheme
+						);
+					}
+				});
+			}
+
+			return () => {
+				themeCleanup();
+				accentCleanup?.();
+			};
 		} else {
 			// Fallback: listen for system preference changes (only if using system theme)
 			if (themeSource === "system") {
@@ -116,7 +153,7 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 				return () => mediaQuery.removeEventListener("change", handler);
 			}
 		}
-	}, [applyTheme, themeSource, colorScheme]);
+	}, [applyTheme, themeSource, colorScheme, matchSystemAccent, supportsAccent]);
 
 	// Function to change theme source (light/dark)
 	const setTheme = useCallback(
@@ -152,6 +189,24 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 		[applyTheme]
 	);
 
+	// Function to toggle matching system accent color
+	const setMatchAccent = useCallback(
+		(enabled: boolean) => {
+			setMatchSystemAccent(enabled);
+			localStorage.setItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT, enabled ? "true" : "false");
+
+			// If enabling, fetch the current accent color
+			if (enabled && window.electronAPI && supportsAccent) {
+				window.electronAPI.getAccentScheme().then((data) => {
+					if (data.accentScheme) {
+						changeColorScheme(data.accentScheme);
+					}
+				});
+			}
+		},
+		[supportsAccent, changeColorScheme]
+	);
+
 	return {
 		themeSource,
 		setTheme,
@@ -159,5 +214,8 @@ export function useElectronTheme(options: UseElectronThemeOptions = {}) {
 		setColorScheme: changeColorScheme,
 		isDark,
 		isLoading,
+		matchSystemAccent,
+		setMatchAccent,
+		supportsAccent,
 	};
 }

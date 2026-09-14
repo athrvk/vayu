@@ -16,6 +16,7 @@ import {
 	ipcMain,
 	nativeImage,
 	nativeTheme,
+	systemPreferences,
 	Menu,
 	Notification,
 	powerMonitor,
@@ -42,6 +43,7 @@ import { createWakeLock, registerPowerIpc } from "./power-save.js";
 import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
 import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
+import { installAccentBridge, accentHexToColorScheme } from "./accent-color.js";
 import { createOpenIntents, OPEN_INTENT_CHANNEL } from "./open-intent.js";
 import {
 	createServiceStopGuard,
@@ -1164,6 +1166,14 @@ function setupIpcHandlers() {
 		};
 	});
 
+	// Accent color scheme - maps OS accent to the nearest Vayu scheme
+	ipcMain.handle("accent:get", () => {
+		const accentHex = systemPreferences.getAccentColor?.() ?? null;
+		return {
+			accentScheme: accentHexToColorScheme(accentHex),
+		};
+	});
+
 	// Window controls for custom titlebar
 	ipcMain.on("window:minimize", () => {
 		mainWindow?.minimize();
@@ -1439,6 +1449,19 @@ app.whenReady().then(async () => {
 
 	// One registration for the process, ahead of any window - see the function.
 	installThemeBridge();
+
+	// Bridge OS system accent color to the renderer (Windows and macOS only).
+	// Installed as a process-wide listener that reads the live window at send time,
+	// same as the theme bridge. On Linux and other platforms, this installs nothing.
+	installAccentBridge({
+		getAccentColor: () => systemPreferences.getAccentColor?.() ?? null,
+		onAccentChanged: (callback) => {
+			systemPreferences.on("accent-color-changed", callback);
+			return () => systemPreferences.off("accent-color-changed", callback);
+		},
+		window: liveWindow,
+		log: (msg, fields) => appLogger().warn("ipc", msg, fields),
+	});
 
 	// The window first, and the engine alongside it. The renderer does not need
 	// the engine to boot - its health query polls `/health` over HTTP and simply

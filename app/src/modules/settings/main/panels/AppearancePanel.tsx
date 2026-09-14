@@ -62,8 +62,17 @@ const ROUNDEDNESS = appSetting("roundedness");
 const REDUCED_MOTION = appSetting("reduced-motion");
 
 export default function AppearancePanel() {
-	const { themeSource, setTheme, colorScheme, setColorScheme, isDark, isLoading } =
-		useElectronTheme();
+	const {
+		themeSource,
+		setTheme,
+		colorScheme,
+		setColorScheme,
+		isDark,
+		isLoading,
+		matchSystemAccent,
+		setMatchAccent,
+		supportsAccent,
+	} = useElectronTheme();
 	const { font, setFont, fontCustom, setFontCustom, scale, setScale, radius, setRadius } =
 		useAppearance();
 	const reducedMotion = useClientSettingsStore((s) => s.reducedMotion);
@@ -159,48 +168,73 @@ export default function AppearancePanel() {
 						primary UI elements.
 					</CardDescription>
 				</CardHeader>
-				<CardContent>
-					{isLoading ? (
-						<div className="grid grid-cols-3 gap-3">
-							<Skeleton className="h-28" />
-							<Skeleton className="h-28" />
-							<Skeleton className="h-28" />
-							<Skeleton className="h-28" />
-							<Skeleton className="h-28" />
-							<Skeleton className="h-28" />
-						</div>
-					) : (
-						<OptionButtons
-							options={COLOR_SCHEMES.map((option) => {
-								const Icon = option.icon;
-								return {
-									value: option.value,
-									label: option.label,
-									description: option.description,
-									/* Swatch derives from the scheme's own accent token
-									   so it can never drift from reality.
-									   data-color-scheme (+ dark) scopes --primary to
-									   this scheme regardless of the active one. */
-									preview: (isSelected) => (
-										<span
-											data-color-scheme={option.value}
-											className={cn(
-												"w-8 h-8 rounded-full flex items-center justify-center bg-primary-fill",
-												isDark && "dark",
-												isSelected &&
-													"ring-2 ring-offset-2 ring-primary ring-offset-background"
-											)}
-										>
-											<Icon className="w-4 h-4 text-primary-foreground" />
-										</span>
-									),
-								};
-							})}
-							value={colorScheme}
-							onChange={setColorScheme}
-							columns="grid-cols-3"
+				<CardContent className="space-y-4">
+					{supportsAccent && (
+						<ToggleRow
+							label="Match system accent color"
+							description="Use your operating system's accent color instead of picking one manually"
+							checked={matchSystemAccent}
+							onChange={setMatchAccent}
 						/>
 					)}
+					<div
+						className={cn(
+							"transition-opacity",
+							matchSystemAccent && "opacity-50 pointer-events-none"
+						)}
+					>
+						{isLoading ? (
+							<div className="grid grid-cols-3 gap-3">
+								<Skeleton className="h-28" />
+								<Skeleton className="h-28" />
+								<Skeleton className="h-28" />
+								<Skeleton className="h-28" />
+								<Skeleton className="h-28" />
+								<Skeleton className="h-28" />
+							</div>
+						) : (
+							<>
+								{matchSystemAccent && (
+									<p className="text-xs text-muted-foreground mb-3">
+										{"Current scheme: "}
+										<span className="font-semibold capitalize">
+											{colorScheme}
+										</span>
+									</p>
+								)}
+								<OptionButtons
+									options={COLOR_SCHEMES.map((option) => {
+										const Icon = option.icon;
+										return {
+											value: option.value,
+											label: option.label,
+											description: option.description,
+											/* Swatch derives from the scheme's own accent token
+											   so it can never drift from reality.
+											   data-color-scheme (+ dark) scopes --primary to
+											   this scheme regardless of the active one. */
+											preview: (isSelected) => (
+												<span
+													data-color-scheme={option.value}
+													className={cn(
+														"w-8 h-8 rounded-full flex items-center justify-center bg-primary-fill",
+														isDark && "dark",
+														isSelected &&
+															"ring-2 ring-offset-2 ring-primary ring-offset-background"
+													)}
+												>
+													<Icon className="w-4 h-4 text-primary-foreground" />
+												</span>
+											),
+										};
+									})}
+									value={colorScheme}
+									onChange={matchSystemAccent ? () => {} : setColorScheme}
+									columns="grid-cols-3"
+								/>
+							</>
+						)}
+					</div>
 				</CardContent>
 			</Card>
 

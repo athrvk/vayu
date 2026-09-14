@@ -17,6 +17,8 @@ export const STORAGE_KEYS = {
 	THEME_SOURCE: "vayu-theme-source",
 	/** Accent color scheme name (sunset/sky/…). Read pre-paint in index.html. */
 	COLOR_SCHEME: "vayu-color-scheme",
+	/** Whether to match OS system accent color (Windows/macOS only). */
+	MATCH_SYSTEM_ACCENT: "vayu-match-system-accent",
 	/** UI font preference (grotesk/inter/system/mono/custom). Read pre-paint in index.html. */
 	UI_FONT: "vayu-ui-font",
 	/** Custom UI font family, used when UI_FONT === "custom". Read pre-paint. */

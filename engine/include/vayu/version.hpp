@@ -19,10 +19,10 @@
 // NOLINTBEGIN(modernize-macro-to-enum)
 #define VAYU_VERSION_MAJOR 0
 #define VAYU_VERSION_MINOR 29
-#define VAYU_VERSION_PATCH 2
+#define VAYU_VERSION_PATCH 3
 // NOLINTEND(modernize-macro-to-enum)
 
-#define VAYU_VERSION_STRING "0.29.2"
+#define VAYU_VERSION_STRING "0.29.3"
 
 namespace vayu {
 
