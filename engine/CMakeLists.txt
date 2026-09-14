@@ -33,7 +33,7 @@ if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
 endif()
 
 project(vayu-engine
-    VERSION 0.29.1
+    VERSION 0.30.0
     DESCRIPTION "High-performance API execution engine"
     LANGUAGES C CXX
 )
