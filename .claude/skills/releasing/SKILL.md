@@ -5,7 +5,21 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
 
 # Releasing Vayu
 
-1. `python build.py --bump-version patch` - updates VERSION, CMakeLists.txt,
+1. **Check what has actually been released before trusting the local `VERSION`
+   file or the last `chore(release):` commit on master.** A version-bump commit
+   can land on master without ever being tagged - a release PR merged and the
+   tag step was missed, or skipped deliberately - and `VERSION` at that point
+   names a release nobody has received. Check the real latest tag:
+   `git fetch --tags && git describe --tags --abbrev=0 origin/master`, or
+   compare against `gh release list --limit 1` / the
+   [Releases page](https://github.com/athrvk/vayu/releases). If the local
+   `VERSION` is ahead of the latest actual tag, that gap is unreleased, not
+   shipped - bump from the **tagged** version, and if a release-notes file
+   already exists for an untagged version, fold this change into it rather than
+   writing a new one on top (see step 4). Skipping this check is what produced
+   0.30.0 and 0.29.3 as two competing, both-wrong bumps on top of an
+   already-merged-but-never-tagged 0.29.2.
+2. `python build.py --bump-version patch` - updates VERSION, CMakeLists.txt,
    version.hpp, package.json. (`patch` | `minor` | `major` | `x.y.z`; add
    `--dry-run` to preview.) It deliberately does **not** touch
    `engine/vcpkg.json`, and refuses to run if that file has grown a `version`
@@ -18,7 +32,7 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    refuses to open a database a newer one already stamped (issue #1492), so
    check whether this release's changes touched the schema before tagging - not
    every version bump carries one.
-2. Check the vcpkg baseline for staleness - `cd engine && vcpkg
+3. Check the vcpkg baseline for staleness - `cd engine && vcpkg
    x-update-baseline --dry-run`. **The release window is the cadence**: nothing
    else owns baseline freshness, and #679 found cpp-httplib five minors behind
    with curl, openssl and sqlite3 each missing point releases, purely because
@@ -54,28 +68,28 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    on every cpp-httplib move, not carried forward - 10 runs of
    `TransportPolicyPaths.LoadRunTraversesManualProxy` with the line and 10
    without, recorded in that file and in `docs/engine/building.md`.
-3. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
+4. Write the curated release notes to `.github/release-notes/vX.Y.Z.md` (Keep a
    Changelog format, see below).
-4. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes
+5. Commit both: `git commit -m "chore(release): x.y.z"` (version bump + notes
    file together).
-5. Tag: `git tag v$(cat VERSION) && git push origin --tags`. **First wait for the
+6. Tag: `git tag v$(cat VERSION) && git push origin --tags`. **First wait for the
    release merge's "Warm build cache" run to go green.** The version bump is in
    `cache-warm.yml`'s `push` paths, so merging the release PR fires a warm run
    that compiles the engine into the master sccache scope; the tag sits on that
    same merge commit, so a tag build started before the warm run finishes reads
    an empty scope and compiles cold (issue #700). The warm run is ~15-25 min per
    platform.
-6. CI builds installers and publishes the GitHub Release, using
+7. CI builds installers and publishes the GitHub Release, using
    `.github/release-notes/<tag>.md` as the release body automatically (no manual
    paste).
-7. Read the sccache hit rate in the release run's log and expect **more than
+8. Read the sccache hit rate in the release run's log and expect **more than
    zero engine hits** (issues #659 item 5, #700). Two different causes produce a
    structural 0%, and they need different fixes:
    - **The warm scope was never populated for this commit** - the most likely
      cause now that the header is isolated. Either the release merge's "Warm
      build cache" run had not finished (or failed) before the tag was pushed, or
      the version bump did not trigger it. Check that run went green on the merge
-     commit *before* tagging (step 5); re-run it and re-tag if it did not.
+     commit *before* tagging (step 6); re-run it and re-tag if it did not.
    - **A header regression.** A version bump used to edit a header every
      translation unit preprocessed, so every release compiled the engine cold by
      construction; `core/user_agent.hpp` keeps the version behind a declaration.
@@ -88,7 +102,7 @@ The version stamp is worth one cheap check (`./build/vayu-engine --help` prints
 it) and nothing else.
 
 **Tag *after* the release commit lands on the default branch.** When the version
-bump goes through a pull request (the usual path), run steps 1-2 on the feature
+bump goes through a pull request (the usual path), run steps 1-3 on the feature
 branch so the bump merges with the PR, but do **not** tag the PR-branch commit.
 A squash/rebase merge rewrites the commit hash, so a tag on the pre-merge commit
 would point at a commit that never reaches the default branch. Wait for the PR to
