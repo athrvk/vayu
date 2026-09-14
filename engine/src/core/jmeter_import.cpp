@@ -231,7 +231,16 @@ std::optional<KindConfig> parse_boundary_extractor (const pugi::xml_node& el) {
 /// `collectionProp` whose own name is `Asserion.test_strings` - a typo in
 /// JMeter's own XML schema, present in every `.jmx` file JMeter itself has
 /// ever written, so a reader that "fixes" it reads nothing back.
-std::optional<KindConfig> parse_response_assertion (const pugi::xml_node& el) {
+///
+/// `Assertion.test_type` is a bitmask (1 Matches, 2 Contains, 4 Not, 8 Equals,
+/// 16 Substring, 32 Or). Every refusal path here - an unmapped test field, a
+/// response-code assertion with Not set (`assert.status` has no `negate`), an
+/// Or assertion with more than one pattern (no Vayu kind expresses "any of
+/// these") - is tallied under `ResponseAssertion_unrecognised`, the same kind
+/// the caller's generic fallback uses, except the Or case, which is distinct
+/// enough (a mapping this parser understands but cannot express) to get its
+/// own `ResponseAssertion_or` tally instead.
+std::optional<KindConfig> parse_response_assertion (Ctx& ctx, const pugi::xml_node& el) {
     pugi::xml_node strings = collection_prop (el, "Asserion.test_strings");
     if (!strings) {
         strings = collection_prop (el, "Assertion.test_strings");
@@ -241,12 +250,20 @@ std::optional<KindConfig> parse_response_assertion (const pugi::xml_node& el) {
         texts.emplace_back (value.text ().get ());
     }
     if (texts.empty ()) {
+        ctx.tally.add ("ResponseAssertion_unrecognised");
         return std::nullopt;
     }
+
+    const long test_type = long_prop (el, "Assertion.test_type", 2);
+    const bool negate    = (test_type & 4) != 0;
 
     const std::string field =
     string_prop (el, "Assertion.test_field", "Assertion.response_data");
     if (field == "Assertion.response_code") {
+        if (negate) {
+            ctx.tally.add ("ResponseAssertion_unrecognised");
+            return std::nullopt;
+        }
         json codes = json::array ();
         for (const std::string& text : texts) {
             char* end       = nullptr;
@@ -256,17 +273,32 @@ std::optional<KindConfig> parse_response_assertion (const pugi::xml_node& el) {
             }
         }
         if (codes.empty ()) {
+            ctx.tally.add ("ResponseAssertion_unrecognised");
             return std::nullopt;
         }
         return KindConfig{ "assert.status", json{ { "in", std::move (codes) } } };
     }
 
-    // `Assertion.test_type` is a bitmask (1 Matches, 2 Contains, 4 Not, 8
-    // Equals, 16 Substring); only the Equals bit changes the mapped mode -
-    // every other bit still reads as a text match, which `assert.contains`'s
-    // own default ("contains") already is.
-    const std::string mode =
-    (long_prop (el, "Assertion.test_type", 2) & 8) != 0 ? "equals" : "contains";
+    // Or with more than one pattern means "any of these"; the mapper can only
+    // emit one `assert.contains` row, which would mean "all of these" instead.
+    // A single pattern with Or set is just that pattern.
+    if ((test_type & 32) != 0 && texts.size () > 1) {
+        ctx.tally.add ("ResponseAssertion_or");
+        return std::nullopt;
+    }
+
+    // Pattern kind by bit, in JMeter's own precedence: Equals first, then
+    // Substring (a plain text contains), then Matches or Contains (both a
+    // regular-expression search in JMeter, so both land on `matches`).
+    std::string mode;
+    if ((test_type & 8) != 0) {
+        mode = "equals";
+    } else if ((test_type & 16) != 0) {
+        mode = "contains";
+    } else {
+        mode = "matches";
+    }
+
     std::string target;
     if (field == "Assertion.response_headers") {
         target = "headers";
@@ -280,13 +312,15 @@ std::optional<KindConfig> parse_response_assertion (const pugi::xml_node& el) {
         // Request Data, Request Headers, Response Message, or Document (a
         // parsed-DOM view of the body) - none has an `assert.contains` field
         // to land on. Guessing "body" would assert against text the source
-        // never named as its target; refused instead, tallied by the caller
-        // the same way any other recognised class this parser could not
-        // extract enough from is.
+        // never named as its target; refused instead, tallied the same way
+        // any other recognised class this parser could not extract enough
+        // from is.
+        ctx.tally.add ("ResponseAssertion_unrecognised");
         return std::nullopt;
     }
     return KindConfig{ "assert.contains",
-        json{ { "field", target }, { "text", texts.front () }, { "mode", mode } } };
+        json{ { "field", target }, { "text", texts.front () }, { "mode", mode },
+        { "negate", negate } } };
 }
 
 std::optional<KindConfig> parse_duration_assertion (const pugi::xml_node& el) {
@@ -402,6 +436,16 @@ std::optional<KindConfig> parse_script_processor (const pugi::xml_node& el, cons
 /// unparsable number); either way the caller counts it.
 std::optional<json>
 build_leaf_element (Ctx& ctx, std::string_view tag, const pugi::xml_node& el) {
+    // `parse_response_assertion` tallies its own refusals (either the shared
+    // `_unrecognised` kind or its own `ResponseAssertion_or`), so it is kept
+    // out of the generic `!kc` tally below.
+    if (tag == "ResponseAssertion") {
+        std::optional<KindConfig> kc = parse_response_assertion (ctx, el);
+        if (!kc) {
+            return std::nullopt;
+        }
+        return make_valid_element (ctx, kc->first, std::move (kc->second));
+    }
     std::optional<KindConfig> kc;
     if (tag == "JSONPostProcessor") {
         kc = parse_json_extractor (el);
@@ -409,8 +453,6 @@ build_leaf_element (Ctx& ctx, std::string_view tag, const pugi::xml_node& el) {
         kc = parse_regex_extractor (el);
     } else if (tag == "BoundaryExtractor") {
         kc = parse_boundary_extractor (el);
-    } else if (tag == "ResponseAssertion") {
-        kc = parse_response_assertion (el);
     } else if (tag == "DurationAssertion") {
         kc = parse_duration_assertion (el);
     } else if (tag == "SizeAssertion") {

@@ -64,10 +64,18 @@
   ; We check if output starts with "Vayu.exe" (first 8 chars) to avoid locale issues
   StrCpy $2 $1 8  ; Extract first 8 characters
   ${If} $2 == "Vayu.exe"
-    ; Vayu.exe is running
-    MessageBox MB_OKCANCEL|MB_ICONINFORMATION \
-      "Vayu is currently running.$\n$\nClick OK to close it and continue installation, or Cancel to abort." \
-      IDOK closeApp IDCANCEL abortInstall
+    ; Vayu.exe is running. A silent install - winget, or electron-updater's own
+    ; `quitAndInstall()` - has nobody to answer a MessageBox; NSIS does not
+    ; suppress a raw MessageBox under /S on its own, so a silent run would
+    ; otherwise sit blocked on a dialog forever. Silent always proceeds
+    ; (close the app, keep installing): there is no unattended "abort" a
+    ; scripted caller could act on either.
+    IfSilent closeApp askToClose
+
+    askToClose:
+      MessageBox MB_OKCANCEL|MB_ICONINFORMATION \
+        "Vayu is currently running.$\n$\nClick OK to close it and continue installation, or Cancel to abort." \
+        IDOK closeApp IDCANCEL abortInstall
 
     closeApp:
       ; Kill both the app and engine processes
@@ -117,17 +125,25 @@
 !macro customUnInstall
   !insertmacro useUserShellContext
 
-  ; Ask user if they want to KEEP app data (Yes = safe/keep, No = delete)
-  MessageBox MB_YESNO|MB_ICONQUESTION \
-    "Would you like to keep your Vayu data for future reinstalls?$\n$\n\
-    This includes:$\n\
-    • Saved requests and collections$\n\
-    • Environment variables$\n\
-    • Test history and results$\n\
-    • Application settings$\n$\n\
-    Yes = Keep my data$\n\
-    No = Delete everything" \
-    IDYES keepData IDNO removeData
+  ; A silent uninstall (an updater's reinstall, winget, a scripted removal) has
+  ; nobody to answer a Yes/No MessageBox, and NSIS does not suppress a raw
+  ; MessageBox under /S on its own - left unguarded, this blocked every
+  ; unattended update on a dialog nobody could see. Default to the answer a
+  ; human is told is the safe one: keep the data.
+  IfSilent keepData askUser
+
+  askUser:
+    ; Ask user if they want to KEEP app data (Yes = safe/keep, No = delete)
+    MessageBox MB_YESNO|MB_ICONQUESTION \
+      "Would you like to keep your Vayu data for future reinstalls?$\n$\n\
+      This includes:$\n\
+      • Saved requests and collections$\n\
+      • Environment variables$\n\
+      • Test history and results$\n\
+      • Application settings$\n$\n\
+      Yes = Keep my data$\n\
+      No = Delete everything" \
+      IDYES keepData IDNO removeData
 
   keepData:
     ; User chose to keep data

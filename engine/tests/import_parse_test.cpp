@@ -300,6 +300,60 @@ TEST (InsomniaImport, FoldsAFolderRequestsPathVariableIntoTheFoldersOwnVariables
 }
 
 /**
+ * A `:` inside a query value (a timestamp, a scoped tag, a port in a redirect
+ * URL) is ordinary text, not a path-variable token (issue #1661). Insomnia
+ * hands the whole URL, query string included, to the path-variable rewrite,
+ * so `?tag=color:id` next to a declared `id` path parameter must survive
+ * untouched rather than becoming `?tag=color{{id}}`.
+ */
+TEST (InsomniaImport, LeavesAColonInAQueryValueUntouched) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W"},
+        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://api.example.com/search?tag=color:id",
+            "pathParameters":[{"name":"id","value":"5"}]}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& collection = parsed.result.at ("collections")[0];
+    EXPECT_EQ (collection.at ("requests")[0].at ("url"),
+    "https://api.example.com/search?tag=color:id");
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("path_variables"));
+}
+
+/**
+ * `find` used to run once per declared key, so a hit inside an
+ * already-rewritten earlier token (or any token containing the real one)
+ * could leave a later `:key` untouched (issue #1661). Walking `/`-delimited
+ * segments finds every occurrence of every declared key regardless of order.
+ */
+TEST (InsomniaImport, RewritesEveryDeclaredSegmentNotJustTheFirstHit) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W"},
+        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://api.example.com/users/:idx/:id",
+            "pathParameters":[{"name":"idx","value":"1"},{"name":"id","value":"2"}]}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("url"),
+    "https://api.example.com/users/{{idx}}/{{id}}");
+}
+
+TEST (InsomniaImport, RewritesTheSameDeclaredKeyAtEveryOccurrence) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W"},
+        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://api.example.com/:id/copies/:id",
+            "pathParameters":[{"name":"id","value":"7"}]}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("url"),
+    "https://api.example.com/{{id}}/copies/{{id}}");
+}
+
+/**
  * Insomnia's explicit "No Auth" (`type: "none"`) must terminate inheritance
  * the same way Postman's `noauth` already does - falling through to
  * `inherit` would send a folder's credentials to a request the user
@@ -972,6 +1026,22 @@ TEST (PostmanImport, SubstitutesAPathVariableIntoATemplateAndACollectionVariable
     EXPECT_EQ (collection.at ("variables").at ("userId").at ("value"), "42");
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("path_variables"), 1);
+}
+
+/// Mirrors `InsomniaImport.RewritesEveryDeclaredSegmentNotJustTheFirstHit`:
+/// both callers share `substitute_path_variables` (issue #1661).
+TEST (PostmanImport, RewritesEveryDeclaredSegmentNotJustTheFirstHit) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":{
+            "raw":"https://api.example.com/users/:idx/:id",
+            "variable":[{"key":"idx","value":"1"},{"key":"id","value":"2"}]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("url"),
+    "https://api.example.com/users/{{idx}}/{{id}}");
 }
 
 TEST (PostmanImport, KeepsAnExplicitCollectionVariableOverAPathVariableOfTheSameName) {
