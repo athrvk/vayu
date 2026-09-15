@@ -257,7 +257,14 @@ compute_spin_tail_us (int64_t remaining_us, int64_t divisor, int64_t base_us, in
     if (divisor <= 0) {
         return cap_us;
     }
-    return std::min ((remaining_us / divisor) + base_us, cap_us);
+    // Parenthesized to block macro expansion: this header is reached by
+    // essentially every translation unit (see the file-level comment above),
+    // including ones that pull in `windows.h` (via curl.h/httplib.h) ahead of
+    // this include without `NOMINMAX` defined - it is PRIVATE to `vayu_core`
+    // (`engine/CMakeLists.txt`), so `vayu-engine`, `vayu-cli` and the test
+    // target never get it. An unparenthesized `std::min` there macro-expands
+    // to `windows.h`'s `min(a,b)` and fails to compile with MSVC's C2589.
+    return (std::min) ((remaining_us / divisor) + base_us, cap_us);
 }
 } // namespace detail
 
