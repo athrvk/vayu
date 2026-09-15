@@ -1220,12 +1220,13 @@ TEST_F (LoadStrategyTest, PhaseHistogramsCanBeDisabledPerRun) {
 // in the arrival gap (issue #1370, extended to Linux/macOS by issue #1667).
 // Platform-free on purpose: the arithmetic is the whole of the decision, and a
 // Linux host has to be able to review it - so every case is phrased relative
-// to `tail` rather than to a literal, since `SPIN_TAIL_US` differs per
-// platform (2000us on Windows, 300us on macOS, 150us on Linux) and this test
-// runs on all three.
+// to `tail`, the *current platform's* `spin_tail_us` at a remainder large
+// enough to sit well under any platform's cap (so the proportional macOS
+// shape has already flattened out and behaves like a plain constant here),
+// and this test runs on all three.
 TEST (TickPacing, SleepLegLeavesTheSpinTail) {
     using vayu::core::tick_sleep_leg_us;
-    constexpr int64_t tail = vayu::core::constants::pacing::SPIN_TAIL_US;
+    const int64_t tail = vayu::core::constants::pacing::spin_tail_us (1'000'000);
 
     // A remainder twice the tail sleeps exactly the tail's worth and spins
     // the rest; three times the tail sleeps twice the tail.
@@ -1241,6 +1242,74 @@ TEST (TickPacing, SleepLegLeavesTheSpinTail) {
     // Never negative, whatever a caller hands it.
     EXPECT_EQ (tick_sleep_leg_us (0, tail), 0);
     EXPECT_EQ (tick_sleep_leg_us (-100, tail), 0);
+}
+
+// The per-platform tail *function* itself (issue #1667's macOS/Linux
+// follow-up to #1370's flat Windows constant): `min (remaining / divisor +
+// base_us, cap_us)`, degenerate (`divisor == 0`, always `cap_us`) on Windows
+// and Linux, proportional-with-cap on macOS. `detail::compute_spin_tail_us`
+// is exercised directly with each platform's own named parameters so every
+// shape is checked on whichever host runs the suite, not only the one whose
+// `#if` branch compiled here.
+TEST (SpinTailUs, MacOsShapeAtTheRealBenchmarkedLegs) {
+    using vayu::core::constants::pacing::detail::compute_spin_tail_us;
+    namespace pacing = vayu::core::constants::pacing;
+
+    // 1500 RPS: tick_us 1000, leg (tick - tail) is well under the cap, so
+    // this is pure slope math: 667 / 9 + 60 = 74 + 60 = 134us.
+    EXPECT_EQ (compute_spin_tail_us (667, pacing::MACOS_DIVISOR,
+               pacing::MACOS_BASE_US, pacing::MACOS_CAP_US),
+    134);
+
+    // 400 RPS: tick_us 2500. 2500 / 9 + 60 = 277 + 60 = 337us.
+    EXPECT_EQ (compute_spin_tail_us (2500, pacing::MACOS_DIVISOR,
+               pacing::MACOS_BASE_US, pacing::MACOS_CAP_US),
+    337);
+
+    // 200 RPS: tick_us 5000. 5000 / 9 + 60 = 555 + 60 = 615us.
+    EXPECT_EQ (compute_spin_tail_us (5000, pacing::MACOS_DIVISOR,
+               pacing::MACOS_BASE_US, pacing::MACOS_CAP_US),
+    615);
+}
+
+TEST (SpinTailUs, MacOsShapeCapsAbovePlateau) {
+    using vayu::core::constants::pacing::detail::compute_spin_tail_us;
+    namespace pacing = vayu::core::constants::pacing;
+
+    // Well above the ~5-10ms plateau point: 50000 / 9 + 60 = 5555 + 60 =
+    // 5615us uncapped, so the cap is what actually applies.
+    EXPECT_EQ (compute_spin_tail_us (50'000, pacing::MACOS_DIVISOR,
+               pacing::MACOS_BASE_US, pacing::MACOS_CAP_US),
+    pacing::MACOS_CAP_US);
+}
+
+TEST (SpinTailUs, WindowsAndLinuxAreFlatRegardlessOfInput) {
+    using vayu::core::constants::pacing::detail::compute_spin_tail_us;
+    namespace pacing = vayu::core::constants::pacing;
+
+    for (const int64_t remaining :
+    { int64_t{ 0 }, int64_t{ 667 }, int64_t{ 5000 }, int64_t{ 50'000 } }) {
+        EXPECT_EQ (compute_spin_tail_us (remaining, 0, pacing::WINDOWS_BASE_US,
+                   pacing::WINDOWS_CAP_US),
+        pacing::WINDOWS_CAP_US)
+        << "remaining=" << remaining;
+        EXPECT_EQ (compute_spin_tail_us (remaining, 0, pacing::LINUX_BASE_US, pacing::LINUX_CAP_US),
+        pacing::LINUX_CAP_US)
+        << "remaining=" << remaining;
+    }
+}
+
+// The platform-selected `spin_tail_us` (the actual call site's entry point,
+// not the parameterized helper above) behaves the same way on whichever
+// platform this build's `#if` branch resolved to.
+TEST (SpinTailUs, PlatformSelectedFunctionIsFlatOrCappedConsistently) {
+    using vayu::core::constants::pacing::spin_tail_us;
+
+    const int64_t small = spin_tail_us (0);
+    const int64_t large = spin_tail_us (1'000'000);
+    EXPECT_GE (small, 0);
+    EXPECT_GE (large, small); // the tail never shrinks as the remainder grows
+    EXPECT_LE (large, 2000);  // no platform's cap exceeds the Windows constant
 }
 
 // ============================================================================

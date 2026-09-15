@@ -744,20 +744,33 @@ on the next tick (measured in the section above). That shape is now
 unconditional: Linux sleeps the coarse leg with
 `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` and macOS with
 `mach_wait_until`, both absolute waits rather than `sleep_for`'s relative one,
-and both still spin the last `pacing::SPIN_TAIL_US` of every tick exactly as
-the Windows leg always has.
+and both still spin the last `pacing::spin_tail_us (remaining)` of every tick
+exactly as the Windows leg always has.
 
-**The Linux and macOS tail sizes are placeholders, not measurements.** This
-change was implemented and reviewed in an environment with no Linux or macOS
-performance hardware available, so `pacing::SPIN_TAIL_US`'s two new arms (150
-us on Linux, sourced from the kernel's documented ~50 us default timer slack
-plus scheduler-wakeup margin; 300 us on macOS, sourced from `mach_wait_until`'s
-documented wakeup characteristics) carry no `actual - requested` table the way
-the Windows constant above does, and the doc comment on each says so.
-[Issue #1667](https://github.com/athrvk/vayu/issues/1667) tracks running the
-same `sleep_for`-overshoot measurement this page has for Windows on real
-Linux and macOS hardware and updating both constants - and this paragraph -
-from whatever it finds.
+**The tail is a per-platform *function* of the remaining tick, not one flat
+number.** Windows and Linux keep the flat shape (`spin_tail_us` always
+returns the platform's constant, regardless of the remainder); macOS does
+not, because its overshoot itself is not flat. Real measurement on an Apple
+M3 Pro (macOS 26.7, 400 samples/row, `mach_wait_until`
+`actual - requested` overshoot, engine+Electron running concurrently - see
+[issue #1667's comment](https://github.com/athrvk/vayu/issues/1667#issuecomment-5679113672)
+for the full table) found the overshoot scaling with the requested sleep
+duration up to ~5-10ms, then plateauing around ~1020-1060us - consistent with
+XNU's timer-coalescing leeway (slop proportional to the timer length, capped)
+rather than Windows' fixed wakeup cost. A single fixed tail cannot cover
+both ends of that: sized for the low-RPS/long-tick case (~1100us) it would
+busy-spin an entire core at high RPS (1500 RPS = 667us ticks, wholly consumed
+by the spin); sized for high RPS it misses the deadline at low RPS (the old
+300us placeholder already overshot by ~2x at 200 RPS before any spin
+happened). So macOS's `spin_tail_us` is
+`min (remaining / 9 + 60, 1100)` (`constants::pacing::MACOS_DIVISOR` /
+`MACOS_BASE_US` / `MACOS_CAP_US`), reproducing that shape: near-zero at very
+short remainders, tracking the measured line through the mid-range, and flat
+at the plateau. **Linux's tail is still a placeholder, not a measurement**:
+`pacing::spin_tail_us` there stays flat at 150us, sourced from the kernel's
+documented ~50 us default timer slack plus scheduler-wakeup margin, with no
+`actual - requested` table behind it. [Issue #1667](https://github.com/athrvk/vayu/issues/1667)
+still tracks that Linux measurement.
 
 ## Prior results (2026-07, CLI, unreconciled)
 
@@ -908,22 +921,28 @@ have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1
 (Windows) and [#1667](https://github.com/athrvk/vayu/issues/1667) (Linux,
 macOS) every tick ends on a busy-spin and only the stretch before it is
 slept, on all three platforms: `platform::sleep_until_precise(next_tick -
-pacing::SPIN_TAIL_US)`, then spin to the tick. `sleep_until_precise` is
-`clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` on Linux,
-`mach_wait_until` on macOS, and `sleep_for`'s ordinary relative form on
-Windows (where the precision problem is the run's 1 ms timer request plus
-this same spin tail, not the sleep primitive itself). A remainder no longer
-than the tail is spun whole, which is what every tick from ~500 RPS up
-already was - `tick_us` is 1000us there, and the Windows tail is 2000us - so
-nothing above that point moved when #1370 landed. Below it the tick used to
-sleep its whole remainder and land late by the sleep's overshoot, which the
-next tick paid back as a double dispatch. The overshoot now lands inside the
-tail instead of inside the arrival gap, and the spin is bounded by the tail
-rather than by the tick, so its cost does not grow as the target rate falls.
-The tail's *size* is platform-specific because each platform's sleep call
-overshoots by a different amount; only the Windows value (2000us) is a
-measurement, the Linux (150us) and macOS (300us) values are placeholders
-pending #1667's hardware measurement.
+pacing::spin_tail_us (remaining))`, then spin to the tick.
+`sleep_until_precise` is `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
+...)` on Linux, `mach_wait_until` on macOS, and `sleep_for`'s ordinary
+relative form on Windows (where the precision problem is the run's 1 ms
+timer request plus this same spin tail, not the sleep primitive itself). A
+remainder no longer than the tail is spun whole, which is what every tick
+from ~500 RPS up already was on Windows - `tick_us` is 1000us there, and the
+Windows tail is a flat 2000us - so nothing above that point moved when #1370
+landed.
+
+The tail's *shape* is platform-specific, not just its size, because each
+platform's sleep call overshoots by a different amount and, on macOS, in a
+different way: Windows' and Linux's `spin_tail_us` are flat constants
+(2000us, measured; 150us, a placeholder pending real hardware), but macOS's
+is `min (remaining / 9 + 60, 1100)` - proportional to the remaining tick up
+to the ~1100us plateau XNU's timer-coalescing leeway produces, real-measured
+on an Apple M3 Pro (see the 2026-09-15 section above). Below the spin
+threshold the tick used to sleep its whole remainder and land late by the
+sleep's overshoot, which the next tick paid back as a double dispatch. The
+overshoot now lands inside the tail instead of inside the arrival gap, and
+the spin is bounded by the tail rather than by the tick, so its cost does not
+grow as the target rate falls.
 
 ### Recommended settings
 

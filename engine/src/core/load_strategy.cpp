@@ -1092,10 +1092,11 @@ class ConstantLoadStrategy : public LoadStrategy {
         if (sleep_us <= 100) {
             return;
         }
-        const int64_t leg = tick_sleep_leg_us (sleep_us, constants::pacing::SPIN_TAIL_US);
+        const int64_t tail = constants::pacing::spin_tail_us (sleep_us);
+        const int64_t leg  = tick_sleep_leg_us (sleep_us, tail);
         if (leg > 0) {
-            vayu::platform::sleep_until_precise (next_tick -
-            std::chrono::microseconds (constants::pacing::SPIN_TAIL_US));
+            vayu::platform::sleep_until_precise (
+            next_tick - std::chrono::microseconds (tail));
         }
         while (std::chrono::steady_clock::now () < next_tick && !context->should_stop) {
             /* spin */

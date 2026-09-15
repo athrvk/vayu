@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -17,7 +18,7 @@
 // engine; `user_agent.hpp` declares the symbol without naming the version, and
 // one .cpp defines it. `version_isolation_test.cpp` guards the rule.
 #include "vayu/core/user_agent.hpp"
-// VAYU_PLATFORM_WINDOWS / VAYU_PLATFORM_MACOS, for pacing::SPIN_TAIL_US below.
+// VAYU_PLATFORM_WINDOWS / VAYU_PLATFORM_MACOS, for pacing::spin_tail_us below.
 #include "vayu/platform/platform.hpp"
 
 namespace vayu::core::constants {
@@ -237,17 +238,29 @@ constexpr size_t SLO_BREACH_WINDOWS = 2;
 /**
  * @brief How a `constant_rps` tick waits out its remainder.
  *
- * All three platforms sleep the coarse leg and spin the last `SPIN_TAIL_US` of
- * every tick (issue #1370 landed it for Windows; the same shape now runs on
- * Linux and macOS too, through `platform::sleep_until_precise`). Only the
- * *size* of the tail is platform-specific, because the sleep primitive each
- * platform's leg actually uses overshoots by a different amount.
+ * All three platforms sleep the coarse leg and spin the last
+ * `spin_tail_us (remaining)` of every tick (issue #1370 landed it for
+ * Windows; the same shape now runs on Linux and macOS too, through
+ * `platform::sleep_until_precise`). Only the *shape* of the tail is
+ * platform-specific, because the sleep primitive each platform's leg
+ * actually uses overshoots by a different amount and, on macOS, in a
+ * different way (see below).
  */
 namespace pacing {
-/// How much of each tick's remainder is busy-spun rather than slept, in
-/// microseconds. The tick sleeps `remainder - SPIN_TAIL_US` and spins the
-/// rest; a remainder no longer than this is spun whole.
-#if VAYU_PLATFORM_WINDOWS
+namespace detail {
+/// The general tail model, shared by every platform:
+/// `min (remaining / divisor + base_us, cap_us)`. `divisor == 0` is the
+/// degenerate flat case (Windows, Linux): the slope term drops out and the
+/// tail is always `cap_us`, which by convention equals `base_us` there.
+constexpr int64_t
+compute_spin_tail_us (int64_t remaining_us, int64_t divisor, int64_t base_us, int64_t cap_us) {
+    if (divisor <= 0) {
+        return cap_us;
+    }
+    return std::min ((remaining_us / divisor) + base_us, cap_us);
+}
+} // namespace detail
+
 /// The value is the sleep overshoot it has to cover. Measured on Windows 11
 /// 24H2 (i5-8300H) with a 1 ms timer request held, 400 samples per row, as
 /// `actual - requested` for the durations this leg actually asks for:
@@ -269,22 +282,74 @@ namespace pacing {
 /// remainder at or under 2000 us was spun whole and anything longer was slept
 /// whole. The first half of that rule is what this constant still says, so
 /// every tick from ~500 RPS up - where the remainder never exceeds the tail -
-/// paces exactly as it did.
-constexpr int64_t SPIN_TAIL_US = 2000;
-#elif VAYU_PLATFORM_MACOS
-/// Placeholder pending real-hardware measurement - see issue #1667. Sourced
-/// from macOS's documented mach_wait_until wakeup characteristics rather
-/// than an empirical study: this value has NOT been measured the way the
-/// Windows constant above was, and must not be read as if it had.
-constexpr int64_t SPIN_TAIL_US = 300;
-#else // Linux
+/// paces exactly as it did. Flat (`divisor = 0`), so Windows's `spin_tail_us`
+/// always returns `WINDOWS_CAP_US` regardless of the remainder - the exact
+/// behavior this constant had before it became a function argument.
+///
+/// Named unconditionally (not inside the `#if` below), alongside every other
+/// platform's parameters, so `SpinTailUs.*` in `load_strategy_test.cpp` can
+/// exercise every platform's tail shape - through `detail::compute_spin_tail_us`
+/// directly - on whichever single platform actually built this translation
+/// unit.
+constexpr int64_t WINDOWS_BASE_US = 2000;
+constexpr int64_t WINDOWS_CAP_US  = 2000;
+
+/// Real measurement (issue #1667,
+/// https://github.com/athrvk/vayu/issues/1667#issuecomment-5679113672):
+/// Apple M3 Pro, macOS 26.7, 400 samples/row, `mach_wait_until`
+/// `actual - requested` overshoot, engine+Electron running concurrently.
+///
+/// Unlike Windows, the overshoot is not flat: it scales with the requested
+/// sleep duration up to ~5-10ms, then plateaus around ~1020-1060us. That
+/// matches XNU's timer-coalescing leeway model - slop proportional to the
+/// timer length, capped - rather than a fixed wakeup cost:
+/// `overshoot ~= min (requested / 8, ~1000us) + ~15us base, p99 +30us
+/// margin`. A single fixed tail cannot cover both ends: sized for the
+/// low-RPS/long-tick case (~1100us) it would busy-spin an entire core at
+/// high RPS (1500 RPS = 667us ticks, wholly consumed by the spin); sized for
+/// high RPS it misses the deadline at low RPS (the sleep leg alone already
+/// overshoots a flat 300us placeholder by ~2x at 200 RPS before any spin
+/// happens). So the tail is `remaining / MACOS_DIVISOR + MACOS_BASE_US`,
+/// capped at `MACOS_CAP_US`, which reproduces that measured shape: near-zero
+/// at very short remainders, tracking the p99 line through the mid-range,
+/// and flat at the plateau.
+///
+/// The cap is tied to the pacing thread's current (default) latency QoS
+/// tier - it runs under `THREAD_PRECEDENCE_POLICY`'s priority bump but no
+/// explicit QoS class - so a future change to that thread's scheduling
+/// policy needs this re-measured; not tracked as a separate issue, since
+/// pursuing a QoS change on its own was explicitly decided against without
+/// further justification.
+constexpr int64_t MACOS_DIVISOR = 9;
+constexpr int64_t MACOS_BASE_US = 60;
+constexpr int64_t MACOS_CAP_US  = 1100;
+
 /// Placeholder pending real-hardware measurement - see issue #1667. Linux's
 /// default timer slack is documented as ~50us
 /// (https://www.kernel.org/doc/html/latest/timers/timers-howto.html and
 /// `/proc/<pid>/timerslack_ns`, default 50000ns); this value adds margin for
 /// scheduler wakeup latency on top of that and has NOT been measured the way
-/// the Windows constant above was.
-constexpr int64_t SPIN_TAIL_US = 150;
+/// the Windows constant above was. Flat (`divisor = 0`), so Linux's
+/// `spin_tail_us` always returns `LINUX_CAP_US` regardless of the remainder.
+constexpr int64_t LINUX_BASE_US = 150;
+constexpr int64_t LINUX_CAP_US  = 150;
+
+/// How much of each tick's remainder is busy-spun rather than slept, in
+/// microseconds. The tick sleeps `remainder - spin_tail_us (remainder)` and
+/// spins the rest; a remainder no longer than this is spun whole.
+#if VAYU_PLATFORM_WINDOWS
+constexpr int64_t spin_tail_us (int64_t remaining_us) {
+    return detail::compute_spin_tail_us (remaining_us, 0, WINDOWS_BASE_US, WINDOWS_CAP_US);
+}
+#elif VAYU_PLATFORM_MACOS
+constexpr int64_t spin_tail_us (int64_t remaining_us) {
+    return detail::compute_spin_tail_us (
+    remaining_us, MACOS_DIVISOR, MACOS_BASE_US, MACOS_CAP_US);
+}
+#else // Linux
+constexpr int64_t spin_tail_us (int64_t remaining_us) {
+    return detail::compute_spin_tail_us (remaining_us, 0, LINUX_BASE_US, LINUX_CAP_US);
+}
 #endif
 } // namespace pacing
 
