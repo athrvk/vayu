@@ -18,6 +18,7 @@
  * - Signal handling
  */
 
+#include <chrono>
 #include <functional>
 #include <string>
 
@@ -247,5 +248,53 @@ class HighResolutionTimerScope {
  * compiled out.
  */
 [[nodiscard]] int high_resolution_timer_holders ();
+
+// ============================================================================
+// Thread Scheduling
+// ============================================================================
+
+/**
+ * @brief Pin the calling thread to one logical CPU, best-effort.
+ * @param cpu_index Zero-based logical CPU index.
+ * @return true if the OS accepted the request, false otherwise (never throws).
+ *
+ * A container or sandboxed dev environment commonly denies this - the caller
+ * logs once and continues; a load-testing sidecar that failed to start because
+ * it could not pin a thread would be worse than one that paces slightly less
+ * precisely.
+ */
+[[nodiscard]] bool pin_current_thread (unsigned cpu_index);
+
+/**
+ * @brief Raise the calling thread's scheduling priority a modest amount, best-effort.
+ * @return true if the OS accepted the request, false otherwise (never throws).
+ *
+ * Deliberately NOT realtime (SCHED_FIFO/SCHED_RR on Linux, THREAD_TIME_CONSTRAINT_POLICY
+ * everywhere): this engine shares the machine with the app it is a sidecar for and
+ * the target under test, and a realtime thread that misbehaves can starve both.
+ * Windows: THREAD_PRIORITY_ABOVE_NORMAL. Linux: a `nice` adjustment only (SCHED_FIFO
+ * needs CAP_SYS_NICE, usually absent in a container, and would starve the UI/target
+ * on a shared box even when granted). macOS: THREAD_PRECEDENCE_POLICY, not a
+ * time-constraint policy (that one really is closer to realtime).
+ */
+[[nodiscard]] bool raise_current_thread_priority ();
+
+/**
+ * @brief Sleep until `deadline`, using the platform's most precise wait primitive.
+ * @param deadline An absolute steady_clock time point.
+ *
+ * Linux: clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...) - absolute rather than
+ * relative, so it carries no "time already spent computing the duration" error the
+ * way sleep_for's relative arithmetic does. macOS: mach_wait_until (no clock_nanosleep
+ * there). Windows: falls back to sleep_for's relative form - the precision problem
+ * there is solved separately (HighResolutionTimerScope + the caller's own spin tail),
+ * not by this function; this exists for Linux/macOS.
+ *
+ * Never spins and never busy-waits past the deadline itself - a caller wanting a
+ * spin tail (see `tick_sleep_leg_us` / `wait_for_next_tick` in `load_strategy.cpp`)
+ * calls this for the coarse leg only and spins the remainder itself, exactly as the
+ * existing Windows leg already does.
+ */
+void sleep_until_precise (std::chrono::steady_clock::time_point deadline);
 
 } // namespace vayu::platform

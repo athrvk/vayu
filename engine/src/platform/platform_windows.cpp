@@ -29,10 +29,12 @@
 #include <windows.h>
 
 #include <atomic>
+#include <chrono>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace vayu::platform {
 
@@ -252,6 +254,41 @@ std::string default_data_dir () {
 // The 1 ms timer request used to live here, held for the process' whole life.
 // It is `HighResolutionTimerScope` in high_resolution_timer.cpp now, taken by
 // each run and released with it (issue #1161).
+
+// ============================================================================
+// Thread Scheduling
+// ============================================================================
+
+bool pin_current_thread (unsigned cpu_index) {
+    // A shift past the mask's own width is undefined behaviour; DWORD_PTR is
+    // 32 bits on a 32-bit build and 64 on a 64-bit one; there is no group
+    // affinity here (that would need SetThreadGroupAffinity for a system with
+    // more logical CPUs than one mask can name), matching the single-mask
+    // Linux/macOS pinning this function offers everywhere else.
+    if (cpu_index >= sizeof (DWORD_PTR) * 8) {
+        return false;
+    }
+    const DWORD_PTR mask = static_cast<DWORD_PTR> (1) << cpu_index;
+    // Returns the previous affinity mask on success, 0 on failure - never a
+    // value this call would want to interpret, only whether it is zero.
+    return SetThreadAffinityMask (GetCurrentThread (), mask) != 0;
+}
+
+bool raise_current_thread_priority () {
+    return SetThreadPriority (GetCurrentThread (), THREAD_PRIORITY_ABOVE_NORMAL) != 0;
+}
+
+void sleep_until_precise (std::chrono::steady_clock::time_point deadline) {
+    // No Windows equivalent of clock_nanosleep/mach_wait_until at this layer;
+    // the precision problem here is solved separately - HighResolutionTimerScope
+    // plus the caller's own spin tail (see wait_for_next_tick in
+    // load_strategy.cpp) - so this is deliberately sleep_for's ordinary
+    // relative form, not a Windows-specific precision path.
+    const auto now = std::chrono::steady_clock::now ();
+    if (deadline > now) {
+        std::this_thread::sleep_for (deadline - now);
+    }
+}
 
 } // namespace vayu::platform
 

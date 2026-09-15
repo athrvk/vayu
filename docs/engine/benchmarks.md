@@ -706,6 +706,72 @@ Pacing precision is unaffected - the bounded wait is exactly the remaining
 deferral, so a 10ms cadence still holds to about 1%, which is why nothing
 noticed this for as long as it went undiagnosed.
 
+### Worker affinity, thread priority and precise sleep off Windows (2026-09-15)
+
+Two related additions to load generation, both best-effort and both landing
+without a measured number of their own:
+
+**CPU affinity and a modest scheduling-priority bump for load-generation
+threads.** An event-loop worker calls `platform::pin_current_thread` and
+`platform::raise_current_thread_priority` once, at the top of its own thread -
+but only when `core::worker_cpu_index` says there is a core to spare; without
+one, neither call happens. Priority rides the same gate as pinning
+deliberately: raising every worker's scheduling priority with no dedicated
+core to run on just means they all compete more aggressively for the same
+cores as everything else sharing the machine, which risks starving those
+instead of pacing more accurately. The run's pacing thread (`run_manager.cpp`'s
+`execute_load_test`, the thread that runs `wait_for_next_tick`) is the one
+exception: it raises its own priority unconditionally, since it is always a
+single thread and never pinned. `worker_cpu_index` itself only activates
+pinning when an operator has capped `workers` below the detected core count,
+reserving CPU 0 for the OS, the UI and the pacing thread rather than pinning
+1:1 across every core - see its doc comment
+(`include/vayu/core/worker_count.hpp`) for why 1:1 would make a run measure
+the laptop instead of the target. Neither call reaches for
+a realtime scheduling class (`SCHED_FIFO`/`SCHED_RR` on Linux,
+`THREAD_TIME_CONSTRAINT_POLICY` on macOS): the engine shares the machine with
+the app it is a sidecar for and with the target under test, and a realtime
+thread that misbehaves can starve both. Both calls are refused outright in a
+container or sandbox that denies the underlying syscall - `sched_setaffinity`,
+`thread_policy_set`, `setpriority`, `SetThreadAffinityMask` - and the engine
+logs once per process and keeps running unpinned at the default priority
+rather than failing a run over it.
+
+**Precise sleep for the tick-pacing loop, off Windows too.** Issue #1370 gave
+`wait_for_next_tick` a sleep-then-spin shape on Windows, because
+`sleep_for`'s overshoot there is large enough to pay back as a double dispatch
+on the next tick (measured in the section above). That shape is now
+unconditional: Linux sleeps the coarse leg with
+`clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` and macOS with
+`mach_wait_until`, both absolute waits rather than `sleep_for`'s relative one,
+and both still spin the last `pacing::spin_tail_us (remaining)` of every tick
+exactly as the Windows leg always has.
+
+**The tail is a per-platform *function* of the remaining tick, not one flat
+number.** Windows and Linux keep the flat shape (`spin_tail_us` always
+returns the platform's constant, regardless of the remainder); macOS does
+not, because its overshoot itself is not flat. Real measurement on an Apple
+M3 Pro (macOS 26.7, 400 samples/row, `mach_wait_until`
+`actual - requested` overshoot, engine+Electron running concurrently - see
+[issue #1667's comment](https://github.com/athrvk/vayu/issues/1667#issuecomment-5679113672)
+for the full table) found the overshoot scaling with the requested sleep
+duration up to ~5-10ms, then plateauing around ~1020-1060us - consistent with
+XNU's timer-coalescing leeway (slop proportional to the timer length, capped)
+rather than Windows' fixed wakeup cost. A single fixed tail cannot cover
+both ends of that: sized for the low-RPS/long-tick case (~1100us) it would
+busy-spin an entire core at high RPS (1500 RPS = 667us ticks, wholly consumed
+by the spin); sized for high RPS it misses the deadline at low RPS (the old
+300us placeholder already overshot by ~2x at 200 RPS before any spin
+happened). So macOS's `spin_tail_us` is
+`min (remaining / 9 + 60, 1100)` (`constants::pacing::MACOS_DIVISOR` /
+`MACOS_BASE_US` / `MACOS_CAP_US`), reproducing that shape: near-zero at very
+short remainders, tracking the measured line through the mid-range, and flat
+at the plateau. **Linux's tail is still a placeholder, not a measurement**:
+`pacing::spin_tail_us` there stays flat at 150us, sourced from the kernel's
+documented ~50 us default timer slack plus scheduler-wakeup margin, with no
+`actual - requested` table behind it. [Issue #1667](https://github.com/athrvk/vayu/issues/1667)
+still tracks that Linux measurement.
+
 ## Prior results (2026-07, CLI, unreconciled)
 
 These numbers were measured earlier via `scripts/test/bench-compare.sh` on a
@@ -850,19 +916,33 @@ jitter is corrected on the following tick, and a rate like 1500 RPS is delivered
 as asked rather than floored to the nearest 1000. Comparing against wrk/vegeta
 at a fixed rate, `sent + dropped` should equal `targetRps × duration`.
 
-**How a tick waits, on Windows.** Rate fidelity is not arrival *regularity*, and
-the two have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)
-every Windows tick ends on a busy-spin and only the stretch before it is slept:
-`sleep_for(remainder - pacing::SPIN_TAIL_US)`, then spin to the tick. A
-remainder no longer than the tail is spun whole, which is what every tick from
-~500 RPS up already was - `tick_us` is 1000us there, and the tail is 2000us -
-so nothing above that point moved. Below it the tick used to sleep its whole
-remainder and land late by the sleep's overshoot, which the next tick paid back
-as a double dispatch. The overshoot now lands inside the tail instead of inside
-the arrival gap, and the spin is bounded by the tail rather than by the tick, so
-its cost does not grow as the target rate falls. Elsewhere the tick sleeps the
-whole remainder; the leg exists because Windows' is the sleep that cannot be
-trusted to the microsecond.
+**How a tick waits.** Rate fidelity is not arrival *regularity*, and the two
+have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)
+(Windows) and [#1667](https://github.com/athrvk/vayu/issues/1667) (Linux,
+macOS) every tick ends on a busy-spin and only the stretch before it is
+slept, on all three platforms: `platform::sleep_until_precise(next_tick -
+pacing::spin_tail_us (remaining))`, then spin to the tick.
+`sleep_until_precise` is `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
+...)` on Linux, `mach_wait_until` on macOS, and `sleep_for`'s ordinary
+relative form on Windows (where the precision problem is the run's 1 ms
+timer request plus this same spin tail, not the sleep primitive itself). A
+remainder no longer than the tail is spun whole, which is what every tick
+from ~500 RPS up already was on Windows - `tick_us` is 1000us there, and the
+Windows tail is a flat 2000us - so nothing above that point moved when #1370
+landed.
+
+The tail's *shape* is platform-specific, not just its size, because each
+platform's sleep call overshoots by a different amount and, on macOS, in a
+different way: Windows' and Linux's `spin_tail_us` are flat constants
+(2000us, measured; 150us, a placeholder pending real hardware), but macOS's
+is `min (remaining / 9 + 60, 1100)` - proportional to the remaining tick up
+to the ~1100us plateau XNU's timer-coalescing leeway produces, real-measured
+on an Apple M3 Pro (see the 2026-09-15 section above). Below the spin
+threshold the tick used to sleep its whole remainder and land late by the
+sleep's overshoot, which the next tick paid back as a double dispatch. The
+overshoot now lands inside the tail instead of inside the arrival gap, and
+the spin is bounded by the tail rather than by the tick, so its cost does not
+grow as the target rate falls.
 
 ### Recommended settings
 
