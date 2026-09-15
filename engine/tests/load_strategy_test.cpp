@@ -1305,11 +1305,14 @@ TEST (SpinTailUs, WindowsAndLinuxAreFlatRegardlessOfInput) {
 TEST (SpinTailUs, PlatformSelectedFunctionIsFlatOrCappedConsistently) {
     using vayu::core::constants::pacing::spin_tail_us;
 
-    const int64_t small = spin_tail_us (0);
-    const int64_t large = spin_tail_us (1'000'000);
-    EXPECT_GE (small, 0);
-    EXPECT_GE (large, small); // the tail never shrinks as the remainder grows
-    EXPECT_LE (large, 2000);  // no platform's cap exceeds the Windows constant
+    // Not named `small`: that identifier is a legacy typedef macro
+    // (`#define small char`, from the RPC headers `windows.h` pulls in) that
+    // NOMINMAX does not guard, so MSVC substitutes it mid-declaration.
+    const int64_t tail_at_zero    = spin_tail_us (0);
+    const int64_t tail_at_plateau = spin_tail_us (1'000'000);
+    EXPECT_GE (tail_at_zero, 0);
+    EXPECT_GE (tail_at_plateau, tail_at_zero); // the tail never shrinks as the remainder grows
+    EXPECT_LE (tail_at_plateau, 2000); // no platform's cap exceeds the Windows constant
 }
 
 // ============================================================================
