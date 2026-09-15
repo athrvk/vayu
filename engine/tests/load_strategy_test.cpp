@@ -1217,23 +1217,25 @@ TEST_F (LoadStrategyTest, PhaseHistogramsCanBeDisabledPerRun) {
     EXPECT_TRUE (stock->metrics_collector->phase_percentiles ().has_value ());
 }
 // The tick's wait is split so the sleep's overshoot lands in the spin and not
-// in the arrival gap (issue #1370). Platform-free on purpose: the arithmetic is
-// the whole of the decision, and a Linux host has to be able to review it.
+// in the arrival gap (issue #1370, extended to Linux/macOS by issue #1667).
+// Platform-free on purpose: the arithmetic is the whole of the decision, and a
+// Linux host has to be able to review it - so every case is phrased relative
+// to `tail` rather than to a literal, since `SPIN_TAIL_US` differs per
+// platform (2000us on Windows, 300us on macOS, 150us on Linux) and this test
+// runs on all three.
 TEST (TickPacing, SleepLegLeavesTheSpinTail) {
     using vayu::core::tick_sleep_leg_us;
     constexpr int64_t tail = vayu::core::constants::pacing::SPIN_TAIL_US;
 
-    // 400 RPS - the rate the issue measured. A 2500us tick sleeps 500us and
-    // spins the last 2000, rather than sleeping all 2500 and landing ~1ms late.
-    EXPECT_EQ (tick_sleep_leg_us (2500, tail), 500);
-    // 200 RPS.
-    EXPECT_EQ (tick_sleep_leg_us (5000, tail), 3000);
+    // A remainder twice the tail sleeps exactly the tail's worth and spins
+    // the rest; three times the tail sleeps twice the tail.
+    EXPECT_EQ (tick_sleep_leg_us (tail * 2, tail), tail);
+    EXPECT_EQ (tick_sleep_leg_us (tail * 3, tail), tail * 2);
 
-    // At and below the tail the whole remainder is spun, which is what every
-    // tick from ~500 RPS up (a 1000us `tick_us`) already did - this leg must
-    // not have moved for them.
-    EXPECT_EQ (tick_sleep_leg_us (1000, tail), 0);
+    // At and below the tail the whole remainder is spun - the boundary itself,
+    // half of it, and one microsecond past it.
     EXPECT_EQ (tick_sleep_leg_us (tail, tail), 0);
+    EXPECT_EQ (tick_sleep_leg_us (tail / 2, tail), 0);
     EXPECT_EQ (tick_sleep_leg_us (tail + 1, tail), 1);
 
     // Never negative, whatever a caller hands it.

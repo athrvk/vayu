@@ -17,6 +17,8 @@
 // engine; `user_agent.hpp` declares the symbol without naming the version, and
 // one .cpp defines it. `version_isolation_test.cpp` guards the rule.
 #include "vayu/core/user_agent.hpp"
+// VAYU_PLATFORM_WINDOWS / VAYU_PLATFORM_MACOS, for pacing::SPIN_TAIL_US below.
+#include "vayu/platform/platform.hpp"
 
 namespace vayu::core::constants {
 /**
@@ -235,15 +237,17 @@ constexpr size_t SLO_BREACH_WINDOWS = 2;
 /**
  * @brief How a `constant_rps` tick waits out its remainder.
  *
- * Windows only in effect: the sleep leg below exists because a Windows tick
- * cannot sleep accurately even with the run's 1 ms timer request in force.
- * Elsewhere the tick sleeps its whole remainder and reads nothing here.
+ * All three platforms sleep the coarse leg and spin the last `SPIN_TAIL_US` of
+ * every tick (issue #1370 landed it for Windows; the same shape now runs on
+ * Linux and macOS too, through `platform::sleep_until_precise`). Only the
+ * *size* of the tail is platform-specific, because the sleep primitive each
+ * platform's leg actually uses overshoots by a different amount.
  */
 namespace pacing {
 /// How much of each tick's remainder is busy-spun rather than slept, in
 /// microseconds. The tick sleeps `remainder - SPIN_TAIL_US` and spins the
 /// rest; a remainder no longer than this is spun whole.
-///
+#if VAYU_PLATFORM_WINDOWS
 /// The value is the sleep overshoot it has to cover. Measured on Windows 11
 /// 24H2 (i5-8300H) with a 1 ms timer request held, 400 samples per row, as
 /// `actual - requested` for the durations this leg actually asks for:
@@ -267,6 +271,21 @@ namespace pacing {
 /// every tick from ~500 RPS up - where the remainder never exceeds the tail -
 /// paces exactly as it did.
 constexpr int64_t SPIN_TAIL_US = 2000;
+#elif VAYU_PLATFORM_MACOS
+/// Placeholder pending real-hardware measurement - see issue #1667. Sourced
+/// from macOS's documented mach_wait_until wakeup characteristics rather
+/// than an empirical study: this value has NOT been measured the way the
+/// Windows constant above was, and must not be read as if it had.
+constexpr int64_t SPIN_TAIL_US = 300;
+#else // Linux
+/// Placeholder pending real-hardware measurement - see issue #1667. Linux's
+/// default timer slack is documented as ~50us
+/// (https://www.kernel.org/doc/html/latest/timers/timers-howto.html and
+/// `/proc/<pid>/timerslack_ns`, default 50000ns); this value adds margin for
+/// scheduler wakeup latency on top of that and has NOT been measured the way
+/// the Windows constant above was.
+constexpr int64_t SPIN_TAIL_US = 150;
+#endif
 } // namespace pacing
 
 /**

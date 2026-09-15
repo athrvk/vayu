@@ -165,7 +165,16 @@ class CurlHandlePool {
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 class EventLoopWorker {
     public:
-    explicit EventLoopWorker (const EventLoopConfig& cfg);
+    /**
+     * @param worker_index Zero-based index of this worker among its siblings,
+     *   used only to pick a pin target (`core::worker_cpu_index`) - not stored,
+     *   read once by `run_loop` on its own thread.
+     * @param num_workers How many workers `EventLoopImpl` created; together
+     *   with @p worker_index this is the whole input to the pinning decision.
+     */
+    explicit EventLoopWorker (const EventLoopConfig& cfg,
+    unsigned worker_index = 0,
+    unsigned num_workers  = 1);
     ~EventLoopWorker ();
 
     // Prevent copying
@@ -260,6 +269,12 @@ class EventLoopWorker {
 
     // Per-worker handle pool for reusing curl handles
     CurlHandlePool handle_pool_;
+
+    // This worker's place among its siblings, read once by run_loop to decide
+    // whether to pin (core::worker_cpu_index) - not touched after construction,
+    // so no synchronisation is needed for the thread that reads them.
+    unsigned worker_index_;
+    unsigned num_workers_;
 };
 
 } // namespace vayu::http::detail

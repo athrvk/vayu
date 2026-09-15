@@ -27,6 +27,7 @@
 #include "vayu/core/refill_deficit.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -1068,17 +1069,22 @@ class ConstantLoadStrategy : public LoadStrategy {
      * every tick and pays the overshoot back as a double dispatch on the next
      * one.
      *
-     * So every Windows tick ends on a spin, and only the stretch before it is
-     * slept (issue #1370): the overshoot lands inside the tail rather than
-     * inside the arrival gap, and the spin is bounded by the tail rather than
-     * by the tick, so its cost does not grow as the target rate falls. A
-     * remainder no longer than the tail is spun whole - which is what every
-     * tick from ~500 RPS up already was, `tick_us` below being 1000us there.
+     * So every tick ends on a spin, and only the stretch before it is slept
+     * (issue #1370, extended off Windows by issue #1667's platform-specific
+     * tail): the overshoot lands inside the tail rather than inside the
+     * arrival gap, and the spin is bounded by the tail rather than by the
+     * tick, so its cost does not grow as the target rate falls. A remainder
+     * no longer than the tail is spun whole - which is what every tick from
+     * ~500 RPS up already was, `tick_us` below being 1000us there.
      *
-     * @p context is read only by that spin, so the leg without it leaves the
-     * parameter unused.
+     * The sleep leg is `platform::sleep_until_precise`: Linux and macOS use
+     * an absolute wait (`clock_nanosleep` / `mach_wait_until`) that does not
+     * itself need the spin tail to be accurate, but the tail stays for the
+     * same reason it stays on Windows - a run does not want to trust *any*
+     * platform's wakeup latency for the last stretch of a tick, and the tail
+     * is cheap.
      */
-    static void wait_for_next_tick ([[maybe_unused]] const std::shared_ptr<RunContext>& context,
+    static void wait_for_next_tick (const std::shared_ptr<RunContext>& context,
     std::chrono::steady_clock::time_point next_tick) {
         const auto sleep_us = std::chrono::duration_cast<std::chrono::microseconds> (
         next_tick - std::chrono::steady_clock::now ())
@@ -1086,17 +1092,14 @@ class ConstantLoadStrategy : public LoadStrategy {
         if (sleep_us <= 100) {
             return;
         }
-#ifdef _WIN32
         const int64_t leg = tick_sleep_leg_us (sleep_us, constants::pacing::SPIN_TAIL_US);
         if (leg > 0) {
-            std::this_thread::sleep_for (std::chrono::microseconds (leg));
+            vayu::platform::sleep_until_precise (next_tick -
+            std::chrono::microseconds (constants::pacing::SPIN_TAIL_US));
         }
         while (std::chrono::steady_clock::now () < next_tick && !context->should_stop) {
             /* spin */
         }
-#else
-        std::this_thread::sleep_for (std::chrono::microseconds (sleep_us));
-#endif
     }
 
     /**

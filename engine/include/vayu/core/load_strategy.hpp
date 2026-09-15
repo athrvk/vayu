@@ -216,9 +216,13 @@ validate_request_elements_run_override (const nlohmann::json& config);
  * inside the spin instead of inside the gap, and bounds the spin at the tail
  * however slow the rate.
  *
- * Only the Windows leg calls this; every other platform sleeps the remainder
- * whole. It is declared here, and unconditionally, because the arithmetic is
- * the whole of the decision and is worth testing on any host.
+ * Every platform's `wait_for_next_tick` calls this now (issue #1667 extended
+ * the Windows-only #1370 shape to Linux/macOS's own precise-sleep primitive,
+ * `platform::sleep_until_precise`); only the *tail* size
+ * (`constants::pacing::SPIN_TAIL_US`) is platform-specific, because each
+ * platform's sleep call overshoots by a different amount. Declared
+ * unconditionally because the arithmetic is the whole of the decision and is
+ * worth testing on any host.
  */
 [[nodiscard]] constexpr int64_t tick_sleep_leg_us (int64_t remainder_us, int64_t spin_tail_us) {
     return remainder_us > spin_tail_us ? remainder_us - spin_tail_us : 0;

@@ -22,9 +22,12 @@
 #include <utility>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/worker_count.hpp"
 #include "vayu/http/curl_options.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
+#include "vayu/platform/platform.hpp"
+#include "vayu/utils/logger.hpp"
 
 namespace vayu::http::detail {
 
@@ -243,10 +246,11 @@ void CurlHandlePool::release (CURL* handle) {
 // EventLoopWorker Implementation
 // ============================================================================
 
-EventLoopWorker::EventLoopWorker (const EventLoopConfig& cfg)
+EventLoopWorker::EventLoopWorker (const EventLoopConfig& cfg, unsigned worker_index, unsigned num_workers)
 : pending_queue (core::constants::queue::CAPACITY), // 64K capacity ring buffer
   config (cfg), rate_limiter (RateLimiterConfig{ cfg.target_rps, cfg.burst_size }),
-  handle_pool_ (config.max_concurrent) { // Pre-allocate handles
+  handle_pool_ (config.max_concurrent), // Pre-allocate handles
+  worker_index_ (worker_index), num_workers_ (num_workers) {
     multi_handle = curl_multi_init ();
     if (!multi_handle) {
         throw std::runtime_error ("Failed to initialize curl_multi for worker");
@@ -496,7 +500,33 @@ void EventLoopWorker::wait_for_work (int still_running) {
     }
 }
 
+namespace {
+/// Warn about a denied pin or priority request once per process, not once per
+/// worker thread - a run with 8 workers on a container that refuses both asks
+/// would otherwise log the same denial 8 times, and every worker denies it the
+/// same way for the same reason.
+std::atomic<bool> g_pin_denied_logged{ false };
+std::atomic<bool> g_priority_denied_logged{ false };
+} // namespace
+
 void EventLoopWorker::run_loop () {
+    if (auto cpu = core::worker_cpu_index (
+        worker_index_, num_workers_, std::thread::hardware_concurrency ())) {
+        if (!vayu::platform::pin_current_thread (*cpu) &&
+        !g_pin_denied_logged.exchange (true)) {
+            vayu::utils::log_warning ("run",
+            "Could not pin a load-generation worker thread to a CPU; "
+            "continuing unpinned");
+        }
+    }
+    if (!vayu::platform::raise_current_thread_priority () &&
+    !g_priority_denied_logged.exchange (true)) {
+        vayu::utils::log_warning ("run",
+        "Could not raise a load-generation worker thread's scheduling "
+        "priority; "
+        "continuing at the default priority");
+    }
+
     // Core loop optimized for latency and throughput.
     // When drain_on_stop=true (stop(true)): keep running until pending queue
     // AND active transfers are both empty, or until the drain deadline passes.
