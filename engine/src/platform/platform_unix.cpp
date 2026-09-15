@@ -22,6 +22,7 @@
 
 #if VAYU_PLATFORM_MACOS
 #include <mach/mach_init.h>
+#include <mach/mach_port.h>
 #include <mach/mach_time.h>
 #include <mach/thread_act.h>
 #include <mach/thread_policy.h>
