@@ -510,6 +510,14 @@ std::atomic<bool> g_priority_denied_logged{ false };
 } // namespace
 
 void EventLoopWorker::run_loop () {
+    // Both asks share one gate: whether there is a CPU to spare
+    // (core::worker_cpu_index, #1667's "never 1:1" rule). Priority is not
+    // requested on its own, even if pinning is denied by the OS - elevating
+    // every worker's scheduling priority with no dedicated core to run on
+    // just means they all compete more aggressively for the same cores as
+    // everything else sharing the machine (the Electron UI this engine is a
+    // sidecar for, its own HTTP server and pacing thread), which risks
+    // starving those instead of pacing more accurately.
     if (auto cpu = core::worker_cpu_index (
         worker_index_, num_workers_, std::thread::hardware_concurrency ())) {
         if (!vayu::platform::pin_current_thread (*cpu) &&
@@ -518,13 +526,13 @@ void EventLoopWorker::run_loop () {
             "Could not pin a load-generation worker thread to a CPU; "
             "continuing unpinned");
         }
-    }
-    if (!vayu::platform::raise_current_thread_priority () &&
-    !g_priority_denied_logged.exchange (true)) {
-        vayu::utils::log_warning ("run",
-        "Could not raise a load-generation worker thread's scheduling "
-        "priority; "
-        "continuing at the default priority");
+        if (!vayu::platform::raise_current_thread_priority () &&
+        !g_priority_denied_logged.exchange (true)) {
+            vayu::utils::log_warning ("run",
+            "Could not raise a load-generation worker thread's scheduling "
+            "priority; "
+            "continuing at the default priority");
+        }
     }
 
     // Core loop optimized for latency and throughput.

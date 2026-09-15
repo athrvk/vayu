@@ -712,16 +712,22 @@ Two related additions to load generation, both best-effort and both landing
 without a measured number of their own:
 
 **CPU affinity and a modest scheduling-priority bump for load-generation
-threads.** Every event-loop worker calls `platform::pin_current_thread` and
-`platform::raise_current_thread_priority` once, at the top of its own thread;
-the run's pacing thread (`run_manager.cpp`'s `execute_load_test`, the thread
-that runs `wait_for_next_tick`) raises its own priority the same way but is
-never pinned. Pinning is `core::worker_cpu_index`'s decision, not the OS
-call's: it only activates when an operator has capped `workers` below the
-detected core count, reserving CPU 0 for the OS, the UI and the pacing thread
-rather than pinning 1:1 across every core - see the doc comment on
-`worker_cpu_index` (`include/vayu/core/worker_count.hpp`) for why 1:1 would
-make a run measure the laptop instead of the target. Neither call reaches for
+threads.** An event-loop worker calls `platform::pin_current_thread` and
+`platform::raise_current_thread_priority` once, at the top of its own thread -
+but only when `core::worker_cpu_index` says there is a core to spare; without
+one, neither call happens. Priority rides the same gate as pinning
+deliberately: raising every worker's scheduling priority with no dedicated
+core to run on just means they all compete more aggressively for the same
+cores as everything else sharing the machine, which risks starving those
+instead of pacing more accurately. The run's pacing thread (`run_manager.cpp`'s
+`execute_load_test`, the thread that runs `wait_for_next_tick`) is the one
+exception: it raises its own priority unconditionally, since it is always a
+single thread and never pinned. `worker_cpu_index` itself only activates
+pinning when an operator has capped `workers` below the detected core count,
+reserving CPU 0 for the OS, the UI and the pacing thread rather than pinning
+1:1 across every core - see its doc comment
+(`include/vayu/core/worker_count.hpp`) for why 1:1 would make a run measure
+the laptop instead of the target. Neither call reaches for
 a realtime scheduling class (`SCHED_FIFO`/`SCHED_RR` on Linux,
 `THREAD_TIME_CONSTRAINT_POLICY` on macOS): the engine shares the machine with
 the app it is a sidecar for and with the target under test, and a realtime
