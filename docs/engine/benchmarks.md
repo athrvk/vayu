@@ -706,6 +706,53 @@ Pacing precision is unaffected - the bounded wait is exactly the remaining
 deferral, so a 10ms cadence still holds to about 1%, which is why nothing
 noticed this for as long as it went undiagnosed.
 
+### Worker affinity, thread priority and precise sleep off Windows (2026-09-15)
+
+Two related additions to load generation, both best-effort and both landing
+without a measured number of their own:
+
+**CPU affinity and a modest scheduling-priority bump for load-generation
+threads.** Every event-loop worker calls `platform::pin_current_thread` and
+`platform::raise_current_thread_priority` once, at the top of its own thread;
+the run's pacing thread (`run_manager.cpp`'s `execute_load_test`, the thread
+that runs `wait_for_next_tick`) raises its own priority the same way but is
+never pinned. Pinning is `core::worker_cpu_index`'s decision, not the OS
+call's: it only activates when an operator has capped `workers` below the
+detected core count, reserving CPU 0 for the OS, the UI and the pacing thread
+rather than pinning 1:1 across every core - see the doc comment on
+`worker_cpu_index` (`include/vayu/core/worker_count.hpp`) for why 1:1 would
+make a run measure the laptop instead of the target. Neither call reaches for
+a realtime scheduling class (`SCHED_FIFO`/`SCHED_RR` on Linux,
+`THREAD_TIME_CONSTRAINT_POLICY` on macOS): the engine shares the machine with
+the app it is a sidecar for and with the target under test, and a realtime
+thread that misbehaves can starve both. Both calls are refused outright in a
+container or sandbox that denies the underlying syscall - `sched_setaffinity`,
+`thread_policy_set`, `setpriority`, `SetThreadAffinityMask` - and the engine
+logs once per process and keeps running unpinned at the default priority
+rather than failing a run over it.
+
+**Precise sleep for the tick-pacing loop, off Windows too.** Issue #1370 gave
+`wait_for_next_tick` a sleep-then-spin shape on Windows, because
+`sleep_for`'s overshoot there is large enough to pay back as a double dispatch
+on the next tick (measured in the section above). That shape is now
+unconditional: Linux sleeps the coarse leg with
+`clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` and macOS with
+`mach_wait_until`, both absolute waits rather than `sleep_for`'s relative one,
+and both still spin the last `pacing::SPIN_TAIL_US` of every tick exactly as
+the Windows leg always has.
+
+**The Linux and macOS tail sizes are placeholders, not measurements.** This
+change was implemented and reviewed in an environment with no Linux or macOS
+performance hardware available, so `pacing::SPIN_TAIL_US`'s two new arms (150
+us on Linux, sourced from the kernel's documented ~50 us default timer slack
+plus scheduler-wakeup margin; 300 us on macOS, sourced from `mach_wait_until`'s
+documented wakeup characteristics) carry no `actual - requested` table the way
+the Windows constant above does, and the doc comment on each says so.
+[Issue #1667](https://github.com/athrvk/vayu/issues/1667) tracks running the
+same `sleep_for`-overshoot measurement this page has for Windows on real
+Linux and macOS hardware and updating both constants - and this paragraph -
+from whatever it finds.
+
 ## Prior results (2026-07, CLI, unreconciled)
 
 These numbers were measured earlier via `scripts/test/bench-compare.sh` on a
@@ -850,19 +897,27 @@ jitter is corrected on the following tick, and a rate like 1500 RPS is delivered
 as asked rather than floored to the nearest 1000. Comparing against wrk/vegeta
 at a fixed rate, `sent + dropped` should equal `targetRps × duration`.
 
-**How a tick waits, on Windows.** Rate fidelity is not arrival *regularity*, and
-the two have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)
-every Windows tick ends on a busy-spin and only the stretch before it is slept:
-`sleep_for(remainder - pacing::SPIN_TAIL_US)`, then spin to the tick. A
-remainder no longer than the tail is spun whole, which is what every tick from
-~500 RPS up already was - `tick_us` is 1000us there, and the tail is 2000us -
-so nothing above that point moved. Below it the tick used to sleep its whole
-remainder and land late by the sleep's overshoot, which the next tick paid back
-as a double dispatch. The overshoot now lands inside the tail instead of inside
-the arrival gap, and the spin is bounded by the tail rather than by the tick, so
-its cost does not grow as the target rate falls. Elsewhere the tick sleeps the
-whole remainder; the leg exists because Windows' is the sleep that cannot be
-trusted to the microsecond.
+**How a tick waits.** Rate fidelity is not arrival *regularity*, and the two
+have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)
+(Windows) and [#1667](https://github.com/athrvk/vayu/issues/1667) (Linux,
+macOS) every tick ends on a busy-spin and only the stretch before it is
+slept, on all three platforms: `platform::sleep_until_precise(next_tick -
+pacing::SPIN_TAIL_US)`, then spin to the tick. `sleep_until_precise` is
+`clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` on Linux,
+`mach_wait_until` on macOS, and `sleep_for`'s ordinary relative form on
+Windows (where the precision problem is the run's 1 ms timer request plus
+this same spin tail, not the sleep primitive itself). A remainder no longer
+than the tail is spun whole, which is what every tick from ~500 RPS up
+already was - `tick_us` is 1000us there, and the Windows tail is 2000us - so
+nothing above that point moved when #1370 landed. Below it the tick used to
+sleep its whole remainder and land late by the sleep's overshoot, which the
+next tick paid back as a double dispatch. The overshoot now lands inside the
+tail instead of inside the arrival gap, and the spin is bounded by the tail
+rather than by the tick, so its cost does not grow as the target rate falls.
+The tail's *size* is platform-specific because each platform's sleep call
+overshoots by a different amount; only the Windows value (2000us) is a
+measurement, the Linux (150us) and macOS (300us) values are placeholders
+pending #1667's hardware measurement.
 
 ### Recommended settings
 
