@@ -720,10 +720,18 @@ TEST_F (ElementsTimersRunnerTest, ElementsTimersOffSilencesAConfiguredThinkTime)
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now () - started);
-    // Two tiny GETs against a loopback mock, with the 2-second wait silenced,
-    // finish in well under a second even on a loaded box - a 4x margin below
-    // the 2000ms the wait would cost if it were not silenced.
-    EXPECT_LT (elapsed.count (), 500)
+    // `waitedMs == 0` below is the assertion that actually proves silencing:
+    // it reads the element's own recorded outcome, not a wall clock, so it
+    // cannot flake on CI scheduling the way a tight absolute bound can (this
+    // one did, on a macOS runner's 3 real cores oversubscribed to `ctest -j8`
+    // - see docs/engine/building.md's macOS ctest section). This bound is
+    // kept only as a coarse smoke check for a much bigger break than
+    // `waitedMs` alone would catch - a run that somehow paid the 2000ms wait
+    // *and* stacked meaningful extra latency on top - so it is set wide
+    // enough (well over double the 2000ms the wait would cost if unsilenced)
+    // that ordinary CI slowness for two tiny loopback GETs cannot plausibly
+    // trip it.
+    EXPECT_LT (elapsed.count (), 5000)
     << "a 2-second think time was not silenced by elements.timers: off";
 
     auto rows = db_->get_results (run_id);

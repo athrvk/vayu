@@ -1119,10 +1119,28 @@ TEST_F (LoadStrategyTest, CapacityStopsAtTheCapAgainstAFastEndpoint) {
 
 // The deadline is the strategy's own stop, not the controller's - it is the one
 // condition that is about the clock rather than about what the service did.
+//
+// 1800ms rather than the 1200ms this started at: `maintain_concurrency` reads
+// `std::chrono::steady_clock::now ()` directly (`load_strategy.cpp`) with no
+// injected clock, and no such seam exists anywhere in the engine to give this
+// test deterministic control over "now" - `capacity_controller.cpp`'s pure
+// decision logic takes elapsed time as a parameter but does not own the clock
+// either, so there is nothing here to inject into without a disproportionate
+// new abstraction the codebase has never needed before. At 1200ms the window
+// this test depends on (level 1 closing at ~1000ms, the deadline landing
+// ~200ms into level 2) left only 200ms of real wall-clock slack on each side,
+// a race by construction under any CI scheduling jitter - exactly what
+// flaked macOS CI at 8-way ctest parallelism on 3 real cores (see
+// docs/engine/building.md's macOS ctest section). 1800ms leaves ~800ms of
+// slack for level 1 to close and ~800ms of headroom before level 2 could
+// possibly reach the 1s `stepDuration` threshold itself, on both sides wide
+// enough that ordinary CI contention cannot plausibly close it - while still
+// being comfortably short of `concurrency`'s 1000-request ceiling, so the
+// search is still mid-climb (not capped) when the deadline lands.
 TEST_F (LoadStrategyTest, CapacityStopsOnItsDeadline) {
     nlohmann::json config = {
         { "mode", "capacity" },
-        { "duration", "1200ms" }, // ends inside the second window
+        { "duration", "1800ms" }, // ends inside the second window, see comment above
         { "stepDuration", "1s" },
         { "sloMs", 2000 },
         { "startConcurrency", 2 },
