@@ -158,6 +158,13 @@ export const APP_SETTINGS = [
 		keywords: ["radius", "corners", "square"],
 	},
 	{
+		anchor: "density",
+		panel: "appearance",
+		label: "Density",
+		searchText: "How tightly rows, cards and dialogs are spaced.",
+		keywords: ["compact", "comfortable", "spacing", "padding", "rows"],
+	},
+	{
 		anchor: "reduced-motion",
 		panel: "appearance",
 		label: "Reduced motion",

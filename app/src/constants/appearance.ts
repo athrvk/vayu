@@ -192,9 +192,48 @@ export const UI_RADII = [
 export type UiRadius = (typeof UI_RADII)[number]["value"];
 export const DEFAULT_UI_RADIUS: UiRadius = "default";
 
+export interface DensityOption {
+	readonly value: string;
+	readonly label: string;
+	readonly description: string;
+}
+
+/**
+ * Interface density (issue #1670), applied by toggling a `data-density`
+ * attribute on `documentElement` rather than by computing a value here: the
+ * two densities are whole `--spacing` values declared in `index.css`
+ * (`:root` and `[data-density="comfortable"]`), so there is nothing for a
+ * `densityValue()`-style resolver to compute - unlike {@link radiusValue},
+ * which picks a numeric `--radius` a JS caller must supply.
+ *
+ * The label "Comfortable" is also the name a discontinued interface-scale
+ * preset used for a 1.1x zoom factor (`LEGACY_UI_SCALES` above) - a
+ * different setting, a different storage key, and the scale preset itself
+ * has not been offered since the continuous slider replaced it. Kept
+ * anyway: it is the term this issue's owner named, and Postman and Gmail
+ * use it for exactly this choice.
+ */
+export const UI_DENSITIES = [
+	{
+		value: "default",
+		label: "Default",
+		description: "Denser rows and tighter padding - fits more on screen",
+	},
+	{
+		value: "comfortable",
+		label: "Comfortable",
+		description: "Today's roomier spacing",
+	},
+] as const satisfies readonly DensityOption[];
+
+/** Interface density, applied by toggling the `data-density` attribute. */
+export type UiDensity = (typeof UI_DENSITIES)[number]["value"];
+export const DEFAULT_UI_DENSITY: UiDensity = "default";
+
 const FONT_VALUES = new Set<string>(UI_FONTS.map((f) => f.value));
 const MONO_FONT_VALUES = new Set<string>(MONO_FONTS.map((f) => f.value));
 const RADIUS_VALUES = new Set<string>(UI_RADII.map((r) => r.value));
+const DENSITY_VALUES = new Set<string>(UI_DENSITIES.map((d) => d.value));
 
 export function isUiFont(value: unknown): value is UiFont {
 	return typeof value === "string" && FONT_VALUES.has(value);
@@ -202,6 +241,10 @@ export function isUiFont(value: unknown): value is UiFont {
 
 export function isUiRadius(value: unknown): value is UiRadius {
 	return typeof value === "string" && RADIUS_VALUES.has(value);
+}
+
+export function isUiDensity(value: unknown): value is UiDensity {
+	return typeof value === "string" && DENSITY_VALUES.has(value);
 }
 
 export function radiusValue(radius: UiRadius): string {

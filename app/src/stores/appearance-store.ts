@@ -9,7 +9,7 @@
  * Appearance store
  *
  * The renderer-only interface preferences - UI font, interface scale, corner
- * roundedness - and the single place each one is written. Seeded from
+ * roundedness, interface density - and the single place each one is written. Seeded from
  * localStorage at module load. `useAppearance` re-asserts them against the live
  * DOM on mount; `useMenuActions` bridges the View menu's zoom items into
  * `nudgeScale` / `resetScale`.
@@ -29,17 +29,20 @@
 import { create } from "zustand";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
+	DEFAULT_UI_DENSITY,
 	DEFAULT_UI_FONT,
 	DEFAULT_UI_RADIUS,
 	DEFAULT_UI_SCALE,
 	clampScale,
 	customSansStack,
 	fontStack,
+	isUiDensity,
 	isUiFont,
 	isUiRadius,
 	nudgeScale,
 	parseScale,
 	radiusValue,
+	type UiDensity,
 	type UiFontChoice,
 	type UiRadius,
 } from "@/constants/appearance";
@@ -75,6 +78,19 @@ function applyRadius(radius: UiRadius): void {
 	document.documentElement.style.setProperty("--radius", radiusValue(radius));
 }
 
+/**
+ * "default" removes the attribute rather than setting it explicitly: the
+ * tightened `--spacing` lives on `:root` itself in index.css, and only
+ * "comfortable" needs a selector to override it.
+ */
+function applyDensity(density: UiDensity): void {
+	if (density === "comfortable") {
+		document.documentElement.setAttribute("data-density", "comfortable");
+	} else {
+		document.documentElement.removeAttribute("data-density");
+	}
+}
+
 function applyScale(factor: number): void {
 	if (window.electronAPI?.setZoomFactor) {
 		// Real page zoom - reflows the viewport, unlike CSS zoom on a child.
@@ -100,6 +116,11 @@ function readRadius(): UiRadius {
 	return isUiRadius(saved) ? saved : DEFAULT_UI_RADIUS;
 }
 
+function readDensity(): UiDensity {
+	const saved = storage()?.getItem(STORAGE_KEYS.UI_DENSITY) ?? null;
+	return isUiDensity(saved) ? saved : DEFAULT_UI_DENSITY;
+}
+
 interface AppearanceState {
 	font: UiFontChoice;
 	/** User-typed family, used when `font === "custom"`. */
@@ -107,6 +128,7 @@ interface AppearanceState {
 	/** Page-zoom factor, always on the step grid (see `clampScale`). */
 	scale: number;
 	radius: UiRadius;
+	density: UiDensity;
 
 	setFont: (next: UiFontChoice) => void;
 	setFontCustom: (next: string) => void;
@@ -117,6 +139,7 @@ interface AppearanceState {
 	/** Ctrl+0. Returns to 100%, which *is* the default setting, not a bypass of it. */
 	resetScale: () => void;
 	setRadius: (next: UiRadius) => void;
+	setDensity: (next: UiDensity) => void;
 	/** Re-assert every preference against the live DOM (mount only). */
 	applyAll: () => void;
 }
@@ -126,6 +149,7 @@ export const useAppearanceStore = create<AppearanceState>((set, get) => ({
 	fontCustom: readFontCustom(),
 	scale: parseScale(storage()?.getItem(STORAGE_KEYS.UI_SCALE) ?? null),
 	radius: readRadius(),
+	density: readDensity(),
 
 	setFont: (next) => {
 		set({ font: next });
@@ -157,10 +181,17 @@ export const useAppearanceStore = create<AppearanceState>((set, get) => ({
 		storage()?.setItem(STORAGE_KEYS.UI_RADIUS, next);
 	},
 
+	setDensity: (next) => {
+		set({ density: next });
+		applyDensity(next);
+		storage()?.setItem(STORAGE_KEYS.UI_DENSITY, next);
+	},
+
 	applyAll: () => {
-		const { font, fontCustom, scale, radius } = get();
+		const { font, fontCustom, scale, radius, density } = get();
 		applyFont(font, fontCustom);
 		applyScale(scale);
 		applyRadius(radius);
+		applyDensity(density);
 	},
 }));

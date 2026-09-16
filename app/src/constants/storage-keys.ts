@@ -27,6 +27,8 @@ export const STORAGE_KEYS = {
 	UI_SCALE: "vayu-ui-scale",
 	/** Corner roundedness (square/default/rounded). Read pre-paint in index.html. */
 	UI_RADIUS: "vayu-ui-radius",
+	/** Interface density (default/comfortable). Read pre-paint in index.html. */
+	UI_DENSITY: "vayu-ui-density",
 	/** Zustand persist name for renderer-only client settings (editor, charts, auto-save). */
 	CLIENT_SETTINGS: "vayu.client-settings",
 	/** Last-used load test configuration (LoadTestConfigDialog). */

@@ -9,12 +9,22 @@
  * AppearancePanel
  *
  * Cosmetic app preferences: theme mode, accent color scheme, and interface
- * (font / scale / roundedness). Client-side only (localStorage-backed), so
+ * (font / scale / roundedness / density). Client-side only (localStorage-backed), so
  * there's no Save button - changes apply live. Rendered inside
  * {@link ClientSettingsPanel} by the app-settings registry.
  */
 
-import { Monitor, Sun, Moon, SunMoon, SwatchBook, Type, Maximize2, Squircle } from "lucide-react";
+import {
+	Monitor,
+	Sun,
+	Moon,
+	SunMoon,
+	SwatchBook,
+	Type,
+	Maximize2,
+	Squircle,
+	Rows3,
+} from "lucide-react";
 import {
 	Button,
 	Card,
@@ -33,6 +43,7 @@ import { useClientSettingsStore } from "@/stores";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
 import {
 	DEFAULT_UI_SCALE,
+	UI_DENSITIES,
 	UI_FONTS,
 	UI_RADII,
 	UI_SCALE_MAX,
@@ -59,6 +70,7 @@ const COLOR_SCHEME = appSetting("color-scheme");
 const UI_FONT = appSetting("ui-font");
 const UI_SCALE = appSetting("ui-scale");
 const ROUNDEDNESS = appSetting("roundedness");
+const DENSITY = appSetting("density");
 const REDUCED_MOTION = appSetting("reduced-motion");
 
 export default function AppearancePanel() {
@@ -73,8 +85,18 @@ export default function AppearancePanel() {
 		setMatchAccent,
 		supportsAccent,
 	} = useElectronTheme();
-	const { font, setFont, fontCustom, setFontCustom, scale, setScale, radius, setRadius } =
-		useAppearance();
+	const {
+		font,
+		setFont,
+		fontCustom,
+		setFontCustom,
+		scale,
+		setScale,
+		radius,
+		setRadius,
+		density,
+		setDensity,
+	} = useAppearance();
 	const reducedMotion = useClientSettingsStore((s) => s.reducedMotion);
 	const osReducesMotion = usePrefersReducedMotion();
 	const setReducedMotion = useClientSettingsStore((s) => s.setReducedMotion);
@@ -322,6 +344,24 @@ export default function AppearancePanel() {
 							value={radius}
 							onChange={setRadius}
 							columns="grid-cols-3"
+							align="start"
+						/>
+					</div>
+
+					<div data-setting-anchor={DENSITY.anchor}>
+						<Eyebrow className="mb-2 flex items-center gap-1.5">
+							<Rows3 className="w-3.5 h-3.5" />
+							{DENSITY.label}
+						</Eyebrow>
+						<OptionButtons
+							options={UI_DENSITIES.map((option) => ({
+								value: option.value,
+								label: option.label,
+								description: option.description,
+							}))}
+							value={density}
+							onChange={setDensity}
+							columns="grid-cols-2"
 							align="start"
 						/>
 					</div>
