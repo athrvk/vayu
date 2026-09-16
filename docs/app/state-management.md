@@ -843,12 +843,20 @@ three maps never held a given id.
 
 #### `appearance-store.ts` - Pre-Paint Interface Preferences
 
-The UI font, the interface scale and the corner roundedness - the three
-preferences `index.html`'s pre-paint script applies before React mounts. Seeded
-from localStorage at module load and written back one key per preference
-(`vayu-ui-font`, `vayu-ui-font-custom`, `vayu-ui-scale`, `vayu-ui-radius`), *not*
-through zustand's `persist`: the pre-paint script reads those exact keys, and
-`SETTINGS_STORAGE_KEYS` clears them on "Reset app settings".
+The UI font, the interface scale, the corner roundedness and the interface
+density - the four preferences `index.html`'s pre-paint script applies before
+React mounts. Seeded from localStorage at module load and written back one
+key per preference (`vayu-ui-font`, `vayu-ui-font-custom`, `vayu-ui-scale`,
+`vayu-ui-radius`, `vayu-ui-density`), *not* through zustand's `persist`: the
+pre-paint script reads those exact keys, and `SETTINGS_STORAGE_KEYS` clears
+them on "Reset app settings".
+
+Density (issue #1670) differs from the other three in mechanism: font, scale
+and radius each resolve a stored value to something `applyX` computes and
+writes with `style.setProperty`, while `applyDensity` only toggles a
+`data-density` attribute on `documentElement` - the two densities are whole
+`--spacing` values declared directly in `index.css`
+(`:root` / `[data-density="comfortable"]`), so there is nothing to compute.
 
 **State:**
 ```typescript

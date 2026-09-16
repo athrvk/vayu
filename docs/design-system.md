@@ -997,6 +997,15 @@ Both live in `appearance-store` (source of truth `constants/appearance.ts`),
 persisted to localStorage, and applied pre-paint in `index.html`. Code/mono
 text stays JetBrains Mono regardless.
 
+**Interface density** (issue #1670) is a fourth Interface control, next to
+Roundedness: `Default` and `Comfortable`, toggled by a `data-density`
+attribute on `documentElement` rather than a computed value, because the two
+densities are whole `--spacing` values declared in `index.css` (see Spacing
+Scale below) with nothing for a resolver function to pick between. The name
+`Comfortable` also named a discontinued interface-scale preset (a 1.1x zoom
+factor); the two are unrelated settings under different storage keys, and the
+scale preset has not been offered since the slider above replaced it.
+
 The View menu's `Ctrl`/`Cmd` `+` `-` `0` drive that same setting rather than
 Chromium's own zoom, so a keyboard zoom persists across a restart and "Actual
 Size" means 100% *because that is the default setting*, not because it bypasses
@@ -1155,6 +1164,40 @@ register is judged on, not a ceiling on the user.
 **Icon sizing goes on `className`, not lucide's `size` prop.** Mixing the two
 hides icons from a scale audit and lets off-grid values (15px) creep in. Use
 `w-3 h-3` (12), `w-3.5 h-3.5` (14), `w-4 h-4` (16), `w-5 h-5` (20).
+
+### Spacing Scale Conventions
+
+Every `p-*`, `m-*`, `gap-*`, `space-*` and `h-*`/`w-*` utility resolves to
+`calc(var(--spacing) * n)` (Tailwind v4), so the one `--spacing` declaration in
+`index.css` moves every padding, margin, gap and row height in the app at
+once (issue #1670). Two densities, both in `index.css`: `Default`
+(`--spacing: 0.1875rem`, 3px/unit) and `Comfortable`
+(`[data-density="comfortable"] { --spacing: 0.25rem }`, 4px/unit - the value
+Tailwind defaulted to before this variable existed, so Comfortable is
+0.30.0's layout exactly, not an approximation of it). Set by Settings →
+Appearance → Interface → Density, owned by `appearance-store`
+(`applyDensity`), applied pre-paint.
+
+| Use | Class | Default | Comfortable |
+|-----|-------|---------|-------------|
+| Control gap | `gap-2` | 6px | 8px |
+| Group gap | `gap-3` | 9px | 12px |
+| Section gap | `gap-4` / `space-y-4` | 12px | 16px |
+| Card padding | `p-4` (`CardHeader`/`CardContent`/`CardFooter`) | 12px | 16px |
+| Dialog padding | `p-5` (`DialogContent`) | 15px | 20px |
+| Drawer row height | `h-8` | 24px | 32px |
+| Chrome band height | `h-[var(--tabstrip-height)]` | 24px | 32px |
+
+`density.test.ts` reads both `--spacing` declarations directly off `index.css`
+and reds if either value or the `--tabstrip-height` formula changes.
+`spacing-scale.test.ts` guards `Card` and `DialogContent` specifically -
+the two primitives this issue tightened - rather than scanning the whole
+tree for `p-6`/`p-8`/`gap-6`/`gap-8`: several other `p-6`/`p-8` call sites
+exist outside those two primitives (page-level containers, and the
+`EmptyState`/`ErrorState` shared components) and were deliberately left
+alone as outside this issue's fix pathway. `--titlebar-height` stays a
+literal `32px`: it sizes the macOS traffic lights, a fixed platform
+constant no density setting should move.
 
 ---
 
@@ -1792,7 +1835,8 @@ header band, body below it.
 
 ## Drawer Row Metric
 
-**Single-line drawer rows are `h-8` (32px).** State the height; do not let it
+**Single-line drawer rows are `h-8` (24px at the default density, 32px at
+Comfortable - see Spacing Scale above).** State the height; do not let it
 fall out of the content. It previously did - a 28px chevron set the collection
 row, padding set the others - so the four drawer views ran **34 / 36 / 38 / 40px**
 and the rhythm shifted every time the user switched view, one click apart in the
@@ -1805,8 +1849,9 @@ centre; do not re-add vertical padding, which is what caused the drift.
 Section *headers* (e.g. "Environments") stay shorter on purpose - they are group
 labels, not list items, and the difference carries hierarchy.
 
-The disclosure chevron is `w-6 h-6` (24px) so it fits a 32px row. That is still
-an adequate pointer target, and the row around it opens the collection.
+The disclosure chevron is `w-6 h-6` - 18px at the default density, 24px at
+Comfortable - sized to fit the row at either. That is still an adequate
+pointer target, and the row around it opens the collection.
 
 **`h-8 items-center` on the row means the activator needs `self-stretch`.** The
 two rules above interact, and the interaction is a bug the eye cannot see. A
