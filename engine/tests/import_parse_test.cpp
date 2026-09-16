@@ -127,6 +127,37 @@ json skip_counts (const json& skipped) {
     return counts;
 }
 
+/**
+ * A file on disk for a `certificate.cert.src` / `.key.src` to name (issue
+ * #1656). The bytes only need to be *there* for most cases - `pm_certificate`
+ * reuses `client_cert_rejection`, which only reads a file's first bytes to sniff
+ * a format, never to validate the certificate itself, so plain text is enough
+ * unless a case is specifically about format sniffing.
+ */
+class ScratchFile {
+    public:
+    explicit ScratchFile (std::string name, const std::string& contents = "not-a-real-certificate\n")
+    : path_ (std::move (name)) {
+        std::ofstream out (path_, std::ios::binary | std::ios::trunc);
+        out.write (contents.data (), static_cast<std::streamsize> (contents.size ()));
+    }
+    ~ScratchFile () {
+        std::error_code ec;
+        std::filesystem::remove (path_, ec);
+    }
+    ScratchFile (const ScratchFile&)            = delete;
+    ScratchFile& operator= (const ScratchFile&) = delete;
+    ScratchFile (ScratchFile&&)                 = delete;
+    ScratchFile& operator= (ScratchFile&&)      = delete;
+
+    const std::string& path () const {
+        return path_;
+    }
+
+    private:
+    std::string path_;
+};
+
 void sort_examples (json& collections) {
     for (json& collection : collections) {
         for (json& request : collection.at ("requests")) {
@@ -971,21 +1002,170 @@ TEST (PostmanImport, ADisabledBodyImportsAsNoneAndIsCounted) {
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("disabled_body"), 1);
 }
 
-/// A request-level `certificate` or `proxy` override has nowhere to land yet
-/// (issue #1656) - counted rather than silently dropped.
-TEST (PostmanImport, CertificateAndProxyAreCountedRatherThanDroppedSilently) {
+/// `proxy` has no per-request field to land in - Vayu's proxy config is
+/// workspace/run-scoped, not per-request (`engine/CLAUDE.md`) - so it stays a
+/// permanent tally, decided by issue #1656 rather than deferred by it.
+TEST (PostmanImport, ProxyIsCountedRatherThanDroppedSilently) {
     const ImportParse parsed =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
         {"name":"R","request":{"method":"GET","url":"https://x.com",
-            "certificate":{"name":"c","matches":["https://x.com"]},
             "proxy":{"host":"proxy.example.com","port":8080}}}
     ]})",
     {}, {});
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const nlohmann::json counts =
     skip_counts (parsed.result.at ("meta").at ("skipped"));
-    EXPECT_EQ (counts.at ("certificate"), 1);
     EXPECT_EQ (counts.at ("proxy_config"), 1);
+    EXPECT_FALSE (counts.contains ("certificate"));
+    EXPECT_TRUE (parsed.result.at ("clientCertificates").empty ());
+}
+
+/// A `certificate` naming no `cert.src` at all has nothing a registry row
+/// could point at - "cannot resolve" per the issue's own acceptance criteria,
+/// same tally as before #1656's mapping.
+TEST (PostmanImport, CertificateWithNoCertSrcIsCountedRatherThanDroppedSilently) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://x.com",
+            "certificate":{"name":"c","matches":["https://x.com"]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("certificate"), 1);
+    EXPECT_TRUE (parsed.result.at ("clientCertificates").empty ());
+}
+
+/// The common real-world shape: a Postman export's `cert.src` names a path on
+/// the *exporting* machine, unreadable here - "cannot resolve" again, not a
+/// mapping failure the way an unparseable host would be.
+TEST (PostmanImport, CertificateWithAnUnreadablePathIsCountedRatherThanDroppedSilently) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://x.com",
+            "certificate":{"name":"c","matches":["https://x.com"],
+                "cert":{"src":"/no/such/file/on/this/machine.pem"}}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("certificate"), 1);
+    EXPECT_TRUE (parsed.result.at ("clientCertificates").empty ());
+}
+
+/// `{{baseUrl}}`-style variable hosts are the common Postman shape and never
+/// resolve to a hostname a registry entry could be keyed on - counted, same as
+/// an unreadable file, rather than reaching the reused write-time check at all.
+TEST (PostmanImport, CertificateOnAnUnresolvedVariableHostIsCountedRatherThanDroppedSilently) {
+    const ScratchFile cert ("import_parse_cert_unresolved_host.pem");
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"{{baseUrl}}/pets",
+            "certificate":{"name":"c","cert":{"src":")" +
+    cert.path () + R"("}}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("certificate"), 1);
+    EXPECT_TRUE (parsed.result.at ("clientCertificates").empty ());
+}
+
+/// A `cert.src` with no `key.src` is an incomplete PEM pair - the same
+/// "key file is empty" refusal `POST /client-certificates` gives a hand-written
+/// entry (`client_cert_file_rejection`), so this is "cannot resolve" too, not a
+/// mapping bug.
+TEST (PostmanImport, CertificateWithNoKeySrcIsCountedRatherThanDroppedSilently) {
+    const ScratchFile cert ("import_parse_cert_no_key.pem");
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://api.example.com/pets",
+            "certificate":{"cert":{"src":")" +
+    cert.path () + R"("}}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("certificate"), 1);
+    EXPECT_TRUE (parsed.result.at ("clientCertificates").empty ());
+}
+
+/// The mapped case (issue #1656's acceptance criteria): a readable PEM pair
+/// and a literal host builds a `clientCertificates` candidate keyed on that
+/// host, and the `certificate` `SkippedItem` kind no longer fires for it.
+TEST (PostmanImport, CertificateWithAReadablePemPairBuildsAClientCertificateCandidate) {
+    const ScratchFile cert ("import_parse_cert_mapped.pem");
+    const ScratchFile key ("import_parse_key_mapped.pem");
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":"https://api.example.com:8443/pets",
+            "certificate":{"name":"c","matches":["https://api.example.com"],
+                "cert":{"src":")" +
+    cert.path () + R"("},
+                "key":{"src":")" +
+    key.path () + R"("},
+                "passphrase":"secret"}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("certificate"));
+    const nlohmann::ordered_json& candidates =
+    parsed.result.at ("clientCertificates");
+    ASSERT_EQ (candidates.size (), 1);
+    EXPECT_EQ (candidates[0].at ("host"), "api.example.com");
+    EXPECT_EQ (candidates[0].at ("port"), 8443);
+    EXPECT_EQ (candidates[0].at ("certPath"), cert.path ());
+    EXPECT_EQ (candidates[0].at ("keyPath"), key.path ());
+    EXPECT_EQ (candidates[0].at ("certFormat"), "pem");
+    EXPECT_EQ (candidates[0].at ("passphrase"), "secret");
+}
+
+/// Two requests naming the *same* certificate for the same (host, port)
+/// dedupe into one candidate rather than two, and neither tallies.
+TEST (PostmanImport, TwoRequestsWithTheSameCertificateForOneHostDedupe) {
+    const ScratchFile cert ("import_parse_cert_dedupe.pem");
+    const ScratchFile key ("import_parse_key_dedupe.pem");
+    const std::string request = R"({"name":"R","request":{"method":"GET",
+        "url":"https://api.example.com/pets",
+        "certificate":{"cert":{"src":")" +
+    cert.path () + R"("},"key":{"src":")" + key.path () + R"("}}}})";
+    const ImportParse parsed = parse_import (R"({"info":{"schema":")" +
+    std::string (POSTMAN_SCHEMA) + R"("},"item":[)" + request + "," + request + "]}",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("certificate"));
+    EXPECT_EQ (parsed.result.at ("clientCertificates").size (), 1);
+}
+
+/// A second request naming a *different* certificate for a (host, port) the
+/// first already claimed cannot both be registered - one row per target, so
+/// the first seen wins and the second tallies rather than silently losing the
+/// first (issue #1656's own "two rows claiming one target" rule, applied at
+/// import time the same way the route's own 409 applies it at write time).
+TEST (PostmanImport, ASecondDifferentCertificateForOneHostIsCounted) {
+    const ScratchFile first ("import_parse_cert_collision_a.pem");
+    const ScratchFile first_key ("import_parse_key_collision_a.pem");
+    const ScratchFile second ("import_parse_cert_collision_b.pem");
+    const ScratchFile second_key ("import_parse_key_collision_b.pem");
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"A","request":{"method":"GET","url":"https://api.example.com/a",
+            "certificate":{"cert":{"src":")" +
+    first.path () + R"("},"key":{"src":")" + first_key.path () + R"("}}}},
+        {"name":"B","request":{"method":"GET","url":"https://api.example.com/b",
+            "certificate":{"cert":{"src":")" +
+    second.path () + R"("},"key":{"src":")" + second_key.path () + R"("}}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("certificate"), 1);
+    const nlohmann::ordered_json& candidates =
+    parsed.result.at ("clientCertificates");
+    ASSERT_EQ (candidates.size (), 1);
+    EXPECT_EQ (candidates[0].at ("certPath"), first.path ());
 }
 
 TEST (PostmanImport, CountsAnUnsupportedAuthTypeButNotAnExplicitNoAuth) {

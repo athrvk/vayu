@@ -37,6 +37,11 @@
 
 namespace vayu::http::routes {
 
+// Defined in client_certificates.cpp; returns {http_status, json_body} - the
+// same pair the HTTP handler writes out.
+std::pair<int, nlohmann::json>
+create_client_certificate_response (vayu::db::Database& db, const nlohmann::json& json);
+
 /**
  * @brief One event of a streamed `/import/fetch` (issue #882).
  *
@@ -948,6 +953,33 @@ const std::vector<vayu::db::SpecDocument>& spec_rows) {
 }
 
 /**
+ * The `clientCertificates` section of a `POST /import/apply` payload,
+ * applied best-effort after the tree's own transaction commits (issue #1656).
+ *
+ * `create_client_certificate_response` takes its own lock (#1455), so calling
+ * it from inside `import_apply_response`'s `db.with_lock` would be a
+ * reentrant deadlock - it has to run after that scope closes, which means a
+ * candidate this call cannot register (a `(host, port)` another row claimed
+ * since the preview, or a file that stopped being readable) is silently
+ * skipped rather than undoing the tree that already landed and does not
+ * reference it - the same trade `POST /globals` makes as the one write
+ * outside this payload (`engine/CLAUDE.md`).
+ */
+void apply_client_certificate_candidates (vayu::db::Database& db,
+const nlohmann::json& candidates) {
+    for (const auto& candidate : candidates) {
+        const int status = create_client_certificate_response (db, candidate).first;
+        if (status != 200) {
+            vayu::utils::log_warning ("http", "POST /import/apply - skipped an imported client certificate candidate",
+            { { "status", status },
+            { "host",
+            candidate.is_object () ? candidate.value ("host", std::string ()) :
+                                     std::string () } });
+        }
+    }
+}
+
+/**
  * Testable core of POST /import/apply - persist a whole parsed import in one
  * atomic call, returning {http_status, json_body} (issue #96).
  *
@@ -980,6 +1012,11 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
     const nlohmann::json* requests     = nullptr;
     const nlohmann::json* environments = nullptr;
     const nlohmann::json* specs        = nullptr;
+    // Not one of the temp-id tree's sections - a certificate candidate names
+    // no parent and nothing else references it - so it rides the same
+    // shape-only `read_items` check without joining `claim_all`/`TempIds`
+    // (issue #1656).
+    const nlohmann::json* client_certificates = nullptr;
     if (auto outcome = read_items (body, "collections", collections); !outcome) {
         return as_response (outcome.error ());
     }
@@ -990,6 +1027,9 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         return as_response (outcome.error ());
     }
     if (auto outcome = read_items (body, "specs", specs); !outcome) {
+        return as_response (outcome.error ());
+    }
+    if (auto outcome = read_items (body, "clientCertificates", client_certificates); !outcome) {
         return as_response (outcome.error ());
     }
 
@@ -1004,7 +1044,8 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         }
     }
     const size_t total = collections->size () + requests->size () +
-    environments->size () + nested_examples + specs->size ();
+    environments->size () + nested_examples + specs->size () +
+    client_certificates->size ();
     if (total > MAX_IMPORT_ITEMS) {
         return as_response (body_error ("Import too large: " + std::to_string (total) +
         " items exceeds the limit of " + std::to_string (MAX_IMPORT_ITEMS) + " per call"));
@@ -1072,6 +1113,10 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
             result = as_response (outcome.error ());
         }
     });
+    if (result.first != 200) {
+        return result;
+    }
+    apply_client_certificate_candidates (db, *client_certificates);
     return result;
 }
 
