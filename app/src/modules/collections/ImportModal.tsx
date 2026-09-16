@@ -1515,12 +1515,12 @@ const SKIPPED_LABELS: Partial<Record<string, [singular: string, plural: string]>
 		"request bodies Postman had turned off - imported with no body rather than sent anyway",
 	],
 	certificate: [
-		"request-level client certificate (Vayu certificates are per-host, not per-request - not yet imported)",
-		"request-level client certificates (Vayu certificates are per-host, not per-request - not yet imported)",
+		"request-level client certificate that could not be registered (an unreadable file, or a host this import already registered a different certificate for)",
+		"request-level client certificates that could not be registered (an unreadable file, or a host this import already registered a different certificate for)",
 	],
 	proxy_config: [
-		"request-level proxy override (not yet imported)",
-		"request-level proxy overrides (not yet imported)",
+		"request-level proxy override (Vayu has no per-request proxy setting to import it into)",
+		"request-level proxy overrides (Vayu has no per-request proxy setting to import it into)",
 	],
 	invalid_percent_encoding: [
 		"query value with an invalid % escape, changed when rejoined into the URL",

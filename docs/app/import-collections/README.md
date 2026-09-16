@@ -250,6 +250,18 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
   one partial outcome left: the tree lands, the globals write fails, and the error
   surfaces with no rollback to undo the apply. See
   [postman-environment.md](postman-environment.md#globals-merge-they-do-not-replace).
+- **`clientCertificates` is best-effort, inside the same call but outside the tree's own
+  atomicity** (issue #1656). A Postman import resolves a request's own `certificate` into
+  a `client_certificates` registry candidate at preview time (see
+  [postman.md](postman.md#request)) and the orchestrator sends it alongside the
+  tree, always `[]` included like `specs`. The engine applies each candidate through the
+  same check-and-write `POST /client-certificates` uses, but only *after* the tree's own
+  transaction commits - reusing that write means reusing its own lock, and taking it from
+  inside the tree's transaction would deadlock. A candidate that fails (a `(host, port)`
+  another row claims by the time apply runs, a file that stopped being readable since the
+  preview) is skipped rather than undoing a tree that does not reference it; nothing in the
+  response says which. `proxy` has no equivalent - Vayu's proxy config is
+  workspace/run-scoped, so it stays a permanent `meta.skipped` tally instead.
 
 **The flattening exists twice, and the two are pinned to each other.**
 `POST /import` has no preview to show, so it flattens engine-side
