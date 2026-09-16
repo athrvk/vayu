@@ -36,9 +36,10 @@ function ScrollArea({
  * The overlay scrollbar, sized and coloured to match the native one.
  *
  * A `ScrollArea` sits beside plain `overflow-auto` panes all over the app, so
- * its bar is read against theirs: this is 6px because `::-webkit-scrollbar` in
- * `index.css` is 6px, and it carries the same `muted-foreground/30` thumb for
- * the same reason. It shipped at shadcn's 10px with a `bg-border` thumb, which
+ * its bar is read against theirs: this is `w-2`/`h-2` because `::-webkit-scrollbar`
+ * in `index.css` is too (2 spacing units, 6px at the default density), and it
+ * carries the same `muted-foreground/30` thumb for the same reason. It shipped
+ * at shadcn's 10px with a `bg-border` thumb, which
  * is both thicker than the baseline and - since `--border` matches `--card` in
  * dark - invisible on the surface this component is usually laid over.
  *
@@ -57,8 +58,8 @@ function ScrollBar({
 			orientation={orientation}
 			className={cn(
 				"flex touch-none select-none transition-colors",
-				orientation === "vertical" && "h-full w-1.5",
-				orientation === "horizontal" && "h-1.5 flex-col",
+				orientation === "vertical" && "h-full w-2",
+				orientation === "horizontal" && "h-2 flex-col",
 				className
 			)}
 			{...props}
