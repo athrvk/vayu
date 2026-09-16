@@ -50,6 +50,27 @@
 
 namespace vayu::core {
 
+/// `fileBaseName(path)`: the last segment of @p path, for either platform's
+/// separator - the path comes from whoever's machine produced the export.
+[[nodiscard]] std::string file_base_name (const std::string& path);
+
+/**
+ * `importedFilePart(entry, src, contentType?)`: @p entry (already carrying a
+ * `key`/`value`/`enabled`/`description`) turned into a multipart part that
+ * uploads a file at @p src.
+ *
+ * @p src is kept exactly as the source wrote it and a row that has one is
+ * marked **unresolved**, because it names a file on the exporting machine, not
+ * one Vayu can read. Shared by every importer that has to turn a
+ * source-machine file reference into a formdata part - Postman/Insomnia
+ * (`import_document.cpp`) and a JMeter `HTTPsampler.Files` upload
+ * (`jmeter_import.cpp`, issue #1657) - so the row shape cannot drift between
+ * them.
+ */
+[[nodiscard]] nlohmann::ordered_json imported_file_part (nlohmann::ordered_json entry,
+const std::string& src,
+const std::string* content_type);
+
 /// The two toggles the import dialog offers, applied at parse time so the
 /// preview counts what will actually be created.
 struct ImportOptions {
