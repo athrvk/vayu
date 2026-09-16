@@ -253,7 +253,7 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
 - **`clientCertificates` is best-effort, inside the same call but outside the tree's own
   atomicity** (issue #1656). A Postman import resolves a request's own `certificate` into
   a `client_certificates` registry candidate at preview time (see
-  [postman.md](postman.md#request-mapping)) and the orchestrator sends it alongside the
+  [postman.md](postman.md#request)) and the orchestrator sends it alongside the
   tree, always `[]` included like `specs`. The engine applies each candidate through the
   same check-and-write `POST /client-certificates` uses, but only *after* the tree's own
   transaction commits - reusing that write means reusing its own lock, and taking it from
