@@ -45,6 +45,51 @@
 
 namespace vayu::core {
 
+/// `fileBaseName(path)`: the last segment, for either platform's separator -
+/// the path comes from whoever's machine produced the export.
+std::string file_base_name (const std::string& path) {
+    const size_t begin = path.find_first_not_of (" \t\n\r\f\v");
+    if (begin == std::string::npos) {
+        return {};
+    }
+    const std::string trimmed =
+    path.substr (begin, path.find_last_not_of (" \t\n\r\f\v") - begin + 1);
+    const size_t cut = trimmed.find_last_of ("/\\");
+    return cut == std::string::npos ? trimmed : trimmed.substr (cut + 1);
+}
+
+/**
+ * `importedFilePart(entry, src, contentType?)`: a multipart part that uploads a
+ * file.
+ *
+ * The path is kept exactly as the source wrote it and a row that has one is
+ * marked **unresolved**, because it names a file on the exporting machine.
+ * A part declared *without* a path - an OpenAPI document names the upload,
+ * never the file (#425) - is not unresolved: the flag warns that something
+ * which looks filled in cannot be sent, and a row showing "Choose file" makes
+ * no such claim.
+ *
+ * Not anonymous-namespace-local: `jmeter_import.cpp` reuses this shape
+ * verbatim for `HTTPsampler.Files` (#1657) rather than building a second one.
+ */
+nlohmann::ordered_json imported_file_part (nlohmann::ordered_json entry,
+const std::string& src,
+const std::string* content_type) {
+    entry["value"] = "";
+    entry["type"]  = "file";
+    entry["src"]   = src;
+    if (const std::string base = file_base_name (src); !base.empty ()) {
+        entry["fileName"] = base;
+    }
+    if (content_type != nullptr) {
+        entry["contentType"] = *content_type;
+    }
+    if (!src.empty ()) {
+        entry["unresolved"] = true;
+    }
+    return entry;
+}
+
 namespace {
 
 using json = nlohmann::ordered_json;
@@ -168,46 +213,6 @@ json to_var_record (const json* vars, int& skipped_variable_metadata) {
         out[as_string (prop (record, "key"))] = std::move (value);
     }
     return out;
-}
-
-/// `fileBaseName(path)`: the last segment, for either platform's separator -
-/// the path comes from whoever's machine produced the export.
-std::string file_base_name (const std::string& path) {
-    const size_t begin = path.find_first_not_of (" \t\n\r\f\v");
-    if (begin == std::string::npos) {
-        return {};
-    }
-    const std::string trimmed =
-    path.substr (begin, path.find_last_not_of (" \t\n\r\f\v") - begin + 1);
-    const size_t cut = trimmed.find_last_of ("/\\");
-    return cut == std::string::npos ? trimmed : trimmed.substr (cut + 1);
-}
-
-/**
- * `importedFilePart(entry, src, contentType?)`: a multipart part that uploads a
- * file.
- *
- * The path is kept exactly as the source wrote it and a row that has one is
- * marked **unresolved**, because it names a file on the exporting machine.
- * A part declared *without* a path - an OpenAPI document names the upload,
- * never the file (#425) - is not unresolved: the flag warns that something
- * which looks filled in cannot be sent, and a row showing "Choose file" makes
- * no such claim.
- */
-json imported_file_part (json entry, const std::string& src, const std::string* content_type) {
-    entry["value"] = "";
-    entry["type"]  = "file";
-    entry["src"]   = src;
-    if (const std::string base = file_base_name (src); !base.empty ()) {
-        entry["fileName"] = base;
-    }
-    if (content_type != nullptr) {
-        entry["contentType"] = *content_type;
-    }
-    if (!src.empty ()) {
-        entry["unresolved"] = true;
-    }
-    return entry;
 }
 
 /// Depth-first over a draft tree's requests, for the two counts the preview
