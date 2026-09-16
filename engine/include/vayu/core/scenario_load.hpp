@@ -172,6 +172,11 @@ const ScenarioPlan& plan);
  * flag, and the producer acquires it before reading them, which is what makes
  * the hand-off free of any lock on the completion path.
  */
+// Deliberate: the implicit default constructor default-constructs `rng`
+// below as a placeholder; nothing ever reads it unseeded, since
+// `derive_vu_rng` always overwrites it with the run's real seed before this
+// VU is used.
+// NOLINTNEXTLINE(cert-msc51-cpp)
 struct VirtualUser {
     /**
      * This user's own number in the run, **1-based** and fixed for the run's
@@ -263,7 +268,9 @@ struct VirtualUser {
     /// pacing measures across iterations by design, not within one.
     std::unordered_map<std::string, int64_t> pacing_state;
     /// This VU's own generator (issue #1498), derived once at construction
-    /// from the run's seed - see `derive_vu_rng`.
+    /// from the run's seed - see `derive_vu_rng`. Default-constructed here as
+    /// a placeholder (see the struct's own `NOLINT` above); never read before
+    /// `derive_vu_rng` overwrites it.
     std::mt19937_64 rng;
     /// In flight (or retired) when true. See the struct comment.
     std::atomic<bool> busy{ false };
