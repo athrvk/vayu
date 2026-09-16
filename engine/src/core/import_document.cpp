@@ -69,7 +69,7 @@ std::string file_base_name (const std::string& path) {
  * which looks filled in cannot be sent, and a row showing "Choose file" makes
  * no such claim.
  *
- * Not anonymous-namespace-local: `core::jmeter_import.cpp` reuses this shape
+ * Not anonymous-namespace-local: `jmeter_import.cpp` reuses this shape
  * verbatim for `HTTPsampler.Files` (#1657) rather than building a second one.
  */
 nlohmann::ordered_json imported_file_part (nlohmann::ordered_json entry,
