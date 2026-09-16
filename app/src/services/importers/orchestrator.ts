@@ -8,6 +8,7 @@
 import type {
 	GlobalVariables,
 	VariableValue,
+	ImportApplyClientCertificate,
 	ImportApplyCollection,
 	ImportApplyEnvironment,
 	ImportApplyRequest,
@@ -82,11 +83,17 @@ export class ImportOrchestrator {
 				}))
 			: [];
 
+		// Pass-through, no temp id: only a Postman preview ever populates this
+		// (issue #1656), and every other format's `result.clientCertificates` is
+		// absent rather than `[]` - see `ImportResult.clientCertificates`.
+		const clientCertificates: ImportApplyClientCertificate[] = result.clientCertificates ?? [];
+
 		const { idMap } = await this.api.applyImport({
 			collections,
 			requests,
 			environments,
 			specs,
+			clientCertificates,
 		});
 
 		// The id-map is the endpoint's contract, so check it rather than assume it:

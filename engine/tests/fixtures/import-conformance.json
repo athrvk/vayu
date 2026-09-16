@@ -106,7 +106,8 @@
           "skipped": [],
           "nonExecutableAuth": 0,
           "unattachedFileParts": 0
-        }
+        },
+        "clientCertificates": []
       },
       "payload": {
         "collections": [
@@ -203,7 +204,8 @@
           }
         ],
         "environments": [],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -303,7 +305,8 @@
           "skipped": [],
           "nonExecutableAuth": 0,
           "unattachedFileParts": 0
-        }
+        },
+        "clientCertificates": []
       },
       "payload": {
         "collections": [
@@ -392,7 +395,8 @@
           }
         ],
         "environments": [],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -449,7 +453,8 @@
           "skipped": [],
           "nonExecutableAuth": 0,
           "unattachedFileParts": 0
-        }
+        },
+        "clientCertificates": []
       },
       "payload": {
         "collections": [
@@ -492,7 +497,8 @@
           }
         ],
         "environments": [],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -581,7 +587,8 @@
             }
           }
         ],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -611,7 +618,8 @@
         "collections": [],
         "requests": [],
         "environments": [],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -659,7 +667,8 @@
         "collections": [],
         "requests": [],
         "environments": [],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -853,7 +862,8 @@
           ],
           "nonExecutableAuth": 1,
           "unattachedFileParts": 0
-        }
+        },
+        "clientCertificates": []
       },
       "payload": {
         "collections": [
@@ -1031,7 +1041,8 @@
           }
         ],
         "environments": [],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -1246,7 +1257,8 @@
             }
           }
         ],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -1430,7 +1442,8 @@
           }
         ],
         "environments": [],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -1709,7 +1722,8 @@
             }
           }
         ],
-        "specs": []
+        "specs": [],
+        "clientCertificates": []
       }
     },
     {
@@ -1985,7 +1999,8 @@
             "tempId": "s1",
             "content": "{\n\t\"openapi\": \"3.0.1\",\n\t\"info\": { \"title\": \"Pet API\", \"description\": \"pets\" },\n\t\"servers\": [{ \"url\": \"https://api.pets.com/v1\" }],\n\t\"components\": {\n\t\t\"securitySchemes\": { \"bearerAuth\": { \"type\": \"http\", \"scheme\": \"bearer\" } },\n\t\t\"schemas\": {\n\t\t\t\"Pet\": {\n\t\t\t\t\"type\": \"object\",\n\t\t\t\t\"properties\": { \"id\": { \"type\": \"integer\" }, \"name\": { \"type\": \"string\" } }\n\t\t\t}\n\t\t}\n\t},\n\t\"security\": [{ \"bearerAuth\": [] }],\n\t\"tags\": [{ \"name\": \"pets\", \"description\": \"Pet ops\" }],\n\t\"paths\": {\n\t\t\"/pets/{petId}\": {\n\t\t\t\"get\": {\n\t\t\t\t\"summary\": \"Get pet\",\n\t\t\t\t\"tags\": [\"pets\"],\n\t\t\t\t\"operationId\": \"getPet\",\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"petId\",\n\t\t\t\t\t\t\"in\": \"path\",\n\t\t\t\t\t\t\"required\": true,\n\t\t\t\t\t\t\"schema\": { \"type\": \"string\" }\n\t\t\t\t\t},\n\t\t\t\t\t{ \"name\": \"verbose\", \"in\": \"query\", \"schema\": { \"type\": \"boolean\" } },\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"X-Request-Id\",\n\t\t\t\t\t\t\"in\": \"header\",\n\t\t\t\t\t\t\"schema\": { \"type\": \"string\" }\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t}\n\t\t},\n\t\t\"/pets\": {\n\t\t\t\"post\": {\n\t\t\t\t\"summary\": \"Create pet\",\n\t\t\t\t\"tags\": [\"pets\"],\n\t\t\t\t\"operationId\": \"createPet\",\n\t\t\t\t\"requestBody\": {\n\t\t\t\t\t\"content\": {\n\t\t\t\t\t\t\"application/json\": { \"schema\": { \"$ref\": \"#/components/schemas/Pet\" } }\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t},\n\t\t\"/health\": { \"get\": { \"summary\": \"Health\" } }\n\t}\n}\n"
           }
-        ]
+        ],
+        "clientCertificates": []
       }
     },
     {
@@ -2195,7 +2210,8 @@
             "tempId": "s1",
             "content": "{\n\t\"swagger\": \"2.0\",\n\t\"info\": { \"title\": \"Store API\", \"description\": \"store\" },\n\t\"host\": \"api.store.com\",\n\t\"basePath\": \"/v2\",\n\t\"schemes\": [\"https\"],\n\t\"securityDefinitions\": { \"apiKey\": { \"type\": \"apiKey\", \"name\": \"X-API-Key\", \"in\": \"header\" } },\n\t\"security\": [{ \"apiKey\": [] }],\n\t\"definitions\": {\n\t\t\"Order\": {\n\t\t\t\"type\": \"object\",\n\t\t\t\"properties\": { \"id\": { \"type\": \"integer\" }, \"status\": { \"type\": \"string\" } }\n\t\t}\n\t},\n\t\"tags\": [{ \"name\": \"orders\" }],\n\t\"paths\": {\n\t\t\"/orders\": {\n\t\t\t\"post\": {\n\t\t\t\t\"summary\": \"Place order\",\n\t\t\t\t\"tags\": [\"orders\"],\n\t\t\t\t\"consumes\": [\"application/json\"],\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{ \"name\": \"body\", \"in\": \"body\", \"schema\": { \"$ref\": \"#/definitions/Order\" } }\n\t\t\t\t]\n\t\t\t},\n\t\t\t\"get\": {\n\t\t\t\t\"summary\": \"List orders\",\n\t\t\t\t\"tags\": [\"orders\"],\n\t\t\t\t\"parameters\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\": \"status\",\n\t\t\t\t\t\t\"in\": \"query\",\n\t\t\t\t\t\t\"type\": \"array\",\n\t\t\t\t\t\t\"collectionFormat\": \"multi\",\n\t\t\t\t\t\t\"items\": { \"type\": \"string\" }\n\t\t\t\t\t},\n\t\t\t\t\t{ \"name\": \"X-Request-Id\", \"in\": \"header\", \"type\": \"string\" }\n\t\t\t\t]\n\t\t\t}\n\t\t}\n\t}\n}\n"
           }
-        ]
+        ],
+        "clientCertificates": []
       }
     },
     {
@@ -2416,7 +2432,8 @@
             "content": "openapi: 3.0.0\ninfo:\n  title: Relative Server\n  description: A YAML document whose server URL is relative.\nservers:\n  - url: ../v2\npaths:\n  /pets/{petId}:\n    parameters:\n      - name: petId\n        in: path\n        required: true\n        schema: { type: string }\n    get:\n      operationId: getPet\n      summary: Get a pet\n      tags: [pets]\n      parameters:\n        - name: verbose\n          in: query\n          schema: { type: boolean }\n        - name: X-Trace\n          in: header\n          required: true\n          schema: { type: string }\n        - name: session\n          in: cookie\n          schema: { type: string }\n      responses:\n        \"200\":\n          description: A pet\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n                  id: { type: string }\n                  age: { type: integer }\n        default:\n          description: Anything else\n        \"2XX\":\n          description: A wildcard\n    trace:\n      summary: Not a Vayu verb\n      responses:\n        \"200\": { description: ok }\n",
             "sourceUrl": "https://api.example.com/specs/openapi.yaml"
           }
-        ]
+        ],
+        "clientCertificates": []
       }
     },
     {
@@ -2737,7 +2754,8 @@
             "tempId": "s1",
             "content": "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"Templated\"},\"servers\":[{\"url\":\"{protocol}://{host}/api\",\"variables\":{\"protocol\":{\"default\":\"https\"}}}],\"components\":{\"securitySchemes\":{\"main\":{\"type\":\"oauth2\",\"flows\":{\"clientCredentials\":{\"tokenUrl\":\"https://auth.example.com/token\",\"scopes\":{\"read\":\"Read\",\"write\":\"Write\"}}}}}},\"security\":[{\"main\":[]}],\"paths\":{\"/api/v1/widgets\":{\"post\":{\"operationId\":\"createWidget\",\"requestBody\":{\"content\":{\"application/xml\":{\"schema\":{\"type\":\"object\"}}}},\"responses\":{\"204\":{\"description\":\"No content\"}}}},\"/api/v1/gadgets\":{\"parameters\":\"not-an-array\",\"get\":{\"operationId\":\"createWidget\",\"responses\":{}}},\"no-leading-slash\":{\"get\":{\"summary\":\"Malformed path key\",\"responses\":{}}}}}"
           }
-        ]
+        ],
+        "clientCertificates": []
       }
     },
     {
@@ -2953,7 +2971,8 @@
             "tempId": "s1",
             "content": "{\"swagger\":\"2.0\",\"info\":{\"title\":\"Forms\",\"description\":\"Swagger form bodies\"},\"host\":\"api.example.com\",\"basePath\":\"/v1\",\"schemes\":[\"https\"],\"consumes\":[\"multipart/form-data\"],\"securityDefinitions\":{\"key\":{\"type\":\"apiKey\",\"name\":\"X-Key\",\"in\":\"query\"}},\"paths\":{\"/upload\":{\"post\":{\"operationId\":\"upload\",\"tags\":[\"files\"],\"parameters\":[{\"name\":\"file\",\"in\":\"formData\",\"type\":\"file\"},{\"name\":\"label\",\"in\":\"formData\",\"type\":\"string\"},{\"name\":\"q\",\"in\":\"query\",\"type\":\"string\",\"default\":\"all\"}],\"responses\":{\"201\":{\"description\":\"Created\",\"schema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}}}}}},\"tags\":[{\"name\":\"files\",\"description\":\"Uploads\"}]}"
           }
-        ]
+        ],
+        "clientCertificates": []
       }
     }
   ]

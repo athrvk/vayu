@@ -2944,6 +2944,7 @@ do - see `docs/app/import-collections/jmeter.md` for the class mapping.
                      "elements": [], "children": [], "requests": [] } ],
   "environments": [],
   "globals": {},
+  "clientCertificates": [],
   "meta": {
     "format": "Postman Collection v2.1", "requestCount": 2, "folderCount": 1,
     "environmentCount": 0, "globalCount": 0, "exampleCount": 0,
@@ -2952,6 +2953,21 @@ do - see `docs/app/import-collections/jmeter.md` for the class mapping.
   }
 }
 ```
+
+**`clientCertificates`** is present, and only ever non-empty, from a Postman
+parse (issue [#1656](https://github.com/athrvk/vayu/issues/1656)): a
+`client_certificates` registry candidate resolved from a request's own
+`certificate`, in the same field shape `POST /client-certificates` takes
+(`host`, `port?`, `certPath`, `keyPath?`, `certFormat?`, `passphrase?`). A candidate is resolved
+only when it would pass that route's own check - a readable PEM pair or
+PKCS#12 file, a literal (not `{{var}}`) host, no earlier request in this parse
+already claiming a different certificate for the same `(host, port)` - so
+resolving one is the common case only when the collection's certificate paths
+are reachable from this machine, which a real-world Postman export's rarely
+are (its paths name files on the *exporting* machine). Anything that does
+not resolve counts into `meta.skipped` as `certificate` instead of appearing
+here. Every other format sends no such key. See
+`docs/app/import-collections/postman.md`.
 
 `meta.skipped` is what the document declared and Vayu cannot represent, counted
 per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
@@ -3016,7 +3032,11 @@ the one write outside it, and they run **last** and **merge**: `POST /globals`
 replaces the whole set, so running it in front of a write that can still fail
 would leave a user's globals half-rewritten by an import that then failed. On a
 key collision the imported value wins - the caller asked for this file's
-variables, and skipping them would be a silent no-op.
+variables, and skipping them would be a silent no-op. A Postman import's
+**`clientCertificates`** candidates (issue #1656) are also outside the tree's
+transaction, applied best-effort inside `POST /import/apply` itself after it
+commits; a candidate `POST /import/apply` cannot register is skipped, never
+fails the call.
 
 **Errors:** every error of `POST /import/parse`, plus every error of
 `POST /import/apply` (including the per-item `400`s naming a `tempId`).
@@ -3049,7 +3069,9 @@ orders integer-like keys numerically ahead of the rest).
 Persist an entire parsed import - collections, their requests, environments, and
 the OpenAPI documents they bind - in **one atomic call**. Items reference each other by opaque **temp ids** the
 client invents; the engine generates every real id via `generate_id` and returns
-the translation in `idMap`.
+the translation in `idMap`. A fifth section, **`clientCertificates`**
+(issue #1656), is not part of that atomic tree or its temp-id namespace - see
+its own bullet below.
 
 This is what replaced ~500 sequential `POST /collections` + `POST /requests`
 calls for a 500-request import, and with it the only reason those endpoints ever
@@ -3082,15 +3104,20 @@ accepted a client-supplied `id` - which they no longer do (see
   ],
   "environments": [
     { "tempId": "e1", "name": "Prod", "variables": {} }
+  ],
+  "clientCertificates": [
+    { "host": "api.example.com", "port": 8443, "certPath": "/home/alice/certs/client.pem",
+      "keyPath": "/home/alice/certs/client-key.pem", "certFormat": "pem" }
   ]
 }
 ```
 
-- All four sections are optional; absent or `null` means "none of that kind"
+- All five sections are optional; absent or `null` means "none of that kind"
   (the [null-vs-absent rule](#the-null-vs-absent-rule)). An empty payload is a
   `200` with an empty `idMap`.
-- Every item needs a non-empty string `tempId`, **unique across all four
-  sections** (they share one namespace, because `idMap` is one flat map). Temp ids
+- Every item needs a non-empty string `tempId`, **unique across the four tree
+  sections** (they share one namespace, because `idMap` is one flat map) -
+  `clientCertificates` items carry no `tempId` at all, see below. Temp ids
   are never stored.
 - A collection's `parentTempId` and a request's `collectionTempId` must name a
   collection `tempId` **in the same payload**; references may point forward, so a
@@ -3133,9 +3160,24 @@ accepted a client-supplied `id` - which they no longer do (see
   just wrote, or the stored one an `openapi.specId` names - so an imported
   collection is bound to a *version* and its runs are measured against the
   contract (issue #709).
-- Up to **10,000 items** per call (collections + requests + environments + specs
-  + nested examples - they are rows this call allocates and writes, so they
-  count).
+- A **`clientCertificates`** item is a `client_certificates` registry
+  candidate (issue #1656), in the same field shape `POST /client-certificates`
+  takes (`host`, `port`, `certPath`, `keyPath`, `certFormat`, `passphrase`) -
+  `id` is refused here too. Unlike every other section it carries no `tempId`
+  (nothing else in the payload references a certificate) and is applied
+  **after** the tree's own transaction commits rather than inside it: the
+  engine reuses `POST /client-certificates`'s own check-and-write, which takes
+  its own lock, and taking it from inside the tree's transaction would
+  deadlock. A candidate that fails that route's own checks (an unreadable
+  file, a `(host, port)` pair another row already claims) is **skipped**
+  rather than failing the call or naming an `item` error - the tree it does
+  not reference has already committed by the time this section runs, and
+  nothing in the response says which candidates landed. Only a Postman
+  preview's own `clientCertificates` array (`POST /import/parse`) ever
+  populates this; every other format sends `[]`.
+- Up to **10,000 items** per call (collections + requests + environments +
+  specs + nested examples + clientCertificates - they are rows this call
+  allocates and writes, so they count).
 
 **Response:** `200`
 ```json

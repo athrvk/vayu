@@ -27,7 +27,10 @@
 #include "vayu/core/jmeter_import.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/http/transport_policy.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/parse.hpp"
 
 #include <algorithm>
 #include <array>
@@ -770,6 +773,14 @@ struct PostmanCounts {
     // merged into the root collection's variables once the walk finishes - see
     // `substitutePathVariables`.
     json path_variables = json::object ();
+    // `client_certificates` registry candidates built from a request's own
+    // `certificate` (issue #1656), one per distinct (host, port) this import
+    // resolved a usable candidate for - see `pm_certificate`. Deduped by
+    // `client_certificate_signatures` so two requests naming the same host
+    // and cert do not double-write, keyed on the same pair `port.value_or
+    // (-1)` stands in for "every port".
+    json client_certificates = json::array ();
+    std::map<std::pair<std::string, int>, std::string> client_certificate_signatures;
 };
 
 /**
@@ -1314,6 +1325,93 @@ std::string pm_description_text (const std::string* text, const std::string* nes
     return {};
 }
 
+/**
+ * A Postman request's own `certificate`, mapped to a `client_certificates`
+ * registry candidate keyed on the request's own resolved host (issue #1656) -
+ * Vayu certificates belong to a host, not a request (`engine/CLAUDE.md`), so
+ * this cannot become a request field.
+ *
+ * The candidate is added to @p counts only when it would pass the same check
+ * `POST /client-certificates` runs (`vayu::http::client_cert_rejection`):
+ * `pm_request`'s own `url` still carrying an unresolved `{{var}}` host (the
+ * common case - most Postman collections name `{{baseUrl}}`, not a literal
+ * host), an unreadable `cert.src` (a path from the exporting machine, which is
+ * the common case for a real-world export) or a second request naming a
+ * different certificate for a (host, port) this import already claimed all
+ * fall back to the existing `skipped_certificate` tally instead - "cannot
+ * resolve", per the issue's own acceptance criteria, is not limited to "no
+ * host to key on". `POST /import/apply` reuses the exact same check-and-write
+ * `POST /client-certificates` uses, best-effort, so a candidate that passes
+ * here needs no new registry semantics to actually land.
+ */
+void pm_certificate (const json* cert, const std::string& url, PostmanCounts& counts) {
+    if (!truthy (cert)) {
+        return;
+    }
+    const std::string* cert_src = as_str (prop (prop (cert, "cert"), "src"));
+    if (cert_src == nullptr || cert_src->empty ()) {
+        counts.skipped_certificate += 1;
+        return;
+    }
+    const vayu::http::UrlParts parts = vayu::http::parse_url_parts (url);
+    const std::string host =
+    vayu::utils::ascii_lower (vayu::http::join_host (parts.host));
+    // `{{baseUrl}}`-style hosts are the common Postman shape.
+    // `client_cert_rejection` has no rule against a `{`/`}` byte in a host -
+    // nothing hand-typed into the Settings card would ever carry one - so this
+    // is a Postman-specific check with no primitive to reuse, catching what
+    // would otherwise become a bogus host for `POST /client-certificates`'s
+    // own check below to pass or reject on unpredictable grounds.
+    if (!parts.parsed || host.empty () || host.find ('{') != std::string::npos ||
+    host.find ('}') != std::string::npos) {
+        counts.skipped_certificate += 1;
+        return;
+    }
+    std::optional<int> port;
+    if (!parts.port.empty ()) {
+        if (const auto value = vayu::utils::parse_number<int> (parts.port);
+        value && *value > 0) {
+            port = value;
+        }
+    }
+    const std::string* key_src = as_str (prop (prop (cert, "key"), "src"));
+    const std::string key      = key_src == nullptr ? std::string () : *key_src;
+    const auto sniffed = vayu::http::sniff_client_cert_format (*cert_src);
+    const vayu::http::ClientCertFormat format =
+    sniffed ? *sniffed : vayu::http::ClientCertFormat::Pem;
+    if (vayu::http::client_cert_rejection (host, port, format, *cert_src, key)) {
+        counts.skipped_certificate += 1;
+        return;
+    }
+
+    const std::string signature = *cert_src + "\n" + key;
+    const auto target           = std::make_pair (host, port.value_or (-1));
+    const auto existing = counts.client_certificate_signatures.find (target);
+    if (existing != counts.client_certificate_signatures.end ()) {
+        if (existing->second != signature) {
+            // A second, different certificate for a (host, port) this import
+            // already claimed - the first one seen wins, the rest tally.
+            counts.skipped_certificate += 1;
+        }
+        return;
+    }
+    counts.client_certificate_signatures.emplace (target, signature);
+
+    json entry = json{ { "host", host }, { "certPath", *cert_src },
+        { "certFormat", vayu::http::to_string (format) } };
+    if (port) {
+        entry["port"] = *port;
+    }
+    if (!key.empty ()) {
+        entry["keyPath"] = key;
+    }
+    if (const std::string* passphrase = as_str (prop (cert, "passphrase"));
+    passphrase != nullptr && !passphrase->empty ()) {
+        entry["passphrase"] = *passphrase;
+    }
+    counts.client_certificates.push_back (std::move (entry));
+}
+
 json pm_request (const json* item, PostmanCounts& counts) {
     const json* declared   = as_record (prop (item, "request"));
     const json empty       = json::object ();
@@ -1326,14 +1424,12 @@ json pm_request (const json* item, PostmanCounts& counts) {
         counts.non_executable += 1;
     }
     counts.requests += 1;
-    if (truthy (prop (rq, "certificate"))) {
-        // A client certificate belongs to a host in Vayu, not a request
-        // (engine/CLAUDE.md), so importing one means writing a registry entry
-        // beside the collection rather than a request field - deferred to
-        // issue #1656; counted so the loss is not silent in the meantime.
-        counts.skipped_certificate += 1;
-    }
+    pm_certificate (prop (rq, "certificate"), url, counts);
     if (truthy (prop (rq, "proxy"))) {
+        // Vayu's proxy config is workspace/run-scoped (`TransportPolicy`,
+        // `engine/CLAUDE.md`), not per-request - unlike `certificate`, there is
+        // no per-request field this could ever land in, so this stays a
+        // permanent tally rather than a deferred mapping (issue #1656).
         counts.skipped_proxy += 1;
     }
     const std::vector<const json*> events = pm_events (item);
@@ -1484,6 +1580,7 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
         // Collection files embed neither environments nor globals - both are
         // separate exports, which `parse_postman_variables` reads.
         { "environments", json::array () }, { "globals", json::object () },
+        { "clientCertificates", std::move (counts.client_certificates) },
         { "meta", std::move (meta) } };
 }
 
@@ -3154,9 +3251,17 @@ nlohmann::ordered_json import_apply_payload (const nlohmann::ordered_json& resul
         environments.push_back (std::move (item));
     }
 
+    // Pass-through, no temp id: nothing else in the tree references a
+    // certificate candidate by one, and a format that never sets this key
+    // (every parser but Postman) gets the empty array `import_apply_response`
+    // already treats as "nothing to apply" (issue #1656).
+    nlohmann::ordered_json client_certificates =
+    result.value ("clientCertificates", nlohmann::ordered_json::array ());
+
     return nlohmann::ordered_json{ { "collections", std::move (collections) },
         { "requests", std::move (requests) },
-        { "environments", std::move (environments) }, { "specs", std::move (specs) } };
+        { "environments", std::move (environments) }, { "specs", std::move (specs) },
+        { "clientCertificates", std::move (client_certificates) } };
 }
 
 } // namespace vayu::core
