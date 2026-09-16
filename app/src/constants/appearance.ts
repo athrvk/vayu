@@ -222,7 +222,7 @@ export const UI_DENSITIES = [
 	{
 		value: "comfortable",
 		label: "Comfortable",
-		description: "Today's roomier spacing",
+		description: "Roomier rows and padding - more breathing room",
 	},
 ] as const satisfies readonly DensityOption[];
 
