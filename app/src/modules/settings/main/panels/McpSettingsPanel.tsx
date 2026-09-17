@@ -69,7 +69,7 @@ import { isCommitEnter } from "@/lib/keyboard";
 import { Callout } from "@/components/shared";
 import { LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
 import { appSetting } from "../app-settings";
-import { NumberSettingRow, ToggleRow } from "./SettingControls";
+import { CollapsibleText, NumberSettingRow, ToggleRow } from "./SettingControls";
 
 // Headings come from the catalogue so search cannot offer a name this panel
 // does not print - see `app-settings.ts`.
@@ -591,8 +591,7 @@ export default function McpSettingsPanel() {
 						)}
 					</div>
 					<CardDescription>
-						Any agent connects to the already-running app with one command - no extra
-						process to manage.
+						<CollapsibleText text="Any agent connects to the already-running app with one command - no extra process to manage." />
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
@@ -600,7 +599,9 @@ export default function McpSettingsPanel() {
 					<ToggleRow
 						className="rounded-md border border-border bg-muted/30 px-3 py-2.5"
 						label="Enable MCP server"
-						description="On by default: while Vayu is running, a connected agent can reach the endpoint below. When off, the endpoint stops accepting connections and connected agents get a clean “start Vayu” error. Your choice persists across restarts."
+						description={
+							<CollapsibleText text="On by default: while Vayu is running, a connected agent can reach the endpoint below. When off, the endpoint stops accepting connections and connected agents get a clean “start Vayu” error. Your choice persists across restarts." />
+						}
 						checked={enabled}
 						onChange={(checked) => void toggleEnabled(checked)}
 						disabled={isLoading || !hasElectron || !status}
@@ -684,10 +685,7 @@ export default function McpSettingsPanel() {
 						<CardTitle>{TOOLS.label}</CardTitle>
 					</div>
 					<CardDescription>
-						Choose which tools agents can use. A disabled tool is hidden from the
-						agent's tool list and rejected if called anyway. The Write group has a
-						second switch of its own - Write access, below - and a write tool needs
-						both: leaving it on here does nothing while writes are off.
+						<CollapsibleText text="Choose which tools agents can use. A disabled tool is hidden from the agent's tool list and rejected if called anyway. The Write group has a second switch of its own - Write access, below - and a write tool needs both: leaving it on here does nothing while writes are off." />
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
@@ -716,7 +714,7 @@ export default function McpSettingsPanel() {
 											</div>
 										}
 										ariaLabel={`Enable all ${cat.label} tools`}
-										description={cat.description}
+										description={<CollapsibleText text={cat.description} />}
 										checked={allOn}
 										onChange={(checked) => setToolsEnabled(names, checked)}
 										disabled={!config}
@@ -737,7 +735,9 @@ export default function McpSettingsPanel() {
 														</code>
 													}
 													ariaLabel={`Enable tool ${tool.name}`}
-													description={tool.description}
+													description={
+														<CollapsibleText text={tool.description} />
+													}
 													checked={on}
 													onChange={(checked) =>
 														setToolsEnabled([tool.name], checked)
@@ -866,10 +866,7 @@ export default function McpSettingsPanel() {
 						<CardTitle>{CAPS.label}</CardTitle>
 					</div>
 					<CardDescription>
-						Hard ceilings on agent-started load runs. A request over any cap is rejected
-						before it reaches the engine, and each cap bounds only the runs that carry
-						the field it names. A cap above the most Vayu itself will run is lowered to
-						that maximum when you save it.
+						<CollapsibleText text="Hard ceilings on agent-started load runs. A request over any cap is rejected before it reaches the engine, and each cap bounds only the runs that carry the field it names. A cap above the most Vayu itself will run is lowered to that maximum when you save it." />
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
@@ -880,7 +877,7 @@ export default function McpSettingsPanel() {
 							<NumberSettingRow
 								key={field.key}
 								label={field.label}
-								description={field.description}
+								description={<CollapsibleText text={field.description} />}
 								value={config ? String(config[field.key]) : ""}
 								// Blur, not every keystroke: each commit crosses IPC,
 								// is re-sanitized by the main process and is applied to
@@ -905,15 +902,7 @@ export default function McpSettingsPanel() {
 						<CardTitle>{WRITES.label}</CardTitle>
 					</div>
 					<CardDescription>
-						When off (default), agents can read and send requests but cannot change
-						saved data: no tool in the Write group above is offered to the agent at all
-						- creating, renaming and deleting collections and saved requests, and
-						editing environments and engine config. The switches above stay yours to set
-						either way; they decide what an agent gets once writes are on. Turning it on
-						grants no tool you switched off in Tools; the two switches are separate, and
-						a delete still asks you to confirm each time, stating how much a collection
-						contains before it goes. Sending requests and load runs are unaffected
-						either way - the allowlist and the caps govern those.
+						<CollapsibleText text="When off (default), agents can read and send requests but cannot change saved data: no tool in the Write group above is offered to the agent at all - creating, renaming and deleting collections and saved requests, and editing environments and engine config. The switches above stay yours to set either way; they decide what an agent gets once writes are on. Turning it on grants no tool you switched off in Tools; the two switches are separate, and a delete still asks you to confirm each time, stating how much a collection contains before it goes. Sending requests and load runs are unaffected either way - the allowlist and the caps govern those." />
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
