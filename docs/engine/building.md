@@ -393,7 +393,11 @@ tracking issue.
   (2026-09-05): 10 of 10 raced without the entry, 10 of 10 passed with it, the
   report frame for frame the same - that release rewrote
   `process_and_close_socket` around a `serve_guarded` wrapper and left
-  `parse_status_line` alone. What is left is upstream in libstdc++.
+  `parse_status_line` alone. And again on the move to cpp-httplib 0.56.0
+  (2026-09-17): 9 of 10 raced without it, 10 of 10 passed with it, the same
+  stack once more - `parse_status_line` is byte-identical to 0.54.1's and its
+  regex is still `thread_local`, so nothing about the window moved. What is
+  left is upstream in libstdc++.
 
 The matrix has therefore paid for itself twice over: two engine-side defects
 found and fixed, one of them a race the ordinary suite is structurally unable
