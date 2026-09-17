@@ -134,10 +134,14 @@ describe("title bar height", () => {
 		// drawer's header band beside it. One declaration, because the two halves
 		// meet at the drawer's resize handle and a second value is a visible step
 		// in the rule that runs across the window.
-		const declarations = [...css.matchAll(/--tabstrip-height:\s*(\d+px)\s*;/g)].map(
-			(m) => m[1]
+		//
+		// Written in the spacing unit rather than a bare px (issue #1670), so the
+		// match is on whatever the declaration's value is, not specifically a
+		// `px` literal - the guard is "exactly one", not "exactly one px value".
+		const declarations = [...css.matchAll(/--tabstrip-height:\s*([^;]+);/g)].map((m) =>
+			m[1].trim()
 		);
-		expect(declarations).toEqual(["32px"]);
+		expect(declarations).toEqual(["calc(var(--spacing) * 8)"]);
 		// Unlike --titlebar-height, deliberately *not* mirrored in
 		// electron/constants.ts: the frame, the Windows caption overlay and the
 		// traffic lights all size to the title row alone, so a constant there

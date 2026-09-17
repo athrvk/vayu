@@ -391,6 +391,17 @@
 		--radius: 0.375rem;
 
 		/*
+		 * Tailwind's spacing unit - every `p-*`, `m-*`, `gap-*`, `space-*` and
+		 * `h-*`/`w-*` utility resolves to `calc(var(--spacing) * n)`, so this one
+		 * value moves every padding, margin, gap and row height in the app at
+		 * once (issue #1670). Undeclared, Tailwind falls back to its own 0.25rem
+		 * default - which is exactly the value `[data-density="comfortable"]`
+		 * restores below, so Comfortable reproduces the pre-#1670 layout exactly
+		 * rather than approximating it.
+		 */
+		--spacing: 0.1875rem;
+
+		/*
 		 * Height of the Dock, the footer status strip.
 		 *
 		 * A token rather than a bare `h-8` because a second element has to know
@@ -444,8 +455,26 @@
 		 * the main process draws is this tall. The frame, the Windows caption
 		 * overlay and the macOS traffic lights all size to the title row alone,
 		 * so a constant there would have no reader.
+		 *
+		 * Written in the spacing unit rather than a bare px (issue #1670): 8
+		 * units is 24px at the default density and 32px - today's value,
+		 * unchanged - at Comfortable. `--titlebar-height` stays a literal px
+		 * value instead: it is sized to the macOS traffic lights, a fixed
+		 * platform constant no density should move.
 		 */
-		--tabstrip-height: 32px;
+		--tabstrip-height: calc(var(--spacing) * 8);
+	}
+
+	/*
+	 * Comfortable density (issue #1670): restores the spacing unit Tailwind
+	 * defaulted to before `--spacing` was declared above, i.e. today's roomier
+	 * 0.30.0 layout, unchanged. Set on `documentElement` by
+	 * `appearance-store.ts`'s `applyDensity` and read pre-paint in index.html,
+	 * mirroring how `[data-color-scheme]` above scopes tokens by attribute
+	 * rather than by a JS-computed value.
+	 */
+	[data-density="comfortable"] {
+		--spacing: 0.25rem;
 	}
 
 	/*
@@ -1371,8 +1400,15 @@
 	 * Styling ::-webkit-scrollbar at all also drops the stepper arrows, which is
 	 * why the default-styled containers showed them and the styled ones did not.
 	 */
+	/*
+	 * 2 units, not 1.5 (issue #1670): at the default density (0.1875rem) that is
+	 * 6px, the documented mouse-target floor below, holding it steady rather
+	 * than letting it shrink to 4.5px as a side effect of the spacing change.
+	 * At Comfortable (0.25rem) it is 8px, 2px over today's - the trade for
+	 * keeping the floor at the tighter default.
+	 */
 	::-webkit-scrollbar {
-		@apply w-1.5 h-1.5;
+		@apply w-2 h-2;
 	}
 
 	::-webkit-scrollbar-track {

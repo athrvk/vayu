@@ -26,6 +26,15 @@ async function loadWithStoredScale(stored: string | null) {
 	return useAppearanceStore;
 }
 
+/** Re-import the store with a given density already in localStorage. */
+async function loadWithStoredDensity(stored: string | null) {
+	localStorage.clear();
+	if (stored !== null) localStorage.setItem(STORAGE_KEYS.UI_DENSITY, stored);
+	vi.resetModules();
+	const { useAppearanceStore } = await import("./appearance-store");
+	return useAppearanceStore;
+}
+
 beforeEach(() => {
 	vi.stubGlobal("electronAPI", undefined);
 });
@@ -68,5 +77,39 @@ describe("appearance store - setScale", () => {
 		const store = await loadWithStoredScale(null);
 		store.getState().setScale(1.3);
 		expect(document.documentElement.style.zoom).toBe("1.3");
+	});
+});
+
+describe("appearance store - density", () => {
+	it("defaults to no data-density attribute, for nothing stored and for garbage", async () => {
+		expect((await loadWithStoredDensity(null)).getState().density).toBe("default");
+		expect(document.documentElement.hasAttribute("data-density")).toBe(false);
+
+		document.documentElement.removeAttribute("data-density");
+		expect((await loadWithStoredDensity("banana")).getState().density).toBe("default");
+		expect(document.documentElement.hasAttribute("data-density")).toBe(false);
+	});
+
+	it("reads a stored comfortable density back and applies its attribute", async () => {
+		document.documentElement.removeAttribute("data-density");
+		const store = await loadWithStoredDensity("comfortable");
+		expect(store.getState().density).toBe("comfortable");
+		// Seeding is state-only; applyAll (mount) is what writes the DOM. Assert
+		// setDensity's own DOM write instead, below, plus applyAll explicitly.
+		store.getState().applyAll();
+		expect(document.documentElement.getAttribute("data-density")).toBe("comfortable");
+	});
+
+	it("setDensity toggles the attribute and persists the choice", async () => {
+		document.documentElement.removeAttribute("data-density");
+		const store = await loadWithStoredDensity(null);
+
+		store.getState().setDensity("comfortable");
+		expect(document.documentElement.getAttribute("data-density")).toBe("comfortable");
+		expect(localStorage.getItem(STORAGE_KEYS.UI_DENSITY)).toBe("comfortable");
+
+		store.getState().setDensity("default");
+		expect(document.documentElement.hasAttribute("data-density")).toBe(false);
+		expect(localStorage.getItem(STORAGE_KEYS.UI_DENSITY)).toBe("default");
 	});
 });
