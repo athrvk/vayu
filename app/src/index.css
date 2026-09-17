@@ -502,9 +502,11 @@
 	[data-density="comfortable"] {
 		--spacing: 0.25rem;
 		/*
-		 * The three floors that scale with density (issue #1679) - `band`,
-		 * `banner`, `icon` and `icon-sm` stay put at every density, per the
-		 * table in docs/design-system.md.
+		 * The three floors that scale with density (issue #1679): `control`,
+		 * `control-sm` and `target`, set here to their Comfortable values.
+		 * `band`, `banner`, `icon` and `icon-sm` stay put at every density -
+		 * no override for them exists in this block - per the table in
+		 * docs/design-system.md.
 		 */
 		--spacing-control: 36px;
 		--spacing-control-sm: 32px;

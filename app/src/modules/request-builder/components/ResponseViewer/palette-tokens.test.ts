@@ -38,6 +38,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, sep } from "node:path";
 import { globSync } from "node:fs";
+import { stripComments } from "@/lib/strip-comments.testkit";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = join(here, "..", "..", "..", "..");
@@ -94,20 +95,6 @@ function guardedFiles(): string[] {
 	return GUARDED.flatMap((pattern) => globSync(pattern, { cwd: srcRoot }))
 		.filter((f) => !excluded.has(f))
 		.map((f) => join(srcRoot, f));
-}
-
-/**
- * Blank out comment bodies, keeping newlines so line numbers still line up.
- *
- * These files quote the classes they replaced, to record what was measured, and
- * the first version of this guard flagged its own documentation - the JSX
- * JSX brace-wrapped block-comment form is neither a `//` line nor a
- * leading-asterisk block line, so per-line stripping missed it entirely.
- */
-function stripComments(source: string): string {
-	return source
-		.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
-		.replace(/\/\/[^\n]*/g, (m) => " ".repeat(m.length));
 }
 
 describe("request/response tree uses design tokens, not raw palette colours", () => {
