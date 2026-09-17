@@ -1163,7 +1163,20 @@ register is judged on, not a ceiling on the user.
 
 **Icon sizing goes on `className`, not lucide's `size` prop.** Mixing the two
 hides icons from a scale audit and lets off-grid values (15px) creep in. Use
-`w-3 h-3` (12), `w-3.5 h-3.5` (14), `w-4 h-4` (16), `w-5 h-5` (20).
+`w-3 h-3`, `w-3.5 h-3.5`, `w-4 h-4` or `w-5 h-5` - like every other `w-*`/`h-*`
+utility these ride `--spacing` (issue #1670), so the rendered size depends on
+density: 9 / 10.5 / 12 / 15px at Default, 12 / 14 / 16 / 20px at Comfortable
+(the values this line quoted before density existed).
+
+**Decision (issue #1670): the shrink applies to icons too, with nothing
+pinned outside the unit.** Checked by eye against a live render at Default -
+the ActivityRail, the Collections toolbar and menu rows (`w-4 h-4`, 12px) all
+stay legible at that size, and a user who finds it too tight has the same
+escape hatch as every other control: Comfortable restores 0.30.0's icon
+sizes exactly, alongside the rest of the layout. A future icon that genuinely
+must not move with density (none exist today) pins its own wrapper with
+`[--spacing:0.25rem]` rather than a literal px size, so it still resolves
+through the same `w-4 h-4` class the rest of the app uses.
 
 ### Spacing Scale Conventions
 
@@ -1187,6 +1200,10 @@ Appearance → Interface → Density, owned by `appearance-store`
 | Dialog padding | `p-5` (`DialogContent`) | 15px | 20px |
 | Drawer row height | `h-8` | 24px | 32px |
 | Chrome band height | `h-[var(--tabstrip-height)]` | 24px | 32px |
+| Icon (small) | `w-3 h-3` | 9px | 12px |
+| Icon (menu/toolbar) | `w-3.5 h-3.5` | 10.5px | 14px |
+| Icon (default) | `w-4 h-4` / `size-4` | 12px | 16px |
+| Icon (panel heading) | `w-5 h-5` | 15px | 20px |
 
 `density.test.ts` reads both `--spacing` declarations directly off `index.css`
 and reds if either value or the `--tabstrip-height` formula changes.

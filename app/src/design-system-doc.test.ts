@@ -124,4 +124,42 @@ describe("design-system.md token values", () => {
 			expect(existsSync(fromRepoRoot(path)), path).toBe(true);
 		}
 	});
+
+	// Issue #1670's reopening review: icon sizes ride `--spacing` like every
+	// other `w-*`/`h-*` utility, so the Icon Sizing paragraph's px values are
+	// only true for one density unless both are stated. This checks them
+	// against the same `--spacing` declarations `density.test.ts` guards,
+	// rather than trusting the doc's own arithmetic.
+	it("keeps the icon-sizing decision's pixel values in step with --spacing", () => {
+		const rootOpen = css.indexOf(":root {");
+		const rootClose = css.indexOf("\n\t}", rootOpen);
+		const defaultSpacing = /--spacing:\s*([\d.]+)rem;/.exec(
+			css.slice(rootOpen, rootClose)
+		)?.[1];
+		const comfortableBlock =
+			/\[data-density="comfortable"\]\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+		const comfortableSpacing = /--spacing:\s*([\d.]+)rem;/.exec(comfortableBlock)?.[1];
+		expect(defaultSpacing, "--spacing not found on :root").toBeDefined();
+		expect(
+			comfortableSpacing,
+			"--spacing not found under [data-density=comfortable]"
+		).toBeDefined();
+
+		const REM_PX = 16;
+		const FACTORS = [3, 3.5, 4, 5];
+		const pxValues = (spacingRem: string) =>
+			FACTORS.map((factor) => Number(spacingRem) * factor * REM_PX);
+		const format = (values: number[]) =>
+			values.map((v) => (Number.isInteger(v) ? String(v) : v.toFixed(1))).join(" / ");
+
+		const decision = doc.match(
+			/(\d+(?:\.\d+)? \/ \d+(?:\.\d+)? \/ \d+(?:\.\d+)? \/ \d+(?:\.\d+)?)px at Default, (\d+(?:\.\d+)? \/ \d+(?:\.\d+)? \/ \d+(?:\.\d+)? \/ \d+(?:\.\d+)?)px at Comfortable/
+		);
+		expect(
+			decision,
+			"icon-sizing decision sentence not found - has it moved or reverted to one density's values?"
+		).not.toBeNull();
+		expect(decision![1]).toBe(format(pxValues(defaultSpacing!)));
+		expect(decision![2]).toBe(format(pxValues(comfortableSpacing!)));
+	});
 });
