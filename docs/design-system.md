@@ -1219,10 +1219,13 @@ constant no density setting should move.
 **Density scales rhythm - row heights, paddings, gaps - not chrome, interactive
 targets or icons** (issue #1679). Three classes of thing have a floor `--spacing`
 must not carry below it: a chrome band is an anchor, not a list row; an
-interactive target has the WCAG 2.2 SC 2.5.8 24×24px minimum; an icon has a
-legibility floor. Seven named steps in `index.css`'s `@theme inline` block,
-outside the `--spacing` multiplier, generate real Tailwind utilities
-(`h-band`, `size-target`, and so on) for these:
+interactive target has the WCAG 2.2 SC 2.5.8 24x24px minimum; an icon has a
+legibility floor. Seven named steps, outside the `--spacing` multiplier,
+generate real Tailwind utilities (`h-band`, `size-target`, and so on) for
+these. They live in a plain `@theme` block in `index.css`, deliberately not
+`@theme inline`: `inline` bakes a literal into each generated utility instead
+of a `var()` reference, which would silently disable the Comfortable override
+below.
 
 | Step | Class prefix | Default | Comfortable | Used by |
 |------|-------|---------|-------------|---------|

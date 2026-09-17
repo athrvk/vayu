@@ -128,9 +128,12 @@ describe("design-system.md token values", () => {
 	// Issue #1679: the Chrome, Target and Icon Floors table names seven steps
 	// that deliberately do NOT ride `--spacing` - the opposite property the
 	// superseded icon-sizing decision this replaces used to check. Read each
-	// row's Default/Comfortable px values against the real `@theme inline`
-	// and `[data-density="comfortable"]` declarations, rather than trusting
-	// the doc's own table.
+	// row's Default/Comfortable px values against the real plain `@theme`
+	// block (deliberately not `@theme inline` - see index.css's own comment:
+	// `inline` bakes a literal into the utility instead of a `var()`
+	// reference, which silently disables the Comfortable override) and
+	// `[data-density="comfortable"]` declarations, rather than trusting the
+	// doc's own table.
 	it("keeps the Chrome, Target and Icon Floors table in step with index.css", () => {
 		const start = doc.indexOf("### Chrome, Target and Icon Floors");
 		expect(start, "the Chrome, Target and Icon Floors heading has moved").toBeGreaterThan(-1);
@@ -142,7 +145,9 @@ describe("design-system.md token values", () => {
 		];
 		expect(rows.length, "no floor-step rows found - has the table moved?").toBe(7);
 
-		const themeOpen = css.indexOf("@theme inline {");
+		// `indexOf("@theme {")`, with the space, skips past the earlier
+		// `@theme inline {` block on purpose.
+		const themeOpen = css.indexOf("@theme {");
 		const themeClose = css.indexOf("\n}", themeOpen);
 		const themeBlock = css.slice(themeOpen, themeClose);
 		const comfortableBlock =
@@ -150,7 +155,7 @@ describe("design-system.md token values", () => {
 
 		for (const [, name, defaultPx, comfortablePx] of rows) {
 			const declared = new RegExp(`${name}:\\s*(\\d+)px;`).exec(themeBlock)?.[1];
-			expect(declared, `${name} not declared in @theme inline`).toBe(defaultPx);
+			expect(declared, `${name} not declared in the plain @theme block`).toBe(defaultPx);
 
 			// band/banner/icon/icon-sm are theme-independent and carry no
 			// [data-density="comfortable"] override at all - only

@@ -67,11 +67,17 @@ describe("interface density", () => {
 	// and design-system-doc.test.ts, which checks that doc's numbers against
 	// these same declarations.
 	describe("chrome/target/icon floors", () => {
-		const themeOpen = css.indexOf("@theme inline {");
+		// A plain `@theme { }` block, deliberately not `@theme inline` - see
+		// index.css's own comment on why: `inline` bakes the resolved value
+		// into each utility instead of a `var()` reference, which silently
+		// disables the Comfortable override below. `indexOf("@theme {")`
+		// (with the space) skips past the earlier `@theme inline {` block on
+		// purpose.
+		const themeOpen = css.indexOf("@theme {");
 		const themeClose = css.indexOf("\n}", themeOpen);
 		const theme = css.slice(themeOpen, themeClose);
 
-		it("declares all seven steps in @theme inline, as literal px", () => {
+		it("declares all seven steps in a plain @theme block, as literal px", () => {
 			expect(themeOpen).toBeGreaterThan(-1);
 			for (const [name, px] of [
 				["--spacing-band", 32],
@@ -84,6 +90,21 @@ describe("interface density", () => {
 			] as const) {
 				expect(theme, name).toMatch(new RegExp(`${name}:\\s*${px}px;`));
 			}
+		});
+
+		it("is not the @theme inline block, so the utility keeps a var() reference", () => {
+			// Confirmed by compiling this exact file with @tailwindcss/node:
+			// inside `@theme inline`, `.h-control` compiled to a baked
+			// `height: 28px` literal with no `--spacing-control` even emitted
+			// to `:root`, which is what silently disabled every override
+			// below. A plain `@theme` block keeps the `var()` indirection.
+			const inlineOpen = css.indexOf("@theme inline {");
+			const inlineClose = css.indexOf("\n}", inlineOpen);
+			expect(themeOpen, "the floor block was not found").toBeGreaterThan(-1);
+			expect(
+				themeOpen < inlineOpen || themeOpen > inlineClose,
+				"the floor steps must not be declared inside @theme inline"
+			).toBe(true);
 		});
 
 		it("never expresses a floor step as calc(var(--spacing) * n)", () => {

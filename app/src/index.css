@@ -128,22 +128,39 @@
 	--text-hero--line-height: 1;
 	--text-metric: 1.375rem; /* 22px */
 	--text-metric--line-height: 1;
+}
 
-	/*
-	 * Chrome/target/icon floors (issue #1679). `--spacing` scales *rhythm* -
-	 * row heights, paddings, gaps - but three classes of thing have a floor of
-	 * their own that rhythm must not carry below: chrome bands are anchors,
-	 * not list rows (every editor-class app keeps its tab strip above 30px and
-	 * its notification bars 26-40px tall); interactive targets have the WCAG
-	 * 2.2 SC 2.5.8 24x24px floor; icons have a legibility floor. Named so
-	 * `h-band`, `h-banner`, `h-control`, `size-target`, `size-icon` and so on
-	 * exist as real Tailwind utilities (Tailwind 4 generates a spacing-scale
-	 * utility for every `--spacing-*` theme key) rather than one-off arbitrary
-	 * values. `band`, `banner`, `icon` and `icon-sm` are theme-independent;
-	 * `control`, `control-sm` and `target` are the three density scales on its
-	 * own scale, under `[data-density="comfortable"]` below - the same
-	 * mechanism `--spacing` itself uses.
-	 */
+/*
+ * Chrome/target/icon floors (issue #1679). `--spacing` scales *rhythm* -
+ * row heights, paddings, gaps - but three classes of thing have a floor of
+ * their own that rhythm must not carry below: chrome bands are anchors,
+ * not list rows (every editor-class app keeps its tab strip above 30px and
+ * its notification bars 26-40px tall); interactive targets have the WCAG
+ * 2.2 SC 2.5.8 24x24px floor; icons have a legibility floor. Named so
+ * `h-band`, `h-banner`, `h-control`, `size-target`, `size-icon` and so on
+ * exist as real Tailwind utilities (Tailwind 4 generates a spacing-scale
+ * utility for every `--spacing-*` theme key) rather than one-off arbitrary
+ * values. `band`, `banner`, `icon` and `icon-sm` are theme-independent;
+ * `control`, `control-sm` and `target` are the three density scales on its
+ * own scale, under `[data-density="comfortable"]` below - the same
+ * mechanism `--spacing` itself uses.
+ *
+ * A plain `@theme` block, deliberately not merged into the `@theme inline`
+ * block above: `inline` bakes the *resolved value* straight into each
+ * generated utility (`.h-control { height: 28px }`) instead of a `var()`
+ * reference, which is exactly right for a token whose own value is a
+ * `var()` reference to something that changes per theme (`--color-background:
+ * hsl(var(--background))`, overridden by `.dark`) but is exactly wrong for a
+ * literal like these seven - it left `.h-control` a fixed 28px with no
+ * variable for `[data-density="comfortable"]` to override, silently
+ * disabling every density-scaled floor. Confirmed by compiling this file
+ * with the repo's own `tailwindcss@4.3.3` (`@tailwindcss/node`'s `compile`)
+ * and reading the generated CSS directly, both ways: `inline` produced
+ * `height: 28px`; plain `@theme` produces `height: var(--spacing-control)`
+ * and emits `--spacing-control: 28px` to `:root`, which the Comfortable
+ * override below then actually reaches.
+ */
+@theme {
 	--spacing-band: 32px;
 	--spacing-banner: 36px;
 	--spacing-control: 28px;
@@ -483,7 +500,7 @@
 		 * chrome band is an anchor, not a list row, so it must not shrink with
 		 * density the way #1670 originally had it (`calc(var(--spacing) * 8)`,
 		 * 24px at the default density). `--spacing-band` is 32px at every
-		 * density - see the floors block above `:root` in `@theme inline`.
+		 * density - see the plain `@theme` floors block above `:root`.
 		 * `--titlebar-height` stays a literal px value instead: it is sized to
 		 * the macOS traffic lights, a fixed platform constant no density
 		 * should move.
