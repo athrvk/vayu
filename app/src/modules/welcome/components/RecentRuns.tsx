@@ -125,7 +125,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 										{formatRelativeTime(run.startTime)}
 									</span>
 								)}
-								<ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+								<ChevronRight className="size-icon text-muted-foreground transition-colors group-hover:text-foreground" />
 							</span>
 						</Button>
 					);

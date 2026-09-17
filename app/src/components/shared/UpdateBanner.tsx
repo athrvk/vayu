@@ -45,13 +45,15 @@ function UpdateBanner() {
 	};
 
 	return (
-		// One line at every density (issue #1670): `h-[var(--tabstrip-height)]`
-		// rather than stacking a second row for the download progress bar, which
-		// used to make this banner two lines tall while downloading. The bar
-		// still shows - as a thin strip along the bottom edge, absolutely
-		// positioned so it adds no height of its own.
-		<div className="enter-fade relative flex h-[var(--tabstrip-height)] items-center gap-3 border-b border-border bg-secondary/60 px-4 text-sm">
-			<ArrowUpCircle className="size-4 shrink-0 text-primary" />
+		// One line at every density (issue #1670): `h-banner` (issue #1679 -
+		// was `h-[var(--tabstrip-height)]`, the tab strip's own band and 4px
+		// short of a notification bar's floor) rather than stacking a second
+		// row for the download progress bar, which used to make this banner
+		// two lines tall while downloading. The bar still shows - as a thin
+		// strip along the bottom edge, absolutely positioned so it adds no
+		// height of its own.
+		<div className="enter-fade relative flex h-banner items-center gap-3 border-b border-border bg-secondary/60 px-4 text-sm">
+			<ArrowUpCircle className="size-icon shrink-0 text-primary" />
 			<span className="flex-1 truncate text-secondary-foreground">
 				{readyToInstall
 					? `Vayu ${update.version} is ready to install.`
@@ -62,13 +64,13 @@ function UpdateBanner() {
 
 			{readyToInstall ? (
 				<Button size="sm" onClick={restartToInstall}>
-					<RotateCw className="size-4" />
+					<RotateCw className="size-icon" />
 					Restart &amp; install
 				</Button>
 			) : downloading ? null : update.installCommand ? (
 				<>
 					<Button size="sm" variant="secondary" onClick={copyInstallCommand}>
-						{copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+						{copied ? <Check className="size-icon" /> : <Copy className="size-icon" />}
 						<LabelSwap
 							label={copied ? "Copied" : "Copy install command"}
 							states={["Copied", "Copy install command"]}
@@ -83,25 +85,26 @@ function UpdateBanner() {
 					 * lands on an app that is already closed.
 					 */}
 					<Button size="sm" variant="ghost" onClick={quitForUpdate}>
-						<Power className="size-4" />
+						<Power className="size-icon" />
 						Quit to update
 					</Button>
 				</>
 			) : (
 				<Button size="sm" variant="secondary" onClick={openReleasePage}>
-					<ExternalLink className="size-4" />
+					<ExternalLink className="size-icon" />
 					View release
 				</Button>
 			)}
 
+			{/* `size="icon"` alone now gives the `target` floor (issue #1679) -
+			    no `size-7` override needed, the way one was before it existed. */}
 			<Button
 				size="icon"
 				variant="ghost"
-				className="size-7"
 				onClick={dismiss}
 				aria-label="Dismiss update notification"
 			>
-				<X className="size-4" />
+				<X className="size-icon-sm" />
 			</Button>
 
 			{downloading ? (

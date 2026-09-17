@@ -143,7 +143,7 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					</Button>
 					<Button onClick={onSave} disabled={!canSave}>
 						{pending && (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							<Loader2 className="mr-2 size-icon animate-spin" aria-hidden="true" />
 						)}
 						Save example
 					</Button>

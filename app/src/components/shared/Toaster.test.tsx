@@ -227,11 +227,13 @@ describe("Toaster", () => {
 
 		it("gives the close control a focus ring and a target bigger than its icon", () => {
 			// The old button had neither: a 14px hit area with no focused state.
+			// `size-target` (issue #1679) replaced the padding-derived ~22px box
+			// with the app's 24px floor.
 			render(<Toaster />);
 			show("Save failed", "error");
 			const close = screen.getByRole("button", { name: "Dismiss notification" });
 			expect(close.className).toContain("focus-visible:ring-2");
-			expect(close.className).toContain("p-1");
+			expect(close.className).toContain("size-target");
 		});
 	});
 

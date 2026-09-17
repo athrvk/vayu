@@ -526,7 +526,7 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 			<Popover open={pickerOpen} onOpenChange={setPickerOpen}>
 				<PopoverTrigger asChild>
 					<Button variant="outline" size="sm">
-						<Plus className="h-4 w-4" />
+						<Plus className="size-icon" />
 						Add element
 					</Button>
 				</PopoverTrigger>

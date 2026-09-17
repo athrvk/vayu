@@ -67,7 +67,7 @@ function DefaultHeaderRow({
 				// `accent-primary` for the same reason the table's row checkbox
 				// carries it - the browser default is a fixed blue that ignores
 				// both the theme and the accent scheme.
-				className="w-4 h-4 accent-primary cursor-pointer"
+				className="size-icon accent-primary cursor-pointer"
 			/>
 			<span
 				className={cn(

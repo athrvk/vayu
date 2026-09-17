@@ -42,9 +42,10 @@ export function CommandSearchBar({ className }: { className?: string }) {
 			// the pointer moves the window instead of pressing the button.
 			style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
 			className={cn(
-				// h-6 in a 32px row: 4px of air above and below, the same gutter the
-				// environment switcher opposite it leaves.
-				"group flex h-6 w-full items-center gap-2 rounded-md border border-input px-2",
+				// `h-target` (issue #1679, 24px - was `h-6`/18px, under the WCAG 2.2
+				// SC 2.5.8 floor) in the 32px title row: 4px of air above and below,
+				// the same gutter the environment switcher opposite it leaves.
+				"group flex h-target w-full items-center gap-2 rounded-md border border-input px-2",
 				// Sunken against --panel, so it reads as a field rather than as a
 				// button: the title row is the panel surface, and a control painted
 				// in the same colour as its bar has no edge to be found by.

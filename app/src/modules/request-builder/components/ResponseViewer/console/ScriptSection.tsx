@@ -97,7 +97,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 				 */}
 				<div
 					className={cn(
-						"flex items-center justify-center w-4 h-4 rounded-md transition-colors",
+						"flex items-center justify-center size-icon rounded-md transition-colors",
 						tone === "running"
 							? "bg-status-running/20 group-hover:bg-status-running/30"
 							: "bg-status-success/20 group-hover:bg-status-success/30"
@@ -106,7 +106,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 					{open ? (
 						<ChevronDown
 							className={cn(
-								"w-3 h-3",
+								"size-icon-sm",
 								tone === "running"
 									? "text-status-running-text"
 									: "text-status-success-text"
@@ -115,7 +115,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 					) : (
 						<ChevronRight
 							className={cn(
-								"w-3 h-3",
+								"size-icon-sm",
 								tone === "running"
 									? "text-status-running-text"
 									: "text-status-success-text"

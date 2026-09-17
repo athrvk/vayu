@@ -175,9 +175,9 @@ export function SampledExchange({
 						// rounded hover fill floats oddly inside the row's own square edges.
 						className="flex-1 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 whitespace-normal rounded-none px-4 py-3 hover:bg-muted/50"
 					>
-						<Chevron className="w-4 h-4 text-muted-foreground shrink-0" />
+						<Chevron className="size-icon text-muted-foreground shrink-0" />
 
-						<StatusIcon className={cn("w-4 h-4 shrink-0", STATE_TINT[resolved])} />
+						<StatusIcon className={cn("size-icon shrink-0", STATE_TINT[resolved])} />
 
 						<span className="text-xs text-muted-foreground font-mono min-w-8">
 							#{label}

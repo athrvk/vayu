@@ -45,7 +45,7 @@ export function ListSkeleton({
 			<div className="space-y-2 py-2" aria-hidden="true">
 				{Array.from({ length: rows }, (_, i) => (
 					<div key={i} className="flex items-center gap-2 px-2 py-1.5">
-						{leading && <Skeleton className="h-4 w-4 rounded-md shrink-0" />}
+						{leading && <Skeleton className="size-icon rounded-md shrink-0" />}
 						{badge && <Skeleton className="h-4 w-5 rounded-md shrink-0" />}
 						<Skeleton className="h-4 flex-1 rounded-md" />
 					</div>

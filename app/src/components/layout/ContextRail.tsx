@@ -204,7 +204,7 @@ export function ContextRail() {
 						side="right"
 						variant="tile"
 					>
-						<Icon className="w-4 h-4" />
+						<Icon className="size-icon" />
 					</RailButton>
 				);
 			})}

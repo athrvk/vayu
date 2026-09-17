@@ -245,7 +245,7 @@ export default function AppearancePanel() {
 															"ring-2 ring-offset-2 ring-primary ring-offset-background"
 													)}
 												>
-													<Icon className="w-4 h-4 text-primary-foreground" />
+													<Icon className="size-icon text-primary-foreground" />
 												</span>
 											),
 										};

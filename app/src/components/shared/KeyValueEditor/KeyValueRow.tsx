@@ -78,7 +78,7 @@ function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) 
 					aria-label={`Resolved value of ${label}`}
 					className="flex h-8 w-5 items-center justify-center rounded-md text-subtle-foreground transition-[color,scale] duration-150 hover:text-primary-text focus-visible:text-primary-text focus-visible:outline-none active:scale-[0.98]"
 				>
-					<Sigma className="h-3 w-3" />
+					<Sigma className="size-icon-sm" />
 				</button>
 			</TooltipTrigger>
 			<TooltipContent side="left" className="max-w-md">
@@ -130,9 +130,13 @@ function KeyValueRow({
 		<div
 			className={cn(
 				"grid gap-2 items-center group px-1 py-0.5 rounded-md",
+				// The leading column reads the `target` floor (issue #1679) rather
+				// than a literal 24px, so it grows to 28px at Comfortable along with
+				// the checkbox inside it instead of leaving a 24px column around a
+				// 28px control.
 				allowFiles
-					? "grid-cols-[24px_1fr_1fr_20px_20px_28px]"
-					: "grid-cols-[24px_1fr_1fr_20px_28px]",
+					? "grid-cols-[var(--spacing-target)_1fr_1fr_20px_20px_28px]"
+					: "grid-cols-[var(--spacing-target)_1fr_1fr_20px_28px]",
 				!item.enabled && "opacity-50",
 				isProtected && "bg-muted/30"
 			)}
@@ -155,10 +159,16 @@ function KeyValueRow({
 					// The neighbouring `rounded-md` / `border-input` are inert on a
 					// native checkbox (no `appearance-none`), so `accent-color` is the
 					// only property here that actually paints.
-					className="w-4 h-4 accent-primary cursor-pointer disabled:opacity-50"
+					//
+					// `size-target` (issue #1679), not `size-icon`: this box is its own
+					// hit target, with no separate padding wrapper the way a close
+					// button's icon-in-a-bigger-box is - a native checkbox's rendered
+					// box and its clickable area are the same box, so it takes the
+					// interactive floor directly rather than the icon step.
+					className="size-target accent-primary cursor-pointer disabled:opacity-50"
 				/>
 			) : (
-				<div className="w-4" />
+				<div className="size-target" />
 			)}
 
 			<VariableInput
@@ -213,9 +223,9 @@ function KeyValueRow({
 								className="h-6 w-5 rounded-md text-subtle-foreground hover:text-primary-text"
 							>
 								{isFileRow ? (
-									<Type className="h-3 w-3" />
+									<Type className="size-icon-sm" />
 								) : (
-									<Paperclip className="h-3 w-3" />
+									<Paperclip className="size-icon-sm" />
 								)}
 							</Button>
 						</TooltipTrigger>

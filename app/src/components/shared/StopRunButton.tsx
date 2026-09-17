@@ -54,9 +54,9 @@ export function StopRunButton({ onStop, isStopping = false, className }: StopRun
 			 * icon-to-label gap to 8px + 6px.
 			 */}
 			{isStopping ? (
-				<Loader2 className="w-3 h-3 animate-spin" />
+				<Loader2 className="size-icon-sm animate-spin" />
 			) : (
-				<StopCircle className="w-3 h-3" />
+				<StopCircle className="size-icon-sm" />
 			)}
 			<LabelSwap label={isStopping ? "Stopping…" : "Stop"} states={["Stop", "Stopping…"]} />
 		</Button>

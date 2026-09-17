@@ -214,7 +214,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				{config && (config.mode || config.comment || protocolLabel) && (
 					<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm mb-3 p-3 border rounded-md bg-background/50">
 						<div className="flex items-center gap-2 text-muted-foreground">
-							<Settings2 className="w-4 h-4 shrink-0" />
+							<Settings2 className="size-icon shrink-0" />
 							<span className="font-medium">Test config</span>
 						</div>
 						{config.mode && (
@@ -244,7 +244,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 											`The results below were measured over those connections.`
 										}
 									>
-										<AlertTriangle className="w-4 h-4 shrink-0" />
+										<AlertTriangle className="size-icon shrink-0" />
 										not negotiated
 									</span>
 								)}
@@ -306,9 +306,9 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						}`}
 					>
 						{authNote.warning ? (
-							<AlertTriangle className="w-4 h-4 shrink-0" />
+							<AlertTriangle className="size-icon shrink-0" />
 						) : (
-							<KeyRound className="w-4 h-4 shrink-0" />
+							<KeyRound className="size-icon shrink-0" />
 						)}
 						<span>{authNote.text}</span>
 					</div>
@@ -321,7 +321,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							{/* Raw palette, and staying. Measured 3.50 light / 3.66 dark on
 						    this tile against the 3.0 icon bar - it clears it in both
 						    themes, and there is no violet semantic token to move it to. */}
-							<TrendingUp className="w-4 h-4 text-purple-500" />
+							<TrendingUp className="size-icon text-purple-500" />
 							<span className="text-xs text-muted-foreground">P99 Latency</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
@@ -330,7 +330,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					</div>
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
-							<Activity className="w-4 h-4 text-primary" />
+							<Activity className="size-icon text-primary" />
 							<span className="text-xs text-muted-foreground">Total Requests</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">
@@ -339,7 +339,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					</div>
 					<div className="bg-muted/50 p-3">
 						<div className="flex items-center gap-2 mb-1">
-							<CheckCircle className="w-4 h-4 text-status-success-text" />
+							<CheckCircle className="size-icon text-status-success-text" />
 							<span className="text-xs text-muted-foreground">Success Rate</span>
 						</div>
 						<p className="text-lg font-bold text-foreground">

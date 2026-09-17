@@ -134,7 +134,7 @@ export function DeleteConfirmDialog({
 						{cancelLabel}
 					</Button>
 					<Button variant={confirmVariant} onClick={onConfirm} disabled={isDeleting}>
-						{isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : confirmLabel}
+						{isDeleting ? <Loader2 className="size-icon animate-spin" /> : confirmLabel}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

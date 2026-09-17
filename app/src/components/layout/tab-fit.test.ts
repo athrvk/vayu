@@ -40,7 +40,7 @@ describe("naturalTabWidth", () => {
 		// under it (#1202). Drop TAB_TRAILING back to the old 10px and this reds.
 		const label = "abcdefghij";
 		const width = naturalTabWidth({ label, hasIcon: false }, measure);
-		const trailing = width - measure(label) - 8 - 2 - 1;
+		const trailing = width - measure(label) - 12 - 2 - 1;
 		expect(trailing).toBeGreaterThanOrEqual(TAB_CLOSE_SPACE);
 	});
 

@@ -143,7 +143,7 @@ function ItemValue({ item }: { item: ChangesetItem }) {
 				{item.driftFrom !== undefined ? (
 					<>
 						<span className="text-muted-foreground">{item.driftFrom}</span>
-						<ArrowRight className="mx-1 inline h-3 w-3 text-muted-foreground align-middle" />
+						<ArrowRight className="mx-1 inline size-icon-sm text-muted-foreground align-middle" />
 						<span className="text-foreground">{item.driftTo}</span>
 					</>
 				) : (
@@ -172,7 +172,7 @@ function ChangeRow({ item }: { item: ChangesetItem }) {
 			<span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
 				{item.detail}
 				{item.collapsible && (
-					<ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+					<ChevronRight className="size-icon-sm transition-transform group-open:rotate-90" />
 				)}
 			</span>
 		</div>
@@ -306,7 +306,7 @@ export default function SaveRunToRequestDialog({
 						disabled={isSaving || writable.length === 0}
 					>
 						{isSaving ? (
-							<Loader2 className="h-4 w-4 animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : (
 							"Save to request"
 						)}

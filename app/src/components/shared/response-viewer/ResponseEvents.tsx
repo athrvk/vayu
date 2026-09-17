@@ -164,7 +164,7 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 					// The `Button` primitive's own baseline already gives this row its
 					// hover/press transitions (index.css's `:where(button, ...)` rule) -
 					// no hand-rolled `transition-*` needed. `[&_svg]:size-3` overrides
-					// the primitive's default `size-4` glyph, matching this row's
+					// the primitive's default `size-icon` glyph, matching this row's
 					// smaller chevron. `rounded-none` overrides the base's `rounded-md`:
 					// this row is full-bleed inside its list (`border-b last:border-b-0`
 					// below), so a rounded hover fill would float oddly inside its own

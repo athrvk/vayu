@@ -150,8 +150,9 @@ export const WINDOW_MIN_HEIGHT = 768;
  * is what the OS draws its caption buttons at, and those are 46x32. Anything
  * smaller squeezes controls the platform requires to stay fully visible. The
  * 48px variant exists for a searchbox or a person-picture; the row does hold a
- * search bar now, but a 24px trigger inside a 32px row clears both by 4px, so
- * the extra 16px would buy padding and nothing else.
+ * search bar now (`CommandSearchBar`, `h-target` - 24px at Default, 28px at
+ * Comfortable, issue #1679), which clears this row by 4px at Default and 2px
+ * at Comfortable, so the extra 16px would still buy padding over control room.
  *
  * **macOS matches it.** 28px is the macOS standard for a title bar holding a
  * *title*; this one holds a search bar, and the traffic lights are a fixed 12px

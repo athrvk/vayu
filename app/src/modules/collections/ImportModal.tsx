@@ -1072,7 +1072,7 @@ function PreviewView({
 	return (
 		<div className="space-y-3">
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
-				<CheckCircle2 className="h-4 w-4 text-status-success-text" />
+				<CheckCircle2 className="size-icon text-status-success-text" />
 				<span className="text-xs font-semibold">{meta.format}</span>
 				{meta.fileName && (
 					<span className="font-mono text-[11px] text-muted-foreground">
@@ -1268,7 +1268,7 @@ function BatchLedger({
 	return (
 		<div className="space-y-3">
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
-				<CheckCircle2 className="h-4 w-4 text-status-success-text" />
+				<CheckCircle2 className="size-icon text-status-success-text" />
 				<span className="text-xs font-semibold">{entries.length} files</span>
 				<span className="text-[11px] text-muted-foreground">
 					{selected} selected for import
@@ -1338,25 +1338,25 @@ function BatchRow({
 				)}
 				{bundledInto && (
 					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-						<Link2 className="h-3 w-3 shrink-0" />
+						<Link2 className="size-icon-sm shrink-0" />
 						Referenced by {bundledInto} - imported as part of it
 					</span>
 				)}
 				{error && (
 					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-						<FileWarning className="h-3 w-3 shrink-0" />
+						<FileWarning className="size-icon-sm shrink-0" />
 						{error}
 					</span>
 				)}
 				{loss && (
 					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-						<AlertTriangle className="h-3 w-3 shrink-0" />
+						<AlertTriangle className="size-icon-sm shrink-0" />
 						{loss}
 					</span>
 				)}
 				{notices && (
 					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-						<Info className="h-3 w-3 shrink-0" />
+						<Info className="size-icon-sm shrink-0" />
 						{notices}
 					</span>
 				)}
@@ -1367,9 +1367,9 @@ function BatchRow({
 						}`}
 					>
 						{outcome.ok ? (
-							<CheckCircle2 className="h-3 w-3 shrink-0" />
+							<CheckCircle2 className="size-icon-sm shrink-0" />
 						) : (
-							<FileWarning className="h-3 w-3 shrink-0" />
+							<FileWarning className="size-icon-sm shrink-0" />
 						)}
 						{outcome.message}
 					</span>

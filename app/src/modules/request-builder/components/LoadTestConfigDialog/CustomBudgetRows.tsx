@@ -131,7 +131,7 @@ export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomB
 						onClick={() => onChange(rows.filter((other) => other.id !== row.id))}
 						disabled={disabled}
 					>
-						<X className="h-4 w-4" />
+						<X className="size-icon" />
 					</Button>
 				</div>
 			))}

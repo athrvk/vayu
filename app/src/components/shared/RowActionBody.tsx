@@ -18,7 +18,7 @@ export function RowActionBody({ action }: { action: RowAction }) {
 	const Icon = action.icon;
 	return (
 		<>
-			<Icon className="h-4 w-4 shrink-0" />
+			<Icon className="size-icon shrink-0" />
 			{action.label}
 		</>
 	);

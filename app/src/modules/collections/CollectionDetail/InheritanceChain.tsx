@@ -116,7 +116,7 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 						>
 							<Folder
 								className={cn(
-									"w-3 h-3 shrink-0",
+									"size-icon-sm shrink-0",
 									isSource ? "text-primary" : "text-muted-foreground"
 								)}
 							/>

@@ -299,7 +299,7 @@ export default function CollectionItem({
 					>
 						<FolderIcon
 							className={cn(
-								"w-4 h-4 shrink-0",
+								"size-icon shrink-0",
 								depth === 0 ? "text-primary" : "text-primary/70"
 							)}
 						/>
@@ -418,7 +418,7 @@ export default function CollectionItem({
 								className="h-7 text-xs"
 							>
 								{isCreatingSubfolder && (
-									<Loader2 className="w-3 h-3 animate-spin mr-1" />
+									<Loader2 className="size-icon-sm animate-spin mr-1" />
 								)}
 								Add
 							</Button>

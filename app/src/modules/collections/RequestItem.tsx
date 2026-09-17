@@ -250,7 +250,7 @@ export default function RequestItem({
 				</button>
 
 				{isDeleting && (
-					<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive-text" />
+					<Loader2 className="size-icon-sm shrink-0 animate-spin text-destructive-text" />
 				)}
 
 				{/*

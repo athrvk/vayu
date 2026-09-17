@@ -319,7 +319,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 			 */}
 			<div className="flex items-center gap-1 px-2 py-1 border-b border-border shrink-0">
 				<div className="relative flex-1 min-w-0">
-					<Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+					<Search className="absolute left-2 top-1/2 -translate-y-1/2 size-icon-sm text-muted-foreground pointer-events-none" />
 					<Input
 						ref={searchRef}
 						value={search}
@@ -347,7 +347,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 					label={showDescriptions ? "Hide full descriptions" : "Show full descriptions"}
 					aria-pressed={showDescriptions}
 					className={cn("h-6 w-6 shrink-0", showDescriptions && "text-primary")}
-					icon={<Text className="w-3 h-3" />}
+					icon={<Text className="size-icon-sm" />}
 					onClick={() => toggleDescriptions(schemaKey)}
 				/>
 			</div>
@@ -359,7 +359,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 			 */}
 			{schema && status === "error" && (
 				<p className="enter-fade flex items-center gap-1 px-2 py-1 m-0 text-[10px] text-warning-text border-b border-border shrink-0">
-					<AlertCircle className="w-3 h-3 shrink-0" />
+					<AlertCircle className="size-icon-sm shrink-0" />
 					{age ? `${age}. Refresh failed.` : "Refresh failed."}
 				</p>
 			)}
@@ -601,7 +601,7 @@ function ExplorerRow({
 					onClick={() => onReveal(reveal)}
 					className="shrink-0 self-stretch flex items-center text-muted-foreground"
 				>
-					<ListTree className="w-3 h-3" />
+					<ListTree className="size-icon-sm" />
 				</button>
 			) : node.expandable ? (
 				<button
@@ -613,9 +613,9 @@ function ExplorerRow({
 					className="shrink-0 self-stretch flex items-center text-muted-foreground"
 				>
 					{expanded ? (
-						<ChevronDown className="w-3 h-3" />
+						<ChevronDown className="size-icon-sm" />
 					) : (
-						<ChevronRight className="w-3 h-3" />
+						<ChevronRight className="size-icon-sm" />
 					)}
 				</button>
 			) : (

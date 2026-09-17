@@ -327,7 +327,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				    matches, because "search" over rows carrying a name, a URL
 				    and a status code otherwise has to be guessed at. */}
 				<div className="relative w-full sm:w-44">
-					<Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+					<Search className="pointer-events-none absolute left-2 top-1/2 size-icon-sm -translate-y-1/2 text-muted-foreground" />
 					<Input
 						value={query}
 						onChange={(e) => setQuery(e.target.value)}

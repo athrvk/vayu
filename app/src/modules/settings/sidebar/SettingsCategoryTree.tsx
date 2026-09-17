@@ -60,7 +60,7 @@ function SectionHeading({ children, icon: Icon }: { children: string; icon?: Luc
 	return (
 		<div className="px-3 py-2 mb-1">
 			<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-				{Icon && <Icon className="w-3 h-3" />}
+				{Icon && <Icon className="size-icon-sm" />}
 				{children}
 			</div>
 		</div>
@@ -113,7 +113,7 @@ export default function SettingsCategoryTree() {
 					"data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-medium"
 				)}
 			>
-				<Icon className="w-4 h-4 shrink-0" />
+				<Icon className="size-icon shrink-0" />
 				<span className="flex-1 truncate">{label}</span>
 			</button>
 		);

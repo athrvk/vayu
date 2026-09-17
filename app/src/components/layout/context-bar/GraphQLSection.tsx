@@ -91,11 +91,11 @@ export function GraphQLSection({ tab }: ContextBarSectionProps) {
 					)}
 				>
 					{status === "loading" ? (
-						<Loader2 className="w-3 h-3 animate-spin" />
+						<Loader2 className="size-icon-sm animate-spin" />
 					) : status === "ready" ? (
-						<CheckCircle2 className="w-3 h-3" />
+						<CheckCircle2 className="size-icon-sm" />
 					) : status === "error" ? (
-						<AlertCircle className="w-3 h-3" />
+						<AlertCircle className="size-icon-sm" />
 					) : null}
 					Schema {STATUS_LABEL[status].toLowerCase()}
 				</span>

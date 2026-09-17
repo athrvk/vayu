@@ -138,7 +138,9 @@ function TabItem({
 					// re-fires for one - only a real open does.
 					"enter-fade",
 					"group relative flex h-full shrink-0 cursor-pointer select-none items-center gap-1.5",
-					"border-r border-border/40 pl-2 pr-2.5 text-sm",
+					// px-3 (issue #1679), not the old pl-2 pr-2.5 - see tab-fit.ts's
+					// TAB_CHROME for the reserved-width side of this.
+					"border-r border-border/40 px-3 text-sm",
 					// The rule sits on the edge the content is on, and matches the
 					// section tabs. It reads identically in both themes, unlike a
 					// surface shift, which light mode carries far more weakly (see
@@ -180,7 +182,7 @@ function TabItem({
 						style={{ background: `hsl(${getMethodColor(descriptor.method)})` }}
 					/>
 				)}
-				{Icon && <Icon className="w-3 h-3 shrink-0" />}
+				{Icon && <Icon className="size-icon-sm shrink-0" />}
 				{/*
 				 * ScrollOnOverflow is kept: it reads the full name on hover, which an
 				 * ellipsis cannot. The ellipsis is what was missing - it clipped
@@ -202,15 +204,20 @@ function TabItem({
 					}}
 					// Absolute, over the trailing padding: in the flow it reserved 22px on
 					// every tab for a control only the hovered or active one ever shows.
+					// `size-target` (issue #1679, 24px - was a 16px hit box): the
+					// close button is a real interactive target and sat under the
+					// WCAG 2.2 SC 2.5.8 24x24px floor. The glyph inside stays
+					// `size-icon-sm` (12px, unchanged) - only the hit area grew, and
+					// `tab-fit.ts`'s TAB_CLOSE_SPACE reserves strip width for it.
 					// `transition-[opacity,background-color]`, not `transition-opacity`:
 					// this is `role="button"`, which the baseline (`index.css`) would
 					// otherwise cover for free, but a scoped `transition-*` utility here
 					// overrides that shorthand rather than merging with it - narrowing
 					// coverage to opacity alone and leaving `hover:bg-muted` untransitioned.
-					className="absolute right-0.5 rounded-md p-0.5 opacity-0 transition-[opacity,background-color,scale] duration-150 active:scale-[0.98] hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
+					className="absolute right-0.5 flex size-target items-center justify-center rounded-md opacity-0 transition-[opacity,background-color,scale] duration-150 active:scale-[0.98] hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
 					data-active={isActive}
 				>
-					<X className="w-3 h-3" />
+					<X className="size-icon-sm" />
 				</span>
 			</div>
 		</RowContextMenu>
@@ -359,7 +366,7 @@ export function TabStrip() {
 							aria-label={`${overflowed.length} more tabs`}
 						>
 							+{overflowed.length}
-							<ChevronDown className="w-3 h-3" />
+							<ChevronDown className="size-icon-sm" />
 						</button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end" className="max-h-80 min-w-56 overflow-y-auto">
@@ -381,7 +388,7 @@ export function TabStrip() {
 											}}
 										/>
 									)}
-									{Icon && <Icon className="w-3 h-3 shrink-0" />}
+									{Icon && <Icon className="size-icon-sm shrink-0" />}
 									{/* Full name here - the menu is where a truncated tab
 									    becomes readable, so it must not truncate too. */}
 									<span className="flex-1 truncate">{d.label}</span>

@@ -84,7 +84,7 @@ export default function MockServerView() {
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex flex-col gap-1 border-b border-border px-3 py-2">
 				<div className="flex flex-wrap items-center gap-2">
-					<MockIcon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+					<MockIcon className="size-icon text-muted-foreground" aria-hidden="true" />
 					<code className="font-mono text-xs">{mock.url}</code>
 					<Button
 						variant="ghost"

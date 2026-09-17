@@ -363,7 +363,7 @@ export function ClientCertificatesCard() {
 									disabled={deleteCertificate.isPending}
 									aria-label={`Remove the certificate for ${targetLabel(certificate)}`}
 								>
-									<Trash2 className="w-4 h-4" />
+									<Trash2 className="size-icon" />
 								</Button>
 							</div>
 						))}
@@ -489,7 +489,7 @@ export function ClientCertificatesCard() {
 								disabled={!canSubmit || createCertificate.isPending}
 							>
 								{createCertificate.isPending && (
-									<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+									<Loader2 className="size-icon mr-1.5 animate-spin" />
 								)}
 								Add certificate
 							</Button>
@@ -497,7 +497,7 @@ export function ClientCertificatesCard() {
 					</div>
 				) : (
 					<Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-						<Plus className="w-4 h-4 mr-1.5" />
+						<Plus className="size-icon mr-1.5" />
 						Add certificate
 					</Button>
 				)}

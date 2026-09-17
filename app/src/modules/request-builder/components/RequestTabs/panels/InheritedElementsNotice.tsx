@@ -122,7 +122,7 @@ export default function InheritedElementsNotice({
 				const isDisabled = disabled.has(entry.id);
 				return (
 					<span key={entry.id} className="flex items-center gap-2 flex-1 min-w-0">
-						<Folder className="w-3 h-3 shrink-0 text-primary" />
+						<Folder className="size-icon-sm shrink-0 text-primary" />
 						<span className="text-[11px] font-mono truncate text-foreground font-semibold">
 							{entry.origin?.name}
 						</span>

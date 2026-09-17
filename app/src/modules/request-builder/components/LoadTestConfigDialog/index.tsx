@@ -1261,7 +1261,7 @@ export default function LoadTestConfigDialog({
 					>
 						{isStarting ? (
 							<>
-								<Loader2 className="w-4 h-4 animate-spin mr-2" />
+								<Loader2 className="size-icon animate-spin mr-2" />
 								Starting…
 							</>
 						) : (

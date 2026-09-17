@@ -102,7 +102,7 @@ function DeltaCell({ metric }: { metric: MetricDelta }) {
 						{formatValue(metric.metric, metric.target)}
 					</span>
 					<span className={cn("flex items-center gap-0.5 text-xs font-medium", tone)}>
-						<Arrow className="w-3 h-3 shrink-0" />
+						<Arrow className="size-icon-sm shrink-0" />
 						{metric.pctChange === null
 							? metric.delta === null
 								? "vs no baseline value"
@@ -167,7 +167,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 	return (
 		<div className="enter-fade mb-3 p-3 border rounded-md bg-background/50">
 			<div className="flex items-center gap-2 mb-2 flex-wrap">
-				<GitCompareArrows className="w-4 h-4 shrink-0 text-muted-foreground" />
+				<GitCompareArrows className="size-icon shrink-0 text-muted-foreground" />
 				<span className="text-sm font-medium text-muted-foreground">vs baseline</span>
 				{/* `variant="chip"`: this badge paints its own background, and
 				    every other variant would drag a `hover:bg-*` along with it. */}

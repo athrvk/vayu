@@ -188,9 +188,9 @@ export default function CollectionTree() {
 								aria-label="Add collection"
 							>
 								{panel.isCreatingCollection ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
+									<Loader2 className="size-icon animate-spin" />
 								) : (
-									<FolderPlus className="w-4 h-4" />
+									<FolderPlus className="size-icon" />
 								)}
 							</Button>
 						</TooltipTrigger>
@@ -207,9 +207,9 @@ export default function CollectionTree() {
 								aria-label="Add request"
 							>
 								{panel.isCreatingRequest ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
+									<Loader2 className="size-icon animate-spin" />
 								) : (
-									<Plus className="w-4 h-4" />
+									<Plus className="size-icon" />
 								)}
 							</Button>
 						</TooltipTrigger>
@@ -228,7 +228,7 @@ export default function CollectionTree() {
 								className="h-7 w-7"
 								aria-label="Import collection"
 							>
-								<Download className="w-4 h-4" />
+								<Download className="size-icon" />
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent>Import collection</TooltipContent>
@@ -267,7 +267,7 @@ export default function CollectionTree() {
 							disabled={panel.isCreatingCollection}
 						>
 							{panel.isCreatingCollection && (
-								<Loader2 className="w-3 h-3 animate-spin mr-1" />
+								<Loader2 className="size-icon-sm animate-spin mr-1" />
 							)}
 							Add
 						</Button>

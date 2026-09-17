@@ -74,13 +74,19 @@ function RecoveryBanner() {
 	return (
 		<div
 			role="status"
-			className="enter-fade flex items-center gap-3 border-b border-border bg-secondary/60 px-4 py-2 text-sm"
+			// `min-h-banner` (issue #1679, 36px floor) - not the fixed `h-banner`
+			// `UpdateBanner` uses, because this banner's text genuinely wraps to
+			// two or more lines (the outcome detail plus a database path plus,
+			// sometimes, a recovery command), where `UpdateBanner` is
+			// deliberately kept to one. A fixed height would clip that content;
+			// a floor lets it grow past 36px while never sitting under it.
+			className="enter-fade flex min-h-banner items-center gap-3 border-b border-border bg-secondary/60 px-4 py-2 text-sm"
 		>
 			<AlertTriangle
 				className={
 					deleted
-						? "size-4 shrink-0 text-destructive-text"
-						: "size-4 shrink-0 text-warning-text"
+						? "size-icon shrink-0 text-destructive-text"
+						: "size-icon shrink-0 text-warning-text"
 				}
 				aria-hidden="true"
 			/>
@@ -108,14 +114,16 @@ function RecoveryBanner() {
 					</>
 				)}
 			</span>
+			{/* `size="icon"` alone now gives the `target` floor (issue #1679) -
+			    no `size-7` override needed, the way one was before it existed. */}
 			<Button
 				size="icon"
 				variant="ghost"
-				className="size-7 shrink-0"
+				className="shrink-0"
 				onClick={() => acknowledge(recovery.at)}
 				aria-label="Dismiss data recovery notice"
 			>
-				<X className="size-4" />
+				<X className="size-icon-sm" />
 			</Button>
 		</div>
 	);

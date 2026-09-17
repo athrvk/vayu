@@ -168,7 +168,7 @@ export default function ResponseBody({
 			>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
-						<ImageIcon className="w-4 h-4" />
+						<ImageIcon className="size-icon" />
 						<span>
 							Image Response ({contentType.split("/")[1]?.toUpperCase() || "IMAGE"})
 						</span>
@@ -196,7 +196,7 @@ export default function ResponseBody({
 			>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
-						<File className="w-4 h-4" />
+						<File className="size-icon" />
 						<span>PDF Document</span>
 					</div>
 					<p className="text-sm text-muted-foreground">
@@ -218,7 +218,7 @@ export default function ResponseBody({
 			>
 				<div className="text-center space-y-4">
 					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
-						<FileCode className="w-4 h-4" />
+						<FileCode className="size-icon" />
 						<span>Binary Data</span>
 					</div>
 					<p className="text-sm text-muted-foreground">
@@ -254,8 +254,15 @@ export default function ResponseBody({
 			 * so `border-b border-rule` already resolves against a card - exactly
 			 * how the tab strip above gets its edge, with no background either.
 			 * The band is defined by its rule and its height, not by a colour.
+			 *
+			 * `h-band` (issue #1679), not the bare `h-8` this comment already
+			 * claimed was 32px: under the 3px spacing rhythm `--spacing` moved to
+			 * for #1670, `h-8` resolves to 24px, level with the tab strip rather
+			 * than a step above it - a comment describing an intent the class had
+			 * stopped delivering. `--spacing-band` is the floor that does not ride
+			 * density, the same one the tab strip and drawer header use.
 			 */}
-			<div className="flex h-8 items-center justify-between gap-2 px-4 border-b border-rule">
+			<div className="flex h-band items-center justify-between gap-2 px-4 border-b border-rule">
 				<div className="flex items-center gap-2">
 					{/* 14px, matching the tab row's `w-3.5` icons. It was 16px. */}
 					<FileCode className="w-3.5 h-3.5 text-muted-foreground" />
@@ -276,16 +283,16 @@ export default function ResponseBody({
 							aria-label="Body view mode"
 						>
 							<ToggleGroupItem value="pretty">
-								<Code className="w-3 h-3" />
+								<Code className="size-icon-sm" />
 								Pretty
 							</ToggleGroupItem>
 							<ToggleGroupItem value="raw">
-								<FileText className="w-3 h-3" />
+								<FileText className="size-icon-sm" />
 								Raw
 							</ToggleGroupItem>
 							{canPreview && (
 								<ToggleGroupItem value="preview">
-									<Eye className="w-3 h-3" />
+									<Eye className="size-icon-sm" />
 									Preview
 								</ToggleGroupItem>
 							)}

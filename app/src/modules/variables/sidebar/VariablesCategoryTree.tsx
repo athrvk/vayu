@@ -375,7 +375,7 @@ export default function VariablesCategoryTree() {
 								// sits in, so nothing of the 32px is dead to a click.
 								className="flex flex-1 self-stretch items-center gap-2 px-8 text-left text-sm"
 							>
-								<Globe className="w-3 h-3" />
+								<Globe className="size-icon-sm" />
 								<span>Globals</span>
 							</button>
 						</div>
@@ -409,11 +409,11 @@ export default function VariablesCategoryTree() {
 									className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
 								>
 									{environmentsExpanded ? (
-										<ChevronDown className="w-3 h-3" />
+										<ChevronDown className="size-icon-sm" />
 									) : (
-										<ChevronRight className="w-3 h-3" />
+										<ChevronRight className="size-icon-sm" />
 									)}
-									<Cloud className="w-3 h-3" />
+									<Cloud className="size-icon-sm" />
 									<span>Environments</span>
 									<Badge
 										variant="secondary"
@@ -430,7 +430,7 @@ export default function VariablesCategoryTree() {
 							    rather than a control the keyboard cannot reach. */}
 							<TooltipIconButton
 								label="Add environment"
-								icon={<Plus className="w-3 h-3" />}
+								icon={<Plus className="size-icon-sm" />}
 								onClick={() => {
 									setEnvironmentsExpanded(true);
 									setCreatingEnvironment(true);
@@ -585,7 +585,7 @@ export default function VariablesCategoryTree() {
 															"bg-scope-environment/10 text-scope-environment hover:bg-scope-environment/20"
 													)}
 												>
-													{/* <Cloud className="w-4 h-4 text-blue-400 shrink-0" /> */}
+													{/* <Cloud className="size-icon text-blue-400 shrink-0" /> */}
 													{renamingEnvId === environment.id ? (
 														<Input
 															autoFocus
@@ -655,7 +655,7 @@ export default function VariablesCategoryTree() {
 														</button>
 													)}
 													{isDeleting && (
-														<Loader2 className="w-3 h-3 shrink-0 animate-spin text-destructive-text" />
+														<Loader2 className="size-icon-sm shrink-0 animate-spin text-destructive-text" />
 													)}
 													{!isDeleting && !isRenaming && (
 														<RowActionsMenu
@@ -736,11 +736,11 @@ export default function VariablesCategoryTree() {
 								className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
 							>
 								{collectionsExpanded ? (
-									<ChevronDown className="w-3 h-3" />
+									<ChevronDown className="size-icon-sm" />
 								) : (
-									<ChevronRight className="w-3 h-3" />
+									<ChevronRight className="size-icon-sm" />
 								)}
-								<Layers className="w-3 h-3" />
+								<Layers className="size-icon-sm" />
 								<span>Collections</span>
 								<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
 									{/* A dash while loading *and* while failed: a literal 0 beside
@@ -822,7 +822,7 @@ export default function VariablesCategoryTree() {
 														GROUP_CHILD_INSET
 													)}
 												>
-													{/* <Folder className="w-4 h-4 text-orange-400" /> */}
+													{/* <Folder className="size-icon text-orange-400" /> */}
 													<TruncatedText className="flex-1">
 														{collection.name}
 													</TruncatedText>

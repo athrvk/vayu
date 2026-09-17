@@ -21,7 +21,10 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
 				// The responsive form rendered every input at 16px whenever the
 				// window was narrower than `md` - a split window, a narrow pane -
 				// which is the one size the type scale does not contain.
-				"flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+				// `h-control` (issue #1679, 28px), not `h-9` - was 27px under the
+				// 3px spacing rhythm, one of the "the whole scale is a mistake"
+				// pixel drifts this issue exists to stop.
+				"flex h-control w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
 				className
 			)}
 			{...props}

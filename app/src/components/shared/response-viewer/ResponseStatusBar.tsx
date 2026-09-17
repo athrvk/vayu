@@ -144,8 +144,11 @@ export function ResponseStatusBar({
 			className={cn(
 				/*
 				 * `py-1.5`, not `py-3`. This was the loosest padding left in the
-				 * builder - a 40px band above a 24px tab row - while everything
-				 * around it had been taken to `py-1`/`py-1.5`. It is 32px now.
+				 * builder - a 40px band above what was then a 24px tab row - while
+				 * everything around it had been taken to `py-1`/`py-1.5`. The tab
+				 * row above it is the 32px `band` floor now (issue #1679); this bar
+				 * stays on the `--spacing` rhythm rather than a fixed step, so it is
+				 * deliberately not pinned to a round number here any more.
 				 *
 				 * It stays a band rather than folding into the tab row below: the
 				 * status of a response is the first thing you look at, and a row
@@ -274,7 +277,11 @@ export function ResponseStatusBar({
 					className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground"
 					title={age.title}
 				>
-					{age.fromRun ? <History className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+					{age.fromRun ? (
+						<History className="size-icon-sm" />
+					) : (
+						<Clock className="size-icon-sm" />
+					)}
 					<span>
 						{age.fromRun ? "from run - " : ""}
 						{formatRelativeTime(age.at)}

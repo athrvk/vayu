@@ -14,8 +14,11 @@
  * **The toolbar.** `px-4 py-2` around `h-7` segments is 44px, hung directly
  * under a 24px tab strip - 83% taller than the band it belongs to.
  * `ResponseActions` carries a comment saying its icons are `h-6` *precisely* so
- * they share that 24px row; the toolbar never got the same treatment. It is
- * `h-8` with no vertical padding now: the same construction, one step up.
+ * they share that 24px row; the toolbar never got the same treatment. It was
+ * `h-8` with no vertical padding, and `h-8` itself stopped naming the tab
+ * strip's own height the moment `--spacing` moved to the 3px rhythm for
+ * #1670 (24px, not the 32px this comment originally described) - `h-band`
+ * (issue #1679) is the floor that does not drift with density.
  *
  * **The segmented control** was three `<Button variant="ghost">` in a `bg-muted`
  * div, each repeating the same eight-class active string. Its track carried no
@@ -56,7 +59,7 @@ function toolbar() {
 describe("the body toolbar's band", () => {
 	it("names a height instead of padding its way to one", () => {
 		const bar = toolbar();
-		expect(bar.className).toMatch(/\bh-8\b/);
+		expect(bar.className).toMatch(/\bh-band\b/);
 	});
 
 	it("adds no vertical padding, which is what made it 44px", () => {

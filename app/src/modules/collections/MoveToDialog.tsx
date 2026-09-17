@@ -101,7 +101,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 							className="gap-2 h-8"
 							onClick={() => onMove(entity, null)}
 						>
-							<FolderTree className="w-4 h-4 shrink-0 text-primary" />
+							<FolderTree className="size-icon shrink-0 text-primary" />
 							<span className="truncate text-sm">Top level</span>
 						</Button>
 					)}
@@ -113,7 +113,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 							style={{ paddingLeft: rowInsetPx(depth) }}
 							onClick={() => onMove(entity, collection.id)}
 						>
-							<Folder className="w-4 h-4 shrink-0 text-primary/70" />
+							<Folder className="size-icon shrink-0 text-primary/70" />
 							<span className="truncate text-sm">{collection.name}</span>
 						</Button>
 					))}
