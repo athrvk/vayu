@@ -43,7 +43,13 @@ export const TAB_TRAILING = TAB_CLOSE_SPACE + 2;
  *
  * 12px leading padding (`px-3`, issue #1679 - was 8px), the trailing strip
  * above, a 2px method rail, a 1px separator, and 6px of gap when an icon is
- * present.
+ * present. These are Comfortable-density pixel values (`--spacing` at
+ * 0.25rem/unit): `px-3` is 12px there and only 9px at Default, `right-0.5`
+ * on the close button is 2px there and 1.5px at Default. This constant does
+ * not vary by density at all, so using the larger, Comfortable-derived
+ * numbers is the safe direction to be wrong in - a few spare px at Default
+ * rather than text running under the close button, the defect line 52
+ * below describes.
  *
  * The trailing strip is the close button's own footprint plus air. The button is
  * absolutely positioned, so it draws over that strip rather than sitting in the
