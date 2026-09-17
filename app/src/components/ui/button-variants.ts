@@ -17,7 +17,16 @@ export const buttonVariants = cva(
 	// covers this element (`button, [role="button"], a[href], summary`,
 	// including `scale` for press feedback) - a utility here would win the
 	// cascade and replace that whole list.
-	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-icon [&_svg]:shrink-0",
+	//
+	// `[&_svg:not([class*='size-'])]:size-icon`, not the bare `[&_svg]:size-icon`
+	// it used to be (issue #1679): a descendant rule scoped to a class plus a
+	// type selector is `(0,1,1)`, which outranks a plain `size-icon-sm` on the
+	// icon itself (`(0,1,0)`) - every caller that wanted the smaller glyph
+	// (the update/recovery banner closes, `RunItem`'s row actions) silently
+	// got the default 16px instead. `:not([class*='size-'])` makes the default
+	// rule not match at all once a caller states its own size, so there is no
+	// specificity contest to lose.
+	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-icon [&_svg]:shrink-0",
 	{
 		variants: {
 			variant: {
