@@ -50,12 +50,76 @@ describe("interface density", () => {
 
 	it("keeps --titlebar-height a fixed px value, unaffected by density", () => {
 		// Sized to the macOS traffic lights, a platform constant no density
-		// setting should move - unlike --tabstrip-height, which is written in
-		// the spacing unit deliberately (see the next assertion).
+		// setting should move - unlike --tabstrip-height, which reads the
+		// `band` floor (see the next assertion) rather than the spacing unit.
 		expect(css).toMatch(/--titlebar-height:\s*32px;/);
 	});
 
-	it("derives --tabstrip-height from the spacing unit", () => {
-		expect(css).toMatch(/--tabstrip-height:\s*calc\(var\(--spacing\)\s*\*\s*8\);/);
+	it("derives --tabstrip-height from the band floor, not the spacing unit", () => {
+		// Issue #1679: this used to be `calc(var(--spacing) * 8)`, which
+		// shrank the tab strip to 24px at Default - a chrome band is an
+		// anchor, not a list row, and must not scale with density.
+		expect(css).toMatch(/--tabstrip-height:\s*var\(--spacing-band\);/);
+	});
+
+	// Issue #1679: seven named floor steps, outside the --spacing multiplier -
+	// see the "Chrome, Target and Icon Floors" table in docs/design-system.md
+	// and design-system-doc.test.ts, which checks that doc's numbers against
+	// these same declarations.
+	describe("chrome/target/icon floors", () => {
+		const themeOpen = css.indexOf("@theme inline {");
+		const themeClose = css.indexOf("\n}", themeOpen);
+		const theme = css.slice(themeOpen, themeClose);
+
+		it("declares all seven steps in @theme inline, as literal px", () => {
+			expect(themeOpen).toBeGreaterThan(-1);
+			for (const [name, px] of [
+				["--spacing-band", 32],
+				["--spacing-banner", 36],
+				["--spacing-control", 28],
+				["--spacing-control-sm", 24],
+				["--spacing-target", 24],
+				["--spacing-icon", 16],
+				["--spacing-icon-sm", 12],
+			] as const) {
+				expect(theme, name).toMatch(new RegExp(`${name}:\\s*${px}px;`));
+			}
+		});
+
+		it("never expresses a floor step as calc(var(--spacing) * n)", () => {
+			// The whole point of a floor is that it does not ride the rhythm
+			// unit - see index.css's own comment on why --tabstrip-height
+			// moved off calc(var(--spacing) * 8).
+			for (const name of [
+				"--spacing-band",
+				"--spacing-banner",
+				"--spacing-control",
+				"--spacing-control-sm",
+				"--spacing-target",
+				"--spacing-icon",
+				"--spacing-icon-sm",
+			]) {
+				const declaration = new RegExp(`${name}:\\s*([^;]+);`).exec(theme)?.[1] ?? "";
+				expect(declaration, name).not.toMatch(/calc\(var\(--spacing\)/);
+			}
+		});
+
+		it('scales only control, control-sm and target under [data-density="comfortable"]', () => {
+			const comfortableBlock =
+				/\[data-density="comfortable"\]\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+			expect(comfortableBlock).toMatch(/--spacing-control:\s*36px;/);
+			expect(comfortableBlock).toMatch(/--spacing-control-sm:\s*32px;/);
+			expect(comfortableBlock).toMatch(/--spacing-target:\s*28px;/);
+			// band/banner/icon/icon-sm are theme-independent, like
+			// --titlebar-height - no override at all under Comfortable.
+			for (const name of [
+				"--spacing-band",
+				"--spacing-banner",
+				"--spacing-icon",
+				"--spacing-icon-sm",
+			]) {
+				expect(comfortableBlock, name).not.toMatch(new RegExp(`${name}:`));
+			}
+		});
 	});
 });

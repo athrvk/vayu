@@ -128,6 +128,29 @@
 	--text-hero--line-height: 1;
 	--text-metric: 1.375rem; /* 22px */
 	--text-metric--line-height: 1;
+
+	/*
+	 * Chrome/target/icon floors (issue #1679). `--spacing` scales *rhythm* -
+	 * row heights, paddings, gaps - but three classes of thing have a floor of
+	 * their own that rhythm must not carry below: chrome bands are anchors,
+	 * not list rows (every editor-class app keeps its tab strip above 30px and
+	 * its notification bars 26-40px tall); interactive targets have the WCAG
+	 * 2.2 SC 2.5.8 24x24px floor; icons have a legibility floor. Named so
+	 * `h-band`, `h-banner`, `h-control`, `size-target`, `size-icon` and so on
+	 * exist as real Tailwind utilities (Tailwind 4 generates a spacing-scale
+	 * utility for every `--spacing-*` theme key) rather than one-off arbitrary
+	 * values. `band`, `banner`, `icon` and `icon-sm` are theme-independent;
+	 * `control`, `control-sm` and `target` are the three density scales on its
+	 * own scale, under `[data-density="comfortable"]` below - the same
+	 * mechanism `--spacing` itself uses.
+	 */
+	--spacing-band: 32px;
+	--spacing-banner: 36px;
+	--spacing-control: 28px;
+	--spacing-control-sm: 24px;
+	--spacing-target: 24px;
+	--spacing-icon: 16px;
+	--spacing-icon-sm: 12px;
 }
 
 /*
@@ -456,13 +479,16 @@
 		 * overlay and the macOS traffic lights all size to the title row alone,
 		 * so a constant there would have no reader.
 		 *
-		 * Written in the spacing unit rather than a bare px (issue #1670): 8
-		 * units is 24px at the default density and 32px - today's value,
-		 * unchanged - at Comfortable. `--titlebar-height` stays a literal px
-		 * value instead: it is sized to the macOS traffic lights, a fixed
-		 * platform constant no density should move.
+		 * Written in the `band` step (issue #1679), not the spacing unit: a
+		 * chrome band is an anchor, not a list row, so it must not shrink with
+		 * density the way #1670 originally had it (`calc(var(--spacing) * 8)`,
+		 * 24px at the default density). `--spacing-band` is 32px at every
+		 * density - see the floors block above `:root` in `@theme inline`.
+		 * `--titlebar-height` stays a literal px value instead: it is sized to
+		 * the macOS traffic lights, a fixed platform constant no density
+		 * should move.
 		 */
-		--tabstrip-height: calc(var(--spacing) * 8);
+		--tabstrip-height: var(--spacing-band);
 	}
 
 	/*
@@ -475,6 +501,14 @@
 	 */
 	[data-density="comfortable"] {
 		--spacing: 0.25rem;
+		/*
+		 * The three floors that scale with density (issue #1679) - `band`,
+		 * `banner`, `icon` and `icon-sm` stay put at every density, per the
+		 * table in docs/design-system.md.
+		 */
+		--spacing-control: 36px;
+		--spacing-control-sm: 32px;
+		--spacing-target: 28px;
 	}
 
 	/*
