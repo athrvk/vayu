@@ -20,7 +20,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { SelectSettingRow, ToggleRow } from "./SettingControls";
+import { CollapsibleText, SelectSettingRow, ToggleRow } from "./SettingControls";
 
 beforeEach(cleanup);
 
@@ -142,5 +142,49 @@ describe("SelectSettingRow - the compact variant", () => {
 		const trigger = screen.getByRole("combobox", { name: "Field" });
 		expect(trigger.className).toContain("w-full");
 		expect(trigger.className).not.toContain("w-48");
+	});
+});
+
+describe("CollapsibleText", () => {
+	const SHORT = "A short description.";
+	// 151 characters - one past the default 150-character clamp.
+	const LONG =
+		"This description runs on well past a couple of lines, the way an engine setting's real copy does, so a reader scanning the page sees a wall of prose repeated dozens of times over.";
+
+	it("renders a short description plainly, with no toggle", () => {
+		render(<CollapsibleText text={SHORT} />);
+
+		expect(screen.getByText(SHORT)).toBeInTheDocument();
+		expect(screen.queryByRole("button")).not.toBeInTheDocument();
+	});
+
+	it("truncates a long description at a word boundary and offers Show more", () => {
+		render(<CollapsibleText text={LONG} />);
+
+		expect(screen.queryByText(LONG)).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /show more/i })).toBeInTheDocument();
+		// The truncated text is a prefix of the real copy, cut on a space rather
+		// than mid-word - mutation check: swap `lastIndexOf(" ")` for a slice at
+		// exactly `clampAt` and this reds on a word cut in half.
+		const shown = screen.getByRole("button").parentElement!.textContent!;
+		expect(LONG.startsWith(shown.replace(/…\s*Show more$/, ""))).toBe(true);
+	});
+
+	it("reveals the full text on Show more and collapses again on Show less", () => {
+		render(<CollapsibleText text={LONG} />);
+
+		fireEvent.click(screen.getByRole("button", { name: /show more/i }));
+		expect(screen.getByText(LONG, { exact: false })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /show less/i })).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: /show less/i }));
+		expect(screen.queryByText(LONG, { exact: false })).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /show more/i })).toBeInTheDocument();
+	});
+
+	it("respects a custom clamp", () => {
+		render(<CollapsibleText text={SHORT} clampAt={5} />);
+
+		expect(screen.getByRole("button", { name: /show more/i })).toBeInTheDocument();
 	});
 });

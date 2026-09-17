@@ -46,7 +46,12 @@ import {
 import { EmptyState } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
-import { DefaultValueLine, NumberSettingRow, SelectSettingRow } from "./panels/SettingControls";
+import {
+	CollapsibleText,
+	DefaultValueLine,
+	NumberSettingRow,
+	SelectSettingRow,
+} from "./panels/SettingControls";
 import { DEFAULT_SAVE_NOTE, getAppPanel, isClientCategory } from "./app-panels";
 import { APP_PANEL_COMPONENTS } from "./app-panel-components";
 import { getEngineCategory } from "../engine-categories";
@@ -697,7 +702,9 @@ export default function SettingsMain() {
 									</span>
 								)}
 							</div>
-							<CardDescription className="mt-1">{entry.description}</CardDescription>
+							<CardDescription className="mt-1">
+								<CollapsibleText text={entry.description} />
+							</CardDescription>
 							{parentEntry && dependentDisabled && (
 								<p className="enter-fade text-xs text-muted-foreground mt-1">
 									Turn on {parentEntry.label} to use this
