@@ -90,7 +90,7 @@ jobs:
       contents: read
       actions: read
     env:
-      VCPKG_COMMIT: '04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4'
+      VCPKG_COMMIT: '386d7c478221b7ee0c97bfe6ea61dcf65121d564'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
     steps:
       - uses: actions/checkout@v7

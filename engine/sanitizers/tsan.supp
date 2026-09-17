@@ -110,7 +110,15 @@ race:crypto/hashtable/hashtable.c
 # way and for the same reason: 10 of 10 runs raced without the line, 10 of 10
 # passed with it, and the report was again the stack above, frame for frame -
 # 0.54.1 rewrote `process_and_close_socket` around a `serve_guarded` wrapper
-# but left `parse_status_line` alone. This is the reading to repeat on the
-# next baseline move; it is not a standing pass, and the entry goes the day a
-# run without it comes back clean.
+# but left `parse_status_line` alone.
+#
+# Re-measured again on the move to cpp-httplib 0.56.0 (2026-09-17): 9 of 10
+# runs raced without the line, 10 of 10 passed with it, and the report was the
+# stack above - `narrow` under `_Scanner`, under the `basic_regex` constructor,
+# under `parse_status_line`. `parse_status_line` is byte-identical to 0.54.1's
+# and the regex is still `thread_local`, so the window is unchanged; 9 rather
+# than 10 is this race's ordinary spread, not a narrowing (0.53.1 read 8 of
+# 10). This is the reading to repeat on the next baseline move; it is not a
+# standing pass, and the entry goes the day a run without it comes back
+# clean.
 race:std::ctype<char>::narrow
