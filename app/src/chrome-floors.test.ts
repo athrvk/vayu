@@ -100,22 +100,50 @@ describe("interactive targets clear the 24x24px floor, not a bare rhythm class",
 	});
 });
 
-describe('the banner closes keep no undersized override on Button\'s size="icon" default', () => {
-	// UpdateBanner and RecoveryBanner's close buttons carry no `size-target`
-	// class of their own - they rely on `Button`'s `size="icon"` variant,
+describe('interactive elements keep no undersized override on Button\'s size="icon" default', () => {
+	// UpdateBanner and RecoveryBanner's close buttons, and (since #1681) the
+	// icon buttons below, carry no `size-target` class of their own - they
+	// rely on `Button`'s / `TooltipIconButton`'s default `size="icon"`,
 	// which resolves to `size-target` (button-variants.ts). That means the
 	// positive per-occurrence check above (which reads a floor class off the
 	// element) cannot guard them: an independent review found that putting
 	// `className="size-7"` back on one leaves this file green, because
 	// nothing here ever asserted its *absence*. Mutation check: confirmed
 	// live - restoring `size-7` reds this case.
+	//
+	// The #1681 fix removed same-number `h-N w-N`/`w-N h-N` pairs and bare
+	// `size-N` overrides (N 4-7); the check below is scoped to exactly that
+	// shape rather than a blanket "no h-N or w-N anywhere in the file" scan,
+	// since several of these files also carry legitimately different-sized
+	// Select/Input controls that would false-positive on a bare single-axis
+	// scan (CodeSection.tsx's `h-7` Select trigger, VariablesCategoryTree.tsx's
+	// `h-6` Input, ExamplesPanel.tsx's `h-7 w-40` Select trigger,
+	// GraphQLBody.tsx's `h-6 w-auto` Select trigger - none of them a same-size
+	// pair, so none match).
 	const cases: [label: string, path: string][] = [
 		["UpdateBanner", "components/shared/UpdateBanner.tsx"],
 		["RecoveryBanner", "components/shared/RecoveryBanner.tsx"],
+		["ResponseActions copy/download", "components/shared/response-viewer/ResponseActions.tsx"],
+		["CodeSection reveal/recompose/copy", "components/layout/context-bar/CodeSection.tsx"],
+		["ContextBar close", "components/layout/ContextBar.tsx"],
+		["TrashItem restore/purge", "modules/trash/sidebar/TrashItem.tsx"],
+		[
+			"VariablesCategoryTree add environment",
+			"modules/variables/sidebar/VariablesCategoryTree.tsx",
+		],
+		[
+			"ExamplesPanel delete",
+			"modules/request-builder/components/RequestTabs/panels/ExamplesPanel.tsx",
+		],
+		[
+			"GraphQLBody schema toggle/refresh",
+			"modules/request-builder/components/RequestTabs/panels/body/GraphQLBody.tsx",
+		],
+		["CollectionTree add collection/request/import", "modules/collections/CollectionTree.tsx"],
 	];
-	const UNDERSIZED_OVERRIDE = /\b(?:size-[4-7]|h-[4-7]|w-[4-7])\b/;
+	const UNDERSIZED_OVERRIDE = /\bh-([4-7])\s+w-\1\b|\bw-([4-7])\s+h-\2\b|\bsize-[4-7]\b/;
 
-	it.each(cases)("%s's close carries no undersized size/h/w override", (_label, path) => {
+	it.each(cases)("%s carries no undersized size/h-w-pair override", (_label, path) => {
 		const source = stripComments(read(path));
 		expect(source.length).toBeGreaterThan(300);
 		expect(source).not.toMatch(UNDERSIZED_OVERRIDE);

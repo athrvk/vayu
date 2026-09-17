@@ -304,7 +304,7 @@ function SchemaControls({
 			<TooltipIconButton
 				label={open ? "Hide schema" : "Browse schema"}
 				aria-expanded={open}
-				className="h-5 w-5 shrink-0"
+				className="shrink-0"
 				icon={
 					open ? (
 						<PanelLeftClose className="size-icon-sm" />
@@ -334,7 +334,7 @@ function SchemaControls({
 			)}
 			<TooltipIconButton
 				label="Refresh schema"
-				className="h-5 w-5 shrink-0"
+				className="shrink-0"
 				icon={
 					loading ? (
 						<Loader2 className="size-icon-sm animate-spin" />

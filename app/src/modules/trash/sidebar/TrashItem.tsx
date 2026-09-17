@@ -108,7 +108,6 @@ export default function TrashItem({
 						disabled={busy}
 						aria-label={`Restore ${entry.name}`}
 						title="Put this back where it came from"
-						className="h-6 w-6"
 					>
 						{isRestoring ? (
 							<Loader2 className="size-icon-sm animate-spin" />
@@ -123,7 +122,6 @@ export default function TrashItem({
 						disabled={busy}
 						aria-label={`Delete ${entry.name} forever`}
 						title="Delete forever"
-						className="h-6 w-6"
 					>
 						{isPurging ? (
 							<Loader2 className="size-icon-sm animate-spin" />

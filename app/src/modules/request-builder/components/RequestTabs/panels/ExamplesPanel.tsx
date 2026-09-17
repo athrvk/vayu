@@ -155,7 +155,7 @@ function ExampleRow({
 					onClick={onDelete}
 					disabled={deleting}
 					aria-label={`Delete example ${example.name}`}
-					className="h-6 w-6 shrink-0"
+					className="shrink-0"
 				>
 					{deleting ? (
 						<Loader2 className="h-3.5 w-3.5 animate-spin" />

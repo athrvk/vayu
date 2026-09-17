@@ -435,7 +435,7 @@ export default function VariablesCategoryTree() {
 									setEnvironmentsExpanded(true);
 									setCreatingEnvironment(true);
 								}}
-								className="h-6 w-6 mr-2"
+								className="mr-2"
 							/>
 						</div>
 

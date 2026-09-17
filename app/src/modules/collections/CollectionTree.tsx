@@ -184,7 +184,6 @@ export default function CollectionTree() {
 								size="icon"
 								onClick={panel.openNewCollectionForm}
 								disabled={panel.isCreatingCollection}
-								className="h-7 w-7"
 								aria-label="Add collection"
 							>
 								{panel.isCreatingCollection ? (
@@ -203,7 +202,6 @@ export default function CollectionTree() {
 								size="icon"
 								onClick={panel.createRequestFromToolbar}
 								disabled={panel.isCreatingRequest}
-								className="h-7 w-7"
 								aria-label="Add request"
 							>
 								{panel.isCreatingRequest ? (
@@ -225,7 +223,6 @@ export default function CollectionTree() {
 								variant="ghost"
 								size="icon"
 								onClick={openImport}
-								className="h-7 w-7"
 								aria-label="Import collection"
 							>
 								<Download className="size-icon" />
