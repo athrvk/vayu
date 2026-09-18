@@ -139,7 +139,7 @@ function VariablesFormBadge({ form }: { form: VariablesForm }) {
 				className="text-muted-foreground"
 				title="These variables contain {{variables}}, so they are not JSON until the request is sent. They are resolved and sent."
 			>
-				<Braces className="w-3 h-3" />
+				<Braces className="size-icon-sm" />
 				Templated
 			</BadgeText>
 		);
@@ -150,7 +150,7 @@ function VariablesFormBadge({ form }: { form: VariablesForm }) {
 			className="text-warning-text"
 			title="These variables are not valid JSON, so the request will be sent without them."
 		>
-			<AlertCircle className="w-3 h-3" />
+			<AlertCircle className="size-icon-sm" />
 			Not sent
 		</BadgeText>
 	);
@@ -175,7 +175,7 @@ function GetTransportBadge({ method }: { method: HttpMethod }) {
 			className="text-muted-foreground"
 			title="GraphQL over GET is sent as query parameters, not as a JSON body. A mutation needs POST."
 		>
-			<AlertCircle className="w-3 h-3" />
+			<AlertCircle className="size-icon-sm" />
 			Sent as query parameters
 		</BadgeText>
 	);
@@ -247,7 +247,11 @@ function PaneTitle({ children, collapsed }: { children: string; collapsed?: bool
 	if (collapsed === undefined) return <span className={EYEBROW_CLASS}>{children}</span>;
 	return (
 		<span className={cn(EYEBROW_CLASS, "flex items-center gap-1")}>
-			{collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+			{collapsed ? (
+				<ChevronRight className="size-icon-sm" />
+			) : (
+				<ChevronDown className="size-icon-sm" />
+			)}
 			{children}
 		</span>
 	);
@@ -300,12 +304,12 @@ function SchemaControls({
 			<TooltipIconButton
 				label={open ? "Hide schema" : "Browse schema"}
 				aria-expanded={open}
-				className="h-5 w-5 shrink-0"
+				className="shrink-0"
 				icon={
 					open ? (
-						<PanelLeftClose className="w-3 h-3" />
+						<PanelLeftClose className="size-icon-sm" />
 					) : (
-						<PanelLeftOpen className="w-3 h-3" />
+						<PanelLeftOpen className="size-icon-sm" />
 					)
 				}
 				onClick={onToggle}
@@ -330,12 +334,12 @@ function SchemaControls({
 			)}
 			<TooltipIconButton
 				label="Refresh schema"
-				className="h-5 w-5 shrink-0"
+				className="shrink-0"
 				icon={
 					loading ? (
-						<Loader2 className="w-3 h-3 animate-spin" />
+						<Loader2 className="size-icon-sm animate-spin" />
 					) : (
-						<RefreshCw className="w-3 h-3" />
+						<RefreshCw className="size-icon-sm" />
 					)
 				}
 				onClick={onRefresh}
@@ -963,7 +967,7 @@ function PendingVariablesBadge({ names }: { names: string[] }) {
 			className="text-warning-text"
 			title={`The Variables pane is not plain JSON, so these were not added: ${names.join(", ")}.`}
 		>
-			<AlertCircle className="w-3 h-3" />
+			<AlertCircle className="size-icon-sm" />
 			{`${names.length} ${names.length === 1 ? "variable needs" : "variables need"} a value`}
 		</BadgeText>
 	);

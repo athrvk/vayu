@@ -105,7 +105,7 @@ function WindowControls() {
 				className="h-full px-3 hover:bg-muted/50 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center"
 				aria-label="Minimize"
 			>
-				<Minus className="w-4 h-4 text-foreground/70" />
+				<Minus className="size-icon text-foreground/70" />
 			</button>
 			<button
 				onClick={() => window.electronAPI?.windowMaximize()}
@@ -123,7 +123,7 @@ function WindowControls() {
 				className="h-full px-3 hover:bg-destructive hover:text-destructive-foreground transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center group"
 				aria-label="Close"
 			>
-				<X className="w-4 h-4 text-foreground/70 group-hover:text-destructive-foreground" />
+				<X className="size-icon text-foreground/70 group-hover:text-destructive-foreground" />
 			</button>
 		</div>
 	);
@@ -260,7 +260,7 @@ function AppIcon() {
 			aria-label="Application menu"
 			aria-haspopup="menu"
 		>
-			<img src={iconUrl} alt="" className="w-4 h-4" />
+			<img src={iconUrl} alt="" className="size-icon" />
 		</div>
 	);
 }
@@ -423,12 +423,12 @@ function EnvSwitcher() {
 					style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
 					aria-label="Switch environment"
 				>
-					<Cloud className="w-3 h-3 shrink-0" />
+					<Cloud className="size-icon-sm shrink-0" />
 					<span className="truncate">{activeEnv?.name ?? "No Environment"}</span>
 					{/* Inherits the control's colour: the old `opacity-60` was a magic
 					    number that fought the tinted state, dimming an already-tinted
 					    foreground a second time. */}
-					<ChevronDown className="w-3 h-3 shrink-0" />
+					<ChevronDown className="size-icon-sm shrink-0" />
 				</button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-44">

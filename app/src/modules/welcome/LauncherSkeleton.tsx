@@ -39,7 +39,7 @@ export function LauncherSkeleton() {
 							key={i}
 							className="flex flex-col items-start gap-2 rounded-md border border-border bg-card p-3"
 						>
-							<Skeleton className="h-4 w-4 rounded-md" />
+							<Skeleton className="size-icon rounded-md" />
 							<Skeleton className="h-3 w-16 rounded-md" />
 						</div>
 					))}

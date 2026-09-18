@@ -159,7 +159,7 @@ export function OptionButtons<T extends string | number>({
 							</span>
 						)}
 						{isSelected && (
-							<CheckCircle2 className="w-4 h-4 text-primary absolute top-1.5 right-1.5" />
+							<CheckCircle2 className="size-icon text-primary absolute top-1.5 right-1.5" />
 						)}
 					</button>
 				);

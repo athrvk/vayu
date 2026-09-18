@@ -17,7 +17,16 @@ export const buttonVariants = cva(
 	// covers this element (`button, [role="button"], a[href], summary`,
 	// including `scale` for press feedback) - a utility here would win the
 	// cascade and replace that whole list.
-	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+	//
+	// `[&_svg:not([class*='size-'])]:size-icon`, not the bare `[&_svg]:size-icon`
+	// it used to be (issue #1679): a descendant rule scoped to a class plus a
+	// type selector is `(0,1,1)`, which outranks a plain `size-icon-sm` on the
+	// icon itself (`(0,1,0)`) - every caller that wanted the smaller glyph
+	// (the update/recovery banner closes, `RunItem`'s row actions) silently
+	// got the default 16px instead. `:not([class*='size-'])` makes the default
+	// rule not match at all once a caller states its own size, so there is no
+	// specificity contest to lose.
+	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-icon [&_svg]:shrink-0",
 	{
 		variants: {
 			variant: {
@@ -78,11 +87,18 @@ export const buttonVariants = cva(
 				 */
 				listRow: "w-full justify-start text-left",
 			},
+			// `default`/`sm`/`icon` read the app's control/target floors (issue
+			// #1679) rather than the bare `--spacing` rhythm: `h-9` and `h-8` were
+			// 27px/24px under the 3px unit (documented as 28/24 by every caller
+			// that mattered), and `icon` at `h-9 w-9` was a 27px interactive
+			// target, under the WCAG 2.2 SC 2.5.8 24x24px floor. `lg` is left on
+			// the rhythm unit - nothing names a "large control" step and it is
+			// already well clear of every floor here.
 			size: {
-				default: "h-9 px-4 py-2",
-				sm: "h-8 px-3 text-xs",
+				default: "h-control px-4 py-2",
+				sm: "h-control-sm px-3 text-xs",
 				lg: "h-10 px-8",
-				icon: "h-9 w-9",
+				icon: "size-target",
 			},
 		},
 		compoundVariants: [

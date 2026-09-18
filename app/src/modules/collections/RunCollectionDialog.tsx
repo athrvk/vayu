@@ -774,9 +774,9 @@ export default function RunCollectionDialog({
 					</Button>
 					<Button onClick={handleRun} disabled={!canRun || startRun.isPending}>
 						{startRun.isPending ? (
-							<Loader2 className="w-4 h-4 mr-2 animate-spin" />
+							<Loader2 className="size-icon mr-2 animate-spin" />
 						) : (
-							<Play className="w-4 h-4 mr-2" />
+							<Play className="size-icon mr-2" />
 						)}
 						Run
 					</Button>

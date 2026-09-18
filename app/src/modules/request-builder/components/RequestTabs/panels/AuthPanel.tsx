@@ -123,7 +123,7 @@ export default function AuthPanel() {
 							return (
 								<SelectItem key={mode} value={mode}>
 									<div className="flex items-center gap-2">
-										<Icon className="w-4 h-4" />
+										<Icon className="size-icon" />
 										<span>{AUTH_MODE_LABELS[mode]}</span>
 									</div>
 								</SelectItem>

@@ -175,7 +175,7 @@ export function StartMockServerDialog({
 					</Button>
 					<Button onClick={start} disabled={!canStart}>
 						{pending && (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							<Loader2 className="mr-2 size-icon animate-spin" aria-hidden="true" />
 						)}
 						Start mock server
 					</Button>

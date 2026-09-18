@@ -262,7 +262,7 @@ function CommandInput({
 			className="flex items-center rounded-t-lg border-b border-rule px-3 focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring"
 			cmdk-input-wrapper=""
 		>
-			<Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+			<Search className="mr-2 size-icon shrink-0 opacity-50" />
 			<CommandPrimitive.Input
 				data-slot="command-input"
 				className={cn(
@@ -374,7 +374,7 @@ function CommandItem({ className, ...props }: React.ComponentProps<typeof Comman
 		<CommandPrimitive.Item
 			data-slot="command-item"
 			className={cn(
-				"relative flex cursor-default gap-2 select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors data-[disabled=true]:pointer-events-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+				"relative flex cursor-default gap-2 select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors data-[disabled=true]:pointer-events-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-icon [&_svg]:shrink-0",
 				className
 			)}
 			{...props}

@@ -74,7 +74,12 @@ export default function MethodSelector() {
 					// The field owns the focus ring; a second one inside it reads as
 					// two controls, which is exactly what this stopped being.
 					"focus:ring-0 focus:ring-offset-0",
-					"[&>svg]:h-3 [&>svg]:w-3"
+					// `size-icon-sm` (issue #1679), not `[&>svg]:h-3 [&>svg]:w-3` -
+					// the same small-icon step every other 12px glyph in the app
+					// moved to; this rule was written as a per-axis arbitrary
+					// selector and the codemod that converted the rest of the app
+					// matched only bare `w-3 h-3`/`h-3 w-3` classes, so it missed it.
+					"[&>svg]:size-icon-sm"
 				)}
 				// Inline `hsl()` from `getMethodColor`, matching `MethodBadge` - the
 				// one way method colour is applied in this app. This file used to

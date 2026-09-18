@@ -57,7 +57,7 @@ export function CookiesSection({ tab }: ContextBarSectionProps) {
 								className="flex items-center gap-1.5 min-w-0"
 							>
 								<CookieIcon
-									className="w-3 h-3 shrink-0 text-muted-foreground"
+									className="size-icon-sm shrink-0 text-muted-foreground"
 									aria-hidden
 								/>
 								<TruncatedText className="text-xs font-mono text-foreground">

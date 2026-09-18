@@ -128,9 +128,9 @@ export function CookiesCard() {
 								className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 							>
 								{clearCookies.isPending ? (
-									<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+									<Loader2 className="size-icon mr-1.5 animate-spin" />
 								) : (
-									<Cookie className="w-4 h-4 mr-1.5" />
+									<Cookie className="size-icon mr-1.5" />
 								)}
 								Clear all cookies
 							</Button>

@@ -124,7 +124,7 @@ export function UpdatesCard() {
 								size="sm"
 								onClick={() => void api.openReleasePage(releaseUrl)}
 							>
-								<ExternalLink className="w-4 h-4 mr-1.5" />
+								<ExternalLink className="size-icon mr-1.5" />
 								Release notes
 							</Button>
 							{installCommand && (
@@ -135,9 +135,9 @@ export function UpdatesCard() {
 										onClick={() => void copyInstallCommand(installCommand)}
 									>
 										{copied ? (
-											<Check className="w-4 h-4 mr-1.5" />
+											<Check className="size-icon mr-1.5" />
 										) : (
-											<Copy className="w-4 h-4 mr-1.5" />
+											<Copy className="size-icon mr-1.5" />
 										)}
 										<LabelSwap
 											label={copied ? "Copied" : "Copy install command"}
@@ -156,7 +156,7 @@ export function UpdatesCard() {
 										size="sm"
 										onClick={() => void api.quitForUpdate()}
 									>
-										<Power className="w-4 h-4 mr-1.5" />
+										<Power className="size-icon mr-1.5" />
 										Quit to update
 									</Button>
 								</>
@@ -187,9 +187,9 @@ export function UpdatesCard() {
 					</p>
 					<Button variant="outline" size="sm" onClick={check} disabled={!api || checking}>
 						{checking ? (
-							<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+							<Loader2 className="size-icon mr-1.5 animate-spin" />
 						) : (
-							<RefreshCw className="w-4 h-4 mr-1.5" />
+							<RefreshCw className="size-icon mr-1.5" />
 						)}
 						Check for updates
 					</Button>

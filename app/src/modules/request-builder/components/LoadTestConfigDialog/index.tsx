@@ -663,6 +663,30 @@ export default function LoadTestConfigDialog({
 						<div key={n.key}>{n.node}</div>
 					))}
 
+					{/*
+					 * First field in the dialog, not the last one inside "Recording
+					 * & limits": naming the run is what a user does before picking
+					 * its profile, not an afterthought behind a collapsed advanced
+					 * section - a comment written after the run started is a comment
+					 * about a run already forgotten which one it was.
+					 */}
+					<div className="space-y-1.5">
+						<Label htmlFor="lt-comment" className="text-xs">
+							Comment
+							<span className="ml-1 font-normal text-muted-foreground">
+								(optional)
+							</span>
+						</Label>
+						<Input
+							id="lt-comment"
+							type="text"
+							value={comment}
+							onChange={(e) => setComment(e.target.value)}
+							placeholder="What are you testing?"
+							className="h-9 text-sm"
+						/>
+					</div>
+
 					<div className="space-y-1.5">
 						<Label className="text-xs">Load profile</Label>
 						<ProfilePicker value={mode} onChange={setMode} disabled={isStarting} />
@@ -1026,23 +1050,6 @@ export default function LoadTestConfigDialog({
 									onCheckedChange={setSaveTimingBreakdown}
 								/>
 							</div>
-
-							<div className="space-y-1.5">
-								<Label htmlFor="lt-comment" className="text-xs">
-									Comment
-									<span className="ml-1 font-normal text-muted-foreground">
-										(optional)
-									</span>
-								</Label>
-								<Input
-									id="lt-comment"
-									type="text"
-									value={comment}
-									onChange={(e) => setComment(e.target.value)}
-									placeholder="What are you testing?"
-									className="h-9 text-sm"
-								/>
-							</div>
 						</CollapsibleContent>
 					</Collapsible>
 
@@ -1261,7 +1268,7 @@ export default function LoadTestConfigDialog({
 					>
 						{isStarting ? (
 							<>
-								<Loader2 className="w-4 h-4 animate-spin mr-2" />
+								<Loader2 className="size-icon animate-spin mr-2" />
 								Starting…
 							</>
 						) : (

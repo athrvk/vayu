@@ -255,9 +255,9 @@ export default function DataTab({ collection }: DataTabProps) {
 			<div className="flex items-center gap-2">
 				<Button onClick={handleDeclare} disabled={!file || updateCollection.isPending}>
 					{updateCollection.isPending ? (
-						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						<Loader2 className="mr-2 size-icon animate-spin" />
 					) : (
-						<Check className="mr-2 h-4 w-4" />
+						<Check className="mr-2 size-icon" />
 					)}
 					{declaredContract ? "Re-declare from this file" : "Declare columns"}
 				</Button>
@@ -267,7 +267,7 @@ export default function DataTab({ collection }: DataTabProps) {
 						onClick={handleClear}
 						disabled={updateCollection.isPending}
 					>
-						<Trash2 className="mr-2 h-4 w-4" />
+						<Trash2 className="mr-2 size-icon" />
 						Clear
 					</Button>
 				)}

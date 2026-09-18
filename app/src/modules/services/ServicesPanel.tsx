@@ -378,12 +378,12 @@ function IssuerRow({
 				leading={
 					expanded ? (
 						<ChevronDown
-							className="h-3 w-3 shrink-0 text-muted-foreground"
+							className="size-icon-sm shrink-0 text-muted-foreground"
 							aria-hidden="true"
 						/>
 					) : (
 						<ChevronRight
-							className="h-3 w-3 shrink-0 text-muted-foreground"
+							className="size-icon-sm shrink-0 text-muted-foreground"
 							aria-hidden="true"
 						/>
 					)

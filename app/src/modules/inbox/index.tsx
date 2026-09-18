@@ -271,7 +271,7 @@ export default function InboxView() {
 				description="Start one to get a local URL that records every request sent to it - no tunnel, no third party."
 				action={
 					<Button onClick={start} disabled={startInbox.isPending}>
-						<Play className="mr-2 h-4 w-4" aria-hidden="true" />
+						<Play className="mr-2 size-icon" aria-hidden="true" />
 						Start inbox
 					</Button>
 				}
@@ -282,7 +282,7 @@ export default function InboxView() {
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-				<InboxIcon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+				<InboxIcon className="size-icon text-muted-foreground" aria-hidden="true" />
 				<code className="font-mono text-xs">{inbox.url}</code>
 				<Button
 					variant="ghost"

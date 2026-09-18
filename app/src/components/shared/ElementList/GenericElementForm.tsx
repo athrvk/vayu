@@ -338,7 +338,7 @@ export function GenericElementForm({ schema, config, onChange }: GenericElementF
 							"[&[data-state=open]>svg]:rotate-90"
 						)}
 					>
-						<ChevronRight className="h-3 w-3 transition-transform" />
+						<ChevronRight className="size-icon-sm transition-transform" />
 						Advanced
 					</CollapsibleTrigger>
 					<CollapsibleContent className="space-y-2 px-1 pt-1.5 pb-1">

@@ -356,18 +356,18 @@ export default function RunItem({
 								aria-pressed={!!run.baseline}
 								title={pinTooltip}
 								className={cn(
-									"h-6 w-6 transition-opacity",
+									"size-target transition-opacity",
 									run.baseline || isTogglingBaseline
 										? "opacity-100"
 										: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 								)}
 							>
 								{isTogglingBaseline ? (
-									<Loader2 className="h-3 w-3 animate-spin" />
+									<Loader2 className="size-icon-sm animate-spin" />
 								) : run.baseline ? (
-									<PinOff className="h-3 w-3" />
+									<PinOff className="size-icon-sm" />
 								) : (
-									<Pin className="h-3 w-3" />
+									<Pin className="size-icon-sm" />
 								)}
 							</Button>
 						)}
@@ -378,16 +378,16 @@ export default function RunItem({
 							disabled={isDeleting}
 							aria-label="Delete run"
 							className={cn(
-								"h-6 w-6 transition-opacity",
+								"size-target transition-opacity",
 								isDeleting
 									? "opacity-100"
 									: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 							)}
 						>
 							{isDeleting ? (
-								<Loader2 className="h-3 w-3 animate-spin" />
+								<Loader2 className="size-icon-sm animate-spin" />
 							) : (
-								<Trash2 className="h-3 w-3" />
+								<Trash2 className="size-icon-sm" />
 							)}
 						</Button>
 					</div>
@@ -403,7 +403,7 @@ export default function RunItem({
 					<div className="flex flex-wrap items-center gap-3 pl-[1.625rem] text-[10px] text-muted-foreground">
 						{scenario?.stepCount != null && (
 							<span className="flex shrink-0 items-center gap-1">
-								<ListOrdered className="h-3 w-3" />
+								<ListOrdered className="size-icon-sm" />
 								{scenario.stepCount} step{scenario.stepCount === 1 ? "" : "s"}
 							</span>
 						)}
@@ -411,37 +411,37 @@ export default function RunItem({
 					    more than one is the thing that changes what the run was. */}
 						{scenario?.iterations != null && scenario.iterations > 1 && (
 							<span className="flex shrink-0 items-center gap-1">
-								<Repeat className="h-3 w-3" />
+								<Repeat className="size-icon-sm" />
 								{scenario.iterations} iterations
 							</span>
 						)}
 						{scenario?.recursive && (
 							<span className="flex shrink-0 items-center gap-1">
-								<FolderTree className="h-3 w-3" />
+								<FolderTree className="size-icon-sm" />
 								Sub-folders
 							</span>
 						)}
 						{run.type === "load" && run.summary?.duration && (
 							<span className="flex shrink-0 items-center gap-1">
-								<Clock className="h-3 w-3" />
+								<Clock className="size-icon-sm" />
 								{run.summary.duration}
 							</span>
 						)}
 						{run.type === "load" && run.summary?.concurrency && (
 							<span className="flex shrink-0 items-center gap-1">
-								<Activity className="h-3 w-3" />
+								<Activity className="size-icon-sm" />
 								{formatConcurrency(run.summary.concurrency)}
 							</span>
 						)}
 						{run.type === "load" && loadTestType && (
 							<span className="flex shrink-0 items-center gap-1">
-								<Zap className="h-3 w-3" />
+								<Zap className="size-icon-sm" />
 								{loadTestTypeToLabel(loadTestType)}
 							</span>
 						)}
 						{run.type === "load" && protocolLabel && (
 							<span className="flex shrink-0 items-center gap-1">
-								<Network className="h-3 w-3" />
+								<Network className="size-icon-sm" />
 								{protocolLabel}
 							</span>
 						)}

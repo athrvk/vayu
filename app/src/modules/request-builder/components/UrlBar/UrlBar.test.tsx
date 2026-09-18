@@ -294,6 +294,12 @@ describe("button hover states", () => {
  * the same drift `type-scale.test.ts` exists to catch for font sizes, in a
  * dimension that has no equivalent guard.
  *
+ * `h-8` itself stopped being a considered number the moment `--spacing` moved
+ * to the 3px rhythm for #1670 - it resolved to 27px, not the 28px this file's
+ * own comment assumed. `h-control` (issue #1679) is the fixed floor that does
+ * not drift with density, and the row states its own floor directly instead
+ * of hoping a control height plus padding still adds up to it.
+ *
  * Pinned here rather than repo-wide: two other arbitrary heights exist and may
  * be deliberate, and a guard that fails on things nobody has looked at gets
  * switched off.
@@ -306,7 +312,7 @@ describe("control heights", () => {
 			screen.getByRole("button", { name: /send/i }),
 			screen.getByRole("button", { name: /load test/i }),
 		]) {
-			expect(el.className).toContain("h-8");
+			expect(el.className).toContain("h-control");
 		}
 	});
 
@@ -314,7 +320,12 @@ describe("control heights", () => {
 		// They are one visual row; a field a pixel off its neighbours is the kind
 		// of thing nobody can name but everybody sees.
 		const { container } = renderBar(true);
-		expect(container.querySelector(".surface-card")?.className).toContain("h-8");
+		expect(container.querySelector(".surface-card")?.className).toContain("h-control");
+	});
+
+	it("states the row's own floor, rather than deriving it", () => {
+		const { container } = renderBar(true);
+		expect(container.querySelector(".bg-panel")?.className).toContain("min-h-[40px]");
 	});
 });
 

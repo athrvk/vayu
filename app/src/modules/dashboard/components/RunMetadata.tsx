@@ -38,7 +38,7 @@ export default function RunMetadata({
 				{/* API Endpoint */}
 				{requestUrl && (
 					<div className="flex items-center gap-2">
-						<Globe className="w-4 h-4 text-muted-foreground" />
+						<Globe className="size-icon text-muted-foreground" />
 						<span className="font-medium text-muted-foreground">Endpoint:</span>
 						{requestMethod && <MethodBadge method={requestMethod} size="md" />}
 						<span
@@ -53,7 +53,7 @@ export default function RunMetadata({
 				{/* Test Mode & Config */}
 				{configuration?.mode && (
 					<div className="flex items-center gap-2">
-						<Activity className="w-4 h-4 text-muted-foreground" />
+						<Activity className="size-icon text-muted-foreground" />
 						<span className="font-medium text-muted-foreground">Mode:</span>
 						<span className="text-foreground capitalize">
 							{loadTestTypeToLabel(configuration.mode as LoadTestConfig["mode"])}
@@ -84,7 +84,7 @@ export default function RunMetadata({
 				{typeof configuration?.dataRowCount === "number" &&
 					configuration.dataRowCount > 0 && (
 						<div className="flex items-center gap-2">
-							<Table2 className="w-4 h-4 text-muted-foreground" />
+							<Table2 className="size-icon text-muted-foreground" />
 							<span className="font-medium text-muted-foreground">Data:</span>
 							<span className="text-foreground">
 								{configuration.dataRowCount}{" "}
@@ -102,7 +102,7 @@ export default function RunMetadata({
 				{/* Start Time */}
 				{startTime && (
 					<div className="flex items-center gap-2">
-						<Calendar className="w-4 h-4 text-muted-foreground" />
+						<Calendar className="size-icon text-muted-foreground" />
 						<span className="font-medium text-muted-foreground">Started:</span>
 						<span className="text-foreground">
 							{new Date(startTime).toLocaleString()}
@@ -113,7 +113,7 @@ export default function RunMetadata({
 				{/* End Time (only show when completed) */}
 				{mode === "completed" && endTime && (
 					<div className="flex items-center gap-2">
-						<Clock className="w-4 h-4 text-muted-foreground" />
+						<Clock className="size-icon text-muted-foreground" />
 						<span className="font-medium text-muted-foreground">Completed:</span>
 						<span className="text-foreground">
 							{new Date(endTime).toLocaleString()}
@@ -124,7 +124,7 @@ export default function RunMetadata({
 				{/* Duration */}
 				{(elapsedDuration > 0 || startTime) && (
 					<div className="flex items-center gap-2">
-						<Timer className="w-4 h-4 text-muted-foreground" />
+						<Timer className="size-icon text-muted-foreground" />
 						<span className="font-medium text-muted-foreground">Run Duration:</span>
 						<span className="text-foreground">
 							{mode === "completed"

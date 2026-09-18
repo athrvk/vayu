@@ -756,7 +756,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							)}
 							<TooltipIconButton
 								label="Delete environment"
-								icon={<Trash2 className="w-4 h-4" />}
+								icon={<Trash2 className="size-icon" />}
 								onClick={() => setShowDeleteConfirm(true)}
 								className="h-8 w-8 text-muted-foreground hover:text-destructive-text hover:bg-destructive/10"
 							/>
@@ -883,7 +883,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												performSaveRef.current();
 											}}
 											className={cn(
-												"w-4 h-4 rounded-md border-input",
+												"size-icon rounded-md border-input",
 												editorConfig.checkboxColor
 											)}
 											disabled={variable.isNew && !variable.key}
@@ -993,7 +993,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 														? "Unmark as secret"
 														: "Mark as secret (masks value in UI)"
 												}
-												icon={<KeyRound className="w-4 h-4" />}
+												icon={<KeyRound className="size-icon" />}
 												onClick={() => {
 													// Un-securing a row swaps `SecretInput`
 													// out for a plain field, and its reveal
@@ -1039,7 +1039,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 												aria-label="Delete variable"
 												className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 											>
-												<Trash2 className="w-4 h-4" />
+												<Trash2 className="size-icon" />
 											</Button>
 										)}
 									</td>

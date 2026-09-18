@@ -69,7 +69,7 @@ export function Callout({ severity, title, children, action, positive, className
 		>
 			<Icon
 				className={cn(
-					"h-4 w-4 shrink-0 mt-px",
+					"size-icon shrink-0 mt-px",
 					positive ? "text-status-success-text" : style.icon
 				)}
 				aria-hidden="true"

@@ -558,12 +558,12 @@ export default function McpSettingsPanel() {
 						) : !status ? (
 							// No status read at all - "Disabled" here would be a guess.
 							<Badge variant="chip" className="ml-1 bg-muted text-muted-foreground">
-								<CircleSlash className="w-3 h-3 mr-1" />
+								<CircleSlash className="size-icon-sm mr-1" />
 								Unknown
 							</Badge>
 						) : !enabled ? (
 							<Badge variant="chip" className="ml-1 bg-muted text-muted-foreground">
-								<CircleSlash className="w-3 h-3 mr-1" />
+								<CircleSlash className="size-icon-sm mr-1" />
 								Disabled
 							</Badge>
 						) : running ? (
@@ -577,7 +577,7 @@ export default function McpSettingsPanel() {
 								variant="chip"
 								className="ml-1 border border-status-success/20 bg-status-success/10 text-status-success-text"
 							>
-								<CircleCheck className="w-3 h-3 mr-1" />
+								<CircleCheck className="size-icon-sm mr-1" />
 								Running
 							</Badge>
 						) : (
@@ -585,7 +585,7 @@ export default function McpSettingsPanel() {
 								variant="chip"
 								className="ml-1 border border-status-stopped/30 bg-status-stopped/10 text-status-stopped-text"
 							>
-								<CircleSlash className="w-3 h-3 mr-1" />
+								<CircleSlash className="size-icon-sm mr-1" />
 								Stopped
 							</Badge>
 						)}
@@ -821,7 +821,7 @@ export default function McpSettingsPanel() {
 								onClick={addHost}
 								disabled={!config || config.allowAll || newHost.trim() === ""}
 							>
-								<Plus className="w-4 h-4 mr-1" />
+								<Plus className="size-icon mr-1" />
 								Add
 							</Button>
 						</div>

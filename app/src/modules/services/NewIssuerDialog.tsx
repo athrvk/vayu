@@ -296,7 +296,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 					</Button>
 					<Button onClick={start} disabled={!canStart}>
 						{startIssuer.isPending && (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							<Loader2 className="mr-2 size-icon animate-spin" aria-hidden="true" />
 						)}
 						Start issuer
 					</Button>

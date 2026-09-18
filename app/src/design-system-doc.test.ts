@@ -125,41 +125,51 @@ describe("design-system.md token values", () => {
 		}
 	});
 
-	// Issue #1670's reopening review: icon sizes ride `--spacing` like every
-	// other `w-*`/`h-*` utility, so the Icon Sizing paragraph's px values are
-	// only true for one density unless both are stated. This checks them
-	// against the same `--spacing` declarations `density.test.ts` guards,
-	// rather than trusting the doc's own arithmetic.
-	it("keeps the icon-sizing decision's pixel values in step with --spacing", () => {
-		const rootOpen = css.indexOf(":root {");
-		const rootClose = css.indexOf("\n\t}", rootOpen);
-		const defaultSpacing = /--spacing:\s*([\d.]+)rem;/.exec(
-			css.slice(rootOpen, rootClose)
-		)?.[1];
+	// Issue #1679: the Chrome, Target and Icon Floors table names seven steps
+	// that deliberately do NOT ride `--spacing` - the opposite property the
+	// superseded icon-sizing decision this replaces used to check. Read each
+	// row's Default/Comfortable px values against the real plain `@theme`
+	// block (deliberately not `@theme inline` - see index.css's own comment:
+	// `inline` bakes a literal into the utility instead of a `var()`
+	// reference, which silently disables the Comfortable override) and
+	// `[data-density="comfortable"]` declarations, rather than trusting the
+	// doc's own table.
+	it("keeps the Chrome, Target and Icon Floors table in step with index.css", () => {
+		const start = doc.indexOf("### Chrome, Target and Icon Floors");
+		expect(start, "the Chrome, Target and Icon Floors heading has moved").toBeGreaterThan(-1);
+		const next = doc.indexOf("\n### ", start + 1);
+		const section = next === -1 ? doc.slice(start) : doc.slice(start, next);
+
+		const rows = [
+			...section.matchAll(/\| `(--spacing-[a-z-]+)` \| `[a-z-]+` \| (\d+)px \| (\d+)px \|/g),
+		];
+		expect(rows.length, "no floor-step rows found - has the table moved?").toBe(7);
+
+		// `indexOf("@theme {")`, with the space, skips past the earlier
+		// `@theme inline {` block on purpose.
+		const themeOpen = css.indexOf("@theme {");
+		const themeClose = css.indexOf("\n}", themeOpen);
+		const themeBlock = css.slice(themeOpen, themeClose);
 		const comfortableBlock =
 			/\[data-density="comfortable"\]\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-		const comfortableSpacing = /--spacing:\s*([\d.]+)rem;/.exec(comfortableBlock)?.[1];
-		expect(defaultSpacing, "--spacing not found on :root").toBeDefined();
-		expect(
-			comfortableSpacing,
-			"--spacing not found under [data-density=comfortable]"
-		).toBeDefined();
 
-		const REM_PX = 16;
-		const FACTORS = [3, 3.5, 4, 5];
-		const pxValues = (spacingRem: string) =>
-			FACTORS.map((factor) => Number(spacingRem) * factor * REM_PX);
-		const format = (values: number[]) =>
-			values.map((v) => (Number.isInteger(v) ? String(v) : v.toFixed(1))).join(" / ");
+		for (const [, name, defaultPx, comfortablePx] of rows) {
+			const declared = new RegExp(`${name}:\\s*(\\d+)px;`).exec(themeBlock)?.[1];
+			expect(declared, `${name} not declared in the plain @theme block`).toBe(defaultPx);
 
-		const decision = doc.match(
-			/(\d+(?:\.\d+)? \/ \d+(?:\.\d+)? \/ \d+(?:\.\d+)? \/ \d+(?:\.\d+)?)px at Default, (\d+(?:\.\d+)? \/ \d+(?:\.\d+)? \/ \d+(?:\.\d+)? \/ \d+(?:\.\d+)?)px at Comfortable/
-		);
-		expect(
-			decision,
-			"icon-sizing decision sentence not found - has it moved or reverted to one density's values?"
-		).not.toBeNull();
-		expect(decision![1]).toBe(format(pxValues(defaultSpacing!)));
-		expect(decision![2]).toBe(format(pxValues(comfortableSpacing!)));
+			// band/banner/icon/icon-sm are theme-independent and carry no
+			// [data-density="comfortable"] override at all - only
+			// control/control-sm/target scale, so the table's two columns
+			// only differ where an override actually exists.
+			if (defaultPx === comfortablePx) {
+				expect(
+					comfortableBlock,
+					`${name} should not be overridden under Comfortable`
+				).not.toMatch(new RegExp(`${name}:`));
+			} else {
+				const overridden = new RegExp(`${name}:\\s*(\\d+)px;`).exec(comfortableBlock)?.[1];
+				expect(overridden, `${name} not overridden under Comfortable`).toBe(comfortablePx);
+			}
+		}
 	});
 });

@@ -147,7 +147,7 @@ function ToastIcon({ variant }: { variant: ToastVariantName }) {
 	return (
 		<Icon
 			aria-hidden="true"
-			className={cn("mt-px h-4 w-4 shrink-0", VARIANT_ICON_CLASS[variant])}
+			className={cn("mt-px size-icon shrink-0", VARIANT_ICON_CLASS[variant])}
 		/>
 	);
 }
@@ -179,8 +179,10 @@ function ToastAction({ className, ...props }: React.ComponentProps<typeof ToastP
 	return (
 		<ToastPrimitives.Action
 			data-slot="toast-action"
+			// `h-control-sm` (issue #1679, 24px - was `h-7`/21px, under the WCAG
+			// 2.2 SC 2.5.8 floor).
 			className={cn(
-				"mt-1.5 inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5",
+				"mt-1.5 inline-flex h-control-sm shrink-0 items-center rounded-md border border-border px-2.5",
 				"text-xs font-medium transition-colors hover:bg-muted",
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-popover",
 				className
@@ -194,18 +196,18 @@ function ToastClose({ className, ...props }: React.ComponentProps<typeof ToastPr
 	return (
 		<ToastPrimitives.Close
 			data-slot="toast-close"
-			// The icon is 14px; the padding is what makes it clickable. The old
-			// button had neither padding nor a focus ring, so it was a 14px
-			// target that gave no sign of being focused.
+			// `size-target` (issue #1679, 24px), replacing the padding-derived
+			// ~22px box: the icon shrinks to `size-icon-sm` (12px) inside it
+			// rather than growing the target past the floor it needs to clear.
 			className={cn(
-				"shrink-0 rounded-md p-1 text-muted-foreground transition-colors",
+				"flex size-target shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors",
 				"hover:bg-muted hover:text-foreground",
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-popover",
 				className
 			)}
 			{...props}
 		>
-			<X className="h-3.5 w-3.5" />
+			<X className="size-icon-sm" />
 		</ToastPrimitives.Close>
 	);
 }

@@ -103,7 +103,7 @@ export function ActivityRail() {
 						variant="indicator"
 						tabIndex={isRovingStop ? 0 : -1}
 					>
-						<Icon className="w-4 h-4" />
+						<Icon className="size-icon" />
 						{/* The one badge the footer carried that moves here: a local
 						    service listening is otherwise invisible outside the surface
 						    that started it (#502). The Dock keeps its own text chip for

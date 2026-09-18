@@ -220,9 +220,9 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 						disabled={state.phase === "checking" || syncSpec.isPending}
 					>
 						{state.phase === "checking" ? (
-							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							<Loader2 className="mr-2 size-icon animate-spin" />
 						) : (
-							<RefreshCw className="mr-2 h-4 w-4" />
+							<RefreshCw className="mr-2 size-icon" />
 						)}
 						Check for changes
 					</Button>
@@ -280,9 +280,9 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 								disabled={syncSpec.isPending}
 							>
 								{syncSpec.isPending ? (
-									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									<Loader2 className="mr-2 size-icon animate-spin" />
 								) : (
-									<Upload className="mr-2 h-4 w-4" />
+									<Upload className="mr-2 size-icon" />
 								)}
 								{documentOnly ? "Update the stored document" : "Apply selected"}
 							</Button>
@@ -549,7 +549,7 @@ function ChangedRow({
 								<span className="font-semibold">{field.field}</span>
 								{field.userTouched && (
 									<span className="text-status-warning-text">
-										<AlertTriangle className="mr-1 inline h-3 w-3 align-[-1px]" />
+										<AlertTriangle className="mr-1 inline size-icon-sm align-[-1px]" />
 										edited here
 									</span>
 								)}

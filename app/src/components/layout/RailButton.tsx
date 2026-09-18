@@ -84,7 +84,12 @@ export function RailButton({
 						// hand-rolled button with no `[data-slot="button"]`, so it misses
 						// the baseline's `scale` press-feedback transition (`index.css`) -
 						// added here instead, same duration as the colour properties.
-						"relative flex items-center justify-center w-full h-9 text-xs",
+						//
+						// `h-band` (issue #1679), not `h-9`: this button fills the rail's
+						// own width top to bottom, and the rail is chrome, not a list -
+						// its buttons take the same floor the tab strip and drawer
+						// header do rather than riding the spacing rhythm.
+						"relative flex items-center justify-center w-full h-band text-xs",
 						"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]",
 						variant === "tile" && "rounded-md",
 						active ? activeClass : idleClass

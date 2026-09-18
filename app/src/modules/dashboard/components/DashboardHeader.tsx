@@ -73,7 +73,7 @@ export default function DashboardHeader({
 			{canNavigateBack && (
 				<TooltipIconButton
 					label="Back"
-					icon={<ArrowLeft className="w-4 h-4" />}
+					icon={<ArrowLeft className="size-icon" />}
 					onClick={navigateBack}
 					className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
 				/>

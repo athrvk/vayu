@@ -103,7 +103,7 @@ export function RowActionsMenu({
 						if (e.detail === 0) setOpen(true);
 					}}
 				>
-					<MoreVertical className="h-3 w-3" />
+					<MoreVertical className="size-icon-sm" />
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent

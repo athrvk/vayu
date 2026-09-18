@@ -138,7 +138,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 			<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
 				<div className="flex items-center gap-3">
 					<div className="flex items-center justify-center w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50">
-						<AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+						<AlertTriangle className="size-icon text-amber-600 dark:text-amber-400" />
 					</div>
 					<div>
 						<p className="text-sm font-medium text-amber-800 dark:text-amber-200">
@@ -157,7 +157,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						onClick={onDismiss}
 						className="border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50"
 					>
-						<X className="w-4 h-4 mr-1.5" />
+						<X className="size-icon mr-1.5" />
 						Dismiss
 					</Button>
 					<Button
@@ -167,9 +167,9 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						onClick={() => void restart()}
 					>
 						{isRestarting ? (
-							<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+							<Loader2 className="size-icon mr-1.5 animate-spin" />
 						) : (
-							<RefreshCw className="w-4 h-4 mr-1.5" />
+							<RefreshCw className="size-icon mr-1.5" />
 						)}
 						<LabelSwap
 							label={isRestarting ? "Restarting..." : "Restart Engine"}
@@ -882,7 +882,7 @@ export default function SettingsMain() {
 							onClick={handleResetToDefaults}
 							disabled={updateConfigMutation.isPending}
 						>
-							<RotateCcw className="w-4 h-4 mr-1.5" />
+							<RotateCcw className="size-icon mr-1.5" />
 							Reset to Defaults
 						</Button>
 						<Button
@@ -893,9 +893,9 @@ export default function SettingsMain() {
 							}
 						>
 							{updateConfigMutation.isPending ? (
-								<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+								<Loader2 className="size-icon mr-1.5 animate-spin" />
 							) : (
-								<Save className="w-4 h-4 mr-1.5" />
+								<Save className="size-icon mr-1.5" />
 							)}
 							Save Changes
 						</Button>
@@ -930,7 +930,7 @@ export default function SettingsMain() {
 							>
 								<ChevronRight
 									className={cn(
-										"w-4 h-4 transition-transform",
+										"size-icon transition-transform",
 										showAdvanced && "rotate-90"
 									)}
 									aria-hidden="true"

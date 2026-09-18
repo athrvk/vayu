@@ -266,7 +266,16 @@ function ElementRow({
 			data-element-row={element.kind}
 		>
 			<Collapsible open={open} onOpenChange={setOpen}>
-				<div className="flex h-8 items-center gap-1 px-2">
+				{/*
+				 * `h-band` (32px, fixed), not `h-8`: the row's own Switch is
+				 * `h-target` (issue #1679), 24px at Default and 28px at
+				 * Comfortable, and `h-8` happens to equal 24px at Default too -
+				 * zero margin, the switch and the chevron button touching the
+				 * row's top and bottom edge exactly. `h-band` is the next fixed
+				 * floor up, the same relationship `ResponseBody`'s toolbar keeps
+				 * between its own `h-target`-family toggle and its `h-band` row.
+				 */}
+				<div className="flex h-band items-center gap-1 px-2">
 					<button
 						type="button"
 						aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
@@ -276,7 +285,7 @@ function ElementRow({
 						className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
 					>
 						<ChevronRight
-							className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")}
+							className={cn("size-icon-sm transition-transform", open && "rotate-90")}
 						/>
 					</button>
 					{renaming ? (
@@ -306,7 +315,7 @@ function ElementRow({
 						>
 							{Icon && (
 								// eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope.
-								<Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+								<Icon className="size-icon-sm shrink-0 text-muted-foreground" />
 							)}
 							{/*
 							 * `shrink-0` keeps a title at its natural width instead of
@@ -526,7 +535,7 @@ export function ElementList({ elements, onChange, kinds, renderAboveForm }: Elem
 			<Popover open={pickerOpen} onOpenChange={setPickerOpen}>
 				<PopoverTrigger asChild>
 					<Button variant="outline" size="sm">
-						<Plus className="h-4 w-4" />
+						<Plus className="size-icon" />
 						Add element
 					</Button>
 				</PopoverTrigger>

@@ -26,14 +26,15 @@ function SelectTrigger({
 		<SelectPrimitive.Trigger
 			data-slot="select-trigger"
 			className={cn(
-				"flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background data-[placeholder]:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+				// `h-control` (issue #1679, 28px), not `h-9`/27px - matches Input.
+				"flex h-control w-full items-center justify-between whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background data-[placeholder]:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
 				className
 			)}
 			{...props}
 		>
 			{children}
 			<SelectPrimitive.Icon asChild>
-				<ChevronDown className="h-4 w-4 opacity-50" />
+				<ChevronDown className="size-icon opacity-50" />
 			</SelectPrimitive.Icon>
 		</SelectPrimitive.Trigger>
 	);
@@ -49,7 +50,7 @@ function SelectScrollUpButton({
 			className={cn("flex cursor-default items-center justify-center py-1", className)}
 			{...props}
 		>
-			<ChevronUp className="h-4 w-4" />
+			<ChevronUp className="size-icon" />
 		</SelectPrimitive.ScrollUpButton>
 	);
 }
@@ -64,7 +65,7 @@ function SelectScrollDownButton({
 			className={cn("flex cursor-default items-center justify-center py-1", className)}
 			{...props}
 		>
-			<ChevronDown className="h-4 w-4" />
+			<ChevronDown className="size-icon" />
 		</SelectPrimitive.ScrollDownButton>
 	);
 }
@@ -130,7 +131,7 @@ function SelectItem({
 		>
 			<span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
 				<SelectPrimitive.ItemIndicator>
-					<Check className="h-4 w-4" />
+					<Check className="size-icon" />
 				</SelectPrimitive.ItemIndicator>
 			</span>
 			<SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>

@@ -91,9 +91,9 @@ export function VariablesSection({ tab }: ContextBarSectionProps) {
 				<Collapsible open={showAll} onOpenChange={setShowAll} className="pt-1">
 					<CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
 						{showAll ? (
-							<ChevronDown className="w-3 h-3 shrink-0" />
+							<ChevronDown className="size-icon-sm shrink-0" />
 						) : (
-							<ChevronRight className="w-3 h-3 shrink-0" />
+							<ChevronRight className="size-icon-sm shrink-0" />
 						)}
 						All in scope ({rest.length})
 					</CollapsibleTrigger>

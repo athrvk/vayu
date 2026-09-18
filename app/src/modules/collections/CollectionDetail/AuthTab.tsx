@@ -242,7 +242,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 			 */}
 			{hasCredentialFields && (
 				<p className="text-[11px] text-muted-foreground mb-2 flex items-center gap-1.5">
-					<Lock className="w-3 h-3 shrink-0" aria-hidden="true" />
+					<Lock className="size-icon-sm shrink-0" aria-hidden="true" />
 					These fields are saved together, when you press Save Auth - not as you type.
 				</p>
 			)}

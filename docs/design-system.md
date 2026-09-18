@@ -1162,21 +1162,23 @@ interface-scale slider still multiplies everything: these are the defaults the
 register is judged on, not a ceiling on the user.
 
 **Icon sizing goes on `className`, not lucide's `size` prop.** Mixing the two
-hides icons from a scale audit and lets off-grid values (15px) creep in. Use
-`w-3 h-3`, `w-3.5 h-3.5`, `w-4 h-4` or `w-5 h-5` - like every other `w-*`/`h-*`
-utility these ride `--spacing` (issue #1670), so the rendered size depends on
-density: 9 / 10.5 / 12 / 15px at Default, 12 / 14 / 16 / 20px at Comfortable
-(the values this line quoted before density existed).
+hides icons from a scale audit and lets off-grid values (15px) creep in.
 
-**Decision (issue #1670): the shrink applies to icons too, with nothing
-pinned outside the unit.** Checked by eye against a live render at Default -
-the ActivityRail, the Collections toolbar and menu rows (`w-4 h-4`, 12px) all
-stay legible at that size, and a user who finds it too tight has the same
-escape hatch as every other control: Comfortable restores 0.30.0's icon
-sizes exactly, alongside the rest of the layout. A future icon that genuinely
-must not move with density (none exist today) pins its own wrapper with
-`[--spacing:0.25rem]` rather than a literal px size, so it still resolves
-through the same `w-4 h-4` class the rest of the app uses.
+**The two most common icon sizes are fixed steps, not `--spacing` multiples**
+(issue #1679, superseding the #1670 decision below). Use `size-icon` (16px,
+was `w-4 h-4` / `size-4`) and `size-icon-sm` (12px, was `w-3 h-3`) - the app's
+own legibility floor at both densities, per the Chrome, Target and Icon
+Floors table under Spacing Scale Conventions. `w-3.5 h-3.5` and `w-5 h-5`
+still ride `--spacing` (10.5/14px and 15/20px at Default/Comfortable): they
+were not part of the #1679 fix pathway and remain density-scaled until a
+reason to fix them turns up.
+
+*Superseded decision (issue #1670, kept for history): the shrink applied to
+icons too, with nothing pinned outside the unit - `w-4 h-4` read 12px at
+Default and `w-3 h-3` read 9px, both checked by eye against a live render.
+The owner's report on 0.32.0 reversed it: 12px and 9px glyphs read as small,
+not as dense, which is what sent `size-icon`/`size-icon-sm` back to a fixed
+floor.*
 
 ### Spacing Scale Conventions
 
@@ -1199,22 +1201,53 @@ Appearance → Interface → Density, owned by `appearance-store`
 | Card padding | `p-4` (`CardHeader`/`CardContent`/`CardFooter`) | 12px | 16px |
 | Dialog padding | `p-5` (`DialogContent`) | 15px | 20px |
 | Drawer row height | `h-8` | 24px | 32px |
-| Chrome band height | `h-[var(--tabstrip-height)]` | 24px | 32px |
-| Icon (small) | `w-3 h-3` | 9px | 12px |
 | Icon (menu/toolbar) | `w-3.5 h-3.5` | 10.5px | 14px |
-| Icon (default) | `w-4 h-4` / `size-4` | 12px | 16px |
 | Icon (panel heading) | `w-5 h-5` | 15px | 20px |
 
 `density.test.ts` reads both `--spacing` declarations directly off `index.css`
-and reds if either value or the `--tabstrip-height` formula changes.
-`spacing-scale.test.ts` guards `Card` and `DialogContent` specifically -
-the two primitives this issue tightened - rather than scanning the whole
-tree for `p-6`/`p-8`/`gap-6`/`gap-8`: several other `p-6`/`p-8` call sites
-exist outside those two primitives (page-level containers, and the
-`EmptyState`/`ErrorState` shared components) and were deliberately left
-alone as outside this issue's fix pathway. `--titlebar-height` stays a
-literal `32px`: it sizes the macOS traffic lights, a fixed platform
+and reds if either value changes. `spacing-scale.test.ts` guards `Card` and
+`DialogContent` specifically - the two primitives this issue tightened -
+rather than scanning the whole tree for `p-6`/`p-8`/`gap-6`/`gap-8`: several
+other `p-6`/`p-8` call sites exist outside those two primitives (page-level
+containers, and the `EmptyState`/`ErrorState` shared components) and were
+deliberately left alone as outside this issue's fix pathway. `--titlebar-height`
+stays a literal `32px`: it sizes the macOS traffic lights, a fixed platform
 constant no density setting should move.
+
+### Chrome, Target and Icon Floors
+
+**Density scales rhythm - row heights, paddings, gaps - not chrome, interactive
+targets or icons** (issue #1679). Three classes of thing have a floor `--spacing`
+must not carry below it: a chrome band is an anchor, not a list row; an
+interactive target has the WCAG 2.2 SC 2.5.8 24x24px minimum; an icon has a
+legibility floor. Seven named steps, outside the `--spacing` multiplier,
+generate real Tailwind utilities (`h-band`, `size-target`, and so on) for
+these. They live in a plain `@theme` block in `index.css`, deliberately not
+`@theme inline`: `inline` bakes a literal into each generated utility instead
+of a `var()` reference, which would silently disable the Comfortable override
+below.
+
+| Step | Class prefix | Default | Comfortable | Used by |
+|------|-------|---------|-------------|---------|
+| `--spacing-band` | `h-band` | 32px | 32px | Tab strip, drawer header, response toolbar, `RailButton` |
+| `--spacing-banner` | `h-banner` | 36px | 36px | Update banner, recovery banner |
+| `--spacing-control` | `h-control` | 28px | 36px | `Input`, `Select`, `Button` default, the URL bar's controls |
+| `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
+| `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar` |
+| `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
+| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`) |
+
+`band`, `banner`, `icon` and `icon-sm` are theme-independent, the same way
+`--titlebar-height` and `--dock-height` are - a chrome anchor or a glyph's
+legibility does not become less real at a looser density. `control`,
+`control-sm` and `target` scale on their own schedule under
+`[data-density="comfortable"]`, the same mechanism `--spacing` itself uses -
+just a different curve, so a control never drops below its own floor at
+either density. `density.test.ts` and `chrome-floors.test.ts` guard both
+halves of this: the former that the seven steps are declared with these
+values and none of them is expressed as a `calc(var(--spacing) * n)`, the
+latter that the chrome bands, interactive targets and icon classes across
+`app/src` actually use them.
 
 ---
 

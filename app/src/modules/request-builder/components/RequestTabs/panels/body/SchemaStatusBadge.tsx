@@ -55,7 +55,7 @@ export function SchemaStatusBadge({ entry }: { entry: SchemaEntry | null }) {
 	if (status === "loading") {
 		return (
 			<BadgeText className="text-muted-foreground" title={title}>
-				<Loader2 className="w-3 h-3 animate-spin" />
+				<Loader2 className="size-icon-sm animate-spin" />
 				Schema
 			</BadgeText>
 		);
@@ -64,7 +64,7 @@ export function SchemaStatusBadge({ entry }: { entry: SchemaEntry | null }) {
 	if (status === "ready") {
 		return (
 			<BadgeText className="text-success-text" title={title}>
-				<CheckCircle2 className="w-3 h-3" />
+				<CheckCircle2 className="size-icon-sm" />
 				Schema
 			</BadgeText>
 		);
@@ -78,7 +78,7 @@ export function SchemaStatusBadge({ entry }: { entry: SchemaEntry | null }) {
 	if (entry?.schema) {
 		return (
 			<BadgeText className="text-warning-text" title={title}>
-				<AlertCircle className="w-3 h-3" />
+				<AlertCircle className="size-icon-sm" />
 				Schema stale
 			</BadgeText>
 		);
@@ -86,7 +86,7 @@ export function SchemaStatusBadge({ entry }: { entry: SchemaEntry | null }) {
 
 	return (
 		<BadgeText className="text-destructive-text" title={title}>
-			<AlertCircle className="w-3 h-3" />
+			<AlertCircle className="size-icon-sm" />
 			No schema
 		</BadgeText>
 	);

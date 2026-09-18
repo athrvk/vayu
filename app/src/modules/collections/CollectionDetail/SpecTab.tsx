@@ -325,7 +325,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							onClick={() => fileInputRef.current?.click()}
 							disabled={bindSpec.isPending}
 						>
-							<Upload className="mr-2 h-4 w-4" />
+							<Upload className="mr-2 size-icon" />
 							Choose file
 						</Button>
 						<input
@@ -359,9 +359,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							disabled={!url || fetching || bindSpec.isPending}
 						>
 							{fetching ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								<Loader2 className="mr-2 size-icon animate-spin" />
 							) : (
-								<Link2 className="mr-2 h-4 w-4" />
+								<Link2 className="mr-2 size-icon" />
 							)}
 							Fetch
 						</Button>
@@ -392,7 +392,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					    or a document that did not read - is pending forever. */}
 					{(describeQuery.isFetching || matchQuery.isFetching) && (
 						<p className="flex items-center gap-2 text-xs text-muted-foreground">
-							<Loader2 className="h-3 w-3 animate-spin" />
+							<Loader2 className="size-icon-sm animate-spin" />
 							Reading this document and matching it against the requests here...
 						</p>
 					)}
@@ -418,9 +418,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 					{picked && match && (
 						<Button onClick={handleBind} disabled={bindSpec.isPending}>
 							{bindSpec.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								<Loader2 className="mr-2 size-icon animate-spin" />
 							) : (
-								<FileJson className="mr-2 h-4 w-4" />
+								<FileJson className="mr-2 size-icon" />
 							)}
 							Bind this spec
 						</Button>
@@ -450,7 +450,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				<div>
 					<SectionLabel>Export</SectionLabel>
 					<Button variant="outline" onClick={() => setExporting(true)}>
-						<Download className="mr-2 h-4 w-4" />
+						<Download className="mr-2 size-icon" />
 						Export as OpenAPI
 					</Button>
 					<p className="mt-1 text-[11px] text-muted-foreground">
@@ -468,7 +468,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						onClick={handleUnbind}
 						disabled={updateCollection.isPending}
 					>
-						<Trash2 className="mr-2 h-4 w-4" />
+						<Trash2 className="mr-2 size-icon" />
 						Unbind
 					</Button>
 					<p className="mt-1 text-[11px] text-muted-foreground">

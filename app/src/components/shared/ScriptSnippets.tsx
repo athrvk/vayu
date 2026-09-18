@@ -136,9 +136,9 @@ export function ScriptSnippets({
 				)}
 			>
 				{collapsed ? (
-					<ChevronRight className="w-3 h-3 shrink-0" />
+					<ChevronRight className="size-icon-sm shrink-0" />
 				) : (
-					<ChevronDown className="w-3 h-3 shrink-0" />
+					<ChevronDown className="size-icon-sm shrink-0" />
 				)}
 				Snippets
 				{total > 0 && <span className="ml-1 tabular-nums opacity-70">{total}</span>}

@@ -160,7 +160,6 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 				{maskable && (
 					<TooltipIconButton
 						label={revealed ? "Hide secrets" : "Reveal secrets"}
-						className="h-6 w-6"
 						icon={
 							revealed ? (
 								<EyeOff className="w-3.5 h-3.5" />
@@ -174,7 +173,6 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 				{mode === "resolved" && (
 					<TooltipIconButton
 						label="Recompose"
-						className="h-6 w-6"
 						icon={<RefreshCw className="w-3.5 h-3.5" />}
 						onClick={() => void composed.refetch()}
 					/>
@@ -198,7 +196,6 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 						<div className="absolute top-1 right-1">
 							<TooltipIconButton
 								label="Copy snippet"
-								className="h-6 w-6"
 								icon={
 									copied ? (
 										<Check className="w-3.5 h-3.5 text-status-success-text" />

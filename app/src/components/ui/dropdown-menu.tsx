@@ -37,7 +37,7 @@ function DropdownMenuSubTrigger({
 		<DropdownMenuPrimitive.SubTrigger
 			data-slot="dropdown-menu-sub-trigger"
 			className={cn(
-				"flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+				"flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-icon [&_svg]:shrink-0",
 				inset && "pl-8",
 				className
 			)}
@@ -97,7 +97,7 @@ function DropdownMenuItem({
 		<DropdownMenuPrimitive.Item
 			data-slot="dropdown-menu-item"
 			className={cn(
-				"relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
+				"relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-icon [&>svg]:shrink-0",
 				inset && "pl-8",
 				className
 			)}
@@ -124,7 +124,7 @@ function DropdownMenuCheckboxItem({
 		>
 			<span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
 				<DropdownMenuPrimitive.ItemIndicator>
-					<Check className="h-4 w-4" />
+					<Check className="size-icon" />
 				</DropdownMenuPrimitive.ItemIndicator>
 			</span>
 			{children}
