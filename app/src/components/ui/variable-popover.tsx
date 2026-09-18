@@ -444,7 +444,7 @@ export function VariablePopover({
 		<Popover open={isOpen} onOpenChange={handleOpenChange}>
 			<PopoverTrigger asChild>{triggerElement}</PopoverTrigger>
 			<PopoverContent
-				className="w-72 p-2.5"
+				className="w-96 max-w-[calc(100vw-2rem)] p-2.5"
 				align="start"
 				side="bottom"
 				onClick={(e) => e.stopPropagation()}
@@ -700,12 +700,11 @@ export function VariablePopover({
 							/>
 							{/*
 							 * The label sits above the control, not beside it, which is
-							 * how `LoadTestConfigDialog` labels its own segmented control.
-							 * Beside it, the three segments have 266px less the label to
-							 * live in, and the two widest UI faces the appearance settings
-							 * offer - System and JetBrains Mono - spend more than that on
-							 * "Environment Collection Global". Above it, the widest of the
-							 * four measures 230px inside 266.
+							 * how `LoadTestConfigDialog` labels its own segmented control -
+							 * kept even as the popover has widened, so a narrower one (a
+							 * future width change, or a small window's `max-w` clamp) does
+							 * not put "Environment Collection Global" beside a label with
+							 * nowhere to shrink to.
 							 */}
 							<div className="space-y-1.5">
 								<span
