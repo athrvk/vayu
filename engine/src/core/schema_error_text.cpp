@@ -12,8 +12,10 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <cmath>
 #include <format>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -163,6 +165,27 @@ const std::string& d) {
     return std::format ("'{}' is not in the expected format", title);
 }
 
+/** @p text as a `double`, or nothing unless the whole of it is one - the
+ *  `monitor.cpp` idiom (`std::stod` plus a consumed-length check), not
+ *  `vayu::utils::parse_number<double>`: libc++'s floating-point
+ *  `std::from_chars` overload is unavailable before macOS 26 (that pin is
+ *  the whole reason `parse_number` exists for integers, but it cannot cover
+ *  a type its own backing function does not support on every platform this
+ *  engine ships on). */
+std::optional<double> parse_double_whole (std::string_view text) {
+    const std::string token (text);
+    try {
+        size_t consumed  = 0;
+        const double val = std::stod (token, &consumed);
+        if (consumed != token.size () || !std::isfinite (val)) {
+            return std::nullopt;
+        }
+        return val;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
 /** `minimum`/`maximum` (inclusive or exclusive): valijson's own message
  *  already ends in exactly the bound, with no trailing text, so the number
  *  is the whole of what follows the matched prefix. */
@@ -177,8 +200,7 @@ std::optional<std::string> bound_rejection (const std::string& title, const std:
         if (d.rfind (prefix, 0) != 0) {
             continue;
         }
-        if (auto n = vayu::utils::parse_number<double> (
-            std::string_view (d).substr (prefix.size ()))) {
+        if (auto n = parse_double_whole (std::string_view (d).substr (prefix.size ()))) {
             return std::format ("'{}' {}{}", title, verb, *n);
         }
     }
