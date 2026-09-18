@@ -24,7 +24,13 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
 				// `h-control` (issue #1679, 28px), not `h-9` - was 27px under the
 				// 3px spacing rhythm, one of the "the whole scale is a mistake"
 				// pixel drifts this issue exists to stop.
-				"flex h-control w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+				//
+				// `px-3`, not `px-2`: `Textarea` and `SelectTrigger` already carry
+				// `px-3`, and `Input` was the one text-entry primitive reading
+				// tighter than its siblings - visible on a short numeric value
+				// (`NumberField`'s "5"), which sits close enough to the border to
+				// read as clipped by it once Roundedness curves the corner.
+				"flex h-control w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
 				className
 			)}
 			{...props}
