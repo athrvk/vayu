@@ -12,16 +12,16 @@ import { cn } from "@/lib/utils";
 /**
  * A styled checkbox - `appearance-none`, not the bare native control.
  *
- * `rounded-md`/`border-input` on an unstyled native checkbox are inert (no
- * visual effect without `appearance-none`), and so was `accent-color`'s
- * companion `focus:ring-*` (no `ring` width class ever paired with it) -
- * both `KeyValueRow`'s row-enable checkbox and the variables table's
- * `accent-scope-*` one carried these as dead classes. It went unnoticed at
- * `size-icon` (16px), where a browser's own native corner rounding reads as
- * "a small checkbox" regardless; it turned into a stark, barely-rounded flat
- * square once `KeyValueRow`'s grew to the `size-target` floor (issue #1679)
- * for its own WCAG 2.5.8 hit area - the defect was always there, just
- * invisible below that size.
+ * The radius and `border-input` classes below are inert on an unstyled native
+ * checkbox (no visual effect without `appearance-none`), and so was
+ * `accent-color`'s companion `focus:ring-*` (no `ring` width class ever
+ * paired with it) - both `KeyValueRow`'s row-enable checkbox and the
+ * variables table's `accent-scope-*` one carried these as dead classes. It
+ * went unnoticed at `size-icon` (16px), where a browser's own native corner
+ * rounding reads as "a small checkbox" regardless; it turned into a stark,
+ * barely-rounded flat square once `KeyValueRow`'s grew to the `size-target`
+ * floor (issue #1679) for its own WCAG 2.5.8 hit area - the defect was
+ * always there, just invisible below that size.
  *
  * The checkmark is a real lucide `Check`, shown via `peer-checked:opacity-100`
  * on a sibling rather than an inline SVG data URI baked into a class string.
@@ -47,7 +47,16 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
 			<input
 				type="checkbox"
 				className={cn(
-					"peer inline-flex shrink-0 cursor-pointer appearance-none rounded-md border border-input bg-background transition-colors",
+					// `min(var(--radius-md),25%)`, not a bare `rounded-md`: the box
+					// isn't one size across callers either, and a fixed radius reads
+					// very differently against each - `--radius-md` is 10px at the
+					// Rounded appearance setting, past half of a 12-16px box, so a
+					// small checkbox became a literal circle (indistinguishable from a
+					// radio button) while a 24-28px one stayed a normal rounded square.
+					// The cap only ever removes roundness from a small box; it never
+					// adds any to a large one, and Square (`--radius: 0`) is unaffected
+					// at every size.
+					"peer inline-flex shrink-0 cursor-pointer appearance-none rounded-[min(var(--radius-md),25%)] border border-input bg-background transition-colors",
 					"checked:border-primary checked:bg-primary",
 					"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1",
 					"disabled:cursor-not-allowed disabled:opacity-50",

@@ -81,15 +81,18 @@ describe("the enable checkbox", () => {
 	});
 
 	it("is appearance-none, so its rounded border actually paints", () => {
-		// The inverse of this file's old guard: `rounded-md`/`border-input`
-		// need `appearance-none` to mean anything on a checkbox - a native one
-		// ignores both silently, which is what a 24-28px (`size-target`, issue
-		// #1679) unstyled checkbox rendered as: a flat, barely-rounded square.
-		// Asserting `appearance-none` is present is what makes the neighbouring
-		// radius/border classes meaningful rather than dead weight again.
+		// The inverse of this file's old guard: the radius/`border-input`
+		// classes need `appearance-none` to mean anything on a checkbox - a
+		// native one ignores both silently, which is what a 24-28px
+		// (`size-target`, issue #1679) unstyled checkbox rendered as: a flat,
+		// barely-rounded square. Asserting `appearance-none` is present is what
+		// makes the neighbouring radius/border classes meaningful rather than
+		// dead weight again.
 		const box = row().querySelector<HTMLInputElement>('input[type="checkbox"]');
 		expect(box!.className).toMatch(/\bappearance-none\b/);
-		expect(box!.className).toMatch(/\brounded-md\b/);
+		// `rounded-[min(var(--radius-md),25%)]`, not a bare `rounded-md` - the
+		// radius is capped by box size, see `ui/checkbox.tsx`.
+		expect(box!.className).toMatch(/\brounded-\[min\(var\(--radius-md\),25%\)\]/);
 	});
 
 	it("still names the row it governs", () => {
