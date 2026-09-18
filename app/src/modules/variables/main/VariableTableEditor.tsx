@@ -57,6 +57,7 @@ import { useVariablesStore } from "@/modules/variables/variables-store";
 import type { VariableValue, Collection, Environment } from "@/types";
 import {
 	Button,
+	Checkbox,
 	Input,
 	Badge,
 	DeleteConfirmDialog,
@@ -233,7 +234,7 @@ const EDITOR_CONFIGS = {
 		infoBg: "bg-scope-global/10",
 		infoTextColor: "text-scope-global",
 		infoBorder: "border-scope-global/20",
-		checkboxColor: "text-scope-global focus:ring-scope-global accent-scope-global",
+		checkboxColor: "checked:bg-scope-global checked:border-scope-global",
 		loadingColor: "border-scope-global",
 	},
 	environment: {
@@ -246,8 +247,7 @@ const EDITOR_CONFIGS = {
 		infoBg: "bg-scope-environment/10",
 		infoTextColor: "text-scope-environment",
 		infoBorder: "border-scope-environment/20",
-		checkboxColor:
-			"text-scope-environment focus:ring-scope-environment accent-scope-environment",
+		checkboxColor: "checked:bg-scope-environment checked:border-scope-environment",
 		loadingColor: "border-scope-environment",
 	},
 	collection: {
@@ -260,7 +260,7 @@ const EDITOR_CONFIGS = {
 		infoBg: "bg-scope-collection/10",
 		infoTextColor: "text-scope-collection",
 		infoBorder: "border-scope-collection/20",
-		checkboxColor: "text-scope-collection focus:ring-scope-collection accent-scope-collection",
+		checkboxColor: "checked:bg-scope-collection checked:border-scope-collection",
 		loadingColor: "border-scope-collection",
 	},
 } as const;
@@ -862,30 +862,26 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 								<tr key={variable.id} className="group">
 									{/*
 									 * `px-1` is clearance for the focus ring, not decoration.
-									 * The baseline draws it 1px wide at `outline-offset: 2px`,
-									 * i.e. 3px outside the box, and this cell sits against the
-									 * scroll container's clip edge when embedded - so with no
+									 * `Checkbox`'s `focus-visible:ring-1 ring-offset-1` draws
+									 * outside the box, and this cell sits against the scroll
+									 * container's clip edge when embedded - so with no
 									 * horizontal padding the ring lost its left side.
 									 *
 									 * Clearance rather than `.panel-clip` on the container: the
-									 * same native checkbox appears in the request builder's
+									 * same `Checkbox` appears in the request builder's
 									 * key-value rows, where `KeyValueRow`'s `p-1` gives it the
 									 * same 4px and the ring reads as an outset hairline with a
 									 * gap. Tucking this one inward would have made one control
 									 * look like two, depending on the screen.
 									 */}
 									<td className="py-1 px-1">
-										<input
-											type="checkbox"
+										<Checkbox
 											checked={variable.enabled}
 											onChange={(e) => {
 												updateVariable(index, "enabled", e.target.checked);
 												performSaveRef.current();
 											}}
-											className={cn(
-												"size-icon rounded-md border-input",
-												editorConfig.checkboxColor
-											)}
+											className={cn("size-icon", editorConfig.checkboxColor)}
 											disabled={variable.isNew && !variable.key}
 										/>
 									</td>

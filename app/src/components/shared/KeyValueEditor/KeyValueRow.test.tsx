@@ -72,16 +72,24 @@ function row(overrides: Partial<Parameters<typeof KeyValueRow>[0]> = {}) {
 
 describe("the enable checkbox", () => {
 	it("paints in the app's accent, not the browser default", () => {
+		// `Checkbox` (`ui/checkbox.tsx`) paints its checked state itself,
+		// `checked:bg-primary`/`checked:border-primary` - not `accent-color`,
+		// which does nothing once `appearance-none` removes native rendering.
 		const box = row().querySelector<HTMLInputElement>('input[type="checkbox"]');
 		expect(box).toBeTruthy();
-		expect(box!.className).toMatch(/\baccent-primary\b/);
+		expect(box!.className).toMatch(/\bchecked:bg-primary\b/);
 	});
 
-	it("carries no properties a native checkbox silently ignores", () => {
-		// `rounded-md` and `border-input` need `appearance-none` to do anything.
-		// Leaving them on read as "this control is styled" when it was not.
+	it("is appearance-none, so its rounded border actually paints", () => {
+		// The inverse of this file's old guard: `rounded-md`/`border-input`
+		// need `appearance-none` to mean anything on a checkbox - a native one
+		// ignores both silently, which is what a 24-28px (`size-target`, issue
+		// #1679) unstyled checkbox rendered as: a flat, barely-rounded square.
+		// Asserting `appearance-none` is present is what makes the neighbouring
+		// radius/border classes meaningful rather than dead weight again.
 		const box = row().querySelector<HTMLInputElement>('input[type="checkbox"]');
-		expect(box!.className).not.toMatch(/\brounded-|\bborder-input\b/);
+		expect(box!.className).toMatch(/\bappearance-none\b/);
+		expect(box!.className).toMatch(/\brounded-md\b/);
 	});
 
 	it("still names the row it governs", () => {

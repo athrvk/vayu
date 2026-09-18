@@ -21,7 +21,7 @@
 
 import { memo } from "react";
 import { Trash2, Sigma, Paperclip, Type } from "lucide-react";
-import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { Button, Checkbox, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { KeyValueItem, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
@@ -142,8 +142,7 @@ function KeyValueRow({
 			)}
 		>
 			{allowDisable ? (
-				<input
-					type="checkbox"
+				<Checkbox
 					checked={item.enabled}
 					onChange={(e) => onUpdate(item.id, "enabled", e.target.checked)}
 					disabled={keyReadOnly || !canDisable}
@@ -151,21 +150,12 @@ function KeyValueRow({
 					// a bare "checkbox", giving no clue which row it enables - and
 					// there is one per row.
 					aria-label={item.key ? `Enable ${item.key}` : "Enable this row"}
-					// `accent-primary` paints the native control in the user's accent.
-					// Without it the browser default wins - a fixed blue that ignores
-					// both the theme and the accent scheme, in the densest table in
-					// the app. The variables table already does this with
-					// `accent-scope-*`; this one had been left on the browser blue.
-					// The neighbouring `rounded-md` / `border-input` are inert on a
-					// native checkbox (no `appearance-none`), so `accent-color` is the
-					// only property here that actually paints.
-					//
 					// `size-target` (issue #1679), not `size-icon`: this box is its own
 					// hit target, with no separate padding wrapper the way a close
 					// button's icon-in-a-bigger-box is - a native checkbox's rendered
 					// box and its clickable area are the same box, so it takes the
 					// interactive floor directly rather than the icon step.
-					className="size-target accent-primary cursor-pointer disabled:opacity-50"
+					className="size-target"
 				/>
 			) : (
 				<div className="size-target" />

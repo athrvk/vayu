@@ -17,6 +17,8 @@ export type { CodeEditorProps } from "./code-editor";
 
 export { Input } from "./input";
 export { SecretInput } from "./secret-input";
+export { Checkbox } from "./checkbox";
+export type { CheckboxProps } from "./checkbox";
 export { Textarea } from "./textarea";
 export type { TextareaProps } from "./textarea";
 
