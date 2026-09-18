@@ -444,7 +444,7 @@ export function VariablePopover({
 		<Popover open={isOpen} onOpenChange={handleOpenChange}>
 			<PopoverTrigger asChild>{triggerElement}</PopoverTrigger>
 			<PopoverContent
-				className="w-[26rem] max-w-[calc(100vw-2rem)] p-2.5"
+				className="w-96 max-w-[calc(100vw-2rem)] p-2.5"
 				align="start"
 				side="bottom"
 				onClick={(e) => e.stopPropagation()}
