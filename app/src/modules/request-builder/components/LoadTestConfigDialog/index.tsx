@@ -845,6 +845,23 @@ export default function LoadTestConfigDialog({
 						)}
 					</div>
 
+					<p className="rounded-md border border-border bg-panel px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+						{summarise(
+							{
+								mode,
+								duration,
+								rps,
+								concurrency,
+								iterations,
+								rampDuration,
+								startConcurrency,
+								stepDuration,
+								sloMs,
+							},
+							blockingError !== null
+						)}
+					</p>
+
 					{/*
 					 * The `elements.scripts` run override (issue #1594), the same
 					 * control and the same three values `RunCollectionDialog`'s
@@ -856,6 +873,10 @@ export default function LoadTestConfigDialog({
 					 * request's own `timer.think` is the only timer kind
 					 * `requestElements` accepts, and there is no UI here for it at
 					 * all, marked or not.
+					 *
+					 * After the profile summary, not before it: the summary is
+					 * still describing the profile fields directly above it, and
+					 * Scripts is the first control that is not about the profile.
 					 */}
 					<div className="flex items-center justify-between gap-4">
 						<Label className="leading-snug">
@@ -886,23 +907,6 @@ export default function LoadTestConfigDialog({
 							<ToggleGroupItem value="allDeferred">All deferred</ToggleGroupItem>
 						</ToggleGroup>
 					</div>
-
-					<p className="rounded-md border border-border bg-panel px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-						{summarise(
-							{
-								mode,
-								duration,
-								rps,
-								concurrency,
-								iterations,
-								rampDuration,
-								startConcurrency,
-								stepDuration,
-								sloMs,
-							},
-							blockingError !== null
-						)}
-					</p>
 
 					{/*
 					    A data file, for a run that parameterises its request
