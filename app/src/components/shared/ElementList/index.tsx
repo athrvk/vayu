@@ -276,7 +276,7 @@ function ElementRow({
 						className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
 					>
 						<ChevronRight
-							className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")}
+							className={cn("size-icon transition-transform", open && "rotate-90")}
 						/>
 					</button>
 					{renaming ? (
@@ -306,7 +306,7 @@ function ElementRow({
 						>
 							{Icon && (
 								// eslint-disable-next-line react-hooks/static-components -- `Icon` is a lookup into `element-categories.ts`'s static KIND_ICONS/CATEGORY_ICONS maps (via kindIcon), the same shape as ELEMENT_FORM_OVERRIDES[element.kind] above; it is never freshly defined, only referentially stable components already loaded at module scope.
-								<Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+								<Icon className="size-icon shrink-0 text-muted-foreground" />
 							)}
 							{/*
 							 * `shrink-0` keeps a title at its natural width instead of
