@@ -85,10 +85,13 @@ describe("interactive targets clear the 24x24px floor, not a bare rhythm class",
 		["RunItem pin/delete buttons", "modules/history/sidebar/RunItem.tsx", /\bsize-target\b/, 2],
 		["CommandSearchBar trigger", "components/layout/CommandSearchBar.tsx", /\bh-target\b/, 1],
 		[
+			// 2: the Checkbox itself, and the same-width placeholder `<div>`
+			// standing in for it when `allowDisable` is false - both need to
+			// hold the column's width.
 			"KeyValueRow checkbox",
 			"components/shared/KeyValueEditor/KeyValueRow.tsx",
-			/\bsize-target accent-primary\b/,
-			1,
+			/\bsize-target\b/,
+			2,
 		],
 	];
 
