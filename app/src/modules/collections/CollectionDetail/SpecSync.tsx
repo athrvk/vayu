@@ -51,7 +51,7 @@
 import { useState } from "react";
 import { AlertTriangle, Check, Loader2, RefreshCw, Upload } from "lucide-react";
 
-import { Button, DeleteConfirmDialog } from "@/components/ui";
+import { Button, Checkbox, DeleteConfirmDialog } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { apiService } from "@/services/api";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
@@ -496,8 +496,7 @@ function ChangedRow({
 	return (
 		<li className="rounded-md border border-rule surface-sunken p-2 space-y-1">
 			<label className="flex items-baseline gap-2">
-				<input
-					type="checkbox"
+				<Checkbox
 					checked={applying}
 					onChange={(e) =>
 						onChange(
@@ -511,6 +510,7 @@ function ChangedRow({
 						)
 					}
 					aria-label={`Apply changes to ${changed.name}`}
+					className="size-icon"
 				/>
 				<span className="text-xs font-medium">{changed.name}</span>
 				<span className="text-[11px] font-mono text-muted-foreground break-all">
@@ -539,12 +539,12 @@ function ChangedRow({
 					{changed.fields.map((field) => (
 						<li key={field.field} className="text-[11px]">
 							<label className="flex items-baseline gap-1.5">
-								<input
-									type="checkbox"
+								<Checkbox
 									checked={fields?.has(field.field) ?? false}
 									disabled={!applying}
 									onChange={(e) => toggleField(field.field, e.target.checked)}
 									aria-label={`Apply ${field.field} to ${changed.name}`}
+									className="size-icon-sm"
 								/>
 								<span className="font-semibold">{field.field}</span>
 								{field.userTouched && (
@@ -599,11 +599,11 @@ function CheckRow({
 	return (
 		<li className="rounded-md border border-rule surface-sunken p-2">
 			<label className="flex items-baseline gap-2">
-				<input
-					type="checkbox"
+				<Checkbox
 					checked={checked}
 					onChange={(e) => onChange(e.target.checked)}
 					aria-label={`${title} (${detail})`}
+					className="size-icon"
 				/>
 				<span className="text-xs font-medium">{title}</span>
 				<span className="text-[11px] font-mono text-muted-foreground break-all">

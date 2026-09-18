@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
 	Button,
+	Checkbox,
 	Dialog,
 	DialogContent,
 	DialogHeader,
@@ -989,20 +990,20 @@ export function ImportModal() {
 							 */}
 							<div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
 								<label className="flex w-fit items-center gap-1.5">
-									<input
-										type="checkbox"
+									<Checkbox
 										checked={importEnvironments}
 										disabled={applying}
 										onChange={(e) => toggleEnvironments(e.target.checked)}
+										className="size-icon"
 									/>
 									Import environments &amp; variables
 								</label>
 								<label className="flex w-fit items-center gap-1.5">
-									<input
-										type="checkbox"
+									<Checkbox
 										checked={importScripts}
 										disabled={applying}
 										onChange={(e) => toggleScripts(e.target.checked)}
+										className="size-icon"
 									/>
 									Import pre-request &amp; test scripts
 								</label>
@@ -1309,9 +1310,8 @@ function BatchRow({
 	const notices = result ? noticeSummary(result.meta) : "";
 	return (
 		<label className="flex items-start gap-2 py-1 pl-1 text-xs">
-			<input
-				type="checkbox"
-				className="mt-1"
+			<Checkbox
+				className="mt-1 size-icon"
 				checked={entry.included}
 				// An applied file is the one thing that must not be re-sent:
 				// `POST /import/apply` is create-only and carries no idempotency key,

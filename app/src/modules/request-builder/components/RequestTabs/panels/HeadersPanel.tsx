@@ -31,7 +31,7 @@ import type { KeyValueItem, RequestDefaultHeader } from "@/types";
 import { useHeadersManager } from "../../../hooks/useHeadersManager";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import { useRequestDefaultsQuery } from "@/queries";
-import { Eyebrow } from "@/components/ui";
+import { Checkbox, Eyebrow } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { STANDARD_HEADERS } from "@/constants/http";
 import { EmptyTableHint } from "./EmptyTableHint";
@@ -57,17 +57,13 @@ function DefaultHeaderRow({
 		// The table's own column track, so name and value line up with the rows
 		// above rather than starting a second, narrower grid.
 		<div className="grid grid-cols-[24px_1fr_1fr_20px_28px] gap-2 items-center px-1 py-0.5">
-			<input
-				type="checkbox"
+			<Checkbox
 				checked={sent}
 				onChange={(e) => onToggle(e.target.checked)}
 				// Named after the header it governs: one per row, and a bare
 				// "checkbox" says nothing about which.
 				aria-label={`Send ${header.name}`}
-				// `accent-primary` for the same reason the table's row checkbox
-				// carries it - the browser default is a fixed blue that ignores
-				// both the theme and the accent scheme.
-				className="size-icon accent-primary cursor-pointer"
+				className="size-icon"
 			/>
 			<span
 				className={cn(
