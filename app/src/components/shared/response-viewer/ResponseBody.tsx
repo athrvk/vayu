@@ -279,7 +279,14 @@ export default function ResponseBody({
 							// A view mode has no "off" - ignore the empty string rather than
 							// letting the body render nothing.
 							onValueChange={(next) => next && setViewMode(next as ViewMode)}
-							size={compact ? "xs" : "sm"}
+							// Always `xs`, not `compact ? "xs" : "sm"`: this toolbar's row
+							// is `h-band` (32px) in both modes, but `sm`'s track (`h-control`
+							// 28px plus `p-1` padding, 34px total) is taller than that - it
+							// overflowed the band's own border once #1679 made `sm` a flat
+							// 28px instead of a `--spacing`-derived value that happened to
+							// fit. `xs`'s track (`h-control-sm` 24px plus `p-0.5`, 27px) is
+							// the one size that actually clears it.
+							size="xs"
 							aria-label="Body view mode"
 						>
 							<ToggleGroupItem value="pretty">
