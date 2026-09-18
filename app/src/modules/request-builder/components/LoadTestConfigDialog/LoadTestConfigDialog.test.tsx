@@ -612,8 +612,13 @@ describe("recording & limits is one surface", () => {
 	/**
 	 * The card used to be worn by the header alone - `bg-card` sat on the
 	 * trigger - so opening the disclosure dropped the sample rate, the slow
-	 * threshold, the timing switch and the comment onto the bare dialog
-	 * background, reading as fields unrelated to the row that revealed them.
+	 * threshold and the timing switch onto the bare dialog background,
+	 * reading as fields unrelated to the row that revealed them.
+	 *
+	 * The comment field used to live here too, last in this disclosure; it
+	 * moved to the top of the dialog body (before "Load profile") so naming a
+	 * run is the first thing typed rather than something found behind a
+	 * collapsed "Recording & limits" section after the run already started.
 	 *
 	 * This is keyed on the surface class, not on ancestry, and that is the whole
 	 * point: `CollapsibleContent` has always been a child of the `Collapsible`
@@ -637,7 +642,6 @@ describe("recording & limits is one surface", () => {
 			/success sample rate/i,
 			/slow request threshold/i,
 			/save timing breakdown/i,
-			/^comment/i,
 		]) {
 			expect(surface).toContainElement(screen.getByLabelText(label));
 		}
@@ -654,11 +658,20 @@ describe("recording & limits is one surface", () => {
 		fireEvent.click(trigger);
 
 		const first = screen.getByLabelText(/success sample rate/i);
-		const last = screen.getByLabelText(/^comment/i);
+		const last = screen.getByLabelText(/save timing breakdown/i);
 		expect(
 			trigger.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING
 		).toBeTruthy();
 		expect(first.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it("puts the comment field at the top of the dialog, before Load profile", () => {
+		open();
+		const comment = screen.getByLabelText(/^comment/i);
+		const profileLabel = screen.getByText("Load profile");
+		expect(
+			comment.compareDocumentPosition(profileLabel) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
 	});
 
 	it("leaves the toggle a real button, so Tab reaches it and Enter/Space fire it", () => {
