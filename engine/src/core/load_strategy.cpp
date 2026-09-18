@@ -330,7 +330,8 @@ std::optional<std::string> validate_elements_run_override (const nlohmann::json&
         return std::nullopt;
     }
     if (!elements->is_object ()) {
-        return "'elements' must be an object";
+        return "The run's Timers/Scripts overrides ('elements') must be an "
+               "object";
     }
 
     static const std::unordered_set<std::string> known_keys = { "timers",
@@ -339,30 +340,35 @@ std::optional<std::string> validate_elements_run_override (const nlohmann::json&
         (void)value;
         if (!known_keys.contains (key)) {
             return "'elements." + key +
-            "' is not a known field - expected one of timers, scripts, "
-            "includeScriptTime, seed";
+            "' is not a recognized override - expected one of timers, "
+            "scripts, includeScriptTime or seed";
         }
     }
 
+    // "Timers"/"Scripts" name the same controls `RunCollectionDialog` and
+    // `LoadTestConfigDialog` show under those labels; `seed` and
+    // `includeScriptTime` have no dialog control of their own (API/MCP only),
+    // so they are named in plain English rather than borrowing a label that
+    // does not exist.
     if (auto timers = elements->find ("timers");
     timers != elements->end () && !is_valid_elements_timers_shape (*timers)) {
-        return "'elements.timers' must be 'asConfigured', 'off', "
+        return "The Timers override must be 'asConfigured', 'off', "
                "{\"fixedMs\": N} or {\"minMs\"/\"maxMs\": N}";
     }
     if (auto seed = elements->find ("seed");
     seed != elements->end () && !is_non_negative_integer (*seed)) {
-        return "'elements.seed' must be a non-negative integer";
+        return "The run's random seed override must be a non-negative integer";
     }
     if (auto scripts = elements->find ("scripts"); scripts != elements->end ()) {
         if (!scripts->is_string () ||
         (*scripts != "asMarked" && *scripts != "allInline" && *scripts != "allDeferred")) {
-            return "'elements.scripts' must be 'asMarked', 'allInline' or "
+            return "The Scripts override must be 'asMarked', 'allInline' or "
                    "'allDeferred'";
         }
     }
     if (auto include_time = elements->find ("includeScriptTime");
     include_time != elements->end () && !include_time->is_boolean ()) {
-        return "'elements.includeScriptTime' must be a boolean";
+        return "The run's 'include script time' override must be true or false";
     }
 
     return std::nullopt;
@@ -389,10 +395,18 @@ const nlohmann::json& config) {
     };
     for (size_t i = 0; i < lifecycle->size (); ++i) {
         const auto& entry = (*lifecycle)[i];
-        const std::string kind = entry.is_object () ? entry.value ("kind", "") : "";
-        if (!allowed_kinds.contains (kind)) {
-            return "'lifecycleElements[" + std::to_string (i) + "]' has kind '" +
-            kind + "' - only script.setup and script.teardown are allowed here";
+        // A malformed entry (not an object, no string "kind") is left for
+        // `Registry::validate` below to report precisely, rather than folded
+        // into this refusal as an empty kind name.
+        if (!entry.is_object () || !entry.contains ("kind") || !entry["kind"].is_string ()) {
+            continue;
+        }
+        const std::string kind_name = entry["kind"].get<std::string> ();
+        if (!allowed_kinds.contains (kind_name)) {
+            const auto* kind = vayu::core::Registry::instance ().find (kind_name);
+            return std::format (
+            "Step {}: '{}' can only be a Setup script or Teardown script here",
+            i + 1, kind != nullptr ? kind->label : kind_name);
         }
     }
 
@@ -477,11 +491,10 @@ const nlohmann::json& config) {
         kind_name) != REQUEST_ELEMENTS_SUPPORTED_KINDS.end ();
         if (!is_supported) {
             return std::format (
-            "requestElements[{}]: '{}' does not run on a single-target load "
-            "run - only extract.*, assert.*, timer.think and "
-            "script.pre/script.post do; run this as part of a \"scenario\" "
-            "instead",
-            i, kind_name);
+            "Step {}: '{}' can only be used in a scenario, not a "
+            "single-request load test. Remove it, or run this as a "
+            "scenario instead",
+            i + 1, kind != nullptr ? kind->label : kind_name);
         }
     }
     return std::nullopt;

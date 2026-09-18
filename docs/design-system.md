@@ -1331,6 +1331,20 @@ The same reasoning rules out `rounded-full` on controls - a button or dropdown
 trigger that keeps its pill shape becomes the one thing on screen ignoring the
 Roundedness setting. Interactive elements take `rounded-md`/`rounded-sm`.
 
+**A control that renders at more than one box size caps the token by
+proportion instead of using it bare.** `Checkbox` (`ui/checkbox.tsx`) is
+instantiated at 12-28px depending on caller (`size-icon-sm`, `size-icon`,
+`size-target`), and `--radius-md` is a fixed length - 10px at Rounded, past
+half the width of a 12-16px box. Applied bare, a checkbox at Rounded became a
+circle indistinguishable from a radio button, while the same class on the
+24-28px row-enable checkbox stayed an ordinary rounded square: one token, two
+unrelated shapes. The fix is `rounded-[min(var(--radius-md),25%)]`: Square
+(`--radius: 0`) is unaffected at every size, Rounded caps at a quarter of the
+box instead of degenerating into a circle, and the cap only ever removes
+roundness from a small instance - it never adds any to a large one. The next
+control that varies its own box size (a radio, a colour swatch) should reach
+for the same `min(token, %)` shape rather than relearning this.
+
 ---
 
 ## Animations

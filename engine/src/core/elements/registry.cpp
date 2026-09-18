@@ -8,6 +8,7 @@
 #include "vayu/core/elements.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/schema_error_text.hpp"
 
 #include <valijson/adapters/nlohmann_json_adapter.hpp>
 #include <valijson/schema.hpp>
@@ -84,18 +85,6 @@ nlohmann::json kind_to_json (const ElementKind& kind) {
     return node;
 }
 
-/** The comma-separated, quoted list of known kinds, for a rejection message. */
-std::string known_kinds_list (const std::vector<ElementKind>& kinds) {
-    std::string list;
-    for (const auto& kind : kinds) {
-        if (!list.empty ()) {
-            list += ", ";
-        }
-        list += "'" + kind.kind + "'";
-    }
-    return list;
-}
-
 /** One element entry's config against its kind's schema, valijson-backed the
  *  way `schema_validation.cpp::validate_body_against_schema` is. */
 std::optional<std::string> validate_config_against_schema (const ElementKind& kind,
@@ -110,9 +99,8 @@ size_t index) {
         const valijson::adapters::NlohmannJsonAdapter adapter (kind.config_schema);
         parser.populateSchema (adapter, parsed);
     } catch (const std::exception& e) {
-        return std::format (
-        "elements[{}] (kind '{}'): its schema could not be read - {}", index,
-        kind.kind, e.what ());
+        return std::format ("'{}' (item {}): its schema could not be read - {}",
+        kind.label, index + 1, e.what ());
     }
 
     valijson::ValidationResults results;
@@ -123,10 +111,12 @@ size_t index) {
     }
     valijson::ValidationResults::Error error;
     if (results.popError (error) && !error.description.empty ()) {
-        return std::format ("elements[{}] ({}): {}", index, kind.kind, error.description);
+        return std::format ("'{}' (item {}): {}", kind.label, index + 1,
+        humanize_schema_error (kind.config_schema, error.description, error.jsonPointer));
     }
     return std::format (
-    "elements[{}] ({}): does not match its config schema", index, kind.kind);
+    "'{}' (item {}): its settings do not match what this element expects",
+    kind.label, index + 1);
 }
 
 /**
@@ -149,37 +139,39 @@ std::unordered_set<std::string>& seen_ids,
 std::string& kind_name_out,
 nlohmann::json& config_out) {
     if (!entry.is_object ()) {
-        return std::format ("elements[{}] must be a JSON object", index);
+        return std::format ("Item {} in the elements list isn't valid - "
+                            "expected an object",
+        index + 1);
     }
     if (!entry.contains ("id") || !entry["id"].is_string () ||
     entry["id"].get<std::string> ().empty ()) {
-        return std::format ("elements[{}]: 'id' must be a non-empty string", index);
+        return std::format ("Item {} is missing an id", index + 1);
     }
     const auto id = entry["id"].get<std::string> ();
     if (!seen_ids.insert (id).second) {
-        return std::format ("elements[{}]: duplicate id '{}'", index, id);
+        return std::format (
+        "Item {} has the same id ('{}') as an earlier item - ids must be "
+        "unique",
+        index + 1, id);
     }
     if (!entry.contains ("kind") || !entry["kind"].is_string ()) {
-        return std::format ("elements[{}]: 'kind' must be a string", index);
+        return std::format ("Item {} is missing a kind", index + 1);
     }
     kind_name_out    = entry["kind"].get<std::string> ();
     const auto* kind = registry.find (kind_name_out);
     if (kind == nullptr) {
-        return std::format ("elements[{}] (kind '{}') is not a known "
-                            "element kind - expected one of {}",
-        index, kind_name_out, known_kinds_list (registry.kinds ()));
+        return std::format ("Item {} has an unrecognized kind: '{}'", index + 1, kind_name_out);
     }
     if (kind->collection_only && owner != ElementOwner::Collection) {
-        return std::format ("elements[{}] (kind '{}') may only be added to "
-                            "a collection, not a request",
-        index, kind_name_out);
+        return std::format (
+        "'{}' can only be added to a collection, not a request", kind->label);
     }
     if (entry.contains ("enabled") && !entry["enabled"].is_boolean ()) {
-        return std::format (
-        "elements[{}] ({}): 'enabled' must be a boolean", index, kind_name_out);
+        return std::format ("'{}' (item {}): 'enabled' must be true or false",
+        kind->label, index + 1);
     }
     if (entry.contains ("name") && !entry["name"].is_null () && !entry["name"].is_string ()) {
-        return std::format ("elements[{}] ({}): 'name' must be a string", index, kind_name_out);
+        return std::format ("'{}' (item {}): 'name' must be text", kind->label, index + 1);
     }
     config_out = entry.contains ("config") ? entry["config"] : nlohmann::json::object ();
     return validate_config_against_schema (*kind, config_out, index);
@@ -202,9 +194,9 @@ std::unordered_set<std::string>& metric_names) {
         return std::nullopt;
     }
     return std::format (
-    "elements[{}] (metric.record): this declares more than {} "
-    "distinct custom metric names, the collector's cap",
-    index, constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES);
+    "Item {} pushes this run past {} distinct custom metric names "
+    "('metric.record') - that's the collector's limit",
+    index + 1, constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES);
 }
 
 } // namespace

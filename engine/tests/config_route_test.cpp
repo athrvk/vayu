@@ -203,12 +203,13 @@ TEST_F (ConfigRouteTest, ARowFromANewerEngineIsExcludedFromEchoedEntries) {
 }
 
 TEST_F (ConfigRouteTest, OutOfRangeReportsBoundAndValue) {
-    // "workers" is seeded as an integer with min 1 / max 128.
+    // "workers" is seeded as an integer with min 1 / max 128, labeled "Worker
+    // Threads" - the rejection names that label, not the wire key.
     auto [status, body] =
     vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"999"}})");
     EXPECT_EQ (status, 400);
     const auto message = body["error"]["message"].get<std::string> ();
-    EXPECT_NE (message.find ("workers"), std::string::npos);
+    EXPECT_NE (message.find ("Worker Threads"), std::string::npos);
     EXPECT_NE (message.find ("128"), std::string::npos); // the exceeded bound
     EXPECT_NE (message.find ("999"), std::string::npos); // the offending value
 }
@@ -218,7 +219,7 @@ TEST_F (ConfigRouteTest, NonIntegerReportsType) {
     vayu::http::routes::apply_config_update (*db_, R"({"entries":{"workers":"abc"}})");
     EXPECT_EQ (status, 400);
     const auto message = body["error"]["message"].get<std::string> ();
-    EXPECT_NE (message.find ("workers"), std::string::npos);
+    EXPECT_NE (message.find ("Worker Threads"), std::string::npos);
     EXPECT_NE (message.find ("integer"), std::string::npos);
 }
 
@@ -301,7 +302,7 @@ TEST_F (ConfigRouteTest, EnumUpdateRejectsValueOutsideOptionsWith400) {
     *db_, R"({"entries":{"defaultHttpVersion":"http3"}})");
     EXPECT_EQ (status, 400);
     const auto message = body["error"]["message"].get<std::string> ();
-    EXPECT_NE (message.find ("defaultHttpVersion"), std::string::npos);
+    EXPECT_NE (message.find ("Default HTTP Version"), std::string::npos);
     EXPECT_NE (message.find ("http3"), std::string::npos);
 }
 
@@ -968,7 +969,8 @@ TEST_F (ConfigRouteTest, ManualProxyModeWithoutUrlIs400) {
     auto [status, body] = vayu::http::routes::apply_config_update (
     *db_, R"({"entries":{"proxyMode":"manual"}})");
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("proxyUrl"),
+    // Names the field's own label ("Proxy URL"), not the wire key.
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("Proxy URL"),
     std::string::npos)
     << body.dump ();
 }

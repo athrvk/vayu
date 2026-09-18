@@ -101,12 +101,13 @@ export default [
 			"jsx-a11y/no-autofocus": "off",
 
 			// The rule recognises a nested control by lower-case tag name, so it
-			// cannot see that `Switch`, `Input` and `SelectTrigger` each render one
-			// native labelable element and nothing else - the association it asks
-			// for is already there. Naming them is what the option is for.
+			// cannot see that `Switch`, `Input`, `SelectTrigger` and `Checkbox`
+			// each render one native labelable element and nothing else - the
+			// association it asks for is already there. Naming them is what the
+			// option is for.
 			"jsx-a11y/label-has-associated-control": [
 				"error",
-				{ controlComponents: ["Switch", "Input", "SelectTrigger"] },
+				{ controlComponents: ["Switch", "Input", "SelectTrigger", "Checkbox"] },
 			],
 
 			// `separator` is structural in the ARIA role table, but the window

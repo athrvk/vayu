@@ -14,6 +14,7 @@
 #include "vayu/core/schema_validation.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/schema_error_text.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
@@ -191,10 +192,13 @@ std::string pointer_of_context (const std::vector<std::string>& context) {
  *
  * Dropping them is cosmetic and deliberately allowed to break: if an upstream
  * release rewords this, a verdict gains its wrapper lines back and reads
- * noisier. That is a different bargain from parsing a keyword out of a message
- * (which `SchemaFailure` refuses to do), because nothing here can become
- * *wrong* - and the fallback below keeps a body from ever being reported as
- * failing with nothing to show for it.
+ * noisier. Checked against `error.description` directly, never
+ * `SchemaFailure::message` (built below by `humanize_schema_error`, which can
+ * read differently from the raw description it started from): a structural
+ * error's own wrapper text matches no keyword that function recognizes, so it
+ * always passes through unchanged, but pinning the check to the untranslated
+ * string is what keeps that true by construction rather than by happening not
+ * to collide today.
  */
 constexpr const char* STRUCTURAL_ERROR_PREFIX =
 "Failed to validate against schema associated with";
@@ -462,11 +466,13 @@ const nlohmann::json& body) {
     while (results.popError (error)) {
         SchemaFailure failure;
         failure.path = pointer_of_context (error.context);
-        failure.message = error.description.size () > limits::MAX_FAILURE_MESSAGE_BYTES ?
-        error.description.substr (0, limits::MAX_FAILURE_MESSAGE_BYTES) + "..." :
-        error.description;
+        const std::string humanized =
+        vayu::core::humanize_schema_error (root, error.description, error.jsonPointer);
+        failure.message = humanized.size () > limits::MAX_FAILURE_MESSAGE_BYTES ?
+        humanized.substr (0, limits::MAX_FAILURE_MESSAGE_BYTES) + "..." :
+        humanized;
 
-        if (failure.message.rfind (STRUCTURAL_ERROR_PREFIX, 0) == 0) {
+        if (error.description.rfind (STRUCTURAL_ERROR_PREFIX, 0) == 0) {
             structural.push_back (std::move (failure));
             continue;
         }

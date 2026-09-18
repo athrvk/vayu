@@ -189,38 +189,42 @@ std::unordered_map<std::string, std::string>& out) {
  */
 template <typename Value, typename Parse>
 std::string numeric_rejection (const vayu::db::ConfigEntry& entry,
-const std::string& key,
 const std::string& value,
 const char* expected,
 Parse parse) {
     try {
         const Value parsed = parse (value);
         if (entry.min_value && parsed < parse (*entry.min_value)) {
-            return std::format (
-            "'{}' must be at least {} (got {})", key, *entry.min_value, value);
+            return std::format ("'{}' must be at least {} (got {})",
+            entry.label, *entry.min_value, value);
         }
         if (entry.max_value && parsed > parse (*entry.max_value)) {
-            return std::format (
-            "'{}' must be at most {} (got {})", key, *entry.max_value, value);
+            return std::format ("'{}' must be at most {} (got {})", entry.label,
+            *entry.max_value, value);
         }
     } catch (...) {
-        return std::format ("'{}' must be {} (got '{}')", key, expected, value);
+        return std::format ("'{}' must be {} (got '{}')", entry.label, expected, value);
     }
     return {};
 }
 
 /** Why @p value is not one of this enum entry's options, or an empty string. */
-std::string enum_rejection (const vayu::db::ConfigEntry& entry,
-const std::string& key,
-const std::string& value) {
+std::string enum_rejection (const vayu::db::ConfigEntry& entry, const std::string& value) {
     std::vector<std::string> allowed;
     std::string allowed_list;
     if (entry.options) {
         try {
             for (const auto& option : nlohmann::json::parse (*entry.options)) {
                 std::string opt_value = option.at ("value").get<std::string> ();
+                std::string opt_label = option.value ("label", opt_value);
                 allowed.push_back (opt_value);
-                allowed_list += (allowed_list.empty () ? "" : ", ") + opt_value;
+                if (!allowed_list.empty ()) {
+                    allowed_list += ", ";
+                }
+                allowed_list += opt_label;
+                allowed_list += " ('";
+                allowed_list += opt_value;
+                allowed_list += "')";
             }
         } catch (const std::exception&) {
             // @deliberate: malformed options fall through with an empty
@@ -229,31 +233,31 @@ const std::string& value) {
         }
     }
     if (std::find (allowed.begin (), allowed.end (), value) == allowed.end ()) {
-        return std::format ("'{}' must be one of [{}] (got '{}')", key, allowed_list, value);
+        return std::format (
+        "'{}' must be one of [{}] (got '{}')", entry.label, allowed_list, value);
     }
     return {};
 }
 
 /** Why @p value does not satisfy the entry's declared type, or an empty string. */
-std::string type_rejection (const vayu::db::ConfigEntry& entry,
-const std::string& key,
-const std::string& value) {
+std::string type_rejection (const vayu::db::ConfigEntry& entry, const std::string& value) {
     if (entry.type == "integer") {
-        return numeric_rejection<int> (entry, key, value, "an integer",
+        return numeric_rejection<int> (entry, value, "an integer",
         [] (const std::string& text) { return std::stoi (text); });
     }
     if (entry.type == "number") {
-        return numeric_rejection<double> (entry, key, value, "a number",
+        return numeric_rejection<double> (entry, value, "a number",
         [] (const std::string& text) { return std::stod (text); });
     }
     if (entry.type == "boolean") {
         if (value != "true" && value != "false") {
-            return std::format ("'{}' must be 'true' or 'false' (got '{}')", key, value);
+            return std::format (
+            "'{}' must be 'true' or 'false' (got '{}')", entry.label, value);
         }
         return {};
     }
     if (entry.type == "enum") {
-        return enum_rejection (entry, key, value);
+        return enum_rejection (entry, value);
     }
     return {};
 }
@@ -275,23 +279,23 @@ const std::string& value) {
  * a rejection - it is how the app records "this machine has no proxy", and
  * clearing it is how `system` goes direct.
  */
-std::string key_rejection (const std::string& key, const std::string& value) {
+std::string key_rejection (const vayu::db::ConfigEntry& entry, const std::string& value) {
     // `correlationIdHeader` is a header *name*, and a name that is not one
     // would put a broken line on every request afterwards - the same shape of
     // invisible failure the proxy URL is refused for (issue #1229).
-    if (key == std::string (vayu::http::CORRELATION_ID_HEADER_KEY)) {
+    if (entry.key == std::string (vayu::http::CORRELATION_ID_HEADER_KEY)) {
         if (const auto rejection = vayu::http::unusable_header_name (value)) {
-            return "'correlationIdHeader' is not usable: " + *rejection;
+            return "'" + entry.label + "' is not usable: " + *rejection;
         }
     }
-    if (key == "customCaCertificates" && !value.empty ()) {
+    if (entry.key == "customCaCertificates" && !value.empty ()) {
         if (const auto rejection = vayu::http::ca_pem_rejection (value)) {
-            return "'customCaCertificates' is not a usable PEM bundle: " + *rejection;
+            return "'" + entry.label + "' is not a usable PEM bundle: " + *rejection;
         }
     }
-    if (key == "proxySystemUrl" && !value.empty ()) {
+    if (entry.key == "proxySystemUrl" && !value.empty ()) {
         if (const auto rejection = vayu::http::proxy_url_rejection (value)) {
-            return "'proxySystemUrl' is not usable: " + *rejection;
+            return "'" + entry.label + "' is not usable: " + *rejection;
         }
     }
     return {};
@@ -317,11 +321,20 @@ const std::unordered_map<std::string, std::string>& updates) {
         const auto stored = db.get_config_entry (key);
         return stored ? stored->value : std::string ();
     };
+    // The display label a key's own catalogue row carries, or the wire key
+    // itself if the row is somehow missing - the same defensive fallback
+    // `Registry::find` callers use for an element kind.
+    const auto label_of = [&] (const char* key) {
+        const auto entry = db.get_config_entry (key);
+        return entry ? entry->label : std::string (key);
+    };
     const std::string mode = effective ("proxyMode");
     const std::string url  = effective ("proxyUrl");
     if (vayu::http::proxy_mode_from_string (mode) == vayu::http::ProxyMode::Manual) {
         if (const auto rejection = vayu::http::proxy_url_rejection (url)) {
-            return "'proxyUrl' is required when 'proxyMode' is 'manual': " + *rejection;
+            return "'" + label_of ("proxyUrl") + "' is required when '" +
+            label_of ("proxyMode") + "' is '" +
+            vayu::http::proxy_mode_label (vayu::http::ProxyMode::Manual) + "': " + *rejection;
         }
         return std::nullopt;
     }
@@ -330,7 +343,7 @@ const std::unordered_map<std::string, std::string>& updates) {
     // validated but not required.
     if (!url.empty ()) {
         if (const auto rejection = vayu::http::proxy_url_rejection (url)) {
-            return "'proxyUrl' is not usable: " + *rejection;
+            return "'" + label_of ("proxyUrl") + "' is not usable: " + *rejection;
         }
     }
     return std::nullopt;
@@ -391,9 +404,9 @@ const std::function<void ()>& before_write) {
             continue;
         }
 
-        std::string reason = type_rejection (*existing, key, value);
+        std::string reason = type_rejection (*existing, value);
         if (reason.empty ()) {
-            reason = key_rejection (key, value);
+            reason = key_rejection (*existing, value);
         }
         if (!reason.empty ()) {
             errors.push_back (reason);

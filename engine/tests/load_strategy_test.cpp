@@ -22,6 +22,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -1380,7 +1381,9 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesAConfigItsKindsSchemaReje
     { "kind", "assert.status" }, { "config", { { "expected", 200 } } } } }) } };
     auto reason = vayu::core::validate_request_elements_run_override (config);
     ASSERT_HAS_VALUE (reason);
-    EXPECT_NE (reason->find ("assert.status"), std::string::npos) << *reason;
+    // The refusal names the kind's label ("Assert status code",
+    // `make_assert_status_kind`), not its wire kind.
+    EXPECT_NE (reason->find ("Assert status code"), std::string::npos) << *reason;
 }
 
 TEST (RequestElementsRunOverrideValidationTest, AcceptsAScriptPreAndAnAssertStatus) {
@@ -1417,7 +1420,10 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesAControllerKind) {
     { "kind", "control.once" }, { "config", nlohmann::json::object () } } }) } };
     auto reason = vayu::core::validate_request_elements_run_override (config);
     ASSERT_HAS_VALUE (reason);
-    EXPECT_NE (reason->find ("control.once"), std::string::npos) << *reason;
+    // The refusal names the kind's human-readable label, not its wire kind -
+    // "Once only" is what `make_control_once_kind` sets as `label`.
+    EXPECT_NE (reason->find ("Once only"), std::string::npos) << *reason;
+    EXPECT_NE (reason->find ("scenario"), std::string::npos) << *reason;
 }
 
 TEST (RequestElementsRunOverrideValidationTest, RefusesTimerPacingAndThroughput) {
@@ -1425,13 +1431,19 @@ TEST (RequestElementsRunOverrideValidationTest, RefusesTimerPacingAndThroughput)
         { "timer.pacing", { { "everyMs", 1000 } } },
         { "timer.throughput", { { "targetPerMinute", 60 } } },
     };
+    // The label each kind sets (`make_timer_pacing_kind` / `make_timer_throughput_kind`),
+    // since the refusal names that rather than the wire kind string.
+    const std::unordered_map<std::string, std::string> labels{
+        { "timer.pacing", "Pacing" },
+        { "timer.throughput", "Throughput" },
+    };
     for (const auto& [kind, valid_config] : cases) {
         const nlohmann::json config{ { "requestElements",
         nlohmann::json::array ({ nlohmann::json{
         { "id", "el_1" }, { "kind", kind }, { "config", valid_config } } }) } };
         auto reason = vayu::core::validate_request_elements_run_override (config);
         ASSERT_HAS_VALUE (reason) << kind;
-        EXPECT_NE (reason->find (kind), std::string::npos) << *reason;
+        EXPECT_NE (reason->find (labels.at (kind)), std::string::npos) << *reason;
     }
 }
 
@@ -1451,7 +1463,7 @@ TEST (RequestElementsRunOverrideValidationTest, AcceptsEveryPhaseZeroExtractAndA
 // names no id must get one rather than a 400 asking it to invent one.
 // Mutation check: drop the `stamp_default_element_ids` call in
 // `validate_request_elements_run_override` and this reddens on
-// `Registry::validate`'s own "'id' must be a non-empty string" refusal.
+// `Registry::validate`'s own "Item 1 is missing an id" refusal.
 TEST (RequestElementsRunOverrideValidationTest, AcceptsAnEntryWithNoId) {
     const nlohmann::json config{ { "requestElements",
     nlohmann::json::array ({ nlohmann::json{ { "kind", "assert.status" },

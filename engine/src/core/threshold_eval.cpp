@@ -32,6 +32,11 @@ enum class Direction : std::uint8_t {
 /// the failure that would produce is silent, a key accepted and never checked.
 struct ThresholdMetric {
     const char* key;
+    /// Display name, the same one `budgets.ts`'s `BUDGET_FIELDS` shows beside
+    /// this key's field in the Load Test dialog - a rejection names this, not
+    /// the wire key, the same rule `ElementKind::label` follows for element
+    /// validation.
+    const char* label;
     Direction direction;
     double min_limit;
     /// Whether `min_limit` itself is a legal budget. True only for the error
@@ -93,38 +98,44 @@ bool assertion_data_present (const RunSummaryInputs& inputs) {
 /// Every budget a run may declare, in the order the report lists them.
 const std::array<ThresholdMetric, 6>& metrics () {
     static const std::array<ThresholdMetric, 6> table = { {
-    { "latencyP50Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
+    { "latencyP50Ms", "p50 latency", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p50; },
     [] (const RunSummaryInputs& in) { return in.latency.count > 0; } },
-    { "latencyP95Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
+    { "latencyP95Ms", "p95 latency", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p95; },
     [] (const RunSummaryInputs& in) { return in.latency.count > 0; } },
-    { "latencyP99Ms", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
+    { "latencyP99Ms", "p99 latency", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p99; },
     [] (const RunSummaryInputs& in) { return in.latency.count > 0; } },
-    { "maxErrorRatePct", Direction::AtMost, 0.0, true, 100.0, "between 0 and 100",
+    { "maxErrorRatePct", "Error rate", Direction::AtMost, 0.0, true, 100.0, "between 0 and 100",
     "It is a percentage of the run's requests.", measured_error_rate, nullptr },
-    { "minThroughputRps", Direction::AtLeast, 0.0, false, MAX_THROUGHPUT_BUDGET_RPS,
+    { "minThroughputRps", "Throughput", Direction::AtLeast, 0.0, false, MAX_THROUGHPUT_BUDGET_RPS,
     "greater than 0 and at most 1000000000", "It is a completed-requests-per-second floor.",
     [] (const RunSummaryInputs& in) { return in.throughput; }, nullptr },
-    { "maxAssertionFailureRatePct", Direction::AtMost, 0.0, true, 100.0,
-    "between 0 and 100", "It is a percentage of this run's assert.* and pm.test outcomes.",
+    { "maxAssertionFailureRatePct", "Assertion failure rate", Direction::AtMost, 0.0,
+    true, 100.0, "between 0 and 100", "It is a percentage of this run's assert.* and pm.test outcomes.",
     measured_assertion_failure_rate, assertion_data_present },
     } };
     return table;
 }
 
-/// The known keys, for a rejection that tells the caller what it may send.
+/// The known budgets, for a rejection that tells the caller what it may send -
+/// each one's display label with its wire key alongside, since a caller typing
+/// JSON needs the key and a person reading the message needs the label.
 std::string known_keys () {
     std::string keys;
     for (const auto& metric : metrics ()) {
         if (!keys.empty ()) {
             keys += ", ";
         }
+        keys += "'";
+        keys += metric.label;
+        keys += "' (";
         keys += metric.key;
+        keys += ")";
     }
     return keys;
 }
@@ -245,18 +256,17 @@ std::optional<std::string> validate_fail_run_key (const nlohmann::json& value) {
 /// of a fractional or huge value is itself undefined, and this is the guard
 /// that has to be total.
 std::optional<std::string> validate_known_metric_limit (const ThresholdMetric& metric,
-const std::string& key,
 const nlohmann::json& value) {
     if (!value.is_number ()) {
-        return "'thresholds." + key + "' must be a number (got " +
+        return "'" + std::string (metric.label) + "' must be a number (got " +
         std::string (value.type_name ()) + ")";
     }
     const double limit   = value.get<double> ();
     const bool under_min = metric.min_inclusive ? limit < metric.min_limit :
                                                   !(limit > metric.min_limit);
     if (!std::isfinite (limit) || under_min || limit > metric.max_limit) {
-        return "'thresholds." + key + "' must be " + metric.range + " (got " +
-        value.dump () + "). " + metric.why;
+        return "'" + std::string (metric.label) + "' must be " + metric.range +
+        " (got " + value.dump () + "). " + metric.why;
     }
     return std::nullopt;
 }
@@ -306,7 +316,7 @@ std::optional<std::string> validate_thresholds (const nlohmann::json& config) {
             continue;
         }
         if (const ThresholdMetric* metric = find_metric (key); metric != nullptr) {
-            if (auto reason = validate_known_metric_limit (*metric, key, value)) {
+            if (auto reason = validate_known_metric_limit (*metric, value)) {
                 return reason;
             }
             ++declared;
