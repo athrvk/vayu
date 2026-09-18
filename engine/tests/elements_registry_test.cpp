@@ -129,9 +129,9 @@ TEST_F (ElementsRegistryTest, AnUnknownKindNamesItselfAndTheKnownList) {
     { json{ { "id", "el_1" }, { "kind", "assert.sttus" }, { "enabled", true } } });
     auto reason = Registry::instance ().validate (elements);
     ASSERT_HAS_VALUE (reason);
-    EXPECT_NE (reason->find ("elements[0]"), std::string::npos);
+    EXPECT_NE (reason->find ("Item 1"), std::string::npos);
     EXPECT_NE (reason->find ("assert.sttus"), std::string::npos);
-    EXPECT_NE (reason->find ("not a known element kind"), std::string::npos);
+    EXPECT_NE (reason->find ("unrecognized kind"), std::string::npos);
 }
 
 TEST_F (ElementsRegistryTest, ABadConfigFieldNamesTheElementAndTheKind) {
@@ -140,8 +140,8 @@ TEST_F (ElementsRegistryTest, ABadConfigFieldNamesTheElementAndTheKind) {
     auto reason         = Registry::instance ().validate (elements);
     ASSERT_HAS_VALUE (reason)
     << "config is missing the required 'message' field";
-    EXPECT_NE (reason->find ("elements[0]"), std::string::npos);
-    EXPECT_NE (reason->find ("test.echo"), std::string::npos);
+    EXPECT_NE (reason->find ("item 1"), std::string::npos);
+    EXPECT_NE (reason->find ("Test echo"), std::string::npos);
 }
 
 TEST_F (ElementsRegistryTest, ADuplicateIdIsRejected) {
@@ -152,7 +152,8 @@ TEST_F (ElementsRegistryTest, ADuplicateIdIsRejected) {
     { "config", { { "elementId", "el_y" } } } } });
     auto reason = Registry::instance ().validate (elements);
     ASSERT_HAS_VALUE (reason);
-    EXPECT_NE (reason->find ("duplicate id 'el_1'"), std::string::npos);
+    EXPECT_NE (reason->find ("Item 2"), std::string::npos);
+    EXPECT_NE (reason->find ("same id ('el_1')"), std::string::npos);
 }
 
 TEST_F (ElementsRegistryTest, AWellFormedListValidatesCleanly) {

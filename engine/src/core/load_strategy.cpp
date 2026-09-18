@@ -477,11 +477,10 @@ const nlohmann::json& config) {
         kind_name) != REQUEST_ELEMENTS_SUPPORTED_KINDS.end ();
         if (!is_supported) {
             return std::format (
-            "requestElements[{}]: '{}' does not run on a single-target load "
-            "run - only extract.*, assert.*, timer.think and "
-            "script.pre/script.post do; run this as part of a \"scenario\" "
-            "instead",
-            i, kind_name);
+            "Step {}: '{}' can only be used in a scenario, not a "
+            "single-request load test. Remove it, or run this as a "
+            "scenario instead",
+            i + 1, kind != nullptr ? kind->label : kind_name);
         }
     }
     return std::nullopt;

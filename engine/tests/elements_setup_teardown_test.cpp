@@ -65,7 +65,7 @@ TEST (ScriptLifecyclePlacementTest, RefusedOnARequestByTheRegistry) {
     auto reason         = vayu::core::Registry::instance ().validate (
     elements, vayu::core::ElementOwner::Request);
     ASSERT_HAS_VALUE (reason);
-    EXPECT_NE (reason->find ("may only be added to a collection"), std::string::npos)
+    EXPECT_NE (reason->find ("can only be added to a collection"), std::string::npos)
     << *reason;
 }
 
@@ -143,8 +143,8 @@ TEST (LifecycleElementsRunOverrideValidationTest, AcceptsSetupAndTeardown) {
 // this must not 400 the same way `apply_elements_field` (routes.hpp) does
 // not for a stored request/collection's `elements`. Mutation check: drop the
 // `stamp_default_element_ids` call in `validate_lifecycle_elements_run_override`
-// and this reddens on `Registry::validate`'s own "'id' must be a non-empty
-// string" refusal.
+// and this reddens on `Registry::validate`'s own "Item 1 is missing an id"
+// refusal.
 TEST (LifecycleElementsRunOverrideValidationTest, AcceptsAnEntryWithNoId) {
     const json config{ { "lifecycleElements",
     json::array ({ json{ { "kind", "script.setup" }, { "config", { { "script", "" } } } } }) } };
