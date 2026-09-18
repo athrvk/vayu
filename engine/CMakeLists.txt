@@ -542,6 +542,7 @@ add_library(vayu_core STATIC
     src/core/spec_diff.cpp
     src/core/spec_coverage.cpp
     src/core/schema_validation.cpp
+    src/core/schema_error_text.cpp
     src/core/run_manager.cpp
     src/core/metrics_collector.cpp
     src/core/sample_capture.cpp

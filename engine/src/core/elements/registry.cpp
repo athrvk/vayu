@@ -8,6 +8,7 @@
 #include "vayu/core/elements.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/schema_error_text.hpp"
 
 #include <valijson/adapters/nlohmann_json_adapter.hpp>
 #include <valijson/schema.hpp>
@@ -98,9 +99,8 @@ size_t index) {
         const valijson::adapters::NlohmannJsonAdapter adapter (kind.config_schema);
         parser.populateSchema (adapter, parsed);
     } catch (const std::exception& e) {
-        return std::format (
-        "elements[{}] (kind '{}'): its schema could not be read - {}", index,
-        kind.kind, e.what ());
+        return std::format ("'{}' (item {}): its schema could not be read - {}",
+        kind.label, index + 1, e.what ());
     }
 
     valijson::ValidationResults results;
@@ -111,7 +111,8 @@ size_t index) {
     }
     valijson::ValidationResults::Error error;
     if (results.popError (error) && !error.description.empty ()) {
-        return std::format ("'{}' (item {}): {}", kind.label, index + 1, error.description);
+        return std::format ("'{}' (item {}): {}", kind.label, index + 1,
+        humanize_schema_error (kind.config_schema, error.description, error.jsonPointer));
     }
     return std::format (
     "'{}' (item {}): its settings do not match what this element expects",
