@@ -124,8 +124,10 @@ TEST (LifecycleElementsRunOverrideValidationTest, RefusesAnyKindOtherThanSetupOr
     { "config", { { "expected", 200 } } } } }) } };
     auto reason = vayu::core::validate_lifecycle_elements_run_override (config);
     ASSERT_HAS_VALUE (reason);
-    EXPECT_NE (reason->find ("lifecycleElements[0]"), std::string::npos) << *reason;
-    EXPECT_NE (reason->find ("assert.status"), std::string::npos) << *reason;
+    EXPECT_NE (reason->find ("Step 1"), std::string::npos) << *reason;
+    // The refusal names the kind's label ("Assert status code",
+    // `make_assert_status_kind`), not its wire kind.
+    EXPECT_NE (reason->find ("Assert status code"), std::string::npos) << *reason;
 }
 
 TEST (LifecycleElementsRunOverrideValidationTest, AcceptsSetupAndTeardown) {

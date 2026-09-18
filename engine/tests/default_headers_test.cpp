@@ -402,8 +402,8 @@ TEST_F (DefaultHeaderConfigTest, ANameThatIsNotOneIsRefusedAtTheWritePath) {
     *db_, R"({"entries":{"correlationIdHeader":"X Request Id"}})");
 
     EXPECT_EQ (status, 400);
-    EXPECT_NE (body.dump ().find ("correlationIdHeader"), std::string::npos)
-    << body.dump ();
+    // Names the field's own label ("Header name"), not the wire key.
+    EXPECT_NE (body.dump ().find ("Header name"), std::string::npos) << body.dump ();
     // Refused, so nothing was stored: the send path still has a usable name.
     const auto policy =
     vayu::http::resolve_default_header_policy (*db_, DefaultHeaderScope::Design);

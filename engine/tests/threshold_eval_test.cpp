@@ -24,6 +24,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <string>
+#include <unordered_map>
+
 #include "optional_assert.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/threshold_eval.hpp"
@@ -68,14 +71,36 @@ vayu::core::ThresholdCheck only_check (const std::optional<ThresholdOutcome>& ou
     return outcome->checks.at (0);
 }
 
-/// Assert rejection and that the message names the offending key - a 400 whose
-/// body does not say which budget is wrong is barely better than silence.
+/// The label `threshold_eval.cpp`'s own metrics table shows for each of its
+/// fixed keys, mirrored here so a rejection's wording can be asserted without
+/// a second copy of the engine's own table - drift between the two shows up
+/// as a test failure rather than silently.
+const std::unordered_map<std::string, std::string>& metric_labels () {
+    static const std::unordered_map<std::string, std::string> labels{
+        { "latencyP50Ms", "p50 latency" },
+        { "latencyP95Ms", "p95 latency" },
+        { "latencyP99Ms", "p99 latency" },
+        { "maxErrorRatePct", "Error rate" },
+        { "minThroughputRps", "Throughput" },
+        { "maxAssertionFailureRatePct", "Assertion failure rate" },
+    };
+    return labels;
+}
+
+/// Assert rejection and that the message names the offending budget - a 400
+/// whose body does not say which one is wrong is barely better than silence.
+/// @p key is the wire key; the message itself names the field's *label* for a
+/// key this engine defines (`metric_labels`), or the wire key verbatim for one
+/// it does not (an unknown key, `failRun`, or a `custom.<name>.<stat>` key the
+/// caller typed itself, none of which have a label to show instead).
 void expect_rejected (const nlohmann::json& thresholds, const std::string& key) {
     auto reason = validate_thresholds (config_with (thresholds));
     ASSERT_HAS_VALUE (reason)
     << "expected rejection for " << key << " in " << thresholds.dump ();
-    EXPECT_NE (reason->find (key), std::string::npos)
-    << "message should name '" << key << "', got: " << *reason;
+    const auto label = metric_labels ().find (key);
+    const std::string& expected = label != metric_labels ().end () ? label->second : key;
+    EXPECT_NE (reason->find (expected), std::string::npos)
+    << "message should name '" << expected << "', got: " << *reason;
 }
 
 } // namespace
