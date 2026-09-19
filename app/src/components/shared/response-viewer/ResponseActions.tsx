@@ -20,16 +20,16 @@
  *     detected body type; history always used `.txt`, and has to keep doing so -
  *     `ResponseData` has no `bodyType` field at all, so unifying on it would
  *     have produced `response-1234.undefined` on every history download.
- *   - **How long the tick lasts.** One used `TIMING.STATUS_RESET_MS`, the other
- *     a literal `2000`. Equal today, which is exactly why it would have drifted
- *     unnoticed. The shared constant wins; it is not a per-caller concern.
+ *
+ * The third difference, how long the tick lasts, is gone rather than a prop:
+ * one copy used `TIMING.STATUS_RESET_MS` and the other a literal `2000`, and
+ * the tick is now `useCopy`'s (`TIMING.COPY_RESET_MS`) for the whole app.
  */
 
-import { useState } from "react";
 import { Copy, Check, Download } from "lucide-react";
-import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { Button, IconSwap, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { useCopy } from "@/hooks/useCopy";
 import { cn } from "@/lib/utils";
-import { TIMING } from "@/config/timing";
 
 export interface ResponseActionsProps {
 	/** The text to copy and to download. */
@@ -44,13 +44,7 @@ export interface ResponseActionsProps {
 }
 
 export function ResponseActions({ content, fileExtension, className }: ResponseActionsProps) {
-	const [copied, setCopied] = useState(false);
-
-	const handleCopy = async () => {
-		await navigator.clipboard.writeText(content);
-		setCopied(true);
-		setTimeout(() => setCopied(false), TIMING.STATUS_RESET_MS);
-	};
+	const { copy, copied } = useCopy({ feedback: "icon" });
 
 	const handleDownload = () => {
 		const blob = new Blob([content], { type: "text/plain" });
@@ -70,15 +64,19 @@ export function ResponseActions({ content, fileExtension, className }: ResponseA
 					<Button
 						size="icon"
 						variant="ghost"
-						onClick={handleCopy}
+						onClick={() => void copy(content, "Response")}
 						aria-label="Copy response"
 					>
-						{copied ? (
-							// The only feedback that the copy happened.
-							<Check className="w-3.5 h-3.5 text-status-success-text" />
-						) : (
-							<Copy className="w-3.5 h-3.5" />
-						)}
+						{/* The check is the only feedback that the copy happened -
+						    and, through `useCopy`, a denied clipboard now says so
+						    instead of leaving the glyph untouched. */}
+						<IconSwap
+							state={copied ? "copied" : "copy"}
+							icons={{
+								copy: <Copy className="w-3.5 h-3.5" />,
+								copied: <Check className="w-3.5 h-3.5 text-status-success-text" />,
+							}}
+						/>
 					</Button>
 				</TooltipTrigger>
 				<TooltipContent>Copy response</TooltipContent>

@@ -2697,6 +2697,20 @@ unreachable and undismissable.
 dismisses itself on a timer and always reports something the user just asked
 for, so interrupting what they are reading is the wrong trade.
 
+### Copy feedback
+
+A copy is acknowledged one of two ways, and which one is decided by the control, not by the surface:
+
+- **An icon button swaps its glyph**: `IconSwap` from Copy to Check, through `useCopy({ feedback: "icon" })`. No toast beside it - the swap already said it.
+- **A menu item or a text button toasts**: plain `useCopy()`, whose toast names the value that was copied, so a surface with several copy controls says which one it means.
+
+**One duration, `TIMING.COPY_RESET_MS`, and the hook owns the timer.** This used to be three - 1500ms in the MCP settings panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the response viewer and the snippet section - because each call site kept its own `copied` flag and its own `setTimeout`.
+
+**Every clipboard write goes through `useCopy`.** `navigator.clipboard.writeText` rejects on a denied permission, an unfocused document, or a platform with no clipboard behind the API, and a call site that awaits it with no catch simply never reaches the line that draws the feedback: the copy fails and the user's only evidence is pasting the previous clipboard contents somewhere else. `clipboard-single-writer.test.ts` holds the rule to two files - the hook, and `errors/ErrorBoundary.tsx`, which runs when the tree below it has already failed and no hook is reachable.
+
+**A failure toasts in both modes.** An icon button has no failure glyph, and a check that simply never appears is the same silence again.
+
+
 ### Destructive Actions
 
 ```tsx

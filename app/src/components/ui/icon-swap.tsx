@@ -10,8 +10,14 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface IconSwapProps<S extends string> {
-	/** Which icon is live right now - one of `icons`' keys. */
-	state: S;
+	/**
+	 * Which icon is live right now - one of `icons`' keys.
+	 *
+	 * `NoInfer` so `S` is fixed by the `icons` map alone: inferring from both
+	 * would let a literal `state="copy"` narrow `S` to just that one key and
+	 * then reject the rest of the map as excess properties.
+	 */
+	state: NoInfer<S>;
 	/**
 	 * Every icon this control can show, keyed by state: e.g.
 	 * `{ copy: <Copy .../>, copied: <Check .../> }`. All of them render, so the
