@@ -51,6 +51,22 @@ export const TIMING = {
 	STATUS_RESET_MS: 2000,
 
 	/**
+	 * How long a copy button's check stays in place of its Copy glyph.
+	 *
+	 * The one duration for the whole app's copy acknowledgement (#1686). It
+	 * replaces three that meant the same thing - 1500ms in the MCP settings
+	 * panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the
+	 * response viewer and the snippet section - and it is read only by
+	 * `useCopy`, which is now the only thing that schedules the reset.
+	 *
+	 * Kept separate from `STATUS_RESET_MS` despite the equal value: that one is
+	 * any transient in-component status, this one is specifically the
+	 * clipboard's, and a change to how long "Copied" lingers should not move an
+	 * unrelated indicator with it.
+	 */
+	COPY_RESET_MS: 2000,
+
+	/**
 	 * How long a just-created row stays highlighted so the eye can find it.
 	 *
 	 * The Services drawer orders inboxes by port, so a new one lands wherever

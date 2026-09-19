@@ -44,7 +44,7 @@ import type { MockServerOptions } from "./mock-server-options";
 
 export default function MockServerControl({ collectionId }: { collectionId: string }) {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const openTab = useTabsStore((s) => s.openTab);
 	const mocksQuery = useMockServersQuery();
 	const startMock = useStartMockServerMutation();
