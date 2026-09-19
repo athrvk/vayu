@@ -1364,6 +1364,28 @@
  * origin is the defect rule 2 exists to prevent, and the frame's centre is
  * where that rotation would want to happen.
  */
+/*
+ * `scale` - FolderOpen, Braces. The whole glyph grows 10%, which is the only
+ * motion available to a single-path icon that draws no part a hinge could
+ * belong to: FolderOpen is one path, and Braces is two curves whose whole
+ * meaning is the gap between them, so moving either curve says "mismatched
+ * brace" rather than "open".
+ *
+ * 10%, not the 2% press feedback uses: press feedback is confirmation of a
+ * click on a whole button, while this has to read across 16px of ink on its
+ * own. The `svg` itself scales about the frame's centre, so a 16px glyph grows
+ * 0.8px on each side and stays inside the button's own box - there is no
+ * neighbour for it to collide with in a rail one icon wide.
+ */
+[data-icon-motion="scale"] {
+	transform-origin: 50% 50%;
+	transition: scale var(--icon-motion-duration) var(--ease-enter);
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="scale"] {
+	scale: 1.1;
+}
+
 [data-icon-motion="nudge-x"],
 [data-icon-motion="nudge-y"] {
 	transform-origin: 50% 50%;
