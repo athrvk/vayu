@@ -1771,46 +1771,6 @@
 }
 
 /*
- * `ring` - Bell. +12deg, -10deg, +6deg, 0: a decaying swing, which is what a
- * struck bell does and what a single rotation does not. About the point the
- * bell hangs from, the top centre of the dome - lucide's arc peaks at (12,2),
- * so 50% and 2/24 = 8.333%.
- *
- * Four steps at the panel tier is 45ms a step, fast enough to read as a
- * flicker, so this is the panel tier doubled - the same allowance `hands` and
- * `waves` take, and for the same reason.
- *
- * A 12deg swing about a point at the top carries the dome's bottom-left corner
- * out to about x 0.3, so the frame clips it: `overflow: visible`.
- */
-[data-icon-motion="ring"] {
-	overflow: visible;
-	transform-origin: 50% 8.333%;
-}
-
-:where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="ring"] {
-	animation: icon-ring calc(var(--dur-panel-in) * 2) var(--ease-enter);
-}
-
-@keyframes icon-ring {
-	0% {
-		rotate: 0deg;
-	}
-	25% {
-		rotate: 12deg;
-	}
-	55% {
-		rotate: -10deg;
-	}
-	80% {
-		rotate: 6deg;
-	}
-	100% {
-		rotate: 0deg;
-	}
-}
-
-/*
  * `spin-back` - RotateCcw. `spin-once` read the other way round, and the
  * distinction is the whole point: `RefreshCw` means "do it again", `RotateCcw`
  * means "put it back", and a glyph that turns against its own arrowheads would

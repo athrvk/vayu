@@ -47,7 +47,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render } from "@testing-library/react";
 import {
-	Bell,
 	Braces,
 	ChevronDown,
 	ChevronRight,
@@ -64,7 +63,6 @@ import {
 	Search,
 	Trash2,
 	Upload,
-	X,
 	Zap,
 	type LucideIcon,
 } from "lucide-react";
@@ -279,7 +277,6 @@ const MOTION_GLYPH: Record<string, LucideIcon> = {
 	[ICON_MOTION.lift]: Upload,
 	[ICON_MOTION.press]: Save,
 	[ICON_MOTION.tiltPin]: Pin,
-	[ICON_MOTION.ring]: Bell,
 	[ICON_MOTION.spinOnce]: RefreshCw,
 	[ICON_MOTION.spinBack]: RotateCcw,
 	[ICON_MOTION.flash]: Zap,
@@ -302,7 +299,6 @@ const FRAME_LEAVING = [
 	ICON_MOTION.tilt,
 	ICON_MOTION.lift,
 	ICON_MOTION.tiltPin,
-	ICON_MOTION.ring,
 ] as const;
 
 describe("icon motion: the nth-child indices lucide's glyphs justify", () => {

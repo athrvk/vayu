@@ -3278,7 +3278,6 @@ stylesheet does not implement is a compile error rather than a dead attribute.
 | `lift` | `Upload` | The arrow rises 2px out of its tray; the tray stays | `--dur-tooltip-in` | yes |
 | `press` | `Save` | The whole glyph goes to 92% and back, a button pressed | `--dur-panel-in` | no |
 | `tilt-pin` | `Pin`, `PinOff` | Leans `-20deg` about the needle's point (12,22) and rights itself | `--dur-panel-in` | yes |
-| `ring` | `Bell` | A decaying swing (`+12deg`, `-10deg`, `+6deg`, 0) about the point it hangs from (12,2) | `--dur-panel-in` x2 | yes |
 | `spin-once` | `RefreshCw` | One 360deg turn (`@keyframes icon-spin-once`), so pointer-out does not unwind it backwards | `--dur-panel-in` | no |
 | `spin-back` | `RotateCcw` | The same turn counter-clockwise, for "put it back" rather than "do it again" | `--dur-panel-in` | no |
 | `flash` | `Zap` | Dims to 40% and back with a 6% grow - a strike, not a movement | `--dur-panel-in` | no |
@@ -3292,8 +3291,8 @@ A motion whose ink leaves the 24-unit viewBox sets `overflow: visible` on the
 simply cut off at every call site. The column above is the list, and
 `icon-motion.test.tsx` holds it to the stylesheet.
 
-A sequence that genuinely needs longer than its tier - `hands`, `waves`,
-`ring` - multiplies the token (`calc(var(--dur-panel-in) * 2)`) rather than
+A sequence that genuinely needs longer than its tier - `hands` and `waves` -
+multiplies the token (`calc(var(--dur-panel-in) * 2)`) rather than
 introducing a literal, and says why in the rule's comment. A stagger inside a
 sequence is keyframe percentages, never `animation-delay`: the reduced-motion
 rules collapse a duration, not a delay, so a delayed step would survive them as

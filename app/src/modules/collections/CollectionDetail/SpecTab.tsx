@@ -53,7 +53,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Download, FileJson, Link2, Loader2, Trash2, Upload } from "lucide-react";
 
-import { Button, Input, Skeleton } from "@/components/ui";
+import { Button, Input, Skeleton, ICON_MOTION } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { apiService } from "@/services/api";
 import {
@@ -326,7 +326,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							onClick={() => fileInputRef.current?.click()}
 							disabled={bindSpec.isPending}
 						>
-							<Upload className="mr-2 size-icon" />
+							<Upload
+								className="mr-2 size-icon"
+								data-icon-motion={ICON_MOTION.lift}
+							/>
 							Choose file
 						</Button>
 						<input
@@ -454,7 +457,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				<div>
 					<SectionLabel>Export</SectionLabel>
 					<Button variant="outline" onClick={() => setExporting(true)}>
-						<Download className="mr-2 size-icon" />
+						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Export as OpenAPI
 					</Button>
 					<p className="mt-1 text-[11px] text-muted-foreground">

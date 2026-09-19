@@ -445,8 +445,14 @@ function EnvSwitcher() {
 					<Plus className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.rotate90} />
 					<span className="flex-1">New Environment</span>
 				</DropdownMenuItem>
-				<DropdownMenuItem onClick={openImport} className="text-xs gap-2">
-					<Download className="w-3.5 h-3.5" />
+				<DropdownMenuItem
+					onClick={openImport}
+					// `group`: same as the New Environment item above - a
+					// DropdownMenuItem is not a `[data-slot="button"]`, so the item
+					// has to be the owner whose hover the glyph answers.
+					className="group text-xs gap-2"
+				>
+					<Download className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.drop} />
 					<span className="flex-1">Import Environment...</span>
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />

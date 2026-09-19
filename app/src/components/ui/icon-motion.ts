@@ -47,7 +47,6 @@
  * - `lift` - Upload. The arrow rises 2px out of its tray; the tray stays.
  * - `press` - Save. The whole glyph goes to 92% and back, a button pressed.
  * - `tilt-pin` - Pin. Leans -20deg off its own point and rights itself.
- * - `ring` - Bell. A decaying swing about the point it hangs from.
  * - `spin-once` - RefreshCw. One 360deg turn, as feedback for "do it again".
  * - `spin-back` - RotateCcw. The same turn the other way, for "put it back".
  * - `flash` - Zap. Dims to 40% and back with a 6% grow.
@@ -69,7 +68,6 @@ export const ICON_MOTION = {
 	lift: "lift",
 	press: "press",
 	tiltPin: "tilt-pin",
-	ring: "ring",
 	spinOnce: "spin-once",
 	spinBack: "spin-back",
 	flash: "flash",
