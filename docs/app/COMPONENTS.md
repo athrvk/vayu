@@ -1577,6 +1577,26 @@ inbox tab both render it, and as two copies they had drifted to two different wo
 (issue #556). `variant="chip"` per the Badge rule - any other variant keeps its own `hover:bg-*`,
 which `cn()` does not replace, so the warning fill would turn the accent colour under the pointer.
 
+## Drawer Section (`components/shared/DrawerSection.tsx`)
+
+A group of rows inside a drawer view, and its header: muted small type, an optional scope glyph, an
+optional count, an optional collapse chevron and a trailing actions slot. `DrawerPanel` gave the four
+views one frame; the groups *inside* a view had none - Services drew muted labels with a plus,
+Variables a chevron, an icon, a filled `Badge` count and a plus, and the collection rows wrote the
+same fact as inline `(2)` text one click away from that badge (issue #1688).
+
+**One count idiom, and the badge loses**: `DrawerSectionCount` is the muted inline count in
+parentheses, exported so a *row* inside a section writes it exactly as its header does - which is how
+`CollectionItem` stays in step without gaining a section header (its `DrawerPanel` band already says
+"Collections"; a section of the same name inside it would be the double heading this issue removed
+from Settings). A string count (`"-"`) is for a number the app does not have yet: a literal `0`
+beside "Couldn't load collections" asserts something untrue.
+
+**The header's semantics stay at the call site.** Variables' headers are `role="treeitem"` rows in a
+roving-tabindex tree, and the "+" beside one is deliberately outside that row - the tree has no
+create key, so the button is the drawer's own tab stop. `rowProps` and `activatorProps` are spread
+through, so this component owns the shape and never has to know about the tree.
+
 ## Field Error (`components/shared/FieldError.tsx`)
 
 The message under a control that will not take what you typed, and the bottom of the app's three

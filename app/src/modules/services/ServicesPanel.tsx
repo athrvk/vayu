@@ -36,6 +36,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Copy, KeyRound, Plus, Square, Trash2 } from "lucide-react";
 import {
 	DrawerPanel,
+	DrawerSection,
 	EmptyState,
 	ErrorState,
 	NonLoopbackBadge,
@@ -162,25 +163,6 @@ function ServiceRow({
 			</button>
 			{actions && <div className="flex shrink-0 items-center gap-0.5">{actions}</div>}
 		</div>
-	);
-}
-
-interface ServiceGroupProps {
-	title: string;
-	/** The group's own create affordance - "New inbox", "New issuer…". */
-	action?: React.ReactNode;
-	children: React.ReactNode;
-}
-
-function ServiceGroup({ title, action, children }: ServiceGroupProps) {
-	return (
-		<section className="mb-4">
-			<div className="flex items-center justify-between gap-1 px-3 py-1.5">
-				<h3 className="text-xs tracking-wider text-muted-foreground">{title}</h3>
-				{action}
-			</div>
-			{children}
-		</section>
 	);
 }
 
@@ -706,9 +688,9 @@ export default function ServicesPanel() {
 	return (
 		<DrawerPanel title="Services">
 			<div className="flex w-full flex-col py-2">
-				<ServiceGroup
+				<DrawerSection
 					title="Webhook inboxes"
-					action={
+					actions={
 						/* "New inbox", matching the issuer group's "New issuer", and a
 						   Plus rather than a Play: this always mints a *new* listener,
 						   and beside a stopped row a Play labelled "Start inbox" read
@@ -746,11 +728,11 @@ export default function ServicesPanel() {
 							/>
 						))
 					)}
-				</ServiceGroup>
+				</DrawerSection>
 
-				<ServiceGroup
+				<DrawerSection
 					title="OAuth issuers"
-					action={
+					actions={
 						<TooltipIconButton
 							label="New issuer"
 							icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -785,12 +767,12 @@ export default function ServicesPanel() {
 							/>
 						))
 					)}
-				</ServiceGroup>
+				</DrawerSection>
 
 				{/* No create affordance: a mock needs a collection to serve, and
 				    this drawer has none selected. The collection header starts
 				    one; this is where every running mock can be found. */}
-				<ServiceGroup title="Mock servers">
+				<DrawerSection title="Mock servers">
 					{showMockError ? (
 						<ErrorState
 							variant="inline"
@@ -807,7 +789,7 @@ export default function ServicesPanel() {
 					) : (
 						orderedMocks.map((mock) => <MockServerRow key={mock.mockId} mock={mock} />)
 					)}
-				</ServiceGroup>
+				</DrawerSection>
 			</div>
 
 			{newIssuerOpen && (

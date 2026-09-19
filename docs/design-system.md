@@ -1855,6 +1855,26 @@ header band, body below it.
   the height is a token and not an `h-8`: `TabStrip.tsx` and `DrawerPanel.tsx`
   cannot see each other, and `titlebar-height.test.ts` holds them together.
 
+- **A group inside a view is a `DrawerSection`, and a count is the muted inline
+  count.** The frame gave the four views one shape; the groups inside a view had
+  none. Services drew muted labels with a trailing plus, Variables drew a
+  chevron, an icon, a filled `Badge` count and a plus, and the collection rows
+  wrote the same fact as inline `(2)` text one click away from that badge - two
+  count idioms in one drawer. `DrawerSection` owns the shape (the padding, the
+  muted small type, the chevron, where the count sits, where the actions sit) and
+  the **badge idiom loses**: a count beside a group name is not a status and not a
+  control, it is the least important thing in the row, and a `Badge` gives it a
+  fill, a border, a 20px floor and the weight of a chip. `DrawerSectionCount` is
+  exported for a *row* to use the same idiom, which is how the collection tree
+  stays in step without gaining a section header - its panel band already says
+  "Collections", and a section of the same name inside it would be a double
+  heading.
+- **The section's ARIA stays at the call site.** Variables' headers are
+  `role="treeitem"` rows in a roving-tabindex tree and their "+" sits outside that
+  row on purpose (the tree has no create key, so the button is the drawer's own
+  tab stop). `rowProps` and `activatorProps` are spread through rather than
+  owned, so the primitive never has to know about the tree. Guard:
+  `DrawerSection.test.tsx`.
 - **The frame owns header padding; the body is flush.** Rows run edge to edge -
   the sidebar convention, and it recovers the ~32px of row width the old inset
   cost. Rows bring their own internal padding.
