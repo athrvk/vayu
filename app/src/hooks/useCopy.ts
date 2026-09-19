@@ -33,7 +33,8 @@
  * to remove, restated as an icon instead of a toast.
  *
  * The reset timer lives here rather than at the six call sites that used to own
- * one, which is how three different durations (1500, 2000, `STATUS_RESET_MS`)
+ * one, which is how three different durations (1500ms, 2000ms, and a shared
+ * transient-status constant)
  * came to acknowledge the same action in the same app.
  */
 
