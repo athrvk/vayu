@@ -21,6 +21,7 @@
  */
 
 import { Braces, Clock, FolderOpen, Radio, Settings, Trash2, type LucideIcon } from "lucide-react";
+import { ICON_MOTION, type IconMotion } from "@/components/ui/icon-motion";
 import type { DrawerView } from "@/stores";
 
 export interface DrawerViewDescriptor {
@@ -28,10 +29,24 @@ export interface DrawerViewDescriptor {
 	/** What the button is called - the Dock's accessible name. */
 	label: string;
 	icon: LucideIcon;
+	/**
+	 * Which named motion this view's glyph plays on hover or focus of the
+	 * button it sits in, if any (#1687). The descriptor carries it so that
+	 * every surface drawing these six - the rail, the command palette -
+	 * animates the same glyph the same way without the renderer knowing
+	 * which icon it has been handed.
+	 *
+	 * Absent is the default and it means no motion. Two of the six are
+	 * absent on policy rather than for want of a fitting animation
+	 * (docs/design-system.md, Icon motion): History's `Clock` is a status
+	 * icon, and Services' `Radio` is a live indicator whose arcs already
+	 * mean "listening" without being moved.
+	 */
+	motion?: IconMotion;
 }
 
 export const DRAWER_VIEWS: readonly DrawerViewDescriptor[] = [
-	{ view: "collections", label: "Collections", icon: FolderOpen },
+	{ view: "collections", label: "Collections", icon: FolderOpen, motion: ICON_MOTION.scale },
 	{ view: "history", label: "History", icon: Clock },
 	/*
 	 * `Braces`, not `Zap`. The lightning bolt is this app's load-test mark -
@@ -61,7 +76,7 @@ export const DRAWER_VIEWS: readonly DrawerViewDescriptor[] = [
 	 * `welcome/Launcher.tsx` (the Variables tile), which drew the same
 	 * concept as `Variable` and `Database` respectively.
 	 */
-	{ view: "variables", label: "Variables", icon: Braces },
+	{ view: "variables", label: "Variables", icon: Braces, motion: ICON_MOTION.scale },
 	/*
 	 * `Radio`: the group is inboxes, OAuth issuers and (with #481) mock
 	 * servers - things that sit there *listening*, which is what the
@@ -87,6 +102,6 @@ export const DRAWER_VIEWS: readonly DrawerViewDescriptor[] = [
 	 * - Collections a solid trapezoid, History a filled circle, Variables
 	 * two open curves, Services concentric arcs, Settings a round cog.
 	 */
-	{ view: "trash", label: "Trash", icon: Trash2 },
-	{ view: "settings", label: "Settings", icon: Settings },
+	{ view: "trash", label: "Trash", icon: Trash2, motion: ICON_MOTION.lid },
+	{ view: "settings", label: "Settings", icon: Settings, motion: ICON_MOTION.spinOnce },
 ];

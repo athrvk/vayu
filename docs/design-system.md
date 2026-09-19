@@ -3261,6 +3261,7 @@ stylesheet does not implement is a compile error rather than a dead attribute.
 | `rotate-90` | `Plus`, `X` | A quarter turn; both glyphs are symmetric under it, so only the movement is visible | `--dur-tooltip-in` |
 | `nudge-x` | `ChevronRight` | 1px along the direction it points | `--dur-tooltip-in` |
 | `nudge-y` | `ChevronDown` | The same, vertically | `--dur-tooltip-in` |
+| `scale` | `FolderOpen`, `Braces` | The whole glyph grows 10%, for a mark with no part to hinge - one path, or two curves that mean the gap between them | `--dur-tooltip-in` |
 
 Lucide renders its `__iconNode` children in declared order with nothing
 prepended, which is what lets a rule address `> path:nth-child(4)`. That is a

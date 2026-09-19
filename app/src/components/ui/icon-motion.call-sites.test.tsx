@@ -64,7 +64,8 @@ describe("icon motion call sites that write the attribute in JSX", () => {
 
 	// A motion fires from its owner's hover, so the glyph needs one: a Button
 	// (`[data-slot="button"]`) or an element carrying `group`. Both TitleBar
-	// close buttons, TabStrip's tab row and Section's trigger are plain
+	// close buttons, TabStrip's tab row, Section's trigger and `RailButton`
+	// (whose glyph's motion comes from `DRAWER_VIEWS`, #1687) are plain
 	// elements, so they carry `group` explicitly - dropping it is the way this
 	// stops working without anything looking wrong.
 	it("keeps a group owner on the call sites that are not a Button", () => {
@@ -73,6 +74,7 @@ describe("icon motion call sites that write the attribute in JSX", () => {
 			"components/layout/TabStrip.tsx",
 			"components/layout/context-bar/Section.tsx",
 			"components/layout/Dock.tsx",
+			"components/layout/RailButton.tsx",
 		]) {
 			expect(readFileSync(resolve(src, file), "utf8"), `${file} has no group owner`).toMatch(
 				/\bgroup\b/

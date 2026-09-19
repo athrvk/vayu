@@ -36,6 +36,9 @@
  *   so the motion reads as the turn itself rather than as a new shape.
  * - `nudgeX` - ChevronRight. 1px along the direction it points.
  * - `nudgeY` - ChevronDown. The same, vertically.
+ * - `scale` - FolderOpen, Braces. The whole glyph grows 10%, for a mark whose
+ *   shape offers no part to hinge: one path, or two curves that mean the gap
+ *   between them.
  */
 export const ICON_MOTION = {
 	lid: "lid",
@@ -43,6 +46,7 @@ export const ICON_MOTION = {
 	rotate90: "rotate-90",
 	nudgeX: "nudge-x",
 	nudgeY: "nudge-y",
+	scale: "scale",
 } as const;
 
 /** One of the names above, as the `data-icon-motion` attribute takes it. */
