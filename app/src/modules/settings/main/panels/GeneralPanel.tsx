@@ -23,6 +23,7 @@ import {
 	CardHeader,
 	CardTitle,
 	Button,
+	DisabledHint,
 	Eyebrow,
 	Kbd,
 	DeleteConfirmDialog,
@@ -199,20 +200,28 @@ export default function GeneralPanel() {
 								? "No stored runs."
 								: `${runs.length} stored run${runs.length === 1 ? "" : "s"}.`}
 						</p>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setConfirmClear(true)}
-							disabled={runs.length === 0 || clearing}
-							className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
+						<DisabledHint
+							reason={
+								clearing
+									? "Clearing the run history"
+									: runs.length === 0 && "No stored runs to clear"
+							}
 						>
-							{clearing ? (
-								<Loader2 className="size-icon mr-1.5 animate-spin" />
-							) : (
-								<Database className="size-icon mr-1.5" />
-							)}
-							Clear run history
-						</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setConfirmClear(true)}
+								disabled={runs.length === 0 || clearing}
+								className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
+							>
+								{clearing ? (
+									<Loader2 className="size-icon mr-1.5 animate-spin" />
+								) : (
+									<Database className="size-icon mr-1.5" />
+								)}
+								Clear run history
+							</Button>
+						</DisabledHint>
 					</div>
 					{/* This card shows and clears the runs; how many are kept, and for
 					    how long, are engine settings at the far end of the tree.

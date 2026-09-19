@@ -28,6 +28,29 @@ export interface RowAction {
 	/** Renders in destructive colour and is separated from the actions above. */
 	destructive?: boolean;
 	disabled?: boolean;
+	/**
+	 * Why the item is off, e.g. "Already first" - drawn beside the label by
+	 * `RowActionBody`, for both menus at once.
+	 *
+	 * Not a `DisabledHint` (`components/ui/disabled-hint.tsx`), which is the
+	 * primitive for every *other* gated control: that one works by giving a
+	 * wrapper span its own tab stop, and inside a menu that second stop competes
+	 * with the menu's own focus management - Radix owns the keyboard there, and
+	 * a disabled item is deliberately skipped by it. A menu row has horizontal
+	 * space a button does not, so the reason can simply be on the row, where it
+	 * is readable without hovering anything.
+	 */
+	disabledReason?: string;
+	/**
+	 * A value the item carries beside its label - the URL a Copy would put on
+	 * the clipboard - drawn in the same trailing column as `disabledReason`.
+	 *
+	 * The alternative was a tooltip on an always-visible icon button, which is
+	 * what the Services rows had: it read only on hover, only with a pointer,
+	 * and only for as long as the pointer stayed. In a menu the value is simply
+	 * on the row, where a screen reader reaches it in the item's own name.
+	 */
+	hint?: string;
 }
 
 /** One action, plus whether a separator belongs above it. */

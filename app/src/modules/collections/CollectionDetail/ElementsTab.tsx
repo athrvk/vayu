@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useMemo } from "react";
-import { Button, LabelSwap } from "@/components/ui";
+import { Button, DisabledHint, LabelSwap } from "@/components/ui";
 import { ExternalChangeCallout, ScriptReferencesRow } from "@/components/shared";
 import { ElementList } from "@/components/shared/ElementList";
 import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
@@ -185,16 +185,30 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 			)}
 
 			<div className="flex gap-2">
-				<Button
-					onClick={handleSave}
-					disabled={!isDirty || updateCollection.isPending || incomplete}
-					className="font-semibold"
+				{/* `incomplete` first: it is the gate a user hits while the draft is
+				    dirty, so the other two reasons never describe it. The sentence
+				    above says which field, which this cannot - a tooltip is one
+				    line - so it names the state and leaves the pointer there. */}
+				<DisabledHint
+					reason={
+						updateCollection.isPending
+							? "Saving the elements list"
+							: incomplete
+								? "An element above is missing a required field"
+								: !isDirty && "No unsaved changes"
+					}
 				>
-					<LabelSwap
-						label={updateCollection.isPending ? "Saving…" : "Save Elements"}
-						states={["Save Elements", "Saving…"]}
-					/>
-				</Button>
+					<Button
+						onClick={handleSave}
+						disabled={!isDirty || updateCollection.isPending || incomplete}
+						className="font-semibold"
+					>
+						<LabelSwap
+							label={updateCollection.isPending ? "Saving…" : "Save Elements"}
+							states={["Save Elements", "Saving…"]}
+						/>
+					</Button>
+				</DisabledHint>
 				<Button
 					variant="outline"
 					onClick={resetDraft}
