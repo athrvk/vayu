@@ -2446,7 +2446,20 @@ since it is always under the provider.
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dialog-cancel-button`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover`, `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+
+### `dialog-cancel-button`
+
+`DialogCancelButton` is the only thing that draws a **Cancel** (issue #1693).
+The word used to come in three variants - `outline` in five dialogs,
+`secondary` in three, `ghost` in three, plus one hand-rolled `<button>` with a
+copied class list - so which one a user saw depended on which dialog they
+opened. It settles on `secondary`, matching `DeleteConfirmDialog`, and takes
+no `variant` prop: a call site that can choose is a call site that can drift.
+`label` renames the word, `size` and `className` pass through for the inline
+forms outside a `DialogFooter` (the new-collection row, the client-certificate
+form) that draw the same button in a denser row.
+`dialog-cancel.test.ts` bans the label anywhere else.
 
 ### `dialog`
 
