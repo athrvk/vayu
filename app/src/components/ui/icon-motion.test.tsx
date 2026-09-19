@@ -314,13 +314,14 @@ describe("icon motion: the nth-child indices lucide's glyphs justify", () => {
 	});
 
 	it("moves the whole svg wherever it names no child", () => {
-		// The four whole-glyph motions must not have grown a child selector
+		// Every whole-glyph motion must not have grown a child selector
 		// without gaining the per-child origin reasoning the lid rule carries.
 		for (const name of [
 			ICON_MOTION.spinOnce,
 			ICON_MOTION.rotate90,
 			ICON_MOTION.nudgeX,
 			ICON_MOTION.nudgeY,
+			ICON_MOTION.scale,
 		]) {
 			expect(indices(name), `${name} now addresses a child path`).toEqual([]);
 		}

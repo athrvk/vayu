@@ -166,7 +166,7 @@ function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: 
 
 export default function InboxView() {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const { openTabs, activeTabId, openTab } = useTabsStore();
 	const { data: inboxes = [], isError, error, refetch } = useInboxesQuery();
 	// Which capture, and of which inbox: ids are per-inbox, so a bare number

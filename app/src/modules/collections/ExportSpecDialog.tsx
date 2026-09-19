@@ -74,7 +74,7 @@ export interface ExportSpecDialogProps {
 export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpecDialogProps) {
 	const [format, setFormat] = useState<ExportFormat>("json");
 	const exported = useSpecExportQuery(collection.id, format);
-	const copy = useCopy();
+	const { copy } = useCopy();
 
 	const result = exported.data;
 	/**
