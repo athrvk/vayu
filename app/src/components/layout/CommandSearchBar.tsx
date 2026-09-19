@@ -19,6 +19,17 @@
  * The chord it advertises comes from `PALETTE_CHORD`, the same constant the
  * palette's own listener matches on - `constants/shortcuts.ts` exists so a
  * control cannot claim a combination nothing listens for.
+ *
+ * **It needs no `isModalOpen()` guard, unlike the chord path** (#1691). The two
+ * are not symmetric: a window-level chord fires wherever focus is, while this is
+ * a click on a control that an open dialog has already taken out of reach.
+ * Measured in Chromium against the app's own `DialogContent`: Radix sets
+ * `pointer-events: none` on `body` and paints the overlay above this button, so
+ * a real click never lands; it marks everything outside the dialog
+ * `aria-hidden`, so the button is not in the accessibility tree; and the focus
+ * trap keeps Tab inside the dialog. Only a scripted `element.click()` reaches
+ * the handler, which is not a path a user has. A guard here would be dead code
+ * defending a door the dialog has already locked.
  */
 
 import { Search } from "lucide-react";
