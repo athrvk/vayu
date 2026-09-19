@@ -51,6 +51,7 @@
 import { useState, useRef, useMemo, useId } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
+import { DialogCancelButton } from "./dialog-cancel-button";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
 import { ToggleGroup, ToggleGroupItem } from "./toggle-group";
@@ -670,9 +671,7 @@ export function VariablePopover({
 							{/* Action Buttons (manual mode only) */}
 							{saveMode === "manual" && canEdit && (
 								<div className="flex justify-end gap-2">
-									<Button size="sm" variant="ghost" onClick={handleCancel}>
-										Cancel
-									</Button>
+									<DialogCancelButton size="sm" onClick={handleCancel} />
 									<Button size="sm" onClick={handleSave}>
 										Save
 									</Button>

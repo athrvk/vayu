@@ -40,6 +40,7 @@ import {
 	DialogTitle,
 	Input,
 	Label,
+	DialogCancelButton,
 } from "@/components/ui";
 import { Callout, FieldError } from "@/components/shared";
 import {
@@ -162,9 +163,7 @@ export function StartMockServerDialog({
 				</DialogBody>
 
 				<DialogFooter>
-					<Button variant="outline" onClick={() => onOpenChange(false)}>
-						Cancel
-					</Button>
+					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					<Button onClick={start} disabled={!canStart}>
 						{pending && (
 							<Loader2 className="mr-2 size-icon animate-spin" aria-hidden="true" />

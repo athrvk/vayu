@@ -2414,9 +2414,24 @@ the footer is a **`DialogBody`**:
 <DialogContent className="sm:max-w-xl">
   <DialogHeader>…</DialogHeader>
   <DialogBody className="space-y-4 py-2">…</DialogBody>   {/* the only scroller */}
-  <DialogFooter>…</DialogFooter>
+  <DialogFooter>
+    <DialogCancelButton onClick={() => onOpenChange(false)} />
+    <Button onClick={handleConfirm}>Run</Button>
+  </DialogFooter>
 </DialogContent>
 ```
+
+**The declining action is `DialogCancelButton`, never a `Button` you pick a
+variant for** (issue #1693). The same word carried three variants across the
+app - `outline` in five dialogs, `secondary` in three, `ghost` in three, plus
+one hand-rolled `<button>` with a copied class list - so which one a user saw
+depended on which dialog they opened. The primitive settles it on `secondary`,
+matching `DeleteConfirmDialog`, the dialog this app shows most often, and it
+deliberately does not take a `variant` prop: a call site that can choose is a
+call site that can drift. `label` renames the word ("Not now", "Keep it"),
+`size` and `className` pass through for the inline forms outside a
+`DialogFooter` that draw the same button in a denser row.
+`components/ui/dialog-cancel.test.ts` bans a `Cancel` label anywhere else.
 
 Three rules hold it together:
 

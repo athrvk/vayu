@@ -81,6 +81,7 @@ import {
 	Switch,
 	ToggleGroup,
 	ToggleGroupItem,
+	DialogCancelButton,
 } from "@/components/ui";
 import { Callout, NumberField } from "@/components/shared";
 import { useStartScenarioRunMutation } from "@/queries";
@@ -765,13 +766,10 @@ export default function RunCollectionDialog({
 				</DialogBody>
 
 				<DialogFooter>
-					<Button
-						variant="outline"
+					<DialogCancelButton
 						onClick={() => onOpenChange(false)}
 						disabled={startRun.isPending}
-					>
-						Cancel
-					</Button>
+					/>
 					<Button onClick={handleRun} disabled={!canRun || startRun.isPending}>
 						{startRun.isPending ? (
 							<Loader2 className="size-icon mr-2 animate-spin" />

@@ -69,6 +69,7 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
+	DialogCancelButton,
 } from "@/components/ui";
 import { Callout, FieldError } from "@/components/shared";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
@@ -588,13 +589,7 @@ export default function SendWithRowDialog({
 										? `Showing ${rendered.length.toLocaleString()} of ${total.toLocaleString()} rows - scroll for more.`
 										: `All ${total.toLocaleString()} ${total === 1 ? "row" : "rows"}.`}
 							</p>
-							<button
-								type="button"
-								onClick={() => onOpenChange(false)}
-								className="h-8 rounded-md px-3 text-xs font-medium hover:bg-accent transition-colors"
-							>
-								Cancel
-							</button>
+							<DialogCancelButton size="sm" onClick={() => onOpenChange(false)} />
 							{/* Names the row it will send, so a row reached by typing a
 							    number is confirmable without hunting for it in the
 							    grid. Clicking a row still sends outright - the fast

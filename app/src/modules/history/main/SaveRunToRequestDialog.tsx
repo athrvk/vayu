@@ -35,6 +35,7 @@ import {
 	DialogTitle,
 	DialogDescription,
 	Button,
+	DialogCancelButton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/format-time";
@@ -292,14 +293,11 @@ export default function SaveRunToRequestDialog({
 					<span className="mr-auto text-label text-muted-foreground">
 						Cannot be undone
 					</span>
-					<Button
+					<DialogCancelButton
 						ref={cancelRef}
-						variant="secondary"
 						onClick={() => onOpenChange(false)}
 						disabled={isSaving}
-					>
-						Cancel
-					</Button>
+					/>
 					<Button
 						variant="default"
 						onClick={handleConfirm}

@@ -14,7 +14,7 @@ import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
-import { Button, IconSwap, Input } from "@/components/ui";
+import { Button, DialogCancelButton, IconSwap, Input } from "@/components/ui";
 import {
 	RowActionsMenu,
 	RowContextMenu,
@@ -421,15 +421,12 @@ export default function CollectionItem({
 								)}
 								Add
 							</Button>
-							<Button
-								variant="secondary"
+							<DialogCancelButton
 								size="sm"
 								onClick={onCancelSubfolder}
 								disabled={isCreatingSubfolder}
 								className="h-7 text-xs"
-							>
-								Cancel
-							</Button>
+							/>
 						</div>
 					)}
 

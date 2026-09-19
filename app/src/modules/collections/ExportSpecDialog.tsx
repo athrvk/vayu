@@ -55,6 +55,7 @@ import {
 	Skeleton,
 	ToggleGroup,
 	ToggleGroupItem,
+	DialogCancelButton,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { useCopy } from "@/hooks/useCopy";
@@ -156,9 +157,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 				</DialogBody>
 
 				<DialogFooter>
-					<Button variant="ghost" onClick={() => onOpenChange(false)}>
-						Cancel
-					</Button>
+					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					{/*
 					 * Disabled while a format assembles, not only while there is
 					 * nothing: what is held is the *previous* format's text, and a

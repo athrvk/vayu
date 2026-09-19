@@ -61,6 +61,7 @@ import {
 	DialogTitle,
 	DialogDescription,
 	DialogFooter,
+	DialogCancelButton,
 } from "@/components/ui";
 import { Callout, NumberField, SEVERITY_ORDER, type Severity } from "@/components/shared";
 import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
@@ -1263,9 +1264,7 @@ export default function LoadTestConfigDialog({
 				</DialogBody>
 
 				<DialogFooter>
-					<Button variant="outline" onClick={onClose} disabled={isStarting}>
-						Cancel
-					</Button>
+					<DialogCancelButton onClick={onClose} disabled={isStarting} />
 					<Button
 						onClick={handleStart}
 						disabled={isStarting || blockingError !== null || oauthGated}

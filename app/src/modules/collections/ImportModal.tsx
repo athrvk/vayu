@@ -34,6 +34,7 @@ import {
 	TabLabel,
 	Textarea,
 	LabelSwap,
+	DialogCancelButton,
 } from "@/components/ui";
 import { useImportModalStore, useTabsStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
@@ -1004,13 +1005,10 @@ export function ImportModal() {
 								</label>
 							</div>
 							<div className="flex gap-2">
-								<Button
-									variant="outline"
+								<DialogCancelButton
 									onClick={handleClose}
 									disabled={importMutation.isPending}
-								>
-									Cancel
-								</Button>
+								/>
 								<Button
 									onClick={handleImport}
 									disabled={applying || applicable.length === 0}
