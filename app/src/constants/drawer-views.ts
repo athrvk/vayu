@@ -36,18 +36,25 @@ export interface DrawerViewDescriptor {
 	 * animates the same glyph the same way without the renderer knowing
 	 * which icon it has been handed.
 	 *
-	 * Absent is the default and it means no motion. Two of the six are
-	 * absent on policy rather than for want of a fitting animation
-	 * (docs/design-system.md, Icon motion): History's `Clock` is a status
-	 * icon, and Services' `Radio` is a live indicator whose arcs already
-	 * mean "listening" without being moved.
+	 * Absent is the default and it means no motion, but no rail entry takes
+	 * that default: a rail entry is a navigation affordance, and a glyph
+	 * that means "go to History" earning nothing while Trash gets a lid is
+	 * what #1707 was filed about. All six name a motion, and no two name
+	 * the same one - `ActivityRail.test.tsx` holds both halves of that.
+	 *
+	 * History's `Clock` and Services' `Radio` animate here even though
+	 * `Clock` is one of the six status glyphs. That is the refined policy,
+	 * not an exception to it (docs/design-system.md, Icon motion): the
+	 * prohibition is on a glyph *conveying* a state - a chip, a status
+	 * column, an inline warning - not on the glyph itself. Here it is the
+	 * affordance for an action.
 	 */
 	motion?: IconMotion;
 }
 
 export const DRAWER_VIEWS: readonly DrawerViewDescriptor[] = [
-	{ view: "collections", label: "Collections", icon: FolderOpen, motion: ICON_MOTION.scale },
-	{ view: "history", label: "History", icon: Clock },
+	{ view: "collections", label: "Collections", icon: FolderOpen, motion: ICON_MOTION.tilt },
+	{ view: "history", label: "History", icon: Clock, motion: ICON_MOTION.hands },
 	/*
 	 * `Braces`, not `Zap`. The lightning bolt is this app's load-test mark -
 	 * it is the Load Test button in the URL bar, the dashboard tab icon, and
@@ -76,7 +83,7 @@ export const DRAWER_VIEWS: readonly DrawerViewDescriptor[] = [
 	 * `welcome/Launcher.tsx` (the Variables tile), which drew the same
 	 * concept as `Variable` and `Database` respectively.
 	 */
-	{ view: "variables", label: "Variables", icon: Braces, motion: ICON_MOTION.scale },
+	{ view: "variables", label: "Variables", icon: Braces, motion: ICON_MOTION.spread },
 	/*
 	 * `Radio`: the group is inboxes, OAuth issuers and (with #481) mock
 	 * servers - things that sit there *listening*, which is what the
@@ -90,7 +97,7 @@ export const DRAWER_VIEWS: readonly DrawerViewDescriptor[] = [
 	 * Collections a solid trapezoid, History a filled circle, Variables two
 	 * open curves, Settings a round cog.
 	 */
-	{ view: "services", label: "Services", icon: Radio },
+	{ view: "services", label: "Services", icon: Radio, motion: ICON_MOTION.waves },
 	/*
 	 * `Trash2`, the same glyph every delete affordance in the app already
 	 * uses - and that repetition is the argument for it rather than against

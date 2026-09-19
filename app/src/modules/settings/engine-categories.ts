@@ -30,6 +30,7 @@
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Server, Code, Network, Activity, Database, Radio, Gauge } from "lucide-react";
+import { ICON_MOTION, type IconMotion } from "@/components/ui";
 import type { EngineSettingsCategory } from "@/types";
 import { ClientCertificatesCard } from "./main/panels/ClientCertificatesCard";
 import { ConnectionTestCard } from "./main/panels/ConnectionTestCard";
@@ -40,6 +41,12 @@ export interface EngineSettingsCategoryMeta {
 	/** Shown under the category title in the settings view header. */
 	description: string;
 	icon: LucideIcon;
+	/**
+	 * Which named motion this category's glyph plays on hover or focus of the
+	 * sidebar row it sits in - the same field `AppSettingsPanel` carries, so
+	 * `categoryMeta` can read one shape from either registry.
+	 */
+	motion?: IconMotion;
 	/**
 	 * Cards rendered above this category's config entries, in order, for engine
 	 * surfaces that are not config entries - a registry with its own CRUD routes
@@ -66,6 +73,7 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		description:
 			"The engine's base capacity, threading model and storage internals - the settings a run is built on",
 		icon: Server,
+		motion: ICON_MOTION.press,
 	},
 	{
 		id: "network_performance",
@@ -76,6 +84,7 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		description:
 			"The wire itself: what a new request starts with, how many transfers a worker keeps open, and how long a name resolution is reused",
 		icon: Network,
+		motion: ICON_MOTION.pulse,
 		// The client-certificate registry (#707) and the connection test (#708)
 		// land here rather than in a category of their own: they are how a
 		// request leaves this machine, and the proxy and trust settings they
@@ -91,6 +100,7 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		description:
 			"Limits for the long-lived surfaces: streaming requests, webhook inboxes, mock servers and OAuth issuers",
 		icon: Radio,
+		motion: ICON_MOTION.waves,
 	},
 	{
 		id: "observability",
@@ -98,6 +108,7 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		description:
 			"Server monitoring, per-phase latency measurement, and the live metrics that feed the dashboard's charts, and the log level for both log files",
 		icon: Activity,
+		motion: ICON_MOTION.trace,
 	},
 	{
 		id: "data_retention",
@@ -105,6 +116,7 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		description:
 			"What a run stores and for how long: capture and truncation budgets, and the run retention limits",
 		icon: Database,
+		motion: ICON_MOTION.stack,
 	},
 	{
 		id: "limits",
@@ -115,12 +127,14 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		description:
 			"The sizes and counts a run or a collection may not exceed - the ceilings that reject an oversized input rather than truncate it",
 		icon: Gauge,
+		motion: ICON_MOTION.sweep,
 	},
 	{
 		id: "scripting_sandbox",
 		label: "Scripting environment",
 		description: "Configuration for the QuickJS sandbox execution, limits, and debugging",
 		icon: Code,
+		motion: ICON_MOTION.part,
 	},
 ];
 

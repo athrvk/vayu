@@ -26,11 +26,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { resolve, join } from "node:path";
 import { render } from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { ICON_MOTION } from "./icon-motion";
+import { DRAWER_VIEWS } from "@/constants/drawer-views";
 import { RowActionBody } from "@/components/shared/RowActionBody";
 import { rowActionItemClass } from "@/components/shared/row-actions";
 import { ContextBarSectionFrame } from "@/components/layout/context-bar/Section";
@@ -43,10 +44,44 @@ const LITERAL_CALL_SITES: Record<string, readonly string[]> = {
 	"components/shared/KeyValueEditor/KeyValueRow.tsx": [ICON_MOTION.lid],
 	"components/layout/Dock.tsx": [ICON_MOTION.spinOnce],
 	"components/layout/context-bar/CodeSection.tsx": [ICON_MOTION.spinOnce],
-	"components/layout/TitleBar.tsx": [ICON_MOTION.rotate90],
+	"components/layout/TitleBar.tsx": [ICON_MOTION.rotate90, ICON_MOTION.drop],
 	"components/layout/TabStrip.tsx": [ICON_MOTION.rotate90],
 	"components/layout/context-bar/Section.tsx": [ICON_MOTION.nudgeX, ICON_MOTION.nudgeY],
+	// The bespoke motions #1707 added, one representative call site each. The
+	// exhaustive claim is the "no name goes unspelled" case below; these are
+	// the files where losing the attribute in a refactor would be hardest to
+	// notice, because the control still looks and behaves exactly the same.
+	"components/layout/CommandSearchBar.tsx": [ICON_MOTION.wiggle],
+	"modules/collections/DataFilePicker.tsx": [ICON_MOTION.lift],
+	"modules/collections/CollectionTree.tsx": [ICON_MOTION.drop],
+	"modules/history/sidebar/RunItem.tsx": [ICON_MOTION.tiltPin],
+	"modules/settings/main/SettingsMain.tsx": [ICON_MOTION.press, ICON_MOTION.spinBack],
+	"modules/settings/main/panels/McpSettingsPanel.tsx": [ICON_MOTION.flash],
+	"modules/inbox/index.tsx": [ICON_MOTION.scale],
 };
+
+/**
+ * Every `.ts` and `.tsx` under `src/`, for the exhaustive scan.
+ *
+ * `.ts` too, because a motion reaches the DOM from a registry as often as from
+ * JSX now: `drawer-views.ts` names the rail's six, `app-panels.ts` and
+ * `engine-categories.ts` name the Settings drawer's fifteen, and a row action
+ * names its own in `useTreeCrud.ts`. A `.tsx`-only scan reported every one of
+ * those names as dead CSS.
+ */
+function sourceFiles(dir: string): string[] {
+	const out: string[] = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const path = join(dir, entry.name);
+		if (entry.isDirectory()) {
+			if (entry.name === "node_modules") continue;
+			out.push(...sourceFiles(path));
+			continue;
+		}
+		if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) out.push(path);
+	}
+	return out;
+}
 
 describe("icon motion call sites that write the attribute in JSX", () => {
 	it.each(Object.entries(LITERAL_CALL_SITES))("%s", (file, names) => {
@@ -68,6 +103,28 @@ describe("icon motion call sites that write the attribute in JSX", () => {
 	// (whose glyph's motion comes from `DRAWER_VIEWS`, #1687) are plain
 	// elements, so they carry `group` explicitly - dropping it is the way this
 	// stops working without anything looking wrong.
+	it("spells every name the vocabulary exports, so no rule is dead CSS", () => {
+		// The direction the per-file map cannot cover: a name in `ICON_MOTION`
+		// with rules in the stylesheet and no call site anywhere is CSS nobody
+		// will ever see run, and it reads in a diff exactly like a motion that
+		// works. Both routes to the DOM count - the attribute written in JSX,
+		// and a registry entry the renderer hands to a generic glyph.
+		const files = sourceFiles(src).filter((f) => !/\.test\.tsx?$/.test(f));
+		expect(files.length, "scanned no source at all").toBeGreaterThan(100);
+		const spelled = new Set<string>();
+		const byKey = new Map(Object.entries(ICON_MOTION).map(([key, name]) => [key, name]));
+		for (const file of files) {
+			const source = readFileSync(file, "utf8");
+			for (const [key, name] of byKey) {
+				if (source.includes(`ICON_MOTION.${key}`)) spelled.add(name);
+			}
+		}
+		for (const { motion } of DRAWER_VIEWS) if (motion) spelled.add(motion);
+
+		const unspelled = Object.values(ICON_MOTION).filter((name) => !spelled.has(name));
+		expect(unspelled.join(", "), "these names have rules and no call site").toBe("");
+	});
+
 	it("keeps a group owner on the call sites that are not a Button", () => {
 		for (const file of [
 			"components/layout/TitleBar.tsx",
@@ -75,6 +132,11 @@ describe("icon motion call sites that write the attribute in JSX", () => {
 			"components/layout/context-bar/Section.tsx",
 			"components/layout/Dock.tsx",
 			"components/layout/RailButton.tsx",
+			// #1707's two hand-rolled owners: the command search bar and the
+			// import dropzone are bare `<button>` elements, which the
+			// stylesheet's trigger selector does not match on its own.
+			"components/layout/CommandSearchBar.tsx",
+			"modules/collections/ImportModal.tsx",
 		]) {
 			expect(readFileSync(resolve(src, file), "utf8"), `${file} has no group owner`).toMatch(
 				/\bgroup\b/

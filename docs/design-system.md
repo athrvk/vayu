@@ -3231,9 +3231,21 @@ The policy, in five rules:
    `.group` row that reveals it - never the SVG's own hover, which
    `[&_svg]:pointer-events-none` has already taken away. `:focus-visible` is
    not optional: a keyboard user gets the same feedback a mouse user does.
-2. **Status icons never animate**: `AlertTriangle`, `AlertCircle`,
-   `CheckCircle2`, `XCircle`, `Clock`, `Info`. A state the user is being told
-   about is not an action they can take.
+2. **A glyph conveying a state never animates** - and that is a rule about
+   *placement*, not about which glyph it is. The six glyphs that usually carry
+   a state (`AlertTriangle`, `AlertCircle`, `CheckCircle2`, `XCircle`, `Clock`,
+   `Info`) animate nowhere they are the message: a status chip, a row's status
+   column, an inline warning, a panel heading. A state the user is being told
+   about is not an action they can take, and a success tick that grows under
+   the pointer invites a click on something that does nothing.
+
+   Where one of those same glyphs *is* the affordance for an action - inside a
+   `[data-slot="button"]`, a menu item, a tab trigger, a `RowAction`, or a
+   registry entry a rail draws as a button (`DRAWER_VIEWS`) - it animates like
+   any other action glyph. History's `Clock` in the Activity Rail is the case
+   this was refined for (#1707): it means "go to History", and it earned a
+   motion of its own rather than nothing. `icon-motion-status.test.ts` encodes
+   the distinction the same way, by the owner the element sits inside.
 3. **A state change animates once. Loops are reserved** for `Loader2` and live
    indicators, where the loop is the message ("work is happening").
 4. **Every transform of an SVG child declares `transform-box: fill-box` and an
@@ -3254,14 +3266,63 @@ A call site spells the name once, as `data-icon-motion` on the icon, and takes
 it from `ICON_MOTION` in `app/src/components/ui/icon-motion.ts` so a name the
 stylesheet does not implement is a compile error rather than a dead attribute.
 
-| Name | Icons | Motion | Duration |
-|------|-------|--------|----------|
-| `lid` | `Trash2` | Lid bar and handle hinge up off the can (`rotate: -12deg`, `translate: 0 -1px`) about the bar's left end | `--dur-tooltip-in` |
-| `spin-once` | `RefreshCw` | One 360deg turn (`@keyframes icon-spin-once`), so pointer-out does not unwind it backwards | `--dur-panel-in` |
-| `rotate-90` | `Plus`, `X` | A quarter turn; both glyphs are symmetric under it, so only the movement is visible | `--dur-tooltip-in` |
-| `nudge-x` | `ChevronRight` | 1px along the direction it points | `--dur-tooltip-in` |
-| `nudge-y` | `ChevronDown` | The same, vertically | `--dur-tooltip-in` |
-| `scale` | `FolderOpen`, `Braces` | The whole glyph grows 10%, for a mark with no part to hinge - one path, or two curves that mean the gap between them | `--dur-tooltip-in` |
+| Name | Icons | Motion | Duration | Leaves the frame |
+|------|-------|--------|----------|------------------|
+| `lid` | `Trash2` | Lid bar and handle hinge up off the can (`rotate: -12deg`, `translate: 0 -1px`) about the bar's left end | `--dur-tooltip-in` | yes |
+| `hands` | `Clock` | The hands polyline sweeps one full revolution about the dial centre (12,12); the dial stays | `--dur-panel-in` x2 | no |
+| `waves` | `Radio` | The four arcs travel outward and fade, inner pair then outer pair; the centre dot stays | `--dur-panel-in` x2 | yes |
+| `spread` | `Braces` | The two curves part by 1px each, outward, and close again | `--dur-tooltip-in` | no |
+| `tilt` | `FolderOpen` | Tips `-6deg` with a 4% grow about the ink's bottom-left corner (2,20) - a folder opening toward you | `--dur-tooltip-in` | yes |
+| `wiggle` | `Search` | `-8deg`, `+8deg`, back, once, about the lens centre (11,11) | `--dur-panel-in` | no |
+| `drop` | `Download` | The arrow (shaft and head) drops 2px into its tray; the tray stays | `--dur-tooltip-in` | no |
+| `lift` | `Upload` | The arrow rises 2px out of its tray; the tray stays | `--dur-tooltip-in` | yes |
+| `press` | `Save` | The whole glyph goes to 92% and back, a button pressed | `--dur-panel-in` | no |
+| `tilt-pin` | `Pin`, `PinOff` | Leans `-20deg` about the needle's point (12,22) and rights itself | `--dur-panel-in` | yes |
+| `ring` | `Bell` | A decaying swing (`+12deg`, `-10deg`, `+6deg`, 0) about the point it hangs from (12,2) | `--dur-panel-in` x2 | yes |
+| `bob` | `Info` | A 1.5px rise and settle, for a mark with no part to hinge and no direction of its own | `--dur-panel-in` | yes |
+| `part` | `Code2`, `Code` | The two chevrons part by 1px each. `spread`'s reading against a glyph lucide draws right-to-left, which is why it is not that name | `--dur-tooltip-in` | yes |
+| `tiles` | `LayoutDashboard` | The four tiles step 1px away from the frame's centre and back, diagonal pairs staggered | `--dur-panel-in` | no |
+| `sweep` | `Gauge` | The needle swings `-70deg` about its hub (12,14) and returns; the dial stays | `--dur-panel-in` x2 | no |
+| `plug-in` | `Plug` | 1.5px along the axis the prongs point, which is up | `--dur-tooltip-in` | yes |
+| `pulse` | `Network` | The three node rects swell 18% in turn, top node first; the connectors stay | `--dur-panel-in` x2 | no |
+| `trace` | `Activity` | The trace is stroked on from its left end, over a measured path length | `--dur-panel-in` x2 | no |
+| `stack` | `Database` | The top disc lifts 1.5px off the stack and settles back | `--dur-tooltip-in` | yes |
+| `spin-once` | `RefreshCw` | One 360deg turn (`@keyframes icon-spin-once`), so pointer-out does not unwind it backwards | `--dur-panel-in` | no |
+| `spin-back` | `RotateCcw` | The same turn counter-clockwise, for "put it back" rather than "do it again" | `--dur-panel-in` | no |
+| `flash` | `Zap` | Dims to 40% and back with a 6% grow - a strike, not a movement | `--dur-panel-in` | no |
+| `rotate-90` | `Plus`, `X` | A quarter turn; both glyphs are symmetric under it, so only the movement is visible | `--dur-tooltip-in` | no |
+| `nudge-x` | `ChevronRight`, `SlidersHorizontal` | 1px along the direction it points | `--dur-tooltip-in` | no |
+| `nudge-y` | `ChevronDown` | The same, vertically | `--dur-tooltip-in` | no |
+| `scale` | `Play` | The whole glyph grows 10% - the last resort for a mark that is one path with no reading of its own to act out | `--dur-tooltip-in` | no |
+
+A motion whose ink leaves the 24-unit viewBox sets `overflow: visible` on the
+`svg`, because an inline SVG clips to its viewBox by default and the travel is
+simply cut off at every call site. The column above is the list, and
+`icon-motion.test.tsx` holds it to the stylesheet - in both directions, so a
+`visible` on a motion that stays inside is caught too.
+
+**A draw-in is measured, never guessed.** `trace` strokes its path on with
+`stroke-dasharray` and `stroke-dashoffset`, and the dash has to be at least the
+path's own length or a second dash creeps in behind the first. Measure it with
+`getTotalLength()` in a real browser, round up, and write the measurement and
+where it came from in the rule's comment. Both properties are set *inside* the
+keyframes, never on the element: a dasharray parked on the glyph is a permanent
+property that happens to look solid today.
+
+**Two glyphs that read alike may still need two names.** `spread` (`Braces`)
+and `part` (`Code2`, `Code`) are the same idea - a pair of marks parting by a
+pixel - and cannot share a rule, because lucide draws `Braces` left-bracket
+first and both code glyphs right-chevron first. Reusing one name would have
+drawn the brackets *closing*, which looks like a considered choice in a diff.
+When the reading matches but the child order does not, the second name is the
+honest answer.
+
+A sequence that genuinely needs longer than its tier - `hands`, `waves`,
+`ring`, `sweep`, `pulse`, `trace` - multiplies the token (`calc(var(--dur-panel-in) * 2)`) rather than
+introducing a literal, and says why in the rule's comment. A stagger inside a
+sequence is keyframe percentages, never `animation-delay`: the reduced-motion
+rules collapse a duration, not a delay, so a delayed step would survive them as
+a pause before an instant jump.
 
 Lucide renders its `__iconNode` children in declared order with nothing
 prepended, which is what lets a rule address `> path:nth-child(4)`. That is a

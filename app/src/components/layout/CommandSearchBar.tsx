@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores";
 import { PALETTE_CHORD } from "@/constants/shortcuts";
 import { formatChord } from "@/lib/platform";
+import { ICON_MOTION } from "@/components/ui";
 
 export function CommandSearchBar({ className }: { className?: string }) {
 	const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
@@ -49,7 +50,11 @@ export function CommandSearchBar({ className }: { className?: string }) {
 				// Sunken against --panel, so it reads as a field rather than as a
 				// button: the title row is the panel surface, and a control painted
 				// in the same colour as its bar has no edge to be found by.
-				"bg-background text-xs text-muted-foreground",
+				// `group`: the Search glyph's `wiggle` fires from this button's
+				// own hover, and the `Icon motion` block gates every rule on a
+				// `[data-slot="button"]` or `.group` ancestor. This is
+				// hand-rolled and is neither without the class.
+				"group bg-background text-xs text-muted-foreground",
 				// Explicit property list, not `transition-colors`: this is a
 				// hand-rolled button with no `[data-slot="button"]`, so it misses the
 				// baseline's `scale` press-feedback transition (`index.css`) - added
@@ -60,7 +65,7 @@ export function CommandSearchBar({ className }: { className?: string }) {
 				className
 			)}
 		>
-			<Search className="h-3.5 w-3.5 shrink-0" />
+			<Search className="h-3.5 w-3.5 shrink-0" data-icon-motion={ICON_MOTION.wiggle} />
 			<span className="flex-1 truncate text-left">Search</span>
 			{/* The hint is the reason the bar earns its width: a user who learns the
 			    chord here never needs the bar again. */}
