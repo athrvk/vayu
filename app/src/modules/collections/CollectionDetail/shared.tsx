@@ -11,6 +11,7 @@
 
 import { Info } from "lucide-react";
 import { Callout } from "@/components/shared";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
  * A failed save on these tabs used to be invisible.
@@ -51,9 +52,9 @@ interface FieldProps {
 export function Field({ label, hint, children }: FieldProps) {
 	return (
 		<div>
-			<div className="text-micro font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2">
+			<Eyebrow size="xs" className="mb-2">
 				{label}
-			</div>
+			</Eyebrow>
 			{children}
 			{hint && <div className="text-label text-muted-foreground mt-1">{hint}</div>}
 		</div>
@@ -62,9 +63,9 @@ export function Field({ label, hint, children }: FieldProps) {
 
 export function SectionLabel({ children }: { children: React.ReactNode }) {
 	return (
-		<div className="text-micro font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2">
+		<Eyebrow size="xs" className="mb-2">
 			{children}
-		</div>
+		</Eyebrow>
 	);
 }
 
@@ -80,9 +81,9 @@ export function InfoBanner({ children }: { children: React.ReactNode }) {
 export function Stat({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="bg-card border border-border rounded-md px-3.5 py-2.5">
-			<div className="text-micro font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-1">
+			<Eyebrow size="xs" className="mb-1">
 				{label}
-			</div>
+			</Eyebrow>
 			<div className="text-lg font-bold text-foreground font-mono">{value}</div>
 		</div>
 	);

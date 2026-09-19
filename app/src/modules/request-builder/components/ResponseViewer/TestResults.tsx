@@ -16,6 +16,7 @@ import { CheckCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ScriptSource, TestResult } from "@/types";
 import { SCRIPT_SECTIONS } from "./console/script-sections";
+import { EYEBROW_XS_CLASS } from "@/components/ui/eyebrow";
 
 export interface TestResultsProps {
 	results: readonly TestResult[];
@@ -99,9 +100,7 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 			<div className="space-y-3">
 				{groups.map((group) => (
 					<section key={group.source} className="space-y-1.5">
-						<h3 className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
-							{group.label}
-						</h3>
+						<h3 className={EYEBROW_XS_CLASS}>{group.label}</h3>
 						{group.tests.map((test, i) => (
 							<div
 								key={i}

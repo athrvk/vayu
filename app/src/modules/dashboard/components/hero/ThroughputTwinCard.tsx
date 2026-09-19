@@ -47,10 +47,10 @@ export function ThroughputTwinCard({
 							req/s
 						</span>
 					</div>
-					<div className="text-micro uppercase tracking-[0.06em] text-muted-foreground mt-1.5">
+					<Eyebrow size="xs" className="mt-1.5">
 						dispatched
 						<InfoChip tip={TOOLTIPS.sendThroughputDispatched} />
-					</div>
+					</Eyebrow>
 				</div>
 				<div>
 					<div className="text-metric leading-none font-bold font-mono tabular-nums text-foreground">
@@ -59,10 +59,10 @@ export function ThroughputTwinCard({
 							req/s
 						</span>
 					</div>
-					<div className="text-micro uppercase tracking-[0.06em] text-muted-foreground mt-1.5">
+					<Eyebrow size="xs" className="mt-1.5">
 						received
 						<InfoChip tip={TOOLTIPS.sendThroughputReceived} />
-					</div>
+					</Eyebrow>
 				</div>
 			</div>
 			{delta !== undefined && (

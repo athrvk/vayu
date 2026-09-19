@@ -61,6 +61,7 @@ import { isCommitEnter } from "@/lib/keyboard";
 import { isDataVariableName } from "@/lib/variable-resolution";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import type { ResolvedVariable, VariableOrigin } from "@/types";
+import { Eyebrow } from "./eyebrow";
 
 // Re-export ResolvedVariable as VariableInfo for backward compatibility
 export type { ResolvedVariable as VariableInfo };
@@ -944,9 +945,9 @@ function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 		<div className="flex flex-col gap-0.5 border-t border-border pt-1.5">
 			{row && (
 				<>
-					<div className="text-micro uppercase tracking-wide text-subtle-foreground">
+					<Eyebrow size="xs" className="text-subtle-foreground">
 						bound data row
-					</div>
+					</Eyebrow>
 					<OriginRow origin={row} beaten={false} />
 				</>
 			)}
@@ -956,9 +957,9 @@ function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 			 * and an off definition is not shadowed by anything. The row block above
 			 * already says which answer wins.
 			 */}
-			<div className="text-micro uppercase tracking-wide text-subtle-foreground">
+			<Eyebrow size="xs" className="text-subtle-foreground">
 				also defined
-			</div>
+			</Eyebrow>
 			{others.map((o, i) => (
 				<OriginRow key={`${o.scope}-${o.sourceId ?? "global"}-${i}`} origin={o} beaten />
 			))}

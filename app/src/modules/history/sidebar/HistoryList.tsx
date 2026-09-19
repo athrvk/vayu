@@ -44,6 +44,7 @@ import RunItem from "./RunItem";
 import { groupRunsByDay } from "./group-runs-by-day";
 import { useHistoryListFocus } from "./useHistoryListFocus";
 import type { Run } from "@/types";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
  * A run that is still executing is stopped by the engine before it is deleted,
@@ -405,9 +406,9 @@ export default function HistoryList() {
 									 * runs said nothing after the first row) - see
 									 * `group-runs-by-day.ts`.
 									 */}
-									<div className="px-1 pt-1 text-label font-medium uppercase tracking-wide text-subtle-foreground first:pt-0">
+									<Eyebrow className="px-1 pt-1 text-subtle-foreground first:pt-0">
 										{group.label}
-									</div>
+									</Eyebrow>
 									{group.runs.map((run) => (
 										<RunItem
 											key={run.id}

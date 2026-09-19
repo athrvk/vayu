@@ -40,6 +40,7 @@ import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { useSettingsIndex } from "@/modules/settings/useSettingsIndex";
 import { searchSettings } from "@/lib/settings-index";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 interface CategoryMeta {
 	label: string;
@@ -59,10 +60,10 @@ function categoryMeta(category: SettingsCategory): CategoryMeta {
 function SectionHeading({ children, icon: Icon }: { children: string; icon?: LucideIcon }) {
 	return (
 		<div className="px-3 py-2 mb-1">
-			<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+			<Eyebrow className="flex items-center gap-2">
 				{Icon && <Icon className="size-icon-sm" />}
 				{children}
-			</div>
+			</Eyebrow>
 		</div>
 	);
 }

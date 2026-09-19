@@ -29,6 +29,7 @@
 import type { ReactNode } from "react";
 import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 export interface ChainCardProps {
 	/** The sentence in the header - what is being inherited, and from where. */
@@ -48,9 +49,9 @@ export function ChainCard({ summary, caption, children }: ChainCardProps) {
 			</div>
 
 			<div className="px-3 py-2">
-				<div className="text-micro font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-1.5">
+				<Eyebrow size="xs" className="mb-1.5">
 					{caption}
-				</div>
+				</Eyebrow>
 				{children.map((row, i) => (
 					<ChainRow key={i} last={i === children.length - 1}>
 						{row}

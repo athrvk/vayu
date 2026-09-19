@@ -36,6 +36,7 @@
 import { Input, MarkdownEditor } from "@/components/ui";
 import { reportBlankNameRefused } from "@/lib/blank-name";
 import { useRequestBuilderContext } from "../../../context";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 export default function InfoPanel() {
 	const { request, updateField, restoreStoredName, saveRequest, saveStatus } =
@@ -68,9 +69,7 @@ export default function InfoPanel() {
 	return (
 		<div className="flex flex-col gap-4 max-w-[76ch]">
 			<div className="flex flex-col gap-2">
-				<div className="text-label uppercase tracking-wide text-subtle-foreground">
-					Name
-				</div>
+				<Eyebrow className="text-subtle-foreground">Name</Eyebrow>
 				<Input
 					value={request.name}
 					onChange={(e) => updateField("name", e.target.value)}
@@ -82,9 +81,7 @@ export default function InfoPanel() {
 			</div>
 
 			<div className="flex flex-col gap-2">
-				<div className="text-label uppercase tracking-wide text-subtle-foreground">
-					Description
-				</div>
+				<Eyebrow className="text-subtle-foreground">Description</Eyebrow>
 				<MarkdownEditor
 					value={request.description ?? ""}
 					onChange={(v) => updateField("description", v)}
