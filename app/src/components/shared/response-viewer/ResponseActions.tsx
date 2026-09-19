@@ -22,7 +22,7 @@
  *     have produced `response-1234.undefined` on every history download.
  *
  * The third difference, how long the tick lasts, is gone rather than a prop:
- * one copy used `TIMING.STATUS_RESET_MS` and the other a literal `2000`, and
+ * one copy used a shared status constant and the other a literal `2000`, and
  * the tick is now `useCopy`'s (`TIMING.COPY_RESET_MS`) for the whole app.
  */
 

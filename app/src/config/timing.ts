@@ -47,22 +47,20 @@ export const TIMING = {
 	 */
 	SAVE_RETRY_MAX_DELAY_MS: 60_000,
 
-	/** Transient in-component status feedback (the response viewer's copy tick). */
-	STATUS_RESET_MS: 2000,
-
 	/**
 	 * How long a copy button's check stays in place of its Copy glyph.
 	 *
 	 * The one duration for the whole app's copy acknowledgement (#1686). It
 	 * replaces three that meant the same thing - 1500ms in the MCP settings
-	 * panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the
-	 * response viewer and the snippet section - and it is read only by
+	 * panel, 2000ms in the two update surfaces, and a transient-status constant
+	 * in the response viewer and the snippet section - and it is read only by
 	 * `useCopy`, which is now the only thing that schedules the reset.
 	 *
-	 * Kept separate from `STATUS_RESET_MS` despite the equal value: that one is
-	 * any transient in-component status, this one is specifically the
-	 * clipboard's, and a change to how long "Copied" lingers should not move an
-	 * unrelated indicator with it.
+	 * That third one, a general "transient in-component status" entry at the
+	 * same 2000ms, is gone with them: the copy tick was its only reader, and a
+	 * key here with no reader is the defect `timing-keys-have-readers.test.ts`
+	 * exists for. A future indicator that is not the clipboard's gets its own
+	 * name rather than borrowing this one.
 	 */
 	COPY_RESET_MS: 2000,
 
@@ -72,7 +70,7 @@ export const TIMING = {
 	 * The Services drawer orders inboxes by port, so a new one lands wherever
 	 * its ephemeral port sorts - not at the end. Without the highlight the only
 	 * evidence a click did anything was a row count nobody was counting. Same
-	 * order as `STATUS_RESET_MS`: long enough to be seen after the toast pulls
+	 * order as the copy tick (`COPY_RESET_MS`): long enough to be seen after the toast pulls
 	 * the eye elsewhere, short enough that it is over before it reads as a
 	 * selection the user has to clear.
 	 */

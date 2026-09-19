@@ -60,7 +60,8 @@ describe("clipboard writes go through useCopy", () => {
 	});
 
 	it("leaves no call site scheduling its own copy reset", () => {
-		// The three durations this replaced (1500, 2000, `STATUS_RESET_MS`) each
+		// The three durations this replaced (1500ms, 2000ms and a shared
+		// transient-status constant) each
 		// lived in a `setTimeout` beside a `setCopied`. The reset is `useCopy`'s,
 		// off `TIMING.COPY_RESET_MS`, and the hook schedules it through a named
 		// `reset` callback rather than an inline setter.
