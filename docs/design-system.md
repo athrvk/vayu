@@ -692,6 +692,17 @@ it decays. A raw palette class here is only defensible if it comes with a
 one, which is why every theme-blind foreground found in this tree failed in
 light mode and passed in dark.
 
+**`palette-tokens.test.ts` now guards all of `modules/` and `components/`**
+(issue #1693), not just the request/response tree it was cut for. The settings
+restart banner was the last `dark:`-paired holdout, and it moved to the
+`--warning` family the "Pending" chip one card below it already used - which
+is the argument for widening: the token existed, the banner just predated it.
+Two exemptions are listed in the guard, both `text-purple-500` marking a
+*load test* (`RunItem`'s bolt, `LoadTestDetail`'s P99 arrow). That is a kind
+rather than a status, so the app's one violet token - `--status-redirect`,
+which means 3xx - would be the wrong word, and both were measured where they
+sit (4.36/4.59 and 3.50/3.66 against the 3.0 icon bar) rather than assumed.
+
 ### HTTP Method Color Tokens
 
 **Always render methods with `MethodBadge`** (`components/shared`) - never a

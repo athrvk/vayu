@@ -134,17 +134,17 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 	const { restart, isRestarting } = useEngineRestart();
 
 	return (
-		<div className="enter-fade bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 px-6 py-3 shrink-0">
+		<div className="enter-fade bg-warning/10 border-b border-warning/30 px-6 py-3 shrink-0">
 			<div className="flex items-center justify-between max-w-3xl mx-auto w-full">
 				<div className="flex items-center gap-3">
-					<div className="flex items-center justify-center w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50">
-						<AlertTriangle className="size-icon text-amber-600 dark:text-amber-400" />
+					<div className="flex items-center justify-center w-8 h-8 rounded-full bg-warning/15">
+						<AlertTriangle className="size-icon text-warning-text" />
 					</div>
 					<div>
-						<p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+						<p className="text-sm font-medium text-warning-text">
 							Engine restart required
 						</p>
-						<p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+						<p className="text-xs text-warning-text/80 mt-0.5">
 							Changes to <span className="font-medium">{labels.join(", ")}</span> will
 							take effect after restarting the engine
 						</p>
@@ -155,14 +155,14 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 						variant="outline"
 						size="sm"
 						onClick={onDismiss}
-						className="border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50"
+						className="border-warning/40 hover:bg-warning/15"
 					>
 						<X className="size-icon mr-1.5" />
 						Dismiss
 					</Button>
 					<Button
 						size="sm"
-						className="bg-amber-600 hover:bg-amber-700 text-white"
+						className="bg-warning hover:bg-warning/90 text-warning-foreground"
 						disabled={isRestarting}
 						onClick={() => void restart()}
 					>
@@ -668,7 +668,7 @@ export default function SettingsMain() {
 					isDependent && "ml-6",
 					isModified && !hasError && "border-primary/50",
 					hasError && "border-destructive/50",
-					isPendingRestart && "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10"
+					isPendingRestart && "border-warning/50 bg-warning/5"
 				)}
 			>
 				<CardHeader className="pb-3">
@@ -677,7 +677,7 @@ export default function SettingsMain() {
 							<div className="flex items-center gap-2">
 								<CardTitle>{entry.label}</CardTitle>
 								{needsRestart && (
-									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-micro font-semibold bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-micro font-semibold border border-warning/30 bg-warning/15 text-warning-text">
 										<RefreshCw className="w-2.5 h-2.5" />
 										Restart Required
 									</span>

@@ -25,12 +25,14 @@
  * and after, on the per-theme `-text` tokens: 4.98/8.36, 5.68/8.80, 5.98/6.76,
  * 4.83/7.66, 5.68/8.80, 5.68/8.80, and 4.84/3.57 for the dot on the fill token.
  *
- * **Scope is deliberate.** This guards the trees that were measured, not the
- * whole app. Elsewhere - the history tabs, the settings banners - the raw
- * palette classes come in explicit `light dark:` pairs, which are theme-aware
- * and therefore not this defect; converting those is a design decision about
- * introducing new tokens (there is no purple or info `-text` token today), not
- * a contrast fix. Widen this guard when those tokens exist, not before.
+ * **Scope is now the whole of `modules/` and `components/`** (issue #1693).
+ * It used to be these two trees alone, because elsewhere the raw palette came
+ * in explicit `light dark:` pairs - theme-aware, so not the contrast defect
+ * above - and converting them needed tokens that did not exist. They do now:
+ * the settings restart banner, the last `dark:`-paired holdout, sits on the
+ * `--warning` family that the "Pending" chip one card below it already used,
+ * which is the whole argument for widening. Two files carry a `dark:` pair
+ * and two carry none; both kinds are named in EXCLUDED below, with the reason.
  */
 
 import { describe, it, expect } from "vitest";
@@ -43,20 +45,27 @@ import { stripComments } from "@/lib/strip-comments.testkit";
 const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = join(here, "..", "..", "..", "..");
 
-const GUARDED = ["modules/request-builder/**/*.tsx", "components/shared/response-viewer/**/*.tsx"];
+const GUARDED = ["modules/**/*.tsx", "components/**/*.tsx"];
 
 /**
- * Nothing is excluded any more.
+ * Two files, one colour, one reason.
  *
- * `LoadTestConfigDialog` used to be: it carried a `bg-blue-50 … dark:bg-blue-950`
- * info box and a hardcoded `bg-purple-600` submit button, and converting them
- * needed tokens that did not exist. The dialog has since been re-cut - the info
- * box became a shared `Callout` on semantic tokens, and the button moved to the
- * accent - so the exemption is gone and the whole tree is guarded.
+ * `text-purple-500` marks a *load test* - the sidebar row's bolt and the P99
+ * tile's trend arrow. It is a kind, not a status, so the one violet token the
+ * app has (`--status-redirect`, which means 3xx) would be the wrong word for
+ * it, and inventing a token for two icons is not worth a permanent entry in
+ * the theme. Both were measured where they sit rather than assumed: 4.36
+ * light / 4.59 dark on the sidebar row, 3.50 / 3.66 on the tile, against the
+ * 3.0 icon bar in both themes - which is why neither needs a `dark:` pair.
+ * The two call-site comments carry those numbers; this list only records that
+ * the exemption is deliberate.
  *
- * If something needs adding back here, say why in the same breath.
+ * If something needs adding here, say why in the same breath.
  */
-const EXCLUDED: string[] = [];
+const EXCLUDED: string[] = [
+	"modules/history/sidebar/RunItem.tsx",
+	"modules/history/main/LoadTestDetail.tsx",
+];
 
 const PALETTE = [
 	"red",
@@ -92,17 +101,21 @@ const RAW = new RegExp(
 
 function guardedFiles(): string[] {
 	const excluded = new Set(EXCLUDED.map((f) => f.split("/").join(sep)));
-	return GUARDED.flatMap((pattern) => globSync(pattern, { cwd: srcRoot }))
-		.filter((f) => !excluded.has(f))
-		.map((f) => join(srcRoot, f));
+	return (
+		GUARDED.flatMap((pattern) => globSync(pattern, { cwd: srcRoot }))
+			// A test asserting on a class it expects to find is not a call site.
+			.filter((f) => !/\.test\.tsx$/.test(f))
+			.filter((f) => !excluded.has(f))
+			.map((f) => join(srcRoot, f))
+	);
 }
 
-describe("request/response tree uses design tokens, not raw palette colours", () => {
+describe("modules and components use design tokens, not raw palette colours", () => {
 	it("scans a non-empty set of files", () => {
 		// The radius guard once passed for weeks while scanning an empty string.
 		// A guard that cannot fail is worse than no guard, because it reads as
 		// coverage.
-		expect(guardedFiles().length).toBeGreaterThan(15);
+		expect(guardedFiles().length).toBeGreaterThan(200);
 	});
 
 	it("finds no raw palette colour classes", () => {

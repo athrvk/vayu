@@ -573,7 +573,6 @@ export default function VariablesCategoryTree() {
 															"bg-scope-environment/10 text-scope-environment hover:bg-scope-environment/20"
 													)}
 												>
-													{/* <Cloud className="size-icon text-blue-400 shrink-0" /> */}
 													{renamingEnvId === environment.id ? (
 														<Input
 															autoFocus
@@ -786,7 +785,6 @@ export default function VariablesCategoryTree() {
 														GROUP_CHILD_INSET
 													)}
 												>
-													{/* <Folder className="size-icon text-orange-400" /> */}
 													<TruncatedText className="flex-1">
 														{collection.name}
 													</TruncatedText>
