@@ -21,6 +21,7 @@ import { Eyebrow } from "@/components/ui";
 import iconUrl from "@shared/icon_png/vayu_icon_256x256.png";
 import { ActionTile } from "./components/ActionTile";
 import { FooterLinks } from "./components/FooterLinks";
+import { WELCOME_COLUMN } from "./welcome-column";
 
 interface FirstRunWelcomeProps {
 	onImport: () => void;
@@ -29,7 +30,7 @@ interface FirstRunWelcomeProps {
 
 export function FirstRunWelcome({ onImport, onNewRequest }: FirstRunWelcomeProps) {
 	return (
-		<div className="flex flex-col gap-8">
+		<div className={`flex flex-col gap-8 ${WELCOME_COLUMN}`}>
 			<div className="flex flex-col gap-2">
 				<div className="flex items-center gap-2">
 					<img src={iconUrl} alt="" className="h-6 w-6" />
