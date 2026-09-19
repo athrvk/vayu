@@ -2025,8 +2025,22 @@ that do show it unconditionally.
 the label is the primary target and there is no way to widen it. Rows must not
 animate under the cursor.
 
-Text that **wraps** (`break-words`, e.g. the run URL in `RunItem`) is neither -
-it never clips, so it needs no tooltip.
+Text that **wraps** (`break-words`) is neither - it never clips, so it needs no
+tooltip.
+
+**A URL is the exception, and it gives way at the head.** Both treatments above
+keep the beginning of a string, which is right for a name and wrong for a URL:
+the scheme and host are what every row on one host shares, so a page of local
+runs read `http://127.0.0.1:9...` five times over for five different requests.
+`lib/truncate-url.ts` (`truncateUrl(url, max = 48)`) shortens the head and keeps
+the path tail, and `RunItem` passes its URL-titled rows through it before the
+`truncate` class ever applies - the class stays, because a character budget is
+not a promise about a narrow drawer. The full value stays in the element's
+`title` and in the row's accessible name.
+
+It is a display helper and never parses: a row can hold a value still being
+typed, a `{{variable}}` in the authority or a relative path, and `new URL()`
+throws on all three.
 
 ---
 

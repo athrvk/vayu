@@ -11,6 +11,7 @@ import type { Run } from "@/types";
 import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { truncateUrl } from "@/lib/truncate-url";
 import { MethodBadge, RowContextMenu, type RowAction } from "@/components/shared";
 import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { formatConcurrency } from "@/constants/load-test-modes";
@@ -242,7 +243,18 @@ export default function RunItem({
 	// The row's identity text, in priority order: a proper request name, else
 	// the url, else the collection a scenario ran, else the bare fallback.
 	const identitySuffix = requestName ?? requestUrl ?? scenarioLabel;
-	const identityText = identitySuffix ?? fallbackIdentity;
+	/*
+	 * A url gives way at its head, everything else at its tail (#1691).
+	 *
+	 * `truncate` keeps the head, and for a url the head is what every row on one
+	 * host shares: a page of local runs read `http://127.0.0.1:9...` over and
+	 * over, one indistinguishable row per request. `truncateUrl` keeps the path
+	 * instead. A name or a collection is left to CSS, where the head *is* the
+	 * identifying part - and the class stays on the element either way, because a
+	 * 48-character budget is not a promise about a narrow drawer.
+	 */
+	const identityText =
+		requestName ?? (requestUrl ? truncateUrl(requestUrl) : (scenarioLabel ?? fallbackIdentity));
 	// A name replacing the url as the visible text does not hide the url -
 	// it is one hover away, on the same text, the way a truncated url or
 	// collection name already was.
