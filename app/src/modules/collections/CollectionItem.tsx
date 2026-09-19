@@ -14,7 +14,7 @@ import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
-import { Button, Input } from "@/components/ui";
+import { Button, IconSwap, Input } from "@/components/ui";
 import { RowActionsMenu, RowContextMenu, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
@@ -70,9 +70,11 @@ export default function CollectionItem({
 	} = useCollectionTreeContext();
 
 	const isExpanded = expandedCollectionIds.has(collection.id);
-	// Open-folder glyph while expanded, so the folder itself echoes the chevron.
-	const FolderIcon = isExpanded ? FolderOpen : Folder;
 	const isSelected = selectedCollectionId === collection.id;
+	const folderIconClass = cn(
+		"size-icon shrink-0",
+		depth === 0 ? "text-primary" : "text-primary/70"
+	);
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
 	const isDeleting = deletingCollectionId === collection.id;
@@ -289,11 +291,15 @@ export default function CollectionItem({
 						className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 						disabled={isDeleting || isRenaming}
 					>
-						<FolderIcon
-							className={cn(
-								"size-icon shrink-0",
-								depth === 0 ? "text-primary" : "text-primary/70"
-							)}
+						{/* Open-folder glyph while expanded, so the folder itself
+						    echoes the chevron - crossfaded, since a tree row's
+						    expand is the one state change the eye is following. */}
+						<IconSwap
+							state={isExpanded ? "open" : "closed"}
+							icons={{
+								closed: <Folder className={folderIconClass} />,
+								open: <FolderOpen className={folderIconClass} />,
+							}}
 						/>
 						{isRenaming ? (
 							<Input

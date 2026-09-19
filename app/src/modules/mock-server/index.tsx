@@ -43,7 +43,7 @@ import { formatTime } from "@/lib/format-time";
 
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const { openTabs, activeTabId, openTab } = useTabsStore();
 	const { data: mocks = [], isError, error, refetch } = useMockServersQuery();
 	const stopMock = useStopMockServerMutation();
