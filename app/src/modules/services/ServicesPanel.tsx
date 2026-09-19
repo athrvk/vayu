@@ -45,6 +45,7 @@ import {
 } from "@/components/shared";
 import {
 	Badge,
+	Button,
 	Collapsible,
 	CollapsibleContent,
 	Input,
@@ -65,7 +66,7 @@ import {
 	useStopMockServerMutation,
 	useUpdateMockIssuerMutation,
 } from "@/queries";
-import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
+import { useInboxNotifyStore, useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TIMING } from "@/config/timing";
 import { cn } from "@/lib/utils";
@@ -642,6 +643,9 @@ export default function ServicesPanel() {
 	const startInbox = useStartInboxMutation();
 	const [expandedIssuerId, setExpandedIssuerId] = useState<string | null>(null);
 	const [newIssuerOpen, setNewIssuerOpen] = useState(false);
+	// A mock is started from a collection's header, so the empty group points
+	// at the Collections drawer rather than offering a button that cannot work.
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const { flashedId: flashedInboxId, flash: flashInbox } = useRowFlash();
 
 	const inboxes = inboxesQuery.data ?? [];
@@ -721,6 +725,15 @@ export default function ServicesPanel() {
 							variant="inline"
 							className={GROUP_NOTE_CLASS}
 							title="No inbox yet. Start one for a local URL that records every request sent to it - no tunnel, no third party."
+							action={
+								<Button
+									variant="link"
+									disabled={startInbox.isPending}
+									onClick={start}
+								>
+									New inbox
+								</Button>
+							}
 						/>
 					) : (
 						orderedInboxes.map((inbox) => (
@@ -755,6 +768,11 @@ export default function ServicesPanel() {
 							variant="inline"
 							className={GROUP_NOTE_CLASS}
 							title="No issuer running. Start one to mint your own OAuth 2.0 tokens locally, with the claims and failures you choose."
+							action={
+								<Button variant="link" onClick={() => setNewIssuerOpen(true)}>
+									New issuer
+								</Button>
+							}
 						/>
 					) : (
 						issuers.map((issuer) => (
@@ -788,6 +806,14 @@ export default function ServicesPanel() {
 							variant="inline"
 							className={GROUP_NOTE_CLASS}
 							title="No mock running. Open a collection and start one to serve its saved example responses on a local URL - a free upstream to build or load-test against."
+							action={
+								<Button
+									variant="link"
+									onClick={() => revealDrawerView("collections")}
+								>
+									Browse collections
+								</Button>
+							}
 						/>
 					) : (
 						orderedMocks.map((mock) => <MockServerRow key={mock.mockId} mock={mock} />)

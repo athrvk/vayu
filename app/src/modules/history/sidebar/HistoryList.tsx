@@ -394,6 +394,25 @@ export default function HistoryList() {
 											? "Pin a run as its request's baseline to keep it here."
 											: "Run your first load test to see its results here."
 								}
+								action={
+									// Only when a control is doing the narrowing:
+									// "Clear the filters" is not an offer to make
+									// when the list is empty because nothing ran.
+									searchQuery ||
+									filterType !== "all" ||
+									filterStatus !== "all" ? (
+										<Button
+											variant="link"
+											onClick={() => {
+												setSearchQuery("");
+												setFilterType("all");
+												setFilterStatus("all");
+											}}
+										>
+											Clear the filters
+										</Button>
+									) : undefined
+								}
 							/>
 						)}
 

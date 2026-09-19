@@ -20,8 +20,14 @@
  * - `pane` - owns a whole region (a detail view with nothing selected, a list
  *   with no items). Centred on both axes, icon-led, and the only variant that
  *   takes an action.
- * - `inline` - a small panel inside something else (a response tab, a card).
- *   One muted line, no icon, no action; an icon here would out-weigh the panel.
+ * - `inline` - a small panel inside something else (a response tab, a card, a
+ *   drawer group). One muted line and no icon; an icon here would out-weigh
+ *   the panel. It does take an `action` (issue #1693): the drawer's group
+ *   notes - "No inbox yet", "No environments" - are exactly the dead ends the
+ *   sweep was about, and their create handler lives one row up in a tooltip
+ *   icon button that is easy to miss. The action renders under the line as
+ *   the same `variant="link"` button `pane` uses, not beside it, so the note
+ *   stays one column wide inside a 50px-inset group.
  *
  * Copy is sentence case, per the rest of the UI and Apple's HIG. It lives at
  * the call site rather than being forced with `text-transform`, so a heading
@@ -49,7 +55,7 @@ interface EmptyStateProps {
 	 * run's report still in flight. `pane` only.
 	 */
 	iconClassName?: string;
-	/** A Button, usually `variant="link"`. `pane` only. */
+	/** A Button, usually `variant="link"`. Both variants. */
 	action?: ReactNode;
 	variant?: "pane" | "inline";
 	className?: string;
@@ -73,6 +79,7 @@ export function EmptyState({
 				)}
 			>
 				{title}
+				{action && <div className="mt-1">{action}</div>}
 			</div>
 		);
 	}

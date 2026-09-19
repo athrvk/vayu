@@ -79,6 +79,10 @@ const failSave = vi.fn();
 vi.mock("@/stores", () => ({
 	useTabsStore: () => ({ openTab: vi.fn() }),
 	useSaveStore: () => ({ failSave }),
+	// The empty-collections note's "Browse collections" action reads this
+	// (issue #1693); these cases never render it, since they always have rows.
+	useLayoutStore: (select: (s: { revealDrawerView: () => void }) => unknown) =>
+		select({ revealDrawerView: vi.fn() }),
 }));
 vi.mock("@/modules/variables/variables-store", () => ({
 	useVariablesStore: () => ({ selectedCategory: null, setSelectedCategory }),

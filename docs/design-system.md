@@ -2615,9 +2615,25 @@ line of muted text. Three shared primitives in `components/shared/` now cover it
 
 | State | Component | Notes |
 |-------|-----------|-------|
-| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description + optional action |
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action` |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
 | Still loading | `DetailSkeleton` | `rows` prop, default 4 |
+
+**An empty state that has a create path says so** (issue #1693). Thirty-odd
+call sites had one between them before, so "No environments" and "No mock
+running" were dead ends whose only way forward was a tooltip icon button one
+row up. Twelve now carry `action={<Button variant="link">…</Button>}`, wired
+to the *same* handler that header button uses - never a second, parallel
+create path, which is what would drift. Where the surface genuinely has no
+create of its own the action points at the surface that does
+("Browse collections" from the mock pane), and where the state is one the
+user caused it undoes that ("Clear the filters", "Clear the filter"). A pane
+that is a selection prompt ("No run selected"), a not-found, a loading step
+or a wait on someone else's traffic gets none: there is nothing to offer.
+The `inline` variant takes an action for this reason - the drawer's group
+notes are inline and are where most of the dead ends were - and renders it
+under its single line, so the note stays one column wide inside an inset
+group.
 
 **`ErrorState` is deliberately not a variant of `EmptyState`.** "Nothing here
 yet" and "this failed" are different messages with different affordances, and

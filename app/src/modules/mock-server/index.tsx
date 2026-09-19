@@ -37,7 +37,7 @@ import {
 	useMockServersQuery,
 	useStopMockServerMutation,
 } from "@/queries";
-import { useTabsStore, useToastStore } from "@/stores";
+import { useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { formatTime } from "@/lib/format-time";
 
@@ -45,6 +45,9 @@ export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
 	const { openTabs, activeTabId, openTab } = useTabsStore();
+	// A mock is started from a collection's header, so the way out of this
+	// state is the Collections drawer - the same place the header lives.
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const { data: mocks = [], isError, error, refetch } = useMockServersQuery();
 	const stopMock = useStopMockServerMutation();
 
@@ -76,6 +79,11 @@ export default function MockServerView() {
 				icon={MockIcon}
 				title="No mock running"
 				description="Start one from a collection's header to serve its saved example responses on a local URL."
+				action={
+					<Button variant="link" onClick={() => revealDrawerView("collections")}>
+						Browse collections
+					</Button>
+				}
 			/>
 		);
 	}

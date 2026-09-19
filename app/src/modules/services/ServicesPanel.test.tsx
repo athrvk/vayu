@@ -141,6 +141,9 @@ describe("the services drawer", () => {
 	});
 
 	/*
+	 * The header's button is taken as the first of its label: an empty group's
+	 * note carries the same label and the same handler (issue #1693).
+	 *
 	 * "New inbox", not "Start inbox": the affordance always mints a new listener,
 	 * and beside a stopped row the old Play icon and wording read as "restart
 	 * that one" - which it never did (issue #553).
@@ -148,7 +151,7 @@ describe("the services drawer", () => {
 	it("mints a new inbox from the group's own affordance, and says that is what it does", async () => {
 		listInboxes.mockResolvedValue([inbox({ running: false })]);
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: "New inbox" }));
+		fireEvent.click((await screen.findAllByRole("button", { name: "New inbox" }))[0]);
 		await waitFor(() => expect(startInbox).toHaveBeenCalled());
 		expect(screen.queryByRole("button", { name: /^start inbox$/i })).not.toBeInTheDocument();
 	});
@@ -162,7 +165,7 @@ describe("the services drawer", () => {
 	it("says a new inbox started, and names the port it got", async () => {
 		startInbox.mockResolvedValue(inbox({ inboxId: "inbox_new", port: 41240 }));
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: "New inbox" }));
+		fireEvent.click((await screen.findAllByRole("button", { name: "New inbox" }))[0]);
 		await waitFor(() =>
 			expect(useToastStore.getState().toasts[0]).toMatchObject({
 				variant: "success",
@@ -182,7 +185,7 @@ describe("the services drawer", () => {
 		renderPanel();
 
 		await screen.findByText("Port 41234");
-		fireEvent.click(screen.getByRole("button", { name: "New inbox" }));
+		fireEvent.click(screen.getAllByRole("button", { name: "New inbox" })[0]);
 
 		const flashedRow = await waitFor(() => {
 			const row = screen.getByText("Port 41230").closest("div.flex.h-8");
@@ -199,7 +202,7 @@ describe("the services drawer", () => {
 	it("still reports a refused start, and highlights nothing", async () => {
 		startInbox.mockRejectedValue(new Error("address already in use"));
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: "New inbox" }));
+		fireEvent.click((await screen.findAllByRole("button", { name: "New inbox" }))[0]);
 		await waitFor(() =>
 			expect(useToastStore.getState().toasts[0]).toMatchObject({
 				variant: "error",
@@ -561,7 +564,7 @@ describe("an issuer row", () => {
 describe("starting an issuer", () => {
 	const openDialog = async () => {
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: "New issuer" }));
+		fireEvent.click((await screen.findAllByRole("button", { name: "New issuer" }))[0]);
 		return within(await screen.findByRole("dialog"));
 	};
 
