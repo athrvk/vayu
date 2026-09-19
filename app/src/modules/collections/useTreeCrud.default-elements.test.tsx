@@ -77,7 +77,7 @@ describe("new-entity creation sends no seeded elements", () => {
 	it("a subfolder", async () => {
 		const { result } = renderCrud();
 
-		act(() => result.current.rows.onSubCollectionNameChange("New Folder"));
+		act(() => result.current.rows.onFolderNameChange("New Folder"));
 		await act(async () => result.current.rows.onCreateSubfolder("c-1"));
 
 		expect(createCollection).toHaveBeenCalledTimes(1);

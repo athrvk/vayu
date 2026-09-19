@@ -31,7 +31,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useTabsStore, useToastStore } from "@/stores";
 import type { Inbox, InboxCapture } from "@/types";
@@ -140,6 +140,11 @@ describe("a refused mutation in the inbox tab", () => {
 		// would otherwise land on a dead button and prove nothing.
 		await screen.findByText("/hook");
 		fireEvent.click(screen.getByRole("button", { name: /clear/i }));
+		// Clear confirms first (issue #1689), so the failure only shows up once
+		// the confirm button inside the dialog is also clicked.
+		fireEvent.click(
+			within(await screen.findByRole("dialog")).getByRole("button", { name: /^clear$/i })
+		);
 		await waitFor(() =>
 			expect(firstToast()).toMatchObject({ variant: "error", message: "database is locked" })
 		);

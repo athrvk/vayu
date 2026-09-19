@@ -2617,6 +2617,33 @@ fallback value of `--rule` is the right answer (see "`border-rule`: let the
 surface pick the token"). Guard: `tabs.test.tsx`, both the rendered class lists
 and a scan asserting every call site in `app/src` declares a variant.
 
+### Loading
+
+Three shapes, one rule each, decided once here rather than per module
+(issue #1683/#1689) because the app had accumulated `Loader2` in 35 files,
+`ListSkeleton`/`DetailSkeleton` in about a dozen, `EmptyState`'s
+`iconClassName="animate-spin"`, and `ImportProgressView` - four idioms with
+nothing saying which one a new screen should reach for.
+
+- **First load of a list or pane is a skeleton.** `ListSkeleton` or
+  `DetailSkeleton` - the shape of the content that is about to appear, so
+  the layout does not jump when it arrives.
+- **An in-place action on an existing control is an inline spinner.**
+  `Loader2` inside the button or row that triggered it - Send, Stop, Save,
+  a per-row purge. The control that was clicked is what shows it is working;
+  nothing else on the pane should move.
+- **A multi-step job is a progress view.** `ImportProgressView` and its kin -
+  several named steps with their own state, not a single spinner standing in
+  for all of them.
+
+A screen reaching for a fourth idiom, or for the wrong one of these three, is
+the bug this rule exists to catch.
+
+**Default entity names are Title Case** ("New Collection", "New Folder"),
+even beside sentence-case headings and button labels ("No collections yet",
+"Delete forever?"). The name is a proper noun for the thing until the user
+renames it; the surrounding UI copy is not.
+
 ### Cards
 
 ```tsx
@@ -2819,6 +2846,32 @@ copy of those four rules.
   <Trash2 className="w-3 h-3" />
 </Button>
 ```
+
+#### Reversibility
+
+Two lanes, decided once here rather than per module (issue #1683/#1689):
+
+- **Collections and requests go to Trash, with Undo.** Deleting either is
+  recoverable for the retention window Settings shows - the undo toast handles
+  the immediate "I clicked the wrong row", and Trash's own restore handles
+  everything after that.
+- **Everything else confirms and deletes permanently**: environments, history
+  runs, load-test examples, inbox listeners and their captures, certificates.
+  The owner decided this deliberately (#1683) - a second Trash lane for every
+  other entity is not coming, so a module reaching for one should reach for
+  `DeleteConfirmDialog` instead.
+- **A destructive action never runs from a single click without one of the
+  two.** A control that removes data either lands in Trash (no confirm needed
+  - it is reversible) or opens `DeleteConfirmDialog` (no Trash - it is not).
+  Wiring a mutation straight to a button's `onClick` for anything that
+  destroys data is the bug this rule exists to catch (#1689's Clear captures
+  and Empty trash were both found this way).
+- **One template writes the sentence.** `DeleteConfirmDialog` takes `name` and
+  an optional `scope` (`"default"` or `"cascade"`) and builds "Delete
+  {name}? {name} is removed permanently." itself, with a suffix for a
+  container that takes its contents with it. A call site passes `description`
+  only for prose the template cannot say - a count, a conditional clause -
+  never to restate what `name`/`scope` already produce.
 
 ### URL Bar (Flat Style)
 
