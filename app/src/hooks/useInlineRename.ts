@@ -27,7 +27,9 @@
  *   abandoned. `closedRef` closes the editor once: the blur that follows a
  *   keyboard close is the one that close caused, and it does nothing.
  * - **An empty name cancels, it never commits.** A blank rename is an
- *   abandoned one, not a request to erase the name.
+ *   abandoned one, not a request to erase the name - except where the name is
+ *   itself optional and blanking it restores a default label, which is
+ *   `commitEmpty` and `ElementList`'s one caller.
  * - **Focus returns to the row on a keyboard close, never on a blur.** The
  *   trees are one tab stop each and the field replaces the row's only focusable
  *   control, so F2 then Escape used to drop the user out of the tree onto
@@ -59,6 +61,12 @@ export interface UseInlineRenameOptions {
 	 */
 	getRowElement?: () => HTMLElement | null | undefined;
 	/**
+	 * Commit an empty value instead of cancelling. Only for a field whose entity
+	 * has an optional name: `ElementList`'s row shows the kind label when the
+	 * name is blank, so clearing it is an action, not an abandoned edit.
+	 */
+	commitEmpty?: boolean;
+	/**
 	 * Stop the keydown reaching an ancestor. The variables tree binds keys on
 	 * the `role="tree"` element above the field and needs it.
 	 */
@@ -83,6 +91,7 @@ export function useInlineRename({
 	onCommit,
 	onCancel,
 	getRowElement,
+	commitEmpty = false,
 	stopPropagation = false,
 }: UseInlineRenameOptions): InlineRename {
 	const [value, setValue] = useState(initialValue);
@@ -118,7 +127,7 @@ export function useInlineRename({
 		if (closedRef.current) return;
 		const trimmed = value.trim();
 		close(fromKeyboard);
-		if (!trimmed) {
+		if (!trimmed && !commitEmpty) {
 			onCancel();
 			return;
 		}
