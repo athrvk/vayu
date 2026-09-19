@@ -60,7 +60,7 @@ export const withTrailingBlank = (items: KeyValueItem[]): KeyValueItem[] => {
  * a picked file reads as blank to a key/value test - it would have been treated
  * as the trailing spare row and dropped on save.
  */
-const isBlankRow = (item: KeyValueItem): boolean =>
+export const isBlankRow = (item: KeyValueItem): boolean =>
 	!item.key.trim() && !item.value.trim() && !item.src?.trim();
 
 /**
