@@ -2586,17 +2586,32 @@ second copy of the literal. The command palette's group headings are an
 </span>
 ```
 
-**Run status left-bar (RunItem):**
+**Status is never colour alone.** A badge, a chip or a glyph that encodes its
+state only as a hue says nothing to a red/green confusion, a monochrome display
+or a greyscale screenshot - and every status surface here is small, where hue is
+hardest to judge. The rule is redundancy: **shape or a word carries the state,
+and the colour agrees with it.** The LIVE pill above carries the word; the
+history row carries the shape.
+
+**Run status glyph (`RunItem`):** one lucide glyph per status, in the family's
+`-text` token (the bare token is a fill and fails AA as a small foreground - see
+"The bare token is the fill"). It replaced a bare coloured dot, which was five
+identical circles in five colours.
+
 ```tsx
-<div className={cn(
-  "absolute left-0 top-0 bottom-0 w-1",
-  status === "completed" && "bg-green-500",
-  status === "failed"    && "bg-red-500",
-  status === "running"   && "bg-blue-500",
-  status === "stopped"   && "bg-orange-500",
-  status === "pending"   && "bg-muted-foreground"
-)} />
+const STATUS_GLYPH = {
+  completed: { icon: CircleCheck,  className: "text-status-success-text" },
+  failed:    { icon: CircleX,      className: "text-status-error-text" },
+  running:   { icon: Loader2,      className: "text-status-running-text animate-spin" },
+  stopped:   { icon: CircleSlash,  className: "text-status-stopped-text" },
+  pending:   { icon: Circle,       className: "text-muted-foreground" },
+};
 ```
+
+The glyph is `aria-hidden`: the row's own accessible name states the status in
+words, so a screen reader hears it once rather than twice. A glyph that has
+something no adjacent text says takes `role="img"` **and** an `aria-label` on
+the same element instead - `role-img-labelled.test.ts` holds that half.
 
 ### Toasts
 

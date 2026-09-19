@@ -28,23 +28,38 @@ import {
 	Pin,
 	PinOff,
 	AlertTriangle,
+	CircleCheck,
+	CircleX,
+	CircleSlash,
+	Circle,
 } from "lucide-react";
 
 /**
- * One dot colour per status - the row's only status affordance now.
- * The word and the left-edge bar this used to carry are gone: `formatTime`'s
- * per-row relative timestamp repeated "8h ago" down a whole page of rows and,
- * with a card border and `py-3` around it, the pair cost roughly two lines of
- * dead space per row for information a day-group header (`HistoryList.tsx`'s
- * `groupRunsByDay`) or a hover now carries instead. The full word and the
- * exact timestamp are still there, in the row's `title`.
+ * One glyph per status - shape first, colour second (#1691).
+ *
+ * This was a bare coloured dot, and the colour was the whole message: five rows
+ * of identical circles that a red/green confusion, a monochrome display or a
+ * screenshot pasted into an issue flattens into one. The shape is what carries
+ * the status now, and the colour agrees with it rather than being asked to say
+ * it alone - the redundancy rule in `docs/design-system.md` (Status Badges).
+ *
+ * The word and the left-edge bar this row used to carry are still gone, and for
+ * the reason they went: `formatTime`'s per-row "8h ago" and a status word cost
+ * roughly two lines of dead space per row for what a day-group header
+ * (`HistoryList.tsx`'s `groupRunsByDay`) or a hover carries instead. The full
+ * word and the exact timestamp are in the row's `title`, and the row's
+ * accessible name (the stretched activator below) states the status outright -
+ * so the glyph is decorative to a screen reader and `aria-hidden`.
+ *
+ * `-text`, not the bare fill token: these are small glyphs, and the bare token
+ * is a fill that fails AA as a foreground (`status-color-tokens.test.ts`).
  */
-const STATUS_DOT_CLASS: Record<Run["status"], string> = {
-	completed: "bg-status-success",
-	failed: "bg-status-error",
-	running: "bg-status-running animate-pulse",
-	stopped: "bg-status-stopped",
-	pending: "bg-muted-foreground",
+const STATUS_GLYPH: Record<Run["status"], { icon: typeof Circle; className: string }> = {
+	completed: { icon: CircleCheck, className: "text-status-success-text" },
+	failed: { icon: CircleX, className: "text-status-error-text" },
+	running: { icon: Loader2, className: "text-status-running-text animate-spin" },
+	stopped: { icon: CircleSlash, className: "text-status-stopped-text" },
+	pending: { icon: Circle, className: "text-muted-foreground" },
 };
 
 const STATUS_LABEL: Record<Run["status"], string> = {
@@ -233,6 +248,9 @@ export default function RunItem({
 	// collection name already was.
 	const identityTitle = requestName ? (requestUrl ?? undefined) : (identitySuffix ?? undefined);
 
+	// Shape carries the status, colour agrees with it - see STATUS_GLYPH.
+	const { icon: StatusGlyph, className: statusGlyphClass } = STATUS_GLYPH[run.status];
+
 	const hasMeta =
 		(scenario &&
 			(scenario.stepCount != null ||
@@ -266,11 +284,8 @@ export default function RunItem({
 				    a run whose work is a sequence), path or collection name, then
 				    the badges and actions a hover or a pinned/warned state reveals. */}
 				<div className="flex h-5 min-w-0 items-center gap-2">
-					<span
-						className={cn(
-							"h-2 w-2 shrink-0 rounded-full",
-							STATUS_DOT_CLASS[run.status]
-						)}
+					<StatusGlyph
+						className={cn("size-3 shrink-0", statusGlyphClass)}
 						aria-hidden="true"
 					/>
 					{method ? (
