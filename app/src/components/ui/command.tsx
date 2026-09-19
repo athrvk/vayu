@@ -218,10 +218,10 @@ const CommandDialog = ({
 					 * eleven-row count that rests on it (#1260).
 					 *
 					 * The icon sizes went the same way and were never doing what
-					 * they said: `[&_[cmdk-item]_svg]:h-5` outranks the `h-3.5`
+					 * they said: `[&_[cmdk-item]_svg]:h-5` outranks the `size-icon-sm`
 					 * a row writes on its own icon - one class, one attribute
 					 * and a type against one class - so every palette row drew a
-					 * 20px icon beside the 14px rail meant to match it.
+					 * 20px icon beside the `h-icon-sm` rail meant to match it.
 					 *
 					 * The list's cap is the other half of the density and
 					 * belongs to whoever renders the list. Group headings carry
@@ -304,7 +304,7 @@ function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
 		<div
 			data-slot="command-footer"
 			className={cn(
-				"flex shrink-0 items-center gap-3 border-t border-rule px-3 py-2 text-[10px] text-muted-foreground",
+				"flex shrink-0 items-center gap-3 border-t border-rule px-3 py-2 text-micro text-muted-foreground",
 				className
 			)}
 			{...props}

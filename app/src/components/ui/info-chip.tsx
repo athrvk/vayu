@@ -49,7 +49,7 @@ export function InfoChip({ tip, className }: InfoChipProps) {
 				<button
 					type="button"
 					className={cn(
-						"ml-1.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle",
+						"ml-1.5 inline-flex size-icon-sm items-center justify-center rounded-full border border-border bg-accent text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-help align-middle",
 						className
 					)}
 					aria-label="More information"
@@ -57,7 +57,7 @@ export function InfoChip({ tip, className }: InfoChipProps) {
 					<Info className="h-2.5 w-2.5" />
 				</button>
 			</TooltipTrigger>
-			<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
+			<TooltipContent className="max-w-[260px] text-label leading-relaxed">
 				{tip}
 			</TooltipContent>
 		</Tooltip>

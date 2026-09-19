@@ -44,6 +44,7 @@ import RunItem from "./RunItem";
 import { groupRunsByDay } from "./group-runs-by-day";
 import { useHistoryListFocus } from "./useHistoryListFocus";
 import type { Run } from "@/types";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
  * A run that is still executing is stopped by the engine before it is deleted,
@@ -168,7 +169,7 @@ export default function HistoryList() {
 		runToDelete?.summary?.url ??
 		(deleteConfirmRunId ? `${deleteConfirmRunId.slice(0, 8)}…` : "");
 	// Deleting one of these stops it first, which is a second consequence the
-	// dialog has to name - "permanently removed" alone does not cover ending a
+	// dialog has to name - "removed permanently" alone does not cover ending a
 	// test that is still generating load.
 	const deleteConfirmStopsRun =
 		runToDelete?.status === "running" || runToDelete?.status === "pending";
@@ -332,7 +333,7 @@ export default function HistoryList() {
 							aria-pressed={pinnedOnly}
 							title="Show only pinned runs"
 						>
-							<Pin className="w-3.5 h-3.5 shrink-0" />
+							<Pin className="size-icon-sm shrink-0" />
 							Pinned
 						</Button>
 					</div>
@@ -393,6 +394,25 @@ export default function HistoryList() {
 											? "Pin a run as its request's baseline to keep it here."
 											: "Run your first load test to see its results here."
 								}
+								action={
+									// Only when a control is doing the narrowing:
+									// "Clear the filters" is not an offer to make
+									// when the list is empty because nothing ran.
+									searchQuery ||
+									filterType !== "all" ||
+									filterStatus !== "all" ? (
+										<Button
+											variant="link"
+											onClick={() => {
+												setSearchQuery("");
+												setFilterType("all");
+												setFilterStatus("all");
+											}}
+										>
+											Clear the filters
+										</Button>
+									) : undefined
+								}
 							/>
 						)}
 
@@ -405,9 +425,9 @@ export default function HistoryList() {
 									 * runs said nothing after the first row) - see
 									 * `group-runs-by-day.ts`.
 									 */}
-									<div className="px-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground first:pt-0">
+									<Eyebrow className="px-1 pt-1 text-subtle-foreground first:pt-0">
 										{group.label}
-									</div>
+									</Eyebrow>
 									{group.runs.map((run) => (
 										<RunItem
 											key={run.id}
@@ -448,7 +468,7 @@ export default function HistoryList() {
 						<>
 							{deleteConfirmStopsRun
 								? "This run is still in progress - deleting it stops it first, then removes it permanently. This cannot be undone."
-								: "This run will be permanently removed. This cannot be undone."}
+								: "This run is removed permanently. This cannot be undone."}
 							{deleteConfirmLabel && (
 								<TruncatedText
 									as="span"

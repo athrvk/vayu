@@ -62,7 +62,7 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 						key={stage.key}
 						className="grid grid-cols-[68px_1fr_70px] items-center gap-2.5 py-1"
 					>
-						<span className="text-[11px] text-muted-foreground">
+						<span className="text-label text-muted-foreground">
 							{stage.label}
 							<InfoChip tip={stage.tip} />
 						</span>
@@ -75,7 +75,7 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 								}}
 							/>
 						</div>
-						<span className="text-right font-mono tabular-nums text-[11px] font-medium">
+						<span className="text-right font-mono tabular-nums text-label font-medium">
 							{duration ? (
 								<>
 									<span className="text-foreground">{duration.value}</span>
@@ -90,7 +90,7 @@ export function TimingWaterfall({ report }: { report: RunReport | null }) {
 					</div>
 				);
 			})}
-			<div className="mt-2.5 pt-2.5 border-t border-dashed border-border flex justify-between text-[11px] text-muted-foreground">
+			<div className="mt-2.5 pt-2.5 border-t border-dashed border-border flex justify-between text-label text-muted-foreground">
 				<span>Avg total</span>
 				<span className="font-mono font-semibold">
 					{hasData ? (

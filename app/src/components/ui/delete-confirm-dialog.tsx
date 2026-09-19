@@ -16,6 +16,12 @@
  * keyboard (Delete on a tree row). Focus is redirected to Cancel instead: the
  * safe action, so a reflexive Enter cancels rather than deletes. Left/Right move
  * between the actions the way native confirmation dialogs behave.
+ *
+ * `name`/`scope` (`deleteConfirmCopy`, in the sibling module) replace the three
+ * phrasings call sites used to write for themselves: "permanently removed",
+ * "removed for good", "will be deleted". This file is the one place any of
+ * those three may still appear - as this sentence, naming them - which is what
+ * `collection-constants.test.ts`'s guard checks.
  */
 
 import { useRef } from "react";
@@ -29,12 +35,29 @@ import {
 	DialogDescription,
 } from "./dialog";
 import { Button } from "./button";
+import { DialogCancelButton } from "./dialog-cancel-button";
+import { deleteConfirmCopy, type DeleteScope } from "./delete-confirm-copy";
 
 export interface DeleteConfirmDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	title: string;
-	description: React.ReactNode;
+	/**
+	 * Omit when `name` is given - the title is then built by `deleteConfirmCopy`.
+	 */
+	title?: string;
+	/**
+	 * Omit when `name` is given - the description is then built by
+	 * `deleteConfirmCopy`. Pass this instead for prose the template does not
+	 * cover (a count, a conditional clause) - it always wins over `name`.
+	 */
+	description?: React.ReactNode;
+	/**
+	 * The entity's name, quoted straight into the generated sentence. Ignored
+	 * when `description` is also given.
+	 */
+	name?: string;
+	/** See `DeleteScope`. Ignored without `name`. */
+	scope?: DeleteScope;
 	onConfirm: () => void | Promise<void>;
 	isDeleting?: boolean;
 	/**
@@ -79,6 +102,8 @@ export function DeleteConfirmDialog({
 	onOpenChange,
 	title,
 	description,
+	name,
+	scope,
 	onConfirm,
 	isDeleting = false,
 	confirmLabel = "Delete",
@@ -87,6 +112,9 @@ export function DeleteConfirmDialog({
 	onCloseAutoFocus,
 }: DeleteConfirmDialogProps) {
 	const cancelRef = useRef<HTMLButtonElement>(null);
+	const generated = name !== undefined ? deleteConfirmCopy(name, scope) : undefined;
+	const resolvedTitle = title ?? generated?.title ?? "Delete?";
+	const resolvedDescription = description ?? generated?.description;
 
 	const handleOpenChange = (next: boolean) => {
 		if (!next) onOpenChange(false);
@@ -121,18 +149,16 @@ export function DeleteConfirmDialog({
 				onCloseAutoFocus={onCloseAutoFocus}
 			>
 				<DialogHeader>
-					<DialogTitle>{title}</DialogTitle>
-					<DialogDescription>{description}</DialogDescription>
+					<DialogTitle>{resolvedTitle}</DialogTitle>
+					<DialogDescription>{resolvedDescription}</DialogDescription>
 				</DialogHeader>
 				<DialogFooter onKeyDown={handleFooterKeyDown} className="gap-2 sm:gap-0">
-					<Button
+					<DialogCancelButton
 						ref={cancelRef}
-						variant="secondary"
+						label={cancelLabel}
 						onClick={() => onOpenChange(false)}
 						disabled={isDeleting}
-					>
-						{cancelLabel}
-					</Button>
+					/>
 					<Button variant={confirmVariant} onClick={onConfirm} disabled={isDeleting}>
 						{isDeleting ? <Loader2 className="size-icon animate-spin" /> : confirmLabel}
 					</Button>

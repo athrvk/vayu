@@ -22,6 +22,7 @@ import type { Run } from "@/types";
 import { ActionTile } from "./components/ActionTile";
 import { FooterLinks } from "./components/FooterLinks";
 import { RecentRuns } from "./components/RecentRuns";
+import { WELCOME_COLUMN } from "./welcome-column";
 
 interface LauncherProps {
 	runs: Run[];
@@ -49,7 +50,8 @@ export function Launcher({
 	onServices,
 }: LauncherProps) {
 	return (
-		<div className="flex flex-col gap-8">
+		// A centred column, not the full width of the tab - see WELCOME_COLUMN.
+		<div className={`flex flex-col gap-8 ${WELCOME_COLUMN}`}>
 			<section>
 				<Eyebrow className="mb-2">Start</Eyebrow>
 				{/* Six columns since Search joined the row: the tiles are

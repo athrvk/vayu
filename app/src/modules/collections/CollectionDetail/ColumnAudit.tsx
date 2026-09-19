@@ -66,8 +66,8 @@ function ColumnChip({ column, tone }: { column: string; tone: "neutral" | "warni
 		<code
 			className={
 				tone === "warning"
-					? "rounded-sm bg-warning/10 px-1.5 py-0.5 font-mono text-[11px] text-warning-text"
-					: "rounded-sm bg-accent px-1.5 py-0.5 font-mono text-[11px]"
+					? "rounded-sm bg-warning/10 px-1.5 py-0.5 font-mono text-label text-warning-text"
+					: "rounded-sm bg-accent px-1.5 py-0.5 font-mono text-label"
 			}
 		>
 			{column}
@@ -180,7 +180,7 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 								row bound, the variable answers as it always did.
 							</Callout>
 						)}
-						<p className="text-[11px] text-muted-foreground">
+						<p className="text-label text-muted-foreground">
 							{audit.inScripts.length > 0
 								? `Scripts also name ${audit.inScripts.join(", ")}. Only literal pm.iterationData.get() arguments are scanned - script usage is dynamic, so this list is best-effort.`
 								: "Only literal pm.iterationData.get() arguments are scanned - script usage is dynamic, so this list is best-effort."}

@@ -29,7 +29,7 @@ export function AchievedThroughputCard({
 	return (
 		<HeroCardShell label="Achieved Throughput" tip={TOOLTIPS.achievedThroughput}>
 			<HeroValue value={fmt(throughput, 1)} unit="req/s" />
-			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				from{" "}
 				<span className="text-foreground font-semibold">
 					{fmt(configuredConcurrency, 0)}

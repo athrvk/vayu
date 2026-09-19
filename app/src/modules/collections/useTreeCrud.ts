@@ -119,7 +119,7 @@ export function useTreeCrud({
 	const [creatingCollection, setCreatingCollection] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
 	const [newCollectionName, setNewCollectionName] = useState(DEFAULT_COLLECTION_NAME);
-	const [newSubCollectionName, setNewSubCollectionName] = useState(DEFAULT_FOLDER_NAME);
+	const [newFolderName, setNewFolderName] = useState(DEFAULT_FOLDER_NAME);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [renamingRequestId, setRenamingRequestId] = useState<string | null>(null);
 	const [deletingCollectionId, setDeletingCollectionId] = useState<string | null>(null);
@@ -204,18 +204,18 @@ export function useTreeCrud({
 
 	const handleCancelSubfolder = useCallback(() => {
 		setCreatingSubfolder(null);
-		setNewSubCollectionName(DEFAULT_FOLDER_NAME);
+		setNewFolderName(DEFAULT_FOLDER_NAME);
 	}, []);
 
 	const handleCreateSubfolder = useCallback(
 		async (parentId: string) => {
-			if (!newSubCollectionName.trim() || createCollectionMutation.isPending) return;
+			if (!newFolderName.trim() || createCollectionMutation.isPending) return;
 
 			expandCollection(parentId);
 
 			try {
 				await createCollectionMutation.mutateAsync({
-					name: newSubCollectionName.trim(),
+					name: newFolderName.trim(),
 					parentId: parentId,
 				});
 			} catch (error) {
@@ -225,7 +225,7 @@ export function useTreeCrud({
 			handleCancelSubfolder();
 		},
 		[
-			newSubCollectionName,
+			newFolderName,
 			createCollectionMutation,
 			expandCollection,
 			reportFailure,
@@ -779,7 +779,7 @@ export function useTreeCrud({
 			deletingCollectionId,
 			deletingRequestId,
 			creatingSubfolder,
-			newSubCollectionName,
+			newFolderName,
 			isCreatingSubfolder: isCreatingCollection,
 			onCollectionClick: handleCollectionClick,
 			onCollectionToggle: handleCollectionToggle,
@@ -794,7 +794,7 @@ export function useTreeCrud({
 			onCollectionDeleteClick: handleCollectionDeleteClick,
 			onRequestDeleteClick: handleRequestDeleteClick,
 			onDuplicateRequest: handleDuplicateRequest,
-			onSubCollectionNameChange: setNewSubCollectionName,
+			onFolderNameChange: setNewFolderName,
 			onCreateSubfolder: handleCreateSubfolder,
 			onCancelSubfolder: handleCancelSubfolder,
 		}),
@@ -804,7 +804,7 @@ export function useTreeCrud({
 			deletingCollectionId,
 			deletingRequestId,
 			creatingSubfolder,
-			newSubCollectionName,
+			newFolderName,
 			isCreatingCollection,
 			handleCollectionClick,
 			handleCollectionToggle,

@@ -208,11 +208,11 @@ function PaletteRow({
 					aria-hidden="true"
 					// The same 2px rail the tab strip draws, for the same reason:
 					// the method is a colour everywhere else in the app.
-					className="h-3.5 w-0.5 shrink-0 rounded-full"
+					className="h-icon-sm w-0.5 shrink-0 rounded-full"
 					style={{ background: `hsl(${getMethodColor(item.method)})` }}
 				/>
 			)}
-			{Icon && <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+			{Icon && <Icon className="size-icon-sm shrink-0 text-muted-foreground" />}
 			<span className="min-w-0 flex-1 truncate">{item.title}</span>
 			{item.subtitle && (
 				<span className="ml-auto shrink-0 truncate pl-3 text-xs text-muted-foreground">

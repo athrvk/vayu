@@ -44,6 +44,7 @@ import {
 	CommandItem,
 	CommandList,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 	Input,
 	Popover,
 	PopoverContent,
@@ -249,10 +250,31 @@ function ElementRow({
 
 	const actions: RowAction[] = [
 		{ label: "Rename", icon: Pencil, onSelect: startRename },
-		{ label: "Move up", icon: ArrowUp, onSelect: () => onMove(-1), disabled: isFirst },
-		{ label: "Move down", icon: ArrowDown, onSelect: () => onMove(1), disabled: isLast },
+		// A one-element list offers both and neither works, and until #1690 the
+		// row gave no reason for either: the reason rides the item, because a
+		// tooltip inside the menu's focus trap would fight it for the keyboard.
+		{
+			label: "Move up",
+			icon: ArrowUp,
+			onSelect: () => onMove(-1),
+			disabled: isFirst,
+			disabledReason: "Already first",
+		},
+		{
+			label: "Move down",
+			icon: ArrowDown,
+			onSelect: () => onMove(1),
+			disabled: isLast,
+			disabledReason: "Already last",
+		},
 		{ label: "Duplicate", icon: Copy, onSelect: onDuplicate },
-		{ label: "Delete", icon: Trash2, onSelect: handleDelete, destructive: true },
+		{
+			label: "Delete",
+			icon: Trash2,
+			iconMotion: ICON_MOTION.lid,
+			onSelect: handleDelete,
+			destructive: true,
+		},
 	];
 
 	const handleRowKeyDown = (e: React.KeyboardEvent) => {

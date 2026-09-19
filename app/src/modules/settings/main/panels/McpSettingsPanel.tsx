@@ -45,6 +45,7 @@ import {
 import {
 	Button,
 	Input,
+	IconSwap,
 	Label,
 	LabelSwap,
 	Switch,
@@ -63,6 +64,7 @@ import type {
 	McpToolCategory,
 	McpToolInfo,
 } from "@/types";
+import { useCopy } from "@/hooks/useCopy";
 import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
@@ -209,26 +211,27 @@ function CopyButton({
 	className?: string;
 	disabled?: boolean;
 }) {
-	const [copied, setCopied] = useState(false);
-	const onCopy = useCallback(() => {
-		void navigator.clipboard?.writeText(text).then(() => {
-			setCopied(true);
-			setTimeout(() => setCopied(false), 1500);
-		});
-	}, [text]);
+	// Was a fire-and-forget write with the feedback inside its `then`: a denied
+	// permission rejected instead, so the check never appeared and nothing said
+	// why (#1686). Spelling that old call here would trip
+	// `clipboard-single-writer.test.ts`, which scans the source as written.
+	const { copy, copied } = useCopy({ feedback: "icon" });
 	return (
 		<Button
 			variant="ghost"
 			size="sm"
-			onClick={onCopy}
+			onClick={() => void copy(text, "Value")}
 			disabled={disabled}
 			className={cn("h-7 px-2 text-xs shrink-0", className)}
 		>
-			{copied ? (
-				<Check className="w-3.5 h-3.5 mr-1 text-success-text" />
-			) : (
-				<Copy className="w-3.5 h-3.5 mr-1" />
-			)}
+			<IconSwap
+				className="mr-1"
+				state={copied ? "copied" : "copy"}
+				icons={{
+					copy: <Copy className="size-icon-sm" />,
+					copied: <Check className="size-icon-sm text-success-text" />,
+				}}
+			/>
 			<LabelSwap label={copied ? "Copied" : "Copy"} states={["Copy", "Copied"]} />
 		</Button>
 	);
@@ -659,9 +662,9 @@ export default function McpSettingsPanel() {
 											}
 										>
 											{connecting === snippet.client ? (
-												<Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+												<Loader2 className="size-icon-sm mr-1 animate-spin" />
 											) : (
-												<Zap className="w-3.5 h-3.5 mr-1" />
+												<Zap className="size-icon-sm mr-1" />
 											)}
 											Connect
 										</Button>
@@ -844,7 +847,7 @@ export default function McpSettingsPanel() {
 											className="rounded-md p-0.5 hover:bg-destructive/10 hover:text-destructive-text transition-colors"
 											aria-label={`Remove ${host}`}
 										>
-											<X className="w-3.5 h-3.5" />
+											<X className="size-icon-sm" />
 										</button>
 									</span>
 								))}

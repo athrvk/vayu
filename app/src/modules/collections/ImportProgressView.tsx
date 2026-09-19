@@ -62,10 +62,33 @@ export function ImportProgressView({ progress }: { progress: ImportProgress }) {
 	const detail = detailOf(progress);
 	return (
 		<div className="enter-fade space-y-2">
-			<div className="flex items-baseline justify-between gap-3">
+			{/*
+			 * The one line that says what is happening, announced (#1691).
+			 *
+			 * An import is a multi-second operation whose only report was visual,
+			 * while the two shorter operations either side of it - the export
+			 * dialog and the tree's own busy states - already announced with
+			 * `role="status"`. The region is the visible line itself rather than
+			 * an off-screen copy, so there is one string to keep in step.
+			 *
+			 * The byte counter is excluded from it. A polite region re-announces
+			 * on every text change, and a download ticking a few times a second
+			 * would talk over everything else in the dialog; the file counts,
+			 * which move once per document, stay in.
+			 */}
+			<div
+				role="status"
+				aria-live="polite"
+				className="flex items-baseline justify-between gap-3"
+			>
 				<span className="text-xs font-medium">{label}</span>
 				{detail && (
-					<span className="font-mono text-[11px] text-muted-foreground">{detail}</span>
+					<span
+						aria-hidden={progress.stage === "fetching"}
+						className="font-mono text-label text-muted-foreground"
+					>
+						{detail}
+					</span>
 				)}
 			</div>
 			<Progress value={fractionOf(progress)} label={label} />

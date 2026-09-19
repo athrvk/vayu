@@ -23,7 +23,7 @@ export function ThroughputCard({
 	return (
 		<HeroCardShell label="Throughput" tip={TOOLTIPS.throughput}>
 			<HeroValue value={fmt(throughput, 1)} unit="req/s" />
-			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				mean iter{" "}
 				<span className="text-foreground font-semibold">{meanLatency.toFixed(0)}</span>ms
 			</p>

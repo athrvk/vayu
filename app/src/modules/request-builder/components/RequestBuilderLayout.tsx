@@ -26,7 +26,8 @@ import { SEND_CHORD, LOAD_TEST_CHORD, matchesChord } from "@/constants/shortcuts
 import { ownsEnterKey } from "@/lib/keyboard";
 import { isModalOpen } from "@/lib/modal";
 import { canSendRequest } from "../utils/send-gate";
-import RequestBreadcrumb from "./RequestBreadcrumb";
+import { TabBreadcrumb } from "@/components/shared";
+import { useRequestCrumbs } from "./useRequestCrumbs";
 import UrlBar from "./UrlBar";
 import RequestTabs from "./RequestTabs";
 import ResponseAnnouncer from "./ResponseAnnouncer";
@@ -38,6 +39,9 @@ export default function RequestBuilderLayout() {
 		useRequestBuilderContext();
 
 	const { requestSplitRatio, setRequestSplitRatio } = useLayoutStore();
+
+	// The collection chain plus this request's name - see `useRequestCrumbs`.
+	const crumbs = useRequestCrumbs();
 
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const debouncedSetRatio = useCallback(
@@ -125,7 +129,7 @@ export default function RequestBuilderLayout() {
 			    nothing at all for a request with no collection and no name, so
 			    the header does not grow a permanent empty line - the mistake the
 			    description band made here before it became the Info tab. */}
-			<RequestBreadcrumb />
+			<TabBreadcrumb label="Request location" crumbs={crumbs} />
 			<UrlBar />
 
 			{/* A field the user is editing that an external write (typically an

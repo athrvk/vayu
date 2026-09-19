@@ -280,7 +280,7 @@ describe("delete forever", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
 
 		expect(
-			await screen.findByText(/"Billing" and everything inside it will be removed for good/)
+			await screen.findByText(/"Billing" and everything inside it is removed permanently/)
 		).toBeInTheDocument();
 	});
 
@@ -383,6 +383,69 @@ describe("delete forever", () => {
 				expect.stringContaining("database is locked"),
 				"error"
 			)
+		);
+	});
+});
+
+// Issue #1689: the panel-header counterpart to per-row purge. No bulk engine
+// route exists, so this loops the same per-row mutation over every listed
+// entry - confirmed once, the way the per-row purge is.
+describe("empty trash", () => {
+	it("asks first, and purges nothing until confirmed", async () => {
+		state.items = [
+			collectionEntry(),
+			collectionEntry({ id: "c2", name: "Auth", kind: "request" }),
+		];
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Empty trash" }));
+
+		expect(await screen.findByText("Empty trash?")).toBeInTheDocument();
+		expect(purge).not.toHaveBeenCalled();
+	});
+
+	it("purges every row once confirmed", async () => {
+		state.items = [
+			collectionEntry(),
+			collectionEntry({ id: "c2", name: "Auth", kind: "request" }),
+		];
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Empty trash" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Empty trash$/ }));
+
+		await waitFor(() => expect(purge).toHaveBeenCalledWith("c1"));
+		await waitFor(() => expect(purge).toHaveBeenCalledWith("c2"));
+		expect(purge).toHaveBeenCalledTimes(2);
+	});
+
+	it("purges nothing when the dialog is dismissed", async () => {
+		state.items = [collectionEntry()];
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Empty trash" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Cancel$/ }));
+
+		await waitFor(() => expect(screen.queryByText("Empty trash?")).not.toBeInTheDocument());
+		expect(purge).not.toHaveBeenCalled();
+	});
+
+	it("reports a row that fails without stopping the rest", async () => {
+		state.items = [
+			collectionEntry(),
+			collectionEntry({ id: "c2", name: "Auth", kind: "request" }),
+		];
+		purge
+			.mockRejectedValueOnce(new Error("database is locked"))
+			.mockResolvedValueOnce({ ...collectionEntry(), purged: true });
+		renderTrash();
+
+		fireEvent.click(screen.getByRole("button", { name: "Empty trash" }));
+		fireEvent.click(await screen.findByRole("button", { name: /^Empty trash$/ }));
+
+		await waitFor(() => expect(purge).toHaveBeenCalledTimes(2));
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(expect.stringContaining("1 of 2"), "error")
 		);
 	});
 });

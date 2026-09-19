@@ -19,15 +19,47 @@
  */
 
 import type { LucideIcon } from "lucide-react";
+import type { IconMotion } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 export interface RowAction {
 	label: string;
 	icon: LucideIcon;
+	/**
+	 * The named icon motion the glyph answers this item's hover with
+	 * (`ICON_MOTION`, `docs/design-system.md` → Motion → Icon motion). Optional:
+	 * most actions are a label with a glyph beside it and nothing to animate.
+	 * Declared here rather than at the two menus because the item is drawn once
+	 * for both of them (`RowActionBody`).
+	 */
+	iconMotion?: IconMotion;
 	onSelect: () => void;
 	/** Renders in destructive colour and is separated from the actions above. */
 	destructive?: boolean;
 	disabled?: boolean;
+	/**
+	 * Why the item is off, e.g. "Already first" - drawn beside the label by
+	 * `RowActionBody`, for both menus at once.
+	 *
+	 * Not a `DisabledHint` (`components/ui/disabled-hint.tsx`), which is the
+	 * primitive for every *other* gated control: that one works by giving a
+	 * wrapper span its own tab stop, and inside a menu that second stop competes
+	 * with the menu's own focus management - Radix owns the keyboard there, and
+	 * a disabled item is deliberately skipped by it. A menu row has horizontal
+	 * space a button does not, so the reason can simply be on the row, where it
+	 * is readable without hovering anything.
+	 */
+	disabledReason?: string;
+	/**
+	 * A value the item carries beside its label - the URL a Copy would put on
+	 * the clipboard - drawn in the same trailing column as `disabledReason`.
+	 *
+	 * The alternative was a tooltip on an always-visible icon button, which is
+	 * what the Services rows had: it read only on hover, only with a pointer,
+	 * and only for as long as the pointer stayed. In a menu the value is simply
+	 * on the row, where a screen reader reaches it in the item's own name.
+	 */
+	hint?: string;
 }
 
 /** One action, plus whether a separator belongs above it. */
@@ -49,7 +81,14 @@ export function rowActionRows(actions: RowAction[]): RowActionRow[] {
 	}));
 }
 
-/** The classes an item takes, whichever menu is drawing it. */
+/**
+ * The classes an item takes, whichever menu is drawing it.
+ *
+ * `group` is here and not at the call sites for the same reason the rest of
+ * this is: an icon motion fires from the `:hover`/`:focus-visible` of the glyph's
+ * owner, a menu item is not a `[data-slot="button"]`, and one of the two menus
+ * would have got the class and the other would not.
+ */
 export function rowActionItemClass(action: RowAction): string {
-	return cn("gap-2 text-sm", action.destructive && "text-destructive-text");
+	return cn("group gap-2 text-sm", action.destructive && "text-destructive-text");
 }

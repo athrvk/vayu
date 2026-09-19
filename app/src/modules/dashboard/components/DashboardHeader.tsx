@@ -68,7 +68,7 @@ export default function DashboardHeader({
 	const configSummary = configParts.join(" · ");
 
 	return (
-		<div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
+		<div className="h-band-lg flex items-center gap-3 px-5 bg-panel border-b border-rule shrink-0">
 			{/* Back button - returns to the previous screen (typically request builder) */}
 			{canNavigateBack && (
 				<TooltipIconButton
@@ -81,16 +81,16 @@ export default function DashboardHeader({
 
 			{/* Status pill */}
 			{isStreaming ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide bg-status-success/15 text-status-success-text border border-status-success/25 shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-status-success/15 text-status-success-text border border-status-success/25 shrink-0">
 					<span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
 					LIVE
 				</span>
 			) : mode === "completed" ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
 					COMPLETED
 				</span>
 			) : mode === "stopped" ? (
-				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
+				<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border shrink-0">
 					STOPPED
 				</span>
 			) : null}

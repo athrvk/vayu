@@ -20,9 +20,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useDashboardStore, useToastStore } from "@/stores";
+import { useDashboardStore, useLayoutStore, useToastStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
-import { EmptyState, Callout } from "@/components/shared";
+import { EmptyState, Callout, TabBreadcrumb } from "@/components/shared";
 import { Button, Tabs, TabsList, TabsTrigger, TabsContent, TabLabel } from "@/components/ui";
 import { DashboardHeader, MetricsView, RequestResponseView } from "./components";
 import { TIMING } from "@/config/timing";
@@ -340,10 +340,33 @@ export default function LoadTestDashboard() {
 		return startTime && endTime ? endTime - startTime : 0;
 	}, [mode, finalReport?.summary?.testDuration, historicalMetrics, startTime, endTime]);
 
+	const revealDrawerView = useLayoutStore((state) => state.revealDrawerView);
+	const crumbs = useMemo(
+		() => [
+			{ id: "history", label: "History", onSelect: () => revealDrawerView("history") },
+			{
+				id: "run",
+				// The live view and the finished report are different places to be,
+				// and the crumb is the only line that says which one this is.
+				label: mode === "completed" ? "Load test report" : "Live load test",
+			},
+		],
+		[mode, revealDrawerView]
+	);
+
 	// Empty state - placed after all hooks so the hook call order stays stable
 	// across renders (Rules of Hooks); the memos above are null-safe with no run.
 	if (!currentRunId) {
-		return <EmptyState title="No active load test" />;
+		return (
+			<EmptyState
+				title="No active load test"
+				action={
+					<Button variant="link" onClick={() => revealDrawerView("history")}>
+						View past runs
+					</Button>
+				}
+			/>
+		);
 	}
 
 	return (
@@ -364,6 +387,15 @@ export default function LoadTestDashboard() {
 				elapsedDuration={elapsedDuration}
 				configuration={displayConfiguration}
 			/>
+
+			{/*
+			 * Where this screen sits (#1691). The dashboard is reached from a run in
+			 * History or from starting a load test, and nothing on it used to say
+			 * so - the header names the run, not the place. "History" reveals the
+			 * run list rather than toggling it, so a crumb pressed from here always
+			 * shows the list it points at.
+			 */}
+			<TabBreadcrumb label="Run location" crumbs={crumbs} className="bg-transparent px-5" />
 
 			{/*
 			 * One notice slot for both failures the dashboard can hit. The stream
@@ -420,10 +452,7 @@ export default function LoadTestDashboard() {
 			)}
 
 			{/* Tab bar */}
-			<TabsList
-				size="sm"
-				className="border-b border-border bg-panel px-5 shrink-0 justify-start"
-			>
+			<TabsList variant="pane" size="sm" className="shrink-0 justify-start">
 				<TabsTrigger value="metrics">
 					<TabLabel>Metrics</TabLabel>
 				</TabsTrigger>

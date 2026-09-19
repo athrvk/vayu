@@ -35,8 +35,8 @@ export interface RowDnd {
 	dropEdge: "before" | "after" | null;
 	/** A drop would land inside this row (folders only). */
 	isDropInto: boolean;
-	/** The row menu's "Move to..." entry, or null when nothing is mounted. */
-	moveAction: RowAction | null;
+	/** The row menu's move entries, empty when no drag machinery is mounted. */
+	moveActions: RowAction[];
 }
 
 export function useRowDnd(entity: TreeEntity): RowDnd {
@@ -48,7 +48,7 @@ export function useRowDnd(entity: TreeEntity): RowDnd {
 			isBlocked: false,
 			dropEdge: null,
 			isDropInto: false,
-			moveAction: null,
+			moveActions: [],
 		};
 	}
 	const target = dnd.dropTarget?.id === entity.id ? dnd.dropTarget.position : null;
@@ -58,7 +58,7 @@ export function useRowDnd(entity: TreeEntity): RowDnd {
 		isBlocked: dnd.isDropBlocked(entity),
 		dropEdge: target === "inside" ? null : target,
 		isDropInto: target === "inside",
-		moveAction: dnd.moveAction(entity),
+		moveActions: dnd.moveActions(entity),
 	};
 }
 

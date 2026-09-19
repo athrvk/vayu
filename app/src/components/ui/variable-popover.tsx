@@ -51,6 +51,7 @@
 import { useState, useRef, useMemo, useId } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
+import { DialogCancelButton } from "./dialog-cancel-button";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
 import { ToggleGroup, ToggleGroupItem } from "./toggle-group";
@@ -61,6 +62,7 @@ import { isCommitEnter } from "@/lib/keyboard";
 import { isDataVariableName } from "@/lib/variable-resolution";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import type { ResolvedVariable, VariableOrigin } from "@/types";
+import { Eyebrow } from "./eyebrow";
 
 // Re-export ResolvedVariable as VariableInfo for backward compatibility
 export type { ResolvedVariable as VariableInfo };
@@ -91,7 +93,7 @@ const BOUND_ROW_LABEL = "Bound row";
  * is where a shape or radius fix starts reaching only two of them.
  */
 const NAME_CHIP =
-	"inline-flex h-[18px] items-center rounded-md border px-1.5 text-[10px] font-semibold leading-none";
+	"inline-flex h-[18px] items-center rounded-md border px-1.5 text-micro font-semibold leading-none";
 
 /**
  * The bare spelling's own sentence, and deliberately not the `data.*` one.
@@ -131,7 +133,7 @@ function RevealButton({
 	return (
 		<TooltipIconButton
 			label={revealed ? "Hide value" : "Reveal value"}
-			icon={revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+			icon={revealed ? <EyeOff className="size-icon-sm" /> : <Eye className="size-icon-sm" />}
 			onClick={onToggle}
 			autoFocus={autoFocus}
 			className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"
@@ -483,7 +485,7 @@ export function VariablePopover({
 							{isSecret && (
 								<span
 									title="Secret - hidden until revealed"
-									className="inline-flex h-[18px] items-center gap-1 rounded-md border border-warning-text/40 px-1.5 text-[10px] font-semibold leading-none text-warning-text"
+									className="inline-flex h-[18px] items-center gap-1 rounded-md border border-warning-text/40 px-1.5 text-micro font-semibold leading-none text-warning-text"
 								>
 									<KeyRound className="h-2.5 w-2.5" />
 									Secret
@@ -549,7 +551,7 @@ export function VariablePopover({
 							 * between scopes.
 							 */}
 							<p
-								className="line-clamp-2 text-[11px] leading-snug text-muted-foreground"
+								className="line-clamp-2 text-label leading-snug text-muted-foreground"
 								title={varInfo.sourceName || undefined}
 							>
 								in{" "}
@@ -661,7 +663,7 @@ export function VariablePopover({
 							 * the chips only pointed at, and leaves the row to itself.
 							 */}
 							{canEdit && saveMode === "auto" && (
-								<p className="text-[10px] text-muted-foreground">
+								<p className="text-micro text-muted-foreground">
 									Saves when you click away. Esc discards.
 								</p>
 							)}
@@ -669,9 +671,7 @@ export function VariablePopover({
 							{/* Action Buttons (manual mode only) */}
 							{saveMode === "manual" && canEdit && (
 								<div className="flex justify-end gap-2">
-									<Button size="sm" variant="ghost" onClick={handleCancel}>
-										Cancel
-									</Button>
+									<DialogCancelButton size="sm" onClick={handleCancel} />
 									<Button size="sm" onClick={handleSave}>
 										Save
 									</Button>
@@ -709,7 +709,7 @@ export function VariablePopover({
 							<div className="space-y-1.5">
 								<span
 									id={createScopeLabelId}
-									className="block text-[10px] text-muted-foreground"
+									className="block text-micro text-muted-foreground"
 								>
 									create in
 								</span>
@@ -791,7 +791,7 @@ export function VariablePopover({
 							 * for the sends that carry no row, not for this one.
 							 */}
 							{boundRowOrigin && (
-								<p className="text-[10px] text-muted-foreground">
+								<p className="text-micro text-muted-foreground">
 									The bound row already answers this name with{" "}
 									<span className="font-mono">
 										{boundRowOrigin.value || "empty"}
@@ -810,7 +810,7 @@ export function VariablePopover({
 							 * form that adds a second definition instead.
 							 */}
 							{switchedOffDefinitions.length > 0 && (
-								<p className="text-[10px] text-muted-foreground">
+								<p className="text-micro text-muted-foreground">
 									{switchedOffDefinitions.length === 1
 										? "This name is already defined below, switched off."
 										: `This name is already defined ${switchedOffDefinitions.length} times below, every one switched off.`}{" "}
@@ -893,7 +893,7 @@ function OriginRow({ origin, beaten }: { origin: VariableOrigin; beaten: boolean
 		origin.scope === "row" ? BOUND_ROW_LABEL : VARIABLE_SCOPE_CONFIG[origin.scope].full;
 
 	return (
-		<div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+		<div className="flex items-center gap-1.5 text-micro text-muted-foreground">
 			<span className={cn("size-[5px] shrink-0 rounded-full", dot)} />
 			<span className="shrink-0">{origin.sourceName ?? label}</span>
 			<span className={cn("truncate font-mono", beaten && "line-through opacity-60")}>
@@ -944,9 +944,9 @@ function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 		<div className="flex flex-col gap-0.5 border-t border-border pt-1.5">
 			{row && (
 				<>
-					<div className="text-[10px] uppercase tracking-wide text-subtle-foreground">
+					<Eyebrow size="xs" className="text-subtle-foreground">
 						bound data row
-					</div>
+					</Eyebrow>
 					<OriginRow origin={row} beaten={false} />
 				</>
 			)}
@@ -956,14 +956,14 @@ function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 			 * and an off definition is not shadowed by anything. The row block above
 			 * already says which answer wins.
 			 */}
-			<div className="text-[10px] uppercase tracking-wide text-subtle-foreground">
+			<Eyebrow size="xs" className="text-subtle-foreground">
 				also defined
-			</div>
+			</Eyebrow>
 			{others.map((o, i) => (
 				<OriginRow key={`${o.scope}-${o.sourceId ?? "global"}-${i}`} origin={o} beaten />
 			))}
 			{row && (
-				<p className="text-[10px] text-muted-foreground">
+				<p className="text-micro text-muted-foreground">
 					{others.some((o) => o.enabled) ? BOUND_ROW_NOTE : BOUND_ROW_NOTE_ALL_OFF}
 				</p>
 			)}

@@ -21,8 +21,16 @@
 
 import { memo } from "react";
 import { Trash2, Sigma, Paperclip, Type } from "lucide-react";
-import { Button, Checkbox, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import {
+	Button,
+	Checkbox,
+	ICON_MOTION,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { isBlankRow } from "./key-value";
 import type { KeyValueItem, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
 import FilePartCell, { type PickedFile } from "./FilePartCell";
@@ -125,6 +133,9 @@ function KeyValueRow({
 	// on a urlencoded row (which the engine refuses) must not paint a picker
 	// that cannot be sent.
 	const isFileRow = allowFiles && item.type === "file";
+	// The trailing spare row every table keeps (`withTrailingBlank`), read with
+	// the same predicate that decides it is spare rather than a second rule.
+	const isPlaceholderRow = isBlankRow(item);
 
 	return (
 		<div
@@ -141,7 +152,19 @@ function KeyValueRow({
 				isProtected && "bg-muted/30"
 			)}
 		>
-			{allowDisable ? (
+			{/*
+			 * The trailing spare row has no checkbox at all (#1691).
+			 *
+			 * It used to paint a *checked* accent box, so the row that exists only
+			 * as somewhere to type read as an enabled parameter before anything had
+			 * been typed into it - three enabled-looking params on a request that
+			 * sends one. Rendering it unchecked instead would have been worse: the
+			 * box is bound to `item.enabled`, which is `true`, so clicking it would
+			 * have done nothing visible. The spacer keeps the column's width, so
+			 * nothing shifts when the first character arrives and the real control
+			 * takes its place.
+			 */}
+			{allowDisable && !isPlaceholderRow ? (
 				<Checkbox
 					checked={item.enabled}
 					onChange={(e) => onUpdate(item.id, "enabled", e.target.checked)}
@@ -254,7 +277,7 @@ function KeyValueRow({
 						: "opacity-0 group-hover:opacity-100"
 				)}
 			>
-				<Trash2 className="w-3.5 h-3.5" />
+				<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
 			</Button>
 		</div>
 	);

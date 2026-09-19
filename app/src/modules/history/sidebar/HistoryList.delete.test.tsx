@@ -152,7 +152,7 @@ describe("HistoryList delete confirmation", () => {
 	it("says nothing about stopping for a finished run", async () => {
 		await openDeleteDialog();
 
-		expect(screen.getByText(/permanently removed/i)).toBeInTheDocument();
+		expect(screen.getByText(/removed permanently/i)).toBeInTheDocument();
 		expect(screen.queryByText(/stops it first/i)).not.toBeInTheDocument();
 	});
 });

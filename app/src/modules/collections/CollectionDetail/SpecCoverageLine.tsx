@@ -48,7 +48,7 @@ export default function SpecCoverageLine({ collectionId }: SpecCoverageLineProps
 	if (!lastRun || !coverage) return null;
 
 	return (
-		<p className="mt-1 text-[11px] text-muted-foreground">
+		<p className="mt-1 text-label text-muted-foreground">
 			Last run covered {coverage.operationsCovered} of {coverage.operationsTotal} operations
 			and {coverage.declaredResponsesHit} of {coverage.declaredResponsesTotal} declared
 			responses,{" "}

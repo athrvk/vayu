@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
-import { Button, TooltipIconButton } from "@/components/ui";
+import { Button, IconSwap, TooltipIconButton } from "@/components/ui";
 import { ApiError } from "@/services/http-client";
 import {
 	useOAuth2TokenStatusQuery,
@@ -186,11 +186,13 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							aria-pressed={revealed}
 							onClick={() => setRevealed((v) => !v)}
 							icon={
-								revealed ? (
-									<EyeOff className="w-3.5 h-3.5" />
-								) : (
-									<Eye className="w-3.5 h-3.5" />
-								)
+								<IconSwap
+									state={revealed ? "revealed" : "hidden"}
+									icons={{
+										hidden: <Eye className="size-icon-sm" />,
+										revealed: <EyeOff className="size-icon-sm" />,
+									}}
+								/>
 							}
 						/>
 					)}
@@ -201,11 +203,11 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 						disabled={busy || incomplete}
 					>
 						{fetchMutation.isPending || authorizing ? (
-							<Loader2 className="w-3.5 h-3.5 animate-spin" />
+							<Loader2 className="size-icon-sm animate-spin" />
 						) : token && !expired ? (
-							<RefreshCw className="w-3.5 h-3.5" />
+							<RefreshCw className="size-icon-sm" />
 						) : (
-							<KeyRound className="w-3.5 h-3.5" />
+							<KeyRound className="size-icon-sm" />
 						)}
 						<span className="ml-1.5">
 							{token ? (expired ? "Refresh" : "Renew") : "Get Token"}
@@ -217,7 +219,7 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							label="Clear cached token"
 							onClick={handleClear}
 							disabled={busy}
-							icon={<Trash2 className="w-3.5 h-3.5" />}
+							icon={<Trash2 className="size-icon-sm" />}
 						/>
 					)}
 				</div>
@@ -239,7 +241,7 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 			{/* Full token disclosure - expands below, doesn't affect the row above */}
 			{revealed && token && (
 				<div className="border-t border-border px-3 py-2">
-					<code className="block break-all text-[11px] leading-relaxed text-foreground select-all">
+					<code className="block break-all text-label leading-relaxed text-foreground select-all">
 						{token.accessToken}
 					</code>
 				</div>

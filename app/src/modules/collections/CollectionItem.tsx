@@ -14,8 +14,13 @@ import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
-import { Button, Input } from "@/components/ui";
-import { RowActionsMenu, RowContextMenu, TruncatedText } from "@/components/shared";
+import { Button, DialogCancelButton, IconSwap, Input } from "@/components/ui";
+import {
+	RowActionsMenu,
+	RowContextMenu,
+	TruncatedText,
+	DrawerSectionCount,
+} from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
@@ -54,7 +59,7 @@ export default function CollectionItem({
 		renamingId,
 		deletingCollectionId,
 		creatingSubfolder,
-		newSubCollectionName,
+		newFolderName,
 		isCreatingSubfolder,
 		getRequestsByCollection,
 		getCollectionActions,
@@ -64,15 +69,17 @@ export default function CollectionItem({
 		onRenameCancel,
 		onStartRename,
 		onCollectionDeleteClick,
-		onSubCollectionNameChange,
+		onFolderNameChange,
 		onCreateSubfolder,
 		onCancelSubfolder,
 	} = useCollectionTreeContext();
 
 	const isExpanded = expandedCollectionIds.has(collection.id);
-	// Open-folder glyph while expanded, so the folder itself echoes the chevron.
-	const FolderIcon = isExpanded ? FolderOpen : Folder;
 	const isSelected = selectedCollectionId === collection.id;
+	const folderIconClass = cn(
+		"size-icon shrink-0",
+		depth === 0 ? "text-primary" : "text-primary/70"
+	);
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
 	const isDeleting = deletingCollectionId === collection.id;
@@ -178,9 +185,13 @@ export default function CollectionItem({
 	 * belongs to the drag slice, which mounts after the CRUD slice and would
 	 * otherwise have to be threaded backwards into it.
 	 */
-	const rowActions = dnd.moveAction
-		? [...getCollectionActions(collection), dnd.moveAction]
-		: getCollectionActions(collection);
+	// Before the destructive tail, not after it: `rowActionRows` fences the first
+	// destructive item off from the ordinary ones above, and appending past it
+	// would leave Move up / Move down below the separator that Delete owns.
+	const crudActions = getCollectionActions(collection);
+	const firstDestructive = crudActions.findIndex((a) => a.destructive);
+	const at = firstDestructive < 0 ? crudActions.length : firstDestructive;
+	const rowActions = [...crudActions.slice(0, at), ...dnd.moveActions, ...crudActions.slice(at)];
 	const menuLabel = `More actions for ${collection.name}`;
 
 	return (
@@ -269,11 +280,11 @@ export default function CollectionItem({
 						aria-label={isExpanded ? "Collapse collection" : "Expand collection"}
 					>
 						{isDeleting ? (
-							<Loader2 className="w-[18px] h-[18px] animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : isExpanded ? (
-							<ChevronDown className="w-[18px] h-[18px]" />
+							<ChevronDown className="size-icon" />
 						) : (
-							<ChevronRight className="w-[18px] h-[18px]" />
+							<ChevronRight className="size-icon" />
 						)}
 					</button>
 					<button
@@ -289,11 +300,15 @@ export default function CollectionItem({
 						className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 						disabled={isDeleting || isRenaming}
 					>
-						<FolderIcon
-							className={cn(
-								"size-icon shrink-0",
-								depth === 0 ? "text-primary" : "text-primary/70"
-							)}
+						{/* Open-folder glyph while expanded, so the folder itself
+						    echoes the chevron - crossfaded, since a tree row's
+						    expand is the one state change the eye is following. */}
+						<IconSwap
+							state={isExpanded ? "open" : "closed"}
+							icons={{
+								closed: <Folder className={folderIconClass} />,
+								open: <FolderOpen className={folderIconClass} />,
+							}}
 						/>
 						{isRenaming ? (
 							<Input
@@ -319,11 +334,14 @@ export default function CollectionItem({
 								>
 									{collection.name}
 								</TruncatedText>
-								{/* shrink-0: the count is short and load-bearing - the name
-							    yields first. */}
-								<span className="shrink-0 text-xs text-muted-foreground">
-									({requests.length + childCollections.length})
-								</span>
+								{/* The drawer's one count idiom, shared with the section
+								    headers in Services and Variables so a row and its
+								    section cannot drift into two idioms again (issue
+								    #1688 - Variables drew the same fact as a filled
+								    Badge one click away from this). */}
+								<DrawerSectionCount
+									value={requests.length + childCollections.length}
+								/>
 							</>
 						)}
 					</button>
@@ -381,8 +399,8 @@ export default function CollectionItem({
 						>
 							<Input
 								type="text"
-								value={newSubCollectionName}
-								onChange={(e) => onSubCollectionNameChange(e.target.value)}
+								value={newFolderName}
+								onChange={(e) => onFolderNameChange(e.target.value)}
 								onKeyDown={(e) => {
 									// `isCommitEnter`, not a bare Enter (#939, #935): an
 									// IME commits its composition buffer with an
@@ -407,15 +425,12 @@ export default function CollectionItem({
 								)}
 								Add
 							</Button>
-							<Button
-								variant="secondary"
+							<DialogCancelButton
 								size="sm"
 								onClick={onCancelSubfolder}
 								disabled={isCreatingSubfolder}
 								className="h-7 text-xs"
-							>
-								Cancel
-							</Button>
+							/>
 						</div>
 					)}
 

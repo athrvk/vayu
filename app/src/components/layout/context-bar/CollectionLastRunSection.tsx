@@ -59,7 +59,7 @@ export function CollectionLastRunSection({ tab }: ContextBarSectionProps) {
 			<span className="flex-1 text-xs font-mono tabular-nums text-muted-foreground truncate">
 				{size ?? ""}
 			</span>
-			<span className="text-[11px] font-mono tabular-nums text-muted-foreground shrink-0">
+			<span className="text-label font-mono tabular-nums text-muted-foreground shrink-0">
 				{formatRelativeTime(run.startTime)}
 			</span>
 		</Button>

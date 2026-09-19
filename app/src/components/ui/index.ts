@@ -12,6 +12,11 @@ export { Button } from "./button";
 export { buttonVariants } from "./button-variants";
 export type { ButtonProps } from "./button";
 
+export { ICON_MOTION } from "./icon-motion";
+export type { IconMotion } from "./icon-motion";
+
+export { IconSwap } from "./icon-swap";
+
 export { CodeEditor } from "./code-editor";
 export type { CodeEditorProps } from "./code-editor";
 
@@ -44,8 +49,13 @@ export {
 	DialogDescription,
 } from "./dialog";
 
+export { DialogCancelButton } from "./dialog-cancel-button";
+export type { DialogCancelButtonProps } from "./dialog-cancel-button";
+
 export { DeleteConfirmDialog } from "./delete-confirm-dialog";
 export type { DeleteConfirmDialogProps } from "./delete-confirm-dialog";
+export { deleteConfirmCopy } from "./delete-confirm-copy";
+export type { DeleteScope } from "./delete-confirm-copy";
 
 export {
 	DropdownMenu,
@@ -74,7 +84,7 @@ export {
 
 export { Tabs, TabsList, TabsTrigger, TabsContent, TabLabel, TabCount, TabErrorDot } from "./tabs";
 export { LabelSwap } from "./label-swap";
-export { Eyebrow, EYEBROW_CLASS } from "./eyebrow";
+export { Eyebrow, EYEBROW_CLASS, EYEBROW_XS_CLASS } from "./eyebrow";
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "./table";
 
 export {
@@ -100,6 +110,8 @@ export {
 	TooltipProvider,
 } from "./tooltip";
 export { TooltipIconButton } from "./tooltip-icon-button";
+export { DisabledHint } from "./disabled-hint";
+export type { DisabledHintProps } from "./disabled-hint";
 export type { TooltipIconButtonProps } from "./tooltip-icon-button";
 export { InfoChip } from "./info-chip";
 export type { InfoChipProps } from "./info-chip";

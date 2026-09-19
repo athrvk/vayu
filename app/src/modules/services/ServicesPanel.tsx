@@ -36,13 +36,18 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Copy, KeyRound, Plus, Square, Trash2 } from "lucide-react";
 import {
 	DrawerPanel,
+	DrawerSection,
 	EmptyState,
 	ErrorState,
 	NonLoopbackBadge,
+	RowActionsMenu,
 	TruncatedText,
+	FieldError,
+	type RowAction,
 } from "@/components/shared";
 import {
 	Badge,
+	Button,
 	Collapsible,
 	CollapsibleContent,
 	Input,
@@ -63,7 +68,7 @@ import {
 	useStopMockServerMutation,
 	useUpdateMockIssuerMutation,
 } from "@/queries";
-import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
+import { useInboxNotifyStore, useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TIMING } from "@/config/timing";
 import { cn } from "@/lib/utils";
@@ -104,8 +109,13 @@ interface ServiceRowProps {
 	actionLabel: string;
 	running: boolean;
 	children: React.ReactNode;
-	/** Trailing controls: copy, stop, delete. */
-	actions?: React.ReactNode;
+	/**
+	 * The row's actions - copy, stop, delete - drawn as the one `⋯` menu every
+	 * other row in the app uses.
+	 */
+	actions?: RowAction[];
+	/** Names the `⋯` trigger, e.g. "More actions for inbox on port 41234". */
+	actionsLabel?: string;
 	leading?: React.ReactNode;
 	/** Highlights the row - a just-created service, so the eye can find it. */
 	flashed?: boolean;
@@ -127,6 +137,15 @@ interface ServiceRowProps {
  * reader heard a row that could not be stopped and a row that could as the same
  * row. Prefixing instead composes the two: the verb, then the content, in the
  * order they are read on screen.
+ *
+ * **The actions are one hover-revealed `⋯` menu** (issue #1690). These were the
+ * last rows in the app painting their actions as always-visible icon buttons,
+ * two or three of them, on a 32px row whose own payload is a URL - so the URL
+ * truncated to make room for controls the user had not come for, and Services
+ * was the one surface where a row's actions neither looked nor behaved like a
+ * row's actions anywhere else. The values those buttons carried in tooltips
+ * ride the items' `hint` instead, which reads without hovering and reaches a
+ * screen reader in the item's own name.
  */
 function ServiceRow({
 	onActivate,
@@ -134,6 +153,7 @@ function ServiceRow({
 	running,
 	children,
 	actions,
+	actionsLabel,
 	leading,
 	flashed,
 }: ServiceRowProps) {
@@ -141,7 +161,8 @@ function ServiceRow({
 		// eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- delegates only clicks landing on the row's own padding to the native button inside it, the drawer-row hit-area pattern in app/CLAUDE.md
 		<div
 			className={cn(
-				"flex h-8 cursor-pointer items-center gap-1 px-3 transition-colors hover:bg-muted/50",
+				// `group`, for the hover reveal the `⋯` menu below takes.
+				"group flex h-8 cursor-pointer items-center gap-1 px-3 transition-colors hover:bg-muted/50",
 				// Not a selection - the drawer has none - so a background tint
 				// rather than the accent fill a selected row would carry.
 				flashed && "bg-primary/10"
@@ -160,27 +181,14 @@ function ServiceRow({
 				<StatusDot running={running} />
 				{children}
 			</button>
-			{actions && <div className="flex shrink-0 items-center gap-0.5">{actions}</div>}
+			{actions && actions.length > 0 && (
+				<RowActionsMenu
+					label={actionsLabel ?? "More actions"}
+					actions={actions}
+					className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+				/>
+			)}
 		</div>
-	);
-}
-
-interface ServiceGroupProps {
-	title: string;
-	/** The group's own create affordance - "New inbox", "New issuer…". */
-	action?: React.ReactNode;
-	children: React.ReactNode;
-}
-
-function ServiceGroup({ title, action, children }: ServiceGroupProps) {
-	return (
-		<section className="mb-4">
-			<div className="flex items-center justify-between gap-1 px-3 py-1.5">
-				<h3 className="text-xs tracking-wider text-muted-foreground">{title}</h3>
-				{action}
-			</div>
-			{children}
-		</section>
 	);
 }
 
@@ -231,7 +239,7 @@ function NotNotifyingBadge() {
 function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const openTab = useTabsStore((s) => s.openTab);
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const stopInbox = useStopInboxMutation();
 	// No capture list on this surface, so the record's own count is all it knows.
 	const deletion = useInboxDeletion(inbox);
@@ -249,51 +257,54 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 				// (in practice the first), and the row's label was a lie (issue #554).
 				onActivate={() => openTab({ type: "inbox", entityId: inbox.inboxId })}
 				actionLabel="Open inbox"
-				actions={
-					<>
-						{/* The URL rides the tooltip rather than the name: the name is
-						    what a screen reader reads on every row, and three inboxes
-						    would be three near-identical 30-character strings. A
-						    stopped inbox says so here too - the URL copies fine and
-						    then refuses connections, a long way from the cause. */}
-						<TooltipIconButton
-							label="Copy inbox URL"
-							tooltipHint={
-								inbox.running ? inbox.url : `${inbox.url} - stopped, not listening`
-							}
-							icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-							onClick={() => void copy(inbox.url, "Inbox URL")}
-						/>
-						{inbox.running && (
-							<TooltipIconButton
-								label={`Stop inbox on port ${inbox.port}`}
-								icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
-								disabled={stopInbox.isPending}
-								onClick={() =>
-									stopInbox.mutate(inbox.inboxId, {
-										onError: (error) =>
-											showToast(
-												error instanceof Error
-													? error.message
-													: "Could not stop the inbox",
-												"error"
-											),
-									})
-								}
-							/>
-						)}
-						{/* On every row, running or not. A stopped inbox had no way off
-						    this list at all before: it stayed until the engine process
-						    exited, while the group's affordance minted more of them
-						    (issue #553). Deleting a running one stops it on the way. */}
-						<TooltipIconButton
-							label={`Delete inbox on port ${inbox.port}`}
-							icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
-							disabled={deletion.isDeleting}
-							onClick={deletion.requestDelete}
-						/>
-					</>
-				}
+				actionsLabel={`More actions for inbox on port ${inbox.port}`}
+				actions={[
+					{
+						// The URL rides the hint rather than the label: the label is
+						// what a screen reader reads on every row, and three inboxes
+						// would be three near-identical 30-character strings. A
+						// stopped inbox says so here too - the URL copies fine and
+						// then refuses connections, a long way from the cause.
+						label: "Copy inbox URL",
+						hint: inbox.running ? inbox.url : `${inbox.url} - stopped, not listening`,
+						icon: Copy,
+						onSelect: () => void copy(inbox.url, "Inbox URL"),
+					},
+					// Absent rather than disabled on a stopped inbox: there is nothing
+					// to stop, and the engine keeps the record rather than the listener.
+					...(inbox.running
+						? [
+								{
+									label: `Stop inbox on port ${inbox.port}`,
+									icon: Square,
+									disabled: stopInbox.isPending,
+									disabledReason: "Stopping",
+									onSelect: () =>
+										stopInbox.mutate(inbox.inboxId, {
+											onError: (error) =>
+												showToast(
+													error instanceof Error
+														? error.message
+														: "Could not stop the inbox",
+													"error"
+												),
+										}),
+								} satisfies RowAction,
+							]
+						: []),
+					{
+						// On every row, running or not. A stopped inbox had no way off
+						// this list at all before: it stayed until the engine process
+						// exited, while the group's affordance minted more of them
+						// (issue #553). Deleting a running one stops it on the way.
+						label: `Delete inbox on port ${inbox.port}`,
+						icon: Trash2,
+						destructive: true,
+						disabled: deletion.isDeleting,
+						disabledReason: "Deleting",
+						onSelect: deletion.requestDelete,
+					},
+				]}
 			>
 				{/* The port is what distinguishes one inbox from another and the
 				    only part of the URL that varies, so it leads. The URL stays
@@ -331,7 +342,7 @@ function IssuerDetailRow({
 			<TruncatedText className="min-w-0 flex-1 font-mono text-xs">{value}</TruncatedText>
 			<TooltipIconButton
 				label={copyLabel}
-				icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+				icon={<Copy className="size-icon-sm" aria-hidden="true" />}
 				onClick={onCopy}
 			/>
 		</div>
@@ -348,7 +359,7 @@ function IssuerRow({
 	onToggle: () => void;
 }) {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const stopIssuer = useStopMockIssuerMutation();
 	const updateIssuer = useUpdateMockIssuerMutation();
 
@@ -389,12 +400,18 @@ function IssuerRow({
 						/>
 					)
 				}
-				actions={
-					<TooltipIconButton
-						label={`Stop issuer on port ${issuer.port}`}
-						icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
-						disabled={stopIssuer.isPending}
-						onClick={() =>
+				actionsLabel={`More actions for issuer on port ${issuer.port}`}
+				actions={[
+					{
+						// Destructive, unlike an inbox's Stop: stopping an issuer drops
+						// it from the engine's list rather than leaving a stopped record
+						// behind, so it is the delete of this group.
+						label: `Stop issuer on port ${issuer.port}`,
+						icon: Square,
+						destructive: true,
+						disabled: stopIssuer.isPending,
+						disabledReason: "Stopping",
+						onSelect: () =>
 							stopIssuer.mutate(issuer.issuerId, {
 								onError: (error) =>
 									showToast(
@@ -403,10 +420,9 @@ function IssuerRow({
 											: "Could not stop the issuer",
 										"error"
 									),
-							})
-						}
-					/>
-				}
+							}),
+					},
+				]}
 			>
 				<TruncatedText className="font-mono text-xs">{issuer.issuerUrl}</TruncatedText>
 				{issuer.failureMode !== "none" && (
@@ -446,7 +462,7 @@ function IssuerRow({
 						</span>
 						<TooltipIconButton
 							label="Copy signing key"
-							icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<KeyRound className="size-icon-sm" aria-hidden="true" />}
 							onClick={() => void copy(issuer.signingKey, "Signing key")}
 						/>
 					</div>
@@ -562,11 +578,9 @@ function IssuerDelayControl({
 				/>
 				<span className="text-xs text-muted-foreground">ms</span>
 			</label>
-			{!valid && (
-				<p id={errorId} className="pt-1 text-xs text-destructive-text">
-					{`A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
-				</p>
-			)}
+			<FieldError id={errorId} className="pt-1">
+				{!valid && `A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
+			</FieldError>
 		</div>
 	);
 }
@@ -579,7 +593,7 @@ function IssuerDelayControl({
  */
 function MockServerRow({ mock }: { mock: MockServer }) {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const openTab = useTabsStore((s) => s.openTab);
 	const stopMock = useStopMockServerMutation();
 
@@ -592,32 +606,34 @@ function MockServerRow({ mock }: { mock: MockServer }) {
 			running
 			onActivate={() => openTab({ type: "mock-server", entityId: mock.mockId })}
 			actionLabel="Open mock server"
-			actions={
-				<>
-					<TooltipIconButton
-						label="Copy mock server URL"
-						tooltipHint={mock.url}
-						icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-						onClick={() => void copy(mock.url, "Mock server URL")}
-					/>
-					<TooltipIconButton
-						label={`Stop mock server on port ${mock.port}`}
-						icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
-						disabled={stopMock.isPending}
-						onClick={() =>
-							stopMock.mutate(mock.mockId, {
-								onError: (error) =>
-									showToast(
-										error instanceof Error
-											? error.message
-											: "Could not stop the mock server",
-										"error"
-									),
-							})
-						}
-					/>
-				</>
-			}
+			actionsLabel={`More actions for mock server on port ${mock.port}`}
+			actions={[
+				{
+					label: "Copy mock server URL",
+					hint: mock.url,
+					icon: Copy,
+					onSelect: () => void copy(mock.url, "Mock server URL"),
+				},
+				{
+					// Terminal like an issuer's, for the same reason: the record goes
+					// with the listener.
+					label: `Stop mock server on port ${mock.port}`,
+					icon: Square,
+					destructive: true,
+					disabled: stopMock.isPending,
+					disabledReason: "Stopping",
+					onSelect: () =>
+						stopMock.mutate(mock.mockId, {
+							onError: (error) =>
+								showToast(
+									error instanceof Error
+										? error.message
+										: "Could not stop the mock server",
+									"error"
+								),
+						}),
+				},
+			]}
 		>
 			{/* The collection is what distinguishes one mock from another -
 			    two mocks of one collection differ only by port, and a column
@@ -661,6 +677,9 @@ export default function ServicesPanel() {
 	const startInbox = useStartInboxMutation();
 	const [expandedIssuerId, setExpandedIssuerId] = useState<string | null>(null);
 	const [newIssuerOpen, setNewIssuerOpen] = useState(false);
+	// A mock is started from a collection's header, so the empty group points
+	// at the Collections drawer rather than offering a button that cannot work.
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const { flashedId: flashedInboxId, flash: flashInbox } = useRowFlash();
 
 	const inboxes = inboxesQuery.data ?? [];
@@ -710,9 +729,9 @@ export default function ServicesPanel() {
 	return (
 		<DrawerPanel title="Services">
 			<div className="flex w-full flex-col py-2">
-				<ServiceGroup
+				<DrawerSection
 					title="Webhook inboxes"
-					action={
+					actions={
 						/* "New inbox", matching the issuer group's "New issuer", and a
 						   Plus rather than a Play: this always mints a *new* listener,
 						   and beside a stopped row a Play labelled "Start inbox" read
@@ -722,7 +741,7 @@ export default function ServicesPanel() {
 						   about and this way the user decides instead. */
 						<TooltipIconButton
 							label="New inbox"
-							icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<Plus className="size-icon-sm" aria-hidden="true" />}
 							disabled={startInbox.isPending}
 							onClick={start}
 						/>
@@ -740,6 +759,15 @@ export default function ServicesPanel() {
 							variant="inline"
 							className={GROUP_NOTE_CLASS}
 							title="No inbox yet. Start one for a local URL that records every request sent to it - no tunnel, no third party."
+							action={
+								<Button
+									variant="link"
+									disabled={startInbox.isPending}
+									onClick={start}
+								>
+									New inbox
+								</Button>
+							}
 						/>
 					) : (
 						orderedInboxes.map((inbox) => (
@@ -750,14 +778,14 @@ export default function ServicesPanel() {
 							/>
 						))
 					)}
-				</ServiceGroup>
+				</DrawerSection>
 
-				<ServiceGroup
+				<DrawerSection
 					title="OAuth issuers"
-					action={
+					actions={
 						<TooltipIconButton
 							label="New issuer"
-							icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<Plus className="size-icon-sm" aria-hidden="true" />}
 							onClick={() => setNewIssuerOpen(true)}
 						/>
 					}
@@ -774,6 +802,11 @@ export default function ServicesPanel() {
 							variant="inline"
 							className={GROUP_NOTE_CLASS}
 							title="No issuer running. Start one to mint your own OAuth 2.0 tokens locally, with the claims and failures you choose."
+							action={
+								<Button variant="link" onClick={() => setNewIssuerOpen(true)}>
+									New issuer
+								</Button>
+							}
 						/>
 					) : (
 						issuers.map((issuer) => (
@@ -789,12 +822,12 @@ export default function ServicesPanel() {
 							/>
 						))
 					)}
-				</ServiceGroup>
+				</DrawerSection>
 
 				{/* No create affordance: a mock needs a collection to serve, and
 				    this drawer has none selected. The collection header starts
 				    one; this is where every running mock can be found. */}
-				<ServiceGroup title="Mock servers">
+				<DrawerSection title="Mock servers">
 					{showMockError ? (
 						<ErrorState
 							variant="inline"
@@ -807,11 +840,19 @@ export default function ServicesPanel() {
 							variant="inline"
 							className={GROUP_NOTE_CLASS}
 							title="No mock running. Open a collection and start one to serve its saved example responses on a local URL - a free upstream to build or load-test against."
+							action={
+								<Button
+									variant="link"
+									onClick={() => revealDrawerView("collections")}
+								>
+									Browse collections
+								</Button>
+							}
 						/>
 					) : (
 						orderedMocks.map((mock) => <MockServerRow key={mock.mockId} mock={mock} />)
 					)}
-				</ServiceGroup>
+				</DrawerSection>
 			</div>
 
 			{newIssuerOpen && (

@@ -797,7 +797,7 @@ export function GraphQLBody({
 								onValueChange={(name) => write({ operationName: name })}
 							>
 								<SelectTrigger
-									className="h-6 w-auto gap-1 px-2 text-[11px]"
+									className="h-6 w-auto gap-1 px-2 text-label"
 									aria-label="Operation"
 								>
 									<SelectValue placeholder="Operation" />

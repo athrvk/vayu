@@ -64,7 +64,7 @@ export function CollectionAuthSection({ tab }: ContextBarSectionProps) {
 			<p className="text-xs text-foreground m-0">
 				Set to <span className="font-semibold text-primary">{label}</span>
 			</p>
-			<p className="text-[11px] text-muted-foreground m-0">{origin}</p>
+			<p className="text-label text-muted-foreground m-0">{origin}</p>
 		</div>
 	);
 }

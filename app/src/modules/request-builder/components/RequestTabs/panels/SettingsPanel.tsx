@@ -197,7 +197,7 @@ export default function SettingsPanel() {
 				 */}
 				{!request.verifySSL && (
 					<div className="enter-fade flex items-start gap-1.5 text-xs text-status-warning-text">
-						<AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+						<AlertTriangle className="size-icon-sm mt-0.5 shrink-0" />
 						<span>
 							This request accepts any certificate. A machine in the middle can read
 							and rewrite it - Send, load tests and streams alike.

@@ -36,22 +36,34 @@ describe("EmptyState", () => {
 		expect(screen.queryByRole("img")).toBeNull();
 	});
 
-	it("drops icon, description and action in the inline variant", () => {
+	it("drops the icon and description in the inline variant", () => {
 		// The inline variant sits inside a small panel, so it is one muted line
-		// and nothing else - passing the other props must not smuggle them in.
+		// - passing icon or description must not smuggle them in.
 		const { container } = render(
 			<EmptyState
 				variant="inline"
 				icon={Inbox}
 				title="No cookies in response"
 				description="should not render"
-				action={<button type="button">nope</button>}
 			/>
 		);
 		expect(screen.getByText("No cookies in response")).toBeInTheDocument();
 		expect(container.querySelector("svg")).toBeNull();
 		expect(screen.queryByText("should not render")).toBeNull();
-		expect(screen.queryByRole("button")).toBeNull();
+	});
+
+	it("keeps the action in the inline variant, under the line", () => {
+		// Issue #1693: the drawer's group notes ("No inbox yet") are inline and
+		// are exactly the dead ends the action exists for. An icon here would
+		// out-weigh a one-line panel; a link under the line does not.
+		render(
+			<EmptyState
+				variant="inline"
+				title="No inbox yet"
+				action={<button type="button">New inbox</button>}
+			/>
+		);
+		expect(screen.getByRole("button", { name: "New inbox" })).toBeInTheDocument();
 	});
 
 	it("carries extra icon classes through, e.g. a spin for a loading pane", () => {

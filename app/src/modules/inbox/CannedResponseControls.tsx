@@ -265,7 +265,7 @@ export function CannedResponseControls({
 						<Button variant="ghost" size="sm" className="h-7">
 							<ChevronDown
 								className={cn(
-									"mr-2 h-3.5 w-3.5 transition-transform",
+									"mr-2 size-icon-sm transition-transform",
 									detailsOpen && "rotate-180"
 								)}
 								aria-hidden="true"

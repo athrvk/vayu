@@ -40,7 +40,7 @@ function Kbd({ className, size = "default", ...props }: KbdProps) {
 				// #1670 (18px, not 24) - the two sides of the cap now read from the
 				// same floor rather than one fixed and one drifting with density.
 				size === "default" && "h-target min-w-target px-1.5 text-xs",
-				size === "sm" && "h-[18px] min-w-[18px] px-1 text-[10px]",
+				size === "sm" && "h-[18px] min-w-[18px] px-1 text-micro",
 				className
 			)}
 			{...props}

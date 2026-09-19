@@ -92,9 +92,9 @@ export default function HeadersViewer({
 			<CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
 				<div className="flex items-center justify-center w-5 h-5 rounded-md bg-muted group-hover:bg-muted/80 transition-colors">
 					{isOpen ? (
-						<ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+						<ChevronDown className="size-icon-sm text-muted-foreground" />
 					) : (
-						<ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+						<ChevronRight className="size-icon-sm text-muted-foreground" />
 					)}
 				</div>
 				<h3 className={EYEBROW_CLASS}>

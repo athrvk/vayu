@@ -68,7 +68,7 @@ export function NumberField({
 				/>
 				{unit && (
 					<span
-						className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground"
+						className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-label text-muted-foreground"
 						aria-hidden="true"
 					>
 						{unit}
@@ -76,7 +76,7 @@ export function NumberField({
 				)}
 			</div>
 			{hint && (
-				<p id={hintId} className="text-[11px] leading-relaxed text-muted-foreground">
+				<p id={hintId} className="text-label leading-relaxed text-muted-foreground">
 					{hint}
 				</p>
 			)}

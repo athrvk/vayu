@@ -124,7 +124,7 @@ export default function ClientErrorView({ errorCode, errorMessage }: ClientError
 				 */}
 				{hint && (
 					<div className="surface-sunken rounded-md border border-rule p-3 text-left flex items-start gap-2">
-						<Lightbulb className="w-3.5 h-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+						<Lightbulb className="size-icon-sm mt-0.5 shrink-0 text-muted-foreground" />
 						<p className="text-xs text-muted-foreground">
 							<span className="font-medium">Tip:</span> {hint}
 						</p>

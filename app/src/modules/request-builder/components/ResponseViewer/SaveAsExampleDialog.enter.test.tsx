@@ -44,7 +44,9 @@ vi.mock("../../context", () => ({
 	}),
 }));
 
-vi.mock("../RequestBreadcrumb", () => ({ default: () => <div /> }));
+// See the note in RequestBuilderLayout.send-chord.test.tsx: no cache behind
+// this render, and the crumb is not what is under test.
+vi.mock("../useRequestCrumbs", () => ({ useRequestCrumbs: () => [] }));
 vi.mock("../UrlBar", () => ({ default: () => <div /> }));
 vi.mock("../ExternalChangeNotice", () => ({ default: () => null }));
 vi.mock("../RequestTabs", () => ({ default: () => <div /> }));

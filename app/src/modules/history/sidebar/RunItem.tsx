@@ -11,6 +11,7 @@ import type { Run } from "@/types";
 import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { truncateUrl } from "@/lib/truncate-url";
 import { MethodBadge, RowContextMenu, type RowAction } from "@/components/shared";
 import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { formatConcurrency } from "@/constants/load-test-modes";
@@ -28,23 +29,38 @@ import {
 	Pin,
 	PinOff,
 	AlertTriangle,
+	CircleCheck,
+	CircleX,
+	CircleSlash,
+	Circle,
 } from "lucide-react";
 
 /**
- * One dot colour per status - the row's only status affordance now.
- * The word and the left-edge bar this used to carry are gone: `formatTime`'s
- * per-row relative timestamp repeated "8h ago" down a whole page of rows and,
- * with a card border and `py-3` around it, the pair cost roughly two lines of
- * dead space per row for information a day-group header (`HistoryList.tsx`'s
- * `groupRunsByDay`) or a hover now carries instead. The full word and the
- * exact timestamp are still there, in the row's `title`.
+ * One glyph per status - shape first, colour second (#1691).
+ *
+ * This was a bare coloured dot, and the colour was the whole message: five rows
+ * of identical circles that a red/green confusion, a monochrome display or a
+ * screenshot pasted into an issue flattens into one. The shape is what carries
+ * the status now, and the colour agrees with it rather than being asked to say
+ * it alone - the redundancy rule in `docs/design-system.md` (Status Badges).
+ *
+ * The word and the left-edge bar this row used to carry are still gone, and for
+ * the reason they went: `formatTime`'s per-row "8h ago" and a status word cost
+ * roughly two lines of dead space per row for what a day-group header
+ * (`HistoryList.tsx`'s `groupRunsByDay`) or a hover carries instead. The full
+ * word and the exact timestamp are in the row's `title`, and the row's
+ * accessible name (the stretched activator below) states the status outright -
+ * so the glyph is decorative to a screen reader and `aria-hidden`.
+ *
+ * `-text`, not the bare fill token: these are small glyphs, and the bare token
+ * is a fill that fails AA as a foreground (`status-color-tokens.test.ts`).
  */
-const STATUS_DOT_CLASS: Record<Run["status"], string> = {
-	completed: "bg-status-success",
-	failed: "bg-status-error",
-	running: "bg-status-running animate-pulse",
-	stopped: "bg-status-stopped",
-	pending: "bg-muted-foreground",
+const STATUS_GLYPH: Record<Run["status"], { icon: typeof Circle; className: string }> = {
+	completed: { icon: CircleCheck, className: "text-status-success-text" },
+	failed: { icon: CircleX, className: "text-status-error-text" },
+	running: { icon: Loader2, className: "text-status-running-text animate-spin" },
+	stopped: { icon: CircleSlash, className: "text-status-stopped-text" },
+	pending: { icon: Circle, className: "text-muted-foreground" },
 };
 
 const STATUS_LABEL: Record<Run["status"], string> = {
@@ -227,11 +243,25 @@ export default function RunItem({
 	// The row's identity text, in priority order: a proper request name, else
 	// the url, else the collection a scenario ran, else the bare fallback.
 	const identitySuffix = requestName ?? requestUrl ?? scenarioLabel;
-	const identityText = identitySuffix ?? fallbackIdentity;
+	/*
+	 * A url gives way at its head, everything else at its tail (#1691).
+	 *
+	 * `truncate` keeps the head, and for a url the head is what every row on one
+	 * host shares: a page of local runs read `http://127.0.0.1:9...` over and
+	 * over, one indistinguishable row per request. `truncateUrl` keeps the path
+	 * instead. A name or a collection is left to CSS, where the head *is* the
+	 * identifying part - and the class stays on the element either way, because a
+	 * 48-character budget is not a promise about a narrow drawer.
+	 */
+	const identityText =
+		requestName ?? (requestUrl ? truncateUrl(requestUrl) : (scenarioLabel ?? fallbackIdentity));
 	// A name replacing the url as the visible text does not hide the url -
 	// it is one hover away, on the same text, the way a truncated url or
 	// collection name already was.
 	const identityTitle = requestName ? (requestUrl ?? undefined) : (identitySuffix ?? undefined);
+
+	// Shape carries the status, colour agrees with it - see STATUS_GLYPH.
+	const { icon: StatusGlyph, className: statusGlyphClass } = STATUS_GLYPH[run.status];
 
 	const hasMeta =
 		(scenario &&
@@ -266,11 +296,8 @@ export default function RunItem({
 				    a run whose work is a sequence), path or collection name, then
 				    the badges and actions a hover or a pinned/warned state reveals. */}
 				<div className="flex h-5 min-w-0 items-center gap-2">
-					<span
-						className={cn(
-							"h-2 w-2 shrink-0 rounded-full",
-							STATUS_DOT_CLASS[run.status]
-						)}
+					<StatusGlyph
+						className={cn("size-3 shrink-0", statusGlyphClass)}
 						aria-hidden="true"
 					/>
 					{method ? (
@@ -281,7 +308,7 @@ export default function RunItem({
 							className="w-[5ch] shrink-0"
 						/>
 					) : scenario ? (
-						<Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+						<Folder className="size-icon-sm shrink-0 text-muted-foreground" />
 					) : null}
 					<span
 						className="min-w-0 flex-1 truncate text-xs font-medium text-foreground"
@@ -296,7 +323,7 @@ export default function RunItem({
 					{run.baseline && (
 						<Badge
 							variant="chip"
-							className="shrink-0 gap-1 bg-primary/15 px-1.5 py-0 text-[10px] font-semibold text-primary"
+							className="shrink-0 gap-1 bg-primary/15 px-1.5 py-0 text-micro font-semibold text-primary"
 						>
 							<Pin className="h-2.5 w-2.5" />
 							{isLoadRun ? "Baseline" : "Pinned"}
@@ -308,7 +335,7 @@ export default function RunItem({
 					    the icon names itself. */}
 					{run.summary?.hasWarnings && (
 						<AlertTriangle
-							className="h-3.5 w-3.5 shrink-0 text-warning-text"
+							className="size-icon-sm shrink-0 text-warning-text"
 							role="img"
 							aria-label="This run has warnings - see its report"
 						/>
@@ -330,7 +357,7 @@ export default function RunItem({
 					 * to. Not every raw palette class is a defect.
 					 */}
 					{run.type === "load" && (
-						<Zap className="h-3.5 w-3.5 shrink-0 text-purple-500" />
+						<Zap className="size-icon-sm shrink-0 text-purple-500" />
 					)}
 					{/* z-10: sits above the stretched activator below, so these stay
 					    clickable while the rest of the row selects the run. */}
@@ -400,7 +427,7 @@ export default function RunItem({
 				    exclusive in what they read. Omitted entirely rather than an
 				    empty `pl-[1.625rem]` row when neither applies. */}
 				{hasMeta && (
-					<div className="flex flex-wrap items-center gap-3 pl-[1.625rem] text-[10px] text-muted-foreground">
+					<div className="flex flex-wrap items-center gap-3 pl-[1.625rem] text-micro text-muted-foreground">
 						{scenario?.stepCount != null && (
 							<span className="flex shrink-0 items-center gap-1">
 								<ListOrdered className="size-icon-sm" />

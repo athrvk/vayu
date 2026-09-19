@@ -62,7 +62,7 @@ const TRACK: Record<SegmentSize, string> = {
 };
 
 const ITEM: Record<SegmentSize, string> = {
-	xs: "h-control-sm px-2 text-[11px]",
+	xs: "h-control-sm px-2 text-label",
 	sm: "h-control px-2.5 text-xs",
 };
 

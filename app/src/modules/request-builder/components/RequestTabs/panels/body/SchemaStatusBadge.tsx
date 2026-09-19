@@ -37,7 +37,7 @@ export function BadgeText({
 }) {
 	return (
 		<span
-			className={cn("flex items-center gap-1 text-[10px] font-semibold", className)}
+			className={cn("flex items-center gap-1 text-micro font-semibold", className)}
 			title={title}
 		>
 			{children}

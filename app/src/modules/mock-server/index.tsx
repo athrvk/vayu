@@ -37,14 +37,17 @@ import {
 	useMockServersQuery,
 	useStopMockServerMutation,
 } from "@/queries";
-import { useTabsStore, useToastStore } from "@/stores";
+import { useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { formatTime } from "@/lib/format-time";
 
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const { openTabs, activeTabId, openTab } = useTabsStore();
+	// A mock is started from a collection's header, so the way out of this
+	// state is the Collections drawer - the same place the header lives.
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const { data: mocks = [], isError, error, refetch } = useMockServersQuery();
 	const stopMock = useStopMockServerMutation();
 
@@ -76,6 +79,11 @@ export default function MockServerView() {
 				icon={MockIcon}
 				title="No mock running"
 				description="Start one from a collection's header to serve its saved example responses on a local URL."
+				action={
+					<Button variant="link" onClick={() => revealDrawerView("collections")}>
+						Browse collections
+					</Button>
+				}
 			/>
 		);
 	}
@@ -92,7 +100,7 @@ export default function MockServerView() {
 						aria-label="Copy mock server URL"
 						onClick={() => void copy(mock.url, "Mock server URL")}
 					>
-						<Copy className="h-3.5 w-3.5" aria-hidden="true" />
+						<Copy className="size-icon-sm" aria-hidden="true" />
 					</Button>
 					<Badge variant="outline">{mock.collectionName}</Badge>
 					<Button
@@ -101,7 +109,7 @@ export default function MockServerView() {
 						className="h-7 gap-1.5 px-2 text-xs"
 						onClick={() => openTab({ type: "collection", entityId: mock.collectionId })}
 					>
-						<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+						<ExternalLink className="size-icon-sm" aria-hidden="true" />
 						Open collection
 					</Button>
 
@@ -140,7 +148,7 @@ export default function MockServerView() {
 							}
 							disabled={stopMock.isPending}
 						>
-							<Square className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+							<Square className="mr-2 size-icon-sm" aria-hidden="true" />
 							Stop
 						</Button>
 					</div>
@@ -169,7 +177,7 @@ export default function MockServerView() {
 									key={`${route.method} ${route.path} ${route.requestId}`}
 									className="flex items-center gap-2 py-1 text-xs"
 								>
-									<span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">
+									<span className="w-12 shrink-0 font-mono text-label text-muted-foreground">
 										{route.method}
 									</span>
 									<TruncatedText className="min-w-0 flex-1 font-mono">
@@ -211,7 +219,7 @@ export default function MockServerView() {
 									key={`${entry.at}-${entry.path}`}
 									className="flex items-center gap-2 py-1 text-xs"
 								>
-									<span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">
+									<span className="w-12 shrink-0 font-mono text-label text-muted-foreground">
 										{entry.method}
 									</span>
 									<TruncatedText className="min-w-0 flex-1 font-mono">
@@ -229,7 +237,7 @@ export default function MockServerView() {
 									>
 										{entry.status}
 									</Badge>
-									<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+									<span className="shrink-0 text-label text-muted-foreground tabular-nums">
 										{formatTime(entry.at)}
 									</span>
 								</li>

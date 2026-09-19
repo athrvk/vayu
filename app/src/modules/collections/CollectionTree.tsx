@@ -17,6 +17,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 	DeleteConfirmDialog,
+	DialogCancelButton,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import ExportSpecDialog from "./ExportSpecDialog";
@@ -272,14 +273,11 @@ export default function CollectionTree() {
 							)}
 							Add
 						</Button>
-						<Button
-							variant="secondary"
+						<DialogCancelButton
 							size="sm"
 							onClick={panel.cancelNewCollectionForm}
 							disabled={panel.isCreatingCollection}
-						>
-							Cancel
-						</Button>
+						/>
 					</div>
 				)}
 

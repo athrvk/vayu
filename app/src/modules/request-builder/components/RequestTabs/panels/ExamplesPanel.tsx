@@ -55,6 +55,7 @@ import {
 } from "@/queries";
 import { useRequestBuilderContext } from "../../../context";
 import type { MockResponseMode, Request, RequestExample } from "@/types";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
  * The header map `ResponseBody` reads, from the example's stored entries.
@@ -101,7 +102,7 @@ function ExampleRow({
 					aria-expanded={open}
 					className="flex min-w-0 flex-1 items-center gap-2 self-stretch rounded-md px-3 py-2 text-left text-xs"
 				>
-					<Chevron className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+					<Chevron className="size-icon-sm shrink-0 text-muted-foreground" />
 					<StatusCodeBadge status={example.status} />
 					<span className="truncate font-medium">{example.name}</span>
 					{/*
@@ -158,9 +159,9 @@ function ExampleRow({
 					className="shrink-0"
 				>
 					{deleting ? (
-						<Loader2 className="h-3.5 w-3.5 animate-spin" />
+						<Loader2 className="size-icon-sm animate-spin" />
 					) : (
-						<Trash2 className="h-3.5 w-3.5" />
+						<Trash2 className="size-icon-sm" />
 					)}
 				</Button>
 			</div>
@@ -169,11 +170,9 @@ function ExampleRow({
 				<div className="enter-fade flex flex-col gap-3 border-t border-rule px-3 py-3">
 					{example.headers.length > 0 && (
 						<div className="flex flex-col gap-1">
-							<div className="text-[11px] uppercase tracking-wide text-subtle-foreground">
-								Headers
-							</div>
+							<Eyebrow className="text-subtle-foreground">Headers</Eyebrow>
 							{example.headers.map((header, i) => (
-								<div key={i} className="flex gap-2 font-mono text-[11px]">
+								<div key={i} className="flex gap-2 font-mono text-label">
 									<span className="text-muted-foreground">{header.key}</span>
 									<span className="truncate">{header.value}</span>
 								</div>

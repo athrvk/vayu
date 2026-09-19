@@ -23,6 +23,8 @@ import { useEngineStore, useLayoutStore } from "@/stores";
 import type { Inbox } from "@/types";
 import { DRAWER_VIEW_CHORDS } from "@/constants/shortcuts";
 import { formatChord } from "@/lib/platform";
+import { DRAWER_VIEWS } from "@/constants/drawer-views";
+import { ICON_MOTION } from "@/components/ui/icon-motion";
 import { ActivityRail } from "./ActivityRail";
 
 const listInboxes = vi.fn();
@@ -150,6 +152,55 @@ describe("ActivityRail - the six view buttons", () => {
 			drawerOpen: true,
 			drawerView: "services",
 		});
+	});
+});
+
+describe("ActivityRail - icon motion from the descriptor (#1687)", () => {
+	/** The `data-icon-motion` on one button's glyph, or `null` for none. */
+	function motionOf(label: string): string | null {
+		const svg = screen.getByRole("button", { name: label }).querySelector("svg");
+		expect(svg, `${label} rendered no glyph`).not.toBeNull();
+		return svg?.getAttribute("data-icon-motion") ?? null;
+	}
+
+	it("renders the attribute for an entry that names a motion", () => {
+		renderRail();
+		expect(motionOf("Collections")).toBe(ICON_MOTION.scale);
+		expect(motionOf("Variables")).toBe(ICON_MOTION.scale);
+		expect(motionOf("Trash")).toBe(ICON_MOTION.lid);
+		expect(motionOf("Settings")).toBe(ICON_MOTION.spinOnce);
+	});
+
+	it("renders no attribute at all for the two the policy leaves still", () => {
+		// History's `Clock` is a status icon and Services' `Radio` a live
+		// indicator (docs/design-system.md, Icon motion). Absent rather than
+		// empty: `[data-icon-motion]` matches an empty value too, so an empty
+		// attribute would inherit the duration custom property for nothing.
+		renderRail();
+		for (const label of ["History", "Services"]) {
+			const svg = screen.getByRole("button", { name: label }).querySelector("svg");
+			expect(svg?.hasAttribute("data-icon-motion"), `${label} names a motion`).toBe(false);
+		}
+	});
+
+	it("matches every descriptor, so a new entry's motion cannot go unrendered", () => {
+		// The claim above is spelled per view for readability; this is the same
+		// claim made against the registry, so adding a seventh view with a
+		// motion the rail drops fails here rather than shipping.
+		renderRail();
+		expect(DRAWER_VIEWS.length).toBeGreaterThan(5);
+		for (const { label, motion } of DRAWER_VIEWS) {
+			expect(motionOf(label), `${label}`).toBe(motion ?? null);
+		}
+	});
+
+	it("gives each glyph the group owner its motion fires from", () => {
+		// Every rule in the `Icon motion` block keys off a `[data-slot="button"]`
+		// or `.group` ancestor's hover; `RailButton` is neither a Button nor a
+		// row, so it carries `group` itself.
+		renderRail();
+		const button = screen.getByRole("button", { name: "Trash" });
+		expect(button.className.split(/\s+/)).toContain("group");
 	});
 });
 

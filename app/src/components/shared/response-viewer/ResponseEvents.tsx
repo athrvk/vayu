@@ -176,7 +176,7 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 						aria-hidden="true"
 						className="size-icon-sm shrink-0 text-muted-foreground"
 					/>
-					<span className="w-10 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
+					<span className="w-10 shrink-0 text-right font-mono text-label text-muted-foreground">
 						{index + 1}
 					</span>
 					{/*
@@ -189,7 +189,7 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 						{event.event}
 					</Badge>
 					{event.sourceId && (
-						<span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+						<span className="shrink-0 font-mono text-label text-muted-foreground">
 							id {event.sourceId}
 						</span>
 					)}
@@ -204,7 +204,7 @@ const EventRow = memo(function EventRow({ event, index }: { event: StreamEvent; 
 						</Badge>
 					)}
 					{at && (
-						<span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+						<span className="shrink-0 font-mono text-label text-muted-foreground">
 							{at}
 						</span>
 					)}

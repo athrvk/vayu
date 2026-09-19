@@ -79,7 +79,7 @@ export function VariablesSection({ tab }: ContextBarSectionProps) {
 							{name}
 						</TruncatedText>
 					</div>
-					<span className="text-[10px] uppercase tracking-wide text-destructive-text shrink-0">
+					<span className="text-micro uppercase tracking-wide text-destructive-text shrink-0">
 						not defined
 					</span>
 				</div>

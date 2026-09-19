@@ -69,11 +69,12 @@ export interface CollectionTreeDnd {
 	isDropBlocked: (entity: TreeEntity) => boolean;
 	moveByKeyboard: (entity: TreeEntity, direction: TreeMoveDirection) => void;
 	/**
-	 * The row menu's "Move to..." entry - the discoverable path that needs no
-	 * chords. A factory rather than a handler so both row types get one action,
-	 * worded and iconed once, instead of two copies that drift.
+	 * The row menu's move entries - Move up, Move down, "Move to..." - the
+	 * discoverable path that needs no chords (#1690). A factory rather than
+	 * handlers so both row types get one list, worded, iconed and gated once,
+	 * instead of two copies that drift.
 	 */
-	moveAction: (entity: TreeEntity) => RowAction;
+	moveActions: (entity: TreeEntity) => RowAction[];
 }
 
 /**
@@ -91,7 +92,7 @@ export interface CollectionTreeCrudSlice {
 	deletingRequestId: string | null;
 	/** Collection whose "new folder" form is open, if any. */
 	creatingSubfolder: string | null;
-	newSubCollectionName: string;
+	newFolderName: string;
 	isCreatingSubfolder: boolean;
 
 	onCollectionClick: (collection: Collection) => void;
@@ -123,7 +124,7 @@ export interface CollectionTreeCrudSlice {
 	onRequestDeleteClick: (requestId: string, requestName: string) => void;
 	onDuplicateRequest: (request: Request) => void;
 
-	onSubCollectionNameChange: (value: string) => void;
+	onFolderNameChange: (value: string) => void;
 	onCreateSubfolder: (parentId: string) => void;
 	onCancelSubfolder: () => void;
 }

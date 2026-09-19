@@ -173,7 +173,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 				    every other variant would drag a `hover:bg-*` along with it. */}
 				<Badge
 					variant="chip"
-					className="gap-1 bg-primary/15 text-primary px-1.5 py-0 text-[10px] font-semibold"
+					className="gap-1 bg-primary/15 text-primary px-1.5 py-0 text-micro font-semibold"
 				>
 					<Pin className="w-2.5 h-2.5" />
 					{new Date(baselineRun!.startTime).toLocaleString()}
@@ -186,7 +186,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 			</div>
 			{comparison.compressionNegotiationDiffers && (
 				<div className="flex items-center gap-2 mt-2 text-xs text-status-warning-text">
-					<AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+					<AlertTriangle className="size-icon-sm shrink-0" />
 					<span>
 						Compression negotiation differs between these runs; byte and latency figures
 						are not directly comparable.

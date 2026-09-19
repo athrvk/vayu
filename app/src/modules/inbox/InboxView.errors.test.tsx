@@ -31,11 +31,30 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+	cleanup,
+	fireEvent,
+	render as renderBare,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
+import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useTabsStore, useToastStore } from "@/stores";
 import type { Inbox, InboxCapture } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
+
+/**
+ * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
+ * rendered bare is in a state the app is never in - and since #1690 a gated
+ * control inside one carries a real tooltip, which throws without it. Every
+ * render in this file goes through the provider, the way the app does.
+ */
+function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
+	return renderBare(ui, { wrapper: TooltipProvider, ...options });
+}
 
 const listInboxes = vi.fn();
 const listInboxCaptures = vi.fn();
@@ -140,6 +159,11 @@ describe("a refused mutation in the inbox tab", () => {
 		// would otherwise land on a dead button and prove nothing.
 		await screen.findByText("/hook");
 		fireEvent.click(screen.getByRole("button", { name: /clear/i }));
+		// Clear confirms first (issue #1689), so the failure only shows up once
+		// the confirm button inside the dialog is also clicked.
+		fireEvent.click(
+			within(await screen.findByRole("dialog")).getByRole("button", { name: /^clear$/i })
+		);
 		await waitFor(() =>
 			expect(firstToast()).toMatchObject({ variant: "error", message: "database is locked" })
 		);

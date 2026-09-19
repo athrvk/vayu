@@ -219,3 +219,30 @@ describe("row density", () => {
 		expect(row().innerHTML).not.toMatch(new RegExp(String.raw`\bh-9\b`));
 	});
 });
+
+describe("the trailing spare row", () => {
+	/*
+	 * The row that exists only as somewhere to type used to paint a *checked*
+	 * accent checkbox, so a request sending one param showed three
+	 * enabled-looking ones (#1691). Unchecked would have been no better: the box
+	 * reads `item.enabled`, which is true, so a click on it would have done
+	 * nothing visible - hence no control at all until there is something to
+	 * disable.
+	 *
+	 * Mutation check: restore the unconditional `allowDisable ?` and the first
+	 * case fails.
+	 */
+	it("offers no enable checkbox until something is typed", () => {
+		const blank = row({ item: { id: "r0", key: "", value: "", enabled: true } });
+		expect(blank.querySelector('input[type="checkbox"]')).toBeNull();
+
+		// The column keeps its width, so the real control arriving shifts nothing.
+		const leading = blank.firstElementChild!.firstElementChild!;
+		expect(leading.className).toContain("size-target");
+	});
+
+	it("offers it as soon as the row holds a key", () => {
+		const typed = row({ item: { id: "r0", key: "page", value: "", enabled: true } });
+		expect(typed.querySelector('input[type="checkbox"]')).toBeTruthy();
+	});
+});

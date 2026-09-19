@@ -25,7 +25,7 @@ export default function VariablesTab({ collection }: VariablesTabProps) {
 			<InfoBanner>
 				Collection variables are scoped to this collection and its sub-folders. Reference
 				them with{" "}
-				<code className="font-mono text-[11px] bg-accent px-1 rounded-sm">{`{{variable}}`}</code>{" "}
+				<code className="font-mono text-label bg-accent px-1 rounded-sm">{`{{variable}}`}</code>{" "}
 				in URLs, headers, body, and scripts. Environment variables take precedence.
 			</InfoBanner>
 

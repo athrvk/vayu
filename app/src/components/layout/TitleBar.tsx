@@ -15,7 +15,7 @@
  * pixel another control took converted directly into overflowed tabs, and a
  * real search bar is worth ~360 of them.
  *
- * Height comes from --titlebar-height, not a bare h-[38px], because the toast
+ * Height comes from --titlebar-height, not a bare 38px literal, because the toast
  * viewport subtracts it when the stack is anchored to the top of the window.
  * The value must still match TITLEBAR_HEIGHT in electron/constants.ts, which
  * sizes the real window frame and cannot read a CSS variable.
@@ -57,10 +57,11 @@ import { useVariablesStore } from "@/modules/variables/variables-store";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 import {
 	DropdownMenu,
-	DropdownMenuTrigger,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+	ICON_MOTION,
 	TooltipIconButton,
 } from "@/components/ui";
 import {
@@ -113,9 +114,9 @@ function WindowControls() {
 				aria-label={isMaximized ? "Restore" : "Maximize"}
 			>
 				{isMaximized ? (
-					<Maximize2 className="w-3.5 h-3.5 text-foreground/70" />
+					<Maximize2 className="size-icon-sm text-foreground/70" />
 				) : (
-					<Square className="w-3.5 h-3.5 text-foreground/70" />
+					<Square className="size-icon-sm text-foreground/70" />
 				)}
 			</button>
 			<button
@@ -123,7 +124,10 @@ function WindowControls() {
 				className="h-full px-3 hover:bg-destructive hover:text-destructive-foreground transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center group"
 				aria-label="Close"
 			>
-				<X className="size-icon text-foreground/70 group-hover:text-destructive-foreground" />
+				<X
+					className="size-icon text-foreground/70 group-hover:text-destructive-foreground"
+					data-icon-motion={ICON_MOTION.rotate90}
+				/>
 			</button>
 		</div>
 	);
@@ -292,7 +296,7 @@ function NavigationControls() {
 				label="Back"
 				tooltipHint={formatChord(GO_BACK_CHORD)}
 				tooltipSide="bottom"
-				icon={<ArrowLeft className="w-3.5 h-3.5" />}
+				icon={<ArrowLeft className="size-icon-sm" />}
 				className="h-7 w-7"
 				disabled={!back}
 				onClick={() => navigateHistory("back", "ui")}
@@ -301,7 +305,7 @@ function NavigationControls() {
 				label="Forward"
 				tooltipHint={formatChord(GO_FORWARD_CHORD)}
 				tooltipSide="bottom"
-				icon={<ArrowRight className="w-3.5 h-3.5" />}
+				icon={<ArrowRight className="size-icon-sm" />}
 				className="h-7 w-7"
 				disabled={!forward}
 				onClick={() => navigateHistory("forward", "ui")}
@@ -434,19 +438,21 @@ function EnvSwitcher() {
 			<DropdownMenuContent align="end" className="min-w-44">
 				<DropdownMenuItem
 					onClick={() => void createNewEnvironment()}
-					className="text-xs gap-2"
+					// `group`: the menu item is the owner whose hover the glyph
+					// answers - a DropdownMenuItem is not a `[data-slot="button"]`.
+					className="group text-xs gap-2"
 				>
-					<Plus className="w-3.5 h-3.5" />
+					<Plus className="size-icon-sm" data-icon-motion={ICON_MOTION.rotate90} />
 					<span className="flex-1">New Environment</span>
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={openImport} className="text-xs gap-2">
-					<Download className="w-3.5 h-3.5" />
+					<Download className="size-icon-sm" />
 					<span className="flex-1">Import Environment...</span>
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onClick={() => selectEnvironment(null)} className="text-xs gap-2">
 					<span className="flex-1">No Environment</span>
-					{!activeEnv && <Check className="w-3.5 h-3.5" />}
+					{!activeEnv && <Check className="size-icon-sm" />}
 				</DropdownMenuItem>
 				{environments.map((env) => (
 					<DropdownMenuItem
@@ -455,7 +461,7 @@ function EnvSwitcher() {
 						className="text-xs gap-2"
 					>
 						<span className="flex-1 truncate">{env.name}</span>
-						{env.id === activeEnvironmentId && <Check className="w-3.5 h-3.5" />}
+						{env.id === activeEnvironmentId && <Check className="size-icon-sm" />}
 					</DropdownMenuItem>
 				))}
 			</DropdownMenuContent>

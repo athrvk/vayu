@@ -122,7 +122,7 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 							/>
 							<span
 								className={cn(
-									"text-[11px] font-mono truncate",
+									"text-label font-mono truncate",
 									isThis
 										? "text-foreground font-semibold"
 										: "text-muted-foreground"
@@ -134,7 +134,7 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 
 						<span
 							className={cn(
-								"text-[10px] font-mono shrink-0",
+								"text-micro font-mono shrink-0",
 								isSource ? "text-primary" : "text-muted-foreground"
 							)}
 						>
@@ -142,12 +142,12 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 						</span>
 
 						{isThis && (
-							<span className="text-[10px] font-semibold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
+							<span className="text-micro font-semibold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
 								THIS
 							</span>
 						)}
 						{isSource && !isThis && (
-							<span className="text-[10px] font-semibold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
+							<span className="text-micro font-semibold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
 								SOURCE
 							</span>
 						)}
@@ -156,7 +156,7 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 			})}
 
 			{blockedBy && (
-				<p className="mt-2.5 m-0 text-[11px] text-muted-foreground">
+				<p className="mt-2.5 m-0 text-label text-muted-foreground">
 					<span className="font-mono">{blockedBy.name}</span> is set to No Auth, so
 					requests below it inherit nothing.
 				</p>

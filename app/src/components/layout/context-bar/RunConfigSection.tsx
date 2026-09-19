@@ -37,7 +37,7 @@ import type { ReactNode } from "react";
 function Row({ label, children }: { label: string; children: ReactNode }) {
 	return (
 		<div className="flex items-baseline justify-between gap-2">
-			<span className="text-[11px] text-muted-foreground shrink-0">{label}</span>
+			<span className="text-label text-muted-foreground shrink-0">{label}</span>
 			<span className="text-xs font-mono text-foreground truncate">{children}</span>
 		</div>
 	);
