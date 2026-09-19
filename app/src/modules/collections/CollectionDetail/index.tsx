@@ -15,9 +15,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
-import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
+import { DetailSkeleton, EmptyState, ErrorState, TabBreadcrumb } from "@/components/shared";
 import { useCollectionsQuery, useMultipleCollectionRequests } from "@/queries/collections";
-import { collectSubtreeIds } from "@/modules/collections/tree-utils";
+import { collectSubtreeIds, walkAncestors } from "@/modules/collections/tree-utils";
 import { useTabsStore, useSessionStore } from "@/stores";
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import AuthTab from "./AuthTab";
@@ -65,7 +65,7 @@ const TABS: { id: CollectionTab; label: string }[] = [
 const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set(["info", "auth", "elements"]);
 
 export default function CollectionDetail() {
-	const { openTabs, activeTabId, specTabTarget, clearSpecTabTarget } = useTabsStore();
+	const { openTabs, activeTabId, specTabTarget, clearSpecTabTarget, openTab } = useTabsStore();
 
 	// Get selected collection ID from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -112,6 +112,37 @@ export default function CollectionDetail() {
 	const collection = useMemo(
 		() => collections.find((c) => c.id === selectedCollectionId) ?? null,
 		[collections, selectedCollectionId]
+	);
+
+	/*
+	 * Where this collection sits, above the tab strip (#1691).
+	 *
+	 * Only for a nested collection: the chain ends with this collection itself,
+	 * and for a root one that is a line repeating the header title underneath it.
+	 * A parent segment opens that collection's tab; the last is inert, because
+	 * you are already there, and renaming is the Info tab's job.
+	 */
+	// From the collections already in hand rather than `useCollectionAncestors`:
+	// this screen holds the whole list for its subtree count, and walking it here
+	// is one memo instead of a second query subscription over the same data. The
+	// cycle guard lives in `walkAncestors`, so it is not re-implemented either.
+	const ancestors = useMemo(
+		() => (selectedCollectionId ? walkAncestors(selectedCollectionId, collections) : []),
+		[selectedCollectionId, collections]
+	);
+	const crumbs = useMemo(
+		() =>
+			ancestors.length > 1
+				? ancestors.map((entry, index) => ({
+						id: entry.id,
+						label: entry.name,
+						onSelect:
+							index < ancestors.length - 1
+								? () => openTab({ type: "collection", entityId: entry.id })
+								: undefined,
+					}))
+				: [],
+		[ancestors, openTab]
 	);
 
 	/*
@@ -234,6 +265,8 @@ export default function CollectionDetail() {
 					<MockServerControl collectionId={collection.id} />
 				</div>
 			</div>
+
+			<TabBreadcrumb label="Collection location" crumbs={crumbs} className="px-5 pt-2" />
 
 			{/* Tab bar */}
 			<Tabs
