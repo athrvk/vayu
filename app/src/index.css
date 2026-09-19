@@ -2189,8 +2189,15 @@
 
 /*
  * `trace` - Activity. The one motion in this block that draws rather than
- * moves: the trace is stroked on from its left end, which is what a live
- * reading does and what no transform of a finished line could say.
+ * moves: the trace is stroked on from its left end, the way a live reading
+ * arrives, which no transform of a finished line could say.
+ *
+ * **The offset is negative on purpose.** Lucide draws this path backwards -
+ * it opens `M22 12` at the right edge and ends `H2` at the left - so a dash
+ * offset counting down from `+50` reveals the line right-to-left, against the
+ * reading direction. Starting at `-50` reveals it from the path's *end*, which
+ * is its left. Checked in a browser rather than reasoned about: the first
+ * capture drew it the wrong way round.
  *
  * `stroke-dasharray` and `stroke-dashoffset` are both set *inside* the
  * keyframes rather than on the element, so the glyph at rest carries no dash
@@ -2216,7 +2223,7 @@
 @keyframes icon-trace {
 	from {
 		stroke-dasharray: 50;
-		stroke-dashoffset: 50;
+		stroke-dashoffset: -50;
 	}
 	to {
 		stroke-dasharray: 50;
