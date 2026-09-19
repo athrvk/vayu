@@ -83,9 +83,8 @@ describe("collection tree rename and the shared save status", () => {
 		registerDirtyRequestContext();
 		const { result } = renderCrud();
 
-		act(() => result.current.rows.onRenameChange("Acme Corp"));
 		await act(async () => {
-			await result.current.rows.onRenameSubmit("c-1");
+			await result.current.rows.onRenameSubmit("c-1", "Acme Corp");
 		});
 
 		expect(updateCollection).toHaveBeenCalledWith({ id: "c-1", name: "Acme Corp" });
@@ -96,9 +95,8 @@ describe("collection tree rename and the shared save status", () => {
 		registerDirtyRequestContext();
 		const { result } = renderCrud();
 
-		act(() => result.current.rows.onRequestRenameChange("List accounts"));
 		await act(async () => {
-			await result.current.rows.onRequestRenameSubmit("r-1");
+			await result.current.rows.onRequestRenameSubmit("r-1", "List accounts");
 		});
 
 		expect(updateRequest).toHaveBeenCalledWith({ id: "r-1", name: "List accounts" });
@@ -108,9 +106,8 @@ describe("collection tree rename and the shared save status", () => {
 	it("still reports 'Saved' for a rename with nothing else unsaved", async () => {
 		const { result } = renderCrud();
 
-		act(() => result.current.rows.onRenameChange("Acme Corp"));
 		await act(async () => {
-			await result.current.rows.onRenameSubmit("c-1");
+			await result.current.rows.onRenameSubmit("c-1", "Acme Corp");
 		});
 
 		expect(useSaveStore.getState().status).toBe("saved");
@@ -121,9 +118,8 @@ describe("collection tree rename and the shared save status", () => {
 		updateRequest.mockRejectedValue(new Error("Request name already taken"));
 		const { result } = renderCrud();
 
-		act(() => result.current.rows.onRequestRenameChange("List accounts"));
 		await act(async () => {
-			await result.current.rows.onRequestRenameSubmit("r-1");
+			await result.current.rows.onRequestRenameSubmit("r-1", "List accounts");
 		});
 
 		expect(useSaveStore.getState().status).toBe("error");

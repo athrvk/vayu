@@ -84,10 +84,8 @@ export interface CollectionTreeDnd {
 export interface CollectionTreeCrudSlice {
 	/** Collection currently being renamed inline, if any. */
 	renamingId: string | null;
-	renameValue: string;
 	/** Request currently being renamed inline, if any. */
 	renamingRequestId: string | null;
-	renameRequestValue: string;
 	/** Rows mid-delete render dimmed and refuse input. */
 	deletingCollectionId: string | null;
 	deletingRequestId: string | null;
@@ -102,13 +100,17 @@ export interface CollectionTreeCrudSlice {
 	/** Actions for a collection's ⋯ menu, built where the handlers live. */
 	getCollectionActions: (collection: Collection) => RowAction[];
 
-	onRenameChange: (value: string) => void;
-	onRenameSubmit: (collectionId: string) => void;
+	/**
+	 * The draft name lives in the row's `useInlineRename`, not here: the field is
+	 * mounted by exactly one row at a time, and a second copy of it up here was
+	 * a value two layers could disagree about. Submit therefore carries the
+	 * trimmed name the hook already holds.
+	 */
+	onRenameSubmit: (collectionId: string, name: string) => void;
 	onRenameCancel: () => void;
 	onStartRename: (collection: Collection) => void;
 
-	onRequestRenameChange: (value: string) => void;
-	onRequestRenameSubmit: (requestId: string) => void;
+	onRequestRenameSubmit: (requestId: string, name: string) => void;
 	onRequestRenameCancel: () => void;
 	onStartRequestRename: (request: Request) => void;
 
