@@ -122,7 +122,7 @@ function EntryLine({ entry }: { entry: ChangesetEntry }) {
 function ItemValue({ item }: { item: ChangesetItem }) {
 	if (item.entries) {
 		return (
-			<div className="mt-1.5 space-y-1 pl-[18px] font-mono text-[11px] leading-relaxed">
+			<div className="mt-1.5 space-y-1 pl-[18px] font-mono text-label leading-relaxed">
 				{item.entries.map((e) => (
 					<EntryLine key={`${e.kind}-${e.key}`} entry={e} />
 				))}
@@ -131,7 +131,7 @@ function ItemValue({ item }: { item: ChangesetItem }) {
 	}
 	if (item.segments) {
 		return (
-			<div className="mt-1.5 pl-[18px] font-mono text-[11px] leading-relaxed break-all">
+			<div className="mt-1.5 pl-[18px] font-mono text-label leading-relaxed break-all">
 				<Segments segments={item.segments} />
 			</div>
 		);
@@ -139,7 +139,7 @@ function ItemValue({ item }: { item: ChangesetItem }) {
 	// kept: a plain mode, or a drift, then the reason.
 	return (
 		<div className="mt-1 pl-[18px]">
-			<span className="font-mono text-[11px]">
+			<span className="font-mono text-label">
 				{item.driftFrom !== undefined ? (
 					<>
 						<span className="text-muted-foreground">{item.driftFrom}</span>
@@ -151,7 +151,7 @@ function ItemValue({ item }: { item: ChangesetItem }) {
 				)}
 			</span>
 			{item.note && (
-				<span className="ml-2 text-[11px] text-muted-foreground">{item.note}</span>
+				<span className="ml-2 text-label text-muted-foreground">{item.note}</span>
 			)}
 		</div>
 	);
@@ -169,7 +169,7 @@ function ChangeRow({ item }: { item: ChangesetItem }) {
 		<div className="flex items-baseline gap-2">
 			{marker}
 			<span className="text-xs font-medium text-foreground">{item.field}</span>
-			<span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
+			<span className="ml-auto flex items-center gap-1 text-micro text-muted-foreground">
 				{item.detail}
 				{item.collapsible && (
 					<ChevronRight className="size-icon-sm transition-transform group-open:rotate-90" />
@@ -265,7 +265,7 @@ export default function SaveRunToRequestDialog({
 
 				<DialogBody className="space-y-4">
 					{tally.length > 0 && (
-						<div className="flex flex-wrap gap-3 font-mono text-[11px] tabular-nums">
+						<div className="flex flex-wrap gap-3 font-mono text-label tabular-nums">
 							{tally.map((t) => (
 								<span key={t.state} className="text-muted-foreground">
 									<span className={cn("font-bold", t.text)}>{t.glyph}</span> {t.n}{" "}
@@ -289,7 +289,7 @@ export default function SaveRunToRequestDialog({
 				</DialogBody>
 
 				<DialogFooter className="items-center gap-2 sm:gap-0">
-					<span className="mr-auto text-[11px] text-muted-foreground">
+					<span className="mr-auto text-label text-muted-foreground">
 						Cannot be undone
 					</span>
 					<Button

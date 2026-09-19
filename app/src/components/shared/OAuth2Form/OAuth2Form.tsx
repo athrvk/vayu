@@ -93,7 +93,7 @@ export default function OAuth2Form({
 		<div className="space-y-1.5">
 			<Label>{label}</Label>
 			{node}
-			{hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+			{hint && <p className="text-label text-muted-foreground">{hint}</p>}
 		</div>
 	);
 

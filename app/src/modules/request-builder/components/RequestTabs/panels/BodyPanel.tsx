@@ -280,7 +280,7 @@ export default function BodyPanel() {
 					 * of the time.
 					 */}
 					{activeMode?.contentType ? (
-						<code className="truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+						<code className="truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-label text-muted-foreground">
 							{activeMode.contentType}
 						</code>
 					) : (

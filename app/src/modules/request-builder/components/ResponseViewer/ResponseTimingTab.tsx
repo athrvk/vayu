@@ -104,7 +104,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 								{formatPhaseDuration(p.value).unit}
 							</span>
 						</span>
-						<span className="text-right font-mono tabular-nums text-[11px] text-muted-foreground">
+						<span className="text-right font-mono tabular-nums text-label text-muted-foreground">
 							{pct(p.value).toFixed(0)}%
 						</span>
 					</div>
@@ -112,7 +112,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 			</div>
 
 			{/* Summary: wire vs generator-side overhead vs perceived total. */}
-			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
+			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-label">
 				{timing.wireMs !== undefined && (
 					<TimingStat
 						label="Wire"

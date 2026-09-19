@@ -148,7 +148,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 				<ExternalChangeCallout what="the elements list" onTakeTheirs={resetDraft} />
 			)}
 
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				These are saved together, when you press Save Elements - not as you add or edit one.
 			</p>
 

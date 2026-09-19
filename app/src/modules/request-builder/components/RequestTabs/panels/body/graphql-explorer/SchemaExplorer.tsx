@@ -331,7 +331,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 						}}
 						placeholder="Search schema"
 						aria-label="Search schema"
-						className="h-6 pl-6 text-[11px]"
+						className="h-6 pl-6 text-label"
 					/>
 				</div>
 				{/*
@@ -358,7 +358,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 			 * same call `schema-cache` makes when it keeps the last good schema.
 			 */}
 			{schema && status === "error" && (
-				<p className="enter-fade flex items-center gap-1 px-2 py-1 m-0 text-[10px] text-warning-text border-b border-border shrink-0">
+				<p className="enter-fade flex items-center gap-1 px-2 py-1 m-0 text-micro text-warning-text border-b border-border shrink-0">
 					<AlertCircle className="size-icon-sm shrink-0" />
 					{age ? `${age}. Refresh failed.` : "Refresh failed."}
 				</p>
@@ -390,7 +390,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 				 */}
 				{!schema ? (
 					<p
-						className="pr-2 py-2 m-0 text-[11px] text-muted-foreground"
+						className="pr-2 py-2 m-0 text-label text-muted-foreground"
 						style={{ paddingLeft: rowInsetPx(0) }}
 					>
 						{status === "loading"
@@ -399,7 +399,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 					</p>
 				) : rows.length === 0 ? (
 					<p
-						className="pr-2 py-2 m-0 text-[11px] text-muted-foreground"
+						className="pr-2 py-2 m-0 text-label text-muted-foreground"
 						style={{ paddingLeft: rowInsetPx(0) }}
 					>
 						Nothing matches "{term}".
@@ -634,7 +634,7 @@ function ExplorerRow({
 				tabIndex={-1}
 				onClick={container ? onToggle : onInsert}
 				className={cn(
-					"flex min-w-0 self-stretch flex-1 text-left text-[11px] font-mono",
+					"flex min-w-0 self-stretch flex-1 text-left text-label font-mono",
 					full ? "flex-col justify-center py-0.5" : "items-center gap-1"
 				)}
 			>

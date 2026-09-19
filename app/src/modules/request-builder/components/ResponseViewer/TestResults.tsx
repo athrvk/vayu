@@ -99,7 +99,7 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 			<div className="space-y-3">
 				{groups.map((group) => (
 					<section key={group.source} className="space-y-1.5">
-						<h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+						<h3 className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
 							{group.label}
 						</h3>
 						{group.tests.map((test, i) => (
@@ -133,7 +133,7 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 											{test.name}
 										</p>
 										{test.error && (
-											<pre className="text-[11px] text-status-error-text mt-1 font-mono whitespace-pre-wrap break-words">
+											<pre className="text-label text-status-error-text mt-1 font-mono whitespace-pre-wrap break-words">
 												{test.error}
 											</pre>
 										)}

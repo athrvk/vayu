@@ -195,7 +195,7 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 			{snippet && (
 				<>
 					<div className="relative">
-						<pre className="surface-sunken border border-rule rounded-md p-2 pr-8 text-[11px] font-mono whitespace-pre-wrap break-all overflow-x-auto m-0">
+						<pre className="surface-sunken border border-rule rounded-md p-2 pr-8 text-label font-mono whitespace-pre-wrap break-all overflow-x-auto m-0">
 							{snippet.code}
 						</pre>
 						<div className="absolute top-1 right-1">
@@ -217,12 +217,12 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 						</div>
 					</div>
 					{snippet.masked && (
-						<p className="text-[11px] text-muted-foreground m-0">
+						<p className="text-label text-muted-foreground m-0">
 							Secrets are hidden. Reveal them before running this.
 						</p>
 					)}
 					{snippet.notes.map((note) => (
-						<p key={note} className="text-[11px] text-muted-foreground m-0">
+						<p key={note} className="text-label text-muted-foreground m-0">
 							{note}
 						</p>
 					))}
@@ -232,7 +232,7 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 					 * the difference between a snippet that is incomplete and one that
 					 * is wrong.
 					 */}
-					<p className="text-[11px] text-muted-foreground m-0">
+					<p className="text-label text-muted-foreground m-0">
 						Cookies from the jar are attached when the request is sent and are not part
 						of this snippet.
 					</p>

@@ -119,7 +119,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 						from <span className="font-mono font-medium">{source.name}</span>.
 					</p>
 					{secret && (
-						<p className="mt-1 m-0 text-[11px] text-muted-foreground font-mono truncate">
+						<p className="mt-1 m-0 text-label text-muted-foreground font-mono truncate">
 							{renderWithVariables(secret)}
 						</p>
 					)}
@@ -146,7 +146,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 							/>
 							<span
 								className={cn(
-									"text-[11px] font-mono truncate",
+									"text-label font-mono truncate",
 									isSource
 										? "text-foreground font-semibold"
 										: "text-muted-foreground"
@@ -158,7 +158,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 
 						<span
 							className={cn(
-								"text-[10px] font-mono shrink-0",
+								"text-micro font-mono shrink-0",
 								isSource ? "text-primary" : "text-muted-foreground"
 							)}
 						>
@@ -166,7 +166,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 						</span>
 
 						{isSource && (
-							<span className="text-[10px] font-semibold bg-primary/15 text-primary px-1.5 py-px rounded-sm shrink-0">
+							<span className="text-micro font-semibold bg-primary/15 text-primary px-1.5 py-px rounded-sm shrink-0">
 								SOURCE
 							</span>
 						)}

@@ -65,7 +65,7 @@ export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomB
 				 * unambiguous where sighted reading is by column.
 				 */
 				<div
-					className="flex items-center gap-2 text-[11px] text-muted-foreground"
+					className="flex items-center gap-2 text-label text-muted-foreground"
 					aria-hidden="true"
 				>
 					<span className="min-w-0 flex-1">Metric name</span>
@@ -153,7 +153,7 @@ export function CustomBudgetRows({ rows, onChange, idPrefix, disabled }: CustomB
 /** The one sentence both dialogs say above the rows. */
 export function CustomBudgetHint() {
 	return (
-		<p className="text-[11px] leading-relaxed text-muted-foreground">
+		<p className="text-label leading-relaxed text-muted-foreground">
 			A ceiling on a value the run records itself - a metric.record element or a pm.metrics
 			call - under the name it is recorded with. A name this run never records is reported as
 			unevaluated rather than passing quietly.

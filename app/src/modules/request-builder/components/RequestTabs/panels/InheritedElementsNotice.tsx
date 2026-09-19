@@ -123,16 +123,16 @@ export default function InheritedElementsNotice({
 				return (
 					<span key={entry.id} className="flex items-center gap-2 flex-1 min-w-0">
 						<Folder className="size-icon-sm shrink-0 text-primary" />
-						<span className="text-[11px] font-mono truncate text-foreground font-semibold">
+						<span className="text-label font-mono truncate text-foreground font-semibold">
 							{entry.origin?.name}
 						</span>
-						<span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+						<span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-micro font-medium text-primary">
 							{kindLabel(entry.kind)}
 						</span>
 						<Button
 							variant="link"
 							size="sm"
-							className="h-auto p-0 text-[11px] ml-auto"
+							className="h-auto p-0 text-label ml-auto"
 							onClick={() => toggleDisabled(entry.id)}
 						>
 							{isDisabled ? "Re-enable" : "Disable"}

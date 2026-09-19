@@ -235,7 +235,7 @@ function MetricsView({
 							Throughput over time
 							<InfoChip tip={TOOLTIPS.throughputOverTime} />
 						</h3>
-						<div className="flex gap-3.5 text-[11px] font-mono text-muted-foreground">
+						<div className="flex gap-3.5 text-label font-mono text-muted-foreground">
 							<span>
 								<span
 									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
@@ -290,7 +290,7 @@ function MetricsView({
 						sleeps={hostSleeps}
 					/>
 					{rampOverlay && (
-						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-[11px] font-mono text-muted-foreground">
+						<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-label font-mono text-muted-foreground">
 							<span>
 								<span className="text-muted-foreground">ramp deviation </span>
 								<span className="text-foreground font-semibold">
@@ -324,7 +324,7 @@ function MetricsView({
 							Latency over time
 							<InfoChip tip={TOOLTIPS.latencyOverTime} />
 						</h3>
-						<div className="flex gap-3.5 text-[11px] font-mono text-muted-foreground">
+						<div className="flex gap-3.5 text-label font-mono text-muted-foreground">
 							<span>
 								<span
 									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
@@ -368,7 +368,7 @@ function MetricsView({
 									Response time vs concurrency
 									<InfoChip tip={TOOLTIPS.responseTimeVsConcurrency} />
 								</h3>
-								<div className="flex gap-3.5 text-[11px] font-mono text-muted-foreground">
+								<div className="flex gap-3.5 text-label font-mono text-muted-foreground">
 									<span>
 										<span
 											className="inline-block w-2 h-2 mr-1.5 rounded-full align-middle"
@@ -400,7 +400,7 @@ function MetricsView({
 									Response time percentiles over time
 									<InfoChip tip={TOOLTIPS.percentilesOverTime} />
 								</h3>
-								<div className="flex gap-3.5 text-[11px] font-mono text-muted-foreground">
+								<div className="flex gap-3.5 text-label font-mono text-muted-foreground">
 									<span>
 										<span
 											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
@@ -449,7 +449,7 @@ function MetricsView({
 						    chart moved onto the status token family every swatch silently
 						    became a different colour from the band it labels.
 						 */}
-						<div className="flex items-center gap-3.5 text-[11px] font-mono text-muted-foreground">
+						<div className="flex items-center gap-3.5 text-label font-mono text-muted-foreground">
 							{STATUS_CLASS_SERIES.map(({ label, cls }) => ({
 								label,
 								color: `hsl(var(${STATUS_CLASS_CSS_VAR[cls]}))`,
@@ -487,7 +487,7 @@ function MetricsView({
 							Server vitals
 							<InfoChip tip={TOOLTIPS.serverVitals} />
 						</h3>
-						<span className="text-[10px] font-mono text-muted-foreground">
+						<span className="text-micro font-mono text-muted-foreground">
 							scraped from the target
 						</span>
 					</div>
@@ -511,7 +511,7 @@ function MetricsView({
 							Custom metrics
 							<InfoChip tip={TOOLTIPS.customMetrics} />
 						</h3>
-						<span className="text-[10px] font-mono text-muted-foreground">
+						<span className="text-micro font-mono text-muted-foreground">
 							metric.record / pm.metrics
 						</span>
 					</div>
@@ -531,11 +531,11 @@ function MetricsView({
 						<h3 className="text-xs font-semibold text-foreground">
 							Latency distribution
 							<InfoChip tip={TOOLTIPS.latencyDistribution} />
-							<span className="ml-2 text-[11px] font-normal text-muted-foreground">
+							<span className="ml-2 text-label font-normal text-muted-foreground">
 								HDR percentile plot
 							</span>
 						</h3>
-						<span className="text-[10px] font-mono text-muted-foreground">
+						<span className="text-micro font-mono text-muted-foreground">
 							{finalReport ? "from HdrHistogram" : "available after completion"}
 						</span>
 					</div>
@@ -547,7 +547,7 @@ function MetricsView({
 					) : (
 						<SkeletonHdrPlot message="p50 / p95 / p99 finalize after the run completes" />
 					)}
-					<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-[11px] font-mono text-muted-foreground">
+					<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-border text-label font-mono text-muted-foreground">
 						<LatencyStat k="min" v={finalReport?.latency?.min} />
 						<LatencyStat k="mean" v={finalReport?.latency?.avg} />
 						<LatencyStat k="p50" v={finalReport?.latency?.p50} />
@@ -564,7 +564,7 @@ function MetricsView({
 							Avg request timing
 							<InfoChip tip={TOOLTIPS.avgRequestTiming} />
 						</h3>
-						<span className="text-[10px] font-mono text-muted-foreground">
+						<span className="text-micro font-mono text-muted-foreground">
 							{hasPhaseAverages(finalReport?.timingBreakdown)
 								? "from timing samples"
 								: "-"}

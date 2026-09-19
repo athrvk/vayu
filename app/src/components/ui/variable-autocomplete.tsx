@@ -154,7 +154,7 @@ export function VariableAutocomplete({
 												variant="compact"
 											/>
 										) : (
-											<span className="ml-2 truncate text-[11px] text-muted-foreground">
+											<span className="ml-2 truncate text-label text-muted-foreground">
 												{detail}
 											</span>
 										)}

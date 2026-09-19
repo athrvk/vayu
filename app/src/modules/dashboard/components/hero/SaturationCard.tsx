@@ -46,7 +46,7 @@ export function SaturationCard({
 				</span>
 			</div>
 			{breakpoint.crossed && (
-				<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+				<p className="text-label text-muted-foreground font-mono mt-0.5">
 					p99 crossed{" "}
 					<span className="text-foreground font-semibold">{breakpoint.p99Ms}</span>ms at
 					conc{" "}

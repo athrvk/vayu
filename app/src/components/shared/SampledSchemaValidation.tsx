@@ -104,7 +104,7 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 				 * and are computed on different evidence, so neither can leave the
 				 * reader to work out which kind its numbers are.
 				 */}
-				<p className="mb-3 text-[11px] text-muted-foreground">
+				<p className="mb-3 text-label text-muted-foreground">
 					{exact
 						? "Checked as each step ran, over every response this run produced."
 						: "Checked at the end of the run, over the responses it kept. Coverage beside this is exact; these numbers describe the sample."}
@@ -120,7 +120,7 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 				 * already describes.
 				 */}
 				{validation.failOnSchemaError === true && (
-					<p className="mb-3 text-[11px] text-muted-foreground">
+					<p className="mb-3 text-label text-muted-foreground">
 						This run made the contract a gate: a step that passed everything else and
 						did not match its declared schema was failed.
 					</p>

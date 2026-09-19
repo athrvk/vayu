@@ -55,7 +55,7 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 
 	return (
 		<div className={inset ? "p-4 overflow-auto h-full" : undefined}>
-			<h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+			<h3 className="mb-1.5 text-micro font-semibold uppercase tracking-wide text-muted-foreground">
 				Elements
 			</h3>
 			<div className="space-y-1.5">
@@ -85,7 +85,7 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 								>
 									{outcome.kind}
 								</span>
-								<span className="text-[10px] text-muted-foreground">
+								<span className="text-micro text-muted-foreground">
 									{outcome.outcome}
 								</span>
 							</div>

@@ -165,7 +165,7 @@ export function ResponseStatusBar({
 			<StatusCodeBadge
 				status={status}
 				statusText={statusText}
-				className="h-5 px-1.5 text-[10px]"
+				className="h-5 px-1.5 text-micro"
 			/>
 
 			{/*
@@ -274,7 +274,7 @@ export function ResponseStatusBar({
 			 */}
 			{age && (
 				<div
-					className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground"
+					className="ml-auto flex items-center gap-1.5 text-label text-muted-foreground"
 					title={age.title}
 				>
 					{age.fromRun ? (

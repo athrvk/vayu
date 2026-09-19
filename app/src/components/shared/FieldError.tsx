@@ -11,7 +11,7 @@
  * Error text had three presentations and no rule saying which to reach for:
  * `Callout` in twenty files, a full-pane `ErrorState`, and hand-written
  * `text-destructive-text` paragraphs in between - at `text-sm`, `text-xs` and
- * `text-[11px]`, some with a leading glyph and some without, some announced and
+ * `text-label`, some with a leading glyph and some without, some announced and
  * most not. The import dialog alone carried all three sizes.
  *
  * The rule, in one line each (`docs/design-system.md`, Component Patterns):

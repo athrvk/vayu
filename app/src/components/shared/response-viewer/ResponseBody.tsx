@@ -266,7 +266,7 @@ export default function ResponseBody({
 				<div className="flex items-center gap-2">
 					{/* 14px, matching the tab row's `w-3.5` icons. It was 16px. */}
 					<FileCode className="w-3.5 h-3.5 text-muted-foreground" />
-					<span className="text-[11px] text-muted-foreground uppercase tracking-[0.06em]">
+					<span className="text-label text-muted-foreground uppercase tracking-[0.06em]">
 						{detectedType}
 					</span>
 				</div>

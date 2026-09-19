@@ -68,7 +68,7 @@ export default function InfoPanel() {
 	return (
 		<div className="flex flex-col gap-4 max-w-[76ch]">
 			<div className="flex flex-col gap-2">
-				<div className="text-[11px] uppercase tracking-wide text-subtle-foreground">
+				<div className="text-label uppercase tracking-wide text-subtle-foreground">
 					Name
 				</div>
 				<Input
@@ -82,7 +82,7 @@ export default function InfoPanel() {
 			</div>
 
 			<div className="flex flex-col gap-2">
-				<div className="text-[11px] uppercase tracking-wide text-subtle-foreground">
+				<div className="text-label uppercase tracking-wide text-subtle-foreground">
 					Description
 				</div>
 				<MarkdownEditor

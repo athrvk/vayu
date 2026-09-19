@@ -845,7 +845,7 @@ export default function LoadTestConfigDialog({
 						)}
 					</div>
 
-					<p className="rounded-md border border-border bg-panel px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+					<p className="rounded-md border border-border bg-panel px-3 py-2 text-label leading-relaxed text-muted-foreground">
 						{summarise(
 							{
 								mode,
@@ -963,7 +963,7 @@ export default function LoadTestConfigDialog({
 					>
 						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
 							<span>Recording &amp; limits</span>
-							<span className="text-[11px] font-normal text-muted-foreground">
+							<span className="text-label font-normal text-muted-foreground">
 								{recordingOpen ? "Hide" : "Show"}
 							</span>
 						</CollapsibleTrigger>
@@ -1002,7 +1002,7 @@ export default function LoadTestConfigDialog({
 								    storage outright. Errors are never sampled
 								    either way; they are always kept.
 								 */}
-								<div className="flex justify-between text-[11px] text-muted-foreground">
+								<div className="flex justify-between text-label text-muted-foreground">
 									<span>1% - a trickle</span>
 									<span>100% - everything</span>
 								</div>
@@ -1044,7 +1044,7 @@ export default function LoadTestConfigDialog({
 									className="text-xs font-normal leading-snug"
 								>
 									Save timing breakdown
-									<span className="block text-[11px] text-muted-foreground">
+									<span className="block text-label text-muted-foreground">
 										DNS, TLS, connect and first-byte, per sampled request.
 									</span>
 								</Label>
@@ -1070,12 +1070,12 @@ export default function LoadTestConfigDialog({
 					>
 						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
 							<span>Pass/fail budgets</span>
-							<span className="text-[11px] font-normal text-muted-foreground">
+							<span className="text-label font-normal text-muted-foreground">
 								{budgetsOpen ? "Hide" : "Show"}
 							</span>
 						</CollapsibleTrigger>
 						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<p className="text-[11px] leading-relaxed text-muted-foreground">
+							<p className="text-label leading-relaxed text-muted-foreground">
 								The run is judged against whatever you declare here and reports a
 								verdict. Leave a field blank to skip that budget; leave them all
 								blank and the run is measured but not judged, as before.
@@ -1126,7 +1126,7 @@ export default function LoadTestConfigDialog({
 									className="text-xs font-normal leading-snug"
 								>
 									Fail the run when a budget is missed
-									<span className="block text-[11px] text-muted-foreground">
+									<span className="block text-label text-muted-foreground">
 										Otherwise a missed budget is reported but the run still ends
 										Completed.
 									</span>
@@ -1154,12 +1154,12 @@ export default function LoadTestConfigDialog({
 					>
 						<CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground transition-colors hover:bg-accent">
 							<span>Server monitoring</span>
-							<span className="text-[11px] font-normal text-muted-foreground">
+							<span className="text-label font-normal text-muted-foreground">
 								{monitorOpen ? "Hide" : "Show"}
 							</span>
 						</CollapsibleTrigger>
 						<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
-							<p className="text-[11px] leading-relaxed text-muted-foreground">
+							<p className="text-label leading-relaxed text-muted-foreground">
 								Scrape the target&apos;s own metrics during the run and chart them
 								on the same timeline as p99 and throughput - so a climb in latency
 								can be read against the server&apos;s CPU or memory. Leave the URL
@@ -1244,7 +1244,7 @@ export default function LoadTestConfigDialog({
 									}
 									className="font-mono text-xs"
 								/>
-								<p className="text-[11px] text-muted-foreground">
+								<p className="text-label text-muted-foreground">
 									A Prometheus name is matched across its labels and the values
 									summed, so a whole family charts as one line.
 								</p>

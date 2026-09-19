@@ -49,7 +49,7 @@ export default function MethodSelector() {
 					"h-full w-auto shrink-0 gap-1.5 border-0 bg-transparent px-3 py-0 shadow-none",
 					// Semibold, not bold: 600 is the heaviest JetBrains Mono face
 					// `fonts.css` bundles, so `font-bold` here is a synthesised 700.
-					"font-mono text-[11px] font-semibold",
+					"font-mono text-label font-semibold",
 					/*
 					 * It had no hover state at all after moving in here - the old
 					 * standalone control got its affordance from a `bg-accent` box,

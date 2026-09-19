@@ -41,7 +41,7 @@ export function CookiesSection({ tab }: ContextBarSectionProps) {
 
 	return (
 		<div className="space-y-2">
-			<p className="text-[11px] text-muted-foreground m-0">
+			<p className="text-label text-muted-foreground m-0">
 				Cookies for <span className="font-mono text-foreground">{host}</span>. libcurl
 				decides what is finally attached - the response's raw request view shows the exact{" "}
 				<span className="font-mono">Cookie</span> line that was sent.
@@ -63,7 +63,7 @@ export function CookiesSection({ tab }: ContextBarSectionProps) {
 								<TruncatedText className="text-xs font-mono text-foreground">
 									{cookie.name}
 								</TruncatedText>
-								<span className="text-[10px] text-muted-foreground shrink-0">
+								<span className="text-micro text-muted-foreground shrink-0">
 									{cookie.domain}
 									{cookie.path}
 								</span>

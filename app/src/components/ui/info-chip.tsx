@@ -57,7 +57,7 @@ export function InfoChip({ tip, className }: InfoChipProps) {
 					<Info className="h-2.5 w-2.5" />
 				</button>
 			</TooltipTrigger>
-			<TooltipContent className="max-w-[260px] text-[11px] leading-relaxed">
+			<TooltipContent className="max-w-[260px] text-label leading-relaxed">
 				{tip}
 			</TooltipContent>
 		</Tooltip>

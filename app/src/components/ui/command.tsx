@@ -304,7 +304,7 @@ function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
 		<div
 			data-slot="command-footer"
 			className={cn(
-				"flex shrink-0 items-center gap-3 border-t border-rule px-3 py-2 text-[10px] text-muted-foreground",
+				"flex shrink-0 items-center gap-3 border-t border-rule px-3 py-2 text-micro text-muted-foreground",
 				className
 			)}
 			{...props}

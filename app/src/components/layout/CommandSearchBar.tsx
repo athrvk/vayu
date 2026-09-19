@@ -75,7 +75,7 @@ export function CommandSearchBar({ className }: { className?: string }) {
 			<span className="flex-1 truncate text-left">Search</span>
 			{/* The hint is the reason the bar earns its width: a user who learns the
 			    chord here never needs the bar again. */}
-			<kbd className="shrink-0 font-mono text-[10px] tracking-tight opacity-70">
+			<kbd className="shrink-0 font-mono text-micro tracking-tight opacity-70">
 				{formatChord(PALETTE_CHORD)}
 			</kbd>
 		</button>

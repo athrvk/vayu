@@ -241,7 +241,7 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 			{/* Full token disclosure - expands below, doesn't affect the row above */}
 			{revealed && token && (
 				<div className="border-t border-border px-3 py-2">
-					<code className="block break-all text-[11px] leading-relaxed text-foreground select-all">
+					<code className="block break-all text-label leading-relaxed text-foreground select-all">
 						{token.accessToken}
 					</code>
 				</div>

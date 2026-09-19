@@ -32,15 +32,15 @@ describe("FieldError", () => {
 	});
 
 	it("carries one size, not whichever the call site had", () => {
-		// The three converted presentations were text-sm, text-xs and
-		// text-[11px]; a 1px difference between two messages on one screen says
+		// The three converted presentations were text-sm, text-xs and the 11px
+		// step (`text-label` since #1692); a 1px difference between two messages on one screen says
 		// nothing a reader can act on.
 		render(<FieldError>Too long</FieldError>);
 		const el = screen.getByRole("alert");
 		expect(el.className).toContain("text-xs");
 		expect(el.className).toContain("text-destructive-text");
 		expect(el.className).not.toContain("text-sm");
-		expect(el.className).not.toContain("text-[11px]");
+		expect(el.className).not.toContain("text-label");
 	});
 
 	it("takes the id a control's aria-describedby points at", () => {

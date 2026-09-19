@@ -62,7 +62,7 @@ export function ConcurrencyUtilCard({
 					</>
 				}
 			/>
-			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				<span className="text-foreground font-semibold">{fmt(util, 0)}</span>% utilisation
 			</p>
 			{util !== undefined && (

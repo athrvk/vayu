@@ -163,7 +163,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 								<span
 									aria-hidden={tone.gutter === "" ? true : undefined}
 									className={cn(
-										"w-9 shrink-0 select-none text-right text-[10px] uppercase leading-5 tracking-wide",
+										"w-9 shrink-0 select-none text-right text-micro uppercase leading-5 tracking-wide",
 										tone.label
 									)}
 								>
@@ -188,7 +188,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 						 */
 						<div
 							ref={sentinelRef}
-							className="pt-2 text-[10px] text-muted-foreground tabular-nums"
+							className="pt-2 text-micro text-muted-foreground tabular-nums"
 						>
 							Showing {visible.toLocaleString()} of {logs.length.toLocaleString()}…
 						</div>

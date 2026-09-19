@@ -21,10 +21,12 @@
  * contains and which render soft on a non-retina display. Those are the
  * signature of adjusting by eye.
  *
- * `text-[10px]` and `text-[11px]` stay allowed: both are in the documented table
- * as the micro/badge and eyebrow sizes, and a dense developer tool genuinely
- * needs steps below 12px. They are permitted *by name* here rather than by
- * pattern, so a twelfth value cannot arrive unnoticed.
+ * `text-[10px]` and `text-[11px]` were the last two allowed: a dense developer
+ * tool genuinely needs steps below 12px, and neither had a token. Both have one
+ * now - `--text-label` and `--text-micro` (#1692) - so the allowance is gone and
+ * the rule is flat: no font size is written as an arbitrary value. The 248 call
+ * sites that spelled the pixels out now name the step, and get its line-height
+ * with it.
  */
 
 import { describe, it, expect } from "vitest";
@@ -41,12 +43,11 @@ const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
  * `docs/design-system.md` -> Type Scale Conventions. Everything else must use a
  * named utility so it carries a line-height.
  */
-const ALLOWED_ARBITRARY = new Set([
-	"text-[10px]", // micro / badge
-	"text-[11px]", // section label / eyebrow
-	// The two metric sizes left this set in #1409: 34px and 22px are
-	// `--text-hero` and `--text-metric` now, which is what carries their paired
-	// line-height. Only the badge steps, which have no token, remain arbitrary.
+const ALLOWED_ARBITRARY = new Set<string>([
+	// Empty, and staying that way. The metric sizes left in #1409 and the two
+	// badge steps in #1692; every step in the table has a token behind it now.
+	// The set is kept rather than deleted so the failure message below can name
+	// what is allowed, which is currently "nothing".
 ]);
 
 const files = globSync("**/*.{ts,tsx}", { cwd: srcRoot }).filter((f) => !f.includes(".test."));
@@ -67,8 +68,12 @@ describe("type scale", () => {
 					if (ALLOWED_ARBITRARY.has(m[0])) continue;
 					offences.push(
 						`${relative(".", file)}:${i + 1}  ${m[0]} is not on the scale. ` +
-							`Use text-xs (12), text-sm (13), text-md (15), ` +
-							`or one of ${[...ALLOWED_ARBITRARY].join(", ")}.`
+							`Use text-micro (10), text-label (11), text-xs (12), ` +
+							`text-sm (13), text-md (15), text-lg (18), text-xl (20), ` +
+							`text-metric (22) or text-hero (34).` +
+							(ALLOWED_ARBITRARY.size
+								? ` Arbitrary values still allowed: ${[...ALLOWED_ARBITRARY].join(", ")}.`
+								: "")
 					);
 				}
 			});
@@ -116,7 +121,7 @@ describe("type scale", () => {
  * Both rows say semibold and the scan below covers both faces: above 600 is a
  * synthesised face in mono, and at 10px in the UI face it closes the counters.
  */
-const MICRO_SIZES = ["text-[10px]", "text-[11px]"] as const;
+const MICRO_SIZES = ["text-micro", "text-label"] as const;
 const MICRO_WEIGHT = "font-semibold";
 
 /** Any Tailwind weight utility, `semibold` first so it wins over `bold`. */
@@ -181,6 +186,9 @@ describe("the micro/badge step's weight", () => {
 	// contributor reads before picking one, and until #1202 nothing checked that
 	// the size it states is the size the utility renders.
 	it.each([
+		// The eyebrow row, whose class cell is what a contributor pastes when they
+		// cannot use the `Eyebrow` primitive itself (#1692).
+		["Section label / eyebrow", "11px", "text-label"],
 		["Hero metric value", "34px", "text-hero"],
 		["Secondary metric value", "22px", "text-metric"],
 		["View title", "20px", "text-xl"],
@@ -263,10 +271,13 @@ describe("the scale steps carry paired line-heights", () => {
 		expect(css.length).toBeGreaterThan(1000);
 	});
 
-	it.each(["sm", "md", "label", "micro", "hero", "metric"])("--text-%s declares a line-height", (step) => {
-		expect(css).toContain(`--text-${step}:`);
-		expect(css).toContain(`--text-${step}--line-height:`);
-	});
+	it.each(["sm", "md", "label", "micro", "hero", "metric"])(
+		"--text-%s declares a line-height",
+		(step) => {
+			expect(css).toContain(`--text-${step}:`);
+			expect(css).toContain(`--text-${step}--line-height:`);
+		}
+	);
 
 	// Every step the app defines, pinned to the pixel. Nothing held these values
 	// until #1202: the doc guard next door reads colour triples, so `--text-sm`

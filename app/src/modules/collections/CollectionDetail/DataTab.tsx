@@ -193,9 +193,9 @@ export default function DataTab({ collection }: DataTabProps) {
 		<div className="max-w-[720px] flex flex-col gap-4">
 			<InfoBanner>
 				Declare which columns this collection&apos;s data files carry, so{" "}
-				<code className="font-mono text-[11px] bg-accent px-1 rounded-sm">{`{{data.column}}`}</code>{" "}
+				<code className="font-mono text-label bg-accent px-1 rounded-sm">{`{{data.column}}`}</code>{" "}
 				and{" "}
-				<code className="font-mono text-[11px] bg-accent px-1 rounded-sm">
+				<code className="font-mono text-label bg-accent px-1 rounded-sm">
 					pm.iterationData
 				</code>{" "}
 				can be checked before a run. The columns are saved with the collection; the file
@@ -212,7 +212,7 @@ export default function DataTab({ collection }: DataTabProps) {
 							{declared.map((column) => (
 								<code
 									key={column}
-									className="rounded-sm bg-accent px-1.5 py-0.5 font-mono text-[11px]"
+									className="rounded-sm bg-accent px-1.5 py-0.5 font-mono text-label"
 								>
 									{column}
 								</code>

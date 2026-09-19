@@ -323,7 +323,7 @@ export default function RunItem({
 					{run.baseline && (
 						<Badge
 							variant="chip"
-							className="shrink-0 gap-1 bg-primary/15 px-1.5 py-0 text-[10px] font-semibold text-primary"
+							className="shrink-0 gap-1 bg-primary/15 px-1.5 py-0 text-micro font-semibold text-primary"
 						>
 							<Pin className="h-2.5 w-2.5" />
 							{isLoadRun ? "Baseline" : "Pinned"}
@@ -427,7 +427,7 @@ export default function RunItem({
 				    exclusive in what they read. Omitted entirely rather than an
 				    empty `pl-[1.625rem]` row when neither applies. */}
 				{hasMeta && (
-					<div className="flex flex-wrap items-center gap-3 pl-[1.625rem] text-[10px] text-muted-foreground">
+					<div className="flex flex-wrap items-center gap-3 pl-[1.625rem] text-micro text-muted-foreground">
 						{scenario?.stepCount != null && (
 							<span className="flex shrink-0 items-center gap-1">
 								<ListOrdered className="size-icon-sm" />

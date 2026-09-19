@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 
 /** 11px, semibold, uppercase, loosely tracked, muted. */
 export const EYEBROW_CLASS =
-	"text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
+	"text-label font-semibold uppercase tracking-[0.06em] text-muted-foreground";
 
 export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
 	// `data-slot`, as the Card primitives carry: it is the only stable way to ask

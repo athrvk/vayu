@@ -389,7 +389,7 @@ export default function ResponseViewer() {
 											? "default"
 											: "destructive"
 									}
-									className="ml-0.5 h-4 px-1 text-[10px]"
+									className="ml-0.5 h-4 px-1 text-micro"
 								>
 									{testResults.filter((t) => t.passed).length}/
 									{testResults.length}

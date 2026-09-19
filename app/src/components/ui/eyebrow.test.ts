@@ -10,7 +10,7 @@
  *
  * `EYEBROW_CLASS` was extracted precisely because the value had been re-typed
  * across the app and drifted - the two in `HeadersViewer` were `text-sm ...
- * tracking-wide` and `text-xs ... uppercase`, neither of them the 11px the rest
+ * tracking-wide` and `text-xs ... uppercase`, neither of them the 11px step the rest
  * of the app used. Extracting a constant does not stop that on its own: twelve
  * byte-for-byte copies of the full class string were still sitting in the
  * settings panels, the welcome screens and the GraphQL body pane, and one in
@@ -52,7 +52,7 @@ describe("EYEBROW_CLASS is written once", () => {
 	it("scanned a non-empty tree", () => {
 		// A guard that reads nothing passes forever.
 		expect(files.length).toBeGreaterThan(100);
-		expect(EYEBROW_CLASS).toContain("text-[11px]");
+		expect(EYEBROW_CLASS).toContain("text-label");
 	});
 
 	it("no file re-types the full class string", () => {

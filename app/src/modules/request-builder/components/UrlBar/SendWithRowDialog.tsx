@@ -447,7 +447,7 @@ export default function SendWithRowDialog({
 					<>
 						<div className="flex items-end gap-2">
 							<label className="flex-1 space-y-1">
-								<span className="text-[11px] text-muted-foreground">
+								<span className="text-label text-muted-foreground">
 									Filter rows
 								</span>
 								<Input
@@ -462,7 +462,7 @@ export default function SendWithRowDialog({
 							    the rows are all here now, so this is how you reach row
 							    480 of 500 without scrolling to it. */}
 							<label className="space-y-1">
-								<span className="text-[11px] text-muted-foreground">Row</span>
+								<span className="text-label text-muted-foreground">Row</span>
 								<Input
 									value={entry}
 									onChange={(e) => setEntry(e.target.value)}
@@ -544,7 +544,7 @@ export default function SendWithRowDialog({
 													index === selected && "bg-accent/60"
 												)}
 											>
-												<TableCell className="w-12 text-right font-mono text-[11px] text-muted-foreground">
+												<TableCell className="w-12 text-right font-mono text-label text-muted-foreground">
 													{index + 1}
 												</TableCell>
 												{columns.map((column) => (
@@ -564,7 +564,7 @@ export default function SendWithRowDialog({
 											<TableRow ref={sentinelRef} className="border-b-0">
 												<TableCell
 													colSpan={columns.length + 1}
-													className="py-2 text-center text-[11px] text-muted-foreground"
+													className="py-2 text-center text-label text-muted-foreground"
 												>
 													Loading more rows…
 												</TableCell>
@@ -576,7 +576,7 @@ export default function SendWithRowDialog({
 						</DialogBody>
 
 						<DialogFooter className="items-center">
-							<p className="mr-auto text-[11px] text-muted-foreground">
+							<p className="mr-auto text-label text-muted-foreground">
 								{/* Which rows are on screen, and that scrolling brings
 								    the rest - said because the grid can clip without
 								    looking clipped on an overlay-scrollbar platform. */}

@@ -51,18 +51,18 @@ interface FieldProps {
 export function Field({ label, hint, children }: FieldProps) {
 	return (
 		<div>
-			<div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2">
+			<div className="text-micro font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2">
 				{label}
 			</div>
 			{children}
-			{hint && <div className="text-[11px] text-muted-foreground mt-1">{hint}</div>}
+			{hint && <div className="text-label text-muted-foreground mt-1">{hint}</div>}
 		</div>
 	);
 }
 
 export function SectionLabel({ children }: { children: React.ReactNode }) {
 	return (
-		<div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2">
+		<div className="text-micro font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-2">
 			{children}
 		</div>
 	);
@@ -80,7 +80,7 @@ export function InfoBanner({ children }: { children: React.ReactNode }) {
 export function Stat({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="bg-card border border-border rounded-md px-3.5 py-2.5">
-			<div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-1">
+			<div className="text-micro font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-1">
 				{label}
 			</div>
 			<div className="text-lg font-bold text-foreground font-mono">{value}</div>

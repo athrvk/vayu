@@ -256,12 +256,12 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 				{bound ? "This collection's own document, updated" : "A skeleton document"}
 				<span className="font-normal text-muted-foreground">({notes.dialect})</span>
 			</p>
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				{bound
 					? "Everything Vayu does not model - vendor extensions, unreferenced components, tags - is carried through untouched, and the dialect is left as it was."
 					: "A starting point, not a contract: it describes the requests that are here, with no schema Vayu did not read off an example body."}
 			</p>
-			<ul className="text-[11px] text-muted-foreground space-y-0.5">
+			<ul className="text-label text-muted-foreground space-y-0.5">
 				<Line
 					count={notes.requestsExported}
 					label="request"
@@ -400,7 +400,7 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 				)}
 			</ul>
 			{notes.vocabularyNotWritten && (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					{notes.dialect} states parameters and examples in a vocabulary Vayu does not
 					write. Operations nothing here claims are still removed, but nothing is written
 					into the ones that stay.

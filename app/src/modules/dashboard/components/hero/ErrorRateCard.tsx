@@ -78,7 +78,7 @@ export function ErrorRateCard({
 					{errorRate.toFixed(1)}
 				</span>
 				<span className="text-xs text-muted-foreground">%</span>
-				<span className="ml-auto text-[11px] font-mono text-muted-foreground">
+				<span className="ml-auto text-label font-mono text-muted-foreground">
 					{formatNumber(failedRequests)} / {formatNumber(totalRequests)}
 				</span>
 			</div>
@@ -94,7 +94,7 @@ export function ErrorRateCard({
 					/>
 				))}
 			</div>
-			<div className="flex flex-wrap gap-3 mt-2 text-[11px] font-mono text-muted-foreground">
+			<div className="flex flex-wrap gap-3 mt-2 text-label font-mono text-muted-foreground">
 				{STATUS_SEGMENTS.map((s) => (
 					<StatusLegend
 						key={s.key}

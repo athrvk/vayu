@@ -48,7 +48,7 @@ export function ChainCard({ summary, caption, children }: ChainCardProps) {
 			</div>
 
 			<div className="px-3 py-2">
-				<div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-1.5">
+				<div className="text-micro font-semibold uppercase tracking-[0.07em] text-muted-foreground mb-1.5">
 					{caption}
 				</div>
 				{children.map((row, i) => (

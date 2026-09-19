@@ -405,7 +405,7 @@ export default function HistoryList() {
 									 * runs said nothing after the first row) - see
 									 * `group-runs-by-day.ts`.
 									 */}
-									<div className="px-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground first:pt-0">
+									<div className="px-1 pt-1 text-label font-medium uppercase tracking-wide text-subtle-foreground first:pt-0">
 										{group.label}
 									</div>
 									{group.runs.map((run) => (

@@ -28,7 +28,7 @@ export function CurrentConcurrencyCard({
 	return (
 		<HeroCardShell label="Current Concurrency" tip={TOOLTIPS.currentConcurrency}>
 			<HeroValue value={currentConcurrency} unit="active" />
-			<p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				targeting{" "}
 				<span className="text-foreground font-semibold">{fmt(targetConcurrency, 0)}</span>{" "}
 				over{" "}

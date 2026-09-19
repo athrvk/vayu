@@ -169,7 +169,7 @@ export default function MockServerView() {
 									key={`${route.method} ${route.path} ${route.requestId}`}
 									className="flex items-center gap-2 py-1 text-xs"
 								>
-									<span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">
+									<span className="w-12 shrink-0 font-mono text-label text-muted-foreground">
 										{route.method}
 									</span>
 									<TruncatedText className="min-w-0 flex-1 font-mono">
@@ -211,7 +211,7 @@ export default function MockServerView() {
 									key={`${entry.at}-${entry.path}`}
 									className="flex items-center gap-2 py-1 text-xs"
 								>
-									<span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">
+									<span className="w-12 shrink-0 font-mono text-label text-muted-foreground">
 										{entry.method}
 									</span>
 									<TruncatedText className="min-w-0 flex-1 font-mono">
@@ -229,7 +229,7 @@ export default function MockServerView() {
 									>
 										{entry.status}
 									</Badge>
-									<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+									<span className="shrink-0 text-label text-muted-foreground tabular-nums">
 										{formatTime(entry.at)}
 									</span>
 								</li>

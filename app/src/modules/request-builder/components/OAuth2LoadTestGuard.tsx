@@ -159,7 +159,7 @@ export default function OAuth2LoadTestGuard({
 					: "Token is shorter than the run"
 			}
 			action={
-				<label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+				<label className="flex items-center gap-2 text-label text-muted-foreground">
 					<Switch checked={acknowledged} onCheckedChange={setAcknowledged} />
 					Start anyway
 				</label>

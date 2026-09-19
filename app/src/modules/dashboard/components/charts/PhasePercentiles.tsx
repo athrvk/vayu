@@ -45,7 +45,7 @@ export function PhasePercentiles({ report }: { report: RunReport | null }) {
 
 	return (
 		<div className="space-y-2.5">
-			<div className="grid grid-cols-[68px_repeat(4,1fr)] gap-2.5 text-[11px] text-muted-foreground">
+			<div className="grid grid-cols-[68px_repeat(4,1fr)] gap-2.5 text-label text-muted-foreground">
 				<span />
 				<span className="text-right font-medium">p50</span>
 				<span className="text-right font-medium">p95</span>
@@ -58,7 +58,7 @@ export function PhasePercentiles({ report }: { report: RunReport | null }) {
 					key={phase.key}
 					className="grid grid-cols-[68px_repeat(4,1fr)] items-center gap-2.5"
 				>
-					<span className="text-[11px] text-muted-foreground flex items-center">
+					<span className="text-label text-muted-foreground flex items-center">
 						<span
 							aria-hidden
 							className="inline-block size-2 rounded-full mr-1.5 shrink-0"
@@ -74,12 +74,12 @@ export function PhasePercentiles({ report }: { report: RunReport | null }) {
 				</div>
 			))}
 
-			<p className="pt-2.5 border-t border-dashed border-border text-[11px] text-muted-foreground">
+			<p className="pt-2.5 border-t border-dashed border-border text-label text-muted-foreground">
 				Every completion ({sampleCount.toLocaleString()}), not the trace sample.
 			</p>
 
 			{flagged.length > 0 && (
-				<p className="text-[11px] text-warning-text">
+				<p className="text-label text-warning-text">
 					{flagged.map((phase) => phase.label).join(" and ")}{" "}
 					{flagged.length === 1 ? "has" : "have"} a p99 far above the p50 - a minority of
 					requests paid this phase while most skipped it. For TLS or Connect that is
@@ -117,7 +117,7 @@ function isTailHeavy(phase: ResolvedPhasePercentiles): boolean {
 function PhaseValue({ value, emphasis }: { value: number; emphasis?: boolean }) {
 	const duration = formatPhaseDuration(value);
 	return (
-		<span className="text-right font-mono tabular-nums text-[11px]">
+		<span className="text-right font-mono tabular-nums text-label">
 			<span className={emphasis ? "text-foreground font-medium" : "text-foreground"}>
 				{duration.value}
 			</span>

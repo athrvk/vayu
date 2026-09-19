@@ -72,7 +72,7 @@ export function TabBreadcrumb({ label, crumbs, className }: TabBreadcrumbProps) 
 		<nav
 			aria-label={label}
 			className={cn(
-				"flex items-center gap-1 min-w-0 overflow-hidden px-3 pt-1.5 text-[11px] text-subtle-foreground bg-panel shrink-0",
+				"flex items-center gap-1 min-w-0 overflow-hidden px-3 pt-1.5 text-label text-subtle-foreground bg-panel shrink-0",
 				className
 			)}
 		>

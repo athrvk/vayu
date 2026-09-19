@@ -111,7 +111,7 @@ export function ContractCoverage({ coverage, inheritedBinding, className }: Cont
 				 * under load - and a reader has no way to know which kind these
 				 * are (docs/app/openapi.md, "What is exact and what is sampled").
 				 */}
-				<p className="mb-3 text-[11px] text-muted-foreground">
+				<p className="mb-3 text-label text-muted-foreground">
 					Counted on every send, not from the stored sample.
 					{/*
 					 * Beside "what these numbers are" rather than raised as a
