@@ -42,7 +42,7 @@ const ICON_STEPS = ["target", "icon", "icon-sm"] as const;
 const twMerge = extendTailwindMerge({
 	extend: {
 		classGroups: {
-			"font-size": [{ text: ["hero", "metric"] }],
+			"font-size": [{ text: ["hero", "metric", "label", "micro"] }],
 			h: [{ h: [...FLOOR_STEPS] }],
 			"min-h": [{ "min-h": ["banner"] }],
 			w: [{ w: [...FLOOR_STEPS] }],

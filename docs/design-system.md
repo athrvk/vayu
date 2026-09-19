@@ -1016,7 +1016,7 @@ composes with page zoom.
 
 | Use | Size | Weight | Class |
 |-----|------|--------|-------|
-| Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
+| Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-label font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
 | Hero metric value | 34px | bold, tabular | `text-hero font-bold leading-none font-mono tabular-nums` |
 | Secondary metric value | 22px | bold | `text-metric font-bold font-mono` |
 | View title | 20px | semibold | `text-xl font-semibold` |
@@ -1024,16 +1024,17 @@ composes with page zoom.
 | Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
 | Small label | 12px | medium | `text-xs font-medium` |
-| Micro / badge (mono) | 10–11px | mono semibold | `text-[10px] font-mono font-semibold` |
-| Micro / badge (UI face) | 10–11px | semibold | `text-[10px] font-semibold` |
+| Micro / badge (mono) | 10–11px | mono semibold | `text-micro font-mono font-semibold` |
+| Micro / badge (UI face) | 10–11px | semibold | `text-micro font-semibold` |
 | URL / path | 12–13px | mono | `text-xs font-mono` |
 
-**Only `text-[10px]` and `text-[11px]` may be written as arbitrary values.**
-Everything else has a named step, and `type-scale.test.ts` fails on anything
-outside that set. The two metric sizes were on that list until they became
-`--text-hero` (34px) and `--text-metric` (22px) in `index.css` - the same move
-`--text-md` made, and for the same reason: a named step arrives with its
-line-height, an arbitrary one does not.
+**No font size is written as an arbitrary value.** Every step in the table
+above has a name, and `type-scale.test.ts` fails on any `text-[Npx]` in
+`app/src`. The last two exceptions closed in #1692: 11px and 10px - the app's
+two most-used sizes, at 188 and 60 call sites - are `--text-label` and
+`--text-micro` now, joining `--text-hero` (34px) and `--text-metric` (22px)
+before them, which closed the same way for the same reason: a named step
+arrives with its line-height, an arbitrary one does not.
 
 **A step whose name is not a size word has to be registered in `cn()`.**
 `text-<x>` is either a font size or a text colour, and tailwind-merge tells the
@@ -2695,23 +2696,29 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 ### Section Eyebrow Label
 
 ```tsx
-<p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-4">
-  Section Title
-</p>
+<Eyebrow className="mb-4">Section Title</Eyebrow>
 ```
 
-That string has one home: the `Eyebrow` primitive
+The class string behind it (`text-label font-semibold uppercase
+tracking-[0.06em] text-muted-foreground`) has one home: the `Eyebrow` primitive
 (`app/src/components/ui/eyebrow.tsx`), which is what a section label should
 render - it was extracted because the class was hand-typed in about a dozen
-components and two of them had already drifted, and `eyebrow.test.ts` fails on a
-second copy of the literal. The command palette's group headings are an
-`Eyebrow` inside the element cmdk labels the group by.
+components and two of them had already drifted. `Eyebrow` takes `size="xs"` for
+the denser 10px tier some panes run.
+
+`eyebrow.test.ts` no longer guards only a verbatim copy of that literal: since
+#1692 it fails on **any** `.tsx` under `app/src` that combines `uppercase` with
+a `tracking-` utility in one class string, which is the shape every hand-rolled
+eyebrow had. Files that genuinely need the combination for something that is not
+a section label are exempted there by name, with the reason. The command
+palette's group headings are an `Eyebrow` inside the element cmdk labels the
+group by.
 
 ### Status Badges / Pills
 
 **Live (running):**
 ```tsx
-<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25">
+<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-label font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25">
   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
   LIVE
 </span>
@@ -2719,7 +2726,7 @@ second copy of the literal. The command palette's group headings are an
 
 **Completed / Stopped:**
 ```tsx
-<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border">
+<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border">
   COMPLETED
 </span>
 ```
@@ -2944,7 +2951,7 @@ Two lanes, decided once here rather than per module (issue #1683/#1689):
 
 ```tsx
 <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
-  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-semibold text-[11px] */}
+  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-semibold text-label */}
   <UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus:border-primary focus:outline-none transition-colors" />
 
   {/* Primary action */}
@@ -3013,7 +3020,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 
 ```tsx
 <div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1">
-  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{label}</p>
+  <Eyebrow>{label}</Eyebrow>
   <div className="flex items-baseline gap-1.5 mt-0.5">
     <span
       className="text-[34px] font-bold leading-none font-mono tabular-nums"
@@ -3023,7 +3030,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
     </span>
     {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
   </div>
-  {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
+  {sub && <p className="text-label text-muted-foreground mt-0.5">{sub}</p>}
   {sparkData && sparkData.length > 1 && (
     <div className="mt-2">
       <Sparkline data={sparkData} color={sparkColor || "hsl(var(--primary))"} />
@@ -3038,7 +3045,7 @@ Note: sparkline renders **below** the value row, not beside it.
 
 ```tsx
 <div className="bg-card border border-border rounded-md p-3">
-  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-1.5">{label}</p>
+  <Eyebrow className="mb-1.5">{label}</Eyebrow>
   <div className="flex items-baseline gap-1">
     <span className="text-[22px] font-bold font-mono text-foreground">{value}</span>
     {unit && <span className="text-xs text-muted-foreground">{unit}</span>}

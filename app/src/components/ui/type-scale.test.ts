@@ -263,7 +263,7 @@ describe("the scale steps carry paired line-heights", () => {
 		expect(css.length).toBeGreaterThan(1000);
 	});
 
-	it.each(["sm", "md", "hero", "metric"])("--text-%s declares a line-height", (step) => {
+	it.each(["sm", "md", "label", "micro", "hero", "metric"])("--text-%s declares a line-height", (step) => {
 		expect(css).toContain(`--text-${step}:`);
 		expect(css).toContain(`--text-${step}--line-height:`);
 	});
@@ -277,6 +277,10 @@ describe("the scale steps carry paired line-heights", () => {
 		["md", "0.9375rem", 15],
 		["metric", "1.375rem", 22],
 		["hero", "2.125rem", 34],
+		// The two steps below `text-xs`, named in #1692. They were the last
+		// arbitrary sizes the scale sanctioned, and the pixels are unchanged.
+		["label", "0.6875rem", 11],
+		["micro", "0.625rem", 10],
 	])("--text-%s is %s", (step, rem, px) => {
 		expect(css).toContain(`--text-${step}: ${rem};`);
 		expect(Number(rem.replace("rem", "")) * 16).toBe(px);
