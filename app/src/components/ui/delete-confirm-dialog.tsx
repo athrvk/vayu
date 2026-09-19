@@ -16,6 +16,12 @@
  * keyboard (Delete on a tree row). Focus is redirected to Cancel instead: the
  * safe action, so a reflexive Enter cancels rather than deletes. Left/Right move
  * between the actions the way native confirmation dialogs behave.
+ *
+ * `name`/`scope` (`deleteConfirmCopy`, in the sibling module) replace the three
+ * phrasings call sites used to write for themselves: "permanently removed",
+ * "removed for good", "will be deleted". This file is the one place any of
+ * those three may still appear - as this sentence, naming them - which is what
+ * `collection-constants.test.ts`'s guard checks.
  */
 
 import { useRef } from "react";
@@ -29,39 +35,7 @@ import {
 	DialogDescription,
 } from "./dialog";
 import { Button } from "./button";
-
-/**
- * The suffix a deletion needs beyond "removed permanently" (issue #1689).
- *
- * `"default"` covers a single leaf: an environment, a run, an inbox. `"cascade"`
- * is for a container that takes its contents with it - a trashed collection, a
- * folder - and says so, because "removed permanently" alone reads as the one
- * row, not everything under it.
- */
-export type DeleteScope = "default" | "cascade";
-
-/**
- * The sentence `DeleteConfirmDialog` builds from `name` and `scope` (issue
- * #1689). Exported so a caller that needs the words outside the dialog itself
- * - a toast confirming what just happened, say - quotes the same noun the
- * dialog did, rather than inventing a second phrasing that can drift from it.
- *
- * Deliberately not "permanently removed", "removed for good" or "will be
- * deleted" - the phrases this replaced, one per call site that had written its
- * own. One sentence shape, reworded here once, is the fix; the guard test
- * pins that only this file may say any of the old three.
- */
-export function deleteConfirmCopy(
-	name: string,
-	scope: DeleteScope = "default"
-): { title: string; description: string } {
-	const subject = `"${name}"`;
-	const suffix = scope === "cascade" ? " and everything inside it" : "";
-	return {
-		title: `Delete ${subject}?`,
-		description: `${subject}${suffix} is removed permanently. This cannot be undone.`,
-	};
-}
+import { deleteConfirmCopy, type DeleteScope } from "./delete-confirm-copy";
 
 export interface DeleteConfirmDialogProps {
 	open: boolean;

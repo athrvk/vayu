@@ -3,7 +3,8 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { DeleteConfirmDialog, deleteConfirmCopy } from "./delete-confirm-dialog";
+import { DeleteConfirmDialog } from "./delete-confirm-dialog";
+import { deleteConfirmCopy } from "./delete-confirm-copy";
 
 function open(props: Partial<React.ComponentProps<typeof DeleteConfirmDialog>> = {}) {
 	return render(
