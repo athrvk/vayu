@@ -30,19 +30,49 @@
 /**
  * The motions the stylesheet implements.
  *
+ * Each one is the thing its glyph *is* (#1707) - a shared `scale` across
+ * unrelated marks says nothing about any of them. The geometry each pivot is
+ * computed from is written out in the `Icon motion` block beside the rule.
+ *
  * - `lid` - Trash2. The lid bar and its handle hinge up off the can.
- * - `spinOnce` - RefreshCw. One 360deg turn, as feedback for "do it again".
+ * - `hands` - Clock. The hands sweep one full revolution about the dial
+ *   centre; the dial stays.
+ * - `waves` - Radio. The four arcs travel outward and fade, inner pair then
+ *   outer pair; the centre dot stays.
+ * - `spread` - Braces. The two curves part by 1px each and close again.
+ * - `tilt` - FolderOpen. Tips -6deg about its bottom-left corner with a 4%
+ *   grow, the way a folder opens toward you.
+ * - `wiggle` - Search. -8deg, +8deg, back, about the lens centre.
+ * - `drop` - Download. The arrow drops 2px into its tray; the tray stays.
+ * - `lift` - Upload. The arrow rises 2px out of its tray; the tray stays.
+ * - `press` - Save. The whole glyph goes to 92% and back, a button pressed.
+ * - `tilt-pin` - Pin. Leans -20deg off its own point and rights itself.
+ * - `ring` - Bell. A decaying swing about the point it hangs from.
+ * - `spin-once` - RefreshCw. One 360deg turn, as feedback for "do it again".
+ * - `spin-back` - RotateCcw. The same turn the other way, for "put it back".
+ * - `flash` - Zap. Dims to 40% and back with a 6% grow.
  * - `rotate90` - Plus, X. A quarter turn; both glyphs are symmetric under it,
  *   so the motion reads as the turn itself rather than as a new shape.
  * - `nudgeX` - ChevronRight. 1px along the direction it points.
  * - `nudgeY` - ChevronDown. The same, vertically.
- * - `scale` - FolderOpen, Braces. The whole glyph grows 10%, for a mark whose
- *   shape offers no part to hinge: one path, or two curves that mean the gap
- *   between them.
+ * - `scale` - Play. The whole glyph grows 10% - the last resort for a mark
+ *   that is one path with no reading of its own to act out.
  */
 export const ICON_MOTION = {
 	lid: "lid",
+	hands: "hands",
+	waves: "waves",
+	spread: "spread",
+	tilt: "tilt",
+	wiggle: "wiggle",
+	drop: "drop",
+	lift: "lift",
+	press: "press",
+	tiltPin: "tilt-pin",
+	ring: "ring",
 	spinOnce: "spin-once",
+	spinBack: "spin-back",
+	flash: "flash",
 	rotate90: "rotate-90",
 	nudgeX: "nudge-x",
 	nudgeY: "nudge-y",

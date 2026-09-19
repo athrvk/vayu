@@ -47,12 +47,25 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render } from "@testing-library/react";
 import {
+	Bell,
+	Braces,
 	ChevronDown,
 	ChevronRight,
+	Clock,
+	Download,
+	FolderOpen,
+	Pin,
+	Play,
 	Plus,
+	Radio,
 	RefreshCw,
+	RotateCcw,
+	Save,
+	Search,
 	Trash2,
+	Upload,
 	X,
+	Zap,
 	type LucideIcon,
 } from "lucide-react";
 import { ICON_MOTION } from "./icon-motion";
@@ -249,6 +262,49 @@ describe("icon motion: the stylesheet block", () => {
 	});
 });
 
+/**
+ * Which lucide glyph each motion is written for, so the indices below are
+ * checked against the right drawing. A motion that moves the whole `svg` is
+ * here too: the "moves the whole svg" case asserts it names no child, and the
+ * "addresses paths" case needs the glyph to look at either way.
+ */
+const MOTION_GLYPH: Record<string, LucideIcon> = {
+	[ICON_MOTION.lid]: Trash2,
+	[ICON_MOTION.hands]: Clock,
+	[ICON_MOTION.waves]: Radio,
+	[ICON_MOTION.spread]: Braces,
+	[ICON_MOTION.tilt]: FolderOpen,
+	[ICON_MOTION.wiggle]: Search,
+	[ICON_MOTION.drop]: Download,
+	[ICON_MOTION.lift]: Upload,
+	[ICON_MOTION.press]: Save,
+	[ICON_MOTION.tiltPin]: Pin,
+	[ICON_MOTION.ring]: Bell,
+	[ICON_MOTION.spinOnce]: RefreshCw,
+	[ICON_MOTION.spinBack]: RotateCcw,
+	[ICON_MOTION.flash]: Zap,
+	[ICON_MOTION.rotate90]: Plus,
+	[ICON_MOTION.nudgeX]: ChevronRight,
+	[ICON_MOTION.nudgeY]: ChevronDown,
+	[ICON_MOTION.scale]: Play,
+};
+
+/**
+ * The motions whose ink leaves the 24-unit viewBox, from the "Leaves the
+ * frame" column of the table in docs/design-system.md. An inline `svg` clips
+ * to its viewBox (`overflow: hidden` is the UA value for an svg root in HTML),
+ * so each of these has to say `overflow: visible` or the travel is simply cut
+ * off - and cut off silently, at every call site at once.
+ */
+const FRAME_LEAVING = [
+	ICON_MOTION.lid,
+	ICON_MOTION.waves,
+	ICON_MOTION.tilt,
+	ICON_MOTION.lift,
+	ICON_MOTION.tiltPin,
+	ICON_MOTION.ring,
+] as const;
+
 describe("icon motion: the nth-child indices lucide's glyphs justify", () => {
 	/**
 	 * What lucide actually renders for one icon, child by child: `tagName` and
@@ -277,53 +333,125 @@ describe("icon motion: the nth-child indices lucide's glyphs justify", () => {
 		return [...new Set(found)].sort((a, b) => a - b);
 	}
 
-	it("names the lid bar and its handle, not the tines or the can", () => {
-		const trash = children(Trash2);
-		// What the rule means, stated as path data rather than as a position:
-		// the lid bar and the handle that sits on it. `+ 1` because `nth-child`
-		// is 1-based.
-		const lid = trash.findIndex((c) => c.d === "M3 6h18") + 1;
-		const handle = trash.findIndex((c) => c.d.startsWith("M8 6V4")) + 1;
-		expect(lid, "lucide no longer draws Trash2's lid bar as `M3 6h18`").toBeGreaterThan(0);
-		expect(handle, "lucide no longer draws Trash2's lid handle").toBeGreaterThan(0);
-		expect(indices(ICON_MOTION.lid)).toEqual([lid, handle].sort((a, b) => a - b));
+	/**
+	 * The 1-based positions of the paths whose `d` starts with each prefix, in
+	 * the order the prefixes are given. The rule says "the lid bar and its
+	 * handle"; the prefix is that sentence written as the data lucide draws,
+	 * so a redraw fails here instead of animating a neighbouring path.
+	 */
+	function positionsOf(Icon: LucideIcon, name: string, prefixes: string[]): number[] {
+		const kids = children(Icon);
+		return prefixes
+			.map((prefix) => {
+				const at = kids.findIndex((c) => c.d.startsWith(prefix));
+				expect(at, `lucide no longer draws ${name}'s \`${prefix}…\` path`).toBeGreaterThan(
+					-1
+				);
+				return at + 1;
+			})
+			.sort((a, b) => a - b);
+	}
+
+	/**
+	 * Every motion that addresses children, and what those children *are*.
+	 * Stated as path data rather than as a position, because the position is
+	 * the thing under test.
+	 */
+	const CHILD_MOTIONS: [name: string, prefixes: string[]][] = [
+		// The lid bar and the handle that sits on it - not the two tines or
+		// the can body, which stay put.
+		[ICON_MOTION.lid, ["M3 6h18", "M8 6V4"]],
+		// The hands polyline. Child 1 is a `circle`, the dial, which is also
+		// why the "addresses paths" case below cannot assume every child is a
+		// path the way it used to.
+		[ICON_MOTION.hands, ["M12 6v6l4 2"]],
+		// The four arcs, right-inner, right-outer, left-outer, left-inner. The
+		// centre dot is a `circle` and does not move.
+		[ICON_MOTION.waves, ["M16.247", "M19.075", "M4.925", "M7.753"]],
+		// Both braces: the motion is the gap between them.
+		[ICON_MOTION.spread, ["M8 3H7", "M16 21h1"]],
+		// The arrow's shaft and head. The tray is what it drops into.
+		[ICON_MOTION.drop, ["M12 15V3", "m7 10 5 5 5-5"]],
+		// The same two for Upload - drawn in a different order, which is the
+		// whole reason these are pinned rather than assumed symmetric.
+		[ICON_MOTION.lift, ["M12 3v12", "m17 8-5-5-5 5"]],
+	];
+
+	it.each(CHILD_MOTIONS)("%s names the right children of its glyph", (name, prefixes) => {
+		const Icon = MOTION_GLYPH[name];
+		expect(Icon, `${name} has no glyph in MOTION_GLYPH`).toBeDefined();
+		expect(indices(name)).toEqual(positionsOf(Icon, name, prefixes));
 	});
 
-	it("addresses paths, and only paths, in every icon it targets", () => {
-		// `nth-child` counts every child, so a `circle` or a `g` appearing in
-		// one of these glyphs would shift the index the lid rule pins above -
-		// and for the whole-svg motions it would be the moment a child-level
-		// rule became possible to get wrong.
-		const icons: Record<string, LucideIcon> = {
-			Trash2,
-			RefreshCw,
-			Plus,
-			X,
-			ChevronRight,
-			ChevronDown,
-		};
-		for (const [name, Icon] of Object.entries(icons)) {
-			const kids = children(Icon);
-			expect(kids.length, `${name} rendered no children`).toBeGreaterThan(0);
-			for (const { tag } of kids) {
-				expect(tag, `${name} now draws a <${tag}>, so nth-child indices shift`).toBe(
-					"path"
-				);
+	it("addresses a path, and only a path, at every index it names", () => {
+		// `nth-child` counts every child whatever its tag, so a rule written
+		// `> path:nth-child(2)` against a glyph whose second child is a
+		// `circle` matches nothing at all - which renders, and looks like a
+		// motion someone simply chose not to give that icon. Clock and Radio
+		// both draw a `circle`, so this is a live failure mode here, not a
+		// hypothetical one.
+		let checked = 0;
+		for (const [name] of CHILD_MOTIONS) {
+			const kids = children(MOTION_GLYPH[name]);
+			for (const index of indices(name)) {
+				expect(
+					kids[index - 1],
+					`${name}: ${MOTION_GLYPH[name]} has no child ${index}`
+				).toBeDefined();
+				expect(
+					kids[index - 1]?.tag,
+					`${name} addresses child ${index}, which is a <${kids[index - 1]?.tag}>`
+				).toBe("path");
+				checked++;
 			}
 		}
+		expect(checked, "no child index was checked, so this proves nothing").toBeGreaterThan(10);
 	});
 
 	it("moves the whole svg wherever it names no child", () => {
 		// Every whole-glyph motion must not have grown a child selector
 		// without gaining the per-child origin reasoning the lid rule carries.
-		for (const name of [
-			ICON_MOTION.spinOnce,
-			ICON_MOTION.rotate90,
-			ICON_MOTION.nudgeX,
-			ICON_MOTION.nudgeY,
-			ICON_MOTION.scale,
-		]) {
+		const childMotions = new Set(CHILD_MOTIONS.map(([name]) => name));
+		const wholeGlyph = Object.values(ICON_MOTION).filter((n) => !childMotions.has(n));
+		expect(wholeGlyph.length).toBeGreaterThan(5);
+		for (const name of wholeGlyph) {
 			expect(indices(name), `${name} now addresses a child path`).toEqual([]);
 		}
+	});
+
+	it("gives every motion a glyph, so a new name cannot skip these checks", () => {
+		for (const name of Object.values(ICON_MOTION)) {
+			expect(MOTION_GLYPH[name], `${name} names no glyph in MOTION_GLYPH`).toBeDefined();
+		}
+	});
+});
+
+describe("icon motion: the frame the ink is allowed to leave", () => {
+	/** The declarations of the bare `[data-icon-motion="<name>"]` rules. */
+	function rootBody(name: string): string {
+		return rules
+			.filter((r) => r.selectors.includes(`[data-icon-motion="${name}"]`))
+			.map((r) => r.body)
+			.join("");
+	}
+
+	it.each(FRAME_LEAVING)("%s lets its ink paint past the viewBox", (name) => {
+		expect(rootBody(name), `${name} leaves the frame and would be clipped`).toContain(
+			"overflow: visible"
+		);
+	});
+
+	it("declares overflow on the frame-leaving motions and nowhere else", () => {
+		// The other direction: `overflow: visible` on a motion that stays
+		// inside is a declaration nobody can tell is dead, and it is how the
+		// list above stops meaning anything.
+		const leaving = new Set<string>(FRAME_LEAVING);
+		const declared = [...code.matchAll(/\[data-icon-motion="([a-z-]+)"\]\s*\{([^}]*)\}/g)]
+			.filter((m) => m[2].includes("overflow: visible"))
+			.map((m) => m[1]);
+		expect(declared.length, "nothing declares overflow, so the scan is vacuous").toBe(
+			FRAME_LEAVING.length
+		);
+		expect([...declared].sort()).toEqual([...leaving].sort());
 	});
 });
