@@ -61,6 +61,7 @@ import {
 	DialogTitle,
 	DialogDescription,
 	DialogFooter,
+	DisabledHint,
 } from "@/components/ui";
 import { Callout, NumberField, SEVERITY_ORDER, type Severity } from "@/components/shared";
 import DataFilePicker, { type SelectedDataFile } from "@/modules/collections/DataFilePicker";
@@ -1266,19 +1267,33 @@ export default function LoadTestConfigDialog({
 					<Button variant="outline" onClick={onClose} disabled={isStarting}>
 						Cancel
 					</Button>
-					<Button
-						onClick={handleStart}
-						disabled={isStarting || blockingError !== null || oauthGated}
+					{/* The OAuth2 gate is the one worth a hint: the guard above says
+					    what is wrong, but it collapses, and Start then reads as
+					    broken. `blockingError` is already on screen beside the field
+					    it belongs to, so the reason here only has to point at it. */}
+					<DisabledHint
+						reason={
+							isStarting
+								? "Starting the run"
+								: blockingError !== null
+									? "Fix the highlighted setting above"
+									: oauthGated && "The OAuth2 token check above has not passed"
+						}
 					>
-						{isStarting ? (
-							<>
-								<Loader2 className="size-icon animate-spin mr-2" />
-								Starting…
-							</>
-						) : (
-							"Start"
-						)}
-					</Button>
+						<Button
+							onClick={handleStart}
+							disabled={isStarting || blockingError !== null || oauthGated}
+						>
+							{isStarting ? (
+								<>
+									<Loader2 className="size-icon animate-spin mr-2" />
+									Starting…
+								</>
+							) : (
+								"Start"
+							)}
+						</Button>
+					</DisabledHint>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>

@@ -289,7 +289,7 @@ The renderer marks what a surface means with `data-context` ("url-bar" | "monaco
 
 ### Row and tab actions menu (`components/shared/RowContextMenu.tsx`, `row-actions.ts`)
 
-A row's actions are one list, drawn by two menus: `RowActionsMenu` (the `⋯` trigger, a `DropdownMenu`) and `RowContextMenu` (right-click, a Radix `ContextMenu` - a second family rather than the dropdown positioned at the pointer, since a context menu anchors to the click point and answers Shift+F10 on its own). Both render the same `RowAction[]`; `row-actions.ts` holds the one rule about the list (the first destructive action gets a separator above it) and `RowActionBody.tsx` holds what one item draws (icon then label), so neither menu can drift from the other. Collection rows, request rows, environment rows and history rows (`RunItem`) all take `RowContextMenu`; history rows had no menu at all before it, since pin and delete were hover-revealed buttons only, and the handlers those buttons call now take an optional event for the same reason a menu selection is not a click on the card.
+A row's actions are one list, drawn by two menus: `RowActionsMenu` (the `⋯` trigger, a `DropdownMenu`) and `RowContextMenu` (right-click, a Radix `ContextMenu` - a second family rather than the dropdown positioned at the pointer, since a context menu anchors to the click point and answers Shift+F10 on its own). Both render the same `RowAction[]`; `row-actions.ts` holds the one rule about the list (the first destructive action gets a separator above it) and `RowActionBody.tsx` holds what one item draws (icon then label, plus the `disabledReason` a gated item carries at its trailing edge - issue #1690, where a tooltip would fight the menu for the keyboard), so neither menu can drift from the other. Collection rows, request rows, environment rows and history rows (`RunItem`) all take `RowContextMenu`; history rows had no menu at all before it, since pin and delete were hover-revealed buttons only, and the handlers those buttons call now take an optional event for the same reason a menu selection is not a click on the card.
 
 `RowContextMenu` wraps rather than replaces the row (`asChild`), marks it `own-menu` so the main-process menu above stands down, and focuses the row on the way past so Escape returns focus there instead of `<body>`. It does not select the row - selecting would mean opening a tab, which no file manager does on right-click - each row's actions already close over that row's own entity. While a row is renaming or deleting, both the menu and the marker stand down together, so a right-click inside the open rename field gets the platform's own Cut/Copy/Paste rather than neither.
 
@@ -1652,7 +1652,9 @@ while collapsed (`summarize-element.ts` - `in [200, 201]`, `wait 500 ms`,
 `$.token → token (env)`; a kind this module has no template for falls back to
 the kind's own description, and one that is genuinely unconfigured to its
 first two properties as `key: value`), an enable switch, and a `⋯` menu
-(`RowActionsMenu`) for Rename, Move up/down, Duplicate and Delete. Click on
+(`RowActionsMenu`) for Rename, Move up/down, Duplicate and Delete - the two
+Move items carrying "Already first" / "Already last" at the row's ends rather
+than being silently off (#1690). Click on
 the header toggles the card; a newly added or duplicated element opens
 expanded, everything else starts collapsed. Alt+Up/Alt+Down on the header's
 own two toggle buttons moves the row, mirroring the menu's Move items.

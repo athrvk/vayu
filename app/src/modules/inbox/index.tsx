@@ -30,6 +30,7 @@ import { Copy, Eraser, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from
 import {
 	Badge,
 	Button,
+	DisabledHint,
 	Label,
 	Select,
 	SelectContent,
@@ -324,19 +325,30 @@ export default function InboxView() {
 					    whole inbox, and two adjacent destructive controls sharing one
 					    icon is how a listener gets deleted by someone meaning to empty
 					    the list. */}
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() =>
-							clearCaptures.mutate(inbox.inboxId, {
-								onError: reportFailure("Could not clear the captures"),
-							})
+					{/* The empty case is the one a user meets: an inbox that has
+					    just been cleared, or one that has not been hit yet, looks
+					    exactly like a Clear that is broken (issue #1690). */}
+					<DisabledHint
+						reason={
+							clearCaptures.isPending
+								? "Clearing the captures"
+								: captures.length === 0 && "No captures to clear"
 						}
-						disabled={clearCaptures.isPending || captures.length === 0}
 					>
-						<Eraser className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-						Clear
-					</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() =>
+								clearCaptures.mutate(inbox.inboxId, {
+									onError: reportFailure("Could not clear the captures"),
+								})
+							}
+							disabled={clearCaptures.isPending || captures.length === 0}
+						>
+							<Eraser className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+							Clear
+						</Button>
+					</DisabledHint>
 					{inbox.running ? (
 						<Button
 							variant="outline"

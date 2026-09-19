@@ -100,6 +100,8 @@ export {
 	TooltipProvider,
 } from "./tooltip";
 export { TooltipIconButton } from "./tooltip-icon-button";
+export { DisabledHint } from "./disabled-hint";
+export type { DisabledHintProps } from "./disabled-hint";
 export type { TooltipIconButtonProps } from "./tooltip-icon-button";
 export { InfoChip } from "./info-chip";
 export type { InfoChipProps } from "./info-chip";
