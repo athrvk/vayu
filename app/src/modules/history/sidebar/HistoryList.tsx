@@ -168,7 +168,7 @@ export default function HistoryList() {
 		runToDelete?.summary?.url ??
 		(deleteConfirmRunId ? `${deleteConfirmRunId.slice(0, 8)}…` : "");
 	// Deleting one of these stops it first, which is a second consequence the
-	// dialog has to name - "permanently removed" alone does not cover ending a
+	// dialog has to name - "removed permanently" alone does not cover ending a
 	// test that is still generating load.
 	const deleteConfirmStopsRun =
 		runToDelete?.status === "running" || runToDelete?.status === "pending";
@@ -448,7 +448,7 @@ export default function HistoryList() {
 						<>
 							{deleteConfirmStopsRun
 								? "This run is still in progress - deleting it stops it first, then removes it permanently. This cannot be undone."
-								: "This run will be permanently removed. This cannot be undone."}
+								: "This run is removed permanently. This cannot be undone."}
 							{deleteConfirmLabel && (
 								<TruncatedText
 									as="span"

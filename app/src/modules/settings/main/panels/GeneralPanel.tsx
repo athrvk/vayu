@@ -340,7 +340,7 @@ export default function GeneralPanel() {
 				open={confirmClear}
 				onOpenChange={setConfirmClear}
 				title="Clear run history?"
-				description={`All ${runs.length} stored run${runs.length === 1 ? "" : "s"} and their metrics will be permanently removed. This cannot be undone.`}
+				description={`All ${runs.length} stored run${runs.length === 1 ? "" : "s"} and their metrics are removed permanently. This cannot be undone.`}
 				onConfirm={clearHistory}
 				isDeleting={clearing}
 			/>

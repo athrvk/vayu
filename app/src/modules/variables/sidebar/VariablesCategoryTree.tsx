@@ -850,12 +850,9 @@ export default function VariablesCategoryTree() {
 			<DeleteConfirmDialog
 				open={!!deleteConfirmEnvId}
 				onOpenChange={(open) => !open && setDeleteConfirmEnvId(null)}
-				title="Delete environment?"
-				description={
-					envToDelete
-						? `"${envToDelete.name}" will be permanently removed. This cannot be undone.`
-						: "This environment will be permanently removed. This cannot be undone."
-				}
+				title={envToDelete ? undefined : "Delete environment?"}
+				description={envToDelete ? undefined : "This cannot be undone."}
+				name={envToDelete?.name}
 				onConfirm={handleConfirmDelete}
 				onCloseAutoFocus={deleteRefocus.onCloseAutoFocus}
 				isDeleting={!!deletingEnvId && deletingEnvId === deleteConfirmEnvId}
