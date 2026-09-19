@@ -1832,6 +1832,427 @@
 	}
 }
 
+/*
+ * ── The Settings drawer's categories (#1707, follow-up) ──
+ *
+ * The fifteen category rows in `SettingsCategoryTree` are navigation
+ * affordances exactly like the rail's six, and were missed the first time
+ * round. Same rules as everything above: the owner triggers (the row is a
+ * hand-rolled `<button>`, so it carries `group`), origins come from lucide's
+ * `__iconNode` geometry and are written out here, and a reading that already
+ * has a name reuses it rather than growing a synonym.
+ *
+ * Reused rather than renamed: Palette takes `tilt` (a palette tips toward you
+ * on its lower-left the way a folder does), Keyboard and Server take `press`,
+ * Services' `Radio` takes `waves`. Where the reading matched but the geometry
+ * did not, the name is new and says why - `part` is the clearest case.
+ *
+ * The same glyph is drawn again as the `SettingsMain` page heading, where it
+ * reports which panel you are on rather than offering an action. It carries no
+ * attribute there, which is the placement rule in
+ * docs/design-system.md working exactly as written.
+ */
+
+/*
+ * `bob` - Info. Nothing inside an `i` in a circle can hinge, and growing it
+ * would be `scale` saying nothing. A single 1.5px rise and settle is the
+ * smallest motion that still reads as the glyph answering the pointer - the
+ * `nudge` argument, applied to a mark with no direction of its own, so the
+ * only honest direction is up.
+ *
+ * A keyframe, not a transition: a glyph that hangs 1.5px high for as long as
+ * the pointer rests on the row reads as misalignment rather than as feedback.
+ *
+ * Lucide draws the dial as a `circle` r=10 about (12,12), so the ink reaches
+ * y 2 and the half-stroke y 1; 1.5px up puts it at y -0.5, outside the frame -
+ * hence `overflow: visible`.
+ */
+[data-icon-motion="bob"] {
+	overflow: visible;
+	transform-origin: 50% 50%;
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="bob"] {
+	animation: icon-bob var(--dur-panel-in) var(--ease-enter);
+}
+
+@keyframes icon-bob {
+	0% {
+		translate: 0 0;
+	}
+	45% {
+		translate: 0 -1.5px;
+	}
+	100% {
+		translate: 0 0;
+	}
+}
+
+/*
+ * `part` - Code2 (lucide's `CodeXml`) and Code. The same reading as `spread`
+ * and deliberately not the same rule, which is the whole reason it has a name:
+ * lucide draws `Braces` left-then-right (child 1 is the `{`), and draws both
+ * code glyphs right-then-left - `CodeXml` is `m18 16 4-4-4-4` then
+ * `m6 8-4 4 4 4`, `Code` is `m16 18 6-6-6-6` then `m8 6-6 6 6 6`. Reusing
+ * `spread` here would have moved each chevron toward the other and drawn the
+ * brackets *closing*, which is a plausible-looking diff that says the opposite
+ * of what it means. Child 3 of `CodeXml` is the slash between them and stays:
+ * the gap is what parts, and the slash is what sits in it.
+ *
+ * At 1px the right chevron's ink reaches x 23 and the half-stroke x 24, the
+ * frame's own edge, so `overflow: visible` rather than a hairline clipped off
+ * the point.
+ */
+[data-icon-motion="part"] {
+	overflow: visible;
+}
+
+[data-icon-motion="part"] > path:nth-child(1),
+[data-icon-motion="part"] > path:nth-child(2) {
+	transform-box: fill-box;
+	transform-origin: 50% 50%;
+	transition: translate var(--icon-motion-duration) var(--ease-enter);
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="part"]
+	> path:nth-child(1) {
+	translate: 1px 0;
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="part"]
+	> path:nth-child(2) {
+	translate: -1px 0;
+}
+
+/*
+ * `tiles` - LayoutDashboard. Four `rect`s, each stepping 1px away from the
+ * frame's centre and back, so the layout reads as loosening rather than as
+ * growing. Lucide draws them top-left (3,3), top-right (14,3), bottom-right
+ * (14,12), bottom-left (3,16), which fixes each one's direction: the sign pair
+ * per child is which corner that child sits in, nothing more.
+ *
+ * The diagonal pairs are staggered - 1 with 3, then 2 with 4 - because four
+ * tiles moving at once is a `scale` of the whole glyph with extra steps. The
+ * stagger is keyframe percentages rather than `animation-delay`, for the
+ * reason stated in the block above: the reduced-motion rules collapse a
+ * duration and not a delay.
+ *
+ * At 1px the outermost ink sits at x 2 / x 22 and y 2 / y 22, a unit inside
+ * the frame with the half-stroke, so nothing needs `overflow` here.
+ */
+[data-icon-motion="tiles"] > rect:nth-child(1),
+[data-icon-motion="tiles"] > rect:nth-child(2),
+[data-icon-motion="tiles"] > rect:nth-child(3),
+[data-icon-motion="tiles"] > rect:nth-child(4) {
+	transform-box: fill-box;
+	transform-origin: 50% 50%;
+}
+
+[data-icon-motion="tiles"] > rect:nth-child(1) {
+	--icon-tile-dx: -1px;
+	--icon-tile-dy: -1px;
+}
+
+[data-icon-motion="tiles"] > rect:nth-child(2) {
+	--icon-tile-dx: 1px;
+	--icon-tile-dy: -1px;
+}
+
+[data-icon-motion="tiles"] > rect:nth-child(3) {
+	--icon-tile-dx: 1px;
+	--icon-tile-dy: 1px;
+}
+
+[data-icon-motion="tiles"] > rect:nth-child(4) {
+	--icon-tile-dx: -1px;
+	--icon-tile-dy: 1px;
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="tiles"]
+	> rect:nth-child(1),
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="tiles"]
+	> rect:nth-child(3) {
+	animation: icon-tile var(--dur-panel-in) var(--ease-enter);
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="tiles"]
+	> rect:nth-child(2),
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="tiles"]
+	> rect:nth-child(4) {
+	animation: icon-tile-late var(--dur-panel-in) var(--ease-enter);
+}
+
+@keyframes icon-tile {
+	0% {
+		translate: 0 0;
+	}
+	50% {
+		translate: var(--icon-tile-dx) var(--icon-tile-dy);
+	}
+	100% {
+		translate: 0 0;
+	}
+}
+
+@keyframes icon-tile-late {
+	0%,
+	30% {
+		translate: 0 0;
+	}
+	70% {
+		translate: var(--icon-tile-dx) var(--icon-tile-dy);
+	}
+	100% {
+		translate: 0 0;
+	}
+}
+
+/*
+ * `sweep` - Gauge, which this app draws twice: Load testing on the app side
+ * and Limits on the engine side. Child 1 is the needle `m12 14 4-4` and child
+ * 2 the dial arc, which stays - a gauge's dial is the thing the needle is read
+ * against.
+ *
+ * The needle turns about its hub, user units (12,14), which is where lucide
+ * starts that segment. Under `fill-box` the percentage resolves against the
+ * needle's own bounding box - x 12..16, y 10..14 - so the hub is
+ * x (12-12)/4 = 0%, y (14-10)/4 = 100%. Against the default `view-box` the
+ * same `0% 100%` would land at (0,24), the frame's bottom-left corner, and the
+ * needle would scythe across the whole glyph.
+ *
+ * -70deg and back: the needle rests pointing up and to the right, so a
+ * counter-clockwise swing takes it down the dial and back up, which is the
+ * direction a gauge falls when the load comes off. The panel tier doubled,
+ * because a sweep read at 180ms is a twitch.
+ *
+ * The needle is 5.66 units long, so about the hub it stays inside a circle
+ * that never leaves the frame.
+ */
+[data-icon-motion="sweep"] > path:nth-child(1) {
+	transform-box: fill-box;
+	transform-origin: 0% 100%;
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="sweep"]
+	> path:nth-child(1) {
+	animation: icon-sweep calc(var(--dur-panel-in) * 2) var(--ease-enter);
+}
+
+@keyframes icon-sweep {
+	0% {
+		rotate: 0deg;
+	}
+	50% {
+		rotate: -70deg;
+	}
+	100% {
+		rotate: 0deg;
+	}
+}
+
+/*
+ * `ring` - Bell. +12deg, -10deg, +6deg, 0: a decaying swing, which is what a
+ * struck bell does and what a single rotation does not. About the point the
+ * bell hangs from, the top centre of the dome - lucide's arc peaks at (12,2),
+ * so 50% and 2/24 = 8.333%.
+ *
+ * This name was designed with the rest of the vocabulary and then held back,
+ * because the app's only `Bell` at the time was a card heading and the guard
+ * in `icon-motion.call-sites.test.tsx` refuses a name with no call site. The
+ * Notifications category is that call site: a row you click to go somewhere,
+ * which is what the policy asks for.
+ *
+ * Four steps at the panel tier is 45ms a step, fast enough to read as a
+ * flicker, so this is that tier doubled.
+ *
+ * A 12deg swing about a point at the top carries the dome's bottom-left corner
+ * out to about x 0.3, so the frame clips it: `overflow: visible`.
+ */
+[data-icon-motion="ring"] {
+	overflow: visible;
+	transform-origin: 50% 8.333%;
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="ring"] {
+	animation: icon-ring calc(var(--dur-panel-in) * 2) var(--ease-enter);
+}
+
+@keyframes icon-ring {
+	0% {
+		rotate: 0deg;
+	}
+	25% {
+		rotate: 12deg;
+	}
+	55% {
+		rotate: -10deg;
+	}
+	80% {
+		rotate: 6deg;
+	}
+	100% {
+		rotate: 0deg;
+	}
+}
+
+/*
+ * `plug-in` - Plug. 1.5px along the axis the prongs point, which is up:
+ * lucide draws them as `M15 8V2` and `M9 8V2`, so the glyph's own "in" is
+ * toward the socket above it. `nudge-y` is the same idea and the wrong
+ * direction - it means "there is more below", which a chevron says and a plug
+ * does not - so this is its own name rather than a second use of that one.
+ *
+ * A transition, so the plug stays seated while the pointer is on the row: a
+ * plug that springs back out is a plug that did not go in.
+ *
+ * The prongs already reach y 2, and the half-stroke y 1; 1.5px up puts ink at
+ * y -0.5, so `overflow: visible`.
+ */
+[data-icon-motion="plug-in"] {
+	overflow: visible;
+	transform-origin: 50% 50%;
+	transition: translate var(--icon-motion-duration) var(--ease-enter);
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="plug-in"] {
+	translate: 0 -1.5px;
+}
+
+/*
+ * `pulse` - Network. The three node `rect`s swell 18% and settle; children 4
+ * and 5 are the connectors between them and stay, because a network's shape
+ * is the thing that does not change while traffic moves through it.
+ *
+ * Lucide draws bottom-right (16,16), bottom-left (2,16), top (9,2), so the
+ * top node is child 3. It pulses first and the two below it follow, which is
+ * what makes the motion read as one signal travelling down the tree rather
+ * than three boxes breathing together. Each `rect` scales about its own
+ * centre, which `fill-box` plus `50% 50%` is exactly - against the default
+ * `view-box` all three would swell about the frame's centre and slide.
+ *
+ * At 18% a 6-unit node grows 0.54 on each side: the right node's ink reaches
+ * x 22.54 and the half-stroke x 23.54, inside the frame.
+ */
+[data-icon-motion="pulse"] > rect:nth-child(1),
+[data-icon-motion="pulse"] > rect:nth-child(2),
+[data-icon-motion="pulse"] > rect:nth-child(3) {
+	transform-box: fill-box;
+	transform-origin: 50% 50%;
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="pulse"]
+	> rect:nth-child(3) {
+	animation: icon-pulse calc(var(--dur-panel-in) * 2) var(--ease-enter);
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="pulse"]
+	> rect:nth-child(1),
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="pulse"]
+	> rect:nth-child(2) {
+	animation: icon-pulse-late calc(var(--dur-panel-in) * 2) var(--ease-enter);
+}
+
+@keyframes icon-pulse {
+	0% {
+		scale: 1;
+	}
+	45% {
+		scale: 1.18;
+	}
+	100% {
+		scale: 1;
+	}
+}
+
+@keyframes icon-pulse-late {
+	0%,
+	35% {
+		scale: 1;
+	}
+	70% {
+		scale: 1.18;
+	}
+	100% {
+		scale: 1;
+	}
+}
+
+/*
+ * `trace` - Activity. The one motion in this block that draws rather than
+ * moves: the trace is stroked on from its left end, which is what a live
+ * reading does and what no transform of a finished line could say.
+ *
+ * `stroke-dasharray` and `stroke-dashoffset` are both set *inside* the
+ * keyframes rather than on the element, so the glyph at rest carries no dash
+ * pattern at all. A dasharray parked on the element would be a permanent
+ * property that happens to look solid, and the day the length changes it would
+ * look like a dotted line instead of a broken animation.
+ *
+ * **A draw-in is measured, never guessed.** `getTotalLength()` on lucide's
+ * path in Chromium is 49.214 user units; the dash is 50, rounded up, so the
+ * single dash covers the whole path with no second dash appearing at the tail.
+ * A redraw upstream changes that number, which is why
+ * `icon-motion.test.tsx` re-measures it rather than trusting this comment.
+ *
+ * Nothing moves, so there is no origin to declare: the ink stays exactly where
+ * lucide put it and only its visible extent changes.
+ */
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="trace"]
+	> path:nth-child(1) {
+	animation: icon-trace calc(var(--dur-panel-in) * 2) var(--ease-enter);
+}
+
+@keyframes icon-trace {
+	from {
+		stroke-dasharray: 50;
+		stroke-dashoffset: 50;
+	}
+	to {
+		stroke-dasharray: 50;
+		stroke-dashoffset: 0;
+	}
+}
+
+/*
+ * `stack` - Database. The top disc lifts 1.5px off the stack and settles back
+ * when the pointer leaves: child 1 is the `ellipse` lucide draws at
+ * (12,5) r 9x3, and children 2 and 3 are the body's sides and its middle band,
+ * which stay. Lifting the whole cylinder would be `bob`; lifting the lid is
+ * the thing a stack of discs can do that nothing else in this block can.
+ *
+ * A transition rather than a keyframe, so the disc stays raised while the row
+ * is hovered - the same argument `spread` makes about an open brace.
+ *
+ * The ellipse's ink reaches y 2 and the half-stroke y 1, so 1.5px up puts it
+ * at y -0.5: `overflow: visible`.
+ */
+[data-icon-motion="stack"] {
+	overflow: visible;
+}
+
+[data-icon-motion="stack"] > ellipse:nth-child(1) {
+	transform-box: fill-box;
+	transform-origin: 50% 50%;
+	transition: translate var(--icon-motion-duration) var(--ease-enter);
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="stack"]
+	> ellipse:nth-child(1) {
+	translate: 0 -1.5px;
+}
+
 @layer components {
 	/*
 	 * ── Surfaces, and the rule colour that reads on each ──

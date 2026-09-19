@@ -3278,6 +3278,15 @@ stylesheet does not implement is a compile error rather than a dead attribute.
 | `lift` | `Upload` | The arrow rises 2px out of its tray; the tray stays | `--dur-tooltip-in` | yes |
 | `press` | `Save` | The whole glyph goes to 92% and back, a button pressed | `--dur-panel-in` | no |
 | `tilt-pin` | `Pin`, `PinOff` | Leans `-20deg` about the needle's point (12,22) and rights itself | `--dur-panel-in` | yes |
+| `ring` | `Bell` | A decaying swing (`+12deg`, `-10deg`, `+6deg`, 0) about the point it hangs from (12,2) | `--dur-panel-in` x2 | yes |
+| `bob` | `Info` | A 1.5px rise and settle, for a mark with no part to hinge and no direction of its own | `--dur-panel-in` | yes |
+| `part` | `Code2`, `Code` | The two chevrons part by 1px each. `spread`'s reading against a glyph lucide draws right-to-left, which is why it is not that name | `--dur-tooltip-in` | yes |
+| `tiles` | `LayoutDashboard` | The four tiles step 1px away from the frame's centre and back, diagonal pairs staggered | `--dur-panel-in` | no |
+| `sweep` | `Gauge` | The needle swings `-70deg` about its hub (12,14) and returns; the dial stays | `--dur-panel-in` x2 | no |
+| `plug-in` | `Plug` | 1.5px along the axis the prongs point, which is up | `--dur-tooltip-in` | yes |
+| `pulse` | `Network` | The three node rects swell 18% in turn, top node first; the connectors stay | `--dur-panel-in` x2 | no |
+| `trace` | `Activity` | The trace is stroked on from its left end, over a measured path length | `--dur-panel-in` x2 | no |
+| `stack` | `Database` | The top disc lifts 1.5px off the stack and settles back | `--dur-tooltip-in` | yes |
 | `spin-once` | `RefreshCw` | One 360deg turn (`@keyframes icon-spin-once`), so pointer-out does not unwind it backwards | `--dur-panel-in` | no |
 | `spin-back` | `RotateCcw` | The same turn counter-clockwise, for "put it back" rather than "do it again" | `--dur-panel-in` | no |
 | `flash` | `Zap` | Dims to 40% and back with a 6% grow - a strike, not a movement | `--dur-panel-in` | no |
@@ -3289,10 +3298,27 @@ stylesheet does not implement is a compile error rather than a dead attribute.
 A motion whose ink leaves the 24-unit viewBox sets `overflow: visible` on the
 `svg`, because an inline SVG clips to its viewBox by default and the travel is
 simply cut off at every call site. The column above is the list, and
-`icon-motion.test.tsx` holds it to the stylesheet.
+`icon-motion.test.tsx` holds it to the stylesheet - in both directions, so a
+`visible` on a motion that stays inside is caught too.
 
-A sequence that genuinely needs longer than its tier - `hands` and `waves` -
-multiplies the token (`calc(var(--dur-panel-in) * 2)`) rather than
+**A draw-in is measured, never guessed.** `trace` strokes its path on with
+`stroke-dasharray` and `stroke-dashoffset`, and the dash has to be at least the
+path's own length or a second dash creeps in behind the first. Measure it with
+`getTotalLength()` in a real browser, round up, and write the measurement and
+where it came from in the rule's comment. Both properties are set *inside* the
+keyframes, never on the element: a dasharray parked on the glyph is a permanent
+property that happens to look solid today.
+
+**Two glyphs that read alike may still need two names.** `spread` (`Braces`)
+and `part` (`Code2`, `Code`) are the same idea - a pair of marks parting by a
+pixel - and cannot share a rule, because lucide draws `Braces` left-bracket
+first and both code glyphs right-chevron first. Reusing one name would have
+drawn the brackets *closing*, which looks like a considered choice in a diff.
+When the reading matches but the child order does not, the second name is the
+honest answer.
+
+A sequence that genuinely needs longer than its tier - `hands`, `waves`,
+`ring`, `sweep`, `pulse`, `trace` - multiplies the token (`calc(var(--dur-panel-in) * 2)`) rather than
 introducing a literal, and says why in the rule's comment. A stagger inside a
 sequence is keyframe percentages, never `animation-delay`: the reduced-motion
 rules collapse a duration, not a delay, so a delayed step would survive them as
