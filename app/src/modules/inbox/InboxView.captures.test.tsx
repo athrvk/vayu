@@ -223,6 +223,9 @@ describe("the stream and the fetch writing one list", () => {
 		// the clear destroyed, which is why the clear empties the cache first.
 		listInboxCaptures.mockResolvedValue(page(0, 0, 0));
 		fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+		fireEvent.click(
+			within(await screen.findByRole("dialog")).getByRole("button", { name: /^Clear$/ })
+		);
 
 		await waitFor(() => expect(clearInboxCaptures).toHaveBeenCalledWith("inbox_a"));
 		await waitFor(() => expect(screen.queryByText("/hook/2")).not.toBeInTheDocument());
