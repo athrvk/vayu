@@ -93,7 +93,7 @@ export interface CollectionTreeCrudSlice {
 	deletingRequestId: string | null;
 	/** Collection whose "new folder" form is open, if any. */
 	creatingSubfolder: string | null;
-	newSubCollectionName: string;
+	newFolderName: string;
 	isCreatingSubfolder: boolean;
 
 	onCollectionClick: (collection: Collection) => void;
@@ -121,7 +121,7 @@ export interface CollectionTreeCrudSlice {
 	onRequestDeleteClick: (requestId: string, requestName: string) => void;
 	onDuplicateRequest: (request: Request) => void;
 
-	onSubCollectionNameChange: (value: string) => void;
+	onFolderNameChange: (value: string) => void;
 	onCreateSubfolder: (parentId: string) => void;
 	onCancelSubfolder: () => void;
 }
