@@ -45,6 +45,10 @@ import { X, Plus, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
 import { TAB_NEW_BUTTON_WIDTH } from "@/constants/layout";
+// The hint an empty strip shows names a chord, so it reads the one definition
+// of it rather than spelling a modifier that is wrong on half the platforms.
+import { NEW_REQUEST_CHORD } from "@/constants/shortcuts";
+import { formatChord } from "@/lib/platform";
 import { ScrollOnOverflow, RowContextMenu } from "@/components/shared";
 import {
 	DropdownMenu,
@@ -340,6 +344,27 @@ export function TabStrip() {
 			 * is unchanged visually, because the strip's flex layout is on the element
 			 * around all three.
 			 */}
+			{/*
+			 * No tabs open: a hint, not a blank band.
+			 *
+			 * The strip stays - it cannot collapse. Its height is the same token the
+			 * drawer's header band reads (see the className above), so a strip that
+			 * disappeared would leave the drawer's header as a 32px step in a rule
+			 * that runs across the window, and the content area would jump by that
+			 * much the moment the last tab closed. What was wrong was what it said:
+			 * an empty 32px band with a lone "+" in it, and nothing telling a user
+			 * whose last tab just closed where the app went.
+			 *
+			 * The chord comes from `constants/shortcuts.ts` through `formatChord`,
+			 * not from a literal: the modifier and the separator differ by platform,
+			 * and a hint naming the wrong key is worse than no hint.
+			 */}
+			{openTabs.length === 0 && (
+				<span className="flex min-w-0 items-center truncate px-3 text-xs text-muted-foreground">
+					Open a request from the drawer, or press {formatChord(NEW_REQUEST_CHORD)}
+				</span>
+			)}
+
 			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tablist is never a tab stop, the active `role="tab"` child carries `tabIndex={0}` and this onKeyDown moves it */}
 			<div role="tablist" onKeyDown={onKeyDown} className="flex min-w-0 items-stretch">
 				{visible.map((i) => (

@@ -92,6 +92,7 @@ describe("VariablesCategoryTree loading state", () => {
 		renderTree();
 
 		// A count of 0 is a claim about the data; an unloaded list has no count.
-		expect(screen.getByText("-")).toBeInTheDocument();
+		// The parentheses are the drawer's one count idiom (#1688).
+		expect(screen.getByText("(-)")).toBeInTheDocument();
 	});
 });

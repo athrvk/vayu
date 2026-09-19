@@ -80,7 +80,8 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 	{
 		id: "notifications",
 		label: "Notifications",
-		description: "Where toasts appear, how long they stay, and which ones are worth showing",
+		description:
+			"Where toasts appear, how long they stay, how many stack at once, and which ones are worth showing",
 		icon: Bell,
 	},
 	{

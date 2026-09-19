@@ -60,7 +60,7 @@ import {
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { fileBaseName } from "@/lib/file-path";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
-import { MethodBadge } from "@/components/shared";
+import { MethodBadge, FieldError } from "@/components/shared";
 import { isCommitEnter } from "@/lib/keyboard";
 
 type Tab = "file" | "url" | "paste";
@@ -691,12 +691,9 @@ export function ImportModal() {
 					{/* An apply that failed leaves the list on screen - the per-file
 					    outcomes are in it - so the message that would have replaced it
 					    is stated here instead. */}
-					{error && (
-						<p className="mt-3 flex items-center gap-1.5 text-xs text-destructive-text">
-							<AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-							{error}
-						</p>
-					)}
+					<FieldError icon={AlertTriangle} className="mt-3">
+						{error}
+					</FieldError>
 				</>
 			) : (
 				<>
@@ -858,9 +855,7 @@ export function ImportModal() {
 							<ImportProgressView progress={progress ?? { stage: "reading" }} />
 						</div>
 					)}
-					{phase === "error" && (
-						<p className="mt-3 text-xs text-destructive-text">{error}</p>
-					)}
+					{phase === "error" && <FieldError className="mt-3">{error}</FieldError>}
 				</>
 			)}
 		</>
@@ -936,7 +931,7 @@ export function ImportModal() {
 					onValueChange={(v) => setTab(v as Tab)}
 					className="flex min-h-0 flex-1 flex-col"
 				>
-					<TabsList className="w-full px-4">
+					<TabsList variant="pane" className="w-full">
 						{(["file", "url", "paste"] as Tab[]).map((t) => (
 							<TabsTrigger key={t} value={t}>
 								<TabLabel>
@@ -1134,24 +1129,18 @@ function PreviewView({
 				examples · {meta.environmentCount} environments · {meta.globalCount} globals
 			</p>
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
-				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-					<AlertTriangle className="h-3.5 w-3.5" />
+				<FieldError icon={AlertTriangle}>
 					{importEnvironments
 						? "Nothing to import from this file."
 						: "No collections in this file. Enable Import environments & variables below to import its environments."}
-				</p>
+				</FieldError>
 			)}
 			{globalCount > 0 && (
 				<p className="text-[11px] text-muted-foreground">
 					Existing globals are kept; a variable of the same name is overwritten.
 				</p>
 			)}
-			{lossSummary(meta) && (
-				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-					<AlertTriangle className="h-3.5 w-3.5" />
-					{lossSummary(meta)}
-				</p>
-			)}
+			<FieldError icon={AlertTriangle}>{lossSummary(meta)}</FieldError>
 			{noticeSummary(meta) && (
 				<p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
 					<Info className="h-3.5 w-3.5 shrink-0" />
@@ -1342,18 +1331,12 @@ function BatchRow({
 						Referenced by {bundledInto} - imported as part of it
 					</span>
 				)}
-				{error && (
-					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-						<FileWarning className="size-icon-sm shrink-0" />
-						{error}
-					</span>
-				)}
-				{loss && (
-					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-						<AlertTriangle className="size-icon-sm shrink-0" />
-						{loss}
-					</span>
-				)}
+				<FieldError as="span" icon={FileWarning}>
+					{error}
+				</FieldError>
+				<FieldError as="span" icon={AlertTriangle}>
+					{loss}
+				</FieldError>
 				{notices && (
 					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
 						<Info className="size-icon-sm shrink-0" />
