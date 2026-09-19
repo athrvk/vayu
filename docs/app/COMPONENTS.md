@@ -864,7 +864,10 @@ both activate it.
   drawer is also the features' discoverability. The first two carry their own start affordance in
   the group header; the third deliberately does not (see below). An inbox row opens the
   inbox *tab* (the drawer lists, the tab shows the captures) and carries copy, stop (running rows
-  only) and **delete** (every row); an issuer row expands in place to its token and authorize URLs,
+  only) and **delete** (every row) in one hover-revealed `⋯` menu, `RowActionsMenu` like every other
+  row in the app - these were the last rows painting their actions as always-visible icon buttons,
+  which on a 32px row truncated the URL that is the row's own payload (issue #1690); the URLs those
+  buttons carried in tooltips ride the items' `hint`, so they read without hovering; an issuer row expands in place to its token and authorize URLs,
   a copy for the HS256 signing key, its configuration in one line, a live `failureMode` switch, and
   - in `slow` only - the delay that mode answers after, committed on blur rather than per keystroke.
   The inbox group's affordance is **New inbox** (Plus), matching **New issuer**: it always mints a

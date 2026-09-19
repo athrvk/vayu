@@ -1793,6 +1793,15 @@ leave a list of names that reads as inert. The test is the same one the state
 toggle above passes - would the row still say what it is for with the control
 absent - and here the answer is no.
 
+**Every row that has actions draws them this way, Services included** (issue
+#1690). The Services drawer's rows were the last holdout - two or three
+always-visible `TooltipIconButton`s on a 32px row whose payload is a URL, so the
+URL truncated to make room for controls the user had not come for. They are one
+hover-revealed `⋯` menu now, and the values those tooltips carried (the inbox
+URL, the mock's base URL) ride the items' `hint`, which reads without hovering.
+There is no exemption: the rows that keep visible controls are the two the rules
+above name - a state toggle, and a row with no job of its own.
+
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
 consistently and get focus management, Escape-to-close and arrow-key navigation

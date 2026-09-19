@@ -49,6 +49,19 @@ export interface DisabledHintProps {
 	children: React.ReactNode;
 }
 
+/**
+ * `pointer-events-auto` is the load-bearing class here, not decoration: this
+ * span is often a child of the disabled control's own container, and it has to
+ * keep receiving hover after `disabled:pointer-events-none` has taken it off the
+ * button inside. `inline-flex` so the span is the child's exact box and adds no
+ * line-height of its own; the ring is the span's, because the focus is.
+ *
+ * A constant rather than an inline string so the `tabIndex` below fits on the
+ * opening line the `eslint-disable-next-line` above it covers.
+ */
+const WRAPPER_CLASS =
+	"pointer-events-auto inline-flex rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+
 export function DisabledHint({ reason, side = "top", children }: DisabledHintProps) {
 	if (!reason) return <>{children}</>;
 
@@ -56,18 +69,7 @@ export function DisabledHint({ reason, side = "top", children }: DisabledHintPro
 		<Tooltip>
 			<TooltipTrigger asChild>
 				{/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the tab stop is the only keyboard path to the reason: the child it wraps is disabled and so unfocusable, exactly the shape Dock.tsx's error tooltips are suppressed for */}
-				<span
-					data-slot="disabled-hint"
-					tabIndex={0}
-					// `pointer-events-auto` is the load-bearing class, not decoration:
-					// this span is often a child of the disabled control's own
-					// container, and it has to keep receiving hover after
-					// `disabled:pointer-events-none` has taken it off the button
-					// inside. `inline-flex` so the span is the child's exact box and
-					// adds no line-height of its own; the ring is the span's, because
-					// the focus is the span's.
-					className="pointer-events-auto inline-flex rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-				>
+				<span data-slot="disabled-hint" tabIndex={0} className={WRAPPER_CLASS}>
 					{children}
 				</span>
 			</TooltipTrigger>
