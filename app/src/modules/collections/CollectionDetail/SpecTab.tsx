@@ -74,6 +74,7 @@ import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { formatBytes } from "@/modules/settings/utils/format-size";
 import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
 import { hasSpecBinding, type Collection } from "@/types";
+import { isCommitEnter } from "@/lib/keyboard";
 import { formatRelative } from "./format";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import SpecSync from "./SpecSync";
@@ -347,7 +348,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							value={url}
 							onChange={(e) => setUrl(e.target.value)}
 							onKeyDown={(e) => {
-								if (e.key === "Enter") void handleFetch();
+								// `isCommitEnter`, not a bare Enter (#939, #935): a URL
+								// half-spelled by an IME must not be fetched, and
+								// mod+Enter is the Send chord.
+								if (isCommitEnter(e)) void handleFetch();
 							}}
 							placeholder="https://api.example.com/openapi.json"
 							className="flex-1"

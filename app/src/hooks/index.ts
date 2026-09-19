@@ -20,6 +20,7 @@ export { useElectronTheme } from "./useElectronTheme";
 export { useOverflowTitle } from "./useOverflowTitle";
 export { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 export { useCopy } from "./useCopy";
+export { useInlineRename, type UseInlineRenameOptions, type InlineRename } from "./useInlineRename";
 
 // Note: useCollections, useRuns, useHealthCheck have been replaced by TanStack Query hooks
 // Import from @/queries instead
