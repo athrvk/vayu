@@ -71,6 +71,7 @@ import type { Inbox, MockIssuer, MockIssuerFailureMode, MockServer } from "@/typ
 import { DeleteInboxDialog } from "@/modules/inbox/DeleteInboxDialog";
 import { useInboxDeletion } from "@/modules/inbox/useInboxDeletion";
 import type { InboxWatchSummary } from "@/services/inbox-watch-service";
+import { isCommitEnter } from "@/lib/keyboard";
 import { useInboxWatchSummary } from "./useInboxWatchSummary";
 import { FAILURE_MODE_LABELS, MAX_SLOW_MS, failureModeSummary } from "./failure-modes";
 import { NewIssuerDialog } from "./NewIssuerDialog";
@@ -550,7 +551,9 @@ function IssuerDelayControl({
 					onChange={(e) => setDraft(e.target.value)}
 					onBlur={commit}
 					onKeyDown={(e) => {
-						if (e.key === "Enter") commit();
+						// `isCommitEnter`, not a bare Enter (#939, #935): mod+Enter is
+						// the Send chord, not this field's apply.
+						if (isCommitEnter(e)) commit();
 					}}
 					disabled={pending}
 					aria-invalid={!valid}
