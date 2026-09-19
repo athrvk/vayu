@@ -783,8 +783,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				<DeleteConfirmDialog
 					open={showDeleteConfirm}
 					onOpenChange={(open) => !open && setShowDeleteConfirm(false)}
-					title="Delete environment?"
-					description={`"${environment.name}" will be permanently removed. This cannot be undone.`}
+					name={environment.name}
 					onConfirm={handleDeleteEnvironment}
 					isDeleting={deleteEnvironmentMutation.isPending}
 				/>

@@ -53,7 +53,7 @@ export default function CollectionItem({
 		renameValue,
 		deletingCollectionId,
 		creatingSubfolder,
-		newSubCollectionName,
+		newFolderName,
 		isCreatingSubfolder,
 		getRequestsByCollection,
 		getCollectionActions,
@@ -64,7 +64,7 @@ export default function CollectionItem({
 		onRenameCancel,
 		onStartRename,
 		onCollectionDeleteClick,
-		onSubCollectionNameChange,
+		onFolderNameChange,
 		onCreateSubfolder,
 		onCancelSubfolder,
 	} = useCollectionTreeContext();
@@ -400,8 +400,8 @@ export default function CollectionItem({
 						>
 							<Input
 								type="text"
-								value={newSubCollectionName}
-								onChange={(e) => onSubCollectionNameChange(e.target.value)}
+								value={newFolderName}
+								onChange={(e) => onFolderNameChange(e.target.value)}
 								onKeyDown={(e) => {
 									if (e.key === "Enter") onCreateSubfolder(collection.id);
 									if (e.key === "Escape") onCancelSubfolder();

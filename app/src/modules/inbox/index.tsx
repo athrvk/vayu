@@ -30,6 +30,7 @@ import { Copy, Eraser, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from
 import {
 	Badge,
 	Button,
+	DeleteConfirmDialog,
 	Label,
 	Select,
 	SelectContent,
@@ -171,6 +172,10 @@ export default function InboxView() {
 	// Which capture, and of which inbox: ids are per-inbox, so a bare number
 	// carried across a switch can select a row in the inbox switched *to*.
 	const [selection, setSelection] = useState<{ inboxId: string; captureId: number } | null>(null);
+	// Clearing wipes every capture the inbox has recorded - as permanent as
+	// deleting the inbox itself, so it goes through the same confirmation
+	// rather than firing on the first click (issue #1689).
+	const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
 	// The notify map is pruned against the engine's list by `useInboxWatchers`,
 	// at the app level: an id is dead once the engine that minted it exits, and
@@ -327,11 +332,7 @@ export default function InboxView() {
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={() =>
-							clearCaptures.mutate(inbox.inboxId, {
-								onError: reportFailure("Could not clear the captures"),
-							})
-						}
+						onClick={() => setConfirmClearOpen(true)}
 						disabled={clearCaptures.isPending || captures.length === 0}
 					>
 						<Eraser className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
@@ -363,6 +364,26 @@ export default function InboxView() {
 					<DeleteInboxButton inbox={inbox} listedTotal={capturesTotal} />
 				</div>
 			</header>
+
+			<DeleteConfirmDialog
+				open={confirmClearOpen}
+				onOpenChange={setConfirmClearOpen}
+				title="Clear captures?"
+				description={`All ${captures.length} recorded ${
+					captures.length === 1 ? "request" : "requests"
+				} in this inbox are removed. This cannot be undone.`}
+				confirmLabel="Clear"
+				onConfirm={() =>
+					clearCaptures.mutate(inbox.inboxId, {
+						onSuccess: () => setConfirmClearOpen(false),
+						onError: (error) => {
+							setConfirmClearOpen(false);
+							reportFailure("Could not clear the captures")(error);
+						},
+					})
+				}
+				isDeleting={clearCaptures.isPending}
+			/>
 
 			{/* Keyed on what the engine is serving, so a change made elsewhere
 			    re-seeds the drafts by remount rather than by an effect. */}
