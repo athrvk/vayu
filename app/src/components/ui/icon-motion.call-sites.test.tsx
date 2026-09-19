@@ -60,17 +60,25 @@ const LITERAL_CALL_SITES: Record<string, readonly string[]> = {
 	"modules/inbox/index.tsx": [ICON_MOTION.scale],
 };
 
-/** Every `.tsx` under `src/`, for the exhaustive scan. */
-function tsxFiles(dir: string): string[] {
+/**
+ * Every `.ts` and `.tsx` under `src/`, for the exhaustive scan.
+ *
+ * `.ts` too, because a motion reaches the DOM from a registry as often as from
+ * JSX now: `drawer-views.ts` names the rail's six, `app-panels.ts` and
+ * `engine-categories.ts` name the Settings drawer's fifteen, and a row action
+ * names its own in `useTreeCrud.ts`. A `.tsx`-only scan reported every one of
+ * those names as dead CSS.
+ */
+function sourceFiles(dir: string): string[] {
 	const out: string[] = [];
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
 		const path = join(dir, entry.name);
 		if (entry.isDirectory()) {
 			if (entry.name === "node_modules") continue;
-			out.push(...tsxFiles(path));
+			out.push(...sourceFiles(path));
 			continue;
 		}
-		if (entry.name.endsWith(".tsx")) out.push(path);
+		if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) out.push(path);
 	}
 	return out;
 }
@@ -101,7 +109,7 @@ describe("icon motion call sites that write the attribute in JSX", () => {
 		// will ever see run, and it reads in a diff exactly like a motion that
 		// works. Both routes to the DOM count - the attribute written in JSX,
 		// and a registry entry the renderer hands to a generic glyph.
-		const files = tsxFiles(src).filter((f) => !f.endsWith(".test.tsx"));
+		const files = sourceFiles(src).filter((f) => !/\.test\.tsx?$/.test(f));
 		expect(files.length, "scanned no source at all").toBeGreaterThan(100);
 		const spelled = new Set<string>();
 		const byKey = new Map(Object.entries(ICON_MOTION).map(([key, name]) => [key, name]));

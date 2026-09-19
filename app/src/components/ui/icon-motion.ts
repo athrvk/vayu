@@ -47,6 +47,20 @@
  * - `lift` - Upload. The arrow rises 2px out of its tray; the tray stays.
  * - `press` - Save. The whole glyph goes to 92% and back, a button pressed.
  * - `tilt-pin` - Pin. Leans -20deg off its own point and rights itself.
+ * - `ring` - Bell. A decaying swing about the point it hangs from.
+ * - `bob` - Info. A 1.5px rise and settle, for a mark with no part to hinge
+ *   and no direction of its own.
+ * - `part` - Code2, Code. The two chevrons part by 1px each. `spread` read
+ *   against a glyph lucide draws right-to-left, which is why it is not that
+ *   name.
+ * - `tiles` - LayoutDashboard. The four tiles step 1px away from the centre
+ *   and back, diagonal pairs staggered.
+ * - `sweep` - Gauge. The needle swings -70deg about its hub and returns.
+ * - `plug-in` - Plug. 1.5px along the axis the prongs point, which is up.
+ * - `pulse` - Network. The three nodes swell 18% in turn, top first.
+ * - `trace` - Activity. The trace is stroked on from its left end, over a
+ *   measured path length.
+ * - `stack` - Database. The top disc lifts off the stack.
  * - `spin-once` - RefreshCw. One 360deg turn, as feedback for "do it again".
  * - `spin-back` - RotateCcw. The same turn the other way, for "put it back".
  * - `flash` - Zap. Dims to 40% and back with a 6% grow.
@@ -68,6 +82,15 @@ export const ICON_MOTION = {
 	lift: "lift",
 	press: "press",
 	tiltPin: "tilt-pin",
+	ring: "ring",
+	bob: "bob",
+	part: "part",
+	tiles: "tiles",
+	sweep: "sweep",
+	plugIn: "plug-in",
+	pulse: "pulse",
+	trace: "trace",
+	stack: "stack",
 	spinOnce: "spin-once",
 	spinBack: "spin-back",
 	flash: "flash",

@@ -47,11 +47,21 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render } from "@testing-library/react";
 import {
+	Activity,
+	Bell,
 	Braces,
 	ChevronDown,
 	ChevronRight,
 	Clock,
+	Code,
+	CodeXml,
+	Database,
 	Download,
+	Gauge,
+	Info,
+	LayoutDashboard,
+	Network,
+	Plug,
 	FolderOpen,
 	Pin,
 	Play,
@@ -162,6 +172,38 @@ const MOVES = /(?:^|[;{\s])(rotate|translate|scale|transform|animation)\s*:/;
 /** An interaction gate. `[data-state`/`aria-pressed` cover a state change. */
 const GATED = /:hover|:focus-visible|\[data-state|aria-pressed/;
 
+/** Sets a transform property directly - not via an animation. */
+const TRANSFORMS = /(?:^|[;{\s])(rotate|translate|scale|transform)\s*:/;
+
+/** The body of one `@keyframes` block in the stripped code, by name. */
+function keyframeBody(name: string): string {
+	const at = code.indexOf(`@keyframes ${name}`);
+	if (at === -1) return "";
+	const open = code.indexOf("{", at);
+	let depth = 1;
+	let i = open + 1;
+	while (i < code.length && depth > 0) {
+		if (code[i] === "{") depth++;
+		else if (code[i] === "}") depth--;
+		i++;
+	}
+	return code.slice(open + 1, i - 1);
+}
+
+/**
+ * Whether these declarations end up transforming the element - directly, or
+ * through the keyframes of an animation they name. An animation that only
+ * changes `opacity` or a stroke dash moves no coordinate system and has no
+ * origin to get wrong.
+ */
+function transformsSomething(body: string): boolean {
+	if (TRANSFORMS.test(body)) return true;
+	for (const match of body.matchAll(/animation:\s*([a-z0-9-]+)/g)) {
+		if (TRANSFORMS.test(keyframeBody(match[1]))) return true;
+	}
+	return false;
+}
+
 describe("icon motion: the stylesheet block", () => {
 	it("reads a stylesheet and a block that are actually there (guards the scan)", () => {
 		expect(css.length).toBeGreaterThan(1000);
@@ -197,7 +239,7 @@ describe("icon motion: the stylesheet block", () => {
 		}
 	});
 
-	it("declares a transform-origin for every target it moves, and fill-box for every child", () => {
+	it("declares a transform-origin for every target it transforms, and fill-box for every child", () => {
 		/** Declarations for one target, gathered from every rule naming it. */
 		const byTarget = new Map<string, string>();
 		for (const rule of rules) {
@@ -210,22 +252,36 @@ describe("icon motion: the stylesheet block", () => {
 		}
 		expect(byTarget.size).toBeGreaterThan(4);
 
+		let required = 0;
 		for (const [target, body] of byTarget) {
-			if (!MOVES.test(body)) continue;
-			expect(body, `${target} moves without an explicit transform-origin`).toMatch(
+			// What actually needs an origin is a *transform*. An `animation:`
+			// needs one too, but only when its keyframes transform - and that
+			// is the half a body cannot answer on its own, because the
+			// transform is written in the `@keyframes` block rather than here.
+			// So the animation's keyframes are looked up and read. Before this,
+			// `trace` - which animates `stroke-dashoffset` and moves nothing -
+			// would have been made to declare an origin that does nothing, and
+			// a rule whose keyframes rotate while its own body is bare would
+			// have passed on a technicality.
+			if (!transformsSomething(body)) continue;
+			required++;
+			expect(body, `${target} transforms without an explicit transform-origin`).toMatch(
 				/transform-origin:\s*\S/
 			);
 			// `fill-box` is what makes a percentage origin resolve against the
-			// path rather than the 24x24 canvas, so it is required exactly where
-			// the rule addresses a child. On the root `svg` the reference box is
-			// the element's own box either way, measured: `50% 50%` computes to
-			// the frame's centre with or without it, so requiring it there would
-			// be requiring a declaration that does nothing.
-			if (!/>\s*(path|circle|rect|line|polyline|polygon|g)\b/.test(target)) continue;
-			expect(body, `${target} moves a child without transform-box: fill-box`).toContain(
+			// shape rather than the 24x24 canvas, so it is required exactly
+			// where the rule addresses a child. On the root `svg` the reference
+			// box is the element's own box either way, measured: `50% 50%`
+			// computes to the frame's centre with or without it, so requiring
+			// it there would be requiring a declaration that does nothing.
+			if (!/>\s*(path|circle|rect|ellipse|line|polyline|polygon|g)\b/.test(target)) continue;
+			expect(body, `${target} transforms a child without transform-box: fill-box`).toContain(
 				"transform-box: fill-box"
 			);
 		}
+		expect(required, "nothing was found to transform, so this proves nothing").toBeGreaterThan(
+			10
+		);
 	});
 
 	it("takes every duration and curve from a token, never a literal", () => {
@@ -277,6 +333,15 @@ const MOTION_GLYPH: Record<string, LucideIcon> = {
 	[ICON_MOTION.lift]: Upload,
 	[ICON_MOTION.press]: Save,
 	[ICON_MOTION.tiltPin]: Pin,
+	[ICON_MOTION.ring]: Bell,
+	[ICON_MOTION.bob]: Info,
+	[ICON_MOTION.part]: CodeXml,
+	[ICON_MOTION.tiles]: LayoutDashboard,
+	[ICON_MOTION.sweep]: Gauge,
+	[ICON_MOTION.plugIn]: Plug,
+	[ICON_MOTION.pulse]: Network,
+	[ICON_MOTION.trace]: Activity,
+	[ICON_MOTION.stack]: Database,
 	[ICON_MOTION.spinOnce]: RefreshCw,
 	[ICON_MOTION.spinBack]: RotateCcw,
 	[ICON_MOTION.flash]: Zap,
@@ -299,6 +364,11 @@ const FRAME_LEAVING = [
 	ICON_MOTION.tilt,
 	ICON_MOTION.lift,
 	ICON_MOTION.tiltPin,
+	ICON_MOTION.ring,
+	ICON_MOTION.bob,
+	ICON_MOTION.part,
+	ICON_MOTION.plugIn,
+	ICON_MOTION.stack,
 ] as const;
 
 describe("icon motion: the nth-child indices lucide's glyphs justify", () => {
@@ -309,24 +379,49 @@ describe("icon motion: the nth-child indices lucide's glyphs justify", () => {
 	 * browser sees - which is what this has to pin, and the one thing a render
 	 * cannot be wrong about.
 	 */
-	function children(Icon: LucideIcon): { tag: string; d: string }[] {
+	function children(Icon: LucideIcon): { tag: string; d: string; at: string }[] {
 		const { container } = render(<Icon />);
 		const svg = container.querySelector("svg");
 		expect(svg, "lucide rendered no svg").not.toBeNull();
 		return [...(svg?.children ?? [])].map((child) => ({
 			tag: child.tagName.toLowerCase(),
 			d: child.getAttribute("d") ?? "",
+			// Where a shape sits, for the children that carry no `d`: a `rect`
+			// is named by its corner and an `ellipse` by its centre, which is
+			// how the rules below say which tile or which disc they mean.
+			at: [
+				child.getAttribute("x") ?? child.getAttribute("cx") ?? "",
+				child.getAttribute("y") ?? child.getAttribute("cy") ?? "",
+			].join(","),
 		}));
 	}
 
-	/** Every `> path:nth-child(N)` the block names for one motion. */
-	function indices(name: string): number[] {
+	/**
+	 * Every `> <tag>:nth-child(N)` the block names for one motion, as
+	 * `[index, tag]`.
+	 *
+	 * The tag is read rather than assumed to be `path`: lucide draws `rect`s
+	 * for LayoutDashboard and Network, an `ellipse` for Database and `circle`s
+	 * for Clock and Radio, so a rule that names the wrong element type matches
+	 * nothing while looking exactly like one that works.
+	 */
+	function targets(name: string): [index: number, tag: string][] {
 		const found = [
 			...code.matchAll(
-				new RegExp(`\\[data-icon-motion="${name}"\\]\\s*> path:nth-child\\((\\d+)\\)`, "g")
+				new RegExp(
+					`\\[data-icon-motion="${name}"\\]\\s*> ([a-z]+):nth-child\\((\\d+)\\)`,
+					"g"
+				)
 			),
-		].map((m) => Number(m[1]));
-		return [...new Set(found)].sort((a, b) => a - b);
+		].map((m): [number, string] => [Number(m[2]), m[1]]);
+		return [...new Map(found.map((t) => [t.join(":"), t])).values()].sort(
+			(a, b) => a[0] - b[0]
+		);
+	}
+
+	/** Just the indices, for the cases that only care about position. */
+	function indices(name: string): number[] {
+		return [...new Set(targets(name).map(([i]) => i))].sort((a, b) => a - b);
 	}
 
 	/**
@@ -371,6 +466,14 @@ describe("icon motion: the nth-child indices lucide's glyphs justify", () => {
 		// The same two for Upload - drawn in a different order, which is the
 		// whole reason these are pinned rather than assumed symmetric.
 		[ICON_MOTION.lift, ["M12 3v12", "m17 8-5-5-5 5"]],
+		// Both chevrons of `CodeXml`; child 3 is the slash between them and
+		// stays. Right-then-left, which is the whole reason this is not
+		// `spread` - see the rule's comment.
+		[ICON_MOTION.part, ["m18 16 4-4-4-4", "m6 8-4 4 4 4"]],
+		// The needle, not the dial arc.
+		[ICON_MOTION.sweep, ["m12 14 4-4"]],
+		// The trace itself, Activity's only child.
+		[ICON_MOTION.trace, ["M22 12h-2.48"]],
 	];
 
 	it.each(CHILD_MOTIONS)("%s names the right children of its glyph", (name, prefixes) => {
@@ -379,39 +482,107 @@ describe("icon motion: the nth-child indices lucide's glyphs justify", () => {
 		expect(indices(name)).toEqual(positionsOf(Icon, name, prefixes));
 	});
 
-	it("addresses a path, and only a path, at every index it names", () => {
+	/**
+	 * The motions whose children are not `path`s, pinned by where the shape
+	 * sits rather than by its path data. Each entry is the `x,y` of a `rect`'s
+	 * corner or the `cx,cy` of an `ellipse`'s centre, in the order the rule
+	 * names them - which is what fixes each tile's direction and which disc
+	 * lifts.
+	 */
+	const SHAPE_MOTIONS: [name: string, at: string[]][] = [
+		// Top-left, top-right, bottom-right, bottom-left: the corner each tile
+		// sits in is its direction, so a reordering upstream would send one
+		// tile the wrong way while the glyph still looked right at rest.
+		[ICON_MOTION.tiles, ["3,3", "14,3", "14,12", "3,16"]],
+		// Bottom-right, bottom-left, top. The top node is child 3, which is
+		// the one that pulses first.
+		[ICON_MOTION.pulse, ["16,16", "2,16", "9,2"]],
+		// The top disc.
+		[ICON_MOTION.stack, ["12,5"]],
+	];
+
+	it.each(SHAPE_MOTIONS)("%s names the right shapes of its glyph", (name, at) => {
+		const kids = children(MOTION_GLYPH[name]);
+		const named = targets(name).map(([index]) => kids[index - 1]?.at);
+		expect(named).toEqual(at);
+	});
+
+	it("addresses the element type it names, at every index it names", () => {
 		// `nth-child` counts every child whatever its tag, so a rule written
 		// `> path:nth-child(2)` against a glyph whose second child is a
 		// `circle` matches nothing at all - which renders, and looks like a
 		// motion someone simply chose not to give that icon. Clock and Radio
-		// both draw a `circle`, so this is a live failure mode here, not a
-		// hypothetical one.
+		// draw a `circle`, LayoutDashboard and Network draw `rect`s and
+		// Database an `ellipse`, so this is a live failure mode here rather
+		// than a hypothetical one.
 		let checked = 0;
-		for (const [name] of CHILD_MOTIONS) {
+		for (const name of Object.values(ICON_MOTION)) {
+			const named = targets(name);
+			if (named.length === 0) continue;
 			const kids = children(MOTION_GLYPH[name]);
-			for (const index of indices(name)) {
+			for (const [index, tag] of named) {
 				expect(
 					kids[index - 1],
-					`${name}: ${MOTION_GLYPH[name]} has no child ${index}`
+					`${name} names a child ${index} that does not exist`
 				).toBeDefined();
 				expect(
 					kids[index - 1]?.tag,
-					`${name} addresses child ${index}, which is a <${kids[index - 1]?.tag}>`
-				).toBe("path");
+					`${name} addresses <${tag}>:nth-child(${index}), which is a <${kids[index - 1]?.tag}>`
+				).toBe(tag);
 				checked++;
 			}
 		}
-		expect(checked, "no child index was checked, so this proves nothing").toBeGreaterThan(10);
+		expect(checked, "no child was checked, so this proves nothing").toBeGreaterThan(20);
+	});
+
+	it("uses one `part` rule for both code glyphs, which lucide draws alike", () => {
+		// `part` is spelled by Code2 (lucide's `CodeXml`) and by `Code`, and
+		// one rule moves child 1 right and child 2 left. That only holds while
+		// both glyphs are drawn right-chevron first; the day one is flipped
+		// upstream, that glyph's brackets close instead of parting, and the
+		// diff that did it is a version bump.
+		for (const [icon, Glyph] of [
+			["CodeXml", CodeXml],
+			["Code", Code],
+		] as const) {
+			const [right, left] = children(Glyph);
+			expect(right.d, `${icon}'s first child is no longer the right chevron`).toMatch(
+				/^m1[68] /
+			);
+			expect(left.d, `${icon}'s second child is no longer the left chevron`).toMatch(
+				/^m[68] /
+			);
+		}
+	});
+
+	it("measures the draw-in rather than trusting the number in the comment", () => {
+		// `trace`'s dash has to be at least the path's own length or the glyph
+		// finishes with a second dash creeping in behind the first. jsdom has
+		// no `getTotalLength`, so what is pinned here is the input that number
+		// was measured from: the exact path lucide draws. A redraw fails here,
+		// which is the moment someone has to re-measure in a browser - the
+		// value and how it was taken are in the rule's comment.
+		const [trace] = children(Activity);
+		expect(trace.d).toBe(
+			"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
+		);
+		// 49.214 units measured in Chromium, rounded up to 50.
+		const dash = /@keyframes icon-trace \{[^}]*?stroke-dasharray:\s*(\d+)/s.exec(code);
+		expect(dash, "icon-trace no longer sets a dasharray").not.toBeNull();
+		expect(Number(dash?.[1])).toBeGreaterThanOrEqual(50);
 	});
 
 	it("moves the whole svg wherever it names no child", () => {
 		// Every whole-glyph motion must not have grown a child selector
 		// without gaining the per-child origin reasoning the lid rule carries.
-		const childMotions = new Set(CHILD_MOTIONS.map(([name]) => name));
+		const childMotions = new Set([
+			...CHILD_MOTIONS.map(([name]) => name),
+			...SHAPE_MOTIONS.map(([name]) => name),
+		]);
 		const wholeGlyph = Object.values(ICON_MOTION).filter((n) => !childMotions.has(n));
 		expect(wholeGlyph.length).toBeGreaterThan(5);
 		for (const name of wholeGlyph) {
-			expect(indices(name), `${name} now addresses a child path`).toEqual([]);
+			expect(indices(name), `${name} now addresses a child`).toEqual([]);
 		}
 	});
 
