@@ -27,6 +27,7 @@ import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "@/constants/collection";
+import { ICON_MOTION } from "@/components/ui";
 
 export interface TreeCrudOptions {
 	collections: Collection[];
@@ -681,6 +682,7 @@ export function useTreeCrud({
 				// acts on the folder's contents rather than on the folder.
 				label: "Run collection",
 				icon: Play,
+				iconMotion: ICON_MOTION.scale,
 				onSelect: () => setRunTarget(collection),
 			},
 			{

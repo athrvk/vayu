@@ -44,7 +44,7 @@ const LITERAL_CALL_SITES: Record<string, readonly string[]> = {
 	"components/shared/KeyValueEditor/KeyValueRow.tsx": [ICON_MOTION.lid],
 	"components/layout/Dock.tsx": [ICON_MOTION.spinOnce],
 	"components/layout/context-bar/CodeSection.tsx": [ICON_MOTION.spinOnce],
-	"components/layout/TitleBar.tsx": [ICON_MOTION.rotate90],
+	"components/layout/TitleBar.tsx": [ICON_MOTION.rotate90, ICON_MOTION.drop],
 	"components/layout/TabStrip.tsx": [ICON_MOTION.rotate90],
 	"components/layout/context-bar/Section.tsx": [ICON_MOTION.nudgeX, ICON_MOTION.nudgeY],
 	// The bespoke motions #1707 added, one representative call site each. The
@@ -52,7 +52,6 @@ const LITERAL_CALL_SITES: Record<string, readonly string[]> = {
 	// the files where losing the attribute in a refactor would be hardest to
 	// notice, because the control still looks and behaves exactly the same.
 	"components/layout/CommandSearchBar.tsx": [ICON_MOTION.wiggle],
-	"components/layout/TitleBar.tsx": [ICON_MOTION.rotate90, ICON_MOTION.drop],
 	"modules/collections/DataFilePicker.tsx": [ICON_MOTION.lift],
 	"modules/collections/CollectionTree.tsx": [ICON_MOTION.drop],
 	"modules/history/sidebar/RunItem.tsx": [ICON_MOTION.tiltPin],
