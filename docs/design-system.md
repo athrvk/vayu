@@ -2060,8 +2060,17 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
 - **Alt+Arrow moves the row itself**, the keyboard half of drag-and-reorder:
   Up/Down among its siblings, Right into the folder rendered above it, Left out
   to after its parent. Alt because the tree owns the bare arrows and the app owns
-  Ctrl/Cmd; every move is announced in the live region below, and the row menu's
-  **"Move to..."** is the same move with no chord at all.
+  Ctrl/Cmd; every move is announced in the live region below.
+- **The row menu carries the same moves with no chord at all**: **Move up**,
+  **Move down** and **"Move to..."** (issue #1690). A chord has to be known
+  before it can be used, so until these existed a keyboard user who had not read
+  the shortcut list could not reorder the tree - while the element list had
+  carried Move up / Move down in its own menu all along, which made one action
+  two actions depending on the list. They call the same `moveByKeyboard` the
+  chords do (one move, one function) and are off at the ends carrying "Already
+  first" / "Already last" as a `disabledReason`, gated off the same block the
+  announcement is computed from. They sit above the row's destructive tail, since
+  the separator there belongs to Delete.
 - Every control inside a row is `tabIndex={-1}`, so those keys are the *only*
   keyboard path to row actions - do not remove one without providing another.
   Both row types must render every hidden control: a folder row without

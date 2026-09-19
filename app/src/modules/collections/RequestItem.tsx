@@ -129,7 +129,7 @@ export default function RequestItem({
 	const rowActions: RowAction[] = [
 		{ label: "Rename", icon: Edit2, onSelect: () => onStartRequestRename(request) },
 		{ label: "Duplicate", icon: Copy, onSelect: () => onDuplicateRequest(request) },
-		...(dnd.moveAction ? [dnd.moveAction] : []),
+		...dnd.moveActions,
 		{ label: "Delete", icon: Trash2, onSelect: handleDelete, destructive: true },
 	];
 	const menuLabel = `More actions for request ${request.name}`;
