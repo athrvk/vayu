@@ -936,7 +936,7 @@ export function ImportModal() {
 					onValueChange={(v) => setTab(v as Tab)}
 					className="flex min-h-0 flex-1 flex-col"
 				>
-					<TabsList className="w-full px-4">
+					<TabsList variant="pane" className="w-full">
 						{(["file", "url", "paste"] as Tab[]).map((t) => (
 							<TabsTrigger key={t} value={t}>
 								<TabLabel>

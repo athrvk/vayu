@@ -248,7 +248,10 @@ export default function CollectionDetail() {
 				{/* The active trigger's weight change used to shift its neighbours
 				    on every switch; TabLabel reserves the bold width, so it no
 				    longer can. */}
-				<TabsList className="bg-panel px-4 shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip">
+				<TabsList
+					variant="pane"
+					className="shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
+				>
 					{TABS.map((t) => {
 						const count =
 							t.id === "variables"

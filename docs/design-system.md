@@ -2544,6 +2544,31 @@ its own regression.
 
 Sentence case for titles, everywhere.
 
+### Tab strips: one trigger look, three band chromes
+
+The trigger has been shared for a while; the band around it was not. Seven call
+sites carried seven recipes - `mx-5 mt-3`, nothing at all, `w-full px-1`, `px-5`
+with a `border-b bg-panel`, `w-full px-4`, `bg-panel px-4`, and
+`px-3 py-1.5 border-b border-rule bg-muted/30` - so the same control read as a
+different piece of chrome in every pane. `TabsList` takes a **required**
+`variant`, and there is no default: a new strip says which of the three it is
+rather than inheriting whichever call site happened to be written first.
+
+| Variant | Classes | For |
+|---------|---------|-----|
+| `pane` | `border-b border-rule bg-panel px-4` | The strip *is* the pane's chrome band - dashboard, Collection Detail, the import dialog, the unified response viewer |
+| `inset` | `px-1` | A strip inside content that is already padded; the padding only keeps the first trigger's focus ring off the edge - the request strip, the load-test detail |
+| `bare` | none | The band belongs to a parent row that holds other things beside the tabs - the response pane's strip shares its row with the response's facts and its actions |
+
+`bare` is not a fourth look. It is `pane`, drawn by whoever owns the row; the
+list adds nothing so the two cannot paint two rules a pixel apart.
+
+The fill is `bg-panel` and the divider is `border-rule` with no surface class
+beside it - `bg-panel` is the `:root` default surface, the one place where the
+fallback value of `--rule` is the right answer (see "`border-rule`: let the
+surface pick the token"). Guard: `tabs.test.tsx`, both the rendered class lists
+and a scan asserting every call site in `app/src` declares a variant.
+
 ### Cards
 
 ```tsx

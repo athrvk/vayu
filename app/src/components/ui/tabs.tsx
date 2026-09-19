@@ -27,10 +27,31 @@
  *
  * This file previously shipped shadcn's segmented-pill default, which four of
  * the five call sites immediately undid with `h-auto p-0 bg-transparent` before
- * re-declaring their own underline recipe. There is one look now, and no
- * `variant` prop: the segmented option had exactly one consumer and this change
- * converts it. Add the prop back when a real second look turns up with a caller
- * to justify its shape.
+ * re-declaring their own underline recipe. There is one *trigger* look now.
+ *
+ * **The strip's chrome is a `variant`, and it is required.** The triggers were
+ * shared while the band around them was not: seven call sites carried seven
+ * recipes - `mx-5 mt-3`, nothing at all, `w-full px-1`, `px-5` with a
+ * `border-b bg-panel`, `w-full px-4`, `bg-panel px-4`, and
+ * `px-3 py-1.5 border-b border-rule bg-muted/30`. Three chromes exist, and the
+ * prop has no default so a new strip has to say which one it is rather than
+ * inheriting whichever happened to be first:
+ *
+ * - `pane` - the strip *is* the pane's chrome band: `bg-panel px-4` with the
+ *   bottom rule the content hangs from. The dashboard, Collection Detail and
+ *   the unified response viewer.
+ * - `inset` - a strip inside content that is already padded, so it carries
+ *   only enough padding to keep the first trigger's focus ring off the edge
+ *   (`px-1`). The request strip, the import dialog, the load-test detail.
+ * - `bare` - the band belongs to a parent row that holds other things beside
+ *   the tabs (the response pane's strip shares its row with the status and the
+ *   actions), so the list adds no fill, no rule and no padding of its own.
+ *   Not a fourth look: it is `pane`, drawn by whoever owns the row.
+ *
+ * `border-rule` rather than a border token, and no surface class beside it:
+ * `bg-panel` is the `:root` default surface, which is the one case where the
+ * fallback value is the right answer (`docs/design-system.md`, "`border-rule`:
+ * let the surface pick the token").
  */
 
 import * as React from "react";
@@ -60,16 +81,37 @@ const SIZE: Record<TabSize, string> = {
 
 const TabsSizeContext = React.createContext<TabSize>("xs");
 
+/**
+ * The strip's chrome. See the file comment for what each one is for; the prop
+ * is required, so there is no "whatever the first caller wanted" default.
+ */
+type TabsVariant = "pane" | "inset" | "bare";
+
+const VARIANT: Record<TabsVariant, string> = {
+	pane: "border-b border-rule bg-panel px-4",
+	inset: "px-1",
+	bare: "",
+};
+
 function TabsList({
 	className,
 	size = "xs",
+	variant,
 	...props
-}: React.ComponentProps<typeof TabsPrimitive.List> & { size?: TabSize }) {
+}: React.ComponentProps<typeof TabsPrimitive.List> & {
+	size?: TabSize;
+	variant: TabsVariant;
+}) {
 	return (
 		<TabsSizeContext.Provider value={size}>
 			<TabsPrimitive.List
 				data-slot="tabs-list"
-				className={cn("flex min-w-0 items-stretch gap-0.5 bg-transparent", className)}
+				data-variant={variant}
+				className={cn(
+					"flex min-w-0 items-stretch gap-0.5 bg-transparent",
+					VARIANT[variant],
+					className
+				)}
 				{...props}
 			/>
 		</TabsSizeContext.Provider>
@@ -255,3 +297,4 @@ function TabErrorDot({
 }
 
 export { Tabs, TabsList, TabsTrigger, TabsContent, TabLabel, TabCount, TabErrorDot };
+export type { TabsVariant };
