@@ -1607,7 +1607,29 @@ see.
 | A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
 | A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
 | Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
+| Every `role="img"` carries an `aria-label` on the same element | `role-img-labelled.test.ts` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
+
+**An operation that takes seconds announces its progress.** A dialog that sits
+on a spinner and a bar reports nothing to a screen reader: the bar's value is
+read on demand, never pushed. Every multi-second operation therefore puts
+`role="status" aria-live="polite"` on **the visible line that says what is
+happening** - not an off-screen copy, which is a second string to keep in step
+with the first. The import dialog (`ImportProgressView`), the export dialog and
+the collection tree's busy states all do.
+
+The counterpart rule is what stays out of the region: a polite region
+re-announces on every text change, so a figure that moves several times a second
+(`ImportProgressView`'s byte counter) is marked `aria-hidden` inside it and left
+for the eye. A counter that moves once per file is slow enough to keep.
+
+**A `role="img"` is a promise that the element has something to say.** A
+decorative glyph given the role and no label announces as an unlabelled image; a
+labelled one beside text that already says the same thing announces twice.
+`jsx-a11y` can see neither case. The mechanical half - the label - is
+`role-img-labelled.test.ts`; the other half is a judgement made at the site, and
+the run row's status glyph is where it landed on `aria-hidden` (see Status
+Badges).
 
 **A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
 open, which is a description; before it opens - and to a screen reader reading
