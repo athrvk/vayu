@@ -265,8 +265,15 @@ describe("the editor fills the pane", () => {
 describe("form-data and urlencoded", () => {
 	it.each(["form-data", "x-www-form-urlencoded"] as const)("renders a table for %s", (mode) => {
 		// They were two copies of the same call, one wrapped in a div and one not.
-		const { container } = renderPanel({ bodyMode: mode });
-		expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
+		//
+		// The table is recognised by its column headings, not by a checkbox: a
+		// fresh panel holds only the trailing spare row, and that row has no
+		// enable checkbox any more (#1691) - so the old proxy was asserting the
+		// presence of a control that is deliberately absent until something is
+		// typed, while the headings are there whatever the rows hold.
+		renderPanel({ bodyMode: mode });
+		expect(screen.getByText("Key")).toBeInTheDocument();
+		expect(screen.getByText("Value")).toBeInTheDocument();
 	});
 
 	/*
