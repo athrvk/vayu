@@ -1,0 +1,126 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+/**
+ * The call sites that opt into an icon motion, from two directions.
+ *
+ * `data-icon-motion` reaches the DOM two ways. Most call sites write the
+ * attribute in JSX, where a source scan is the honest check - the attribute is
+ * literally in the file, and what goes wrong is a file quietly losing it in a
+ * refactor. One does not: a row action's glyph is drawn once for both menus
+ * (`RowActionBody`), so the name arrives in a variable and no scan can see it -
+ * the rule `app/CLAUDE.md` states for a class bound from a variable. Those get
+ * rendered and read off the element.
+ *
+ * Both halves matter because the failure is silent either way: an attribute the
+ * stylesheet has no rule for is inert, and a rule with no attribute anywhere is
+ * dead CSS. `icon-motion.test.tsx` holds the stylesheet's half.
+ */
+
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { render } from "@testing-library/react";
+import { Trash2 } from "lucide-react";
+import { ICON_MOTION } from "./icon-motion";
+import { RowActionBody } from "@/components/shared/RowActionBody";
+import { rowActionItemClass } from "@/components/shared/row-actions";
+import { ContextBarSectionFrame } from "@/components/layout/context-bar/Section";
+
+/** `src/`, so a call site is named once as a repository-ish path. */
+const src = resolve(__dirname, "../..");
+
+/** The files that spell a motion name in JSX, and the name each one spells. */
+const LITERAL_CALL_SITES: Record<string, readonly string[]> = {
+	"components/shared/KeyValueEditor/KeyValueRow.tsx": [ICON_MOTION.lid],
+	"components/layout/Dock.tsx": [ICON_MOTION.spinOnce],
+	"components/layout/context-bar/CodeSection.tsx": [ICON_MOTION.spinOnce],
+	"components/layout/TitleBar.tsx": [ICON_MOTION.rotate90],
+	"components/layout/TabStrip.tsx": [ICON_MOTION.rotate90],
+	"components/layout/context-bar/Section.tsx": [ICON_MOTION.nudgeX, ICON_MOTION.nudgeY],
+};
+
+describe("icon motion call sites that write the attribute in JSX", () => {
+	it.each(Object.entries(LITERAL_CALL_SITES))("%s", (file, names) => {
+		const source = readFileSync(resolve(src, file), "utf8");
+		expect(source.length, `${file} read as nothing`).toBeGreaterThan(500);
+		// `{...}`, not `="lid"`: the name comes from `ICON_MOTION` so a typo is
+		// a compile error. Dock's is a conditional expression, hence the loose
+		// left-hand side and the per-name check below.
+		expect(source).toContain("data-icon-motion={");
+		for (const name of names) {
+			const key = Object.entries(ICON_MOTION).find(([, v]) => v === name)?.[0];
+			expect(source, `${file} no longer spells ${name}`).toContain(`ICON_MOTION.${key}`);
+		}
+	});
+
+	// A motion fires from its owner's hover, so the glyph needs one: a Button
+	// (`[data-slot="button"]`) or an element carrying `group`. Both TitleBar
+	// close buttons, TabStrip's tab row and Section's trigger are plain
+	// elements, so they carry `group` explicitly - dropping it is the way this
+	// stops working without anything looking wrong.
+	it("keeps a group owner on the call sites that are not a Button", () => {
+		for (const file of [
+			"components/layout/TitleBar.tsx",
+			"components/layout/TabStrip.tsx",
+			"components/layout/context-bar/Section.tsx",
+			"components/layout/Dock.tsx",
+		]) {
+			expect(readFileSync(resolve(src, file), "utf8"), `${file} has no group owner`).toMatch(
+				/\bgroup\b/
+			);
+		}
+	});
+});
+
+describe("icon motion names that arrive in a variable", () => {
+	it("puts a row action's motion on its glyph, and none on an action without one", () => {
+		const { container } = render(
+			<>
+				<RowActionBody
+					action={{
+						label: "Delete",
+						icon: Trash2,
+						iconMotion: ICON_MOTION.lid,
+						onSelect: () => {},
+						destructive: true,
+					}}
+				/>
+				<RowActionBody action={{ label: "Rename", icon: Trash2, onSelect: () => {} }} />
+			</>
+		);
+		const [withMotion, without] = [...container.querySelectorAll("svg")];
+		expect(withMotion.getAttribute("data-icon-motion")).toBe(ICON_MOTION.lid);
+		// Absent, not empty: an empty attribute would match `[data-icon-motion]`
+		// and inherit the duration custom property for nothing.
+		expect(without.hasAttribute("data-icon-motion")).toBe(false);
+	});
+
+	it("gives a menu item the group its glyph's motion triggers from", () => {
+		expect(rowActionItemClass({ label: "Delete", icon: Trash2, onSelect: () => {} })).toContain(
+			"group"
+		);
+	});
+
+	it("swaps the chevron's motion with the disclosure's direction", () => {
+		const frame = (expanded: boolean) =>
+			render(
+				<ContextBarSectionFrame title="Auth" expanded={expanded} onToggle={() => {}}>
+					<p>body</p>
+				</ContextBarSectionFrame>
+			)
+				.container.querySelector("svg")
+				?.getAttribute("data-icon-motion");
+
+		expect(frame(true)).toBe(ICON_MOTION.nudgeY);
+		expect(frame(false)).toBe(ICON_MOTION.nudgeX);
+	});
+});

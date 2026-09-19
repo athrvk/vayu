@@ -44,6 +44,7 @@ import {
 	CommandItem,
 	CommandList,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 	Input,
 	Popover,
 	PopoverContent,
@@ -252,7 +253,13 @@ function ElementRow({
 		{ label: "Move up", icon: ArrowUp, onSelect: () => onMove(-1), disabled: isFirst },
 		{ label: "Move down", icon: ArrowDown, onSelect: () => onMove(1), disabled: isLast },
 		{ label: "Duplicate", icon: Copy, onSelect: onDuplicate },
-		{ label: "Delete", icon: Trash2, onSelect: handleDelete, destructive: true },
+		{
+			label: "Delete",
+			icon: Trash2,
+			iconMotion: ICON_MOTION.lid,
+			onSelect: handleDelete,
+			destructive: true,
+		},
 	];
 
 	const handleRowKeyDown = (e: React.KeyboardEvent) => {

@@ -1200,6 +1200,184 @@
 	}
 }
 
+/*
+ * ── Icon motion ──
+ *
+ * An icon that responds to the action it is the affordance for (#1685; the
+ * policy is in #1683 and written down in docs/design-system.md under Motion).
+ *
+ * CSS only, deliberately. The lucide-animated shape is a `motion` component per
+ * icon, each wrapping the glyph in a `div` that breaks `button-variants.ts`'s
+ * `[&_svg:not([class*='size-'])]:size-icon` sizing and its
+ * `[&_svg]:pointer-events-none`; and JS-driven motion is invisible to both
+ * reduced-motion rules at the end of this file, which collapse only the
+ * animation and transition duration properties (plus the iteration count and
+ * scroll behaviour). Everything here is a transition or a keyframe animation,
+ * so the in-app toggle and the system-preference media query at the end of this
+ * file already take every duration below to 0.01ms, and there is nothing new
+ * for either of them to learn.
+ *
+ * NOTE: neither of those two selectors is spelled out here on purpose -
+ * `reduced-motion.test.ts` finds each by the first occurrence of its literal
+ * text in this file, so a comment quoting one would hand the guard a comment to
+ * parse instead of the rule.
+ *
+ * Four rules the whole block obeys:
+ *
+ * 1. **The owner triggers, never the icon.** Every rule keys off
+ *    `:where([data-slot="button"], .group):is(:hover, :focus-visible)` - the
+ *    Button the glyph sits in, or the row that reveals it. `[&_svg]:pointer-events-none`
+ *    means an SVG here has no hover of its own to key off anyway, and a glyph
+ *    that animates while the pointer is merely near it reads as decoration
+ *    rather than feedback. `:focus-visible` is not optional: a keyboard user
+ *    gets the same feedback a mouse user does.
+ * 2. **Every transform of an SVG *child* declares `transform-box: fill-box` and
+ *    an explicit `transform-origin`.** Without `fill-box` the reference box is
+ *    the `view-box`, so a percentage origin resolves against the whole 24x24
+ *    canvas instead of the path, and a hinge lands nowhere near the hinge. A
+ *    motion that moves the whole `svg` needs only the origin: on the root
+ *    element both the default `view-box` and `fill-box` resolve a percentage
+ *    against the frame, not the ink - measured, not assumed (`50% 50%` computes
+ *    to `24px 24px` on a 48px `svg` either way, the frame's centre rather than
+ *    the centre of a bounding box that is usually off it) - so declaring
+ *    `transform-box` there would read as load-bearing and do nothing.
+ * 3. **The standalone `rotate` / `translate` / `scale` properties**, never
+ *    `transform:`. They compose with any `transform` the element already
+ *    carries (the same reasoning as the Dialog `translate` note above and the
+ *    press-feedback `scale` note in `@layer base`), and they animate
+ *    independently of each other.
+ * 4. **Durations and eases come only from the `--dur-*` / `--ease-*` tokens**,
+ *    through `--icon-motion-duration`. A distinct custom-property name, not
+ *    `--tw-duration`: a `.motion-menu` / `.motion-tooltip` ancestor sets that
+ *    one for `tw-animate-css`, and reading it here would let a menu's tier leak
+ *    into the glyph inside it.
+ *
+ * No `will-change`: these are 12px glyphs whose motion lasts 100-180ms, and a
+ * standing compositor-layer hint on every icon in a hovered row costs more than
+ * it buys.
+ *
+ * Unlayered on purpose. A Tailwind utility on the icon (`transition-*`,
+ * `rotate-*`) lives in `@layer utilities` and would otherwise win the cascade
+ * and replace the `transition` shorthand these rules depend on.
+ */
+
+[data-icon-motion] {
+	/* The default tier: a hover nudge must read as instant or it reads as lag,
+	   exactly the Tooltip argument. `spin-once` below raises it. */
+	--icon-motion-duration: var(--dur-tooltip-in);
+}
+
+/*
+ * `lid` - Trash2. Children 4 and 5 of the icon node are the lid bar
+ * (`M3 6h18`) and its handle (`M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2`); 1-3
+ * are the two tines and the can body, which stay put. `icon-motion.test.ts`
+ * pins those indices against lucide's exported `__iconNode`, so a glyph
+ * redrawn upstream fails a test instead of animating the wrong path.
+ *
+ * Both children hinge about *one* point, the left end of the lid bar (user
+ * units 3,6) - a lid opens on its hinge, so two different origins would tear
+ * the lid off the handle. `fill-box` makes each percentage resolve against
+ * that child's own bounding box, and the two boxes differ, so the two
+ * `transform-origin` values differ to name the same point: the bar's box is
+ * x 3-21 / y 6-6, making its left end `0% 50%`; the handle's is x 8-16 /
+ * y 2-6, where x=3 is (3-8)/8 = -62.5% and y=6 is (6-2)/4 = 100%.
+ */
+[data-icon-motion="lid"] > path:nth-child(4),
+[data-icon-motion="lid"] > path:nth-child(5) {
+	transform-box: fill-box;
+	transition:
+		rotate var(--icon-motion-duration) var(--ease-enter),
+		translate var(--icon-motion-duration) var(--ease-enter);
+}
+
+[data-icon-motion="lid"] > path:nth-child(4) {
+	transform-origin: 0% 50%;
+}
+
+[data-icon-motion="lid"] > path:nth-child(5) {
+	transform-origin: -62.5% 100%;
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="lid"]
+	> path:nth-child(4),
+:where([data-slot="button"], .group):is(:hover, :focus-visible)
+	[data-icon-motion="lid"]
+	> path:nth-child(5) {
+	rotate: -12deg;
+	translate: 0 -1px;
+}
+
+/*
+ * `spin-once` - RefreshCw. One turn, not a loop: a loop means "work is
+ * happening" and belongs to `Loader2` and the live indicators (the policy in
+ * docs/design-system.md), while this is feedback for "this will run again".
+ *
+ * A keyframe rather than `rotate: 360deg` on hover, because a transition would
+ * unwind the full turn backwards on pointer-out. The animation is on the `svg`
+ * itself, so `50% 50%` is the frame's centre - which is the centre lucide draws
+ * a circular arrow about, and the centre a reader expects it to turn on even
+ * where the ink is not symmetric about it (RefreshCw's two arrowheads are not).
+ *
+ * Panel tier, not tooltip: a 100ms 360deg turn is a flicker rather than a spin.
+ */
+[data-icon-motion="spin-once"] {
+	transform-origin: 50% 50%;
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="spin-once"] {
+	animation: icon-spin-once var(--dur-panel-in) var(--ease-enter);
+}
+
+@keyframes icon-spin-once {
+	from {
+		rotate: 0deg;
+	}
+	to {
+		rotate: 360deg;
+	}
+}
+
+/*
+ * `rotate-90` - Plus and X. Both glyphs are symmetric under a quarter turn, so
+ * the endpoint is the glyph it started as and only the movement is visible:
+ * which is the point, since neither control changes what it means on hover. The
+ * whole `svg` turns about the frame's centre, so there is no per-child hinge to
+ * get wrong - and both glyphs are drawn symmetrically about that centre
+ * (Plus x 5-19 / y 5-19, X x 6-18 / y 6-18), so the turn is a turn in place.
+ */
+[data-icon-motion="rotate-90"] {
+	transform-origin: 50% 50%;
+	transition: rotate var(--icon-motion-duration) var(--ease-enter);
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="rotate-90"] {
+	rotate: 90deg;
+}
+
+/*
+ * `nudge-x` / `nudge-y` - ChevronRight and ChevronDown. 1px along the axis the
+ * glyph points, which is the smallest motion that still reads: a chevron says
+ * "there is more this way", and the nudge is it leaning that way. The whole
+ * `svg` moves, and `transform-origin` does not affect a pure translation at all
+ * - it is declared anyway, because the day a nudge grows a rotation an absent
+ * origin is the defect rule 2 exists to prevent, and the frame's centre is
+ * where that rotation would want to happen.
+ */
+[data-icon-motion="nudge-x"],
+[data-icon-motion="nudge-y"] {
+	transform-origin: 50% 50%;
+	transition: translate var(--icon-motion-duration) var(--ease-enter);
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="nudge-x"] {
+	translate: 1px 0;
+}
+
+:where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="nudge-y"] {
+	translate: 0 1px;
+}
+
 @layer components {
 	/*
 	 * ── Surfaces, and the rule colour that reads on each ──

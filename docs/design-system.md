@@ -3196,6 +3196,63 @@ requestAnimationFrame loops, and the single `scrollIntoView` passes no
 that way: JS-driven motion is invisible to both rules and would need its own
 opt-out.
 
+### Icon motion
+
+An icon animates only as feedback for the action it is the affordance for, and
+the rules that do it are CSS, in the `Icon motion` block of
+`app/src/index.css`. There is no `motion`/framer-motion dependency and there
+will not be one: the lucide-animated registry ships a component per icon, each
+wrapping the glyph in a `div` that breaks `button-variants.ts`'s
+`[&_svg:not([class*='size-'])]:size-icon` sizing and its
+`[&_svg]:pointer-events-none`, and JS-driven motion is invisible to both
+collapse rules above. A transition or a keyframe animation is stopped by them
+for free.
+
+The policy, in five rules:
+
+1. **The owner triggers, never the icon.** A motion fires from the
+   `:hover` / `:focus-visible` of the glyph's own `[data-slot="button"]` or the
+   `.group` row that reveals it - never the SVG's own hover, which
+   `[&_svg]:pointer-events-none` has already taken away. `:focus-visible` is
+   not optional: a keyboard user gets the same feedback a mouse user does.
+2. **Status icons never animate**: `AlertTriangle`, `AlertCircle`,
+   `CheckCircle2`, `XCircle`, `Clock`, `Info`. A state the user is being told
+   about is not an action they can take.
+3. **A state change animates once. Loops are reserved** for `Loader2` and live
+   indicators, where the loop is the message ("work is happening").
+4. **Every transform of an SVG child declares `transform-box: fill-box` and an
+   explicit `transform-origin`.** The initial reference box is the `view-box`,
+   so a percentage origin otherwise resolves against the whole 24x24 canvas
+   instead of the path, and a hinge lands nowhere near the hinge. Use the
+   standalone `rotate` / `translate` / `scale` properties, never `transform:`,
+   so they compose with any `transform` the element already carries - the same
+   reasoning as press feedback's `scale`.
+5. **Durations and eases come only from the `--dur-*` / `--ease-*` tokens**,
+   through `--icon-motion-duration`. That name is deliberately not
+   `--tw-duration`: a `.motion-menu` / `.motion-tooltip` ancestor sets that one
+   for `tw-animate-css`, and reading it here would let a menu's tier leak into
+   the glyph inside it. No `will-change` - a standing compositor hint on every
+   icon in a hovered row costs more than a 12px glyph's 100-180ms buys.
+
+A call site spells the name once, as `data-icon-motion` on the icon, and takes
+it from `ICON_MOTION` in `app/src/components/ui/icon-motion.ts` so a name the
+stylesheet does not implement is a compile error rather than a dead attribute.
+
+| Name | Icons | Motion | Duration |
+|------|-------|--------|----------|
+| `lid` | `Trash2` | Lid bar and handle hinge up off the can (`rotate: -12deg`, `translate: 0 -1px`) about the bar's left end | `--dur-tooltip-in` |
+| `spin-once` | `RefreshCw` | One 360deg turn (`@keyframes icon-spin-once`), so pointer-out does not unwind it backwards | `--dur-panel-in` |
+| `rotate-90` | `Plus`, `X` | A quarter turn; both glyphs are symmetric under it, so only the movement is visible | `--dur-tooltip-in` |
+| `nudge-x` | `ChevronRight` | 1px along the direction it points | `--dur-tooltip-in` |
+| `nudge-y` | `ChevronDown` | The same, vertically | `--dur-tooltip-in` |
+
+Lucide renders its `__iconNode` children in declared order with nothing
+prepended, which is what lets a rule address `> path:nth-child(4)`. That is a
+dependency on an upstream glyph's shape, so `icon-motion.test.ts` pins the
+index against the exported `__iconNode`: a redrawn `Trash2` fails a test
+instead of animating the wrong path. The same guard holds the four rules above
+to the stylesheet - trigger selectors, `fill-box`, token-only timing.
+
 ---
 
 ## Source Files
