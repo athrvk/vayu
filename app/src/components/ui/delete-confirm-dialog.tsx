@@ -30,11 +30,59 @@ import {
 } from "./dialog";
 import { Button } from "./button";
 
+/**
+ * The suffix a deletion needs beyond "removed permanently" (issue #1689).
+ *
+ * `"default"` covers a single leaf: an environment, a run, an inbox. `"cascade"`
+ * is for a container that takes its contents with it - a trashed collection, a
+ * folder - and says so, because "removed permanently" alone reads as the one
+ * row, not everything under it.
+ */
+export type DeleteScope = "default" | "cascade";
+
+/**
+ * The sentence `DeleteConfirmDialog` builds from `name` and `scope` (issue
+ * #1689). Exported so a caller that needs the words outside the dialog itself
+ * - a toast confirming what just happened, say - quotes the same noun the
+ * dialog did, rather than inventing a second phrasing that can drift from it.
+ *
+ * Deliberately not "permanently removed", "removed for good" or "will be
+ * deleted" - the phrases this replaced, one per call site that had written its
+ * own. One sentence shape, reworded here once, is the fix; the guard test
+ * pins that only this file may say any of the old three.
+ */
+export function deleteConfirmCopy(
+	name: string,
+	scope: DeleteScope = "default"
+): { title: string; description: string } {
+	const subject = `"${name}"`;
+	const suffix = scope === "cascade" ? " and everything inside it" : "";
+	return {
+		title: `Delete ${subject}?`,
+		description: `${subject}${suffix} is removed permanently. This cannot be undone.`,
+	};
+}
+
 export interface DeleteConfirmDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	title: string;
-	description: React.ReactNode;
+	/**
+	 * Omit when `name` is given - the title is then built by `deleteConfirmCopy`.
+	 */
+	title?: string;
+	/**
+	 * Omit when `name` is given - the description is then built by
+	 * `deleteConfirmCopy`. Pass this instead for prose the template does not
+	 * cover (a count, a conditional clause) - it always wins over `name`.
+	 */
+	description?: React.ReactNode;
+	/**
+	 * The entity's name, quoted straight into the generated sentence. Ignored
+	 * when `description` is also given.
+	 */
+	name?: string;
+	/** See `DeleteScope`. Ignored without `name`. */
+	scope?: DeleteScope;
 	onConfirm: () => void | Promise<void>;
 	isDeleting?: boolean;
 	/**
@@ -79,6 +127,8 @@ export function DeleteConfirmDialog({
 	onOpenChange,
 	title,
 	description,
+	name,
+	scope,
 	onConfirm,
 	isDeleting = false,
 	confirmLabel = "Delete",
@@ -87,6 +137,9 @@ export function DeleteConfirmDialog({
 	onCloseAutoFocus,
 }: DeleteConfirmDialogProps) {
 	const cancelRef = useRef<HTMLButtonElement>(null);
+	const generated = name !== undefined ? deleteConfirmCopy(name, scope) : undefined;
+	const resolvedTitle = title ?? generated?.title ?? "Delete?";
+	const resolvedDescription = description ?? generated?.description;
 
 	const handleOpenChange = (next: boolean) => {
 		if (!next) onOpenChange(false);
@@ -121,8 +174,8 @@ export function DeleteConfirmDialog({
 				onCloseAutoFocus={onCloseAutoFocus}
 			>
 				<DialogHeader>
-					<DialogTitle>{title}</DialogTitle>
-					<DialogDescription>{description}</DialogDescription>
+					<DialogTitle>{resolvedTitle}</DialogTitle>
+					<DialogDescription>{resolvedDescription}</DialogDescription>
 				</DialogHeader>
 				<DialogFooter onKeyDown={handleFooterKeyDown} className="gap-2 sm:gap-0">
 					<Button
