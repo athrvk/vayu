@@ -78,7 +78,7 @@ export default function UnifiedResponseViewer({
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
 				className="flex min-h-0 flex-1 flex-col"
 			>
-				<TabsList className="px-3 py-1.5 border-b border-rule bg-muted/30">
+				<TabsList variant="pane">
 					<TabsTrigger value="body">
 						<FileText className="size-icon-sm" />
 						<TabLabel>Response</TabLabel>

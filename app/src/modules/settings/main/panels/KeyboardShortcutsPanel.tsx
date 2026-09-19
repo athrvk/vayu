@@ -27,16 +27,7 @@
  * this to the list.
  */
 
-import { Keyboard } from "lucide-react";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-	Eyebrow,
-	Kbd,
-} from "@/components/ui";
+import { Card, CardContent, Eyebrow, Kbd } from "@/components/ui";
 import { chordKeys } from "@/lib/platform";
 import { SHORTCUT_GROUPS } from "@/constants/shortcuts";
 import { appSetting } from "../app-settings";
@@ -48,18 +39,15 @@ const SHORTCUTS = appSetting("keyboard-shortcuts");
 export default function KeyboardShortcutsPanel() {
 	return (
 		<div data-setting-anchor={SHORTCUTS.anchor}>
+			{/* No CardHeader: the pane's own band already prints this panel's name
+			    and description from `app-panels.ts`, and a card repeating them was
+			    two headings a few pixels apart with drifted copy - "chord" against
+			    "shortcut", and a second sentence about rebinding that the band's
+			    save note already makes ("Shortcuts are fixed; this screen is a
+			    reference."). One source of copy per panel (issue #1688);
+			    `SettingsMain.panel-heading.test.tsx` holds it. */}
 			<Card>
-				<CardHeader className="pb-3">
-					<div className="flex items-center gap-2">
-						<Keyboard className="w-5 h-5 text-muted-foreground" />
-						<CardTitle>{SHORTCUTS.label}</CardTitle>
-					</div>
-					<CardDescription>
-						Every shortcut the app listens for, drawn for this platform. They are not
-						rebindable yet.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-5">
+				<CardContent className="space-y-5 pt-6">
 					{SHORTCUT_GROUPS.map((group) => (
 						<div key={group.id}>
 							<Eyebrow className="mb-2">{group.title}</Eyebrow>

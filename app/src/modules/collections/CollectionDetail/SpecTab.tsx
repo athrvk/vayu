@@ -54,7 +54,7 @@ import { useMemo, useRef, useState } from "react";
 import { Download, FileJson, Link2, Loader2, Trash2, Upload } from "lucide-react";
 
 import { Button, Input, Skeleton } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Callout, FieldError } from "@/components/shared";
 import { apiService } from "@/services/api";
 import {
 	useCollectionsQuery,
@@ -611,10 +611,10 @@ function BoundSpec({
 					</div>
 				</dl>
 				{failed && (
-					<p className="text-[11px] text-destructive-text">
+					<FieldError>
 						The stored document could not be read - its source and fetch time are
 						unknown until the engine answers.
-					</p>
+					</FieldError>
 				)}
 			</div>
 		</div>

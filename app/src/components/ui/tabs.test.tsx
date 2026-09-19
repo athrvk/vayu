@@ -20,13 +20,16 @@
 
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { readFileSync, globSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, relative } from "node:path";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount, TabErrorDot } from "./tabs";
 
 /** Two triggers whose labels differ enough in width for a shift to show. */
 function Fixture() {
 	return (
 		<Tabs defaultValue="one">
-			<TabsList>
+			<TabsList variant="bare">
 				<TabsTrigger value="one">
 					<TabLabel>Post-request</TabLabel>
 				</TabsTrigger>
@@ -173,7 +176,7 @@ describe("a force-mounted panel stays out of sight", () => {
 	function Forced() {
 		return (
 			<Tabs defaultValue="two">
-				<TabsList>
+				<TabsList variant="bare">
 					<TabsTrigger value="one">
 						<TabLabel>One</TabLabel>
 					</TabsTrigger>
@@ -226,5 +229,112 @@ describe("counts and the error mark are different things", () => {
 		const dot = screen.getByLabelText("Script error");
 		expect(dot.className).toContain("bg-status-error");
 		expect(dot.className).not.toContain("text-primary-text");
+	});
+});
+
+/*
+ * The strip's chrome (issue #1688). Seven call sites carried seven band
+ * recipes; the variant is where they live now, and it is required so a new
+ * strip states which of the three it is. Rendered rather than scanned: the
+ * class list goes through `cn()`, and a scan cannot see what tailwind-merge
+ * does to a caller's `className` on top of the variant.
+ *
+ * Mutation check (confirmed): swap `pane` and `inset` in VARIANT and both of
+ * the first two cases fail.
+ */
+describe("TabsList variants", () => {
+	function listFor(variant: "pane" | "inset" | "bare") {
+		const { container } = render(
+			<Tabs defaultValue="one">
+				<TabsList variant={variant}>
+					<TabsTrigger value="one">
+						<TabLabel>One</TabLabel>
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="one">one</TabsContent>
+			</Tabs>
+		);
+		const list = container.querySelector<HTMLElement>("[data-slot='tabs-list']")!;
+		expect(list).not.toBeNull();
+		return list;
+	}
+
+	it("draws the pane band: panel fill, the rule under it, and the pane's padding", () => {
+		const list = listFor("pane");
+		expect(list.className).toContain("bg-panel");
+		expect(list.className).toContain("border-b");
+		expect(list.className).toContain("border-rule");
+		expect(list.className).toContain("px-4");
+		expect(list.dataset.variant).toBe("pane");
+	});
+
+	it("insets only enough to keep the first trigger's ring off the edge", () => {
+		const list = listFor("inset");
+		expect(list.className).toContain("px-1");
+		// No band: the content around it already carries the chrome.
+		expect(list.className).not.toContain("bg-panel");
+		expect(list.className).not.toContain("border-b");
+	});
+
+	it("adds nothing at all when the parent row owns the band", () => {
+		const list = listFor("bare");
+		expect(list.className).not.toContain("bg-panel");
+		expect(list.className).not.toContain("border-b");
+		expect(list.className).not.toContain("px-4");
+		expect(list.className).not.toContain("px-1");
+	});
+
+	it("lets a call site keep its own layout classes beside the variant", () => {
+		const { container } = render(
+			<Tabs defaultValue="one">
+				<TabsList variant="pane" className="shrink-0 justify-start">
+					<TabsTrigger value="one">
+						<TabLabel>One</TabLabel>
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="one">one</TabsContent>
+			</Tabs>
+		);
+		const list = container.querySelector<HTMLElement>("[data-slot='tabs-list']")!;
+		expect(list.className).toContain("bg-panel");
+		expect(list.className).toContain("shrink-0");
+		expect(list.className).toContain("justify-start");
+	});
+});
+
+/*
+ * Every strip in the app states its chrome.
+ *
+ * Source-scanned on purpose, and this is the one claim a render cannot make:
+ * it is about the call sites, not about the primitive. The tag is matched
+ * across newlines because prettier breaks a multi-attribute JSX tag onto one
+ * line per attribute, so a single-line grep reports three false positives
+ * (`ResponseViewer`, `RequestTabs`, `CollectionDetail`) that do carry the prop.
+ */
+describe("every TabsList call site declares its variant", () => {
+	const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+	const files = globSync("**/*.tsx", { cwd: srcRoot }).filter((f) => !f.includes(".test."));
+
+	it("scans a real tree", () => {
+		expect(files.length).toBeGreaterThan(100);
+	});
+
+	it("finds a variant inside every opening tag", () => {
+		const tags: [file: string, tag: string][] = [];
+		for (const file of files) {
+			const source = readFileSync(join(srcRoot, file), "utf8");
+			for (const m of source.matchAll(/<TabsList\b[\s\S]*?>/g)) {
+				tags.push([relative(".", file), m[0]]);
+			}
+		}
+		// The seven strips this issue converted. A drop below that is a strip
+		// deleted or a scan that stopped seeing them.
+		expect(
+			tags.length,
+			"no TabsList call sites found - has the scan broken?"
+		).toBeGreaterThanOrEqual(7);
+		for (const [file, tag] of tags) {
+			expect(tag, `${file} renders a TabsList with no variant`).toMatch(/variant=/);
+		}
 	});
 });

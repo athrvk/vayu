@@ -68,7 +68,7 @@ export default function DashboardHeader({
 	const configSummary = configParts.join(" · ");
 
 	return (
-		<div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
+		<div className="h-band-lg flex items-center gap-3 px-5 bg-panel border-b border-rule shrink-0">
 			{/* Back button - returns to the previous screen (typically request builder) */}
 			{canNavigateBack && (
 				<TooltipIconButton

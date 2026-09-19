@@ -15,7 +15,7 @@
  * pixel another control took converted directly into overflowed tabs, and a
  * real search bar is worth ~360 of them.
  *
- * Height comes from --titlebar-height, not a bare h-[38px], because the toast
+ * Height comes from --titlebar-height, not a bare 38px literal, because the toast
  * viewport subtracts it when the stack is anchored to the top of the window.
  * The value must still match TITLEBAR_HEIGHT in electron/constants.ts, which
  * sizes the real window frame and cannot read a CSS variable.

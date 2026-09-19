@@ -137,10 +137,11 @@
  * not list rows (every editor-class app keeps its tab strip above 30px and
  * its notification bars 26-40px tall); interactive targets have the WCAG
  * 2.2 SC 2.5.8 24x24px floor; icons have a legibility floor. Named so
- * `h-band`, `h-banner`, `h-control`, `size-target`, `size-icon` and so on
- * exist as real Tailwind utilities (Tailwind 4 generates a spacing-scale
+ * `h-band`, `h-band-lg`, `h-banner`, `h-control`, `size-target`, `size-icon`
+ * and so on exist as real Tailwind utilities (Tailwind 4 generates a spacing-scale
  * utility for every `--spacing-*` theme key) rather than one-off arbitrary
- * values. `band`, `banner`, `icon` and `icon-sm` are theme-independent;
+ * values. `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
+ * theme-independent;
  * `control`, `control-sm` and `target` are the three density scales on its
  * own scale, under `[data-density="comfortable"]` below - the same
  * mechanism `--spacing` itself uses.
@@ -151,7 +152,7 @@
  * reference, which is exactly right for a token whose own value is a
  * `var()` reference to something that changes per theme (`--color-background:
  * hsl(var(--background))`, overridden by `.dark`) but is exactly wrong for a
- * literal like these seven - it left `.h-control` a fixed 28px with no
+ * literal like these nine - it left `.h-control` a fixed 28px with no
  * variable for `[data-density="comfortable"]` to override, silently
  * disabling every density-scaled floor. Confirmed by compiling this file
  * with the repo's own `tailwindcss@4.3.3` (`@tailwindcss/node`'s `compile`)
@@ -162,6 +163,25 @@
  */
 @theme {
 	--spacing-band: 32px;
+	/*
+	 * The two wider bands (issue #1688). `band` is the second chrome row - the
+	 * tab strip and the drawer header; `band-md` is the request pane's URL bar
+	 * row and `band-lg` the pane header the dashboard and Collection Detail
+	 * both draw. All three were arbitrary literals at their call sites
+	 * (a 52px height, a 40px floor), which is not merely untidy: an arbitrary
+	 * value is a fixed length, so those rows were the only chrome in the app
+	 * that could not follow a token at all, and a reader had no way to tell a
+	 * measured band from a number somebody nudged.
+	 *
+	 * Theme-independent like `band` itself, and for the same reason: a chrome
+	 * anchor does not become less of an anchor at a looser density. The rows
+	 * still breathe with the setting - their own `px-*`/`py-*`/`gap-*` ride
+	 * `--spacing` - because both are stated as floors (`h-band-lg` on a row
+	 * whose content is shorter than the band, `min-h-band-md` where the
+	 * content can be taller).
+	 */
+	--spacing-band-md: 40px;
+	--spacing-band-lg: 52px;
 	--spacing-banner: 36px;
 	--spacing-control: 28px;
 	--spacing-control-sm: 24px;
@@ -521,9 +541,9 @@
 		/*
 		 * The three floors that scale with density (issue #1679): `control`,
 		 * `control-sm` and `target`, set here to their Comfortable values.
-		 * `band`, `banner`, `icon` and `icon-sm` stay put at every density -
-		 * no override for them exists in this block - per the table in
-		 * docs/design-system.md.
+		 * `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` stay put
+		 * at every density - no override for them exists in this block - per the
+		 * table in docs/design-system.md.
 		 */
 		--spacing-control: 36px;
 		--spacing-control-sm: 32px;

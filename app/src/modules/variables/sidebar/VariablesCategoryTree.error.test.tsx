@@ -164,7 +164,9 @@ describe("VariablesCategoryTree when a scope query fails", () => {
 		renderTree();
 
 		expect(screen.getByText("Couldn't load collections")).toBeInTheDocument();
-		expect(screen.queryByText("0")).toBeNull();
-		expect(screen.getByText("-")).toBeInTheDocument();
+		// `(0)` and `(-)` since #1688: the drawer's one count idiom is the muted
+		// inline count in parentheses, which the collection rows already used.
+		expect(screen.queryByText("(0)")).toBeNull();
+		expect(screen.getByText("(-)")).toBeInTheDocument();
 	});
 });

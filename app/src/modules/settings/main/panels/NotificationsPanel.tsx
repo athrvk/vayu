@@ -108,14 +108,16 @@ export default function NotificationsPanel() {
 			    preference is a row inside it. It was four cards, one per setting. */}
 			<Card>
 				<CardHeader className="pb-3">
+					{/* "Toasts", not "Notifications": the pane's band already carries
+					    the panel's name and description, so a card repeating them was
+					    two headings a few pixels apart (issue #1688). This card is one
+					    topic inside the panel, and that is what it is called - the
+					    description it used to carry now lives once, in
+					    `app-panels.ts`. */}
 					<div className="flex items-center gap-2">
 						<Bell className="w-5 h-5 text-muted-foreground" />
-						<CardTitle>Notifications</CardTitle>
+						<CardTitle>Toasts</CardTitle>
 					</div>
-					<CardDescription>
-						Where toasts appear, how long they stay, how many stack at once, and what is
-						worth interrupting you for.
-					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-5">
 					<div data-setting-anchor={POSITION.anchor}>
