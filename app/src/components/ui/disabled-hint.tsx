@@ -29,6 +29,11 @@
  * disabled copy of the same button. The two copies are how a hover state, an
  * icon or an `aria-label` ends up on one of them and not the other.
  *
+ * Crossing the gate replaces the child's DOM node, because the wrapper is there
+ * on one side of it and not the other. Nothing user-visible depends on that - a
+ * disabled control is not focusable, so there is no focus to lose - but a test
+ * holding a reference across the flip has to re-query it.
+ *
  * A disabled *menu item* is the one gated control this does not wrap:
  * `RowAction`'s `disabledReason` puts the reason on the item itself, because a
  * tooltip inside a menu's focus trap competes with the menu for the keyboard.

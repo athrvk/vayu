@@ -27,12 +27,32 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+	act,
+	cleanup,
+	fireEvent,
+	render as renderBare,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
+import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { mergeCapture, queryKeys } from "@/queries";
 import { useTabsStore } from "@/stores";
 import type { Inbox, InboxCapture, InboxCapturesResponse } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
+
+/**
+ * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
+ * rendered bare is in a state the app is never in - and since #1690 a gated
+ * control inside one carries a real tooltip, which throws without it. Every
+ * render in this file goes through the provider, the way the app does.
+ */
+function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
+	return renderBare(ui, { wrapper: TooltipProvider, ...options });
+}
 
 const listInboxes = vi.fn();
 const listInboxCaptures = vi.fn();
