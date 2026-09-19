@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import { useCollectionTreeContext } from "./context/CollectionTreeContext";
@@ -17,6 +17,8 @@ import { compareTreeOrder } from "@/types";
 import { Button, Input } from "@/components/ui";
 import { RowActionsMenu, RowContextMenu, TruncatedText } from "@/components/shared";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
+import { useInlineRename } from "@/hooks/useInlineRename";
 import { childInsetPx, rowInsetPx } from "@/constants/layout";
 
 /**
@@ -50,7 +52,6 @@ export default function CollectionItem({
 		expandedCollectionIds,
 		selectedCollectionId,
 		renamingId,
-		renameValue,
 		deletingCollectionId,
 		creatingSubfolder,
 		newSubCollectionName,
@@ -59,7 +60,6 @@ export default function CollectionItem({
 		getCollectionActions,
 		onCollectionClick,
 		onCollectionToggle,
-		onRenameChange,
 		onRenameSubmit,
 		onRenameCancel,
 		onStartRename,
@@ -112,23 +112,15 @@ export default function CollectionItem({
 		creatingSubfolder !== collection.id;
 
 	const rowRef = useRef<HTMLDivElement>(null);
-	/**
-	 * Set when the rename field is about to be closed *from the keyboard*, so
-	 * focus can be put back on the row once React has unmounted the field.
-	 *
-	 * Without it F2, Escape drops the user out of the tree entirely: the field
-	 * disappears, focus falls to `<body>`, and the next Tab starts from the top
-	 * of the document. Blur deliberately does not set it - a blur means focus has
-	 * already gone somewhere the user chose, and yanking it back would be worse
-	 * than the bug.
-	 */
-	const returnFocusToRow = useRef(false);
 
-	useEffect(() => {
-		if (isRenaming || !returnFocusToRow.current) return;
-		returnFocusToRow.current = false;
-		rowRef.current?.focus();
-	}, [isRenaming]);
+	/** The rename contract, including the focus return - see `useInlineRename`. */
+	const rename = useInlineRename({
+		active: isRenaming,
+		initialValue: collection.name,
+		onCommit: (name) => onRenameSubmit(collection.id, name),
+		onCancel: onRenameCancel,
+		getRowElement: () => rowRef.current,
+	});
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
@@ -306,18 +298,7 @@ export default function CollectionItem({
 						{isRenaming ? (
 							<Input
 								type="text"
-								value={renameValue}
-								onChange={(e) => onRenameChange(e.target.value)}
-								onKeyDown={(e) => {
-									if (e.key === "Enter") {
-										returnFocusToRow.current = true;
-										onRenameSubmit(collection.id);
-									} else if (e.key === "Escape") {
-										returnFocusToRow.current = true;
-										onRenameCancel();
-									}
-								}}
-								onBlur={() => onRenameSubmit(collection.id)}
+								{...rename.inputProps}
 								className="flex-1 h-6 text-sm"
 								autoFocus
 								onClick={(e) => e.stopPropagation()}
@@ -403,7 +384,11 @@ export default function CollectionItem({
 								value={newSubCollectionName}
 								onChange={(e) => onSubCollectionNameChange(e.target.value)}
 								onKeyDown={(e) => {
-									if (e.key === "Enter") onCreateSubfolder(collection.id);
+									// `isCommitEnter`, not a bare Enter (#939, #935): an
+									// IME commits its composition buffer with an
+									// ordinary Enter keydown, and mod+Enter is the
+									// Send chord, not this field's create.
+									if (isCommitEnter(e)) onCreateSubfolder(collection.id);
 									if (e.key === "Escape") onCancelSubfolder();
 								}}
 								placeholder="Folder name"

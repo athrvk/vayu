@@ -121,9 +121,7 @@ export function useTreeCrud({
 	const [newCollectionName, setNewCollectionName] = useState(DEFAULT_COLLECTION_NAME);
 	const [newSubCollectionName, setNewSubCollectionName] = useState(DEFAULT_FOLDER_NAME);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
-	const [renameValue, setRenameValue] = useState("");
 	const [renamingRequestId, setRenamingRequestId] = useState<string | null>(null);
-	const [renameRequestValue, setRenameRequestValue] = useState("");
 	const [deletingCollectionId, setDeletingCollectionId] = useState<string | null>(null);
 	const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
 	const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmTarget | null>(null);
@@ -285,24 +283,21 @@ export function useTreeCrud({
 
 	const handleRenameCollection = useCallback((collection: Collection) => {
 		setRenamingId(collection.id);
-		setRenameValue(collection.name);
 	}, []);
 
 	const handleRenameCancel = useCallback(() => {
 		setRenamingId(null);
-		setRenameValue("");
 	}, []);
 
 	const handleRenameSubmit = useCallback(
-		async (collectionId: string) => {
-			const trimmedValue = renameValue.trim();
-			// Enter submits and then blur submits again, because the field is still
-			// mounted while the PUT is in flight. Clearing the rename state *before*
-			// awaiting unmounts the field, so there is no second blur to fire - and a
-			// name that did not change never reaches the wire at all, which is the
-			// guard the request-rename path has always had and this one had not.
+		async (collectionId: string, name: string) => {
+			// The name arrives trimmed and non-empty from the row's
+			// `useInlineRename`; this path still refuses a rename to the name the
+			// collection already has, which is a PUT with nothing in it.
+			const trimmedValue = name.trim();
+			// Clearing the rename state *before* awaiting unmounts the field, so the
+			// blur that follows Enter has nothing left to submit.
 			setRenamingId(null);
-			setRenameValue("");
 
 			const original = collections.find((c) => c.id === collectionId);
 			if (!trimmedValue || original?.name === trimmedValue) return;
@@ -318,34 +313,24 @@ export function useTreeCrud({
 				failSave(error instanceof Error ? error.message : "Failed to rename collection");
 			}
 		},
-		[
-			renameValue,
-			collections,
-			startSaving,
-			updateCollectionMutation,
-			completeSaveThenIdle,
-			failSave,
-		]
+		[collections, startSaving, updateCollectionMutation, completeSaveThenIdle, failSave]
 	);
 
 	const handleStartRequestRename = useCallback((request: Request) => {
 		setRenamingRequestId(request.id);
-		setRenameRequestValue(request.name);
 	}, []);
 
 	const handleRequestRenameCancel = useCallback(() => {
 		setRenamingRequestId(null);
-		setRenameRequestValue("");
 	}, []);
 
 	const handleRequestRenameSubmit = useCallback(
-		async (requestId: string) => {
-			const trimmedValue = renameRequestValue.trim();
+		async (requestId: string, name: string) => {
+			const trimmedValue = name.trim();
 			// Cleared before the await for the same reason as the collection path:
 			// while the field is still mounted, the blur that follows Enter submits a
 			// second time.
 			setRenamingRequestId(null);
-			setRenameRequestValue("");
 
 			// Find the original request to check if name actually changed
 			// Search through all collections to find the request
@@ -372,14 +357,7 @@ export function useTreeCrud({
 				failSave(error instanceof Error ? error.message : "Failed to rename request");
 			}
 		},
-		[
-			renameRequestValue,
-			requestsByCollection,
-			startSaving,
-			updateRequestMutation,
-			completeSaveThenIdle,
-			failSave,
-		]
+		[requestsByCollection, startSaving, updateRequestMutation, completeSaveThenIdle, failSave]
 	);
 
 	/**
@@ -797,9 +775,7 @@ export function useTreeCrud({
 	const rows = useMemo<CollectionTreeCrudSlice>(
 		() => ({
 			renamingId,
-			renameValue,
 			renamingRequestId,
-			renameRequestValue,
 			deletingCollectionId,
 			deletingRequestId,
 			creatingSubfolder,
@@ -809,11 +785,9 @@ export function useTreeCrud({
 			onCollectionToggle: handleCollectionToggle,
 			onRequestClick: handleRequestClick,
 			getCollectionActions,
-			onRenameChange: setRenameValue,
 			onRenameSubmit: handleRenameSubmit,
 			onRenameCancel: handleRenameCancel,
 			onStartRename: handleRenameCollection,
-			onRequestRenameChange: setRenameRequestValue,
 			onRequestRenameSubmit: handleRequestRenameSubmit,
 			onRequestRenameCancel: handleRequestRenameCancel,
 			onStartRequestRename: handleStartRequestRename,
@@ -826,9 +800,7 @@ export function useTreeCrud({
 		}),
 		[
 			renamingId,
-			renameValue,
 			renamingRequestId,
-			renameRequestValue,
 			deletingCollectionId,
 			deletingRequestId,
 			creatingSubfolder,
