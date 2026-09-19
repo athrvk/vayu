@@ -15,6 +15,8 @@ export type { ButtonProps } from "./button";
 export { ICON_MOTION } from "./icon-motion";
 export type { IconMotion } from "./icon-motion";
 
+export { IconSwap } from "./icon-swap";
+
 export { CodeEditor } from "./code-editor";
 export type { CodeEditorProps } from "./code-editor";
 
