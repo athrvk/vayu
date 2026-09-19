@@ -61,11 +61,14 @@ describe("FieldError", () => {
 	it("renders a span where a <p> would be invalid markup", () => {
 		// Inside a <label> or another <span>, a <p> is reparented by the browser,
 		// which moves the message out of the row it belongs to.
+		// A `<span>` parent rather than the `<label>` the import dialog actually
+		// uses: the two have the same phrasing-only content model, and a label with
+		// no control in it fails `jsx-a11y/label-has-associated-control`.
 		render(
-			<label>
+			<span>
 				Row
 				<FieldError as="span">No such row</FieldError>
-			</label>
+			</span>
 		);
 		const el = screen.getByRole("alert");
 		expect(el.tagName).toBe("SPAN");
