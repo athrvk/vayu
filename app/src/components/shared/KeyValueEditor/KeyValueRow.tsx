@@ -21,7 +21,14 @@
 
 import { memo } from "react";
 import { Trash2, Sigma, Paperclip, Type } from "lucide-react";
-import { Button, Checkbox, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import {
+	Button,
+	Checkbox,
+	ICON_MOTION,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { KeyValueItem, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
@@ -254,7 +261,7 @@ function KeyValueRow({
 						: "opacity-0 group-hover:opacity-100"
 				)}
 			>
-				<Trash2 className="w-3.5 h-3.5" />
+				<Trash2 className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.lid} />
 			</Button>
 		</div>
 	);

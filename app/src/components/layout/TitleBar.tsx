@@ -57,10 +57,11 @@ import { useVariablesStore } from "@/modules/variables/variables-store";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 import {
 	DropdownMenu,
-	DropdownMenuTrigger,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+	ICON_MOTION,
 	TooltipIconButton,
 } from "@/components/ui";
 import {
@@ -123,7 +124,10 @@ function WindowControls() {
 				className="h-full px-3 hover:bg-destructive hover:text-destructive-foreground transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center group"
 				aria-label="Close"
 			>
-				<X className="size-icon text-foreground/70 group-hover:text-destructive-foreground" />
+				<X
+					className="size-icon text-foreground/70 group-hover:text-destructive-foreground"
+					data-icon-motion={ICON_MOTION.rotate90}
+				/>
 			</button>
 		</div>
 	);
@@ -434,9 +438,11 @@ function EnvSwitcher() {
 			<DropdownMenuContent align="end" className="min-w-44">
 				<DropdownMenuItem
 					onClick={() => void createNewEnvironment()}
-					className="text-xs gap-2"
+					// `group`: the menu item is the owner whose hover the glyph
+					// answers - a DropdownMenuItem is not a `[data-slot="button"]`.
+					className="group text-xs gap-2"
 				>
-					<Plus className="w-3.5 h-3.5" />
+					<Plus className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.rotate90} />
 					<span className="flex-1">New Environment</span>
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={openImport} className="text-xs gap-2">

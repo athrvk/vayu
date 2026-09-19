@@ -38,6 +38,7 @@ import { useRequestQuery, useCollectionAncestors } from "@/queries";
 import { useSessionStore } from "@/stores";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import {
+	ICON_MOTION,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -173,7 +174,12 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 				{mode === "resolved" && (
 					<TooltipIconButton
 						label="Recompose"
-						icon={<RefreshCw className="w-3.5 h-3.5" />}
+						icon={
+							<RefreshCw
+								className="w-3.5 h-3.5"
+								data-icon-motion={ICON_MOTION.spinOnce}
+							/>
+						}
 						onClick={() => void composed.refetch()}
 					/>
 				)}
