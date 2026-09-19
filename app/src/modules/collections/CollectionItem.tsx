@@ -185,9 +185,13 @@ export default function CollectionItem({
 	 * belongs to the drag slice, which mounts after the CRUD slice and would
 	 * otherwise have to be threaded backwards into it.
 	 */
-	const rowActions = dnd.moveAction
-		? [...getCollectionActions(collection), dnd.moveAction]
-		: getCollectionActions(collection);
+	// Before the destructive tail, not after it: `rowActionRows` fences the first
+	// destructive item off from the ordinary ones above, and appending past it
+	// would leave Move up / Move down below the separator that Delete owns.
+	const crudActions = getCollectionActions(collection);
+	const firstDestructive = crudActions.findIndex((a) => a.destructive);
+	const at = firstDestructive < 0 ? crudActions.length : firstDestructive;
+	const rowActions = [...crudActions.slice(0, at), ...dnd.moveActions, ...crudActions.slice(at)];
 	const menuLabel = `More actions for ${collection.name}`;
 
 	return (

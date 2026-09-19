@@ -144,11 +144,27 @@ describe("the mock servers group", () => {
 		expect(mockServerTabs[0].entityId).toBe("mock_b");
 	});
 
+	/**
+	 * Opens the row's `⋯` menu and selects an item. The mock row's actions became
+	 * menu items with #1690, the same shape every other row in the app uses.
+	 */
+	async function selectRowAction(item: RegExp) {
+		fireEvent.pointerDown(
+			await screen.findByRole("button", {
+				name: /more actions for mock server on port 43100/i,
+			}),
+			{ button: 0, ctrlKey: false, pointerType: "mouse" }
+		);
+		fireEvent.click(
+			within(await screen.findByRole("menu")).getByRole("menuitem", { name: item })
+		);
+	}
+
 	it("copies the base URL rather than making it read off the row", async () => {
 		listMockServers.mockResolvedValue([mock()]);
 		renderPanel();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Copy mock server URL" }));
+		await selectRowAction(/Copy mock server URL/);
 		await waitFor(() => expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:43100"));
 	});
 
@@ -158,9 +174,7 @@ describe("the mock servers group", () => {
 		listMockServers.mockResolvedValueOnce([mock()]).mockResolvedValue([]);
 		renderPanel();
 
-		fireEvent.click(
-			await screen.findByRole("button", { name: /stop mock server on port 43100/i })
-		);
+		await selectRowAction(/Stop mock server on port 43100/);
 		await waitFor(() => expect(stopMockServer).toHaveBeenCalledWith("mock_a"));
 		await waitFor(() =>
 			expect(screen.getByText(/Open a collection and start one/i)).toBeInTheDocument()
@@ -172,9 +186,7 @@ describe("the mock servers group", () => {
 		stopMockServer.mockRejectedValue(new Error("Mock server not found"));
 		renderPanel();
 
-		fireEvent.click(
-			await screen.findByRole("button", { name: /stop mock server on port 43100/i })
-		);
+		await selectRowAction(/Stop mock server on port 43100/);
 		await waitFor(() =>
 			expect(useToastStore.getState().toasts[0]?.message).toBe("Mock server not found")
 		);
