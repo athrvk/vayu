@@ -162,9 +162,9 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 						label={revealed ? "Hide secrets" : "Reveal secrets"}
 						icon={
 							revealed ? (
-								<EyeOff className="w-3.5 h-3.5" />
+								<EyeOff className="size-icon-sm" />
 							) : (
-								<Eye className="w-3.5 h-3.5" />
+								<Eye className="size-icon-sm" />
 							)
 						}
 						onClick={() => setRevealed((r) => !r)}
@@ -175,7 +175,7 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 						label="Recompose"
 						icon={
 							<RefreshCw
-								className="w-3.5 h-3.5"
+								className="size-icon-sm"
 								data-icon-motion={ICON_MOTION.spinOnce}
 							/>
 						}
@@ -205,9 +205,9 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 									<IconSwap
 										state={copied ? "copied" : "copy"}
 										icons={{
-											copy: <Copy className="w-3.5 h-3.5" />,
+											copy: <Copy className="size-icon-sm" />,
 											copied: (
-												<Check className="w-3.5 h-3.5 text-status-success-text" />
+												<Check className="size-icon-sm text-status-success-text" />
 											),
 										}}
 									/>

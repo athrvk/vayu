@@ -333,7 +333,7 @@ export default function HistoryList() {
 							aria-pressed={pinnedOnly}
 							title="Show only pinned runs"
 						>
-							<Pin className="w-3.5 h-3.5 shrink-0" />
+							<Pin className="size-icon-sm shrink-0" />
 							Pinned
 						</Button>
 					</div>

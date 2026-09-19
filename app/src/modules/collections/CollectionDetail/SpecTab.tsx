@@ -549,9 +549,9 @@ function BoundSpec({
 					) : (
 						<>
 							{sourceUrl ? (
-								<Link2 className="h-3.5 w-3.5 text-primary shrink-0" />
+								<Link2 className="size-icon-sm text-primary shrink-0" />
 							) : (
-								<FileJson className="h-3.5 w-3.5 text-primary shrink-0" />
+								<FileJson className="size-icon-sm text-primary shrink-0" />
 							)}
 							<span className="font-mono break-all">{source}</span>
 						</>

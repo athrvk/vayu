@@ -765,7 +765,7 @@ export function ImportModal() {
 								disabled={isBusy}
 								onClick={() => folderInputRef.current?.click()}
 							>
-								<FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+								<FolderOpen className="mr-1.5 size-icon-sm" />
 								Import folder
 							</Button>
 						</div>
@@ -1080,7 +1080,7 @@ function PreviewView({
 					onClick={onDismiss}
 					aria-label="Dismiss"
 				>
-					<X className="h-3.5 w-3.5" />
+					<X className="size-icon-sm" />
 				</button>
 			</div>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
@@ -1096,7 +1096,7 @@ function PreviewView({
 						key={i}
 						className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium"
 					>
-						<Layers className="h-3.5 w-3.5 text-primary" />
+						<Layers className="size-icon-sm text-primary" />
 						{e.name}
 						<span className="text-label font-normal text-muted-foreground">
 							{varCountLabel(Object.keys(e.variables).length)}
@@ -1109,7 +1109,7 @@ function PreviewView({
 				 */}
 				{globalCount > 0 && (
 					<div className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium">
-						<Globe className="h-3.5 w-3.5 text-primary" />
+						<Globe className="size-icon-sm text-primary" />
 						Globals
 						<span className="text-label font-normal text-muted-foreground">
 							{varCountLabel(globalCount)}
@@ -1143,7 +1143,7 @@ function PreviewView({
 			<FieldError icon={AlertTriangle}>{lossSummary(meta)}</FieldError>
 			{noticeSummary(meta) && (
 				<p className="flex items-center gap-1.5 text-label text-muted-foreground">
-					<Info className="h-3.5 w-3.5 shrink-0" />
+					<Info className="size-icon-sm shrink-0" />
 					{noticeSummary(meta)}
 				</p>
 			)}
@@ -1268,7 +1268,7 @@ function BatchLedger({
 					onClick={onDismiss}
 					aria-label="Dismiss"
 				>
-					<X className="h-3.5 w-3.5" />
+					<X className="size-icon-sm" />
 				</button>
 			</div>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
@@ -1540,7 +1540,7 @@ function TreeNode({
 	return (
 		<div className="pl-1">
 			<div className="flex items-center gap-1.5 py-0.5 text-xs font-medium">
-				<Folder className="h-3.5 w-3.5 text-primary" />
+				<Folder className="size-icon-sm text-primary" />
 				{name}
 			</div>
 			<div className="pl-5">

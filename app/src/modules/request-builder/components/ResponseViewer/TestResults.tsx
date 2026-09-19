@@ -116,9 +116,9 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 							>
 								<div className="flex items-start gap-2">
 									{test.passed ? (
-										<CheckCircle className="w-3.5 h-3.5 text-status-success-text mt-px shrink-0" />
+										<CheckCircle className="size-icon-sm text-status-success-text mt-px shrink-0" />
 									) : (
-										<XCircle className="w-3.5 h-3.5 text-status-error-text mt-px shrink-0" />
+										<XCircle className="size-icon-sm text-status-error-text mt-px shrink-0" />
 									)}
 									<div className="flex-1 min-w-0">
 										<p

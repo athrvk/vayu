@@ -157,7 +157,11 @@ export function MarkdownEditor({
 				<TooltipIconButton
 					label={pinned ? "Show rendered" : "Show markdown source"}
 					icon={
-						pinned ? <Eye className="h-3.5 w-3.5" /> : <Code2 className="h-3.5 w-3.5" />
+						pinned ? (
+							<Eye className="size-icon-sm" />
+						) : (
+							<Code2 className="size-icon-sm" />
+						)
 					}
 					onClick={() => setPinned(!pinned)}
 					aria-pressed={pinned}

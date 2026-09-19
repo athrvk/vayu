@@ -288,7 +288,7 @@ export default function AppearancePanel() {
 
 					<div data-setting-anchor={UI_SCALE.anchor}>
 						<Eyebrow className="mb-2 flex items-center gap-1.5">
-							<Maximize2 className="w-3.5 h-3.5" />
+							<Maximize2 className="size-icon-sm" />
 							{UI_SCALE.label}
 						</Eyebrow>
 						<div className="flex items-center gap-3">
@@ -325,7 +325,7 @@ export default function AppearancePanel() {
 
 					<div data-setting-anchor={ROUNDEDNESS.anchor}>
 						<Eyebrow className="mb-2 flex items-center gap-1.5">
-							<Squircle className="w-3.5 h-3.5" />
+							<Squircle className="size-icon-sm" />
 							{ROUNDEDNESS.label}
 						</Eyebrow>
 						<OptionButtons
@@ -350,7 +350,7 @@ export default function AppearancePanel() {
 
 					<div data-setting-anchor={DENSITY.anchor}>
 						<Eyebrow className="mb-2 flex items-center gap-1.5">
-							<Rows3 className="w-3.5 h-3.5" />
+							<Rows3 className="size-icon-sm" />
 							{DENSITY.label}
 						</Eyebrow>
 						<OptionButtons

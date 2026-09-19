@@ -139,7 +139,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 								aria-label="Assembling the document"
 								className="text-muted-foreground"
 							>
-								<Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+								<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
 							</span>
 						)}
 					</div>
@@ -252,7 +252,7 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 	return (
 		<div className="enter-fade rounded-md border border-rule surface-sunken p-3 space-y-2">
 			<p className="flex items-center gap-2 text-xs font-semibold">
-				<FileJson className="h-3.5 w-3.5 text-primary shrink-0" />
+				<FileJson className="size-icon-sm text-primary shrink-0" />
 				{bound ? "This collection's own document, updated" : "A skeleton document"}
 				<span className="font-normal text-muted-foreground">({notes.dialect})</span>
 			</p>

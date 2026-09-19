@@ -146,7 +146,7 @@ export default function NotificationsPanel() {
 								disabled={previewable.length === 0}
 								className="gap-1.5"
 							>
-								<Play className="w-3.5 h-3.5" />
+								<Play className="size-icon-sm" />
 								Preview
 							</Button>
 							<p className="text-xs text-muted-foreground">
@@ -366,7 +366,7 @@ function SystemNotificationsCard() {
 						disabled={previewing || unavailableReason !== null || !enabled}
 						className="gap-1.5"
 					>
-						<Play className="w-3.5 h-3.5" />
+						<Play className="size-icon-sm" />
 						Preview
 					</Button>
 					<p className="text-xs text-muted-foreground">{previewHint}</p>

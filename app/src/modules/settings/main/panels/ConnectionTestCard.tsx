@@ -151,7 +151,7 @@ export function ConnectionTestCard() {
 							disabled={testing || url.trim() === ""}
 							onClick={() => void run()}
 						>
-							{testing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+							{testing && <Loader2 className="size-icon-sm animate-spin" />}
 							Test
 						</Button>
 					</div>

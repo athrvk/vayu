@@ -244,13 +244,13 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 							tooltipHint={
 								inbox.running ? inbox.url : `${inbox.url} - stopped, not listening`
 							}
-							icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<Copy className="size-icon-sm" aria-hidden="true" />}
 							onClick={() => void copy(inbox.url, "Inbox URL")}
 						/>
 						{inbox.running && (
 							<TooltipIconButton
 								label={`Stop inbox on port ${inbox.port}`}
-								icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
+								icon={<Square className="size-icon-sm" aria-hidden="true" />}
 								disabled={stopInbox.isPending}
 								onClick={() =>
 									stopInbox.mutate(inbox.inboxId, {
@@ -271,7 +271,7 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 						    (issue #553). Deleting a running one stops it on the way. */}
 						<TooltipIconButton
 							label={`Delete inbox on port ${inbox.port}`}
-							icon={<Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<Trash2 className="size-icon-sm" aria-hidden="true" />}
 							disabled={deletion.isDeleting}
 							onClick={deletion.requestDelete}
 						/>
@@ -314,7 +314,7 @@ function IssuerDetailRow({
 			<TruncatedText className="min-w-0 flex-1 font-mono text-xs">{value}</TruncatedText>
 			<TooltipIconButton
 				label={copyLabel}
-				icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+				icon={<Copy className="size-icon-sm" aria-hidden="true" />}
 				onClick={onCopy}
 			/>
 		</div>
@@ -375,7 +375,7 @@ function IssuerRow({
 				actions={
 					<TooltipIconButton
 						label={`Stop issuer on port ${issuer.port}`}
-						icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
+						icon={<Square className="size-icon-sm" aria-hidden="true" />}
 						disabled={stopIssuer.isPending}
 						onClick={() =>
 							stopIssuer.mutate(issuer.issuerId, {
@@ -429,7 +429,7 @@ function IssuerRow({
 						</span>
 						<TooltipIconButton
 							label="Copy signing key"
-							icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<KeyRound className="size-icon-sm" aria-hidden="true" />}
 							onClick={() => void copy(issuer.signingKey, "Signing key")}
 						/>
 					</div>
@@ -578,12 +578,12 @@ function MockServerRow({ mock }: { mock: MockServer }) {
 					<TooltipIconButton
 						label="Copy mock server URL"
 						tooltipHint={mock.url}
-						icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+						icon={<Copy className="size-icon-sm" aria-hidden="true" />}
 						onClick={() => void copy(mock.url, "Mock server URL")}
 					/>
 					<TooltipIconButton
 						label={`Stop mock server on port ${mock.port}`}
-						icon={<Square className="h-3.5 w-3.5" aria-hidden="true" />}
+						icon={<Square className="size-icon-sm" aria-hidden="true" />}
 						disabled={stopMock.isPending}
 						onClick={() =>
 							stopMock.mutate(mock.mockId, {
@@ -703,7 +703,7 @@ export default function ServicesPanel() {
 						   about and this way the user decides instead. */
 						<TooltipIconButton
 							label="New inbox"
-							icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<Plus className="size-icon-sm" aria-hidden="true" />}
 							disabled={startInbox.isPending}
 							onClick={start}
 						/>
@@ -738,7 +738,7 @@ export default function ServicesPanel() {
 					actions={
 						<TooltipIconButton
 							label="New issuer"
-							icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<Plus className="size-icon-sm" aria-hidden="true" />}
 							onClick={() => setNewIssuerOpen(true)}
 						/>
 					}

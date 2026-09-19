@@ -132,7 +132,7 @@ function RevealButton({
 	return (
 		<TooltipIconButton
 			label={revealed ? "Hide value" : "Reveal value"}
-			icon={revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+			icon={revealed ? <EyeOff className="size-icon-sm" /> : <Eye className="size-icon-sm" />}
 			onClick={onToggle}
 			autoFocus={autoFocus}
 			className="absolute right-0 top-0 h-8 w-8 text-muted-foreground hover:text-foreground"

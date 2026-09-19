@@ -429,7 +429,7 @@ export default function ResponseViewer() {
 							onClick={() => setSavingExample(true)}
 							className="h-6 shrink-0 px-2 text-xs"
 						>
-							<BookmarkPlus className="h-3.5 w-3.5" />
+							<BookmarkPlus className="size-icon-sm" />
 							Save as example
 						</Button>
 					)}

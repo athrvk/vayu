@@ -264,8 +264,8 @@ export default function ResponseBody({
 			 */}
 			<div className="flex h-band items-center justify-between gap-2 px-4 border-b border-rule">
 				<div className="flex items-center gap-2">
-					{/* 14px, matching the tab row's `w-3.5` icons. It was 16px. */}
-					<FileCode className="w-3.5 h-3.5 text-muted-foreground" />
+					{/* `size-icon-sm`, matching the tab row's icons. It was 16px. */}
+					<FileCode className="size-icon-sm text-muted-foreground" />
 					<span className="text-label text-muted-foreground uppercase tracking-[0.06em]">
 						{detectedType}
 					</span>

@@ -308,7 +308,7 @@ export default function RunItem({
 							className="w-[5ch] shrink-0"
 						/>
 					) : scenario ? (
-						<Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+						<Folder className="size-icon-sm shrink-0 text-muted-foreground" />
 					) : null}
 					<span
 						className="min-w-0 flex-1 truncate text-xs font-medium text-foreground"
@@ -335,7 +335,7 @@ export default function RunItem({
 					    the icon names itself. */}
 					{run.summary?.hasWarnings && (
 						<AlertTriangle
-							className="h-3.5 w-3.5 shrink-0 text-warning-text"
+							className="size-icon-sm shrink-0 text-warning-text"
 							role="img"
 							aria-label="This run has warnings - see its report"
 						/>
@@ -357,7 +357,7 @@ export default function RunItem({
 					 * to. Not every raw palette class is a defect.
 					 */}
 					{run.type === "load" && (
-						<Zap className="h-3.5 w-3.5 shrink-0 text-purple-500" />
+						<Zap className="size-icon-sm shrink-0 text-purple-500" />
 					)}
 					{/* z-10: sits above the stretched activator below, so these stay
 					    clickable while the rest of the row selects the run. */}

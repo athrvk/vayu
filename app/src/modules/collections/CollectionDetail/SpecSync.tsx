@@ -239,7 +239,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 
 				{state.phase === "unchanged" && (
 					<p className="flex items-center gap-2 text-xs text-status-success-text">
-						<Check className="h-3.5 w-3.5 shrink-0" />
+						<Check className="size-icon-sm shrink-0" />
 						Up to date - the document is byte for byte the one this collection is bound
 						to.
 					</p>
@@ -247,7 +247,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 
 				{state.phase === "applied" && (
 					<p className="flex items-center gap-2 text-xs text-status-success-text">
-						<Check className="h-3.5 w-3.5 shrink-0" />
+						<Check className="size-icon-sm shrink-0" />
 						{state.created + state.updated + state.deleted === 0 ? (
 							<>
 								Applied - the stored document, its response schemas and its coverage

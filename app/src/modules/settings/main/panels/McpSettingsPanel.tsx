@@ -228,8 +228,8 @@ function CopyButton({
 				className="mr-1"
 				state={copied ? "copied" : "copy"}
 				icons={{
-					copy: <Copy className="w-3.5 h-3.5" />,
-					copied: <Check className="w-3.5 h-3.5 text-success-text" />,
+					copy: <Copy className="size-icon-sm" />,
+					copied: <Check className="size-icon-sm text-success-text" />,
 				}}
 			/>
 			<LabelSwap label={copied ? "Copied" : "Copy"} states={["Copy", "Copied"]} />
@@ -662,9 +662,9 @@ export default function McpSettingsPanel() {
 											}
 										>
 											{connecting === snippet.client ? (
-												<Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+												<Loader2 className="size-icon-sm mr-1 animate-spin" />
 											) : (
-												<Zap className="w-3.5 h-3.5 mr-1" />
+												<Zap className="size-icon-sm mr-1" />
 											)}
 											Connect
 										</Button>
@@ -847,7 +847,7 @@ export default function McpSettingsPanel() {
 											className="rounded-md p-0.5 hover:bg-destructive/10 hover:text-destructive-text transition-colors"
 											aria-label={`Remove ${host}`}
 										>
-											<X className="w-3.5 h-3.5" />
+											<X className="size-icon-sm" />
 										</button>
 									</span>
 								))}

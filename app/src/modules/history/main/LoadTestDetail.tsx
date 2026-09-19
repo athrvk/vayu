@@ -379,11 +379,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			>
 				<TabsList variant="inset" className="mx-4 mt-3">
 					<TabsTrigger value="overview">
-						<BarChart3 className="w-3.5 h-3.5" />
+						<BarChart3 className="size-icon-sm" />
 						<TabLabel>Overview</TabLabel>
 					</TabsTrigger>
 					<TabsTrigger value="performance">
-						<TrendingUp className="w-3.5 h-3.5" />
+						<TrendingUp className="size-icon-sm" />
 						<TabLabel>Performance</TabLabel>
 					</TabsTrigger>
 					{/* Only for a run that has a sequence. A single-request load run
@@ -392,12 +392,12 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					    per-step results rows. */}
 					{isScenarioLoad && (
 						<TabsTrigger value="steps">
-							<ListOrdered className="w-3.5 h-3.5" />
+							<ListOrdered className="size-icon-sm" />
 							<TabLabel>Steps</TabLabel>
 						</TabsTrigger>
 					)}
 					<TabsTrigger value="samples">
-						<Activity className="w-3.5 h-3.5" />
+						<Activity className="size-icon-sm" />
 						<TabLabel>Sampled Requests</TabLabel>
 					</TabsTrigger>
 				</TabsList>

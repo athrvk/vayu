@@ -45,7 +45,7 @@ export function ValidationChip({ validation, className }: ValidationChipProps) {
 				className={cn("flex items-center gap-1.5 text-xs text-muted-foreground", className)}
 				title={uncheckedReasonText(validation.reason)}
 			>
-				<HelpCircle aria-hidden="true" className="size-3.5" />
+				<HelpCircle aria-hidden="true" className="size-icon-sm" />
 				<span>Schema not checked</span>
 			</div>
 		);
@@ -61,7 +61,7 @@ export function ValidationChip({ validation, className }: ValidationChipProps) {
 				)}
 				title="This response does not match the schema its spec declares."
 			>
-				<XCircle aria-hidden="true" className="size-3.5" />
+				<XCircle aria-hidden="true" className="size-icon-sm" />
 				<span className="tabular-nums">
 					Schema failed{total > 0 ? ` - ${total.toLocaleString()}` : ""}
 					{total > 0 ? (total === 1 ? " problem" : " problems") : ""}
@@ -83,7 +83,7 @@ export function ValidationChip({ validation, className }: ValidationChipProps) {
 					: "This response matches the schema its spec declares."
 			}
 		>
-			<CheckCircle2 aria-hidden="true" className="size-3.5" />
+			<CheckCircle2 aria-hidden="true" className="size-icon-sm" />
 			<span>{partial ? "Schema partly checked" : "Matched schema"}</span>
 		</div>
 	);

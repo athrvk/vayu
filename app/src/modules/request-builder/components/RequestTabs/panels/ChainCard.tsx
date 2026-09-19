@@ -44,7 +44,7 @@ export function ChainCard({ summary, caption, children }: ChainCardProps) {
 	return (
 		<div className="enter-fade rounded-md border border-primary/30 bg-primary/10">
 			<div className="flex items-start gap-2 px-3 py-2.5 border-b border-primary/20">
-				<Info className="w-3.5 h-3.5 text-primary shrink-0 mt-px" aria-hidden="true" />
+				<Info className="size-icon-sm text-primary shrink-0 mt-px" aria-hidden="true" />
 				<div className="flex-1 min-w-0">{summary}</div>
 			</div>
 

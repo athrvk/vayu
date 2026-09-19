@@ -287,7 +287,7 @@ export default function DataTab({ collection }: DataTabProps) {
 			 */}
 			{declaredContract && !file && reading && (
 				<p className="flex items-center gap-2 text-xs text-muted-foreground">
-					<Loader2 className="h-3.5 w-3.5 animate-spin" />
+					<Loader2 className="size-icon-sm animate-spin" />
 					Reading {remembered?.fileName ?? "the declared file"}…
 				</p>
 			)}

@@ -1169,10 +1169,18 @@ hides icons from a scale audit and lets off-grid values (15px) creep in.
 (issue #1679, superseding the #1670 decision below). Use `size-icon` (16px,
 was `w-4 h-4` / `size-4`) and `size-icon-sm` (12px, was `w-3 h-3`) - the app's
 own legibility floor at both densities, per the Chrome, Target and Icon
-Floors table under Spacing Scale Conventions. `w-3.5 h-3.5` and `w-5 h-5`
-still ride `--spacing` (10.5/14px and 15/20px at Default/Comfortable): they
-were not part of the #1679 fix pathway and remain density-scaled until a
-reason to fix them turns up.
+Floors table under Spacing Scale Conventions. `w-5 h-5` still rides
+`--spacing` (15/20px at Default/Comfortable): it was not part of the #1679
+fix pathway and remains density-scaled until a reason to fix it turns up.
+
+**`h-3.5 w-3.5`, `w-3.5 h-3.5` and `size-3.5` are banned outright**
+(`components/ui/icon-size-token.test.ts`, issue #1693). They were a third
+icon size with no token behind them, spelled three ways across 152 call
+sites and doing the same job as `size-icon-sm` in the same rows; all of them
+are now `size-icon-sm`, a deliberate step onto the scale from 14px to 12px
+rather than a translation. `size-icon` was wrong for them - each sits beside
+`text-sm` or smaller text, which is why it was written under the default in
+the first place.
 
 *Superseded decision (issue #1670, kept for history): the shrink applied to
 icons too, with nothing pinned outside the unit - `w-4 h-4` read 12px at
@@ -1238,7 +1246,7 @@ below.
 | `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
 | `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar` |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
-| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`) |
+| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
 
 `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
 theme-independent, the same way `--titlebar-height` and `--dock-height` are - a

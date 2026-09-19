@@ -72,7 +72,7 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 							<div className="flex items-center gap-2">
 								<Icon
 									className={cn(
-										"w-3.5 h-3.5 shrink-0",
+										"size-icon-sm shrink-0",
 										OUTCOME_TEXT_CLASS[outcome.outcome]
 									)}
 								/>

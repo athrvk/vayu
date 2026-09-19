@@ -169,7 +169,10 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 				 */}
 				{unevaluated.length > 0 && (
 					<div className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground">
-						<AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+						<AlertTriangle
+							aria-hidden="true"
+							className="mt-0.5 size-icon-sm shrink-0"
+						/>
 						<span className="tabular-nums">
 							{validation.unevaluated} checked{" "}
 							{validation.unevaluated === 1 ? "response" : "responses"} met schema

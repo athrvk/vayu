@@ -186,7 +186,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 			</div>
 			{comparison.compressionNegotiationDiffers && (
 				<div className="flex items-center gap-2 mt-2 text-xs text-status-warning-text">
-					<AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+					<AlertTriangle className="size-icon-sm shrink-0" />
 					<span>
 						Compression negotiation differs between these runs; byte and latency figures
 						are not directly comparable.

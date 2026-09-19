@@ -72,7 +72,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 	if (!collectionId) {
 		return (
 			<div className="flex items-start gap-2 p-3 rounded-md border border-border bg-card text-xs text-muted-foreground">
-				<Info className="w-3.5 h-3.5 shrink-0 mt-px" />
+				<Info className="size-icon-sm shrink-0 mt-px" />
 				<p className="m-0 leading-relaxed">
 					This request isn't in a collection, so there's nothing to inherit from.{" "}
 					<span className="text-foreground">No auth will be sent.</span>
@@ -88,7 +88,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 	if (!source) {
 		return (
 			<div className="flex items-start gap-2 p-3 rounded-md border border-border bg-card text-xs text-muted-foreground">
-				<Lock className="w-3.5 h-3.5 shrink-0 mt-px" />
+				<Lock className="size-icon-sm shrink-0 mt-px" />
 				<p className="m-0 leading-relaxed">
 					{blockedBy ? (
 						<>

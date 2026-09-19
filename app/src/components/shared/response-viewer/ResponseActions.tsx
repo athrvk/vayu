@@ -73,8 +73,8 @@ export function ResponseActions({ content, fileExtension, className }: ResponseA
 						<IconSwap
 							state={copied ? "copied" : "copy"}
 							icons={{
-								copy: <Copy className="w-3.5 h-3.5" />,
-								copied: <Check className="w-3.5 h-3.5 text-status-success-text" />,
+								copy: <Copy className="size-icon-sm" />,
+								copied: <Check className="size-icon-sm text-status-success-text" />,
 							}}
 						/>
 					</Button>
@@ -89,7 +89,7 @@ export function ResponseActions({ content, fileExtension, className }: ResponseA
 						onClick={handleDownload}
 						aria-label="Download response"
 					>
-						<Download className="w-3.5 h-3.5" />
+						<Download className="size-icon-sm" />
 					</Button>
 				</TooltipTrigger>
 				<TooltipContent>Download response</TooltipContent>

@@ -90,7 +90,7 @@ export default function SpecReimportDialog({
 							>
 								<span className="min-w-0 flex-1">
 									<span className="flex items-baseline gap-1.5">
-										<FileJson className="h-3.5 w-3.5 shrink-0 text-primary" />
+										<FileJson className="size-icon-sm shrink-0 text-primary" />
 										<span className="truncate text-xs font-medium">
 											{match.label}
 										</span>

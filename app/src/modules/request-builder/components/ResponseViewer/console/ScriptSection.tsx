@@ -63,7 +63,7 @@ export function ScriptError({ which, message }: { which: ScriptKey; message: str
 	return (
 		<div className="p-3 rounded-md bg-destructive/10 border border-destructive/20">
 			<div className="flex items-start gap-2">
-				<AlertCircle className="w-3.5 h-3.5 text-destructive-text mt-0.5 shrink-0" />
+				<AlertCircle className="size-icon-sm text-destructive-text mt-0.5 shrink-0" />
 				<div className="flex-1 min-w-0">
 					<p className="text-xs font-semibold text-destructive-text">
 						{SCRIPT_SECTIONS[which].errorLabel}

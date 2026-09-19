@@ -103,12 +103,12 @@ export function BulkEditor({
 				<Button variant="outline" size="sm" onClick={toggle} className="shrink-0">
 					{isText ? (
 						<>
-							<Table2 className="w-3.5 h-3.5 mr-1" />
+							<Table2 className="size-icon-sm mr-1" />
 							Table
 						</>
 					) : (
 						<>
-							<Edit3 className="w-3.5 h-3.5 mr-1" />
+							<Edit3 className="size-icon-sm mr-1" />
 							Bulk edit
 						</>
 					)}

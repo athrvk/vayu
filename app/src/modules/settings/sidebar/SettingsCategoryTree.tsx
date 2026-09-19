@@ -125,7 +125,7 @@ export default function SettingsCategoryTree() {
 			<div className="flex flex-col w-full py-2">
 				<div className="px-3 pb-2">
 					<div className="relative">
-						<Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+						<Search className="pointer-events-none absolute left-2.5 top-1/2 size-icon-sm -translate-y-1/2 text-muted-foreground" />
 						<Input
 							value={query}
 							onChange={(e) => setQuery(e.target.value)}
@@ -141,7 +141,7 @@ export default function SettingsCategoryTree() {
 								aria-label="Clear search"
 								className="absolute right-0.5 top-1/2 h-7 w-7 -translate-y-1/2 p-0"
 							>
-								<X className="h-3.5 w-3.5" />
+								<X className="size-icon-sm" />
 							</Button>
 						)}
 					</div>

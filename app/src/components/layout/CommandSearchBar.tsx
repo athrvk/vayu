@@ -71,7 +71,7 @@ export function CommandSearchBar({ className }: { className?: string }) {
 				className
 			)}
 		>
-			<Search className="h-3.5 w-3.5 shrink-0" />
+			<Search className="size-icon-sm shrink-0" />
 			<span className="flex-1 truncate text-left">Search</span>
 			{/* The hint is the reason the bar earns its width: a user who learns the
 			    chord here never needs the bar again. */}

@@ -396,7 +396,7 @@ export default function SendWithRowDialog({
 						lastInGroup ? "rounded-r-md rounded-l-none" : "rounded-none"
 					)}
 				>
-					<ChevronDown aria-hidden="true" className="h-3.5 w-3.5" />
+					<ChevronDown aria-hidden="true" className="size-icon-sm" />
 				</button>
 			</DialogTrigger>
 
@@ -418,7 +418,7 @@ export default function SendWithRowDialog({
 				<div className="flex items-center gap-2 rounded-md border border-rule bg-card surface-card px-3 py-2 text-xs">
 					<FileSpreadsheet
 						aria-hidden="true"
-						className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+						className="size-icon-sm shrink-0 text-muted-foreground"
 					/>
 					<span className="truncate font-medium">{rows.fileName}</span>
 					<span className="shrink-0 text-muted-foreground">

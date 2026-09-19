@@ -85,8 +85,8 @@ export function SecretInput({
 					<IconSwap
 						state={revealed ? "revealed" : "hidden"}
 						icons={{
-							hidden: <Eye className="w-3.5 h-3.5" />,
-							revealed: <EyeOff className="w-3.5 h-3.5" />,
+							hidden: <Eye className="size-icon-sm" />,
+							revealed: <EyeOff className="size-icon-sm" />,
 						}}
 					/>
 				}

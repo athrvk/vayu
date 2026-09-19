@@ -72,7 +72,7 @@ export function SectionLabel({ children }: { children: React.ReactNode }) {
 export function InfoBanner({ children }: { children: React.ReactNode }) {
 	return (
 		<div className="flex items-start gap-2 p-2.5 px-3 rounded-md mb-5 bg-primary/10 border border-primary/30">
-			<Info className="w-3.5 h-3.5 text-primary shrink-0 mt-px" />
+			<Info className="size-icon-sm text-primary shrink-0 mt-px" />
 			<p className="text-xs text-foreground leading-relaxed m-0">{children}</p>
 		</div>
 	);
