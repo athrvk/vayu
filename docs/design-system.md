@@ -2711,6 +2711,34 @@ A copy is acknowledged one of two ways, and which one is decided by the control,
 **A failure toasts in both modes.** An icon button has no failure glyph, and a check that simply never appears is the same silence again.
 
 
+### Inline rename
+
+Every tree that renames a row in place does it through one hook,
+`app/src/hooks/useInlineRename.ts` - the collections tree, the variables
+sidebar's environments and the element list. The field is an ordinary `Input`
+at the row's height (`h-6 flex-1 text-sm`) replacing the row's label; the hook
+owns the behaviour:
+
+- **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a
+  bare `e.key === "Enter"`. An IME commits its composition buffer with an
+  ordinary Enter keydown, and `mod+Enter` is the app's Send chord - a field
+  acting on it renamed the row *and* sent the request from one press.
+  `commit-enter.test.ts` fails on any new bare comparison outside the
+  hand-rolled activation controls it names.
+- **Escape never commits.** The cancel unmounts the field and the blur that
+  follows is the one the cancel caused, so the hook closes the editor once and
+  that blur does nothing. A blur the *user* caused still commits.
+- **The name is trimmed, and an empty one cancels** rather than erasing a name.
+  The one exception is a field whose entity has an optional name (an element
+  row falls back to its kind label), which asks for `commitEmpty`.
+- **Focus returns to the row after a keyboard close, never after a blur.** Each
+  tree is one tab stop and the field replaces the row's only focusable control,
+  so an Escape that left focus on `<body>` would drop the user out of the tree.
+  After a blur, focus has already gone where the user put it.
+
+A surface that renames something in place uses the hook rather than a fourth
+copy of those four rules.
+
 ### Destructive Actions
 
 ```tsx
@@ -3259,5 +3287,6 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
+| `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |
 | `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |
