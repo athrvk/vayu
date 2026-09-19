@@ -91,6 +91,10 @@ export * from "./EmptyState";
 // ...and the one way to say the load failed, which is not the same thing
 export * from "./ErrorState";
 
+// ...and the one way to say a single field will not take what you typed. The
+// three levels of error presentation are the rule in docs/design-system.md.
+export * from "./FieldError";
+
 // Loading placeholder for the drawer's list views
 export * from "./ListSkeleton";
 

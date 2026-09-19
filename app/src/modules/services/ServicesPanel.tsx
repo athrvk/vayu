@@ -40,6 +40,7 @@ import {
 	ErrorState,
 	NonLoopbackBadge,
 	TruncatedText,
+	FieldError,
 } from "@/components/shared";
 import {
 	Badge,
@@ -559,11 +560,9 @@ function IssuerDelayControl({
 				/>
 				<span className="text-xs text-muted-foreground">ms</span>
 			</label>
-			{!valid && (
-				<p id={errorId} className="pt-1 text-xs text-destructive-text">
-					{`A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
-				</p>
-			)}
+			<FieldError id={errorId} className="pt-1">
+				{!valid && `A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
+			</FieldError>
 		</div>
 	);
 }

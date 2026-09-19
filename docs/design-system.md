@@ -2552,6 +2552,26 @@ its own regression.
 
 Sentence case for titles, everywhere.
 
+### Error text has three levels, and one component each
+
+| Level | What it is | Component |
+|-------|------------|-----------|
+| Field | One control refused one value | `FieldError` |
+| Block | A condition about the form or the pane, which may stack with others | `Callout` |
+| Pane | The thing you came to look at did not load | `ErrorState` |
+
+Field-level messages were hand-written before, in `text-sm`, `text-xs` and `text-[11px]` - the
+import dialog carried all three - some with a leading glyph, some announced and most not.
+`FieldError` is one size (`text-xs`; the sizes were the order the code was written in, not a
+hierarchy) and always `role="alert"`, because a message that appears after a keystroke is a change
+nobody is looking at.
+
+`text-destructive-text` is not by itself an error message: it is also the right foreground for a
+failure count, a "not defined" chip and the Dock's "Not saved". `error-presentation.test.ts` draws
+the line where it can be drawn mechanically - the token in a literal class string on a `<p>` or a
+`<span>` - and every deliberate exception is named in that guard with what the red text is instead,
+rather than the rule being widened until it passes.
+
 ### Tab strips: one trigger look, three band chromes
 
 The trigger has been shared for a while; the band around it was not. Seven call

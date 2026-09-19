@@ -28,6 +28,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
+import { FieldError } from "@/components/shared";
 
 /** Roughly two lines of `text-sm` at a settings card's width - past this, a
  *  description reads as a wall of text ahead of the control it explains. */
@@ -625,11 +626,7 @@ export function NumberSettingRow({
 					<span className="text-xs text-muted-foreground whitespace-nowrap">{hint}</span>
 				)}
 			</div>
-			{error && (
-				<p id={errorId} className="text-xs text-destructive-text">
-					{error}
-				</p>
-			)}
+			<FieldError id={errorId}>{error}</FieldError>
 			{description && (
 				<p id={descriptionId} className="text-xs text-muted-foreground">
 					{description}

@@ -1577,6 +1577,25 @@ inbox tab both render it, and as two copies they had drifted to two different wo
 (issue #556). `variant="chip"` per the Badge rule - any other variant keeps its own `hover:bg-*`,
 which `cn()` does not replace, so the warning fill would turn the accent colour under the pointer.
 
+## Field Error (`components/shared/FieldError.tsx`)
+
+The message under a control that will not take what you typed, and the bottom of the app's three
+error levels: **field-level** is `FieldError`, **block-level** is [`Callout`](../design-system.md),
+**pane-level** is `ErrorState`. Before issue #1688 the middle of that range was hand-written
+`text-destructive-text` paragraphs at three sizes - the import dialog alone carried `text-sm`,
+`text-xs` and `text-[11px]` - some with a leading glyph, some announced and most not.
+
+One size (`text-xs`: the sizes were the order the code was written in, not a hierarchy),
+`role="alert"` so a message that appears after a keystroke announces itself, an `id` for the
+control's `aria-describedby`, an optional leading `icon` for a message that has to be found among
+other lines of the same size, and `as="span"` for a parent whose content model is phrasing only (a
+`<label>`, another `<span>`) where a `<p>` would be silently reparented out of its row. It renders
+nothing for an empty message, so a call site is `<FieldError>{error}</FieldError>` rather than
+`{error && …}` - the same swallowing `TabCount` does with a zero. `error-presentation.test.ts`
+fails on red prose outside the three primitives; a site where the token is on data rather than on a
+message (a failure count, the Dock's "Not saved") is named in that guard's exemption list with what
+the red text is instead.
+
 ## Number Field (`components/shared/NumberField.tsx`)
 
 A labelled number input with its unit inside the field (`ms`, `%`, `req/s`), an optional hint line,
