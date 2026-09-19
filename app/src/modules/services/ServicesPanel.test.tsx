@@ -104,6 +104,31 @@ function renderPanel() {
 	);
 }
 
+/**
+ * Opens a row's `⋯` menu (issue #1690: these actions used to be always-visible
+ * icon buttons) and returns it, so a case can click an item or read a hint.
+ *
+ * `pointerDown`, which is the event Radix's trigger listens on - the idiom
+ * `CollectionTree.run.test.tsx` uses for the same menu.
+ */
+async function openRowMenu(name: RegExp | string) {
+	fireEvent.pointerDown(await screen.findByRole("button", { name }), {
+		button: 0,
+		ctrlKey: false,
+		pointerType: "mouse",
+	});
+	return screen.findByRole("menu");
+}
+
+/** Opens a row's menu and selects the item named. */
+async function selectRowAction(menuName: RegExp | string, item: RegExp | string) {
+	const menu = await openRowMenu(menuName);
+	fireEvent.click(within(menu).getByRole("menuitem", { name: item }));
+}
+
+/** The one inbox these cases render, by the name its `⋯` trigger carries. */
+const INBOX_MENU = /more actions for inbox on port 41234/i;
+
 beforeEach(() => {
 	cleanup();
 	listInboxes.mockReset().mockResolvedValue([]);
@@ -246,17 +271,41 @@ describe("an inbox row", () => {
 		expect(inboxTabs[0].entityId).toBe("inbox_a");
 	});
 
+	/**
+	 * Services rows were the last in the app painting their actions as
+	 * always-visible icon buttons (issue #1690). jsdom has no layout, so the
+	 * reveal is asserted as the rendered class list, the shape
+	 * `row-action-reveal.test.ts` guards repo-wide: hidden at rest, and revealed
+	 * on hover *and* on focus-within, since the `⋯` is a keyboard target too.
+	 * Mutation check: drop the `className` from `ServiceRow`'s `RowActionsMenu`
+	 * and this fails.
+	 */
+	it("hides its row actions until the row is hovered or focused", async () => {
+		listInboxes.mockResolvedValue([inbox()]);
+		renderPanel();
+
+		const trigger = await screen.findByRole("button", { name: INBOX_MENU });
+		expect(trigger.className).toContain("opacity-0");
+		expect(trigger.className).toContain("group-hover:opacity-100");
+		expect(trigger.className).toContain("group-focus-within:opacity-100");
+
+		// The reveal is the row's, not the button's: without `group` on the row
+		// box the two classes above never fire.
+		const row = trigger.closest("div");
+		expect(row?.className).toContain("group");
+	});
+
 	it("copies the URL a webhook source is pointed at", async () => {
 		listInboxes.mockResolvedValue([inbox()]);
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
+		await selectRowAction(INBOX_MENU, /Copy inbox URL/);
 		expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:41234/");
 	});
 
 	it("stops a running inbox", async () => {
 		listInboxes.mockResolvedValue([inbox()]);
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: /stop inbox on port 41234/i }));
+		await selectRowAction(INBOX_MENU, /Stop inbox on port 41234/);
 		await waitFor(() => expect(stopInbox).toHaveBeenCalledWith("inbox_a"));
 	});
 
@@ -270,7 +319,10 @@ describe("an inbox row", () => {
 		listInboxes.mockResolvedValue([inbox({ running: false })]);
 		renderPanel();
 		expect(await screen.findByText("Stopped")).toBeInTheDocument();
-		expect(screen.queryByRole("button", { name: /stop inbox/i })).not.toBeInTheDocument();
+		const menu = await openRowMenu(INBOX_MENU);
+		expect(
+			within(menu).queryByRole("menuitem", { name: /Stop inbox/ })
+		).not.toBeInTheDocument();
 	});
 
 	/*
@@ -282,7 +334,7 @@ describe("an inbox row", () => {
 	it("deletes a stopped inbox, which nothing else here can remove", async () => {
 		listInboxes.mockResolvedValue([inbox({ running: false })]);
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: /delete inbox on port 41234/i }));
+		await selectRowAction(INBOX_MENU, /Delete inbox on port 41234/);
 		await waitFor(() => expect(deleteInbox).toHaveBeenCalledWith("inbox_a"));
 	});
 
@@ -290,7 +342,7 @@ describe("an inbox row", () => {
 		listInboxes.mockResolvedValue([inbox({ captureCount: 37 })]);
 		renderPanel();
 
-		fireEvent.click(await screen.findByRole("button", { name: /delete inbox on port 41234/i }));
+		await selectRowAction(INBOX_MENU, /Delete inbox on port 41234/);
 		expect(await screen.findByText(/37 recorded requests/i)).toBeInTheDocument();
 		expect(deleteInbox).not.toHaveBeenCalled();
 
@@ -301,7 +353,7 @@ describe("an inbox row", () => {
 	it("deletes a running inbox too - the engine stops it on the way", async () => {
 		listInboxes.mockResolvedValue([inbox()]);
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: /delete inbox on port 41234/i }));
+		await selectRowAction(INBOX_MENU, /Delete inbox on port 41234/);
 		await waitFor(() => expect(deleteInbox).toHaveBeenCalledWith("inbox_a"));
 		expect(stopInbox).not.toHaveBeenCalled();
 	});
@@ -377,7 +429,7 @@ describe("an inbox row", () => {
 		listInboxes.mockResolvedValue([inbox()]);
 		renderPanel();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
+		await selectRowAction(INBOX_MENU, /Copy inbox URL/);
 		await waitFor(() =>
 			expect(useToastStore.getState().toasts[0]).toMatchObject({ variant: "error" })
 		);
@@ -392,9 +444,12 @@ describe("an inbox row", () => {
 	it("warns that a stopped inbox's URL has nothing listening behind it", async () => {
 		listInboxes.mockResolvedValue([inbox({ running: false })]);
 		renderPanel();
-		fireEvent.focus(await screen.findByRole("button", { name: "Copy inbox URL" }));
-		// Radix renders the content twice - the visible tip and its aria copy.
-		expect((await screen.findAllByText(/stopped, not listening/i)).length).toBeGreaterThan(0);
+		// On the item itself now, not in a tooltip on an icon button: the menu row
+		// has the width for it, and it reads without hovering (issue #1690).
+		const menu = await openRowMenu(INBOX_MENU);
+		expect(within(menu).getByRole("menuitem", { name: /Copy inbox URL/ }).textContent).toMatch(
+			/stopped, not listening/i
+		);
 	});
 
 	it("says so when the copy worked", async () => {
@@ -402,7 +457,7 @@ describe("an inbox row", () => {
 		listInboxes.mockResolvedValue([inbox()]);
 		renderPanel();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
+		await selectRowAction(INBOX_MENU, /Copy inbox URL/);
 		await waitFor(() =>
 			expect(useToastStore.getState().toasts[0]).toMatchObject({
 				variant: "success",
@@ -556,7 +611,10 @@ describe("an issuer row", () => {
 	it("stops the issuer it names", async () => {
 		listMockIssuers.mockResolvedValue([issuer()]);
 		renderPanel();
-		fireEvent.click(await screen.findByRole("button", { name: /stop issuer on port 42000/i }));
+		await selectRowAction(
+			/more actions for issuer on port 42000/i,
+			/Stop issuer on port 42000/
+		);
 		await waitFor(() => expect(stopMockIssuer).toHaveBeenCalledWith("iss_a"));
 	});
 });

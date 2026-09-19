@@ -27,11 +27,23 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, cleanup } from "@testing-library/react";
+import { render as renderBare, cleanup } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { APP_SETTINGS } from "./app-settings";
 import { APP_SETTINGS_PANELS } from "./app-panels";
 import { APP_PANEL_COMPONENTS } from "./app-panel-components";
+
+/**
+ * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
+ * rendered bare is in a state the app is never in - and since #1690 a gated
+ * control inside one carries a real tooltip, which throws without it. Every
+ * render in this file goes through the provider, the way the app does.
+ */
+function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
+	return renderBare(ui, { wrapper: TooltipProvider, ...options });
+}
 
 // The panels reach outside Settings for three things, none of them the subject:
 // the engine's run store, its cookie jar, and the Electron updater bridge.

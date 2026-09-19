@@ -591,21 +591,24 @@ describe("ElementList - reordering", () => {
 		await screen.findByRole("menu");
 	}
 
-	it("disables moving the first row up and the last row down", async () => {
+	/**
+	 * The reason is part of the assertion, not decoration: a Move item that is off
+	 * and silent about it is the defect #1690 filed. It rides the item's own name,
+	 * so this queries by a regex rather than the bare label.
+	 */
+	it("disables moving the first row up and the last row down, and says why", async () => {
 		renderList([extractElement("e1"), assertElement("a1")]);
 
 		await openRowMenu("Extract JSON");
-		expect(screen.getByRole("menuitem", { name: "Move up" })).toHaveAttribute(
-			"aria-disabled",
-			"true"
-		);
-		fireEvent.keyDown(screen.getByRole("menuitem", { name: "Move up" }), { key: "Escape" });
+		const up = screen.getByRole("menuitem", { name: /Move up/ });
+		expect(up).toHaveAttribute("aria-disabled", "true");
+		expect(up.textContent).toMatch(/Already first/);
+		fireEvent.keyDown(up, { key: "Escape" });
 
 		await openRowMenu("Assert Status");
-		expect(screen.getByRole("menuitem", { name: "Move down" })).toHaveAttribute(
-			"aria-disabled",
-			"true"
-		);
+		const down = screen.getByRole("menuitem", { name: /Move down/ });
+		expect(down).toHaveAttribute("aria-disabled", "true");
+		expect(down.textContent).toMatch(/Already last/);
 	});
 
 	it("moves the focused card with Alt+ArrowDown", () => {

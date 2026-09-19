@@ -24,9 +24,21 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render as renderBare, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
 import GeneralPanel from "./GeneralPanel";
+
+/**
+ * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
+ * rendered bare is in a state the app is never in - and since #1690 a gated
+ * control inside one carries a real tooltip, which throws without it. Every
+ * render in this file goes through the provider, the way the app does.
+ */
+function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
+	return renderBare(ui, { wrapper: TooltipProvider, ...options });
+}
 
 const deleteRun = vi.fn((_id: string) => Promise.resolve());
 const invalidateRuns = vi.fn();

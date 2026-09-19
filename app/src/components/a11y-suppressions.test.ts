@@ -43,12 +43,14 @@ const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
  * went with the body editor's drag handle (#1323); 17 added the Dock's
  * worker-count tooltip (#1508); 18 adds the script element form's editor
  * height handle (#1605); 19 adds ActivityRail's roving-tabindex nav (#1615);
- * 20 adds the history list's roving-tabindex group (`useHistoryListFocus`).
+ * 20 adds the history list's roving-tabindex group (`useHistoryListFocus`);
+ * 21 adds `DisabledHint`'s wrapper span, the only keyboard path to the reason a
+ * control is off (#1690).
  * The number moves down with the list in the doc when a site is fixed rather
  * than suppressed. Raising it means adding a site to the doc too, which is
  * where the reason has to convince the next reader.
  */
-const CEILING = 20;
+const CEILING = 21;
 
 /** The reason marker eslint itself understands, and this repository writes. */
 const REASON = " -- ";

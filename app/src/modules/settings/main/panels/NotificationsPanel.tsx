@@ -41,6 +41,7 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
+	DisabledHint,
 	Eyebrow,
 } from "@/components/ui";
 import { systemNotify } from "@/services/notify";
@@ -136,19 +137,23 @@ export default function NotificationsPanel() {
 							dismiss follows the edge the stack sits on.
 						</p>
 						<div className="flex items-center gap-2 mt-3">
-							<Button
-								variant="outline"
-								size="sm"
-								// See the system card: two buttons print "Preview",
-								// and the accessible name is what tells them apart.
-								aria-label="Preview a toast"
-								onClick={preview}
-								disabled={previewable.length === 0}
-								className="gap-1.5"
+							<DisabledHint
+								reason={previewable.length === 0 && "Show is set to None"}
 							>
-								<Play className="size-icon-sm" />
-								Preview
-							</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									// See the system card: two buttons print "Preview",
+									// and the accessible name is what tells them apart.
+									aria-label="Preview a toast"
+									onClick={preview}
+									disabled={previewable.length === 0}
+									className="gap-1.5"
+								>
+									<Play className="size-icon-sm" />
+									Preview
+								</Button>
+							</DisabledHint>
 							<p className="text-xs text-muted-foreground">
 								{previewable.length === 0
 									? "Nothing to preview - Show is set to None."

@@ -19,9 +19,21 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as renderBare, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { TooltipProvider } from "@/components/ui";
 import type { Inbox } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
+
+/**
+ * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
+ * rendered bare is in a state the app is never in - and since #1690 a gated
+ * control inside one carries a real tooltip, which throws without it. Every
+ * render in this file goes through the provider, the way the app does.
+ */
+function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
+	return renderBare(ui, { wrapper: TooltipProvider, ...options });
+}
 
 const inbox: Inbox = {
 	inboxId: "inbox_a",

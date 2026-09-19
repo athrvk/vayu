@@ -31,6 +31,7 @@ import {
 	Badge,
 	Button,
 	DeleteConfirmDialog,
+	DisabledHint,
 	Label,
 	Select,
 	SelectContent,
@@ -329,15 +330,28 @@ export default function InboxView() {
 					    whole inbox, and two adjacent destructive controls sharing one
 					    icon is how a listener gets deleted by someone meaning to empty
 					    the list. */}
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() => setConfirmClearOpen(true)}
-						disabled={clearCaptures.isPending || captures.length === 0}
+					{/* The empty case is the one a user meets: an inbox that has
+					    just been cleared, or one that has not been hit yet, looks
+					    exactly like a Clear that is broken (issue #1690). The hint
+					    explains the state the button is in; the dialog below confirms
+					    the click when it is not in it. */}
+					<DisabledHint
+						reason={
+							clearCaptures.isPending
+								? "Clearing the captures"
+								: captures.length === 0 && "No captures to clear"
+						}
 					>
-						<Eraser className="mr-2 size-icon-sm" aria-hidden="true" />
-						Clear
-					</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setConfirmClearOpen(true)}
+							disabled={clearCaptures.isPending || captures.length === 0}
+						>
+							<Eraser className="mr-2 size-icon-sm" aria-hidden="true" />
+							Clear
+						</Button>
+					</DisabledHint>
 					{inbox.running ? (
 						<Button
 							variant="outline"
