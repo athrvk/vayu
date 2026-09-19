@@ -15,7 +15,7 @@ import {
 	// switches on.
 	type EngineStatus as EngineConnectionStatus,
 } from "@/stores";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { ICON_MOTION, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 
@@ -287,10 +287,13 @@ function PendingRestartButton() {
 				<button
 					onClick={() => void restart()}
 					disabled={isRestarting}
-					className="enter-fade flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					className="enter-fade group flex items-center gap-1 text-xs text-warning-text rounded-sm hover:underline disabled:no-underline disabled:opacity-70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 				>
 					<RefreshCw
 						className={cn("size-icon-sm", isRestarting && "animate-spin")}
+						// Not while it is already spinning: the one-shot turn would
+						// fight the `animate-spin` loop that says work is happening.
+						data-icon-motion={isRestarting ? undefined : ICON_MOTION.spinOnce}
 						aria-hidden="true"
 					/>
 					{isRestarting ? "Restarting…" : "Restart pending"}
