@@ -73,6 +73,9 @@ export * from "./NonLoopbackBadge";
 // Truncated text that scrolls on hover (tab strip)
 export * from "./ScrollOnOverflow";
 
+// The "where am I" line a detail tab draws above its content
+export * from "./TabBreadcrumb";
+
 // Truncated text that reveals the full value on hover, only when clipped
 export * from "./TruncatedText";
 

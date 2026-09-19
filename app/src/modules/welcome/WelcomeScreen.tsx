@@ -79,7 +79,9 @@ export default function WelcomeScreen() {
 
 	return (
 		<div className="flex-1 overflow-auto bg-background">
-			<div className="max-w-2xl px-8 py-10">
+			{/* Gutters only: the column is the state's own (WELCOME_COLUMN), so a
+			    skeleton and the content it stands in for cannot land in different ones. */}
+			<div className="px-8 py-10">
 				{isLoading ? (
 					<LauncherSkeleton />
 				) : isEmpty ? (

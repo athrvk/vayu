@@ -41,7 +41,9 @@ vi.mock("../context", () => ({
 	useRequestBuilderContext: () => context,
 }));
 
-vi.mock("./RequestBreadcrumb", () => ({ default: () => <div data-testid="breadcrumb" /> }));
+// The crumb reads the collections query; this layout test has no cache behind
+// it and nothing here depends on the chain. No crumbs means no band drawn.
+vi.mock("./useRequestCrumbs", () => ({ useRequestCrumbs: () => [] }));
 vi.mock("./UrlBar", () => ({ default: () => <div data-testid="url-bar" /> }));
 vi.mock("./ExternalChangeNotice", () => ({ default: () => null }));
 vi.mock("./RequestTabs", () => ({ default: () => <div data-testid="request-tabs" /> }));

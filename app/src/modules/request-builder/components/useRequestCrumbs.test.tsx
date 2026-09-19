@@ -11,6 +11,11 @@
 /**
  * The crumb above the URL bar says where the open request lives.
  *
+ * `RequestBreadcrumb` used to be a component of its own; the line is now
+ * `components/shared/TabBreadcrumb` fed by `useRequestCrumbs`, so that the
+ * collection, run-report and dashboard tabs draw the same shape (#1691). Every
+ * claim below is about the pair, which is what the builder renders.
+ *
  * Nothing in the builder said before. The tab strip shows a bare name, so a
  * request opened from a nested folder gave no clue which collection chain - and
  * therefore which inherited auth, scripts and variables - it belonged to.
@@ -50,7 +55,18 @@ vi.mock("@/stores", () => ({
 }));
 
 const { RequestBuilderContext } = await import("../context");
-const { default: RequestBreadcrumb } = await import("./RequestBreadcrumb");
+const { TabBreadcrumb } = await import("@/components/shared/TabBreadcrumb");
+const { useRequestCrumbs } = await import("./useRequestCrumbs");
+
+/**
+ * The pair as the builder mounts it: the module-specific hook that knows a
+ * request sits under a collection, and the shared row that draws crumbs. Tested
+ * together because that is the unit a user sees - a hook returning the right
+ * array while the row drops the last entry is still a broken line.
+ */
+function RequestBreadcrumb() {
+	return <TabBreadcrumb label="Request location" crumbs={useRequestCrumbs()} />;
+}
 
 function collection(id: string, name: string): Collection {
 	return { id, name } as unknown as Collection;
@@ -75,7 +91,7 @@ beforeEach(() => {
 	ancestors = [];
 });
 
-describe("RequestBreadcrumb", () => {
+describe("the request builder's crumb line", () => {
 	it("renders the chain root-first, then the request name", () => {
 		ancestors = [collection("col_root", "Acme API"), collection("col_leaf", "Payouts")];
 		renderCrumb({ name: "List settlements" });
