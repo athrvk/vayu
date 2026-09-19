@@ -38,8 +38,13 @@ const PRIMITIVE = join("components", "ui", "dialog-cancel-button.tsx");
  * the opening tag breaks, which is why this has to span lines - the literal
  * `>Cancel<` the issue's acceptance criterion greps for never appears in a
  * formatted file, and a single-line guard would have passed over all twelve.
+ *
+ * The opening tag is `[^<]*`, not `[^>]*`: an `onClick={() => …}` handler puts
+ * a `>` inside the tag, so `[^>]*` ends the match at the arrow and the guard
+ * silently stops seeing the very call sites it exists for. Caught by the
+ * mutation check, which passed the first time it should have failed.
  */
-const CANCEL_BUTTON = /<[Bb]utton\b[^>]*>\s*Cancel\s*<\/[Bb]utton>/g;
+const CANCEL_BUTTON = /<[Bb]utton\b[^<]*>\s*Cancel\s*<\/[Bb]utton>/g;
 
 function scannedFiles(): string[] {
 	return globSync("**/*.tsx", { cwd: srcRoot })
@@ -74,6 +79,8 @@ describe("Cancel is DialogCancelButton everywhere", () => {
 		expect(source).toContain('variant="secondary"');
 		// The variant is omitted from the prop type on purpose: a caller that
 		// can choose is a caller that can drift back to three variants.
-		expect(source.replace(/\s+/g, " ")).toContain('Omit< ButtonProps, "variant" | "children" | "asChild" >');
+		expect(source.replace(/\s+/g, " ")).toContain(
+			'Omit< ButtonProps, "variant" | "children" | "asChild" >'
+		);
 	});
 });
