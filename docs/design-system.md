@@ -1220,7 +1220,7 @@ constant no density setting should move.
 targets or icons** (issue #1679). Three classes of thing have a floor `--spacing`
 must not carry below it: a chrome band is an anchor, not a list row; an
 interactive target has the WCAG 2.2 SC 2.5.8 24x24px minimum; an icon has a
-legibility floor. Seven named steps, outside the `--spacing` multiplier,
+legibility floor. Nine named steps, outside the `--spacing` multiplier,
 generate real Tailwind utilities (`h-band`, `size-target`, and so on) for
 these. They live in a plain `@theme` block in `index.css`, deliberately not
 `@theme inline`: `inline` bakes a literal into each generated utility instead
@@ -1230,6 +1230,8 @@ below.
 | Step | Class prefix | Default | Comfortable | Used by |
 |------|-------|---------|-------------|---------|
 | `--spacing-band` | `h-band` | 32px | 32px | Tab strip, drawer header, response toolbar, `RailButton` |
+| `--spacing-band-md` | `h-band-md` | 40px | 40px | The URL bar row (as `min-h-band-md`) |
+| `--spacing-band-lg` | `h-band-lg` | 52px | 52px | Pane headers: the dashboard header, the Collection Detail header |
 | `--spacing-banner` | `h-banner` | 36px | 36px | Update banner, recovery banner |
 | `--spacing-control` | `h-control` | 28px | 36px | `Input`, `Select`, `Button` default, the URL bar's controls |
 | `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
@@ -1237,14 +1239,20 @@ below.
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
 | `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`) |
 
-`band`, `banner`, `icon` and `icon-sm` are theme-independent, the same way
-`--titlebar-height` and `--dock-height` are - a chrome anchor or a glyph's
-legibility does not become less real at a looser density. `control`,
+`band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
+theme-independent, the same way `--titlebar-height` and `--dock-height` are - a
+chrome anchor or a glyph's legibility does not become less real at a looser
+density. The wider two arrived with issue #1688, which moved the last three
+bands off arbitrary bracketed literals; a band written that way was the one
+piece of chrome in the app that could follow no token at all, and the rows still
+breathe with the density setting because their own padding and gaps ride
+`--spacing`. `header-band.test.ts` fails on any element that paints a band (a
+bottom rule over a panel fill) and sets its height with a pixel literal. `control`,
 `control-sm` and `target` scale on their own schedule under
 `[data-density="comfortable"]`, the same mechanism `--spacing` itself uses -
 just a different curve, so a control never drops below its own floor at
 either density. `density.test.ts` and `chrome-floors.test.ts` guard both
-halves of this: the former that the seven steps are declared with these
+halves of this: the former that the nine steps are declared with these
 values and none of them is expressed as a `calc(var(--spacing) * n)`, the
 latter that the chrome bands, interactive targets and icon classes across
 `app/src` actually use them.

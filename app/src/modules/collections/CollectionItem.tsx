@@ -277,11 +277,11 @@ export default function CollectionItem({
 						aria-label={isExpanded ? "Collapse collection" : "Expand collection"}
 					>
 						{isDeleting ? (
-							<Loader2 className="w-[18px] h-[18px] animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : isExpanded ? (
-							<ChevronDown className="w-[18px] h-[18px]" />
+							<ChevronDown className="size-icon" />
 						) : (
-							<ChevronRight className="w-[18px] h-[18px]" />
+							<ChevronRight className="size-icon" />
 						)}
 					</button>
 					<button
