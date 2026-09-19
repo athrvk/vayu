@@ -28,7 +28,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ArrowRightLeft } from "lucide-react";
+import { ArrowDown, ArrowRightLeft, ArrowUp } from "lucide-react";
 import { useReorderMutation } from "@/queries";
 import { useToastStore, useSaveStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
@@ -46,6 +46,7 @@ import {
 } from "./drag-gesture";
 import { resolveDrop, zoneAt, type DropDestination, type TreeEntity } from "./drop-position";
 import type { CollectionTreeDnd, CollectionTreeDropTarget } from "./context/CollectionTreeContext";
+import type { RowAction } from "@/components/shared";
 import { TIMING } from "@/config/timing";
 
 /** Alt+Arrow directions, in tree terms rather than screen terms. */
@@ -651,15 +652,32 @@ export function useTreeDnd({
 
 	/* ── Keyboard move ────────────────────────────────────────────────────── */
 
-	const moveByKeyboard = useCallback(
-		(entity: TreeEntity, direction: TreeMoveDirection) => {
+	/**
+	 * The ordered block this row sits in, and where in it - the folders-first
+	 * rule means a folder's block is its parent's subfolders and a request's is
+	 * its collection's requests, never the rows as rendered.
+	 *
+	 * Shared by the move itself and by the menu's gating (#1690), so "Move up is
+	 * off" and "Move up announces already first" cannot disagree about which row
+	 * is first.
+	 */
+	const blockPosition = useCallback(
+		(entity: TreeEntity): { block: OrderedRow[]; at: number } => {
 			const { collections: allCollections } = dataRef.current;
-			const owner = entity.kind === "collection" ? entity.parentId : entity.collectionId;
 			const block: OrderedRow[] =
 				entity.kind === "collection"
 					? collectionSiblings(allCollections, entity.parentId)
 					: [...requestSiblings(entity.collectionId)];
-			const at = block.findIndex((row) => row.id === entity.id);
+			return { block, at: block.findIndex((row) => row.id === entity.id) };
+		},
+		[requestSiblings]
+	);
+
+	const moveByKeyboard = useCallback(
+		(entity: TreeEntity, direction: TreeMoveDirection) => {
+			const { collections: allCollections } = dataRef.current;
+			const owner = entity.kind === "collection" ? entity.parentId : entity.collectionId;
+			const { block, at } = blockPosition(entity);
 			if (at < 0) return;
 
 			if (direction === "up" || direction === "down") {
@@ -732,7 +750,47 @@ export function useTreeDnd({
 				{ undoable: true }
 			);
 		},
-		[applyPlacement, expandCollection, nameOf, requestSiblings]
+		[applyPlacement, blockPosition, expandCollection, nameOf, requestSiblings]
+	);
+
+	/**
+	 * Move up / Move down / Move to..., for a row's `⋯` menu and its right-click
+	 * menu (#1690).
+	 *
+	 * The tree reordered by drag and by Alt+Arrow only, and neither is
+	 * discoverable: a drag needs a pointer, and a chord needs to be known
+	 * already. The element list has had Move up / Move down in its menu all
+	 * along, so the app named one action two ways depending on which list you
+	 * were in. These call the same `moveByKeyboard` the chords do - one move
+	 * still goes through one function - and are off at the ends with the reason
+	 * on the item, since a disabled menu item cannot hold a tooltip.
+	 */
+	const moveActions = useCallback(
+		(entity: TreeEntity): RowAction[] => {
+			const { block, at } = blockPosition(entity);
+			return [
+				{
+					label: "Move up",
+					icon: ArrowUp,
+					disabled: at <= 0,
+					disabledReason: "Already first",
+					onSelect: () => moveByKeyboard(entity, "up"),
+				},
+				{
+					label: "Move down",
+					icon: ArrowDown,
+					disabled: at < 0 || at >= block.length - 1,
+					disabledReason: "Already last",
+					onSelect: () => moveByKeyboard(entity, "down"),
+				},
+				{
+					label: "Move to...",
+					icon: ArrowRightLeft,
+					onSelect: () => setMoveTarget(entity),
+				},
+			];
+		},
+		[blockPosition, moveByKeyboard]
 	);
 
 	/* ── "Move to..." ─────────────────────────────────────────────────────── */
@@ -781,15 +839,12 @@ export function useTreeDnd({
 				);
 			},
 			moveByKeyboard,
-			moveAction: (entity: TreeEntity) => ({
-				label: "Move to...",
-				icon: ArrowRightLeft,
-				onSelect: () => setMoveTarget(entity),
-			}),
+			moveActions,
 		}),
 		[
 			dragging,
 			dropTarget,
+			moveActions,
 			moveByKeyboard,
 			onClickCapture,
 			onPointerCancel,

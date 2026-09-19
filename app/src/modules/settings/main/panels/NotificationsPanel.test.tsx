@@ -19,7 +19,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render as renderBare, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { TooltipProvider } from "@/components/ui";
 
 // What the build can do is the main process's answer (#1358). Available is the
 // ordinary case; the case that matters is a build that cannot notify at all.
@@ -36,6 +38,16 @@ import NotificationsPanel from "./NotificationsPanel";
 import { useClientSettingsStore } from "@/stores";
 import { useToastStore } from "@/stores";
 import { DEFAULT_NOTIFICATION_PREFS } from "@/constants/toast";
+
+/**
+ * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
+ * rendered bare is in a state the app is never in - and since #1690 a gated
+ * control inside one carries a real tooltip, which throws without it. Every
+ * render in this file goes through the provider, the way the app does.
+ */
+function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
+	return renderBare(ui, { wrapper: TooltipProvider, ...options });
+}
 
 beforeEach(() => {
 	cleanup();

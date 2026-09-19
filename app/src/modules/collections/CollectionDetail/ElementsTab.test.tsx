@@ -24,12 +24,24 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render as renderBare, screen, fireEvent, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { TooltipProvider } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
 import { useEditorVariableTokensContext } from "@/components/shared/EditorVariableTokens/context";
 import type { Collection, DataContractScope, ElementDef, ElementKindSchema } from "@/types";
 import type { VariableOrigin } from "@/types/domain";
 import ElementsTab from "./ElementsTab";
+
+/**
+ * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
+ * rendered bare is in a state the app is never in - and since #1690 a gated
+ * control inside one carries a real tooltip, which throws without it. Every
+ * render in this file goes through the provider, the way the app does.
+ */
+function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
+	return renderBare(ui, { wrapper: TooltipProvider, ...options });
+}
 
 const mutation = {
 	// `mutateAsync`, not `mutate`: the tab's save has to be awaitable so the
@@ -228,13 +240,15 @@ describe("ElementsTab - the Save button", () => {
 	it("is disabled until an element is added, then enabled", async () => {
 		renderTab(makeCollection([]));
 
-		const save = screen.getByRole("button", { name: /save elements/i });
-		expect(save).toBeDisabled();
+		const save = () => screen.getByRole("button", { name: /save elements/i });
+		expect(save()).toBeDisabled();
 
 		openAddMenu();
 		fireEvent.click((await screen.findByText("Extract JSON")).closest("[cmdk-item]")!);
 
-		expect(save).toBeEnabled();
+		// Re-queried rather than held: a gated Save is wrapped in a `DisabledHint`
+		// and an ungated one is not, so crossing the gate replaces the node.
+		expect(save()).toBeEnabled();
 	});
 
 	it("is disabled again once Reset discards the draft", async () => {

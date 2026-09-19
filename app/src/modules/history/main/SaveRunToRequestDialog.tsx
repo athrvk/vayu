@@ -35,6 +35,7 @@ import {
 	DialogTitle,
 	DialogDescription,
 	Button,
+	DisabledHint,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/format-time";
@@ -300,17 +301,25 @@ export default function SaveRunToRequestDialog({
 					>
 						Cancel
 					</Button>
-					<Button
-						variant="default"
-						onClick={handleConfirm}
-						disabled={isSaving || writable.length === 0}
+					<DisabledHint
+						reason={
+							isSaving
+								? "Saving the run"
+								: writable.length === 0 && "No collection here can take a request"
+						}
 					>
-						{isSaving ? (
-							<Loader2 className="size-icon animate-spin" />
-						) : (
-							"Save to request"
-						)}
-					</Button>
+						<Button
+							variant="default"
+							onClick={handleConfirm}
+							disabled={isSaving || writable.length === 0}
+						>
+							{isSaving ? (
+								<Loader2 className="size-icon animate-spin" />
+							) : (
+								"Save to request"
+							)}
+						</Button>
+					</DisabledHint>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>
