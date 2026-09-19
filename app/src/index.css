@@ -1282,6 +1282,19 @@
  * x 3-21 / y 6-6, making its left end `0% 50%`; the handle's is x 8-16 /
  * y 2-6, where x=3 is (3-8)/8 = -62.5% and y=6 is (6-2)/4 = 100%.
  */
+/*
+ * The lid leaves the frame when it opens. Lucide draws the handle at user
+ * units y 2-6 and the bar at y 6, so a -12deg turn about the bar's left end
+ * plus the 1px lift carries the handle's far end to about y -1.7 - above the
+ * viewBox. An inline svg clips to its viewBox by default (`overflow: hidden`
+ * is the UA value for an svg root in HTML), which cut the top off the open
+ * lid at every call site. `visible` lets the two or three pixels of travel
+ * paint past the frame; nothing else in the block moves outside it.
+ */
+[data-icon-motion="lid"] {
+	overflow: visible;
+}
+
 [data-icon-motion="lid"] > path:nth-child(4),
 [data-icon-motion="lid"] > path:nth-child(5) {
 	transform-box: fill-box;
