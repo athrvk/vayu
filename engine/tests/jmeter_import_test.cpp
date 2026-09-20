@@ -517,7 +517,7 @@ TEST (JmeterImport, ResponseAssertionNotBitInvertsTheMappedAssertion) {
         const nlohmann::ordered_json& config =
         first_request (result.at ("collections").at (0)).at ("elements").at (0).at ("config");
         EXPECT_EQ (config.at ("mode").get<std::string> (), "matches");
-        EXPECT_EQ (config.at ("text").get<std::string> (), R"(id":\s*\d+)");
+        EXPECT_EQ (config.at ("text").get<std::string> (), "id\":\\s*\\d+");
     }
 }
 
