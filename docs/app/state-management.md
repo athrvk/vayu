@@ -163,9 +163,9 @@ canGoBack(useTabsStore.getState());
 canGoForward(useTabsStore.getState());
 ```
 
-#### `layout-store.ts` - Drawer, Context Bar, & Split Ratio
+#### `layout-store.ts` - Drawer, Context Bar, & Response Position
 
-Manages the left drawer (collections/history/variables/settings), the right context bar, and request/response split ratio.
+Manages the left drawer (collections/history/variables/settings), the right context bar, and where the response pane sits - beside the request or below it - with one split ratio per arrangement.
 
 **State:**
 ```typescript
@@ -176,7 +176,10 @@ Manages the left drawer (collections/history/variables/settings), the right cont
   contextBarOpen: boolean                // Is the right context bar visible?
   contextBarWidth: number
   contextBarCollapsedSections: string[]  // Section ids the user collapsed (`code` by default)
-  requestSplitRatio: number              // 0–1; left/request pane fraction
+  responsePosition: ResponsePosition     // "beside" | "below" | "auto" (default beside, #1711)
+  autoResponseArrangement: "beside" | "below"  // What auto resolves to right now - written by the builder's measurement, not persisted
+  requestSplitRatioBeside: number        // 0-1; the request pane's share while the response is beside it
+  requestSplitRatioBelow: number         // 0-1; the request pane's share while the response is below it
   scriptSnippetsCollapsed: boolean       // Default a fresh script row's snippets list starts from (collapsed); each row keeps its own state after that
   scriptEditorHeights: Record<string, number>  // Height (px) of a script.pre/script.post element's editor box, keyed by the element's own id - capped at 200 entries, oldest set evicted first
   scriptEditorHeightDefault: number      // Height a script row with no entry above starts at - the last height set on any row
@@ -194,10 +197,14 @@ const {
   contextBarOpen, setContextBarOpen, toggleContextBar,
   contextBarWidth, setContextBarWidth,
   contextBarCollapsedSections, toggleContextBarSection,
-  requestSplitRatio, setRequestSplitRatio
+  responsePosition, setResponsePosition, toggleResponsePosition,
+  setRequestSplitRatio
 } = useLayoutStore();
 activateDrawerView("variables"); // Open drawer to variables, or toggle closed if already there
 setDrawerWidth(300); // Clamped to [PANEL_MIN_WIDTH, PANEL_MAX_WIDTH] (constants/layout.ts)
+toggleResponsePosition(); // beside <-> below; from auto, the opposite of what auto currently shows
+setRequestSplitRatio("below", 0.6); // Into the ratio for the arrangement that was dragged, clamped 0.2..0.8
+resolveResponseArrangement(useLayoutStore.getState()); // The arrangement on screen: the setting, or auto's pick
 ```
 
 **One drawer width, not one per view.** v2 stored a width per view, so switching
@@ -237,8 +244,10 @@ persisted collapse list never keeps naming a section that no longer exists. It
 is a default, not a policy: once migrated, a user's own toggle on `code`
 overrides it exactly like any other section.
 
-**Persistence:** `vayu.layout` (v4, with real migrations for all three bumps -
-the one store in the app doing persistence versioning end to end)
+**Persistence:** `vayu.layout` (v6, with a real migration for every bump -
+the one store in the app doing persistence versioning end to end; v6 carries
+the old single `requestSplitRatio` forward as the Beside ratio, seeds Below
+even and keeps the position at Beside, so an upgrade re-arranges nothing)
 
 #### `session-store.ts` - Active Environment
 
