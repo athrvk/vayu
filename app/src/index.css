@@ -2554,6 +2554,18 @@
 	}
 
 	/*
+	 * Reserve a gutter for scrollbars on elements that can scroll. Per CSS
+	 * Overflow 4, scrollbar-gutter: stable reserves space for overflow: hidden
+	 * too, so we scope it to actual scroll containers via Tailwind utility
+	 * class names - CSS cannot select on computed overflow. overflow-hidden
+	 * (used throughout for text truncation and clipping) deliberately gets no
+	 * gutter to avoid creating visible dead strips.
+	 */
+	:where(.overflow-auto, .overflow-y-auto, .overflow-scroll, .overflow-y-scroll) {
+		scrollbar-gutter: stable;
+	}
+
+	/*
 	 * Electron is Chromium, so these are the rules that actually render here.
 	 * Styling ::-webkit-scrollbar at all also drops the stepper arrows, which is
 	 * why the default-styled containers showed them and the styled ones did not.
