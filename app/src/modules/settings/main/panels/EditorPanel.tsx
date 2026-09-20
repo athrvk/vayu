@@ -14,7 +14,6 @@
  * lives under Appearance alongside the UI font.
  */
 
-import { Code2 } from "lucide-react";
 import {
 	Card,
 	CardContent,
@@ -63,18 +62,12 @@ export default function EditorPanel() {
 
 	return (
 		<>
+			{/* No CardHeader: the pane's band already says "Editor" and
+			    "Code-editor behavior across scripts and request/response bodies",
+			    which is this description in other words. One source of copy per
+			    panel (issue #1688). */}
 			<Card>
-				<CardHeader className="pb-3">
-					<div className="flex items-center gap-2">
-						<Code2 className="w-5 h-5 text-muted-foreground" />
-						<CardTitle>Editor</CardTitle>
-					</div>
-					<CardDescription>
-						Applies to every code editor in the app - scripts and request/response
-						bodies.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-5">
+				<CardContent className="space-y-5 pt-6">
 					<div data-setting-anchor={CODE_FONT.anchor}>
 						<Eyebrow className="mb-2">{CODE_FONT.label}</Eyebrow>
 						<FontPicker

@@ -125,7 +125,7 @@ describe("design-system.md token values", () => {
 		}
 	});
 
-	// Issue #1679: the Chrome, Target and Icon Floors table names seven steps
+	// Issue #1679: the Chrome, Target and Icon Floors table names nine steps
 	// that deliberately do NOT ride `--spacing` - the opposite property the
 	// superseded icon-sizing decision this replaces used to check. Read each
 	// row's Default/Comfortable px values against the real plain `@theme`
@@ -143,7 +143,7 @@ describe("design-system.md token values", () => {
 		const rows = [
 			...section.matchAll(/\| `(--spacing-[a-z-]+)` \| `[a-z-]+` \| (\d+)px \| (\d+)px \|/g),
 		];
-		expect(rows.length, "no floor-step rows found - has the table moved?").toBe(7);
+		expect(rows.length, "no floor-step rows found - has the table moved?").toBe(9);
 
 		// `indexOf("@theme {")`, with the space, skips past the earlier
 		// `@theme inline {` block on purpose.

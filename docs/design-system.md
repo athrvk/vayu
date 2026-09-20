@@ -1220,7 +1220,7 @@ constant no density setting should move.
 targets or icons** (issue #1679). Three classes of thing have a floor `--spacing`
 must not carry below it: a chrome band is an anchor, not a list row; an
 interactive target has the WCAG 2.2 SC 2.5.8 24x24px minimum; an icon has a
-legibility floor. Seven named steps, outside the `--spacing` multiplier,
+legibility floor. Nine named steps, outside the `--spacing` multiplier,
 generate real Tailwind utilities (`h-band`, `size-target`, and so on) for
 these. They live in a plain `@theme` block in `index.css`, deliberately not
 `@theme inline`: `inline` bakes a literal into each generated utility instead
@@ -1230,6 +1230,8 @@ below.
 | Step | Class prefix | Default | Comfortable | Used by |
 |------|-------|---------|-------------|---------|
 | `--spacing-band` | `h-band` | 32px | 32px | Tab strip, drawer header, response toolbar, `RailButton` |
+| `--spacing-band-md` | `h-band-md` | 40px | 40px | The URL bar row (as `min-h-band-md`) |
+| `--spacing-band-lg` | `h-band-lg` | 52px | 52px | Pane headers: the dashboard header, the Collection Detail header |
 | `--spacing-banner` | `h-banner` | 36px | 36px | Update banner, recovery banner |
 | `--spacing-control` | `h-control` | 28px | 36px | `Input`, `Select`, `Button` default, the URL bar's controls |
 | `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
@@ -1237,14 +1239,20 @@ below.
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
 | `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`) |
 
-`band`, `banner`, `icon` and `icon-sm` are theme-independent, the same way
-`--titlebar-height` and `--dock-height` are - a chrome anchor or a glyph's
-legibility does not become less real at a looser density. `control`,
+`band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
+theme-independent, the same way `--titlebar-height` and `--dock-height` are - a
+chrome anchor or a glyph's legibility does not become less real at a looser
+density. The wider two arrived with issue #1688, which moved the last three
+bands off arbitrary bracketed literals; a band written that way was the one
+piece of chrome in the app that could follow no token at all, and the rows still
+breathe with the density setting because their own padding and gaps ride
+`--spacing`. `header-band.test.ts` fails on any element that paints a band (a
+bottom rule over a panel fill) and sets its height with a pixel literal. `control`,
 `control-sm` and `target` scale on their own schedule under
 `[data-density="comfortable"]`, the same mechanism `--spacing` itself uses -
 just a different curve, so a control never drops below its own floor at
 either density. `density.test.ts` and `chrome-floors.test.ts` guard both
-halves of this: the former that the seven steps are declared with these
+halves of this: the former that the nine steps are declared with these
 values and none of them is expressed as a `calc(var(--spacing) * n)`, the
 latter that the chrome bands, interactive targets and icon classes across
 `app/src` actually use them.
@@ -1873,6 +1881,26 @@ header band, body below it.
   the height is a token and not an `h-8`: `TabStrip.tsx` and `DrawerPanel.tsx`
   cannot see each other, and `titlebar-height.test.ts` holds them together.
 
+- **A group inside a view is a `DrawerSection`, and a count is the muted inline
+  count.** The frame gave the four views one shape; the groups inside a view had
+  none. Services drew muted labels with a trailing plus, Variables drew a
+  chevron, an icon, a filled `Badge` count and a plus, and the collection rows
+  wrote the same fact as inline `(2)` text one click away from that badge - two
+  count idioms in one drawer. `DrawerSection` owns the shape (the padding, the
+  muted small type, the chevron, where the count sits, where the actions sit) and
+  the **badge idiom loses**: a count beside a group name is not a status and not a
+  control, it is the least important thing in the row, and a `Badge` gives it a
+  fill, a border, a 20px floor and the weight of a chip. `DrawerSectionCount` is
+  exported for a *row* to use the same idiom, which is how the collection tree
+  stays in step without gaining a section header - its panel band already says
+  "Collections", and a section of the same name inside it would be a double
+  heading.
+- **The section's ARIA stays at the call site.** Variables' headers are
+  `role="treeitem"` rows in a roving-tabindex tree and their "+" sits outside that
+  row on purpose (the tree has no create key, so the button is the drawer's own
+  tab stop). `rowProps` and `activatorProps` are spread through rather than
+  owned, so the primitive never has to know about the tree. Guard:
+  `DrawerSection.test.tsx`.
 - **The frame owns header padding; the body is flush.** Rows run edge to edge -
   the sidebar convention, and it recovers the ~32px of row width the old inset
   cost. Rows bring their own internal padding.
@@ -2578,6 +2606,51 @@ background refetch, and covering still-valid content with a full-pane error is
 its own regression.
 
 Sentence case for titles, everywhere.
+
+### Error text has three levels, and one component each
+
+| Level | What it is | Component |
+|-------|------------|-----------|
+| Field | One control refused one value | `FieldError` |
+| Block | A condition about the form or the pane, which may stack with others | `Callout` |
+| Pane | The thing you came to look at did not load | `ErrorState` |
+
+Field-level messages were hand-written before, in `text-sm`, `text-xs` and `text-[11px]` - the
+import dialog carried all three - some with a leading glyph, some announced and most not.
+`FieldError` is one size (`text-xs`; the sizes were the order the code was written in, not a
+hierarchy) and always `role="alert"`, because a message that appears after a keystroke is a change
+nobody is looking at.
+
+`text-destructive-text` is not by itself an error message: it is also the right foreground for a
+failure count, a "not defined" chip and the Dock's "Not saved". `error-presentation.test.ts` draws
+the line where it can be drawn mechanically - the token in a literal class string on a `<p>` or a
+`<span>` - and every deliberate exception is named in that guard with what the red text is instead,
+rather than the rule being widened until it passes.
+
+### Tab strips: one trigger look, three band chromes
+
+The trigger has been shared for a while; the band around it was not. Seven call
+sites carried seven recipes - `mx-5 mt-3`, nothing at all, `w-full px-1`, `px-5`
+with a `border-b bg-panel`, `w-full px-4`, `bg-panel px-4`, and
+`px-3 py-1.5 border-b border-rule bg-muted/30` - so the same control read as a
+different piece of chrome in every pane. `TabsList` takes a **required**
+`variant`, and there is no default: a new strip says which of the three it is
+rather than inheriting whichever call site happened to be written first.
+
+| Variant | Classes | For |
+|---------|---------|-----|
+| `pane` | `border-b border-rule bg-panel px-4` | The strip *is* the pane's chrome band - dashboard, Collection Detail, the import dialog, the unified response viewer |
+| `inset` | `px-1` | A strip inside content that is already padded; the padding only keeps the first trigger's focus ring off the edge - the request strip, the load-test detail |
+| `bare` | none | The band belongs to a parent row that holds other things beside the tabs - the response pane's strip shares its row with the response's facts and its actions |
+
+`bare` is not a fourth look. It is `pane`, drawn by whoever owns the row; the
+list adds nothing so the two cannot paint two rules a pixel apart.
+
+The fill is `bg-panel` and the divider is `border-rule` with no surface class
+beside it - `bg-panel` is the `:root` default surface, the one place where the
+fallback value of `--rule` is the right answer (see "`border-rule`: let the
+surface pick the token"). Guard: `tabs.test.tsx`, both the rendered class lists
+and a scan asserting every call site in `app/src` declares a variant.
 
 ### Cards
 

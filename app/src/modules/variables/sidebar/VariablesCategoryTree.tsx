@@ -55,24 +55,14 @@ import {
 	RowActionsMenu,
 	RowContextMenu,
 	DrawerPanel,
+	DrawerSection,
 	ErrorState,
 	TruncatedText,
 	ListSkeleton,
 	type RowAction,
 } from "@/components/shared";
 import type { Environment } from "@/types";
-import {
-	Globe,
-	Layers,
-	ChevronDown,
-	ChevronRight,
-	Cloud,
-	Plus,
-	Trash2,
-	Loader2,
-	Edit2,
-	Copy,
-} from "lucide-react";
+import { Globe, Layers, Cloud, Plus, Trash2, Loader2, Edit2, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
@@ -375,52 +365,42 @@ export default function VariablesCategoryTree() {
 					</div>
 
 					{/* Environments Section (Medium Priority) */}
-					<div className="mb-4">
-						<div className="flex items-center">
-							{/* The header is a level-1 row: Right expands it, Left
-							    collapses it, Enter does either. `data-tree-toggle` and
-							    `data-tree-activate` are the same button because for a
-							    section header those two verbs are one. */}
-							<div
-								role="treeitem"
-								aria-selected={false}
-								tabIndex={-1}
-								aria-expanded={environmentsExpanded}
-								aria-level={1}
-								aria-posinset={2}
-								aria-setsize={SCOPE_SECTIONS}
-								aria-owns={environmentsExpanded ? environmentsGroupId : undefined}
-								data-tree-label="Environments"
-								className="focus-row flex min-w-0 flex-1 items-center"
-							>
-								<button
-									type="button"
-									tabIndex={-1}
-									data-tree-toggle
-									data-tree-activate
-									onClick={() => setEnvironmentsExpanded(!environmentsExpanded)}
-									className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
-								>
-									{environmentsExpanded ? (
-										<ChevronDown className="size-icon-sm" />
-									) : (
-										<ChevronRight className="size-icon-sm" />
-									)}
-									<Cloud className="size-icon-sm" />
-									<span>Environments</span>
-									<Badge
-										variant="secondary"
-										className="ml-auto text-xs px-1.5 py-0"
-									>
-										{isLoadingEnvironments || showEnvironmentsError
-											? "-"
-											: environments.length}
-									</Badge>
-								</button>
-							</div>
-							{/* Outside the row above, deliberately: the tree has no
-							    "create" key, so this is the sidebar's second tab stop
-							    rather than a control the keyboard cannot reach. */}
+					{/* The header is a level-1 row: Right expands it, Left collapses
+					    it, Enter does either. `data-tree-toggle` and
+					    `data-tree-activate` are the same button because for a section
+					    header those two verbs are one - and the "+" is deliberately
+					    outside that row: the tree has no "create" key, so it is the
+					    sidebar's own tab stop rather than a control the keyboard
+					    cannot reach. DrawerSection owns the shape and spreads both
+					    sets of attributes through; see its own comment. */}
+					<DrawerSection
+						title="Environments"
+						icon={Cloud}
+						count={
+							isLoadingEnvironments || showEnvironmentsError
+								? "-"
+								: environments.length
+						}
+						expanded={environmentsExpanded}
+						onToggle={() => setEnvironmentsExpanded(!environmentsExpanded)}
+						rowProps={{
+							role: "treeitem",
+							"aria-selected": false,
+							tabIndex: -1,
+							"aria-expanded": environmentsExpanded,
+							"aria-level": 1,
+							"aria-posinset": 2,
+							"aria-setsize": SCOPE_SECTIONS,
+							"aria-owns": environmentsExpanded ? environmentsGroupId : undefined,
+							"data-tree-label": "Environments",
+							className: "focus-row items-center",
+						}}
+						activatorProps={{
+							tabIndex: -1,
+							"data-tree-toggle": true,
+							"data-tree-activate": true,
+						}}
+						actions={
 							<TooltipIconButton
 								label="Add environment"
 								icon={<Plus className="size-icon-sm" />}
@@ -428,10 +408,9 @@ export default function VariablesCategoryTree() {
 									setEnvironmentsExpanded(true);
 									setCreatingEnvironment(true);
 								}}
-								className="mr-2"
 							/>
-						</div>
-
+						}
+					>
 						{environmentsExpanded && (
 							<div id={environmentsGroupId} role="group" className="mt-1">
 								{/* New Environment Input */}
@@ -681,48 +660,39 @@ export default function VariablesCategoryTree() {
 								)}
 							</div>
 						)}
-					</div>
+					</DrawerSection>
 
 					{/* Collections Section (Highest Priority) */}
-					<div>
-						<div
-							role="treeitem"
-							aria-selected={false}
-							tabIndex={-1}
-							aria-expanded={collectionsExpanded}
-							aria-level={1}
-							aria-posinset={3}
-							aria-setsize={SCOPE_SECTIONS}
-							aria-owns={collectionsExpanded ? collectionsGroupId : undefined}
-							data-tree-label="Collections"
-							className="focus-row flex items-center"
-						>
-							<button
-								type="button"
-								tabIndex={-1}
-								data-tree-toggle
-								data-tree-activate
-								onClick={() => setCollectionsExpanded(!collectionsExpanded)}
-								className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs tracking-wider text-muted-foreground hover:bg-accent"
-							>
-								{collectionsExpanded ? (
-									<ChevronDown className="size-icon-sm" />
-								) : (
-									<ChevronRight className="size-icon-sm" />
-								)}
-								<Layers className="size-icon-sm" />
-								<span>Collections</span>
-								<Badge variant="secondary" className="ml-auto text-xs px-1.5 py-0">
-									{/* A dash while loading *and* while failed: a literal 0 beside
-									    "Couldn't load collections" asserts a count the app does
-									    not have. Same reason loading already shows one. */}
-									{isLoadingCollections || showCollectionsError
-										? "-"
-										: collections.length}
-								</Badge>
-							</button>
-						</div>
-
+					{/* `count` takes a dash while loading *and* while failed: a literal
+					    0 beside "Couldn't load collections" asserts a count the app
+					    does not have. */}
+					<DrawerSection
+						title="Collections"
+						icon={Layers}
+						count={
+							isLoadingCollections || showCollectionsError ? "-" : collections.length
+						}
+						expanded={collectionsExpanded}
+						onToggle={() => setCollectionsExpanded(!collectionsExpanded)}
+						className="mb-0"
+						rowProps={{
+							role: "treeitem",
+							"aria-selected": false,
+							tabIndex: -1,
+							"aria-expanded": collectionsExpanded,
+							"aria-level": 1,
+							"aria-posinset": 3,
+							"aria-setsize": SCOPE_SECTIONS,
+							"aria-owns": collectionsExpanded ? collectionsGroupId : undefined,
+							"data-tree-label": "Collections",
+							className: "focus-row items-center",
+						}}
+						activatorProps={{
+							tabIndex: -1,
+							"data-tree-toggle": true,
+							"data-tree-activate": true,
+						}}
+					>
 						{collectionsExpanded && (
 							<div id={collectionsGroupId} role="group" className="mt-1">
 								{isLoadingCollections ? (
@@ -813,7 +783,7 @@ export default function VariablesCategoryTree() {
 								)}
 							</div>
 						)}
-					</div>
+					</DrawerSection>
 				</div>
 			</DrawerPanel>
 

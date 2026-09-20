@@ -15,7 +15,12 @@ import type { TreeEntity } from "./drop-position";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
 import { Button, IconSwap, Input } from "@/components/ui";
-import { RowActionsMenu, RowContextMenu, TruncatedText } from "@/components/shared";
+import {
+	RowActionsMenu,
+	RowContextMenu,
+	TruncatedText,
+	DrawerSectionCount,
+} from "@/components/shared";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
@@ -275,11 +280,11 @@ export default function CollectionItem({
 						aria-label={isExpanded ? "Collapse collection" : "Expand collection"}
 					>
 						{isDeleting ? (
-							<Loader2 className="w-[18px] h-[18px] animate-spin" />
+							<Loader2 className="size-icon animate-spin" />
 						) : isExpanded ? (
-							<ChevronDown className="w-[18px] h-[18px]" />
+							<ChevronDown className="size-icon" />
 						) : (
-							<ChevronRight className="w-[18px] h-[18px]" />
+							<ChevronRight className="size-icon" />
 						)}
 					</button>
 					<button
@@ -329,11 +334,14 @@ export default function CollectionItem({
 								>
 									{collection.name}
 								</TruncatedText>
-								{/* shrink-0: the count is short and load-bearing - the name
-							    yields first. */}
-								<span className="shrink-0 text-xs text-muted-foreground">
-									({requests.length + childCollections.length})
-								</span>
+								{/* The drawer's one count idiom, shared with the section
+								    headers in Services and Variables so a row and its
+								    section cannot drift into two idioms again (issue
+								    #1688 - Variables drew the same fact as a filled
+								    Badge one click away from this). */}
+								<DrawerSectionCount
+									value={requests.length + childCollections.length}
+								/>
 							</>
 						)}
 					</button>

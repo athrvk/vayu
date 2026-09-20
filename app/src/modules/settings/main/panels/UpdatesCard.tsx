@@ -41,6 +41,7 @@ import {
 import { useCopy } from "@/hooks/useCopy";
 import type { UpdateCheckResult } from "@/types/electron";
 import { appSetting } from "../app-settings";
+import { FieldError } from "@/components/shared";
 
 // Headings come from the catalogue so search cannot offer a name this panel
 // does not print - see `app-settings.ts`.
@@ -103,11 +104,7 @@ export function UpdatesCard() {
 			case "unavailable":
 				return <p className="text-sm text-muted-foreground">{result.detail}</p>;
 			case "error":
-				return (
-					<p className="text-sm text-destructive-text">
-						Couldn&apos;t check for updates. {result.message}
-					</p>
-				);
+				return <FieldError>Couldn&apos;t check for updates. {result.message}</FieldError>;
 			case "available": {
 				// Bound here so the optional survives narrowing into the handler.
 				const { version, strategy, releaseUrl, installCommand } = result;
