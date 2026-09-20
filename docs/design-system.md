@@ -2650,6 +2650,13 @@ showing ("Collections sidebar") because one landmark hosts six panels -
 collections, history, variables, services, trash and settings - and
 "Complementary" alone would not say which.
 
+**A drag does not persist per frame.** `PanelResizeHandle` paints the live width
+straight onto the `<aside>`'s inline `style.width` (it is the handle's own
+`parentElement`) once per animation frame, and calls `setWidth` - the write
+`layout-store` persists - exactly once, on `pointerup`. Keyboard nudges and the
+double-click reset are discrete key presses and clicks, not a per-frame stream,
+so they still call `setWidth` straight away.
+
 **The Drawer wraps no view in a scroll region.** Each view supplies its own
 `DrawerPanel` (`app/src/components/shared/DrawerPanel.tsx`), which owns the
 header - `h-[var(--tabstrip-height)]`, so it lines up with the TabStrip across
