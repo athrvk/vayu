@@ -24,6 +24,7 @@ import {
 	Maximize2,
 	Squircle,
 	Rows3,
+	PanelBottom,
 } from "lucide-react";
 import {
 	Button,
@@ -39,8 +40,9 @@ import {
 import { useElectronTheme, type ThemeSource } from "@/hooks/useElectronTheme";
 import { useAppearance } from "@/hooks/useAppearance";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { useClientSettingsStore } from "@/stores";
+import { useClientSettingsStore, useLayoutStore } from "@/stores";
 import { COLOR_SCHEMES } from "@/constants/color-schemes";
+import { RESPONSE_POSITIONS } from "@/constants/layout";
 import {
 	DEFAULT_UI_SCALE,
 	UI_DENSITIES,
@@ -71,6 +73,7 @@ const UI_FONT = appSetting("ui-font");
 const UI_SCALE = appSetting("ui-scale");
 const ROUNDEDNESS = appSetting("roundedness");
 const DENSITY = appSetting("density");
+const RESPONSE_POSITION = appSetting("response-position");
 const REDUCED_MOTION = appSetting("reduced-motion");
 
 export default function AppearancePanel() {
@@ -97,6 +100,8 @@ export default function AppearancePanel() {
 		density,
 		setDensity,
 	} = useAppearance();
+	const responsePosition = useLayoutStore((s) => s.responsePosition);
+	const setResponsePosition = useLayoutStore((s) => s.setResponsePosition);
 	const reducedMotion = useClientSettingsStore((s) => s.reducedMotion);
 	const osReducesMotion = usePrefersReducedMotion();
 	const setReducedMotion = useClientSettingsStore((s) => s.setReducedMotion);
@@ -362,6 +367,31 @@ export default function AppearancePanel() {
 							value={density}
 							onChange={setDensity}
 							columns="grid-cols-2"
+							align="start"
+						/>
+					</div>
+
+					{/*
+					 * In `layout-store` rather than the appearance hook: it is a
+					 * pane arrangement, kept with the split ratios it selects
+					 * between, and the Dock button and the chord write the same
+					 * field (issue #1711). Beside is the default and Auto an
+					 * explicit third choice, not the new normal.
+					 */}
+					<div data-setting-anchor={RESPONSE_POSITION.anchor}>
+						<Eyebrow className="mb-2 flex items-center gap-1.5">
+							<PanelBottom className="size-icon-sm" />
+							{RESPONSE_POSITION.label}
+						</Eyebrow>
+						<OptionButtons
+							options={RESPONSE_POSITIONS.map((option) => ({
+								value: option.value,
+								label: option.label,
+								description: option.description,
+							}))}
+							value={responsePosition}
+							onChange={setResponsePosition}
+							columns="grid-cols-3"
 							align="start"
 						/>
 					</div>

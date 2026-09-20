@@ -138,6 +138,23 @@ export const REQUEST_SPLIT_RATIO_MAX = 0.8;
 export const AUTO_RESPONSE_BELOW_MAX_WIDTH = 880;
 
 /**
+ * The Response position options as Settings > Appearance prints them, in
+ * display order. Beside first because it is the default; Auto last because
+ * it is the rule, not an arrangement. The Auto description names the
+ * threshold from the constant above so the sentence cannot drift from the
+ * number the hook applies.
+ */
+export const RESPONSE_POSITIONS = [
+	{ value: "beside", label: "Beside", description: "To the right of the request" },
+	{ value: "below", label: "Below", description: "Under the request" },
+	{
+		value: "auto",
+		label: "Auto",
+		description: `Below when the builder is narrower than ${AUTO_RESPONSE_BELOW_MAX_WIDTH}px`,
+	},
+] as const;
+
+/**
  * How far past the threshold the width has to move before `auto` flips back
  * (px). A divider or window drag that hovers at the threshold would otherwise
  * re-arrange the builder on every pixel, each flip remounting the split.
