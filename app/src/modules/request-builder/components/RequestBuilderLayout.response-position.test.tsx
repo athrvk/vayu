@@ -108,6 +108,25 @@ class RecordingResizeObserver {
 const observerOf = (root: Element | null) =>
 	observers.find((entry) => root !== null && entry.targets.includes(root));
 
+/**
+ * Frames requested and not yet run. The hook defers an observer-driven flip
+ * to the next frame (a flip inside the delivery is the browser's
+ * "ResizeObserver loop completed with undelivered notifications"), so a test
+ * that pushes a resize through the observer runs the frame itself.
+ */
+const frames: FrameRequestCallback[] = [];
+const flushFrames = () => {
+	const pending = frames.splice(0);
+	pending.forEach((frame) => frame(performance.now()));
+};
+
+/** One resize delivery to the layout's observer, and the frame that follows it. */
+const deliverResize = (observer: { callback: ResizeObserverCallback }) =>
+	act(() => {
+		observer.callback([], {} as ResizeObserver);
+		flushFrames();
+	});
+
 function renderAt(position: ResponsePosition, width: number) {
 	measuredWidth = width;
 	useLayoutStore.setState({ responsePosition: position, autoResponseArrangement: "beside" });
@@ -124,7 +143,12 @@ const arrangementOf = (group: HTMLElement) => ({
 
 beforeEach(() => {
 	observers.length = 0;
+	frames.length = 0;
 	setLayout.mockClear();
+	vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => frames.push(frame));
+	vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+		frames.splice(id - 1, 1);
+	});
 	vi.stubGlobal("ResizeObserver", RecordingResizeObserver);
 	vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
 		() =>
@@ -177,7 +201,7 @@ describe("RequestBuilderLayout response position", () => {
 		const { container } = renderAt("auto", WIDE);
 		const observer = observerOf(container.firstElementChild);
 		if (!observer) throw new Error("the layout is not observing its own width");
-		const fire = () => act(() => observer.callback([], {} as ResizeObserver));
+		const fire = () => deliverResize(observer);
 		const current = () =>
 			container.querySelector("[data-group]")?.getAttribute("data-response-position");
 
@@ -213,7 +237,7 @@ describe("RequestBuilderLayout response position", () => {
 		expect(setLayout).not.toHaveBeenCalled();
 
 		measuredWidth = NARROW;
-		act(() => observer.callback([], {} as ResizeObserver));
+		deliverResize(observer);
 
 		expect(arrangementOf(container.querySelector("[data-group]") as HTMLElement)).toEqual({
 			orientation: "vertical",
@@ -223,6 +247,30 @@ describe("RequestBuilderLayout response position", () => {
 		expect(getByTestId("response-viewer")).toBe(responseViewer);
 		expect(setLayout).toHaveBeenCalledTimes(1);
 		expect(setLayout).toHaveBeenCalledWith({ request: 70, response: 30 });
+	});
+
+	/*
+	 * Mutation check: call `measure` straight from the observer callback and
+	 * the "still beside" assertion fails.
+	 */
+	it("flips on the frame after the observer delivery, never inside it", () => {
+		const { container } = renderAt("auto", WIDE);
+		const observer = observerOf(container.firstElementChild);
+		if (!observer) throw new Error("the layout is not observing its own width");
+		const current = () =>
+			container.querySelector("[data-group]")?.getAttribute("data-response-position");
+
+		measuredWidth = NARROW;
+		act(() => observer.callback([], {} as ResizeObserver));
+		expect(current()).toBe("beside");
+		expect(frames).toHaveLength(1);
+
+		// A second delivery before the frame runs does not queue a second frame.
+		act(() => observer.callback([], {} as ResizeObserver));
+		expect(frames).toHaveLength(1);
+
+		act(() => flushFrames());
+		expect(current()).toBe("below");
 	});
 
 	it("writes auto's pick to the store, where the Dock button reads it", () => {
