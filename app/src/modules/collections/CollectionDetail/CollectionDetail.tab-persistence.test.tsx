@@ -55,13 +55,14 @@ vi.mock("@/queries/collections", () => ({
 let activeCollectionId = "c1";
 
 vi.mock("@/stores", () => ({
-	useTabsStore: () => ({
-		openTabs: [
-			{ id: "t1", type: "collection", entityId: "c1" },
-			{ id: "t2", type: "collection", entityId: "c2" },
-		],
-		activeTabId: activeCollectionId === "c1" ? "t1" : "t2",
-	}),
+	useTabsStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			openTabs: [
+				{ id: "t1", type: "collection", entityId: "c1" },
+				{ id: "t2", type: "collection", entityId: "c2" },
+			],
+			activeTabId: activeCollectionId === "c1" ? "t1" : "t2",
+		}),
 	useSessionStore: (selector: (s: unknown) => unknown) =>
 		selector({ setLastCollectionId: vi.fn() }),
 }));

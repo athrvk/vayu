@@ -149,9 +149,10 @@ export default function VariablesCategoryTree() {
 	 */
 	const inlineErrorClass = cn("justify-start px-3 py-2 text-xs", GROUP_CHILD_INSET);
 
-	const { selectedCategory, setSelectedCategory } = useVariablesStore();
-	const { openTab } = useTabsStore();
-	const { failSave } = useSaveStore();
+	const selectedCategory = useVariablesStore((s) => s.selectedCategory);
+	const setSelectedCategory = useVariablesStore((s) => s.setSelectedCategory);
+	const openTab = useTabsStore((s) => s.openTab);
+	const failSave = useSaveStore((s) => s.failSave);
 
 	const treeRef = useRef<HTMLDivElement>(null);
 	const treeFocus = useRovingTreeFocus(treeRef);

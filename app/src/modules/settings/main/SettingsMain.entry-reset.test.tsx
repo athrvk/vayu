@@ -98,29 +98,31 @@ vi.mock("@/modules/settings/settings-store", () => ({
 
 const showToast = vi.fn();
 vi.mock("@/stores", () => ({
-	useEngineStore: () => ({
-		engineStatus: "connected",
-		pendingRestart: false,
-		restartRequiredKeys: [],
-		addRestartRequiredKey: vi.fn(),
-		clearRestartRequired: vi.fn(),
-	}),
+	useEngineStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			engineStatus: "connected",
+			pendingRestart: false,
+			restartRequiredKeys: [],
+			addRestartRequiredKey: vi.fn(),
+			clearRestartRequired: vi.fn(),
+		}),
 	useToastStore: (selector: (s: { showToast: typeof showToast }) => unknown) =>
 		selector({ showToast }),
 }));
 
 vi.mock("@/stores/save-store", () => ({
-	useSaveStore: () => ({
-		startSaving: vi.fn(),
-		completeSaveThenIdle: vi.fn(),
-		failSave: vi.fn(),
-		setStatus: vi.fn(),
-		markPendingSave: vi.fn(),
-		registerContext: vi.fn(),
-		unregisterContext: vi.fn(),
-		setActiveContext: vi.fn(),
-		updateContext: vi.fn(),
-	}),
+	useSaveStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			startSaving: vi.fn(),
+			completeSaveThenIdle: vi.fn(),
+			failSave: vi.fn(),
+			setStatus: vi.fn(),
+			markPendingSave: vi.fn(),
+			registerContext: vi.fn(),
+			unregisterContext: vi.fn(),
+			setActiveContext: vi.fn(),
+			updateContext: vi.fn(),
+		}),
 }));
 
 function renderSettings() {

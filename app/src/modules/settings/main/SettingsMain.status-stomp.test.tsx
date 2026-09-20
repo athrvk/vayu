@@ -60,18 +60,20 @@ vi.mock("@/queries", () => ({
 vi.mock("./panels/ClientCertificatesCard", () => ({ ClientCertificatesCard: () => null }));
 
 vi.mock("@/modules/settings/settings-store", () => ({
-	useSettingsStore: () => ({ selectedCategory: "network_performance", restartRequiredKeys: [] }),
+	useSettingsStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({ selectedCategory: "network_performance", restartRequiredKeys: [] }),
 }));
 
 const showToast = vi.fn();
 vi.mock("@/stores", () => ({
-	useEngineStore: () => ({
-		engineStatus: "connected",
-		pendingRestart: false,
-		restartRequiredKeys: [],
-		addRestartRequiredKey: vi.fn(),
-		clearRestartRequired: vi.fn(),
-	}),
+	useEngineStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			engineStatus: "connected",
+			pendingRestart: false,
+			restartRequiredKeys: [],
+			addRestartRequiredKey: vi.fn(),
+			clearRestartRequired: vi.fn(),
+		}),
 	// The panel toasts the edits a category-switch flush had to drop.
 	useToastStore: (selector: (s: { showToast: typeof showToast }) => unknown) =>
 		selector({ showToast }),

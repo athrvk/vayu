@@ -72,7 +72,7 @@ interface DesignRunViewProps {
 export default function DesignRunView({ run }: DesignRunViewProps) {
 	const { executeRequest: engineExecuteRequest, composeRequest: engineComposeRequest } =
 		useEngine();
-	const { activeEnvironmentId } = useSessionStore();
+	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
 	const [showSaveDialog, setShowSaveDialog] = useState(false);

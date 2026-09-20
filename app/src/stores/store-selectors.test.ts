@@ -77,7 +77,12 @@ function scan(): Finding[] {
 			const site = `${posixFile}:${at + 1}`;
 			if (ALLOWLIST.has(site)) return;
 			if (NO_SELECTOR.test(line)) {
-				findings.push({ file: posixFile, line: at + 1, kind: "no-selector", text: line.trim() });
+				findings.push({
+					file: posixFile,
+					line: at + 1,
+					kind: "no-selector",
+					text: line.trim(),
+				});
 			} else if (OBJECT_SELECTOR.test(line)) {
 				findings.push({
 					file: posixFile,
@@ -86,7 +91,12 @@ function scan(): Finding[] {
 					text: line.trim(),
 				});
 			} else if (DERIVED_ARRAY.test(line)) {
-				findings.push({ file: posixFile, line: at + 1, kind: "derived-array", text: line.trim() });
+				findings.push({
+					file: posixFile,
+					line: at + 1,
+					kind: "derived-array",
+					text: line.trim(),
+				});
 			}
 		});
 	}
@@ -121,9 +131,10 @@ describe("store subscriptions", () => {
 			const [file, lineStr] = site.split(":");
 			const lines = readFileSync(join(srcRoot, file), "utf8").split(/\r?\n/);
 			const text = lines[Number(lineStr) - 1] ?? "";
-			expect(text, `${site} is allowlisted but no longer holds a Store() call - remove it`).toMatch(
-				/Store\(/
-			);
+			expect(
+				text,
+				`${site} is allowlisted but no longer holds a Store() call - remove it`
+			).toMatch(/Store\(/);
 		}
 	});
 });

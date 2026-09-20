@@ -169,7 +169,9 @@ function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: 
 export default function InboxView() {
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
-	const { openTabs, activeTabId, openTab } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const openTab = useTabsStore((s) => s.openTab);
 	const { data: inboxes = [], isError, error, refetch } = useInboxesQuery();
 	// Which capture, and of which inbox: ids are per-inbox, so a bare number
 	// carried across a switch can select a row in the inbox switched *to*.

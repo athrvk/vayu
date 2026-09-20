@@ -44,11 +44,12 @@ vi.mock("@/queries/collections", () => ({
 }));
 
 vi.mock("@/stores", () => ({
-	useTabsStore: () => ({
-		openTabs: [{ id: "t1", type: "collection", entityId: activeCollectionId }],
-		activeTabId: "t1",
-		openTab,
-	}),
+	useTabsStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			openTabs: [{ id: "t1", type: "collection", entityId: activeCollectionId }],
+			activeTabId: "t1",
+			openTab,
+		}),
 	useSessionStore: (selector: (s: unknown) => unknown) =>
 		selector({ setLastCollectionId: vi.fn() }),
 }));

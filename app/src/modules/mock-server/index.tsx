@@ -44,7 +44,9 @@ import { formatTime } from "@/lib/format-time";
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
-	const { openTabs, activeTabId, openTab } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const openTab = useTabsStore((s) => s.openTab);
 	// A mock is started from a collection's header, so the way out of this
 	// state is the Collections drawer - the same place the header lives.
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);

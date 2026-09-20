@@ -183,21 +183,22 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 }
 
 export default function SettingsMain() {
-	const { selectedCategory, highlightedKey } = useSettingsStore();
-	const { pendingRestart, restartRequiredKeys, addRestartRequiredKey, clearRestartRequired } =
-		useEngineStore();
+	const selectedCategory = useSettingsStore((s) => s.selectedCategory);
+	const highlightedKey = useSettingsStore((s) => s.highlightedKey);
+	const pendingRestart = useEngineStore((s) => s.pendingRestart);
+	const restartRequiredKeys = useEngineStore((s) => s.restartRequiredKeys);
+	const addRestartRequiredKey = useEngineStore((s) => s.addRestartRequiredKey);
+	const clearRestartRequired = useEngineStore((s) => s.clearRestartRequired);
 	const showToast = useToastStore((s) => s.showToast);
-	const {
-		startSaving,
-		completeSaveThenIdle,
-		failSave,
-		setStatus,
-		markPendingSave,
-		registerContext,
-		unregisterContext,
-		setActiveContext,
-		updateContext,
-	} = useSaveStore();
+	const startSaving = useSaveStore((s) => s.startSaving);
+	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
+	const failSave = useSaveStore((s) => s.failSave);
+	const setStatus = useSaveStore((s) => s.setStatus);
+	const markPendingSave = useSaveStore((s) => s.markPendingSave);
+	const registerContext = useSaveStore((s) => s.registerContext);
+	const unregisterContext = useSaveStore((s) => s.unregisterContext);
+	const setActiveContext = useSaveStore((s) => s.setActiveContext);
+	const updateContext = useSaveStore((s) => s.updateContext);
 	const { data: configResponse, isLoading, error } = useConfigQuery();
 	const updateConfigMutation = useUpdateConfigMutation();
 

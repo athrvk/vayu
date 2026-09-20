@@ -51,18 +51,20 @@ vi.mock("@/queries", () => ({
 }));
 
 vi.mock("@/modules/settings/settings-store", () => ({
-	useSettingsStore: () => ({ selectedCategory: "network", restartRequiredKeys: [] }),
+	useSettingsStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({ selectedCategory: "network", restartRequiredKeys: [] }),
 }));
 
 const showToast = vi.fn();
 vi.mock("@/stores", () => ({
-	useEngineStore: () => ({
-		engineStatus: "connected",
-		pendingRestart: false,
-		restartRequiredKeys: [],
-		addRestartRequiredKey: vi.fn(),
-		clearRestartRequired: vi.fn(),
-	}),
+	useEngineStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			engineStatus: "connected",
+			pendingRestart: false,
+			restartRequiredKeys: [],
+			addRestartRequiredKey: vi.fn(),
+			clearRestartRequired: vi.fn(),
+		}),
 	// The panel toasts the edits a category-switch flush had to drop.
 	useToastStore: (selector: (s: { showToast: typeof showToast }) => unknown) =>
 		selector({ showToast }),
@@ -71,17 +73,18 @@ vi.mock("@/stores", () => ({
 vi.mock("@/stores/save-store", () => ({
 	// SettingsMain destructures nine members; a partial mock throws on the first
 	// one it calls, which is easy to mistake for a defect in the component.
-	useSaveStore: () => ({
-		startSaving: vi.fn(),
-		completeSaveThenIdle: vi.fn(),
-		failSave: vi.fn(),
-		setStatus: vi.fn(),
-		markPendingSave: vi.fn(),
-		registerContext: vi.fn(),
-		unregisterContext: vi.fn(),
-		setActiveContext: vi.fn(),
-		updateContext: vi.fn(),
-	}),
+	useSaveStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			startSaving: vi.fn(),
+			completeSaveThenIdle: vi.fn(),
+			failSave: vi.fn(),
+			setStatus: vi.fn(),
+			markPendingSave: vi.fn(),
+			registerContext: vi.fn(),
+			unregisterContext: vi.fn(),
+			setActiveContext: vi.fn(),
+			updateContext: vi.fn(),
+		}),
 }));
 
 function renderSettings() {

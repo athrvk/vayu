@@ -28,7 +28,7 @@ import { LauncherSkeleton } from "./LauncherSkeleton";
 
 export default function WelcomeScreen() {
 	const openImport = useImportModalStore((s) => s.open);
-	const { openTab } = useTabsStore();
+	const openTab = useTabsStore((s) => s.openTab);
 	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
 	// The flow itself lives in `useNewRequest`, shared with the command palette's

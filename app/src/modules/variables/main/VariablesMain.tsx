@@ -23,7 +23,7 @@ import { Braces } from "lucide-react";
 import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 
 export default function VariablesMain() {
-	const { selectedCategory } = useVariablesStore();
+	const selectedCategory = useVariablesStore((s) => s.selectedCategory);
 	// isLoading matters here, not just the data. Both queries default to `[]`,
 	// so a category selected from a previous session resolved to `undefined`
 	// while its query was still in flight and the screen announced "not found"
