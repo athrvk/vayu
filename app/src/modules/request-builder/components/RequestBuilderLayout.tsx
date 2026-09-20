@@ -8,8 +8,10 @@
 /**
  * RequestBuilderLayout Component
  *
- * Internal layout component that uses ResizablePanelGroup for the vertical split between
- * request editor (left) and response viewer (right).
+ * Internal layout component that uses ResizablePanelGroup for the split between
+ * the request editor and the response viewer - the response beside the request
+ * or below it, per the `responsePosition` setting (issue #1711; `auto` is
+ * resolved by `useResolvedResponsePosition` from this component's own width).
  *
  * Also handles the send shortcuts (Cmd/Ctrl+Enter, and Cmd/Ctrl+Shift+Enter for
  * a load test).
@@ -19,10 +21,13 @@
  */
 
 import { useCallback, useEffect, useRef } from "react";
+import { useGroupRef } from "react-resizable-panels";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
 import { useRequestBuilderContext } from "../context";
+import { useResolvedResponsePosition } from "../hooks/useResolvedResponsePosition";
 import { SEND_CHORD, LOAD_TEST_CHORD, matchesChord } from "@/constants/shortcuts";
+import { DEFAULT_REQUEST_SPLIT_RATIO, STACKED_PANE_MIN_HEIGHT } from "@/constants/layout";
 import { ownsEnterKey } from "@/lib/keyboard";
 import { isModalOpen } from "@/lib/modal";
 import { canSendRequest } from "../utils/send-gate";
@@ -34,23 +39,64 @@ import ResponseAnnouncer from "./ResponseAnnouncer";
 import ResponseViewer from "./ResponseViewer";
 import ExternalChangeNotice from "./ExternalChangeNotice";
 
+/** A 0-1 share as the percentage string the panel library wants, without float noise. */
+const percent = (share: number) => `${Math.round(share * 10000) / 100}%`;
+
 export default function RequestBuilderLayout() {
 	const { request, isExecuting, isStreaming, executeRequest, startLoadTest, canStartLoadTest } =
 		useRequestBuilderContext();
 
-	const { requestSplitRatio, setRequestSplitRatio } = useLayoutStore();
+	const containerRef = useRef<HTMLDivElement>(null);
+	const arrangement = useResolvedResponsePosition(containerRef);
+	const requestSplitRatio = useLayoutStore((s) =>
+		arrangement === "beside" ? s.requestSplitRatioBeside : s.requestSplitRatioBelow
+	);
+	const setRequestSplitRatio = useLayoutStore((s) => s.setRequestSplitRatio);
+	const groupRef = useGroupRef();
 
 	// The collection chain plus this request's name - see `useRequestCrumbs`.
 	const crumbs = useRequestCrumbs();
 
+	/*
+	 * Into the ratio for the arrangement that was dragged. The arrangement is
+	 * captured with the ratio rather than read when the timer fires, so a flip
+	 * inside the debounce window cannot file a Beside drag under Below.
+	 */
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const debouncedSetRatio = useCallback(
 		(ratio: number) => {
 			if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-			saveTimeoutRef.current = setTimeout(() => setRequestSplitRatio(ratio), 200);
+			saveTimeoutRef.current = setTimeout(
+				() => setRequestSplitRatio(arrangement, ratio),
+				200
+			);
 		},
-		[setRequestSplitRatio]
+		[setRequestSplitRatio, arrangement]
 	);
+
+	/*
+	 * Double-click on the divider: back to an even split, for this arrangement
+	 * only. Written to the store *and* applied through the group's imperative
+	 * handle, because `defaultSize` is read once at mount and a ratio change
+	 * alone would not move a group that is already laid out.
+	 */
+	const resetSplit = useCallback(() => {
+		setRequestSplitRatio(arrangement, DEFAULT_REQUEST_SPLIT_RATIO);
+		groupRef.current?.setLayout({
+			request: DEFAULT_REQUEST_SPLIT_RATIO * 100,
+			response: (1 - DEFAULT_REQUEST_SPLIT_RATIO) * 100,
+		});
+	}, [setRequestSplitRatio, arrangement, groupRef]);
+
+	/*
+	 * Stacked minimums are pixels, side-by-side ones a share: 20% of a short
+	 * window is a response pane that cannot show a status line and one row of
+	 * body, where 20% of a wide window is still a usable column.
+	 */
+	const paneBounds =
+		arrangement === "beside"
+			? { minSize: "20%", maxSize: "80%" }
+			: { minSize: STACKED_PANE_MIN_HEIGHT };
 
 	/*
 	 * Send and Load Test from the keyboard.
@@ -117,7 +163,7 @@ export default function RequestBuilderLayout() {
 	}, [request.url, isExecuting, isStreaming, executeRequest, startLoadTest, canStartLoadTest]);
 
 	return (
-		<div className="h-full flex flex-col">
+		<div ref={containerRef} className="h-full flex flex-col">
 			{/*
 			 * Rendered unconditionally and outside the panels: the live region has
 			 * to exist before the response does, and it must survive the response
@@ -136,33 +182,44 @@ export default function RequestBuilderLayout() {
 			    MCP agent) has changed to a different value (issue #1436). */}
 			<ExternalChangeNotice />
 
-			{/* Main content area with resizable panels */}
+			{/*
+			 * Keyed on the arrangement: `defaultSize` is read once at mount, so
+			 * the remount is what re-applies the matching ratio when the
+			 * response moves from beside the request to below it. Only a user's
+			 * own drag is persisted (`isUserInteraction`) - the layout the
+			 * library reports on mount, or after a pixel minimum clamps a
+			 * stacked pane, is not a preference anyone expressed.
+			 */}
 			<ResizablePanelGroup
-				orientation="horizontal"
+				key={arrangement}
+				groupRef={groupRef}
+				orientation={arrangement === "beside" ? "horizontal" : "vertical"}
+				data-response-position={arrangement}
 				className="flex-1"
-				onLayoutChanged={(layout) => {
-					const first = Object.values(layout)[0];
+				onLayoutChanged={(layout, meta) => {
+					if (!meta.isUserInteraction) return;
+					const first = layout.request;
 					if (first !== undefined) debouncedSetRatio(first / 100);
 				}}
 			>
 				{/* Request Editor Panel */}
 				<ResizablePanel
+					id="request"
 					// react-resizable-panels v4 treats bare numbers as pixels - percentages must be strings
-					defaultSize={`${requestSplitRatio * 100}%`}
-					minSize="20%"
-					maxSize="80%"
+					defaultSize={percent(requestSplitRatio)}
+					{...paneBounds}
 					className="flex flex-col"
 				>
 					<RequestTabs />
 				</ResizablePanel>
 
-				<ResizableHandle withHandle />
+				<ResizableHandle withHandle onReset={resetSplit} />
 
 				{/* Response Viewer Panel */}
 				<ResizablePanel
-					defaultSize={`${(1 - requestSplitRatio) * 100}%`}
-					minSize="20%"
-					maxSize="80%"
+					id="response"
+					defaultSize={percent(1 - requestSplitRatio)}
+					{...paneBounds}
 					className="flex flex-col"
 				>
 					<ResponseViewer />
