@@ -66,6 +66,25 @@ export const TOGGLE_CONTEXT_BAR_CHORD: Chord = {
 	label: "Show or hide the context bar",
 };
 
+/**
+ * Move the response pane from beside the request to below it, and back
+ * (issue #1711). Acts on the active request tab only; the Dock button, the
+ * palette row and Settings > Appearance > Response position are the other
+ * three routes to the same store action.
+ *
+ * ⇧⌘B, by the same elimination `EDIT_VARIABLE_CHORD` records: Monaco binds
+ * A, F, G, I, K, L, M, O and R with Shift somewhere in the combination, this
+ * registry holds E, H, U, S, T, M and D, and the native menu takes ⇧⌘W, ⇧⌘Z
+ * and ⇧⌘V. B is free in all three, and it sits beside ⌘B, the drawer toggle,
+ * as the other chord that moves a pane.
+ */
+export const TOGGLE_RESPONSE_POSITION_CHORD: Chord = {
+	mod: true,
+	shift: true,
+	key: "B",
+	label: "Toggle response position",
+};
+
 /** Open Settings, the platform convention for a preferences window. */
 export const SETTINGS_CHORD: Chord = { mod: true, key: ",", label: "Open settings" };
 
@@ -327,6 +346,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 			CLOSE_TAB_CHORD,
 			TOGGLE_DRAWER_CHORD,
 			TOGGLE_CONTEXT_BAR_CHORD,
+			TOGGLE_RESPONSE_POSITION_CHORD,
 			SETTINGS_CHORD,
 			APP_MENU_CHORD,
 		],

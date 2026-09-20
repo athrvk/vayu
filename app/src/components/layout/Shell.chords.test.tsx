@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Shell from "./Shell";
 import { useTabsStore, useLayoutStore, useSaveStore } from "@/stores";
@@ -158,6 +158,25 @@ describe("the Shell's chord map", () => {
 		renderShell();
 		press({ key: "i" });
 		expect(useLayoutStore.getState().contextBarOpen).toBe(true);
+	});
+
+	it("toggles the response position on mod+shift+B, from a request tab only", () => {
+		renderShell();
+		press({ key: "B", shift: true });
+		expect(useLayoutStore.getState().responsePosition).toBe("below");
+		press({ key: "B", shift: true });
+		expect(useLayoutStore.getState().responsePosition).toBe("beside");
+
+		// Only a request tab has a response pane to move (#1711). Mutation check:
+		// drop the request-tab gate in the Shell's handler and this half fails.
+		act(() => {
+			useTabsStore.setState({
+				openTabs: [{ id: FIRST, type: "settings", entityId: null }],
+				activeTabId: FIRST,
+			});
+		});
+		press({ key: "B", shift: true });
+		expect(useLayoutStore.getState().responsePosition).toBe("beside");
 	});
 
 	it("opens the settings tab on mod+comma", () => {

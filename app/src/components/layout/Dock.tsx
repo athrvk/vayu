@@ -11,6 +11,7 @@ import {
 	useEngineStore,
 	useLayoutStore,
 	useSaveStore,
+	useTabsStore,
 	// Aliased: `EngineStatus` is the component below, and the type is what it
 	// switches on.
 	type EngineStatus as EngineConnectionStatus,
@@ -18,6 +19,7 @@ import {
 import { ICON_MOTION, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
+import { ResponsePositionButton } from "./ResponsePositionButton";
 
 /**
  * What each engine state is called in the strip.
@@ -310,6 +312,10 @@ function PendingRestartButton() {
 
 export function Dock() {
 	const saveStatus = useSaveStore((s) => s.status);
+	// The type alone, so the strip does not re-render on every tab-store write.
+	const activeTabType = useTabsStore(
+		(s) => s.openTabs.find((t) => t.id === s.activeTabId)?.type ?? null
+	);
 
 	// No TooltipProvider of its own. A bare nested one would reset this strip to
 	// Radix's 700ms default, ignoring the app-wide delay set in main.tsx.
@@ -321,17 +327,29 @@ export function Dock() {
 			 * `ui/toast.tsx`. Same value (2rem); the token is what keeps the two
 			 * from drifting apart.
 			 *
-			 * Status only, since #1615: the sidebar-view switchers moved to
-			 * `ActivityRail` and the context-bar toggle to `ContextRail`, both on a
-			 * window edge the OS never covers. Everything left here already has a
-			 * non-footer path when there is something to click (pending restart is
-			 * the banner in Settings, save status opens the tab it names), so the
-			 * system Dock covering this strip on macOS costs a glance, never a
-			 * click.
+			 * Status in the centre, per-tab view controls on the right. #1615
+			 * moved the sidebar-view switchers to `ActivityRail` and the
+			 * context-bar toggle to `ContextRail`, both on a window edge the OS
+			 * never covers, and left this strip status-only; #1711 amends that
+			 * to admit a right-aligned cluster of controls that act on the
+			 * *active tab's* view, rendered only while that tab is a request
+			 * tab. The rule that survives both is the one that matters: every
+			 * item here has a non-footer path (pending restart is the banner in
+			 * Settings, save status opens the tab it names, the response
+			 * position has its chord, its palette row and its Settings row), so
+			 * the system Dock covering this strip on macOS costs a glance, never
+			 * a click.
+			 *
+			 * The centre group stays centred in the whole strip, not in what the
+			 * right cluster leaves: the two gutters are equal `flex-1` boxes and
+			 * the right one holds the cluster at its end, so the connection light
+			 * does not shift when a request tab comes and goes.
 			 */}
 			<div className="flex items-center h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0">
+				<div className="flex-1" aria-hidden="true" />
+
 				{/* Ambient status */}
-				<div className="flex-1 flex items-center justify-center gap-4">
+				<div className="flex items-center justify-center gap-4">
 					<EngineStatus />
 
 					<RunningServices />
@@ -380,6 +398,11 @@ export function Dock() {
 					 * decoration, so it gets a passing colour.
 					 */}
 					<EngineVersion />
+				</div>
+
+				{/* Per-tab view controls - a request tab's only, for now. */}
+				<div className="flex-1 flex items-center justify-end gap-1">
+					{activeTabType === "request" && <ResponsePositionButton />}
 				</div>
 			</div>
 		</>
