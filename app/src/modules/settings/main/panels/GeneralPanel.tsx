@@ -26,6 +26,7 @@ import {
 	Eyebrow,
 	Kbd,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 } from "@/components/ui";
 import { modKey } from "@/lib/platform";
 import { useClientSettingsStore } from "@/stores";
@@ -320,7 +321,10 @@ export default function GeneralPanel() {
 						onClick={() => setConfirmReset(true)}
 						className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 					>
-						<RotateCcw className="size-icon mr-1.5" />
+						<RotateCcw
+							className="size-icon mr-1.5"
+							data-icon-motion={ICON_MOTION.spinBack}
+						/>
 						Reset to defaults
 					</Button>
 				</CardContent>

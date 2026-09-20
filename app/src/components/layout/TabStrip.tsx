@@ -52,9 +52,10 @@ import { formatChord } from "@/lib/platform";
 import { ScrollOnOverflow, RowContextMenu } from "@/components/shared";
 import {
 	DropdownMenu,
-	DropdownMenuTrigger,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuTrigger,
+	ICON_MOTION,
 } from "@/components/ui";
 import { fitTabs, makeTextMeasurer, naturalTabWidth } from "./tab-fit";
 // Labels and icons live beside this file, not in it: the command palette lists
@@ -221,7 +222,7 @@ function TabItem({
 					className="absolute right-0.5 flex size-target items-center justify-center rounded-md opacity-0 transition-[opacity,background-color,scale] duration-150 active:scale-[0.98] hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
 					data-active={isActive}
 				>
-					<X className="size-icon-sm" />
+					<X className="size-icon-sm" data-icon-motion={ICON_MOTION.rotate90} />
 				</span>
 			</div>
 		</RowContextMenu>
@@ -431,9 +432,9 @@ export function TabStrip() {
 				// (tab-focus.ts), the way the tree's hidden controls are reached.
 				data-tab-new
 				style={{ width: TAB_NEW_BUTTON_WIDTH }}
-				className="flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
+				className="group flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
 			>
-				<Plus className="w-3.5 h-3.5" />
+				<Plus className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.rotate90} />
 			</button>
 		</div>
 	);

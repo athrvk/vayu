@@ -1392,6 +1392,7 @@ One curve pair and one duration per tier, declared once as CSS custom properties
 | `--dur-panel-in` / `--dur-panel-out` | 180ms / 130ms | Dialog - the whole view dims |
 | `--dur-menu-in` / `--dur-menu-out` | 140ms / 100ms | Popover, DropdownMenu, Select, ContextMenu |
 | `--dur-tooltip-in` / `--dur-tooltip-out` | 100ms / 80ms | Tooltip - must read near-instant |
+| `--dur-icon-nudge` / `--dur-icon-play` | 200ms / 280ms | Icon motion - a hover nudge that unwinds, a one-shot sequence (x2 for two-phase) |
 
 **Dialog** (`.dialog-panel`/`.dialog-overlay`) consumes these directly in hand-written `@keyframes` - see the comment above them for why it does not use `tw-animate-css`'s stock utility stack (a centring hack it does not need, no overlay-sync problem the others don't have).
 
@@ -1404,6 +1405,8 @@ One curve pair and one duration per tier, declared once as CSS custom properties
 **`TabsContent`** (`tabs.tsx`) is the one place `.enter-fade` sits on an element that *does* carry a Radix `data-state` - `data-[state=inactive]:hidden` toggles the native `hidden` attribute rather than mounting/unmounting, so there is no conditional-render moment for `.enter-fade` to key off in the usual sense. `@starting-style` fires on any change of display type, `none` to something else included, which is exactly what a `hidden` toggle is - so the same class still applies, and re-fires on every switch back to an already-visited tab, not just the first. A force-mounted panel (`forceMount`, e.g. Collection Detail's four draft-preserving tabs) gets the same fade for the same reason: it never truly unmounts, only its `hidden` attribute flips.
 
 **`LabelSwap`** (`app/src/components/ui/label-swap.tsx`) is for a button/badge/status label that changes text in place - "Send" → "Sending" → "Send". It solves two problems together, both of which a naive `key={label}` + `.enter-fade` on the bare text gets wrong: the text fading is not the only thing that changes (the *box* resizes too, since "Sending" is wider than "Send", and Apple's version never moves the control around it), and the fade needs the DOM node to actually remount for `@starting-style` to fire again. The fix for the first is `TabLabel`'s (`tabs.tsx`) width-reservation trick generalised to more than one word: every candidate string in `states` sits in the same CSS grid cell, `invisible` and `h-0`, so the column is sized by the widest one while only the visible text contributes height; `aria-hidden="true"` on those twins keeps a screen reader from hearing every candidate read out. The fix for the second is `key={label}` on the live span, which remounts it - and therefore replays `.enter-fade` - every time `label` changes. `states` must be the finite, enumerable set the caller already knows; it is not inferred by watching `label` over renders (that would start too narrow and still jump the first time a wider state appears), and a data-derived label (a count, a status string from a payload) has no fixed "widest" to reserve, so `LabelSwap` is the wrong fit for one.
+
+**`IconSwap`** (`app/src/components/ui/icon-swap.tsx`) is the same mechanism for a glyph instead of a word - Copy → Check, Eye → EyeOff, Play → Square, Folder → FolderOpen. Every icon in the `icons` map renders into one grid cell, the reserve twins `invisible h-0` and `aria-hidden` (every one of them, the live state's included, so the box is the same size whichever state is showing), and `key={state}` on the live cell remounts it so `.enter-fade` replays. Two glyphs of the same nominal size are still not the same width of ink, and a pair where one carries a `mr-1.5` is enough to shift the label beside it, which is what the reservation prevents. It is a *different mechanism* from `data-icon-motion` (Icon motion, below), not a variant of it: a motion animates one glyph that stays itself and is triggered by its owner's hover, a swap crossfades between two glyphs and is triggered by state. `IconSwap` puts nothing of its own on the nodes it is handed, so an icon can do both. Entry only, for `.enter-fade`'s documented reason, and a state that flips back inside one fade duration reads as a flicker rather than a crossfade - the accepted cost of staying JS-free.
 
 **`CollapsibleContent`** (`app/src/components/ui/collapsible.tsx`) is the one disclosure that animates its own height, and it does it with `tw-animate-css`'s stock `collapsible-down`/`collapsible-up` keyed off Radix's `data-state`. Radix measures the open box into `--radix-collapsible-content-height` and those keyframes already read it, so there is nothing to hand-roll: the class list is `overflow-hidden` (what makes the height clip rather than squash) plus `data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up`. The curve is borrowed the Toast way, file-local, because the generated `--animate-collapsible-*` value reads `--tw-ease` ahead of its own `ease-out`: `[--tw-ease:var(--ease-enter)]` with a `data-[state=closed]` twin swapping in `--ease-exit`. The duration stays tw-animate-css's 200ms - the three tier tokens are all about chrome arriving over the view, and inline content pushing its siblings down is not that.
 
@@ -2768,6 +2771,48 @@ unreachable and undismissable.
 dismisses itself on a timer and always reports something the user just asked
 for, so interrupting what they are reading is the wrong trade.
 
+### Copy feedback
+
+A copy is acknowledged one of two ways, and which one is decided by the control, not by the surface:
+
+- **An icon button swaps its glyph**: `IconSwap` from Copy to Check, through `useCopy({ feedback: "icon" })`. No toast beside it - the swap already said it.
+- **A menu item or a text button toasts**: plain `useCopy()`, whose toast names the value that was copied, so a surface with several copy controls says which one it means.
+
+**One duration, `TIMING.COPY_RESET_MS`, and the hook owns the timer.** This used to be three - 1500ms in the MCP settings panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the response viewer and the snippet section - because each call site kept its own `copied` flag and its own `setTimeout`.
+
+**Every clipboard write goes through `useCopy`.** `navigator.clipboard.writeText` rejects on a denied permission, an unfocused document, or a platform with no clipboard behind the API, and a call site that awaits it with no catch simply never reaches the line that draws the feedback: the copy fails and the user's only evidence is pasting the previous clipboard contents somewhere else. `clipboard-single-writer.test.ts` holds the rule to two files - the hook, and `errors/ErrorBoundary.tsx`, which runs when the tree below it has already failed and no hook is reachable.
+
+**A failure toasts in both modes.** An icon button has no failure glyph, and a check that simply never appears is the same silence again.
+
+
+### Inline rename
+
+Every tree that renames a row in place does it through one hook,
+`app/src/hooks/useInlineRename.ts` - the collections tree, the variables
+sidebar's environments and the element list. The field is an ordinary `Input`
+at the row's height (`h-6 flex-1 text-sm`) replacing the row's label; the hook
+owns the behaviour:
+
+- **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a
+  bare `e.key === "Enter"`. An IME commits its composition buffer with an
+  ordinary Enter keydown, and `mod+Enter` is the app's Send chord - a field
+  acting on it renamed the row *and* sent the request from one press.
+  `commit-enter.test.ts` fails on any new bare comparison outside the
+  hand-rolled activation controls it names.
+- **Escape never commits.** The cancel unmounts the field and the blur that
+  follows is the one the cancel caused, so the hook closes the editor once and
+  that blur does nothing. A blur the *user* caused still commits.
+- **The name is trimmed, and an empty one cancels** rather than erasing a name.
+  The one exception is a field whose entity has an optional name (an element
+  row falls back to its kind label), which asks for `commitEmpty`.
+- **Focus returns to the row after a keyboard close, never after a blur.** Each
+  tree is one tab stop and the field replaces the row's only focusable control,
+  so an Escape that left focus on `<body>` would drop the user out of the tree.
+  After a blur, focus has already gone where the user put it.
+
+A surface that renames something in place uses the hook rather than a fourth
+copy of those four rules.
+
 ### Destructive Actions
 
 ```tsx
@@ -3241,6 +3286,125 @@ requestAnimationFrame loops, and the single `scrollIntoView` passes no
 that way: JS-driven motion is invisible to both rules and would need its own
 opt-out.
 
+### Icon motion
+
+An icon animates only as feedback for the action it is the affordance for, and
+the rules that do it are CSS, in the `Icon motion` block of
+`app/src/index.css`. There is no `motion`/framer-motion dependency and there
+will not be one: the lucide-animated registry ships a component per icon, each
+wrapping the glyph in a `div` that breaks `button-variants.ts`'s
+`[&_svg:not([class*='size-'])]:size-icon` sizing and its
+`[&_svg]:pointer-events-none`, and JS-driven motion is invisible to both
+collapse rules above. A transition or a keyframe animation is stopped by them
+for free.
+
+The policy, in five rules:
+
+1. **The owner triggers, never the icon.** A motion fires from the
+   `:hover` / `:focus-visible` of the glyph's own `[data-slot="button"]` or the
+   `.group` row that reveals it - never the SVG's own hover, which
+   `[&_svg]:pointer-events-none` has already taken away. `:focus-visible` is
+   not optional: a keyboard user gets the same feedback a mouse user does.
+2. **A glyph conveying a state never animates** - and that is a rule about
+   *placement*, not about which glyph it is. The six glyphs that usually carry
+   a state (`AlertTriangle`, `AlertCircle`, `CheckCircle2`, `XCircle`, `Clock`,
+   `Info`) animate nowhere they are the message: a status chip, a row's status
+   column, an inline warning, a panel heading. A state the user is being told
+   about is not an action they can take, and a success tick that grows under
+   the pointer invites a click on something that does nothing.
+
+   Where one of those same glyphs *is* the affordance for an action - inside a
+   `[data-slot="button"]`, a menu item, a tab trigger, a `RowAction`, or a
+   registry entry a rail draws as a button (`DRAWER_VIEWS`) - it animates like
+   any other action glyph. History's `Clock` in the Activity Rail is the case
+   this was refined for (#1707): it means "go to History", and it earned a
+   motion of its own rather than nothing. `icon-motion-status.test.ts` encodes
+   the distinction the same way, by the owner the element sits inside.
+3. **A state change animates once. Loops are reserved** for `Loader2` and live
+   indicators, where the loop is the message ("work is happening").
+4. **Every transform of an SVG child declares `transform-box: fill-box` and an
+   explicit `transform-origin`.** The initial reference box is the `view-box`,
+   so a percentage origin otherwise resolves against the whole 24x24 canvas
+   instead of the path, and a hinge lands nowhere near the hinge. Use the
+   standalone `rotate` / `translate` / `scale` properties, never `transform:`,
+   so they compose with any `transform` the element already carries - the same
+   reasoning as press feedback's `scale`.
+5. **Durations and eases come only from the `--dur-*` / `--ease-*` tokens**,
+   through `--icon-motion-duration`. That name is deliberately not
+   `--tw-duration`: a `.motion-menu` / `.motion-tooltip` ancestor sets that one
+   for `tw-animate-css`, and reading it here would let a menu's tier leak into
+   the glyph inside it. No `will-change` - a standing compositor hint on every
+   icon in a hovered row costs more than a 12px glyph's 200-560ms buys.
+
+A call site spells the name once, as `data-icon-motion` on the icon, and takes
+it from `ICON_MOTION` in `app/src/components/ui/icon-motion.ts` so a name the
+stylesheet does not implement is a compile error rather than a dead attribute.
+
+| Name | Icons | Motion | Duration | Leaves the frame |
+|------|-------|--------|----------|------------------|
+| `lid` | `Trash2` | Lid bar and handle hinge up off the can (`rotate: -12deg`, `translate: 0 -1px`) about the bar's left end | `--dur-icon-nudge` | yes |
+| `hands` | `Clock` | The hands polyline sweeps one full revolution about the dial centre (12,12); the dial stays | `--dur-icon-play` x2 | no |
+| `waves` | `Radio` | The four arcs travel outward and fade, inner pair then outer pair; the centre dot stays | `--dur-icon-play` x2 | yes |
+| `spread` | `Braces` | The two curves part by 1px each, outward, and close again | `--dur-icon-nudge` | no |
+| `tilt` | `FolderOpen` | Tips `-6deg` with a 4% grow about the ink's bottom-left corner (2,20) - a folder opening toward you | `--dur-icon-nudge` | yes |
+| `wiggle` | `Search` | `-8deg`, `+8deg`, back, once, about the lens centre (11,11) | `--dur-icon-play` | no |
+| `drop` | `Download` | The arrow (shaft and head) drops 2px into its tray; the tray stays | `--dur-icon-nudge` | no |
+| `lift` | `Upload` | The arrow rises 2px out of its tray; the tray stays | `--dur-icon-nudge` | yes |
+| `press` | `Save` | The whole glyph goes to 92% and back, a button pressed | `--dur-icon-play` | no |
+| `tilt-pin` | `Pin`, `PinOff` | Leans `-20deg` about the needle's point (12,22) and rights itself | `--dur-icon-play` | yes |
+| `ring` | `Bell` | A decaying swing (`+12deg`, `-10deg`, `+6deg`, 0) about the point it hangs from (12,2) | `--dur-icon-play` x2 | yes |
+| `bob` | `Info` | A 1.5px rise and settle, for a mark with no part to hinge and no direction of its own | `--dur-icon-play` | yes |
+| `part` | `Code2`, `Code` | The two chevrons part by 1px each. `spread`'s reading against a glyph lucide draws right-to-left, which is why it is not that name | `--dur-icon-nudge` | yes |
+| `tiles` | `LayoutDashboard` | The four tiles step 1px away from the frame's centre and back, diagonal pairs staggered | `--dur-icon-play` | no |
+| `sweep` | `Gauge` | The needle swings `-70deg` about its hub (12,14) and returns; the dial stays | `--dur-icon-play` x2 | no |
+| `plug-in` | `Plug` | 1.5px along the axis the prongs point, which is up | `--dur-icon-nudge` | yes |
+| `pulse` | `Network` | The three node rects swell 18% in turn, top node first; the connectors stay | `--dur-icon-play` x2 | no |
+| `trace` | `Activity` | The trace is stroked on from its left end, over a measured path length | `--dur-icon-play` x2 | no |
+| `stack` | `Database` | The top disc lifts 1.5px off the stack and settles back | `--dur-icon-nudge` | yes |
+| `spin-once` | `RefreshCw` | One 360deg turn (`@keyframes icon-spin-once`), so pointer-out does not unwind it backwards | `--dur-icon-play` | no |
+| `spin-back` | `RotateCcw` | The same turn counter-clockwise, for "put it back" rather than "do it again" | `--dur-icon-play` | no |
+| `flash` | `Zap` | Dims to 40% and back with a 6% grow - a strike, not a movement | `--dur-icon-play` | no |
+| `rotate-90` | `Plus`, `X` | A quarter turn; both glyphs are symmetric under it, so only the movement is visible | `--dur-icon-nudge` | no |
+| `nudge-x` | `ChevronRight`, `SlidersHorizontal` | 1px along the direction it points | `--dur-icon-nudge` | no |
+| `nudge-y` | `ChevronDown` | The same, vertically | `--dur-icon-nudge` | no |
+| `scale` | `Play` | The whole glyph grows 10% - the last resort for a mark that is one path with no reading of its own to act out | `--dur-icon-nudge` | no |
+
+A motion whose ink leaves the 24-unit viewBox sets `overflow: visible` on the
+`svg`, because an inline SVG clips to its viewBox by default and the travel is
+simply cut off at every call site. The column above is the list, and
+`icon-motion.test.tsx` holds it to the stylesheet - in both directions, so a
+`visible` on a motion that stays inside is caught too.
+
+**A draw-in is measured, never guessed.** `trace` strokes its path on with
+`stroke-dasharray` and `stroke-dashoffset`, and the dash has to be at least the
+path's own length or a second dash creeps in behind the first. Measure it with
+`getTotalLength()` in a real browser, round up, and write the measurement and
+where it came from in the rule's comment. Both properties are set *inside* the
+keyframes, never on the element: a dasharray parked on the glyph is a permanent
+property that happens to look solid today.
+
+**Two glyphs that read alike may still need two names.** `spread` (`Braces`)
+and `part` (`Code2`, `Code`) are the same idea - a pair of marks parting by a
+pixel - and cannot share a rule, because lucide draws `Braces` left-bracket
+first and both code glyphs right-chevron first. Reusing one name would have
+drawn the brackets *closing*, which looks like a considered choice in a diff.
+When the reading matches but the child order does not, the second name is the
+honest answer.
+
+A sequence that genuinely needs longer than its tier - `hands`, `waves`,
+`ring`, `sweep`, `pulse`, `trace` - multiplies the token (`calc(var(--dur-icon-play) * 2)`) rather than
+introducing a literal, and says why in the rule's comment. A stagger inside a
+sequence is keyframe percentages, never `animation-delay`: the reduced-motion
+rules collapse a duration, not a delay, so a delayed step would survive them as
+a pause before an instant jump.
+
+Lucide renders its `__iconNode` children in declared order with nothing
+prepended, which is what lets a rule address `> path:nth-child(4)`. That is a
+dependency on an upstream glyph's shape, so `icon-motion.test.ts` pins the
+index against the exported `__iconNode`: a redrawn `Trash2` fails a test
+instead of animating the wrong path. The same guard holds the four rules above
+to the stylesheet - trigger selectors, `fill-box`, token-only timing.
+
 ---
 
 ## Source Files
@@ -3259,5 +3423,6 @@ opt-out.
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
+| `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |
 | `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |

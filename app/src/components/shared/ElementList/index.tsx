@@ -44,6 +44,7 @@ import {
 	CommandItem,
 	CommandList,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 	Input,
 	Popover,
 	PopoverContent,
@@ -53,8 +54,8 @@ import {
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { generateId } from "@/lib/id";
 import { isBlankScriptElement, missingRequiredKeys } from "@/lib/elements";
-import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
+import { useInlineRename } from "@/hooks/useInlineRename";
 import { useLayoutStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
@@ -208,7 +209,6 @@ function ElementRow({
 
 	const [open, setOpen] = useState(isNew);
 	const [renaming, setRenaming] = useState(false);
-	const [nameDraft, setNameDraft] = useState(element.name ?? "");
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	// Flipped by `startRename`, consumed by `RowActionsMenu`'s
 	// `onCloseAutoFocus` below - not a `setTimeout`. `onSelect` fires while
@@ -227,11 +227,21 @@ function ElementRow({
 	const startRename = () => {
 		pendingRenameRef.current = true;
 	};
-	const commitRename = () => {
-		const trimmed = nameDraft.trim();
-		onUpdate({ ...element, name: trimmed.length > 0 ? trimmed : undefined });
-		setRenaming(false);
-	};
+	/**
+	 * `commitEmpty`: an element's name is optional, and the row falls back to the
+	 * kind label without one - so clearing the field is how a user drops a custom
+	 * name, not an edit they abandoned.
+	 */
+	const rename = useInlineRename({
+		active: renaming,
+		initialValue: element.name ?? "",
+		commitEmpty: true,
+		onCommit: (name) => {
+			onUpdate({ ...element, name: name.length > 0 ? name : undefined });
+			setRenaming(false);
+		},
+		onCancel: () => setRenaming(false),
+	});
 
 	const handleDelete = () => {
 		if (isElementBlank(element)) onRemove();
@@ -243,7 +253,13 @@ function ElementRow({
 		{ label: "Move up", icon: ArrowUp, onSelect: () => onMove(-1), disabled: isFirst },
 		{ label: "Move down", icon: ArrowDown, onSelect: () => onMove(1), disabled: isLast },
 		{ label: "Duplicate", icon: Copy, onSelect: onDuplicate },
-		{ label: "Delete", icon: Trash2, onSelect: handleDelete, destructive: true },
+		{
+			label: "Delete",
+			icon: Trash2,
+			iconMotion: ICON_MOTION.lid,
+			onSelect: handleDelete,
+			destructive: true,
+		},
 	];
 
 	const handleRowKeyDown = (e: React.KeyboardEvent) => {
@@ -291,20 +307,9 @@ function ElementRow({
 					{renaming ? (
 						<Input
 							autoFocus
-							value={nameDraft}
+							{...rename.inputProps}
 							placeholder={label}
 							className="h-6 flex-1"
-							onChange={(e) => setNameDraft(e.target.value)}
-							onBlur={commitRename}
-							onKeyDown={(e) => {
-								if (isCommitEnter(e)) {
-									e.preventDefault();
-									commitRename();
-								} else if (e.key === "Escape") {
-									e.preventDefault();
-									setRenaming(false);
-								}
-							}}
 						/>
 					) : (
 						<button
@@ -386,7 +391,8 @@ function ElementRow({
 							// itself; landing it on the trigger first just to lose it
 							// again a render later would flash focus across two controls.
 							e.preventDefault();
-							setNameDraft(element.name ?? "");
+							// The draft seeds itself from `element.name` as the field
+							// opens; see `useInlineRename`.
 							setRenaming(true);
 						}}
 					/>

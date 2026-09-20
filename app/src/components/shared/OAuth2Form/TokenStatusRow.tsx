@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
-import { Button, TooltipIconButton } from "@/components/ui";
+import { Button, IconSwap, TooltipIconButton } from "@/components/ui";
 import { ApiError } from "@/services/http-client";
 import {
 	useOAuth2TokenStatusQuery,
@@ -186,11 +186,13 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							aria-pressed={revealed}
 							onClick={() => setRevealed((v) => !v)}
 							icon={
-								revealed ? (
-									<EyeOff className="w-3.5 h-3.5" />
-								) : (
-									<Eye className="w-3.5 h-3.5" />
-								)
+								<IconSwap
+									state={revealed ? "revealed" : "hidden"}
+									icons={{
+										hidden: <Eye className="w-3.5 h-3.5" />,
+										revealed: <EyeOff className="w-3.5 h-3.5" />,
+									}}
+								/>
 							}
 						/>
 					)}

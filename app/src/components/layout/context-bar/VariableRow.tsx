@@ -20,6 +20,7 @@ import { Input, SecretInput } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import type { ReactNode } from "react";
 import type { ResolvedVariable } from "@/types";
+import { isCommitEnter } from "@/lib/keyboard";
 
 interface VariableRowProps {
 	name: string;
@@ -80,7 +81,10 @@ export function VariableRow({ name, resolved, marker, onCommit }: VariableRowPro
 					className="h-7 text-xs font-mono"
 					onBlur={(e) => onCommit(e.target)}
 					onKeyDown={(e) => {
-						if (e.key === "Enter") {
+						// `isCommitEnter`, not a bare Enter (#939, #935): the blur below
+						// is what writes the value, so an IME's composition commit would
+						// write a half-composed one and mod+Enter would write *and* send.
+						if (isCommitEnter(e)) {
 							e.currentTarget.blur();
 						} else if (e.key === "Escape") {
 							e.currentTarget.value = resolved.value;

@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
 import { useCollectionTreeContext } from "./context/CollectionTreeContext";
@@ -14,7 +14,7 @@ import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
-import { Button, Input } from "@/components/ui";
+import { Button, IconSwap, Input } from "@/components/ui";
 import {
 	RowActionsMenu,
 	RowContextMenu,
@@ -22,6 +22,8 @@ import {
 	DrawerSectionCount,
 } from "@/components/shared";
 import { cn } from "@/lib/utils";
+import { isCommitEnter } from "@/lib/keyboard";
+import { useInlineRename } from "@/hooks/useInlineRename";
 import { childInsetPx, rowInsetPx } from "@/constants/layout";
 
 /**
@@ -55,7 +57,6 @@ export default function CollectionItem({
 		expandedCollectionIds,
 		selectedCollectionId,
 		renamingId,
-		renameValue,
 		deletingCollectionId,
 		creatingSubfolder,
 		newSubCollectionName,
@@ -64,7 +65,6 @@ export default function CollectionItem({
 		getCollectionActions,
 		onCollectionClick,
 		onCollectionToggle,
-		onRenameChange,
 		onRenameSubmit,
 		onRenameCancel,
 		onStartRename,
@@ -75,9 +75,11 @@ export default function CollectionItem({
 	} = useCollectionTreeContext();
 
 	const isExpanded = expandedCollectionIds.has(collection.id);
-	// Open-folder glyph while expanded, so the folder itself echoes the chevron.
-	const FolderIcon = isExpanded ? FolderOpen : Folder;
 	const isSelected = selectedCollectionId === collection.id;
+	const folderIconClass = cn(
+		"size-icon shrink-0",
+		depth === 0 ? "text-primary" : "text-primary/70"
+	);
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
 	const isDeleting = deletingCollectionId === collection.id;
@@ -117,23 +119,15 @@ export default function CollectionItem({
 		creatingSubfolder !== collection.id;
 
 	const rowRef = useRef<HTMLDivElement>(null);
-	/**
-	 * Set when the rename field is about to be closed *from the keyboard*, so
-	 * focus can be put back on the row once React has unmounted the field.
-	 *
-	 * Without it F2, Escape drops the user out of the tree entirely: the field
-	 * disappears, focus falls to `<body>`, and the next Tab starts from the top
-	 * of the document. Blur deliberately does not set it - a blur means focus has
-	 * already gone somewhere the user chose, and yanking it back would be worse
-	 * than the bug.
-	 */
-	const returnFocusToRow = useRef(false);
 
-	useEffect(() => {
-		if (isRenaming || !returnFocusToRow.current) return;
-		returnFocusToRow.current = false;
-		rowRef.current?.focus();
-	}, [isRenaming]);
+	/** The rename contract, including the focus return - see `useInlineRename`. */
+	const rename = useInlineRename({
+		active: isRenaming,
+		initialValue: collection.name,
+		onCommit: (name) => onRenameSubmit(collection.id, name),
+		onCancel: onRenameCancel,
+		getRowElement: () => rowRef.current,
+	});
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
@@ -302,27 +296,20 @@ export default function CollectionItem({
 						className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 						disabled={isDeleting || isRenaming}
 					>
-						<FolderIcon
-							className={cn(
-								"size-icon shrink-0",
-								depth === 0 ? "text-primary" : "text-primary/70"
-							)}
+						{/* Open-folder glyph while expanded, so the folder itself
+						    echoes the chevron - crossfaded, since a tree row's
+						    expand is the one state change the eye is following. */}
+						<IconSwap
+							state={isExpanded ? "open" : "closed"}
+							icons={{
+								closed: <Folder className={folderIconClass} />,
+								open: <FolderOpen className={folderIconClass} />,
+							}}
 						/>
 						{isRenaming ? (
 							<Input
 								type="text"
-								value={renameValue}
-								onChange={(e) => onRenameChange(e.target.value)}
-								onKeyDown={(e) => {
-									if (e.key === "Enter") {
-										returnFocusToRow.current = true;
-										onRenameSubmit(collection.id);
-									} else if (e.key === "Escape") {
-										returnFocusToRow.current = true;
-										onRenameCancel();
-									}
-								}}
-								onBlur={() => onRenameSubmit(collection.id)}
+								{...rename.inputProps}
 								className="flex-1 h-6 text-sm"
 								autoFocus
 								onClick={(e) => e.stopPropagation()}
@@ -411,7 +398,11 @@ export default function CollectionItem({
 								value={newSubCollectionName}
 								onChange={(e) => onSubCollectionNameChange(e.target.value)}
 								onKeyDown={(e) => {
-									if (e.key === "Enter") onCreateSubfolder(collection.id);
+									// `isCommitEnter`, not a bare Enter (#939, #935): an
+									// IME commits its composition buffer with an
+									// ordinary Enter keydown, and mod+Enter is the
+									// Send chord, not this field's create.
+									if (isCommitEnter(e)) onCreateSubfolder(collection.id);
 									if (e.key === "Escape") onCancelSubfolder();
 								}}
 								placeholder="Folder name"

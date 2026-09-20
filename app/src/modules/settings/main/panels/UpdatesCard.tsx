@@ -35,8 +35,10 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
+	IconSwap,
 	LabelSwap,
 } from "@/components/ui";
+import { useCopy } from "@/hooks/useCopy";
 import type { UpdateCheckResult } from "@/types/electron";
 import { appSetting } from "../app-settings";
 import { FieldError } from "@/components/shared";
@@ -50,7 +52,7 @@ const APP_VERSION = typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ :
 export function UpdatesCard() {
 	const [checking, setChecking] = useState(false);
 	const [result, setResult] = useState<UpdateCheckResult | null>(null);
-	const [copied, setCopied] = useState(false);
+	const { copy, copied } = useCopy({ feedback: "icon" });
 
 	const api = window.electronAPI;
 
@@ -70,9 +72,7 @@ export function UpdatesCard() {
 	};
 
 	const copyInstallCommand = async (command: string) => {
-		await navigator.clipboard.writeText(command);
-		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
+		await copy(command, "Install command");
 	};
 
 	/**
@@ -131,11 +131,14 @@ export function UpdatesCard() {
 										size="sm"
 										onClick={() => void copyInstallCommand(installCommand)}
 									>
-										{copied ? (
-											<Check className="size-icon mr-1.5" />
-										) : (
-											<Copy className="size-icon mr-1.5" />
-										)}
+										<IconSwap
+											className="mr-1.5"
+											state={copied ? "copied" : "copy"}
+											icons={{
+												copy: <Copy className="size-icon" />,
+												copied: <Check className="size-icon" />,
+											}}
+										/>
 										<LabelSwap
 											label={copied ? "Copied" : "Copy install command"}
 											states={["Copy install command", "Copied"]}
