@@ -63,6 +63,7 @@ import { isDataVariableName } from "@/lib/variable-resolution";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import type { ResolvedVariable, VariableOrigin } from "@/types";
 import { Eyebrow } from "./eyebrow";
+import { Callout } from "@/components/shared/Callout";
 
 // Re-export ResolvedVariable as VariableInfo for backward compatibility
 export type { ResolvedVariable as VariableInfo };
@@ -844,15 +845,15 @@ export function VariablePopover({
 						 * an `off` badge on it, tells the reader to go and do the one
 						 * thing they have already done (issue #1083).
 						 */
-						<div className="text-sm text-destructive-text">
+						<Callout severity="blocking">
 							Defined, but every definition is switched off, so this token does not
 							resolve.
-						</div>
+						</Callout>
 					) : (
-						<div className="text-sm text-destructive-text">
+						<Callout severity="blocking">
 							Variable not defined. Define it in Globals, an Environment, or
 							Collection variables.
-						</div>
+						</Callout>
 					)}
 					{/*
 					 * Outside the branch chain, because "where could this have come

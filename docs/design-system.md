@@ -2710,9 +2710,10 @@ nobody is looking at.
 
 `text-destructive-text` is not by itself an error message: it is also the right foreground for a
 failure count, a "not defined" chip and the Dock's "Not saved". `error-presentation.test.ts` draws
-the line where it can be drawn mechanically - the token in a literal class string on a `<p>` or a
-`<span>` - and every deliberate exception is named in that guard with what the red text is instead,
-rather than the rule being widened until it passes.
+the line where it can be drawn mechanically - the token in a literal class string on the opening
+tag of a text-bearing element (`<p>`, `<span>`, `<div>`, `<small>`, `<label>`, a list item, a table
+cell, a heading) - and every deliberate exception is named in that guard with what the red text is
+instead, rather than the rule being widened until it passes.
 
 ### Tab strips: one trigger look, three band chromes
 

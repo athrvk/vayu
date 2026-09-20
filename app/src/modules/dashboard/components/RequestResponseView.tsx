@@ -14,7 +14,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { Clock, XCircle } from "lucide-react";
+import { XCircle } from "lucide-react";
 import type { RequestResponseViewProps } from "../types";
 import { InfoChip } from "./shared";
 import { formatPhaseDuration } from "@/components/shared/response-viewer/utils";
@@ -34,6 +34,7 @@ import {
 	CustomMetricsSummary,
 	ThresholdVerdict,
 	TestValidationSummary,
+	Callout,
 } from "@/components/shared";
 import { useRunSamplesQuery } from "@/queries/runs";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
@@ -368,17 +369,14 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 										>
 											{/* Slow Request Warning */}
 											{trace?.isSlow && (
-												<div className="flex items-center gap-2 text-xs bg-destructive/10 text-destructive-text p-2 rounded-md">
-													<Clock className="size-icon-sm" />
-													<span>
-														Slow request: {trace.totalMs?.toFixed(1)}ms
-														{trace.thresholdMs && (
-															<span className="text-muted-foreground ml-1">
-																(threshold: {trace.thresholdMs}ms)
-															</span>
-														)}
-													</span>
-												</div>
+												<Callout severity="warning" title="Slow request">
+													{trace.totalMs?.toFixed(1)}ms
+													{trace.thresholdMs && (
+														<span className="text-muted-foreground ml-1">
+															(threshold: {trace.thresholdMs}ms)
+														</span>
+													)}
+												</Callout>
 											)}
 
 											{/* The captured exchange (issue #174). These two blocks used

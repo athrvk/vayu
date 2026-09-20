@@ -22,9 +22,11 @@
  * thing it is right for: a failure count, a "Not saved" status, a metric that
  * is red because of what it says. Those are data in red, not a sentence about
  * what went wrong, and no scan can tell them apart. So the rule is narrowed to
- * the shape a message actually takes - the token on a `<p>` or a `<span>`
- * opening tag - and every site that is deliberately not a message is named
- * below with its reason, rather than the guard being widened until it passes.
+ * the shape a message actually takes - the token on the opening tag of a
+ * text-bearing element (`<p>`, `<span>`, `<div>`, `<small>`, `<label>`, a list
+ * item, a table cell, a heading) - and every site that is deliberately not a
+ * message is named below with its reason, rather than the guard being widened
+ * until it passes.
  * A new red sentence has to either use a primitive or argue itself onto this
  * list.
  *
@@ -72,7 +74,12 @@ const NOT_A_MESSAGE: Record<string, string> = {
 };
 
 /**
- * `<p className="… text-destructive-text …">` / `<span …>`, across newlines.
+ * `<p className="… text-destructive-text …">`, `<div …>` and the other text
+ * elements, across newlines. `<div>` is in the set since #1683's closing audit:
+ * five hand-rolled messages (a settings pane that failed to load, a variable
+ * table that failed to load, the editor's load failure, two token-state
+ * sentences in the variable popover, a slow-request warning) sat on a `<div>`
+ * and the `<p>`/`<span>`-only scan waved every one of them through.
  *
  * A *literal* class string only. The token also turns up inside `cn()` and
  * template ternaries that pick red or green from a boolean - a threshold
@@ -80,7 +87,8 @@ const NOT_A_MESSAGE: Record<string, string> = {
  * never a sentence about a failure. A conditional pair is what distinguishes
  * the two, so the regex simply does not look inside one.
  */
-const RED_TEXT_TAG = /<(p|span)\b[^>]*?className="[^"]*\btext-destructive-text\b[^"]*"[^>]*?>/g;
+const RED_TEXT_TAG =
+	/<(p|span|div|small|label|li|td|th|h[1-6])\b[^>]*?className="[^"]*\btext-destructive-text\b[^"]*"[^>]*?>/g;
 
 describe("error text has one presentation per level", () => {
 	const files = globSync("**/*.tsx", { cwd: srcRoot }).filter((f) => !f.includes(".test."));
