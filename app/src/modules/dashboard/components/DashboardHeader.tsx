@@ -11,6 +11,7 @@
  * Compact 52px single-row header with status, method, URL, config info, and stop button
  */
 
+import { memo } from "react";
 import { ArrowLeft } from "lucide-react";
 import { TooltipIconButton } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
@@ -25,7 +26,11 @@ function formatElapsed(ms: number): string {
 	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-export default function DashboardHeader({
+// memo'd (#1714): LoadTestDashboard re-renders on every metrics tick during a
+// run (up to 10 Hz), and this header's own props barely ever change. The
+// caller passes a stable onStop (useCallback) and a memoised configuration,
+// so the memo actually holds rather than just decorating the export.
+function DashboardHeader({
 	mode,
 	isStreaming,
 	isStopping,
@@ -35,7 +40,10 @@ export default function DashboardHeader({
 	elapsedDuration = 0,
 	configuration,
 }: DashboardHeaderProps) {
-	const { openTabs, activeTabId, openTab, closeTab } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const openTab = useTabsStore((s) => s.openTab);
+	const closeTab = useTabsStore((s) => s.closeTab);
 	const sourceRequestId = useDashboardStore((s) => s.sourceRequestId);
 
 	const canNavigateBack = sourceRequestId != null || openTabs.length > 1;
@@ -119,3 +127,5 @@ export default function DashboardHeader({
 		</div>
 	);
 }
+
+export default memo(DashboardHeader);

@@ -19,7 +19,7 @@
  * - RequestResponseView: Status codes, errors, timing breakdown
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardStore, useLayoutStore, useToastStore } from "@/stores";
 import { apiService, loadTestService } from "@/services";
 import { EmptyState, Callout, TabBreadcrumb } from "@/components/shared";
@@ -30,26 +30,24 @@ import type { DashboardView, DisplayMetrics } from "./types";
 
 export default function LoadTestDashboard() {
 	const showToast = useToastStore((state) => state.showToast);
-	const {
-		currentRunId,
-		mode,
-		isStreaming,
-		currentMetrics,
-		historicalMetrics,
-		finalReport,
-		activeView,
-		isStopping,
-		loadTestConfig,
-		requestInfo,
-		setActiveView,
-		stopRun,
-		setFinalReport,
-		setStopping,
-		// Written by the SSE layer on a connection failure and, until now, read
-		// by nothing - so a dead metrics stream looked like a run with no data.
-		error: streamError,
-		setError: setStreamError,
-	} = useDashboardStore();
+	const currentRunId = useDashboardStore((s) => s.currentRunId);
+	const mode = useDashboardStore((s) => s.mode);
+	const isStreaming = useDashboardStore((s) => s.isStreaming);
+	const currentMetrics = useDashboardStore((s) => s.currentMetrics);
+	const historicalMetrics = useDashboardStore((s) => s.historicalMetrics);
+	const finalReport = useDashboardStore((s) => s.finalReport);
+	const activeView = useDashboardStore((s) => s.activeView);
+	const isStopping = useDashboardStore((s) => s.isStopping);
+	const loadTestConfig = useDashboardStore((s) => s.loadTestConfig);
+	const requestInfo = useDashboardStore((s) => s.requestInfo);
+	const setActiveView = useDashboardStore((s) => s.setActiveView);
+	const stopRun = useDashboardStore((s) => s.stopRun);
+	const setFinalReport = useDashboardStore((s) => s.setFinalReport);
+	const setStopping = useDashboardStore((s) => s.setStopping);
+	// Written by the SSE layer on a connection failure and, until now, read
+	// by nothing - so a dead metrics stream looked like a run with no data.
+	const streamError = useDashboardStore((s) => s.error);
+	const setStreamError = useDashboardStore((s) => s.setError);
 
 	// Track whether we're loading the report
 	const [isLoadingReport, setIsLoadingReport] = useState(false);
@@ -203,7 +201,10 @@ export default function LoadTestDashboard() {
 		historicalMetrics.length,
 	]);
 
-	const handleStop = async () => {
+	// useCallback, not a plain arrow: this is DashboardHeader's onStop prop, and
+	// DashboardHeader is memo'd below - a fresh function identity every tick
+	// would defeat that memo the same way an inline object prop would (#1714).
+	const handleStop = useCallback(async () => {
 		if (currentRunId) {
 			setStopping(true);
 			try {
@@ -232,7 +233,7 @@ export default function LoadTestDashboard() {
 				setStopping(false);
 			}
 		}
-	};
+	}, [currentRunId, setStopping, stopRun, showToast]);
 
 	// Compute derived state
 	const lastHistoricalMetrics = useMemo(() => {
