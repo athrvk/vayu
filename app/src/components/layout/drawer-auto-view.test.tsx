@@ -91,7 +91,7 @@ describe("Shell sidebar auto-view effect", () => {
 			drawerWidth: 300,
 			contextBarOpen: false,
 			contextBarWidth: 400,
-			requestSplitRatio: 0.5,
+			responsePosition: "beside",
 		});
 	});
 

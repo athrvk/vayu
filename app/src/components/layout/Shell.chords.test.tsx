@@ -132,7 +132,7 @@ describe("the Shell's chord map", () => {
 			drawerWidth: 300,
 			contextBarOpen: false,
 			contextBarWidth: 400,
-			requestSplitRatio: 0.5,
+			responsePosition: "beside",
 		});
 	});
 

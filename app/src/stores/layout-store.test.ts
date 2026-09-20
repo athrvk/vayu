@@ -5,10 +5,11 @@
  * store at all, so `.persist.getOptions()` is undefined without a DOM.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { useLayoutStore } from "./layout-store";
+import { useLayoutStore, resolveResponseArrangement } from "./layout-store";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import {
 	CONTEXT_BAR_DEFAULT_COLLAPSED,
+	DEFAULT_REQUEST_SPLIT_RATIO,
 	PANEL_MIN_WIDTH,
 	PANEL_MAX_WIDTH,
 	DEFAULT_DRAWER_WIDTH,
@@ -16,6 +17,8 @@ import {
 	GRAPHQL_VARIABLES_MAX_SIZE,
 	GRAPHQL_VARIABLES_MIN_SIZE,
 	DEFAULT_SCRIPT_EDITOR_HEIGHT,
+	REQUEST_SPLIT_RATIO_MAX,
+	REQUEST_SPLIT_RATIO_MIN,
 	SCRIPT_EDITOR_MIN_HEIGHT,
 	SCRIPT_EDITOR_MAX_HEIGHT,
 } from "@/constants/layout";
@@ -91,8 +94,11 @@ describe("layout-store drawer width", () => {
 		});
 
 		it("still resets a skewed split ratio from v1", () => {
+			// Through the v6 branch too: the reset lands on the Beside ratio,
+			// which is the one the old single ratio became.
 			const migrated = migrate({ requestSplitRatio: 0.97 }, 1);
-			expect(migrated.requestSplitRatio).toBe(0.5);
+			expect(migrated.requestSplitRatioBeside).toBe(0.5);
+			expect(migrated.requestSplitRatio).toBeUndefined();
 		});
 	});
 
@@ -477,6 +483,145 @@ describe("layout-store script editor heights", () => {
 			);
 			expect(migrated.scriptEditorHeights).toEqual({ el_1: 400 });
 			expect(migrated.scriptEditorHeightDefault).toBe(400);
+		});
+	});
+});
+
+/**
+ * Where the response sits (issue #1711): Beside, Below, or Auto, with one split
+ * ratio per arrangement so a flip does not undo the drag before it.
+ */
+describe("layout-store response position", () => {
+	beforeEach(() => {
+		useLayoutStore.setState({
+			responsePosition: "beside",
+			autoResponseArrangement: "beside",
+			requestSplitRatioBeside: DEFAULT_REQUEST_SPLIT_RATIO,
+			requestSplitRatioBelow: DEFAULT_REQUEST_SPLIT_RATIO,
+		});
+	});
+
+	it("ships Beside, with both ratios even", () => {
+		// The initial state, not what `beforeEach` installs: Beside is what every
+		// existing user has and what the other tools default to, so a default
+		// that drifted to Auto would re-arrange the builder under all of them.
+		const initial = useLayoutStore.getInitialState();
+		expect(initial.responsePosition).toBe("beside");
+		expect(initial.requestSplitRatioBeside).toBe(DEFAULT_REQUEST_SPLIT_RATIO);
+		expect(initial.requestSplitRatioBelow).toBe(DEFAULT_REQUEST_SPLIT_RATIO);
+	});
+
+	it("toggles beside -> below -> beside", () => {
+		const { toggleResponsePosition } = useLayoutStore.getState();
+		toggleResponsePosition();
+		expect(useLayoutStore.getState().responsePosition).toBe("below");
+		toggleResponsePosition();
+		expect(useLayoutStore.getState().responsePosition).toBe("beside");
+	});
+
+	it("from auto, writes the opposite of what auto currently resolves to", () => {
+		// The user chose, so Auto is over: the result is an explicit
+		// arrangement, never `auto` again, and it is the one they are not
+		// looking at.
+		useLayoutStore.setState({ responsePosition: "auto", autoResponseArrangement: "below" });
+		useLayoutStore.getState().toggleResponsePosition();
+		expect(useLayoutStore.getState().responsePosition).toBe("beside");
+
+		useLayoutStore.setState({ responsePosition: "auto", autoResponseArrangement: "beside" });
+		useLayoutStore.getState().toggleResponsePosition();
+		expect(useLayoutStore.getState().responsePosition).toBe("below");
+	});
+
+	it("resolves the arrangement from the setting, or from auto's pick", () => {
+		expect(
+			resolveResponseArrangement({
+				responsePosition: "below",
+				autoResponseArrangement: "beside",
+			})
+		).toBe("below");
+		expect(
+			resolveResponseArrangement({
+				responsePosition: "auto",
+				autoResponseArrangement: "below",
+			})
+		).toBe("below");
+		expect(
+			resolveResponseArrangement({
+				responsePosition: "auto",
+				autoResponseArrangement: "beside",
+			})
+		).toBe("beside");
+	});
+
+	it("keeps one ratio per arrangement, each clamped", () => {
+		const { setRequestSplitRatio } = useLayoutStore.getState();
+		setRequestSplitRatio("beside", 0.3);
+		setRequestSplitRatio("below", 0.7);
+		expect(useLayoutStore.getState().requestSplitRatioBeside).toBe(0.3);
+		expect(useLayoutStore.getState().requestSplitRatioBelow).toBe(0.7);
+
+		setRequestSplitRatio("beside", 0.05);
+		setRequestSplitRatio("below", 0.99);
+		expect(useLayoutStore.getState().requestSplitRatioBeside).toBe(REQUEST_SPLIT_RATIO_MIN);
+		expect(useLayoutStore.getState().requestSplitRatioBelow).toBe(REQUEST_SPLIT_RATIO_MAX);
+	});
+
+	it("survives a restart - the setting and both ratios, but not auto's pick", () => {
+		useLayoutStore.getState().setResponsePosition("below");
+		useLayoutStore.getState().setRequestSplitRatio("beside", 0.3);
+		useLayoutStore.getState().setRequestSplitRatio("below", 0.6);
+		useLayoutStore.getState().setAutoResponseArrangement("below");
+
+		// Mutation check: drop any of the three from `partialize` and the choice
+		// lasts exactly until the next launch. The fourth is derived from a
+		// width that does not survive a relaunch, so persisting it would flash
+		// a stale arrangement on the first frame.
+		const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.LAYOUT_STORE) ?? "{}");
+		expect(stored.state.responsePosition).toBe("below");
+		expect(stored.state.requestSplitRatioBeside).toBe(0.3);
+		expect(stored.state.requestSplitRatioBelow).toBe(0.6);
+		expect(stored.state.autoResponseArrangement).toBeUndefined();
+	});
+
+	describe("v5 -> v6 migration", () => {
+		const migrate = (
+			useLayoutStore.persist.getOptions() as unknown as {
+				migrate: (s: unknown, v: number) => Record<string, unknown>;
+			}
+		).migrate;
+
+		it("carries the one old ratio forward as the Beside ratio, Below even, position Beside", () => {
+			// Mutation check: drop the v5 branch in `migrate` and a 0.33.0 user's
+			// split comes back at 50/50 with the old key still in the blob.
+			const migrated = migrate({ requestSplitRatio: 0.3 }, 5);
+			expect(migrated.requestSplitRatioBeside).toBe(0.3);
+			expect(migrated.requestSplitRatioBelow).toBe(0.5);
+			expect(migrated.responsePosition).toBe("beside");
+			expect(migrated.requestSplitRatio).toBeUndefined();
+		});
+
+		it("clamps a stale ratio and falls back when the blob has none", () => {
+			expect(migrate({ requestSplitRatio: 0.95 }, 5).requestSplitRatioBeside).toBe(
+				REQUEST_SPLIT_RATIO_MAX
+			);
+			expect(migrate({}, 5).requestSplitRatioBeside).toBe(DEFAULT_REQUEST_SPLIT_RATIO);
+			expect(migrate({ requestSplitRatio: "wide" }, 5).requestSplitRatioBeside).toBe(
+				DEFAULT_REQUEST_SPLIT_RATIO
+			);
+		});
+
+		it("leaves a v6 blob alone, so a chosen Below is not undone on launch", () => {
+			const migrated = migrate(
+				{
+					responsePosition: "below",
+					requestSplitRatioBeside: 0.4,
+					requestSplitRatioBelow: 0.6,
+				},
+				6
+			);
+			expect(migrated.responsePosition).toBe("below");
+			expect(migrated.requestSplitRatioBeside).toBe(0.4);
+			expect(migrated.requestSplitRatioBelow).toBe(0.6);
 		});
 	});
 });
