@@ -51,6 +51,8 @@ export {
 
 export { DeleteConfirmDialog } from "./delete-confirm-dialog";
 export type { DeleteConfirmDialogProps } from "./delete-confirm-dialog";
+export { deleteConfirmCopy } from "./delete-confirm-copy";
+export type { DeleteScope } from "./delete-confirm-copy";
 
 export {
 	DropdownMenu,

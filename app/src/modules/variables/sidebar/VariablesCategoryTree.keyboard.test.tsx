@@ -309,13 +309,13 @@ describe("the actions that had no keyboard path", () => {
 		const tree = renderTree();
 
 		press(row(tree, "Production"), "Delete");
-		expect(screen.getByText(/"Production" will be permanently removed/)).toBeInTheDocument();
+		expect(screen.getByText(/"Production" is removed permanently/)).toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 		// The key a Mac keyboard actually has. Both are live on every platform,
 		// so neither is asserted against a stubbed `isMac`.
 		press(row(tree, "Staging"), "Backspace");
-		expect(screen.getByText(/"Staging" will be permanently removed/)).toBeInTheDocument();
+		expect(screen.getByText(/"Staging" is removed permanently/)).toBeInTheDocument();
 	});
 });
 

@@ -53,6 +53,7 @@ function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
 const listInboxes = vi.fn();
 const listInboxCaptures = vi.fn();
 const deleteInbox = vi.fn();
+const clearInboxCaptures = vi.fn();
 
 vi.mock("@/services/api", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/services/api")>();
@@ -63,6 +64,7 @@ vi.mock("@/services/api", async (importOriginal) => {
 			listInboxes: () => listInboxes(),
 			listInboxCaptures: (...a: unknown[]) => listInboxCaptures(...a),
 			deleteInbox: (...a: unknown[]) => deleteInbox(...a),
+			clearInboxCaptures: (...a: unknown[]) => clearInboxCaptures(...a),
 		},
 	};
 });
@@ -129,6 +131,7 @@ beforeEach(() => {
 	listInboxes.mockReset().mockResolvedValue([inbox()]);
 	listInboxCaptures.mockReset().mockResolvedValue(capturePage([]));
 	deleteInbox.mockReset().mockResolvedValue({ inboxId: "inbox_a", capturesDeleted: 0 });
+	clearInboxCaptures.mockReset().mockResolvedValue({ inboxId: "inbox_a", capturesDeleted: 0 });
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn() } });
 	Element.prototype.scrollIntoView = vi.fn();
@@ -202,5 +205,38 @@ describe("what a delete would cost", () => {
 		expect(capturesAtRisk(inbox({ captureCount: 0 }), 1)).toBe(1);
 		// And a list trimmed to a page never talks the count *down*.
 		expect(capturesAtRisk(inbox({ captureCount: 120 }), 50)).toBe(120);
+	});
+});
+
+// Issue #1689: Clear wiped every capture on one click, with no confirmation -
+// the inbox itself gets DeleteInboxDialog beside it, so Clear had less
+// friction than the control right next to it for the same category of loss.
+describe("clearing an inbox's captures", () => {
+	it("asks first, and does not mutate until confirmed", async () => {
+		listInboxes.mockResolvedValue([inbox({ captureCount: 2 })]);
+		listInboxCaptures.mockResolvedValue(capturePage([capture(1), capture(2)]));
+		renderTab();
+		await waitFor(() => expect(screen.getAllByText("/hook")).toHaveLength(2));
+
+		fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+		expect(await screen.findByText("Clear captures?")).toBeInTheDocument();
+		expect(clearInboxCaptures).not.toHaveBeenCalled();
+
+		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clear" }));
+		await waitFor(() => expect(clearInboxCaptures).toHaveBeenCalledWith("inbox_a"));
+	});
+
+	it("clears nothing when the dialog is dismissed", async () => {
+		listInboxes.mockResolvedValue([inbox({ captureCount: 1 })]);
+		listInboxCaptures.mockResolvedValue(capturePage([capture(1)]));
+		renderTab();
+		await screen.findByText("/hook");
+
+		fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+		await waitFor(() => expect(screen.queryByText("Clear captures?")).not.toBeInTheDocument());
+		expect(clearInboxCaptures).not.toHaveBeenCalled();
 	});
 });
