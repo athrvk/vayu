@@ -97,7 +97,7 @@ export function MethodBadge({
 		<span
 			className={cn(
 				"font-mono font-semibold uppercase shrink-0 transition-opacity",
-				size === "sm" ? "text-[10px]" : "text-[11px]",
+				size === "sm" ? "text-micro" : "text-label",
 				isBadge &&
 					// `5ch` of content plus this chip's own `px-1.5` and 1px border, so
 					// the box is exactly wide enough for `PATCH` (the longest label

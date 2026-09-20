@@ -357,7 +357,16 @@ export default function LoadTestDashboard() {
 	// Empty state - placed after all hooks so the hook call order stays stable
 	// across renders (Rules of Hooks); the memos above are null-safe with no run.
 	if (!currentRunId) {
-		return <EmptyState title="No active load test" />;
+		return (
+			<EmptyState
+				title="No active load test"
+				action={
+					<Button variant="link" onClick={() => revealDrawerView("history")}>
+						View past runs
+					</Button>
+				}
+			/>
+		);
 	}
 
 	return (

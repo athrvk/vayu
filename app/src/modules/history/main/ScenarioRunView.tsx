@@ -306,7 +306,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 			<header className="flex flex-wrap items-center gap-3 px-5 py-3 bg-panel border-b border-border shrink-0">
 				{isStreaming && (
 					<span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-						<Loader2 className="w-3.5 h-3.5 animate-spin" />
+						<Loader2 className="size-icon-sm animate-spin" />
 						Running
 					</span>
 				)}

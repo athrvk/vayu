@@ -434,7 +434,7 @@ export function TabStrip() {
 				style={{ width: TAB_NEW_BUTTON_WIDTH }}
 				className="group flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
 			>
-				<Plus className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.rotate90} />
+				<Plus className="size-icon-sm" data-icon-motion={ICON_MOTION.rotate90} />
 			</button>
 		</div>
 	);

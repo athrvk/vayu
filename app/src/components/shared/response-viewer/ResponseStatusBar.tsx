@@ -165,7 +165,7 @@ export function ResponseStatusBar({
 			<StatusCodeBadge
 				status={status}
 				statusText={statusText}
-				className="h-5 px-1.5 text-[10px]"
+				className="h-5 px-1.5 text-micro"
 			/>
 
 			{/*
@@ -198,14 +198,14 @@ export function ResponseStatusBar({
 
 			{time !== undefined && (
 				<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-					<Clock className="w-3.5 h-3.5" />
+					<Clock className="size-icon-sm" />
 					<span className="tabular-nums">{formatResponseTime(time)}</span>
 				</div>
 			)}
 
 			{size !== undefined && (
 				<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-					<FileText className="w-3.5 h-3.5" />
+					<FileText className="size-icon-sm" />
 					<span className="tabular-nums">{formatSize(size)}</span>
 				</div>
 			)}
@@ -230,7 +230,7 @@ export function ResponseStatusBar({
 						`Timings and throughput below describe that connection, not HTTP/2.`
 					}
 				>
-					<AlertTriangle className="w-3.5 h-3.5" />
+					<AlertTriangle className="size-icon-sm" />
 					<span>{httpVersion || "HTTP/1.1"}, not HTTP/2</span>
 				</div>
 			)}
@@ -249,7 +249,7 @@ export function ResponseStatusBar({
 						`(Settings > Network & connectivity).`
 					}
 				>
-					<ShieldCheck className="w-3.5 h-3.5" />
+					<ShieldCheck className="size-icon-sm" />
 					<span>mTLS: {clientCertificate}</span>
 				</div>
 			)}
@@ -274,7 +274,7 @@ export function ResponseStatusBar({
 			 */}
 			{age && (
 				<div
-					className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground"
+					className="ml-auto flex items-center gap-1.5 text-label text-muted-foreground"
 					title={age.title}
 				>
 					{age.fromRun ? (

@@ -27,7 +27,13 @@ import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
 import LoadTestCommandSurface from "./components/LoadTestCommandSurface";
 import SendRequestCommandSurface from "./components/SendRequestCommandSurface";
-import { useTabsStore, useSessionStore, useDashboardStore, useToastStore } from "@/stores";
+import {
+	useTabsStore,
+	useSessionStore,
+	useDashboardStore,
+	useLayoutStore,
+	useToastStore,
+} from "@/stores";
 import {
 	useRequestQuery,
 	isRequestNotFound,
@@ -226,6 +232,9 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
  */
 export default function RequestBuilder() {
 	const { openTabs, activeTabId, openTab, closeTab } = useTabsStore();
+	// A request is picked from the Collections drawer, so that is where the
+	// "nothing selected" pane sends you.
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const { activeEnvironmentId } = useSessionStore();
 	const { startRun } = useDashboardStore();
 	const showToast = useToastStore((s) => s.showToast);
@@ -884,7 +893,16 @@ export default function RequestBuilder() {
 
 	// Loading state
 	if (!selectedRequestId) {
-		return <EmptyState title="Select a request to get started" />;
+		return (
+			<EmptyState
+				title="Select a request to get started"
+				action={
+					<Button variant="link" onClick={() => revealDrawerView("collections")}>
+						Browse collections
+					</Button>
+				}
+			/>
+		);
 	}
 
 	if (isLoading) {

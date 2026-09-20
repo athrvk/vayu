@@ -34,6 +34,7 @@ import {
 	TabLabel,
 	Textarea,
 	LabelSwap,
+	DialogCancelButton,
 	ICON_MOTION,
 } from "@/components/ui";
 import { useImportModalStore, useTabsStore } from "@/stores";
@@ -746,7 +747,7 @@ export function ImportModal() {
 							<span className="mt-2 block text-sm font-medium">
 								Drop files here, or click to browse
 							</span>
-							<span className="block text-[11px] text-muted-foreground">
+							<span className="block text-label text-muted-foreground">
 								Format is detected per file - drop as many as you like
 							</span>
 							<span className="mt-4 flex flex-wrap justify-center gap-1.5">
@@ -756,7 +757,7 @@ export function ImportModal() {
 										// Bare `bg-card` on purpose: the chip's edge faces the
 										// sunken drop zone, so its `border-rule` must inherit the
 										// zone's declaration, not declare a card rule of its own.
-										className="rounded-md border border-rule bg-card px-2 py-0.5 text-[10px] font-semibold"
+										className="rounded-md border border-rule bg-card px-2 py-0.5 text-micro font-semibold"
 									>
 										{b}
 									</span>
@@ -765,7 +766,7 @@ export function ImportModal() {
 						</button>
 					)}
 					{tab === "file" && (
-						<div className="mt-2 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
+						<div className="mt-2 flex items-center justify-center gap-2 text-label text-muted-foreground">
 							<span>Or bring in a whole directory of specs:</span>
 							<Button
 								variant="outline"
@@ -773,7 +774,7 @@ export function ImportModal() {
 								disabled={isBusy}
 								onClick={() => folderInputRef.current?.click()}
 							>
-								<FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+								<FolderOpen className="mr-1.5 size-icon-sm" />
 								Import folder
 							</Button>
 						</div>
@@ -991,7 +992,7 @@ export function ImportModal() {
 							 * second checkbox had no label at all, shrinking its hit
 							 * target to the 13px box.
 							 */}
-							<div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+							<div className="flex flex-col gap-1 text-label text-muted-foreground">
 								<label className="flex w-fit items-center gap-1.5">
 									<Checkbox
 										checked={importEnvironments}
@@ -1012,13 +1013,10 @@ export function ImportModal() {
 								</label>
 							</div>
 							<div className="flex gap-2">
-								<Button
-									variant="outline"
+								<DialogCancelButton
 									onClick={handleClose}
 									disabled={importMutation.isPending}
-								>
-									Cancel
-								</Button>
+								/>
 								<Button
 									onClick={handleImport}
 									disabled={applying || applicable.length === 0}
@@ -1079,7 +1077,7 @@ function PreviewView({
 				<CheckCircle2 className="size-icon text-status-success-text" />
 				<span className="text-xs font-semibold">{meta.format}</span>
 				{meta.fileName && (
-					<span className="font-mono text-[11px] text-muted-foreground">
+					<span className="font-mono text-label text-muted-foreground">
 						{meta.fileName}
 					</span>
 				)}
@@ -1088,7 +1086,7 @@ function PreviewView({
 					onClick={onDismiss}
 					aria-label="Dismiss"
 				>
-					<X className="h-3.5 w-3.5" />
+					<X className="size-icon-sm" />
 				</button>
 			</div>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
@@ -1104,9 +1102,9 @@ function PreviewView({
 						key={i}
 						className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium"
 					>
-						<Layers className="h-3.5 w-3.5 text-primary" />
+						<Layers className="size-icon-sm text-primary" />
 						{e.name}
-						<span className="text-[11px] font-normal text-muted-foreground">
+						<span className="text-label font-normal text-muted-foreground">
 							{varCountLabel(Object.keys(e.variables).length)}
 						</span>
 					</div>
@@ -1117,9 +1115,9 @@ function PreviewView({
 				 */}
 				{globalCount > 0 && (
 					<div className="flex items-center gap-1.5 py-0.5 pl-1 text-xs font-medium">
-						<Globe className="h-3.5 w-3.5 text-primary" />
+						<Globe className="size-icon-sm text-primary" />
 						Globals
-						<span className="text-[11px] font-normal text-muted-foreground">
+						<span className="text-label font-normal text-muted-foreground">
 							{varCountLabel(globalCount)}
 						</span>
 					</div>
@@ -1132,7 +1130,7 @@ function PreviewView({
 			    acceptance criterion 1). Unconditional like the other four: "0
 			    examples" is the answer for a file that carried none, which is
 			    different from a preview that does not mention them. */}
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				{meta.requestCount} requests · {meta.folderCount} folders · {meta.exampleCount}{" "}
 				examples · {meta.environmentCount} environments · {meta.globalCount} globals
 			</p>
@@ -1144,14 +1142,14 @@ function PreviewView({
 				</FieldError>
 			)}
 			{globalCount > 0 && (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					Existing globals are kept; a variable of the same name is overwritten.
 				</p>
 			)}
 			<FieldError icon={AlertTriangle}>{lossSummary(meta)}</FieldError>
 			{noticeSummary(meta) && (
-				<p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-					<Info className="h-3.5 w-3.5 shrink-0" />
+				<p className="flex items-center gap-1.5 text-label text-muted-foreground">
+					<Info className="size-icon-sm shrink-0" />
 					{noticeSummary(meta)}
 				</p>
 			)}
@@ -1268,7 +1266,7 @@ function BatchLedger({
 			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
 				<CheckCircle2 className="size-icon text-status-success-text" />
 				<span className="text-xs font-semibold">{entries.length} files</span>
-				<span className="text-[11px] text-muted-foreground">
+				<span className="text-label text-muted-foreground">
 					{selected} selected for import
 				</span>
 				<button
@@ -1276,7 +1274,7 @@ function BatchLedger({
 					onClick={onDismiss}
 					aria-label="Dismiss"
 				>
-					<X className="h-3.5 w-3.5" />
+					<X className="size-icon-sm" />
 				</button>
 			</div>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
@@ -1284,7 +1282,7 @@ function BatchLedger({
 					<BatchRow key={entry.id} entry={entry} onToggle={onToggle} />
 				))}
 			</div>
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				Each file is imported on its own, as its own collection - a file the engine refuses
 				does not undo the ones before it.
 			</p>
@@ -1321,20 +1319,20 @@ function BatchRow({
 				<span className="flex items-baseline gap-1.5">
 					<span className="truncate font-medium">{name}</span>
 					{result && (
-						<span className="shrink-0 text-[10px] font-semibold text-muted-foreground">
+						<span className="shrink-0 text-micro font-semibold text-muted-foreground">
 							{result.meta.format}
 						</span>
 					)}
 				</span>
 				{result && (
-					<span className="block text-[11px] text-muted-foreground">
+					<span className="block text-label text-muted-foreground">
 						{result.meta.requestCount} requests · {result.meta.folderCount} folders ·{" "}
 						{result.meta.exampleCount} examples · {result.meta.environmentCount}{" "}
 						environments · {result.meta.globalCount} globals
 					</span>
 				)}
 				{bundledInto && (
-					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+					<span className="flex items-center gap-1.5 text-label text-muted-foreground">
 						<Link2 className="size-icon-sm shrink-0" />
 						Referenced by {bundledInto} - imported as part of it
 					</span>
@@ -1346,14 +1344,14 @@ function BatchRow({
 					{loss}
 				</FieldError>
 				{notices && (
-					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+					<span className="flex items-center gap-1.5 text-label text-muted-foreground">
 						<Info className="size-icon-sm shrink-0" />
 						{notices}
 					</span>
 				)}
 				{outcome && (
 					<span
-						className={`flex items-center gap-1.5 text-[11px] ${
+						className={`flex items-center gap-1.5 text-label ${
 							outcome.ok ? "text-status-success-text" : "text-destructive-text"
 						}`}
 					>
@@ -1548,14 +1546,14 @@ function TreeNode({
 	return (
 		<div className="pl-1">
 			<div className="flex items-center gap-1.5 py-0.5 text-xs font-medium">
-				<Folder className="h-3.5 w-3.5 text-primary" />
+				<Folder className="size-icon-sm text-primary" />
 				{name}
 			</div>
 			<div className="pl-5">
 				{requests.map((r, i) => (
 					<div
 						key={i}
-						className="flex items-center gap-2 py-0.5 text-[11px] text-muted-foreground"
+						className="flex items-center gap-2 py-0.5 text-label text-muted-foreground"
 					>
 						<MethodBadge method={r.method} variant="text" className="w-10" />
 						<span>{r.name}</span>

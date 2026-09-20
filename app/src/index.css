@@ -128,6 +128,24 @@
 	--text-hero--line-height: 1;
 	--text-metric: 1.375rem; /* 22px */
 	--text-metric--line-height: 1;
+
+	/*
+	 * The two steps below `text-xs` (#1692). 11px and 10px were the app's two
+	 * most-used sizes - 188 and 60 call sites - and the only ones still written
+	 * as arbitrary values, which is why the Type Scale table had to carve out an
+	 * exception for them by name. `label` is the section-label/eyebrow step and
+	 * `micro` the badge/chip step; both keep the exact pixel size they had, so
+	 * this names what was already there rather than resizing anything.
+	 *
+	 * The line-heights are what the names buy: an arbitrary size carries none,
+	 * so 230 of those 248 sites inherited whatever rhythm their parent happened
+	 * to have and the same size read differently in two panes. 16px and 14px are
+	 * the steps Tailwind pairs with its own sizes either side of these.
+	 */
+	--text-label: 0.6875rem; /* 11px */
+	--text-label--line-height: calc(1 / 0.6875); /* 16px */
+	--text-micro: 0.625rem; /* 10px */
+	--text-micro--line-height: calc(0.875 / 0.625); /* 14px */
 }
 
 /*

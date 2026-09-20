@@ -119,7 +119,7 @@ export default function LoadTestingPanel() {
 								onClick={() => setCeilings(DEFAULT_LOAD_TEST_CEILINGS)}
 							>
 								<RotateCcw
-									className="w-3.5 h-3.5 mr-1.5"
+									className="size-icon-sm mr-1.5"
 									data-icon-motion={ICON_MOTION.spinBack}
 								/>
 								{/* "all", because each row now carries its own Reset

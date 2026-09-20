@@ -131,9 +131,9 @@ export default function OAuth2LoadTestGuard({
 						disabled={fetchMutation.isPending}
 					>
 						{fetchMutation.isPending ? (
-							<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							<Loader2 className="size-icon-sm animate-spin" />
 						) : (
-							<RefreshCw className="h-3.5 w-3.5" />
+							<RefreshCw className="size-icon-sm" />
 						)}
 						<span className="ml-1.5">Fetch &amp; check</span>
 					</Button>
@@ -159,7 +159,7 @@ export default function OAuth2LoadTestGuard({
 					: "Token is shorter than the run"
 			}
 			action={
-				<label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+				<label className="flex items-center gap-2 text-label text-muted-foreground">
 					<Switch checked={acknowledged} onCheckedChange={setAcknowledged} />
 					Start anyway
 				</label>
@@ -178,9 +178,9 @@ export default function OAuth2LoadTestGuard({
 						className="mt-2 flex"
 					>
 						{fetchMutation.isPending ? (
-							<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							<Loader2 className="size-icon-sm animate-spin" />
 						) : (
-							<RefreshCw className="h-3.5 w-3.5" />
+							<RefreshCw className="size-icon-sm" />
 						)}
 						<span className="ml-1.5">Refresh token</span>
 					</Button>

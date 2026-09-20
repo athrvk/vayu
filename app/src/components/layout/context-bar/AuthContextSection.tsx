@@ -90,7 +90,7 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 			<p className="text-xs text-foreground m-0">
 				Sending <span className="font-semibold text-primary">{label}</span>
 			</p>
-			<p className="text-[11px] text-muted-foreground m-0">{effective.origin}</p>
+			<p className="text-label text-muted-foreground m-0">{effective.origin}</p>
 			{oauthConfig && <TokenStatusRow resolvedConfig={oauthConfig} />}
 		</div>
 	);

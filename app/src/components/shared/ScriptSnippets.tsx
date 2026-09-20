@@ -190,7 +190,7 @@ export function ScriptSnippets({
 													{snippet.label}
 												</span>
 												{snippet.detail && (
-													<span className="text-[11px] text-muted-foreground">
+													<span className="text-label text-muted-foreground">
 														{snippet.detail}
 													</span>
 												)}

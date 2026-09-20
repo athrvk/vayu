@@ -135,7 +135,7 @@ export default function ScenarioStepsTab({
 											</span>
 											<Badge
 												variant="outline"
-												className="font-mono text-[10px] shrink-0"
+												className="font-mono text-micro shrink-0"
 											>
 												{step.method}
 											</Badge>

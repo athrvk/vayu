@@ -158,7 +158,7 @@ function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: 
 				onClick={deletion.requestDelete}
 				disabled={deletion.isDeleting}
 			>
-				<Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+				<Trash2 className="mr-2 size-icon-sm" aria-hidden="true" />
 				Delete
 			</Button>
 			<DeleteInboxDialog deletion={deletion} />
@@ -301,7 +301,7 @@ export default function InboxView() {
 					aria-label="Copy inbox URL"
 					onClick={() => void copy(inbox.url, "Inbox URL")}
 				>
-					<Copy className="h-3.5 w-3.5" aria-hidden="true" />
+					<Copy className="size-icon-sm" aria-hidden="true" />
 				</Button>
 
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
@@ -353,7 +353,7 @@ export default function InboxView() {
 							onClick={() => setConfirmClearOpen(true)}
 							disabled={clearCaptures.isPending || captures.length === 0}
 						>
-							<Eraser className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+							<Eraser className="mr-2 size-icon-sm" aria-hidden="true" />
 							Clear
 						</Button>
 					</DisabledHint>
@@ -368,13 +368,13 @@ export default function InboxView() {
 							}
 							disabled={stopInbox.isPending}
 						>
-							<Square className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+							<Square className="mr-2 size-icon-sm" aria-hidden="true" />
 							Stop
 						</Button>
 					) : (
 						<Button size="sm" onClick={start} disabled={startInbox.isPending}>
 							<Play
-								className="mr-2 h-3.5 w-3.5"
+								className="mr-2 size-icon-sm"
 								aria-hidden="true"
 								data-icon-motion={ICON_MOTION.scale}
 							/>
@@ -431,7 +431,7 @@ export default function InboxView() {
 						title="Live updates stopped"
 						action={
 							<Button variant="outline" size="sm" onClick={live.resume}>
-								<RotateCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+								<RotateCw className="mr-2 size-icon-sm" aria-hidden="true" />
 								Resume
 							</Button>
 						}

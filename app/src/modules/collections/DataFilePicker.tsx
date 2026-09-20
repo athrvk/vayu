@@ -240,7 +240,7 @@ export default function DataFilePicker({
 						disabled={disabled}
 						className="shrink-0"
 					>
-						<X className="mr-1.5 h-3.5 w-3.5" />
+						<X className="mr-1.5 size-icon-sm" />
 						Remove
 					</Button>
 				) : (
@@ -253,7 +253,7 @@ export default function DataFilePicker({
 						className="shrink-0"
 					>
 						<Upload
-							className="mr-1.5 h-3.5 w-3.5"
+							className="mr-1.5 size-icon-sm"
 							data-icon-motion={ICON_MOTION.lift}
 						/>
 						Choose file
@@ -278,7 +278,7 @@ export default function DataFilePicker({
 			{selected && (
 				<div className="space-y-2 rounded-md border border-rule bg-card surface-card p-3">
 					<div className="flex items-center gap-2 text-xs">
-						<FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+						<FileSpreadsheet className="size-icon-sm shrink-0 text-muted-foreground" />
 						<span className="truncate font-medium">{selected.fileName}</span>
 						<span className="ml-auto shrink-0 text-muted-foreground">
 							{selected.parsed.format.toUpperCase()} · {rowCount}{" "}

@@ -120,13 +120,13 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 						icons={{
 							idle: (
 								<Play
-									className="h-3.5 w-3.5"
+									className="size-icon-sm"
 									aria-hidden="true"
 									data-icon-motion={ICON_MOTION.scale}
 								/>
 							),
 							starting: (
-								<Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+								<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
 							),
 						}}
 					/>
@@ -137,7 +137,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 					tooltipHint="Latency and error rate"
 					icon={
 						<SlidersHorizontal
-							className="h-3.5 w-3.5"
+							className="size-icon-sm"
 							aria-hidden="true"
 							data-icon-motion={ICON_MOTION.nudgeX}
 						/>
@@ -174,7 +174,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 				    misses even the 3:1 icon bar on a light surface (2.21:1,
 				    design-system.md). */}
 				<ServerCog
-					className="h-3.5 w-3.5 shrink-0 text-status-success-text"
+					className="size-icon-sm shrink-0 text-status-success-text"
 					aria-hidden="true"
 				/>
 				<TruncatedText className="font-mono text-xs">{running.url}</TruncatedText>
@@ -187,13 +187,13 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 			<TooltipIconButton
 				label="Open mock server"
 				tooltipHint="View its route table and activity log"
-				icon={<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
+				icon={<ExternalLink className="size-icon-sm" aria-hidden="true" />}
 				onClick={() => openTab({ type: "mock-server", entityId: running.mockId })}
 			/>
 			<TooltipIconButton
 				label="Copy mock server URL"
 				tooltipHint={running.url}
-				icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+				icon={<Copy className="size-icon-sm" aria-hidden="true" />}
 				onClick={() => void copy(running.url, "Mock server URL")}
 			/>
 			<TooltipIconButton
@@ -203,9 +203,9 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 					<IconSwap
 						state={stopMock.isPending ? "stopping" : "idle"}
 						icons={{
-							idle: <Square className="h-3.5 w-3.5" aria-hidden="true" />,
+							idle: <Square className="size-icon-sm" aria-hidden="true" />,
 							stopping: (
-								<Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+								<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
 							),
 						}}
 					/>

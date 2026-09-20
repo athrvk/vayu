@@ -69,7 +69,7 @@ export function RunSourceSection({ tab }: ContextBarSectionProps) {
 		<div className="space-y-2">
 			{scenario ? (
 				<div className="flex items-center justify-between gap-2">
-					<span className="text-[11px] text-muted-foreground shrink-0">Collection</span>
+					<span className="text-label text-muted-foreground shrink-0">Collection</span>
 					{!collectionId ? (
 						<span className="text-xs text-muted-foreground truncate">Not recorded</span>
 					) : !collection ? (
@@ -92,7 +92,7 @@ export function RunSourceSection({ tab }: ContextBarSectionProps) {
 				</div>
 			) : (
 				<div className="flex items-center justify-between gap-2">
-					<span className="text-[11px] text-muted-foreground shrink-0">Request</span>
+					<span className="text-label text-muted-foreground shrink-0">Request</span>
 					{!run.requestId ? (
 						<span className="text-xs text-muted-foreground truncate">Not saved</span>
 					) : requestGone ? (
@@ -110,7 +110,7 @@ export function RunSourceSection({ tab }: ContextBarSectionProps) {
 				</div>
 			)}
 			<div className="flex items-center justify-between gap-2">
-				<span className="text-[11px] text-muted-foreground shrink-0">Environment</span>
+				<span className="text-label text-muted-foreground shrink-0">Environment</span>
 				<span className="text-xs font-mono text-foreground truncate">
 					{environmentLabel}
 				</span>

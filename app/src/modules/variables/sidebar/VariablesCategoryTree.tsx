@@ -42,7 +42,7 @@
 import { useId, useRef, useState } from "react";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
 import { useDeleteRefocus } from "@/modules/collections/useDeleteRefocus";
-import { useTabsStore, useSaveStore } from "@/stores";
+import { useTabsStore, useSaveStore, useLayoutStore } from "@/stores";
 import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
 import {
 	useCollectionsQuery,
@@ -56,6 +56,7 @@ import {
 	RowContextMenu,
 	DrawerPanel,
 	DrawerSection,
+	EmptyState,
 	ErrorState,
 	TruncatedText,
 	ListSkeleton,
@@ -66,7 +67,7 @@ import { Globe, Layers, Cloud, Plus, Trash2, Loader2, Edit2, Copy } from "lucide
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
-import { Badge, Input, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
+import { Badge, Button, Input, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 
 /**
@@ -175,6 +176,10 @@ export default function VariablesCategoryTree() {
 	const [deletingEnvId, setDeletingEnvId] = useState<string | null>(null);
 	const [deleteConfirmEnvId, setDeleteConfirmEnvId] = useState<string | null>(null);
 	const [renamingEnvId, setRenamingEnvId] = useState<string | null>(null);
+
+	// A collection's variables are reached through the Collections drawer, so
+	// the empty group points there rather than offering a create it cannot do.
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 
 	// Mutations
 	const createEnvironmentMutation = useCreateEnvironmentMutation();
@@ -454,14 +459,25 @@ export default function VariablesCategoryTree() {
 										onRetry={() => void refetchEnvironments()}
 									/>
 								) : environments.length === 0 && !creatingEnvironment ? (
-									<div
+									<EmptyState
+										variant="inline"
 										className={cn(
-											"px-3 py-2 text-xs text-muted-foreground italic",
+											"px-3 py-2 text-left text-xs italic",
 											GROUP_CHILD_INSET
 										)}
-									>
-										No environments
-									</div>
+										title="No environments"
+										action={
+											<Button
+												variant="link"
+												onClick={() => {
+													setEnvironmentsExpanded(true);
+													setCreatingEnvironment(true);
+												}}
+											>
+												Add environment
+											</Button>
+										}
+									/>
 								) : (
 									environments.map((environment, index) => {
 										const variableCount = environment.variables
@@ -557,7 +573,6 @@ export default function VariablesCategoryTree() {
 															"bg-scope-environment/10 text-scope-environment hover:bg-scope-environment/20"
 													)}
 												>
-													{/* <Cloud className="size-icon text-blue-400 shrink-0" /> */}
 													{renamingEnvId === environment.id ? (
 														<Input
 															autoFocus
@@ -708,14 +723,22 @@ export default function VariablesCategoryTree() {
 										onRetry={() => void refetchCollections()}
 									/>
 								) : collections.length === 0 ? (
-									<div
+									<EmptyState
+										variant="inline"
 										className={cn(
-											"px-3 py-2 text-xs text-muted-foreground italic",
+											"px-3 py-2 text-left text-xs italic",
 											GROUP_CHILD_INSET
 										)}
-									>
-										No collections
-									</div>
+										title="No collections"
+										action={
+											<Button
+												variant="link"
+												onClick={() => revealDrawerView("collections")}
+											>
+												Browse collections
+											</Button>
+										}
+									/>
 								) : (
 									collections.map((collection, index) => {
 										const variableCount = collection.variables
@@ -762,7 +785,6 @@ export default function VariablesCategoryTree() {
 														GROUP_CHILD_INSET
 													)}
 												>
-													{/* <Folder className="size-icon text-orange-400" /> */}
 													<TruncatedText className="flex-1">
 														{collection.name}
 													</TruncatedText>

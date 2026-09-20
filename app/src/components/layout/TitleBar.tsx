@@ -114,9 +114,9 @@ function WindowControls() {
 				aria-label={isMaximized ? "Restore" : "Maximize"}
 			>
 				{isMaximized ? (
-					<Maximize2 className="w-3.5 h-3.5 text-foreground/70" />
+					<Maximize2 className="size-icon-sm text-foreground/70" />
 				) : (
-					<Square className="w-3.5 h-3.5 text-foreground/70" />
+					<Square className="size-icon-sm text-foreground/70" />
 				)}
 			</button>
 			<button
@@ -296,7 +296,7 @@ function NavigationControls() {
 				label="Back"
 				tooltipHint={formatChord(GO_BACK_CHORD)}
 				tooltipSide="bottom"
-				icon={<ArrowLeft className="w-3.5 h-3.5" />}
+				icon={<ArrowLeft className="size-icon-sm" />}
 				className="h-7 w-7"
 				disabled={!back}
 				onClick={() => navigateHistory("back", "ui")}
@@ -305,7 +305,7 @@ function NavigationControls() {
 				label="Forward"
 				tooltipHint={formatChord(GO_FORWARD_CHORD)}
 				tooltipSide="bottom"
-				icon={<ArrowRight className="w-3.5 h-3.5" />}
+				icon={<ArrowRight className="size-icon-sm" />}
 				className="h-7 w-7"
 				disabled={!forward}
 				onClick={() => navigateHistory("forward", "ui")}
@@ -442,7 +442,7 @@ function EnvSwitcher() {
 					// answers - a DropdownMenuItem is not a `[data-slot="button"]`.
 					className="group text-xs gap-2"
 				>
-					<Plus className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.rotate90} />
+					<Plus className="size-icon-sm" data-icon-motion={ICON_MOTION.rotate90} />
 					<span className="flex-1">New Environment</span>
 				</DropdownMenuItem>
 				<DropdownMenuItem
@@ -452,13 +452,13 @@ function EnvSwitcher() {
 					// has to be the owner whose hover the glyph answers.
 					className="group text-xs gap-2"
 				>
-					<Download className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.drop} />
+					<Download className="size-icon-sm" data-icon-motion={ICON_MOTION.drop} />
 					<span className="flex-1">Import Environment...</span>
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onClick={() => selectEnvironment(null)} className="text-xs gap-2">
 					<span className="flex-1">No Environment</span>
-					{!activeEnv && <Check className="w-3.5 h-3.5" />}
+					{!activeEnv && <Check className="size-icon-sm" />}
 				</DropdownMenuItem>
 				{environments.map((env) => (
 					<DropdownMenuItem
@@ -467,7 +467,7 @@ function EnvSwitcher() {
 						className="text-xs gap-2"
 					>
 						<span className="flex-1 truncate">{env.name}</span>
-						{env.id === activeEnvironmentId && <Check className="w-3.5 h-3.5" />}
+						{env.id === activeEnvironmentId && <Check className="size-icon-sm" />}
 					</DropdownMenuItem>
 				))}
 			</DropdownMenuContent>

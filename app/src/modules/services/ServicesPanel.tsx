@@ -47,6 +47,7 @@ import {
 } from "@/components/shared";
 import {
 	Badge,
+	Button,
 	Collapsible,
 	CollapsibleContent,
 	Input,
@@ -67,7 +68,7 @@ import {
 	useStopMockServerMutation,
 	useUpdateMockIssuerMutation,
 } from "@/queries";
-import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
+import { useInboxNotifyStore, useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TIMING } from "@/config/timing";
 import { cn } from "@/lib/utils";
@@ -341,7 +342,7 @@ function IssuerDetailRow({
 			<TruncatedText className="min-w-0 flex-1 font-mono text-xs">{value}</TruncatedText>
 			<TooltipIconButton
 				label={copyLabel}
-				icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+				icon={<Copy className="size-icon-sm" aria-hidden="true" />}
 				onClick={onCopy}
 			/>
 		</div>
@@ -461,7 +462,7 @@ function IssuerRow({
 						</span>
 						<TooltipIconButton
 							label="Copy signing key"
-							icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<KeyRound className="size-icon-sm" aria-hidden="true" />}
 							onClick={() => void copy(issuer.signingKey, "Signing key")}
 						/>
 					</div>
@@ -676,6 +677,9 @@ export default function ServicesPanel() {
 	const startInbox = useStartInboxMutation();
 	const [expandedIssuerId, setExpandedIssuerId] = useState<string | null>(null);
 	const [newIssuerOpen, setNewIssuerOpen] = useState(false);
+	// A mock is started from a collection's header, so the empty group points
+	// at the Collections drawer rather than offering a button that cannot work.
+	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const { flashedId: flashedInboxId, flash: flashInbox } = useRowFlash();
 
 	const inboxes = inboxesQuery.data ?? [];
@@ -737,7 +741,7 @@ export default function ServicesPanel() {
 						   about and this way the user decides instead. */
 						<TooltipIconButton
 							label="New inbox"
-							icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<Plus className="size-icon-sm" aria-hidden="true" />}
 							disabled={startInbox.isPending}
 							onClick={start}
 						/>
@@ -755,6 +759,15 @@ export default function ServicesPanel() {
 							variant="inline"
 							className={GROUP_NOTE_CLASS}
 							title="No inbox yet. Start one for a local URL that records every request sent to it - no tunnel, no third party."
+							action={
+								<Button
+									variant="link"
+									disabled={startInbox.isPending}
+									onClick={start}
+								>
+									New inbox
+								</Button>
+							}
 						/>
 					) : (
 						orderedInboxes.map((inbox) => (
@@ -772,7 +785,7 @@ export default function ServicesPanel() {
 					actions={
 						<TooltipIconButton
 							label="New issuer"
-							icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+							icon={<Plus className="size-icon-sm" aria-hidden="true" />}
 							onClick={() => setNewIssuerOpen(true)}
 						/>
 					}
@@ -789,6 +802,11 @@ export default function ServicesPanel() {
 							variant="inline"
 							className={GROUP_NOTE_CLASS}
 							title="No issuer running. Start one to mint your own OAuth 2.0 tokens locally, with the claims and failures you choose."
+							action={
+								<Button variant="link" onClick={() => setNewIssuerOpen(true)}>
+									New issuer
+								</Button>
+							}
 						/>
 					) : (
 						issuers.map((issuer) => (
@@ -822,6 +840,14 @@ export default function ServicesPanel() {
 							variant="inline"
 							className={GROUP_NOTE_CLASS}
 							title="No mock running. Open a collection and start one to serve its saved example responses on a local URL - a free upstream to build or load-test against."
+							action={
+								<Button
+									variant="link"
+									onClick={() => revealDrawerView("collections")}
+								>
+									Browse collections
+								</Button>
+							}
 						/>
 					) : (
 						orderedMocks.map((mock) => <MockServerRow key={mock.mockId} mock={mock} />)

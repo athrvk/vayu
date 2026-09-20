@@ -118,6 +118,9 @@ vi.mock("@/stores", () => ({
 	useTabsStore: () => ({ openTab: vi.fn() }),
 	// The environment tree reports a failed delete through the Dock's save status.
 	useSaveStore: () => ({ failSave: vi.fn() }),
+	// Read by the empty-collections note's "Browse collections" action (#1693).
+	useLayoutStore: (select: (s: { revealDrawerView: () => void }) => unknown) =>
+		select({ revealDrawerView: vi.fn() }),
 }));
 vi.mock("@/modules/variables/variables-store", () => ({
 	useVariablesStore: () => ({ selectedCategory: null, setSelectedCategory }),

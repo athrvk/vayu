@@ -85,7 +85,7 @@ export function ImportProgressView({ progress }: { progress: ImportProgress }) {
 				{detail && (
 					<span
 						aria-hidden={progress.stage === "fetching"}
-						className="font-mono text-[11px] text-muted-foreground"
+						className="font-mono text-label text-muted-foreground"
 					>
 						{detail}
 					</span>

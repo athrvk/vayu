@@ -167,7 +167,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 						<span className="text-xs font-medium text-foreground">Context</span>
 						<TooltipIconButton
 							label="Close context bar"
-							icon={<X className="w-3.5 h-3.5" />}
+							icon={<X className="size-icon-sm" />}
 							tooltipSide="bottom"
 							onClick={() => setContextBarOpen(false)}
 						/>

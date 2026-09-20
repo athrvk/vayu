@@ -17,15 +17,15 @@ import type { RowAction } from "./row-actions";
  * An item's contents: its glyph, then its label, then a trailing column holding
  * either the reason the item is off or the value it carries (#1690).
  *
+ * `data-icon-motion` arrives in a variable, so no source scan can see it - the
+ * rendered-class half of `icon-motion.call-sites.test.tsx` is what holds it.
+ *
  * `ml-auto` rather than a gap: the reason is a second column, and a menu sizes
  * itself to its widest row, so letting it sit where the label ends would leave
  * "Already first" reading as part of "Move up" on the one row and not on the
  * next. `text-muted-foreground` keeps it behind the label whichever it is - a
  * disabled item is already at the menu's own disabled opacity, and the column
  * has to stay secondary on an enabled one too.
- *
- * `data-icon-motion` arrives in a variable, so no source scan can see it - the
- * rendered-class half of `icon-motion.call-sites.test.tsx` is what holds it.
  */
 export function RowActionBody({ action }: { action: RowAction }) {
 	const Icon = action.icon;

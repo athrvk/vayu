@@ -49,6 +49,8 @@ import type { KeyValueItem, KeyValueEditorProps } from "@/types";
 import { withTrailingBlank } from "./key-value";
 import KeyValueRow from "./KeyValueRow";
 import type { PickedFile } from "./FilePartCell";
+import { EYEBROW_CLASS } from "@/components/ui/eyebrow";
+import { cn } from "@/lib/utils";
 
 export default function KeyValueEditor({
 	items,
@@ -175,11 +177,14 @@ export default function KeyValueEditor({
 			 * because it is the one still visible once you start typing.
 			 */}
 			<div
-				className={`grid gap-2 ${
-					allowFiles
-						? "grid-cols-[24px_1fr_1fr_20px_20px_28px]"
-						: "grid-cols-[24px_1fr_1fr_20px_28px]"
-				} px-1 text-[11px] font-semibold uppercase tracking-wide text-subtle-foreground`}
+				className={cn(
+					EYEBROW_CLASS,
+					`grid gap-2 ${
+						allowFiles
+							? "grid-cols-[24px_1fr_1fr_20px_20px_28px]"
+							: "grid-cols-[24px_1fr_1fr_20px_28px]"
+					} px-1 text-subtle-foreground`
+				)}
 			>
 				<div />
 				<div>Key</div>

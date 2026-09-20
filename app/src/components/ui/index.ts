@@ -49,6 +49,9 @@ export {
 	DialogDescription,
 } from "./dialog";
 
+export { DialogCancelButton } from "./dialog-cancel-button";
+export type { DialogCancelButtonProps } from "./dialog-cancel-button";
+
 export { DeleteConfirmDialog } from "./delete-confirm-dialog";
 export type { DeleteConfirmDialogProps } from "./delete-confirm-dialog";
 export { deleteConfirmCopy } from "./delete-confirm-copy";
@@ -81,7 +84,7 @@ export {
 
 export { Tabs, TabsList, TabsTrigger, TabsContent, TabLabel, TabCount, TabErrorDot } from "./tabs";
 export { LabelSwap } from "./label-swap";
-export { Eyebrow, EYEBROW_CLASS } from "./eyebrow";
+export { Eyebrow, EYEBROW_CLASS, EYEBROW_XS_CLASS } from "./eyebrow";
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "./table";
 
 export {

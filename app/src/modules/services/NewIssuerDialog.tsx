@@ -47,6 +47,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 	Textarea,
+	DialogCancelButton,
 } from "@/components/ui";
 import { Callout, FieldError } from "@/components/shared";
 import { useStartMockIssuerMutation } from "@/queries";
@@ -276,9 +277,7 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 				</DialogBody>
 
 				<DialogFooter>
-					<Button variant="outline" onClick={() => onOpenChange(false)}>
-						Cancel
-					</Button>
+					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					<Button onClick={start} disabled={!canStart}>
 						{startIssuer.isPending && (
 							<Loader2 className="mr-2 size-icon animate-spin" aria-hidden="true" />

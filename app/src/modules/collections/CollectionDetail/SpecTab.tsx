@@ -346,7 +346,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 								if (file) handleFile(file);
 							}}
 						/>
-						<span className="text-[11px] text-muted-foreground">or</span>
+						<span className="text-label text-muted-foreground">or</span>
 						<Input
 							value={url}
 							onChange={(e) => setUrl(e.target.value)}
@@ -460,7 +460,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Export as OpenAPI
 					</Button>
-					<p className="mt-1 text-[11px] text-muted-foreground">
+					<p className="mt-1 text-label text-muted-foreground">
 						Writes this collection's own document back out, updated: operations it no
 						longer has removed, stored examples written in, and everything Vayu does not
 						model left exactly as it is.
@@ -478,7 +478,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 						<Trash2 className="mr-2 size-icon" />
 						Unbind
 					</Button>
-					<p className="mt-1 text-[11px] text-muted-foreground">
+					<p className="mt-1 text-label text-muted-foreground">
 						Unbinding leaves the requests and their recorded operations exactly as they
 						are, and leaves the stored document for anything else bound to it.
 					</p>
@@ -552,9 +552,9 @@ function BoundSpec({
 					) : (
 						<>
 							{sourceUrl ? (
-								<Link2 className="h-3.5 w-3.5 text-primary shrink-0" />
+								<Link2 className="size-icon-sm text-primary shrink-0" />
 							) : (
-								<FileJson className="h-3.5 w-3.5 text-primary shrink-0" />
+								<FileJson className="size-icon-sm text-primary shrink-0" />
 							)}
 							<span className="font-mono break-all">{source}</span>
 						</>
@@ -567,7 +567,7 @@ function BoundSpec({
 				 * hiding a value that is already known would be a second way of
 				 * describing the document wrongly.
 				 */}
-				<dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+				<dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-label text-muted-foreground">
 					<div className="flex gap-1.5">
 						<dt>Hash</dt>
 						<dd className="font-mono text-foreground">{shortHash(specHash)}</dd>
@@ -647,14 +647,14 @@ function MatchSummary({
 				{title || "Untitled API"}{" "}
 				<span className="font-normal text-muted-foreground">({format})</span>
 			</p>
-			<p className="text-[11px] text-muted-foreground break-all">from {source}</p>
+			<p className="text-label text-muted-foreground break-all">from {source}</p>
 			{/*
 			 * All three numbers, always - including the zeros. "matched 12" alone
 			 * reads as a complete result; "matched 12, 3 requests unmatched, 4
 			 * operations with no request" is what the user is actually agreeing to,
 			 * and the two leftovers are what sync (#627) will later offer to act on.
 			 */}
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				Matched {matched} request{matched === 1 ? "" : "s"} · {unmatchedRequests} request
 				{unmatchedRequests === 1 ? "" : "s"} with no operation · {unmatchedOperations}{" "}
 				operation
@@ -667,7 +667,7 @@ function MatchSummary({
 			 * and the user is agreeing to it (issue #718).
 			 */}
 			{staleStamps > 0 && (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					{staleStamps} request{staleStamps === 1 ? "" : "s"} record
 					{staleStamps === 1 ? "s" : ""} an operation this document does not have - that
 					identity is cleared, because it names another document.

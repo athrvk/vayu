@@ -277,7 +277,7 @@ function KeyValueRow({
 						: "opacity-0 group-hover:opacity-100"
 				)}
 			>
-				<Trash2 className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.lid} />
+				<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
 			</Button>
 		</div>
 	);

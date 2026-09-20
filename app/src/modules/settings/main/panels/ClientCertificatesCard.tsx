@@ -61,6 +61,7 @@ import {
 	SecretInput,
 	ToggleGroup,
 	ToggleGroupItem,
+	DialogCancelButton,
 } from "@/components/ui";
 import {
 	useClientCertificatesQuery,
@@ -480,9 +481,7 @@ export function ClientCertificatesCard() {
 						</div>
 
 						<div className="flex items-center justify-end gap-2">
-							<Button variant="ghost" size="sm" onClick={closeForm}>
-								Cancel
-							</Button>
+							<DialogCancelButton size="sm" onClick={closeForm} />
 							<Button
 								size="sm"
 								onClick={() => void submit()}

@@ -32,6 +32,11 @@ describe("cn keeps a custom font size beside a text colour", () => {
 		// CardTitle with a caller that tints it, and body text - the controls.
 		["text-md", "text-md font-semibold leading-none tracking-tight", "text-destructive-text"],
 		["text-sm", "text-sm", "text-foreground"],
+		// The two badge steps (#1692). `label` and `micro` are exactly the case
+		// the comment above describes - names that say what the step is for, so
+		// tailwind-merge reads them as colours unless `utils.ts` says otherwise.
+		["text-label", "text-label font-semibold uppercase", "text-muted-foreground"],
+		["text-micro", "text-micro font-mono font-semibold", "text-status-error-text"],
 	])("%s", (step, base, caller) => {
 		expect(cn(base, caller).split(" ")).toContain(step);
 	});

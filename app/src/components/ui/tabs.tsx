@@ -262,7 +262,7 @@ function TabCount({ value, className }: { value: React.ReactNode; className?: st
 	return (
 		<sup
 			className={cn(
-				"font-mono text-[10px] leading-none tabular-nums text-primary-text",
+				"font-mono text-micro leading-none tabular-nums text-primary-text",
 				className
 			)}
 		>

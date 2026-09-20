@@ -33,7 +33,7 @@ export function ThroughputTwinCard({
 				Send · Throughput
 				<InfoChip tip={TOOLTIPS.sendThroughput} />
 				{showQueueChip && (
-					<span className="ml-2 inline-flex items-center normal-case tracking-normal font-mono text-[10px] font-semibold px-1.5 py-px rounded-sm bg-warning/10 text-warning-text">
+					<span className="ml-2 inline-flex items-center normal-case tracking-normal font-mono text-micro font-semibold px-1.5 py-px rounded-sm bg-warning/10 text-warning-text">
 						queue {avgQueueWaitMs.toFixed(0)}ms
 						<InfoChip tip={TOOLTIPS.queueChip} />
 					</span>
@@ -47,10 +47,10 @@ export function ThroughputTwinCard({
 							req/s
 						</span>
 					</div>
-					<div className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground mt-1.5">
+					<Eyebrow size="xs" className="mt-1.5">
 						dispatched
 						<InfoChip tip={TOOLTIPS.sendThroughputDispatched} />
-					</div>
+					</Eyebrow>
 				</div>
 				<div>
 					<div className="text-metric leading-none font-bold font-mono tabular-nums text-foreground">
@@ -59,17 +59,17 @@ export function ThroughputTwinCard({
 							req/s
 						</span>
 					</div>
-					<div className="text-[10px] uppercase tracking-[0.06em] text-muted-foreground mt-1.5">
+					<Eyebrow size="xs" className="mt-1.5">
 						received
 						<InfoChip tip={TOOLTIPS.sendThroughputReceived} />
-					</div>
+					</Eyebrow>
 				</div>
 			</div>
 			{delta !== undefined && (
-				<p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-2">
+				<p className="text-label text-muted-foreground mt-2 flex items-center gap-2">
 					<span
 						className={cn(
-							"inline-block px-1.5 py-px rounded-sm font-mono text-[10px] font-semibold transition-colors duration-150",
+							"inline-block px-1.5 py-px rounded-sm font-mono text-micro font-semibold transition-colors duration-150",
 							deltaOk
 								? "bg-success/10 text-success-text"
 								: "bg-destructive/10 text-destructive-text"

@@ -40,6 +40,7 @@ import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { useSettingsIndex } from "@/modules/settings/useSettingsIndex";
 import { searchSettings } from "@/lib/settings-index";
+import { Eyebrow } from "@/components/ui/eyebrow";
 
 interface CategoryMeta {
 	label: string;
@@ -72,10 +73,10 @@ function categoryMeta(category: SettingsCategory): CategoryMeta {
 function SectionHeading({ children, icon: Icon }: { children: string; icon?: LucideIcon }) {
 	return (
 		<div className="px-3 py-2 mb-1">
-			<div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+			<Eyebrow className="flex items-center gap-2">
 				{Icon && <Icon className="size-icon-sm" />}
 				{children}
-			</div>
+			</Eyebrow>
 		</div>
 	);
 }
@@ -143,7 +144,7 @@ export default function SettingsCategoryTree() {
 			<div className="flex flex-col w-full py-2">
 				<div className="px-3 pb-2">
 					<div className="relative">
-						<Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+						<Search className="pointer-events-none absolute left-2.5 top-1/2 size-icon-sm -translate-y-1/2 text-muted-foreground" />
 						<Input
 							value={query}
 							onChange={(e) => setQuery(e.target.value)}
@@ -159,7 +160,7 @@ export default function SettingsCategoryTree() {
 								aria-label="Clear search"
 								className="absolute right-0.5 top-1/2 h-7 w-7 -translate-y-1/2 p-0"
 							>
-								<X className="h-3.5 w-3.5" />
+								<X className="size-icon-sm" />
 							</Button>
 						)}
 					</div>

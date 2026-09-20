@@ -152,7 +152,7 @@ export default function NotificationsPanel() {
 									className="gap-1.5"
 								>
 									<Play
-										className="w-3.5 h-3.5"
+										className="size-icon-sm"
 										data-icon-motion={ICON_MOTION.scale}
 									/>
 									Preview
@@ -375,7 +375,7 @@ function SystemNotificationsCard() {
 						disabled={previewing || unavailableReason !== null || !enabled}
 						className="gap-1.5"
 					>
-						<Play className="w-3.5 h-3.5" data-icon-motion={ICON_MOTION.scale} />
+						<Play className="size-icon-sm" data-icon-motion={ICON_MOTION.scale} />
 						Preview
 					</Button>
 					<p className="text-xs text-muted-foreground">{previewHint}</p>

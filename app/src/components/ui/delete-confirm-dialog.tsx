@@ -35,6 +35,7 @@ import {
 	DialogDescription,
 } from "./dialog";
 import { Button } from "./button";
+import { DialogCancelButton } from "./dialog-cancel-button";
 import { deleteConfirmCopy, type DeleteScope } from "./delete-confirm-copy";
 
 export interface DeleteConfirmDialogProps {
@@ -152,14 +153,12 @@ export function DeleteConfirmDialog({
 					<DialogDescription>{resolvedDescription}</DialogDescription>
 				</DialogHeader>
 				<DialogFooter onKeyDown={handleFooterKeyDown} className="gap-2 sm:gap-0">
-					<Button
+					<DialogCancelButton
 						ref={cancelRef}
-						variant="secondary"
+						label={cancelLabel}
 						onClick={() => onOpenChange(false)}
 						disabled={isDeleting}
-					>
-						{cancelLabel}
-					</Button>
+					/>
 					<Button variant={confirmVariant} onClick={onConfirm} disabled={isDeleting}>
 						{isDeleting ? <Loader2 className="size-icon animate-spin" /> : confirmLabel}
 					</Button>

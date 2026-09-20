@@ -32,6 +32,7 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
+	DialogCancelButton,
 } from "@/components/ui";
 import type { SpecReimportMatch } from "@/services/openapi/bound-spec-match";
 
@@ -90,12 +91,12 @@ export default function SpecReimportDialog({
 							>
 								<span className="min-w-0 flex-1">
 									<span className="flex items-baseline gap-1.5">
-										<FileJson className="h-3.5 w-3.5 shrink-0 text-primary" />
+										<FileJson className="size-icon-sm shrink-0 text-primary" />
 										<span className="truncate text-xs font-medium">
 											{match.label}
 										</span>
 									</span>
-									<span className="block text-[11px] text-muted-foreground">
+									<span className="block text-label text-muted-foreground">
 										Bound to{" "}
 										<span className="font-medium text-foreground">
 											{match.collectionName}
@@ -119,9 +120,7 @@ export default function SpecReimportDialog({
 				</DialogBody>
 
 				<DialogFooter className="gap-2 sm:gap-0">
-					<Button ref={cancelRef} variant="secondary" onClick={onCancel}>
-						Cancel
-					</Button>
+					<DialogCancelButton ref={cancelRef} onClick={onCancel} />
 					<Button onClick={onImportAnyway}>Import anyway</Button>
 				</DialogFooter>
 			</DialogContent>

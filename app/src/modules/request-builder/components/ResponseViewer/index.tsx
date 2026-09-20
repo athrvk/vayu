@@ -389,7 +389,7 @@ export default function ResponseViewer() {
 											? "default"
 											: "destructive"
 									}
-									className="ml-0.5 h-4 px-1 text-[10px]"
+									className="ml-0.5 h-4 px-1 text-micro"
 								>
 									{testResults.filter((t) => t.passed).length}/
 									{testResults.length}
@@ -429,7 +429,7 @@ export default function ResponseViewer() {
 							onClick={() => setSavingExample(true)}
 							className="h-6 shrink-0 px-2 text-xs"
 						>
-							<BookmarkPlus className="h-3.5 w-3.5" />
+							<BookmarkPlus className="size-icon-sm" />
 							Save as example
 						</Button>
 					)}

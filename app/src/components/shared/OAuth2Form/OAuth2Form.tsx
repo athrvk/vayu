@@ -93,7 +93,7 @@ export default function OAuth2Form({
 		<div className="space-y-1.5">
 			<Label>{label}</Label>
 			{node}
-			{hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+			{hint && <p className="text-label text-muted-foreground">{hint}</p>}
 		</div>
 	);
 
@@ -213,7 +213,7 @@ export default function OAuth2Form({
 			<Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
 				<CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
 					<ChevronDown
-						className={`w-3.5 h-3.5 transition-transform ${advancedOpen ? "" : "-rotate-90"}`}
+						className={`size-icon-sm transition-transform ${advancedOpen ? "" : "-rotate-90"}`}
 					/>
 					Advanced
 				</CollapsibleTrigger>

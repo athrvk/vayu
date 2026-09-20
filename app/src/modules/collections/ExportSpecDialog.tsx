@@ -55,6 +55,7 @@ import {
 	Skeleton,
 	ToggleGroup,
 	ToggleGroupItem,
+	DialogCancelButton,
 	ICON_MOTION,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
@@ -140,7 +141,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 								aria-label="Assembling the document"
 								className="text-muted-foreground"
 							>
-								<Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+								<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
 							</span>
 						)}
 					</div>
@@ -157,9 +158,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 				</DialogBody>
 
 				<DialogFooter>
-					<Button variant="ghost" onClick={() => onOpenChange(false)}>
-						Cancel
-					</Button>
+					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					{/*
 					 * Disabled while a format assembles, not only while there is
 					 * nothing: what is held is the *previous* format's text, and a
@@ -253,16 +252,16 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 	return (
 		<div className="enter-fade rounded-md border border-rule surface-sunken p-3 space-y-2">
 			<p className="flex items-center gap-2 text-xs font-semibold">
-				<FileJson className="h-3.5 w-3.5 text-primary shrink-0" />
+				<FileJson className="size-icon-sm text-primary shrink-0" />
 				{bound ? "This collection's own document, updated" : "A skeleton document"}
 				<span className="font-normal text-muted-foreground">({notes.dialect})</span>
 			</p>
-			<p className="text-[11px] text-muted-foreground">
+			<p className="text-label text-muted-foreground">
 				{bound
 					? "Everything Vayu does not model - vendor extensions, unreferenced components, tags - is carried through untouched, and the dialect is left as it was."
 					: "A starting point, not a contract: it describes the requests that are here, with no schema Vayu did not read off an example body."}
 			</p>
-			<ul className="text-[11px] text-muted-foreground space-y-0.5">
+			<ul className="text-label text-muted-foreground space-y-0.5">
 				<Line
 					count={notes.requestsExported}
 					label="request"
@@ -401,7 +400,7 @@ function ExportSummary({ notes }: { notes: ExportNotes }) {
 				)}
 			</ul>
 			{notes.vocabularyNotWritten && (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="text-label text-muted-foreground">
 					{notes.dialect} states parameters and examples in a vocabulary Vayu does not
 					write. Operations nothing here claims are still removed, but nothing is written
 					into the ones that stay.

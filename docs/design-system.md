@@ -692,6 +692,17 @@ it decays. A raw palette class here is only defensible if it comes with a
 one, which is why every theme-blind foreground found in this tree failed in
 light mode and passed in dark.
 
+**`palette-tokens.test.ts` now guards all of `modules/` and `components/`**
+(issue #1693), not just the request/response tree it was cut for. The settings
+restart banner was the last `dark:`-paired holdout, and it moved to the
+`--warning` family the "Pending" chip one card below it already used - which
+is the argument for widening: the token existed, the banner just predated it.
+Two exemptions are listed in the guard, both `text-purple-500` marking a
+*load test* (`RunItem`'s bolt, `LoadTestDetail`'s P99 arrow). That is a kind
+rather than a status, so the app's one violet token - `--status-redirect`,
+which means 3xx - would be the wrong word, and both were measured where they
+sit (4.36/4.59 and 3.50/3.66 against the 3.0 icon bar) rather than assumed.
+
 ### HTTP Method Color Tokens
 
 **Always render methods with `MethodBadge`** (`components/shared`) - never a
@@ -1016,7 +1027,7 @@ composes with page zoom.
 
 | Use | Size | Weight | Class |
 |-----|------|--------|-------|
-| Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
+| Section label / eyebrow | 11px | semibold, uppercase, +tracking | `text-label font-semibold uppercase tracking-[0.06em] text-muted-foreground` |
 | Hero metric value | 34px | bold, tabular | `text-hero font-bold leading-none font-mono tabular-nums` |
 | Secondary metric value | 22px | bold | `text-metric font-bold font-mono` |
 | View title | 20px | semibold | `text-xl font-semibold` |
@@ -1024,16 +1035,17 @@ composes with page zoom.
 | Title / small heading | 15px | semibold | `text-md font-semibold` |
 | Body / default | 13px | regular | `text-sm` |
 | Small label | 12px | medium | `text-xs font-medium` |
-| Micro / badge (mono) | 10–11px | mono semibold | `text-[10px] font-mono font-semibold` |
-| Micro / badge (UI face) | 10–11px | semibold | `text-[10px] font-semibold` |
+| Micro / badge (mono) | 10–11px | mono semibold | `text-micro font-mono font-semibold` |
+| Micro / badge (UI face) | 10–11px | semibold | `text-micro font-semibold` |
 | URL / path | 12–13px | mono | `text-xs font-mono` |
 
-**Only `text-[10px]` and `text-[11px]` may be written as arbitrary values.**
-Everything else has a named step, and `type-scale.test.ts` fails on anything
-outside that set. The two metric sizes were on that list until they became
-`--text-hero` (34px) and `--text-metric` (22px) in `index.css` - the same move
-`--text-md` made, and for the same reason: a named step arrives with its
-line-height, an arbitrary one does not.
+**No font size is written as an arbitrary value.** Every step in the table
+above has a name, and `type-scale.test.ts` fails on any `text-[Npx]` in
+`app/src`. The last two exceptions closed in #1692: 11px and 10px - the app's
+two most-used sizes, at 188 and 60 call sites - are `--text-label` and
+`--text-micro` now, joining `--text-hero` (34px) and `--text-metric` (22px)
+before them, which closed the same way for the same reason: a named step
+arrives with its line-height, an arbitrary one does not.
 
 **A step whose name is not a size word has to be registered in `cn()`.**
 `text-<x>` is either a font size or a text colour, and tailwind-merge tells the
@@ -1168,10 +1180,18 @@ hides icons from a scale audit and lets off-grid values (15px) creep in.
 (issue #1679, superseding the #1670 decision below). Use `size-icon` (16px,
 was `w-4 h-4` / `size-4`) and `size-icon-sm` (12px, was `w-3 h-3`) - the app's
 own legibility floor at both densities, per the Chrome, Target and Icon
-Floors table under Spacing Scale Conventions. `w-3.5 h-3.5` and `w-5 h-5`
-still ride `--spacing` (10.5/14px and 15/20px at Default/Comfortable): they
-were not part of the #1679 fix pathway and remain density-scaled until a
-reason to fix them turns up.
+Floors table under Spacing Scale Conventions. `w-5 h-5` still rides
+`--spacing` (15/20px at Default/Comfortable): it was not part of the #1679
+fix pathway and remains density-scaled until a reason to fix it turns up.
+
+**`h-3.5 w-3.5`, `w-3.5 h-3.5` and `size-3.5` are banned outright**
+(`components/ui/icon-size-token.test.ts`, issue #1693). They were a third
+icon size with no token behind them, spelled three ways across 152 call
+sites and doing the same job as `size-icon-sm` in the same rows; all of them
+are now `size-icon-sm`, a deliberate step onto the scale from 14px to 12px
+rather than a translation. `size-icon` was wrong for them - each sits beside
+`text-sm` or smaller text, which is why it was written under the default in
+the first place.
 
 *Superseded decision (issue #1670, kept for history): the shrink applied to
 icons too, with nothing pinned outside the unit - `w-4 h-4` read 12px at
@@ -1237,7 +1257,7 @@ below.
 | `--spacing-control-sm` | `h-control-sm` | 24px | 32px | `Button` sm, toast action, `ToggleGroup` xs |
 | `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar` |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
-| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`) |
+| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
 
 `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
 theme-independent, the same way `--titlebar-height` and `--dock-height` are - a
@@ -2438,9 +2458,24 @@ the footer is a **`DialogBody`**:
 <DialogContent className="sm:max-w-xl">
   <DialogHeader>…</DialogHeader>
   <DialogBody className="space-y-4 py-2">…</DialogBody>   {/* the only scroller */}
-  <DialogFooter>…</DialogFooter>
+  <DialogFooter>
+    <DialogCancelButton onClick={() => onOpenChange(false)} />
+    <Button onClick={handleConfirm}>Run</Button>
+  </DialogFooter>
 </DialogContent>
 ```
+
+**The declining action is `DialogCancelButton`, never a `Button` you pick a
+variant for** (issue #1693). The same word carried three variants across the
+app - `outline` in five dialogs, `secondary` in three, `ghost` in three, plus
+one hand-rolled `<button>` with a copied class list - so which one a user saw
+depended on which dialog they opened. The primitive settles it on `secondary`,
+matching `DeleteConfirmDialog`, the dialog this app shows most often, and it
+deliberately does not take a `variant` prop: a call site that can choose is a
+call site that can drift. `label` renames the word ("Not now", "Keep it"),
+`size` and `className` pass through for the inline forms outside a
+`DialogFooter` that draw the same button in a denser row.
+`components/ui/dialog-cancel.test.ts` bans a `Cancel` label anywhere else.
 
 Three rules hold it together:
 
@@ -2624,9 +2659,25 @@ line of muted text. Three shared primitives in `components/shared/` now cover it
 
 | State | Component | Notes |
 |-------|-----------|-------|
-| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description + optional action |
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action` |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
 | Still loading | `DetailSkeleton` | `rows` prop, default 4 |
+
+**An empty state that has a create path says so** (issue #1693). Thirty-odd
+call sites had one between them before, so "No environments" and "No mock
+running" were dead ends whose only way forward was a tooltip icon button one
+row up. Twelve now carry `action={<Button variant="link">…</Button>}`, wired
+to the *same* handler that header button uses - never a second, parallel
+create path, which is what would drift. Where the surface genuinely has no
+create of its own the action points at the surface that does
+("Browse collections" from the mock pane), and where the state is one the
+user caused it undoes that ("Clear the filters", "Clear the filter"). A pane
+that is a selection prompt ("No run selected"), a not-found, a loading step
+or a wait on someone else's traffic gets none: there is nothing to offer.
+The `inline` variant takes an action for this reason - the drawer's group
+notes are inline and are where most of the dead ends were - and renders it
+under its single line, so the note stays one column wide inside an inset
+group.
 
 **`ErrorState` is deliberately not a variant of `EmptyState`.** "Nothing here
 yet" and "this failed" are different messages with different affordances, and
@@ -2642,33 +2693,6 @@ background refetch, and covering still-valid content with a full-pane error is
 its own regression.
 
 Sentence case for titles, everywhere.
-
-### Loading
-
-Three shapes, one rule each, decided once here rather than per module
-(issue #1683/#1689) because the app had accumulated `Loader2` in 35 files,
-`ListSkeleton`/`DetailSkeleton` in about a dozen, `EmptyState`'s
-`iconClassName="animate-spin"`, and `ImportProgressView` - four idioms with
-nothing saying which one a new screen should reach for.
-
-- **First load of a list or pane is a skeleton.** `ListSkeleton` or
-  `DetailSkeleton` - the shape of the content that is about to appear, so
-  the layout does not jump when it arrives.
-- **An in-place action on an existing control is an inline spinner.**
-  `Loader2` inside the button or row that triggered it - Send, Stop, Save,
-  a per-row purge. The control that was clicked is what shows it is working;
-  nothing else on the pane should move.
-- **A multi-step job is a progress view.** `ImportProgressView` and its kin -
-  several named steps with their own state, not a single spinner standing in
-  for all of them.
-
-A screen reaching for a fourth idiom, or for the wrong one of these three, is
-the bug this rule exists to catch.
-
-**Default entity names are Title Case** ("New Collection", "New Folder"),
-even beside sentence-case headings and button labels ("No collections yet",
-"Delete forever?"). The name is a proper noun for the thing until the user
-renames it; the surrounding UI copy is not.
 
 ### Error text has three levels, and one component each
 
@@ -2715,6 +2739,33 @@ fallback value of `--rule` is the right answer (see "`border-rule`: let the
 surface pick the token"). Guard: `tabs.test.tsx`, both the rendered class lists
 and a scan asserting every call site in `app/src` declares a variant.
 
+### Loading
+
+Three shapes, one rule each, decided once here rather than per module
+(issue #1683/#1689) because the app had accumulated `Loader2` in 35 files,
+`ListSkeleton`/`DetailSkeleton` in about a dozen, `EmptyState`'s
+`iconClassName="animate-spin"`, and `ImportProgressView` - four idioms with
+nothing saying which one a new screen should reach for.
+
+- **First load of a list or pane is a skeleton.** `ListSkeleton` or
+  `DetailSkeleton` - the shape of the content that is about to appear, so
+  the layout does not jump when it arrives.
+- **An in-place action on an existing control is an inline spinner.**
+  `Loader2` inside the button or row that triggered it - Send, Stop, Save,
+  a per-row purge. The control that was clicked is what shows it is working;
+  nothing else on the pane should move.
+- **A multi-step job is a progress view.** `ImportProgressView` and its kin -
+  several named steps with their own state, not a single spinner standing in
+  for all of them.
+
+A screen reaching for a fourth idiom, or for the wrong one of these three, is
+the bug this rule exists to catch.
+
+**Default entity names are Title Case** ("New Collection", "New Folder"),
+even beside sentence-case headings and button labels ("No collections yet",
+"Delete forever?"). The name is a proper noun for the thing until the user
+renames it; the surrounding UI copy is not.
+
 ### Cards
 
 ```tsx
@@ -2728,23 +2779,29 @@ Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-
 ### Section Eyebrow Label
 
 ```tsx
-<p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-4">
-  Section Title
-</p>
+<Eyebrow className="mb-4">Section Title</Eyebrow>
 ```
 
-That string has one home: the `Eyebrow` primitive
+The class string behind it (`text-label font-semibold uppercase
+tracking-[0.06em] text-muted-foreground`) has one home: the `Eyebrow` primitive
 (`app/src/components/ui/eyebrow.tsx`), which is what a section label should
 render - it was extracted because the class was hand-typed in about a dozen
-components and two of them had already drifted, and `eyebrow.test.ts` fails on a
-second copy of the literal. The command palette's group headings are an
-`Eyebrow` inside the element cmdk labels the group by.
+components and two of them had already drifted. `Eyebrow` takes `size="xs"` for
+the denser 10px tier some panes run.
+
+`eyebrow.test.ts` no longer guards only a verbatim copy of that literal: since
+#1692 it fails on **any** `.tsx` under `app/src` that combines `uppercase` with
+a `tracking-` utility in one class string, which is the shape every hand-rolled
+eyebrow had. Files that genuinely need the combination for something that is not
+a section label are exempted there by name, with the reason. The command
+palette's group headings are an `Eyebrow` inside the element cmdk labels the
+group by.
 
 ### Status Badges / Pills
 
 **Live (running):**
 ```tsx
-<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25">
+<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-label font-semibold tracking-wide bg-green-500/15 text-green-500 border border-green-500/25">
   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
   LIVE
 </span>
@@ -2752,7 +2809,7 @@ second copy of the literal. The command palette's group headings are an
 
 **Completed / Stopped:**
 ```tsx
-<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide bg-muted text-muted-foreground border border-border">
+<span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-label font-semibold tracking-wide bg-muted text-muted-foreground border border-border">
   COMPLETED
 </span>
 ```
@@ -2881,20 +2938,6 @@ unreachable and undismissable.
 dismisses itself on a timer and always reports something the user just asked
 for, so interrupting what they are reading is the wrong trade.
 
-### Copy feedback
-
-A copy is acknowledged one of two ways, and which one is decided by the control, not by the surface:
-
-- **An icon button swaps its glyph**: `IconSwap` from Copy to Check, through `useCopy({ feedback: "icon" })`. No toast beside it - the swap already said it.
-- **A menu item or a text button toasts**: plain `useCopy()`, whose toast names the value that was copied, so a surface with several copy controls says which one it means.
-
-**One duration, `TIMING.COPY_RESET_MS`, and the hook owns the timer.** This used to be three - 1500ms in the MCP settings panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the response viewer and the snippet section - because each call site kept its own `copied` flag and its own `setTimeout`.
-
-**Every clipboard write goes through `useCopy`.** `navigator.clipboard.writeText` rejects on a denied permission, an unfocused document, or a platform with no clipboard behind the API, and a call site that awaits it with no catch simply never reaches the line that draws the feedback: the copy fails and the user's only evidence is pasting the previous clipboard contents somewhere else. `clipboard-single-writer.test.ts` holds the rule to two files - the hook, and `errors/ErrorBoundary.tsx`, which runs when the tree below it has already failed and no hook is reachable.
-
-**A failure toasts in both modes.** An icon button has no failure glyph, and a check that simply never appears is the same silence again.
-
-
 ### Inline rename
 
 Every tree that renames a row in place does it through one hook,
@@ -2922,6 +2965,19 @@ owns the behaviour:
 
 A surface that renames something in place uses the hook rather than a fourth
 copy of those four rules.
+
+### Copy feedback
+
+A copy is acknowledged one of two ways, and which one is decided by the control, not by the surface:
+
+- **An icon button swaps its glyph**: `IconSwap` from Copy to Check, through `useCopy({ feedback: "icon" })`. No toast beside it - the swap already said it.
+- **A menu item or a text button toasts**: plain `useCopy()`, whose toast names the value that was copied, so a surface with several copy controls says which one it means.
+
+**One duration, `TIMING.COPY_RESET_MS`, and the hook owns the timer.** This used to be three - 1500ms in the MCP settings panel, 2000ms in the two update surfaces, `STATUS_RESET_MS` in the response viewer and the snippet section - because each call site kept its own `copied` flag and its own `setTimeout`.
+
+**Every clipboard write goes through `useCopy`.** `navigator.clipboard.writeText` rejects on a denied permission, an unfocused document, or a platform with no clipboard behind the API, and a call site that awaits it with no catch simply never reaches the line that draws the feedback: the copy fails and the user's only evidence is pasting the previous clipboard contents somewhere else. `clipboard-single-writer.test.ts` holds the rule to two files - the hook, and `errors/ErrorBoundary.tsx`, which runs when the tree below it has already failed and no hook is reachable.
+
+**A failure toasts in both modes.** An icon button has no failure glyph, and a check that simply never appears is the same silence again.
 
 ### A disabled control says why: `DisabledHint`
 
@@ -3011,7 +3067,7 @@ Two lanes, decided once here rather than per module (issue #1683/#1689):
 
 ```tsx
 <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
-  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-semibold text-[11px] */}
+  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-semibold text-label */}
   <UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus:border-primary focus:outline-none transition-colors" />
 
   {/* Primary action */}
@@ -3080,7 +3136,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 
 ```tsx
 <div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1">
-  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{label}</p>
+  <Eyebrow>{label}</Eyebrow>
   <div className="flex items-baseline gap-1.5 mt-0.5">
     <span
       className="text-[34px] font-bold leading-none font-mono tabular-nums"
@@ -3090,7 +3146,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
     </span>
     {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
   </div>
-  {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
+  {sub && <p className="text-label text-muted-foreground mt-0.5">{sub}</p>}
   {sparkData && sparkData.length > 1 && (
     <div className="mt-2">
       <Sparkline data={sparkData} color={sparkColor || "hsl(var(--primary))"} />
@@ -3105,7 +3161,7 @@ Note: sparkline renders **below** the value row, not beside it.
 
 ```tsx
 <div className="bg-card border border-border rounded-md p-3">
-  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground mb-1.5">{label}</p>
+  <Eyebrow className="mb-1.5">{label}</Eyebrow>
   <div className="flex items-baseline gap-1">
     <span className="text-[22px] font-bold font-mono text-foreground">{value}</span>
     {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
