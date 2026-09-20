@@ -17,6 +17,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import ExportSpecDialog from "./ExportSpecDialog";
@@ -226,7 +227,10 @@ export default function CollectionTree() {
 								onClick={openImport}
 								aria-label="Import collection"
 							>
-								<Download className="size-icon" />
+								<Download
+									className="size-icon"
+									data-icon-motion={ICON_MOTION.drop}
+								/>
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent>Import collection</TooltipContent>

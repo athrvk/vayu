@@ -81,6 +81,7 @@ import {
 	Switch,
 	ToggleGroup,
 	ToggleGroupItem,
+	ICON_MOTION,
 } from "@/components/ui";
 import { Callout, NumberField } from "@/components/shared";
 import { useStartScenarioRunMutation } from "@/queries";
@@ -776,7 +777,7 @@ export default function RunCollectionDialog({
 						{startRun.isPending ? (
 							<Loader2 className="size-icon mr-2 animate-spin" />
 						) : (
-							<Play className="size-icon mr-2" />
+							<Play className="size-icon mr-2" data-icon-motion={ICON_MOTION.scale} />
 						)}
 						Run
 					</Button>

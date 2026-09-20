@@ -48,7 +48,7 @@ import {
 } from "@/queries";
 import { useEngine } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
-import { Button, Badge, LabelSwap } from "@/components/ui";
+import { Button, Badge, LabelSwap, ICON_MOTION } from "@/components/ui";
 import { ErrorState } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
 import { toFlatHeaders } from "@/modules/request-builder/utils/key-value";
@@ -434,7 +434,10 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					 */}
 					{liveRequest && (
 						<Button variant="outline" size="sm" onClick={() => setShowSaveDialog(true)}>
-							<Save className="w-3.5 h-3.5 mr-1.5" />
+							<Save
+								className="w-3.5 h-3.5 mr-1.5"
+								data-icon-motion={ICON_MOTION.press}
+							/>
 							Save this run to the request
 						</Button>
 					)}
