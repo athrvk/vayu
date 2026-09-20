@@ -14,10 +14,12 @@
  * The drafts stop a mode switch from destroying your body (see
  * `utils/body-drafts.ts`). They started as a ref inside `BodyPanel`, and that
  * was the wrong home for a reason nothing in the pure-function tests could see:
- * `RequestTabs` renders one `TabsContent` per tab and Radix mounts only the
- * active one, so stepping over to Headers and back tears `BodyPanel` down. A
- * panel-local ref went with it - stash JSON behind GraphQL, glance at Headers,
- * come back, and the JSON was gone.
+ * `RequestTabs` renders one `TabsContent` per tab and, until #1718, Radix
+ * mounted only the active one, so stepping over to Headers and back tore
+ * `BodyPanel` down. A panel-local ref went with it - stash JSON behind
+ * GraphQL, glance at Headers, come back, and the JSON was gone. Body now stays
+ * mounted once visited, but the panel still goes with the builder (a tab
+ * switch, a close), so the drafts' home is the provider either way.
  *
  * What is tested here is the **lifetime**, which is the thing that changed: the
  * drafts survive a consumer unmounting and remounting, and survive the provider
@@ -130,7 +132,7 @@ describe("drafts across a tab switch", () => {
 	it("survives BodyPanel unmounting and coming back", async () => {
 		renderProvider();
 
-		// Leave the Body tab, then return - Radix unmounts the inactive panel,
+		// Leave the Body tab, then return - the consumer unmounts and remounts,
 		// which is exactly what threw a panel-local ref away.
 		await act(async () => harnessStep("away"));
 		await act(async () => harnessStep("back"));
