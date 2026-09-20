@@ -322,11 +322,23 @@ export function UPlotChart({
 		}
 
 		const activePlot = plot;
+		// Deferred to the next frame, the same pattern as
+		// useResolvedResponsePosition (#1711): calling setSize synchronously
+		// inside the observer callback is the same shape as the loop #1713
+		// fixed - a delivery that resizes the element the observer itself
+		// watches - and triggers the browser's "ResizeObserver loop completed
+		// with undelivered notifications", which `main.tsx` logs as a
+		// high-severity window error.
+		let resizeFrame: number | null = null;
 		const ro =
 			typeof ResizeObserver !== "undefined" && activePlot
-				? new ResizeObserver(() =>
-						activePlot.setSize({ width: host.clientWidth || 600, height })
-					)
+				? new ResizeObserver(() => {
+						if (resizeFrame !== null) return;
+						resizeFrame = requestAnimationFrame(() => {
+							resizeFrame = null;
+							activePlot.setSize({ width: host.clientWidth || 600, height });
+						});
+					})
 				: null;
 		ro?.observe(host);
 
@@ -374,6 +386,7 @@ export function UPlotChart({
 		return () => {
 			unsubFocus?.();
 			ro?.disconnect();
+			if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
 			activePlot?.destroy();
 			plotRef.current = null;
 		};
