@@ -26,6 +26,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import { Palette, Code2, LayoutDashboard, Gauge, Bell, Plug, Info, Keyboard } from "lucide-react";
+import { ICON_MOTION, type IconMotion } from "@/components/ui";
 import type { ClientSettingsCategory, SettingsCategory } from "@/types";
 
 export interface AppSettingsPanel {
@@ -34,6 +35,20 @@ export interface AppSettingsPanel {
 	/** Shown under the panel header. */
 	description: string;
 	icon: LucideIcon;
+	/**
+	 * Which named motion this panel's glyph plays on hover or focus of the
+	 * sidebar row it sits in (`ICON_MOTION`, docs/design-system.md → Motion →
+	 * Icon motion). The same shape `DRAWER_VIEWS` carries, and for the same
+	 * reason: `SettingsCategoryTree` draws fifteen glyphs generically and must
+	 * not learn which one it has been handed.
+	 *
+	 * Optional in the type and named by every entry in practice - a category
+	 * row is a navigation affordance exactly like a rail entry, so a glyph
+	 * that answers nothing reads as unfinished. The panel *header* draws no
+	 * glyph at all, which is where the same icon would be reporting rather
+	 * than offering; `SettingsCategoryTree.test.tsx` holds both halves.
+	 */
+	motion?: IconMotion;
 	/**
 	 * How this panel saves, stated in its header. Three save models coexist in
 	 * Settings - these panels autosave, the engine view has an explicit Save
@@ -52,30 +67,35 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		label: "General",
 		description: "Storage locations and application info",
 		icon: Info,
+		motion: ICON_MOTION.bob,
 	},
 	{
 		id: "appearance",
 		label: "Appearance",
 		description: "Customize the look and feel of the application",
 		icon: Palette,
+		motion: ICON_MOTION.tilt,
 	},
 	{
 		id: "editor",
 		label: "Editor",
 		description: "Code-editor behavior across scripts and request/response bodies",
 		icon: Code2,
+		motion: ICON_MOTION.part,
 	},
 	{
 		id: "dashboard",
 		label: "Dashboard",
 		description: "How live test dashboards and charts behave",
 		icon: LayoutDashboard,
+		motion: ICON_MOTION.tiles,
 	},
 	{
 		id: "load-testing",
 		label: "Load testing",
 		description: "How far the load-test dialog lets you push a run",
 		icon: Gauge,
+		motion: ICON_MOTION.sweep,
 	},
 	{
 		id: "notifications",
@@ -83,12 +103,14 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		description:
 			"Where toasts appear, how long they stay, how many stack at once, and which ones are worth showing",
 		icon: Bell,
+		motion: ICON_MOTION.ring,
 	},
 	{
 		id: "shortcuts",
 		label: "Keyboard shortcuts",
 		description: "Every chord the app listens for, drawn for this platform",
 		icon: Keyboard,
+		motion: ICON_MOTION.press,
 		// Nothing on this screen is editable, so the autosave note would be
 		// answering a question it does not raise.
 		saveNote: "Shortcuts are fixed; this screen is a reference.",
@@ -100,6 +122,7 @@ export const APP_SETTINGS_PANELS: readonly AppSettingsPanel[] = [
 		label: "AI agents (MCP)",
 		description: "Expose Vayu to AI agents like Claude Code, and set the safety guardrails",
 		icon: Plug,
+		motion: ICON_MOTION.plugIn,
 		saveNote:
 			"Switches and hosts are saved as you change them; the caps save when you leave the field. Every change is applied to the running server.",
 	},

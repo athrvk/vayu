@@ -42,6 +42,7 @@ import {
 	CardTitle,
 	Skeleton,
 	Textarea,
+	ICON_MOTION,
 } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import { cn } from "@/lib/utils";
@@ -882,7 +883,10 @@ export default function SettingsMain() {
 							onClick={handleResetToDefaults}
 							disabled={updateConfigMutation.isPending}
 						>
-							<RotateCcw className="size-icon mr-1.5" />
+							<RotateCcw
+								className="size-icon mr-1.5"
+								data-icon-motion={ICON_MOTION.spinBack}
+							/>
 							Reset to Defaults
 						</Button>
 						<Button
@@ -895,7 +899,10 @@ export default function SettingsMain() {
 							{updateConfigMutation.isPending ? (
 								<Loader2 className="size-icon mr-1.5 animate-spin" />
 							) : (
-								<Save className="size-icon mr-1.5" />
+								<Save
+									className="size-icon mr-1.5"
+									data-icon-motion={ICON_MOTION.press}
+								/>
 							)}
 							Save Changes
 						</Button>

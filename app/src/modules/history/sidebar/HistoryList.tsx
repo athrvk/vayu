@@ -39,6 +39,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 } from "@/components/ui";
 import RunItem from "./RunItem";
 import { groupRunsByDay } from "./group-runs-by-day";
@@ -333,7 +334,10 @@ export default function HistoryList() {
 							aria-pressed={pinnedOnly}
 							title="Show only pinned runs"
 						>
-							<Pin className="size-icon-sm shrink-0" />
+							<Pin
+								className="size-icon-sm shrink-0"
+								data-icon-motion={ICON_MOTION.tiltPin}
+							/>
 							Pinned
 						</Button>
 					</div>

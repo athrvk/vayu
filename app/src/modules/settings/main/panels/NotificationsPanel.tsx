@@ -43,6 +43,7 @@ import {
 	CardTitle,
 	DisabledHint,
 	Eyebrow,
+	ICON_MOTION,
 } from "@/components/ui";
 import { systemNotify } from "@/services/notify";
 import type { SystemNotificationOutcome } from "@/types/electron";
@@ -150,7 +151,10 @@ export default function NotificationsPanel() {
 									disabled={previewable.length === 0}
 									className="gap-1.5"
 								>
-									<Play className="size-icon-sm" />
+									<Play
+										className="size-icon-sm"
+										data-icon-motion={ICON_MOTION.scale}
+									/>
 									Preview
 								</Button>
 							</DisabledHint>
@@ -371,7 +375,7 @@ function SystemNotificationsCard() {
 						disabled={previewing || unavailableReason !== null || !enabled}
 						className="gap-1.5"
 					>
-						<Play className="size-icon-sm" />
+						<Play className="size-icon-sm" data-icon-motion={ICON_MOTION.scale} />
 						Preview
 					</Button>
 					<p className="text-xs text-muted-foreground">{previewHint}</p>

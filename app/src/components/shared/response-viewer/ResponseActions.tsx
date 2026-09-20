@@ -27,7 +27,14 @@
  */
 
 import { Copy, Check, Download } from "lucide-react";
-import { Button, IconSwap, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import {
+	Button,
+	IconSwap,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+	ICON_MOTION,
+} from "@/components/ui";
 import { useCopy } from "@/hooks/useCopy";
 import { cn } from "@/lib/utils";
 
@@ -89,7 +96,7 @@ export function ResponseActions({ content, fileExtension, className }: ResponseA
 						onClick={handleDownload}
 						aria-label="Download response"
 					>
-						<Download className="size-icon-sm" />
+						<Download className="size-icon-sm" data-icon-motion={ICON_MOTION.drop} />
 					</Button>
 				</TooltipTrigger>
 				<TooltipContent>Download response</TooltipContent>

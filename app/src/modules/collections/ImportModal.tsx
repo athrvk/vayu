@@ -35,6 +35,7 @@ import {
 	Textarea,
 	LabelSwap,
 	DialogCancelButton,
+	ICON_MOTION,
 } from "@/components/ui";
 import { useImportModalStore, useTabsStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
@@ -720,7 +721,11 @@ export function ImportModal() {
 						<button
 							type="button"
 							disabled={isBusy}
-							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center disabled:cursor-default disabled:opacity-60"
+							// `group`: the Upload glyph's `lift` fires from this
+							// dropzone's hover, and the `Icon motion` block gates on a
+							// `[data-slot="button"]` or `.group` ancestor - a bare
+							// <button> element is neither.
+							className="group w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center disabled:cursor-default disabled:opacity-60"
 							onClick={() => fileInputRef.current?.click()}
 							onDragOver={(e) => e.preventDefault()}
 							onDrop={(e) => {
@@ -735,7 +740,10 @@ export function ImportModal() {
 								void handleFiles(Array.from(e.dataTransfer.files));
 							}}
 						>
-							<Upload className="mx-auto h-6 w-6 text-muted-foreground" />
+							<Upload
+								className="mx-auto h-6 w-6 text-muted-foreground"
+								data-icon-motion={ICON_MOTION.lift}
+							/>
 							<span className="mt-2 block text-sm font-medium">
 								Drop files here, or click to browse
 							</span>

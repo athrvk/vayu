@@ -39,6 +39,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 	Switch,
+	ICON_MOTION,
 } from "@/components/ui";
 import { Callout, EmptyState, ErrorState, NonLoopbackBadge } from "@/components/shared";
 import {
@@ -277,7 +278,11 @@ export default function InboxView() {
 				description="Start one to get a local URL that records every request sent to it - no tunnel, no third party."
 				action={
 					<Button onClick={start} disabled={startInbox.isPending}>
-						<Play className="mr-2 size-icon" aria-hidden="true" />
+						<Play
+							className="mr-2 size-icon"
+							aria-hidden="true"
+							data-icon-motion={ICON_MOTION.scale}
+						/>
 						Start inbox
 					</Button>
 				}
@@ -368,7 +373,11 @@ export default function InboxView() {
 						</Button>
 					) : (
 						<Button size="sm" onClick={start} disabled={startInbox.isPending}>
-							<Play className="mr-2 size-icon-sm" aria-hidden="true" />
+							<Play
+								className="mr-2 size-icon-sm"
+								aria-hidden="true"
+								data-icon-motion={ICON_MOTION.scale}
+							/>
 							Start new
 						</Button>
 					)}

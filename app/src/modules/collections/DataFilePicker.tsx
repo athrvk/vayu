@@ -43,6 +43,7 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
+	ICON_MOTION,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import {
@@ -251,7 +252,10 @@ export default function DataFilePicker({
 						disabled={disabled}
 						className="shrink-0"
 					>
-						<Upload className="mr-1.5 size-icon-sm" />
+						<Upload
+							className="mr-1.5 size-icon-sm"
+							data-icon-motion={ICON_MOTION.lift}
+						/>
 						Choose file
 					</Button>
 				)}

@@ -37,7 +37,7 @@ import {
 	Square,
 } from "lucide-react";
 import { useState } from "react";
-import { Button, IconSwap, TooltipIconButton } from "@/components/ui";
+import { Button, IconSwap, TooltipIconButton, ICON_MOTION } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import {
 	useMockServersQuery,
@@ -118,7 +118,13 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 					<IconSwap
 						state={startMock.isPending ? "starting" : "idle"}
 						icons={{
-							idle: <Play className="size-icon-sm" aria-hidden="true" />,
+							idle: (
+								<Play
+									className="size-icon-sm"
+									aria-hidden="true"
+									data-icon-motion={ICON_MOTION.scale}
+								/>
+							),
 							starting: (
 								<Loader2 className="size-icon-sm animate-spin" aria-hidden="true" />
 							),
@@ -129,7 +135,13 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 				<TooltipIconButton
 					label="Mock server options"
 					tooltipHint="Latency and error rate"
-					icon={<SlidersHorizontal className="size-icon-sm" aria-hidden="true" />}
+					icon={
+						<SlidersHorizontal
+							className="size-icon-sm"
+							aria-hidden="true"
+							data-icon-motion={ICON_MOTION.nudgeX}
+						/>
+					}
 					disabled={startMock.isPending}
 					// The mutation outlives the dialog, so a failed direct start
 					// would greet the next open with a Callout about it.

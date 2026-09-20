@@ -56,6 +56,7 @@ import {
 	CardHeader,
 	CardTitle,
 	Skeleton,
+	ICON_MOTION,
 } from "@/components/ui";
 import type {
 	McpConnectClient,
@@ -664,7 +665,10 @@ export default function McpSettingsPanel() {
 											{connecting === snippet.client ? (
 												<Loader2 className="size-icon-sm mr-1 animate-spin" />
 											) : (
-												<Zap className="size-icon-sm mr-1" />
+												<Zap
+													className="size-icon-sm mr-1"
+													data-icon-motion={ICON_MOTION.flash}
+												/>
 											)}
 											Connect
 										</Button>
