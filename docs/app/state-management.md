@@ -214,6 +214,14 @@ Collections (the default view) had. Re-introducing a per-view width re-introduce
 that bug. `setRequestSplitRatio` clamps to [0.2, 0.8]; both panel widths clamp to
 `PANEL_MIN_WIDTH` / `PANEL_MAX_WIDTH`.
 
+**`setDrawerWidth` / `setContextBarWidth` are not called per `pointermove`.**
+`PanelResizeHandle` (`app/src/components/layout/PanelResizeHandle.tsx`) holds a
+drag's live width outside the store, painting it onto the panel's own inline
+`style.width` once per animation frame, and calls the setter - the one write
+`partialize` persists - exactly once, on `pointerup`. A store write on every
+`pointermove` was a synchronous `JSON.stringify` + `localStorage.setItem` of the
+whole persisted slice 120-240 times a second (#1715).
+
 **`paletteOpen` is here, and is not persisted.** The palette lives in `Shell`
 while the things that open it - the welcome Launcher's Search tile, the title
 bar's search bar - are in other subtrees, so the flag has to be shared state
