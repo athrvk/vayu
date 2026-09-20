@@ -20,7 +20,7 @@
  * tabs - it is the first request tab now. See `RequestTabs/panels/InfoPanel`.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useGroupRef } from "react-resizable-panels";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
@@ -39,8 +39,10 @@ import ResponseAnnouncer from "./ResponseAnnouncer";
 import ResponseViewer from "./ResponseViewer";
 import ExternalChangeNotice from "./ExternalChangeNotice";
 
-/** A 0-1 share as the percentage string the panel library wants, without float noise. */
-const percent = (share: number) => `${Math.round(share * 10000) / 100}%`;
+/** A 0-1 share as a percentage number, without float noise. */
+const share = (ratio: number) => Math.round(ratio * 10000) / 100;
+/** The same share as the percentage string `defaultSize` wants. */
+const percent = (ratio: number) => `${share(ratio)}%`;
 
 export default function RequestBuilderLayout() {
 	const { request, isExecuting, isStreaming, executeRequest, startLoadTest, canStartLoadTest } =
@@ -75,18 +77,44 @@ export default function RequestBuilderLayout() {
 	);
 
 	/*
+	 * `defaultSize` is read once at mount, so a ratio that changes on a group
+	 * that is already laid out has to go through the group's imperative handle.
+	 */
+	const applyRatio = useCallback(
+		(ratio: number) => {
+			groupRef.current?.setLayout({ request: share(ratio), response: share(1 - ratio) });
+		},
+		[groupRef]
+	);
+
+	/*
 	 * Double-click on the divider: back to an even split, for this arrangement
-	 * only. Written to the store *and* applied through the group's imperative
-	 * handle, because `defaultSize` is read once at mount and a ratio change
-	 * alone would not move a group that is already laid out.
+	 * only.
 	 */
 	const resetSplit = useCallback(() => {
 		setRequestSplitRatio(arrangement, DEFAULT_REQUEST_SPLIT_RATIO);
-		groupRef.current?.setLayout({
-			request: DEFAULT_REQUEST_SPLIT_RATIO * 100,
-			response: (1 - DEFAULT_REQUEST_SPLIT_RATIO) * 100,
-		});
-	}, [setRequestSplitRatio, arrangement, groupRef]);
+		applyRatio(DEFAULT_REQUEST_SPLIT_RATIO);
+	}, [setRequestSplitRatio, arrangement, applyRatio]);
+
+	/*
+	 * A flip re-orients the group *in place* - the library re-lays out when its
+	 * `orientation` prop changes - and this effect then applies the ratio the
+	 * new arrangement owns. It is a layout effect so the new ratio is on screen
+	 * in the same frame as the new orientation, and it skips the mount, where
+	 * `defaultSize` has already done the job.
+	 *
+	 * Deliberately not a `key` on the group: a remount would tear down and
+	 * rebuild the request editor and the response viewer, code editors and all,
+	 * and that rebuild is a visible flash of the whole pane on every Auto flip
+	 * while the window is being resized.
+	 */
+	const mountedArrangementRef = useRef(arrangement);
+	useLayoutEffect(() => {
+		if (mountedArrangementRef.current === arrangement) return;
+		mountedArrangementRef.current = arrangement;
+		const s = useLayoutStore.getState();
+		applyRatio(arrangement === "beside" ? s.requestSplitRatioBeside : s.requestSplitRatioBelow);
+	}, [arrangement, applyRatio]);
 
 	/*
 	 * Stacked minimums are pixels, side-by-side ones a share: 20% of a short
@@ -183,15 +211,11 @@ export default function RequestBuilderLayout() {
 			<ExternalChangeNotice />
 
 			{/*
-			 * Keyed on the arrangement: `defaultSize` is read once at mount, so
-			 * the remount is what re-applies the matching ratio when the
-			 * response moves from beside the request to below it. Only a user's
-			 * own drag is persisted (`isUserInteraction`) - the layout the
-			 * library reports on mount, or after a pixel minimum clamps a
-			 * stacked pane, is not a preference anyone expressed.
+			 * Only a user's own drag is persisted (`isUserInteraction`) - the
+			 * layout the library reports on mount, after a flip, or after a pixel
+			 * minimum clamps a stacked pane, is not a preference anyone expressed.
 			 */}
 			<ResizablePanelGroup
-				key={arrangement}
 				groupRef={groupRef}
 				orientation={arrangement === "beside" ? "horizontal" : "vertical"}
 				data-response-position={arrangement}

@@ -18,9 +18,8 @@ export { AUTO_RESPONSE_BELOW_MAX_WIDTH };
  * Below under the threshold, beside at or above it - with a band on the way
  * back: a builder that stacked at 879px does not un-stack until it is
  * `AUTO_RESPONSE_HYSTERESIS` wider, so a drawer or window drag that hovers
- * around the threshold does not re-arrange the split on every pixel (each
- * flip remounts the panel group). Exported for the unit test; the hook is the
- * only production caller.
+ * around the threshold does not re-arrange the split on every pixel. Exported
+ * for the unit test; the hook is the only production caller.
  */
 export function pickAutoArrangement(
 	width: number,

@@ -56,13 +56,27 @@ vi.mock("./ResponseViewer", () => ({ default: () => <div data-testid="response-v
  * mounted with rather than on a style the DOM cannot show.
  */
 const panelDefaultSizes: Record<string, unknown> = {};
+
+/**
+ * What the layout applies through the group's imperative handle after a flip.
+ * The real handle is re-populated by the library on every commit, so a spy
+ * placed on it would be gone by the time the layout calls it; instead the
+ * layout's `useGroupRef` is stubbed with this handle and the real `Group` is
+ * not told about it, so the calls land here and nowhere else.
+ */
+const setLayout = vi.fn();
+const groupHandle = { current: { setLayout, getLayout: () => ({}) } };
+
 vi.mock("react-resizable-panels", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("react-resizable-panels")>();
 	const Panel = (props: React.ComponentProps<typeof actual.Panel>) => {
 		if (typeof props.id === "string") panelDefaultSizes[props.id] = props.defaultSize;
 		return <actual.Panel {...props} />;
 	};
-	return { ...actual, Panel };
+	const Group = ({ groupRef: _, ...props }: React.ComponentProps<typeof actual.Group>) => (
+		<actual.Group {...props} />
+	);
+	return { ...actual, Panel, Group, useGroupRef: () => groupHandle };
 });
 
 const WIDE = AUTO_RESPONSE_BELOW_MAX_WIDTH + 400;
@@ -110,6 +124,7 @@ const arrangementOf = (group: HTMLElement) => ({
 
 beforeEach(() => {
 	observers.length = 0;
+	setLayout.mockClear();
 	vi.stubGlobal("ResizeObserver", RecordingResizeObserver);
 	vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
 		() =>
@@ -179,6 +194,35 @@ describe("RequestBuilderLayout response position", () => {
 		measuredWidth = AUTO_RESPONSE_BELOW_MAX_WIDTH + AUTO_RESPONSE_HYSTERESIS;
 		fire();
 		expect(current()).toBe("beside");
+	});
+
+	/*
+	 * Mutation check: put `key={arrangement}` back on the panel group and the
+	 * identity assertions fail - a remount is a fresh pair of nodes, and in the
+	 * app a fresh pair of editors, which is the flash this test exists to keep
+	 * out. Drop the layout effect instead and the ratio assertion fails.
+	 */
+	it("flips in place: the panes survive and the new arrangement's ratio is applied", () => {
+		useLayoutStore.setState({ requestSplitRatioBeside: 0.3, requestSplitRatioBelow: 0.7 });
+		const { container, getByTestId } = renderAt("auto", WIDE);
+		const observer = observerOf(container.firstElementChild);
+		if (!observer) throw new Error("the layout is not observing its own width");
+		const requestTabs = getByTestId("request-tabs");
+		const responseViewer = getByTestId("response-viewer");
+		// `defaultSize` seeds the mount; the handle is for flips only.
+		expect(setLayout).not.toHaveBeenCalled();
+
+		measuredWidth = NARROW;
+		act(() => observer.callback([], {} as ResizeObserver));
+
+		expect(arrangementOf(container.querySelector("[data-group]") as HTMLElement)).toEqual({
+			orientation: "vertical",
+			position: "below",
+		});
+		expect(getByTestId("request-tabs")).toBe(requestTabs);
+		expect(getByTestId("response-viewer")).toBe(responseViewer);
+		expect(setLayout).toHaveBeenCalledTimes(1);
+		expect(setLayout).toHaveBeenCalledWith({ request: 70, response: 30 });
 	});
 
 	it("writes auto's pick to the store, where the Dock button reads it", () => {
