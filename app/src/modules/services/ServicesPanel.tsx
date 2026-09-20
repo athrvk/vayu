@@ -255,7 +255,7 @@ function NotNotifyingBadge() {
 function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const openTab = useTabsStore((s) => s.openTab);
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const stopInbox = useStopInboxMutation();
 	// No capture list on this surface, so the record's own count is all it knows.
 	const deletion = useInboxDeletion(inbox);
@@ -375,7 +375,7 @@ function IssuerRow({
 	onToggle: () => void;
 }) {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const stopIssuer = useStopMockIssuerMutation();
 	const updateIssuer = useUpdateMockIssuerMutation();
 
@@ -611,7 +611,7 @@ function IssuerDelayControl({
  */
 function MockServerRow({ mock }: { mock: MockServer }) {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const openTab = useTabsStore((s) => s.openTab);
 	const stopMock = useStopMockServerMutation();
 

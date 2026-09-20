@@ -23,6 +23,9 @@ import type { RowAction } from "./row-actions";
  * next. `text-muted-foreground` keeps it behind the label whichever it is - a
  * disabled item is already at the menu's own disabled opacity, and the column
  * has to stay secondary on an enabled one too.
+ *
+ * `data-icon-motion` arrives in a variable, so no source scan can see it - the
+ * rendered-class half of `icon-motion.call-sites.test.tsx` is what holds it.
  */
 export function RowActionBody({ action }: { action: RowAction }) {
 	const Icon = action.icon;
@@ -31,7 +34,7 @@ export function RowActionBody({ action }: { action: RowAction }) {
 	const trailing = (action.disabled ? action.disabledReason : undefined) ?? action.hint;
 	return (
 		<>
-			<Icon className="size-icon shrink-0" />
+			<Icon className="size-icon shrink-0" data-icon-motion={action.iconMotion} />
 			{action.label}
 			{trailing ? (
 				// `max-w-48 truncate`: a hint is often a URL, and a menu sizes

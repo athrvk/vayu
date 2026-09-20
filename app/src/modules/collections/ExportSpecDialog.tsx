@@ -55,6 +55,7 @@ import {
 	Skeleton,
 	ToggleGroup,
 	ToggleGroupItem,
+	ICON_MOTION,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { useCopy } from "@/hooks/useCopy";
@@ -74,7 +75,7 @@ export interface ExportSpecDialogProps {
 export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpecDialogProps) {
 	const [format, setFormat] = useState<ExportFormat>("json");
 	const exported = useSpecExportQuery(collection.id, format);
-	const copy = useCopy();
+	const { copy } = useCopy();
 
 	const result = exported.data;
 	/**
@@ -174,7 +175,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 						Copy
 					</Button>
 					<Button disabled={!result || reassembling} onClick={handleDownload}>
-						<Download className="mr-2 size-icon" />
+						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Download
 					</Button>
 				</DialogFooter>

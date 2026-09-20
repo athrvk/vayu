@@ -23,7 +23,7 @@
  */
 
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger, ICON_MOTION } from "@/components/ui";
 import { EYEBROW_CLASS } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
@@ -54,13 +54,21 @@ export function ContextBarSectionFrame({
 			<CollapsibleTrigger
 				className={cn(
 					EYEBROW_CLASS,
-					"flex items-center gap-1 w-full text-left hover:text-foreground transition-colors"
+					// `group`: a CollapsibleTrigger is not a `[data-slot="button"]`, and the
+					// chevron inside it is what answers this control's hover.
+					"group flex items-center gap-1 w-full text-left hover:text-foreground transition-colors"
 				)}
 			>
 				{expanded ? (
-					<ChevronDown className={cn(CHEVRON_COLUMN, "h-3 shrink-0")} />
+					<ChevronDown
+						className={cn(CHEVRON_COLUMN, "h-3 shrink-0")}
+						data-icon-motion={ICON_MOTION.nudgeY}
+					/>
 				) : (
-					<ChevronRight className={cn(CHEVRON_COLUMN, "h-3 shrink-0")} />
+					<ChevronRight
+						className={cn(CHEVRON_COLUMN, "h-3 shrink-0")}
+						data-icon-motion={ICON_MOTION.nudgeX}
+					/>
 				)}
 				{title}
 			</CollapsibleTrigger>

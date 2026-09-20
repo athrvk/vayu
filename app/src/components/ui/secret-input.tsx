@@ -16,6 +16,7 @@
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { IconSwap } from "./icon-swap";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input } from "./input";
 
@@ -81,7 +82,13 @@ export function SecretInput({
 				label={revealed ? "Hide value" : "Show value"}
 				aria-pressed={revealed}
 				icon={
-					revealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />
+					<IconSwap
+						state={revealed ? "revealed" : "hidden"}
+						icons={{
+							hidden: <Eye className="w-3.5 h-3.5" />,
+							revealed: <EyeOff className="w-3.5 h-3.5" />,
+						}}
+					/>
 				}
 			/>
 		</div>
