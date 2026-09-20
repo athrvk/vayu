@@ -23,7 +23,6 @@ import {
 	Save,
 	RotateCcw,
 	Loader2,
-	AlertCircle,
 	ChevronRight,
 	AlertTriangle,
 	RefreshCw,
@@ -44,7 +43,7 @@ import {
 	Textarea,
 	ICON_MOTION,
 } from "@/components/ui";
-import { EmptyState } from "@/components/shared";
+import { EmptyState, ErrorState } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
 import {
@@ -502,15 +501,10 @@ export default function SettingsMain() {
 
 	if (error) {
 		return (
-			<div className="flex-1 flex flex-col items-center justify-center text-destructive-text gap-4 p-8">
-				<AlertCircle className="w-12 h-12" />
-				<div className="text-center">
-					<p className="text-md font-medium">Failed to load settings</p>
-					<p className="text-sm mt-1 text-muted-foreground">
-						{error instanceof Error ? error.message : "Unknown error"}
-					</p>
-				</div>
-			</div>
+			<ErrorState
+				title="Failed to load settings"
+				detail={error instanceof Error ? error.message : "Unknown error"}
+			/>
 		);
 	}
 

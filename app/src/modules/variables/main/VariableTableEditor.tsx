@@ -43,7 +43,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Globe, Cloud, Folder, Trash2, AlertCircle, LucideIcon, KeyRound } from "lucide-react";
+import { Globe, Cloud, Folder, Trash2, LucideIcon, KeyRound } from "lucide-react";
 import {
 	useGlobalsQuery,
 	useUpdateGlobalsMutation,
@@ -69,7 +69,7 @@ import {
 	SecretInput,
 	TooltipIconButton,
 } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Callout, ErrorState } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import type { VariableType } from "@/lib/variable-cast";
 import {
@@ -707,17 +707,10 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 	if (dataError) {
 		return (
-			<div className="flex items-center justify-center h-full text-destructive-text">
-				<AlertCircle className="w-5 h-5 mr-2" />
-				<span>
-					Failed to load{" "}
-					{type === "globals"
-						? "globals"
-						: type === "environment"
-							? "environment"
-							: "collection"}
-				</span>
-			</div>
+			<ErrorState
+				variant="inline"
+				title={`Failed to load ${type === "globals" ? "globals" : type === "environment" ? "environment" : "collection"}`}
+			/>
 		);
 	}
 

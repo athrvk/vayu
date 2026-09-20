@@ -32,6 +32,7 @@ import { useMonacoTheme } from "@/hooks/useMonacoTheme";
 // provider, which reaches into the request builder for its writer, and a
 // `components/ui` primitive must not drag a module tree in behind it.
 import { useEditorVariableTokens } from "@/components/shared/EditorVariableTokens/useEditorVariableTokens";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { LEAVE_EDITOR_CHORD } from "@/constants/shortcuts";
 import { chordKeys } from "@/lib/platform";
 import { contextProps } from "@/lib/context-menu";
@@ -232,15 +233,12 @@ export function CodeEditor({
 
 	if (loadFailed) {
 		return (
-			<div
-				role="alert"
-				style={{ height }}
-				className={cn(
-					"flex items-center justify-center p-3 text-xs text-destructive-text",
-					className
-				)}
-			>
-				Editor failed to load. Reopen the app to try again.
+			<div role="alert" style={{ height }} className={className}>
+				<ErrorState
+					variant="inline"
+					title="Editor failed to load. Reopen the app to try again."
+					className="h-full p-3"
+				/>
 			</div>
 		);
 	}
