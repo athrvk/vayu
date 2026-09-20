@@ -6,9 +6,19 @@
  */
 
 import { PanelBottom, PanelRight } from "lucide-react";
-import { IconSwap, TooltipIconButton } from "@/components/ui";
-import { useLayoutStore, resolveResponseArrangement } from "@/stores";
+import {
+	ContextMenu,
+	ContextMenuContent,
+	ContextMenuRadioGroup,
+	ContextMenuRadioItem,
+	ContextMenuTrigger,
+	IconSwap,
+	TooltipIconButton,
+} from "@/components/ui";
+import { useLayoutStore, resolveResponseArrangement, type ResponsePosition } from "@/stores";
+import { RESPONSE_POSITIONS } from "@/constants/layout";
 import { TOGGLE_RESPONSE_POSITION_CHORD } from "@/constants/shortcuts";
+import { contextProps } from "@/lib/context-menu";
 import { formatChord } from "@/lib/platform";
 
 /**
@@ -30,26 +40,52 @@ import { formatChord } from "@/lib/platform";
  * `IconSwap` rather than a conditional render: the two glyphs are the same
  * nominal size and still not the same width of ink, and the swap crossfades
  * where a swap-by-render pops.
+ *
+ * Right-click picks instead of flipping: a radio menu over the three settings
+ * (Beside, Below, Auto), the same set the Settings row offers. It is what puts
+ * Auto within reach from the strip - a left click can only ever leave it - and
+ * it marks which of the three is in force, which the destination glyph by
+ * design does not say. `contextProps("own-menu")` keeps the main process's
+ * edit menu off the gesture, as on every surface that draws its own.
  */
 export function ResponsePositionButton() {
+	const setting = useLayoutStore((s) => s.responsePosition);
 	const arrangement = useLayoutStore(resolveResponseArrangement);
 	const toggleResponsePosition = useLayoutStore((s) => s.toggleResponsePosition);
+	const setResponsePosition = useLayoutStore((s) => s.setResponsePosition);
 
 	return (
-		<TooltipIconButton
-			label={arrangement === "beside" ? "Response below" : "Response beside"}
-			tooltipHint={formatChord(TOGGLE_RESPONSE_POSITION_CHORD)}
-			icon={
-				<IconSwap
-					state={arrangement}
-					icons={{
-						beside: <PanelBottom className="size-icon-sm" aria-hidden="true" />,
-						below: <PanelRight className="size-icon-sm" aria-hidden="true" />,
-					}}
+		<ContextMenu>
+			<ContextMenuTrigger asChild>
+				<TooltipIconButton
+					label={arrangement === "beside" ? "Response below" : "Response beside"}
+					tooltipHint={formatChord(TOGGLE_RESPONSE_POSITION_CHORD)}
+					icon={
+						<IconSwap
+							state={arrangement}
+							icons={{
+								beside: <PanelBottom className="size-icon-sm" aria-hidden="true" />,
+								below: <PanelRight className="size-icon-sm" aria-hidden="true" />,
+							}}
+						/>
+					}
+					className="text-muted-foreground hover:text-foreground"
+					onClick={toggleResponsePosition}
+					{...contextProps("own-menu")}
 				/>
-			}
-			className="text-muted-foreground hover:text-foreground"
-			onClick={toggleResponsePosition}
-		/>
+			</ContextMenuTrigger>
+			<ContextMenuContent aria-label="Response position">
+				<ContextMenuRadioGroup
+					value={setting}
+					onValueChange={(value) => setResponsePosition(value as ResponsePosition)}
+				>
+					{RESPONSE_POSITIONS.map((option) => (
+						<ContextMenuRadioItem key={option.value} value={option.value}>
+							{option.label}
+						</ContextMenuRadioItem>
+					))}
+				</ContextMenuRadioGroup>
+			</ContextMenuContent>
+		</ContextMenu>
 	);
 }

@@ -2627,9 +2627,12 @@ below it and back, its chord in the tooltip. The icon names the destination
 (see Pane Toggles below): `PanelBottom` while the response is beside
 ("Response below"), `PanelRight` while it is below ("Response beside"), swapped
 with `IconSwap`. While the setting is Auto the button shows Auto's current pick
-and a click writes an explicit choice. → `Dock.response-position.test.tsx`
-(mutation-checked: without the request-tab gate, the settings and dashboard
-cases fail).
+and a click writes an explicit choice. **Right-click picks instead of flipping**:
+a `ContextMenuRadioGroup` over Beside / Below / Auto, the same set as the
+Settings row, which is what puts Auto within reach from the strip and marks
+which setting is in force - the destination glyph by design does not say. →
+`Dock.response-position.test.tsx` (mutation-checked: without the request-tab
+gate, the settings and dashboard cases fail).
 
 The rule that lets a control sit here at all is the one both amendments kept:
 every item has a path that is not the footer (pending restart is the banner in
@@ -3683,7 +3686,7 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/layout/ContextRail.tsx` | Right-edge nav - one icon per applicable context-bar section |
 | `app/src/components/layout/RailButton.tsx` | The icon button shared by both rails - edge-indicator and tile variants |
 | `app/src/components/layout/Dock.tsx` | The bottom strip - status in the centre (engine light, version, services, save state, pending restart), per-tab view controls on the right |
-| `app/src/components/layout/ResponsePositionButton.tsx` | The Dock's response-position switch - Beside / Below, icon names the destination, request tabs only |
+| `app/src/components/layout/ResponsePositionButton.tsx` | The Dock's response-position switch - click flips Beside / Below, right-click picks Beside / Below / Auto, icon names the destination, request tabs only |
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |

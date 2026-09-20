@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useEngineStore, useLayoutStore, useTabsStore, type TabType } from "@/stores";
@@ -90,6 +90,35 @@ describe("the Dock's response-position button", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Response below" }));
 		expect(useLayoutStore.getState().responsePosition).toBe("below");
 		expect(screen.getByRole("button", { name: "Response beside" })).toBeInTheDocument();
+	});
+
+	/*
+	 * Mutation check: drop the `ContextMenu` wrapper from the button and the
+	 * menu never opens; drop `onValueChange` and the Auto case fails.
+	 */
+	it("offers Beside, Below and Auto on right-click, marking the setting in force", async () => {
+		useLayoutStore.setState({ responsePosition: "below", autoResponseArrangement: "beside" });
+		renderDockOn("request");
+		const trigger = screen.getByRole("button", { name: "Response beside" });
+		expect(trigger).toHaveAttribute("data-context", "own-menu");
+
+		fireEvent.contextMenu(trigger);
+		const menu = await screen.findByRole("menu", { name: "Response position" });
+		const items = within(menu).getAllByRole("menuitemradio");
+		expect(items.map((item) => item.textContent)).toEqual(["Beside", "Below", "Auto"]);
+		expect(items.map((item) => item.getAttribute("aria-checked"))).toEqual([
+			"false",
+			"true",
+			"false",
+		]);
+
+		fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Auto" }));
+		expect(useLayoutStore.getState().responsePosition).toBe("auto");
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("menu", { name: "Response position" })
+			).not.toBeInTheDocument()
+		);
 	});
 
 	it("shows auto's current pick, and a click makes the choice explicit", () => {
