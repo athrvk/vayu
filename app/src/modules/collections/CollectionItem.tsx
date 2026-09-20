@@ -59,7 +59,7 @@ export default function CollectionItem({
 		renamingId,
 		deletingCollectionId,
 		creatingSubfolder,
-		newSubCollectionName,
+		newFolderName,
 		isCreatingSubfolder,
 		getRequestsByCollection,
 		getCollectionActions,
@@ -69,7 +69,7 @@ export default function CollectionItem({
 		onRenameCancel,
 		onStartRename,
 		onCollectionDeleteClick,
-		onSubCollectionNameChange,
+		onFolderNameChange,
 		onCreateSubfolder,
 		onCancelSubfolder,
 	} = useCollectionTreeContext();
@@ -395,8 +395,8 @@ export default function CollectionItem({
 						>
 							<Input
 								type="text"
-								value={newSubCollectionName}
-								onChange={(e) => onSubCollectionNameChange(e.target.value)}
+								value={newFolderName}
+								onChange={(e) => onFolderNameChange(e.target.value)}
 								onKeyDown={(e) => {
 									// `isCommitEnter`, not a bare Enter (#939, #935): an
 									// IME commits its composition buffer with an

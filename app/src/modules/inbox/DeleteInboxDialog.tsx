@@ -25,7 +25,7 @@ export function DeleteInboxDialog({ deletion }: { deletion: InboxDeletion }) {
 			title={`Delete the inbox on port ${inbox.port}?`}
 			description={`Its ${captureCount} recorded ${
 				captureCount === 1 ? "request" : "requests"
-			} will be deleted with it. This cannot be undone.`}
+			} are removed with it. This cannot be undone.`}
 			onConfirm={deletion.confirmDelete}
 			isDeleting={deletion.isDeleting}
 		/>

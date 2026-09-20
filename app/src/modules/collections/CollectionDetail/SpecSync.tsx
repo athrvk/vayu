@@ -311,8 +311,8 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 				title="Delete requests this document no longer declares?"
 				description={
 					<>
-						{pendingDeletes} request{pendingDeletes === 1 ? "" : "s"} will be deleted,
-						with everything saved on {pendingDeletes === 1 ? "it" : "them"}. The rest of
+						{pendingDeletes} request{pendingDeletes === 1 ? "" : "s"} and everything
+						saved on {pendingDeletes === 1 ? "it" : "them"} are removed. The rest of
 						this sync is applied in the same step.
 					</>
 				}
