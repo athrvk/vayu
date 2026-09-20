@@ -1618,7 +1618,29 @@ see.
 | A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
 | A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
 | Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
+| Every `role="img"` carries an `aria-label` on the same element | `role-img-labelled.test.ts` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
+
+**An operation that takes seconds announces its progress.** A dialog that sits
+on a spinner and a bar reports nothing to a screen reader: the bar's value is
+read on demand, never pushed. Every multi-second operation therefore puts
+`role="status" aria-live="polite"` on **the visible line that says what is
+happening** - not an off-screen copy, which is a second string to keep in step
+with the first. The import dialog (`ImportProgressView`), the export dialog and
+the collection tree's busy states all do.
+
+The counterpart rule is what stays out of the region: a polite region
+re-announces on every text change, so a figure that moves several times a second
+(`ImportProgressView`'s byte counter) is marked `aria-hidden` inside it and left
+for the eye. A counter that moves once per file is slow enough to keep.
+
+**A `role="img"` is a promise that the element has something to say.** A
+decorative glyph given the role and no label announces as an unlabelled image; a
+labelled one beside text that already says the same thing announces twice.
+`jsx-a11y` can see neither case. The mechanical half - the label - is
+`role-img-labelled.test.ts`; the other half is a judgement made at the site, and
+the run row's status glyph is where it landed on `aria-hidden` (see Status
+Badges).
 
 **A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
 open, which is a description; before it opens - and to a screen reader reading
@@ -2057,8 +2079,22 @@ that do show it unconditionally.
 the label is the primary target and there is no way to widen it. Rows must not
 animate under the cursor.
 
-Text that **wraps** (`break-words`, e.g. the run URL in `RunItem`) is neither -
-it never clips, so it needs no tooltip.
+Text that **wraps** (`break-words`) is neither - it never clips, so it needs no
+tooltip.
+
+**A URL is the exception, and it gives way at the head.** Both treatments above
+keep the beginning of a string, which is right for a name and wrong for a URL:
+the scheme and host are what every row on one host shares, so a page of local
+runs read `http://127.0.0.1:9...` five times over for five different requests.
+`lib/truncate-url.ts` (`truncateUrl(url, max = 48)`) shortens the head and keeps
+the path tail, and `RunItem` passes its URL-titled rows through it before the
+`truncate` class ever applies - the class stays, because a character budget is
+not a promise about a narrow drawer. The full value stays in the element's
+`title` and in the row's accessible name.
+
+It is a display helper and never parses: a row can hold a value still being
+typed, a `{{variable}}` in the authority or a relative path, and `new URL()`
+throws on all three.
 
 ---
 
@@ -2721,17 +2757,32 @@ second copy of the literal. The command palette's group headings are an
 </span>
 ```
 
-**Run status left-bar (RunItem):**
+**Status is never colour alone.** A badge, a chip or a glyph that encodes its
+state only as a hue says nothing to a red/green confusion, a monochrome display
+or a greyscale screenshot - and every status surface here is small, where hue is
+hardest to judge. The rule is redundancy: **shape or a word carries the state,
+and the colour agrees with it.** The LIVE pill above carries the word; the
+history row carries the shape.
+
+**Run status glyph (`RunItem`):** one lucide glyph per status, in the family's
+`-text` token (the bare token is a fill and fails AA as a small foreground - see
+"The bare token is the fill"). It replaced a bare coloured dot, which was five
+identical circles in five colours.
+
 ```tsx
-<div className={cn(
-  "absolute left-0 top-0 bottom-0 w-1",
-  status === "completed" && "bg-green-500",
-  status === "failed"    && "bg-red-500",
-  status === "running"   && "bg-blue-500",
-  status === "stopped"   && "bg-orange-500",
-  status === "pending"   && "bg-muted-foreground"
-)} />
+const STATUS_GLYPH = {
+  completed: { icon: CircleCheck,  className: "text-status-success-text" },
+  failed:    { icon: CircleX,      className: "text-status-error-text" },
+  running:   { icon: Loader2,      className: "text-status-running-text animate-spin" },
+  stopped:   { icon: CircleSlash,  className: "text-status-stopped-text" },
+  pending:   { icon: Circle,       className: "text-muted-foreground" },
+};
 ```
+
+The glyph is `aria-hidden`: the row's own accessible name states the status in
+words, so a screen reader hears it once rather than twice. A glyph that has
+something no adjacent text says takes `role="img"` **and** an `aria-label` on
+the same element instead - `role-img-labelled.test.ts` holds that half.
 
 ### Toasts
 
