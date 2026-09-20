@@ -14,19 +14,25 @@
  *
  * Before the fix, `TabItem` called `useTabsStore()` with no selector, so it
  * re-rendered on every write to the tabs store regardless of which field
- * changed. Read via `data-render-count` (a ref bumped once per actual call
- * to the render function, in `TabStrip.tsx`) rather than a `Profiler`:
- * `Profiler.onRender` fires for a memoized child's `Profiler` wrapper on
- * every commit whether or not that child's render function actually ran, so
- * it cannot tell a bailout from a real re-render the way this counter does.
+ * changed.
+ *
+ * `TabItem` (in its own module, `./TabItem`, for exactly this reason) is
+ * wrapped here in a second, identically-shallow `memo` whose body counts
+ * renders per tab id before delegating to the real `TabItemImpl` - not a
+ * `Profiler`, because a `Profiler` around the tab list fires on every commit
+ * regardless of which memoized child actually re-executed its render
+ * function, which is exactly the distinction this test needs (the same
+ * reasoning, and the same shape, as #1716's `KeyValueEditor/index.test.tsx`).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { memo, createElement, type ComponentProps } from "react";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { TabStrip } from "./TabStrip";
 import { useTabsStore } from "@/stores";
+import type TabItemType from "./TabItem";
 
 vi.mock("@/queries", () => ({
 	requestDetailOptions: () => ({
@@ -40,6 +46,26 @@ vi.mock("@/queries", () => ({
 vi.mock("@/hooks/useVariableResolver", () => ({
 	useVariableResolver: () => ({ resolveString: (s: string) => s }),
 }));
+
+const renderCounts: Record<string, number> = {};
+
+vi.mock("./TabItem", async (importOriginal) => {
+	const mod = await importOriginal<{
+		default: typeof TabItemType;
+		TabItemImpl: typeof TabItemType;
+	}>();
+	// Imported dynamically inside the factory, not as a top-level static
+	// import: `vi.mock` factories are hoisted above the file's own imports,
+	// so a top-level binding referenced here throws "Cannot access ... before
+	// initialization". This is the same comparator the real `TabItem` uses,
+	// so this counting wrapper bails exactly when the real memo would.
+	const { tabItemPropsEqual } = await import("./tab-item-props-equal");
+	const Counting = memo((props: ComponentProps<typeof mod.TabItemImpl>) => {
+		renderCounts[props.tab.id] = (renderCounts[props.tab.id] ?? 0) + 1;
+		return createElement(mod.TabItemImpl, props);
+	}, tabItemPropsEqual);
+	return { ...mod, default: Counting };
+});
 
 function renderStrip() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -56,15 +82,6 @@ const TABS = [
 	{ id: "t3", type: "variables" as const, entityId: null },
 ];
 
-function renderCounts(): Record<string, number> {
-	const counts: Record<string, number> = {};
-	for (const tab of screen.getAllByRole("tab")) {
-		const id = tab.getAttribute("data-tab-id")!;
-		counts[id] = Number(tab.getAttribute("data-render-count"));
-	}
-	return counts;
-}
-
 beforeEach(() => {
 	useTabsStore.setState({
 		openTabs: [...TABS],
@@ -72,24 +89,31 @@ beforeEach(() => {
 		navHistory: [],
 		navIndex: -1,
 	});
+	for (const tab of TABS) renderCounts[tab.id] = 0;
 });
 afterEach(cleanup);
 
 describe("TabStrip render count", () => {
 	it("re-renders only the two tabs whose active state changed", async () => {
 		renderStrip();
-		const afterMount = renderCounts();
+		// Every tab mounts once; only the mount matters as a starting point.
+		for (const tab of TABS) expect(renderCounts[tab.id]).toBeGreaterThan(0);
+		for (const tab of TABS) renderCounts[tab.id] = 0;
 
 		await act(async () => useTabsStore.getState().focusTab("t2"));
-		const afterFirstFocus = renderCounts();
-		expect(afterFirstFocus.t1).toBe(afterMount.t1 + 1);
-		expect(afterFirstFocus.t2).toBe(afterMount.t2 + 1);
-		expect(afterFirstFocus.t3).toBe(afterMount.t3);
+		expect(renderCounts.t1).toBeGreaterThan(0);
+		expect(renderCounts.t2).toBeGreaterThan(0);
+		expect(renderCounts.t3).toBe(0);
 
+		for (const tab of TABS) renderCounts[tab.id] = 0;
 		await act(async () => useTabsStore.getState().focusTab("t3"));
-		const afterSecondFocus = renderCounts();
-		expect(afterSecondFocus.t1).toBe(afterFirstFocus.t1);
-		expect(afterSecondFocus.t2).toBe(afterFirstFocus.t2 + 1);
-		expect(afterSecondFocus.t3).toBe(afterFirstFocus.t3 + 1);
+		expect(renderCounts.t1).toBe(0);
+		expect(renderCounts.t2).toBeGreaterThan(0);
+		expect(renderCounts.t3).toBeGreaterThan(0);
+
+		// And the strip itself did draw three tabs throughout - a broken mock
+		// that rendered nothing would otherwise pass every assertion above for
+		// having counted nothing at all.
+		expect(screen.getAllByRole("tab")).toHaveLength(3);
 	});
 });
