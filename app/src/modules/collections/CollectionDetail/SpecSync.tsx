@@ -51,7 +51,7 @@
 import { useState } from "react";
 import { AlertTriangle, Check, Loader2, RefreshCw, Upload } from "lucide-react";
 
-import { Button, Checkbox, DeleteConfirmDialog } from "@/components/ui";
+import { Button, Checkbox, DeleteConfirmDialog, ICON_MOTION } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { apiService } from "@/services/api";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
@@ -282,7 +282,10 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 								{syncSpec.isPending ? (
 									<Loader2 className="mr-2 size-icon animate-spin" />
 								) : (
-									<Upload className="mr-2 size-icon" />
+									<Upload
+										className="mr-2 size-icon"
+										data-icon-motion={ICON_MOTION.lift}
+									/>
 								)}
 								{documentOnly ? "Update the stored document" : "Apply selected"}
 							</Button>

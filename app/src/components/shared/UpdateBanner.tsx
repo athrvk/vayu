@@ -5,12 +5,13 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useState } from "react";
 import { ArrowUpCircle, Check, Copy, ExternalLink, Power, RotateCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconSwap } from "@/components/ui/icon-swap";
 import { LabelSwap } from "@/components/ui/label-swap";
 import { Progress } from "@/components/ui/progress";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
+import { useCopy } from "@/hooks/useCopy";
 
 /**
  * Slim banner that appears when a newer Vayu release is available.
@@ -31,7 +32,7 @@ function UpdateBanner() {
 		openReleasePage,
 		quitForUpdate,
 	} = useAppUpdate();
-	const [copied, setCopied] = useState(false);
+	const { copy, copied } = useCopy({ feedback: "icon" });
 
 	if (!update) return null;
 
@@ -39,9 +40,7 @@ function UpdateBanner() {
 
 	const copyInstallCommand = async () => {
 		if (!update.installCommand) return;
-		await navigator.clipboard.writeText(update.installCommand);
-		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
+		await copy(update.installCommand, "Install command");
 	};
 
 	return (
@@ -70,7 +69,13 @@ function UpdateBanner() {
 			) : downloading ? null : update.installCommand ? (
 				<>
 					<Button size="sm" variant="secondary" onClick={copyInstallCommand}>
-						{copied ? <Check className="size-icon" /> : <Copy className="size-icon" />}
+						<IconSwap
+							state={copied ? "copied" : "copy"}
+							icons={{
+								copy: <Copy className="size-icon" />,
+								copied: <Check className="size-icon" />,
+							}}
+						/>
 						<LabelSwap
 							label={copied ? "Copied" : "Copy install command"}
 							states={["Copied", "Copy install command"]}

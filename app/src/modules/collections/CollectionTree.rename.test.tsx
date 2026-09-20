@@ -133,6 +133,38 @@ describe("renaming a collection", () => {
 		expect(updateCollection).toHaveBeenCalledWith({ id: "c1", name: "Payments" });
 	});
 
+	it("sends nothing when Escape cancels, blur or no blur", async () => {
+		renderTree();
+		const field = startRename('[data-collection-id="c1"]');
+		fireEvent.change(field, { target: { value: "Payments" } });
+
+		fireEvent.keyDown(field, { key: "Escape" });
+		// The blur a close causes, fired explicitly: the old field cancelled on
+		// Escape and committed on blur, so this pair saved the name the user had
+		// just abandoned (#1684). `useInlineRename` closes the editor once.
+		fireEvent.blur(field);
+
+		await waitFor(() =>
+			expect(document.querySelector('[data-collection-id="c1"] input')).toBeNull()
+		);
+		expect(updateCollection).not.toHaveBeenCalled();
+		// Escape is a keyboard close, so the row keeps the tab stop the field took.
+		expect(document.activeElement).toBe(document.querySelector('[data-collection-id="c1"]'));
+	});
+
+	it("leaves the Send chord to the window", async () => {
+		renderTree();
+		const field = startRename('[data-collection-id="c1"]');
+		fireEvent.change(field, { target: { value: "Payments" } });
+
+		// mod+Enter renamed the row *and* sent the request, from one press.
+		fireEvent.keyDown(field, { key: "Enter", metaKey: true });
+		fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
+
+		expect(updateCollection).not.toHaveBeenCalled();
+		expect(document.querySelector('[data-collection-id="c1"] input')).not.toBeNull();
+	});
+
 	it("reports a failed rename", async () => {
 		updateCollection.mockRejectedValue(new Error("database is locked"));
 		renderTree();

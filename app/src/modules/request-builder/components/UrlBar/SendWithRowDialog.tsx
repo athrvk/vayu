@@ -70,7 +70,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Callout, FieldError } from "@/components/shared";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { dataCellText, type DataFileRow } from "@/services/data-files";
 import { cn } from "@/lib/utils";
@@ -482,19 +482,17 @@ export default function SendWithRowDialog({
 						{/* Named, never clamped or ignored: a number outside the file
 						    is a mistake about which row, and sending a different one
 						    would be worse than sending none. */}
-						{typed.kind === "error" && (
-							<p className="text-[11px] text-destructive-text">{typed.message}</p>
-						)}
+						{typed.kind === "error" && <FieldError>{typed.message}</FieldError>}
 						{/* The same refusal for the row nobody typed: a remembered index,
 						    or a step's repro target, pointing past the file as it reads
 						    now. Said rather than clamped, and the footer's button is
 						    dead while it stands. */}
 						{selectedMissing && (
-							<p className="text-[11px] text-destructive-text">
+							<FieldError>
 								Row {(selected + 1).toLocaleString()} no longer exists - the file
 								has {total.toLocaleString()} {total === 1 ? "row" : "rows"}. Pick
 								one below.
-							</p>
+							</FieldError>
 						)}
 
 						<DialogBody className="rounded-md border border-rule">

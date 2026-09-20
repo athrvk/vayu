@@ -355,7 +355,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				onValueChange={setActiveTab}
 				className="flex-1 flex flex-col min-h-0"
 			>
-				<TabsList className="mx-5 mt-3">
+				<TabsList variant="inset" className="mx-4 mt-3">
 					<TabsTrigger value="overview">
 						<BarChart3 className="w-3.5 h-3.5" />
 						<TabLabel>Overview</TabLabel>

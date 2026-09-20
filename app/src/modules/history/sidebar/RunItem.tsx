@@ -9,7 +9,7 @@ import type React from "react";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import type { Run } from "@/types";
 import { RUN_KIND_LABEL } from "@/modules/history/types";
-import { Badge, Button } from "@/components/ui";
+import { Badge, Button, ICON_MOTION } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { MethodBadge, RowContextMenu, type RowAction } from "@/components/shared";
 import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
@@ -365,9 +365,15 @@ export default function RunItem({
 								{isTogglingBaseline ? (
 									<Loader2 className="size-icon-sm animate-spin" />
 								) : run.baseline ? (
-									<PinOff className="size-icon-sm" />
+									<PinOff
+										className="size-icon-sm"
+										data-icon-motion={ICON_MOTION.tiltPin}
+									/>
 								) : (
-									<Pin className="size-icon-sm" />
+									<Pin
+										className="size-icon-sm"
+										data-icon-motion={ICON_MOTION.tiltPin}
+									/>
 								)}
 							</Button>
 						)}

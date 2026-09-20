@@ -36,7 +36,7 @@ import type { TabDescriptor } from "./tab-descriptors";
 
 export function useTabActions(tab: Tab, descriptor: TabDescriptor): RowAction[] {
 	const { openTabs, closeTab, closeOtherTabs, closeTabsToRight, closeSavedTabs } = useTabsStore();
-	const copy = useCopy();
+	const { copy } = useCopy();
 
 	const index = openTabs.findIndex((t) => t.id === tab.id);
 	const isLast = index === openTabs.length - 1;

@@ -17,6 +17,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 	DeleteConfirmDialog,
+	ICON_MOTION,
 } from "@/components/ui";
 import CollectionItem from "./CollectionItem";
 import ExportSpecDialog from "./ExportSpecDialog";
@@ -34,6 +35,7 @@ import {
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import type { Request } from "@/types";
 import { compareTreeOrder } from "@/types";
+import { isCommitEnter } from "@/lib/keyboard";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
@@ -225,7 +227,10 @@ export default function CollectionTree() {
 								onClick={openImport}
 								aria-label="Import collection"
 							>
-								<Download className="size-icon" />
+								<Download
+									className="size-icon"
+									data-icon-motion={ICON_MOTION.drop}
+								/>
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent>Import collection</TooltipContent>
@@ -250,7 +255,10 @@ export default function CollectionTree() {
 							value={panel.newCollectionName}
 							onChange={(e) => panel.setNewCollectionName(e.target.value)}
 							onKeyDown={(e) => {
-								if (e.key === "Enter") panel.createCollection();
+								// `isCommitEnter`, not a bare Enter (#939, #935): an IME
+								// commits its composition buffer with an ordinary Enter
+								// keydown, and mod+Enter is the Send chord.
+								if (isCommitEnter(e)) panel.createCollection();
 								if (e.key === "Escape") panel.cancelNewCollectionForm();
 							}}
 							placeholder="Collection name"

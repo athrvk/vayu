@@ -62,7 +62,8 @@ describe("interface density", () => {
 		expect(css).toMatch(/--tabstrip-height:\s*var\(--spacing-band\);/);
 	});
 
-	// Issue #1679: seven named floor steps, outside the --spacing multiplier -
+	// Issue #1679: named floor steps, outside the --spacing multiplier -
+	// nine of them since #1688 added the two wider chrome bands -
 	// see the "Chrome, Target and Icon Floors" table in docs/design-system.md
 	// and design-system-doc.test.ts, which checks that doc's numbers against
 	// these same declarations.
@@ -77,10 +78,12 @@ describe("interface density", () => {
 		const themeClose = css.indexOf("\n}", themeOpen);
 		const theme = css.slice(themeOpen, themeClose);
 
-		it("declares all seven steps in a plain @theme block, as literal px", () => {
+		it("declares all nine steps in a plain @theme block, as literal px", () => {
 			expect(themeOpen).toBeGreaterThan(-1);
 			for (const [name, px] of [
 				["--spacing-band", 32],
+				["--spacing-band-md", 40],
+				["--spacing-band-lg", 52],
 				["--spacing-banner", 36],
 				["--spacing-control", 28],
 				["--spacing-control-sm", 24],
@@ -113,6 +116,8 @@ describe("interface density", () => {
 			// moved off calc(var(--spacing) * 8).
 			for (const name of [
 				"--spacing-band",
+				"--spacing-band-md",
+				"--spacing-band-lg",
 				"--spacing-banner",
 				"--spacing-control",
 				"--spacing-control-sm",
@@ -131,10 +136,13 @@ describe("interface density", () => {
 			expect(comfortableBlock).toMatch(/--spacing-control:\s*36px;/);
 			expect(comfortableBlock).toMatch(/--spacing-control-sm:\s*32px;/);
 			expect(comfortableBlock).toMatch(/--spacing-target:\s*28px;/);
-			// band/banner/icon/icon-sm are theme-independent, like
-			// --titlebar-height - no override at all under Comfortable.
+			// The three band steps, banner, icon and icon-sm are
+			// theme-independent, like --titlebar-height - no override at all
+			// under Comfortable.
 			for (const name of [
 				"--spacing-band",
+				"--spacing-band-md",
+				"--spacing-band-lg",
 				"--spacing-banner",
 				"--spacing-icon",
 				"--spacing-icon-sm",

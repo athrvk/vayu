@@ -110,7 +110,10 @@ export default function RequestTabs() {
 			className="flex-1 flex flex-col overflow-hidden"
 		>
 			{/* Tab Headers */}
-			<TabsList className="w-full overflow-x-auto overflow-y-hidden flex-nowrap px-1 scrollbar-strip">
+			<TabsList
+				variant="inset"
+				className="w-full overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
+			>
 				{tabs.map((tab) => (
 					<TabsTrigger key={tab.id} value={tab.id}>
 						<TabLabel>{tab.label}</TabLabel>

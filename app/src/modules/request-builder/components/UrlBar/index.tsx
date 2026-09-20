@@ -37,9 +37,10 @@
  * `--spacing` moved to the 3px rhythm for #1670: it resolved to 27px, not the
  * 28px this file's own numbers assumed - the same drift the type scale has a
  * guard for, just not one written down as a mistake before now. The row
- * states its own floor directly, `min-h-[40px]`, rather than deriving it from
- * a control height plus padding that could drift again: this is one band
- * doing real work continuously, not a permanent empty one.
+ * states its own floor directly, `min-h-band-md` (40px, issue #1688 - it was
+ * an arbitrary bracketed literal), rather than deriving it from a control height
+ * plus padding that could drift again: this is one band doing real work
+ * continuously, not a permanent empty one.
  *
  * **No icons and no inline keycaps.** Both were tried and both cost width in
  * the one row that has none to spare: the lightning bolt and the triangle each
@@ -160,7 +161,7 @@ export default function UrlBar() {
 	const sendAlone = !canStartLoadTest && !showRowCaret;
 
 	return (
-		<div className="flex min-h-[40px] items-center gap-2 px-3 py-1 border-b border-border bg-panel shrink-0">
+		<div className="flex min-h-band-md items-center gap-2 px-3 py-1 border-b border-rule bg-panel shrink-0">
 			{/*
 			    One field holding both the method and the URL.
 			    `border-input`, not `border-border`. This is a text field, and

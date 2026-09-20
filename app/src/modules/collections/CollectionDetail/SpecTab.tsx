@@ -53,8 +53,8 @@
 import { useMemo, useRef, useState } from "react";
 import { Download, FileJson, Link2, Loader2, Trash2, Upload } from "lucide-react";
 
-import { Button, Input, Skeleton } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Button, Input, Skeleton, ICON_MOTION } from "@/components/ui";
+import { Callout, FieldError } from "@/components/shared";
 import { apiService } from "@/services/api";
 import {
 	useCollectionsQuery,
@@ -74,6 +74,7 @@ import { collectSubtreeIds } from "@/modules/collections/tree-utils";
 import { formatBytes } from "@/modules/settings/utils/format-size";
 import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
 import { hasSpecBinding, type Collection } from "@/types";
+import { isCommitEnter } from "@/lib/keyboard";
 import { formatRelative } from "./format";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import SpecSync from "./SpecSync";
@@ -325,7 +326,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							onClick={() => fileInputRef.current?.click()}
 							disabled={bindSpec.isPending}
 						>
-							<Upload className="mr-2 size-icon" />
+							<Upload
+								className="mr-2 size-icon"
+								data-icon-motion={ICON_MOTION.lift}
+							/>
 							Choose file
 						</Button>
 						<input
@@ -347,7 +351,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							value={url}
 							onChange={(e) => setUrl(e.target.value)}
 							onKeyDown={(e) => {
-								if (e.key === "Enter") void handleFetch();
+								// `isCommitEnter`, not a bare Enter (#939, #935): a URL
+								// half-spelled by an IME must not be fetched, and
+								// mod+Enter is the Send chord.
+								if (isCommitEnter(e)) void handleFetch();
 							}}
 							placeholder="https://api.example.com/openapi.json"
 							className="flex-1"
@@ -450,7 +457,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				<div>
 					<SectionLabel>Export</SectionLabel>
 					<Button variant="outline" onClick={() => setExporting(true)}>
-						<Download className="mr-2 size-icon" />
+						<Download className="mr-2 size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Export as OpenAPI
 					</Button>
 					<p className="mt-1 text-[11px] text-muted-foreground">
@@ -607,10 +614,10 @@ function BoundSpec({
 					</div>
 				</dl>
 				{failed && (
-					<p className="text-[11px] text-destructive-text">
+					<FieldError>
 						The stored document could not be read - its source and fetch time are
 						unknown until the engine answers.
-					</p>
+					</FieldError>
 				)}
 			</div>
 		</div>
