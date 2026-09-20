@@ -209,9 +209,14 @@ export function RequestRateChart({
 		];
 		const columns: number[][] = [cols[0], cols[1]];
 
-		let ramp = false;
-		if (rampOverlay && rampOverlay.points.length > 1) {
-			ramp = true;
+		// Decided from the run's own config (rampOverlay is non-null only for a
+		// ramp_up run with a target concurrency, both known at run start), not
+		// from how many buckets history has accumulated - `points.length` grows
+		// from the caller's history one tick at a time, so gating on it here
+		// flipped the series set (and the `key` below) partway through every
+		// ramp-up run and force-remounted the chart (#1717).
+		const ramp = rampOverlay != null;
+		if (ramp) {
 			const byTime = new Map<number, RampOverlay["points"][number]>(
 				rampOverlay.points.map((p) => [p.time, p])
 			);
