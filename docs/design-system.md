@@ -2650,6 +2650,13 @@ showing ("Collections sidebar") because one landmark hosts six panels -
 collections, history, variables, services, trash and settings - and
 "Complementary" alone would not say which.
 
+**A drag does not persist per frame.** `PanelResizeHandle` paints the live width
+straight onto the `<aside>`'s inline `style.width` (it is the handle's own
+`parentElement`) once per animation frame, and calls `setWidth` - the write
+`layout-store` persists - exactly once, on `pointerup`. Keyboard nudges and the
+double-click reset are discrete key presses and clicks, not a per-frame stream,
+so they still call `setWidth` straight away.
+
 **The Drawer wraps no view in a scroll region.** Each view supplies its own
 `DrawerPanel` (`app/src/components/shared/DrawerPanel.tsx`), which owns the
 header - `h-[var(--tabstrip-height)]`, so it lines up with the TabStrip across
@@ -3423,6 +3430,9 @@ container gets them; there is nothing to remember and nothing to apply.
 		scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
 	}
 }
+:where(.overflow-auto, .overflow-y-auto, .overflow-scroll, .overflow-y-scroll) {
+	scrollbar-gutter: stable;
+}
 ::-webkit-scrollbar {
 	@apply w-1.5 h-1.5;
 }
@@ -3464,6 +3474,8 @@ sweep of the stylesheet can see it drift.
 move together or the suite reddens.
 
 Do not take a content pane below 6px: the thumb stops being a mouse target.
+
+The baseline also reserves a 6px gutter with `scrollbar-gutter: stable` on scroll containers (via Tailwind utility classes), placed outside the `@supports` guard because this property does not trigger the standard-property opt-out that affects width and color. Per CSS Overflow 4, the gutter reserves for `overflow: hidden` too, so it is scoped via CSS class selectors rather than applying globally - `overflow-hidden` is used throughout the app for text truncation and clipping, and deserves no dead 6px strip.
 
 ### Tab strips: `scrollbar-strip`
 

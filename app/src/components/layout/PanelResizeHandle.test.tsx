@@ -22,10 +22,29 @@
  * look broken.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { PANEL_MIN_WIDTH, PANEL_MAX_WIDTH } from "@/constants/layout";
+
+/**
+ * The drag path coalesces to one DOM write per animation frame (#1715), so a
+ * drag's assertions need `requestAnimationFrame` to actually run a callback -
+ * jsdom does not schedule one on its own. Stubbed onto a macrotask rather than
+ * left to fire on a real frame, the same substitution `ContextRail.scroll.
+ * test.tsx` uses and explains: a `setTimeout` still runs after the pointermove
+ * handler returns, which is the ordering a real frame guarantees too.
+ */
+function stubAnimationFrame() {
+	vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+		return setTimeout(() => cb(0), 0) as unknown as number;
+	});
+	vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+}
+
+async function flushAnimationFrame() {
+	await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 function setup(side: "left" | "right", width = 300) {
 	const setWidth = vi.fn();
@@ -118,5 +137,115 @@ describe("PanelResizeHandle", () => {
 	it("shows a focus state - an 8px strip with no content is otherwise unfindable", () => {
 		const { handle } = setup("right");
 		expect(handle.className).toContain("focus-visible:");
+	});
+});
+
+/**
+ * A pointer drag used to call `setWidth` on every `pointermove` - a store
+ * write, a re-render of every `layout-store` subscriber, and a synchronous
+ * `localStorage.setItem` of the whole persisted slice, 120-240 times a second
+ * (#1715). The fix keeps the drag's live width out of the store until
+ * `pointerup`, painting it straight onto the panel's inline `style.width` -
+ * the handle's own `parentElement`, which is what `Drawer` and `ContextBar`
+ * both render it inside of - once per animation frame instead.
+ */
+describe("PanelResizeHandle - drag", () => {
+	beforeEach(() => {
+		stubAnimationFrame();
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	function setupDrag(side: "left" | "right" = "right", startWidth = 300) {
+		const setWidth = vi.fn();
+		const { container } = render(
+			<div style={{ width: startWidth }}>
+				<PanelResizeHandle
+					side={side}
+					width={startWidth}
+					setWidth={setWidth}
+					defaultWidth={260}
+					label="Resize sidebar"
+				/>
+			</div>
+		);
+		const handle = screen.getByRole("separator");
+		const panel = container.firstElementChild as HTMLElement;
+		return { setWidth, handle, panel };
+	}
+
+	it("writes the store exactly once, on pointer up, with the final width", async () => {
+		const { setWidth, handle } = setupDrag("right", 300);
+
+		fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1 });
+		// A drag of N moves - well past what one animation frame could coalesce.
+		for (let dx = 1; dx <= 40; dx++) {
+			fireEvent.pointerMove(window, { clientX: 100 + dx });
+		}
+		await flushAnimationFrame();
+
+		// Mutation check: restore the per-move `setWidth` call this test guards
+		// against, and this assertion fails - `setWidth` would have been called
+		// 40 times before `pointerup` ever fires.
+		expect(setWidth).not.toHaveBeenCalled();
+
+		fireEvent.pointerUp(window);
+
+		expect(setWidth).toHaveBeenCalledTimes(1);
+		expect(setWidth).toHaveBeenCalledWith(340);
+	});
+
+	it("tracks the pointer in the panel's inline width during the drag", async () => {
+		const { handle, panel } = setupDrag("right", 300);
+
+		fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1 });
+		fireEvent.pointerMove(window, { clientX: 150 });
+		await flushAnimationFrame();
+
+		// Painted straight onto the panel element, not routed through a store
+		// write and a re-render - so this holds even though `setWidth` has not
+		// been called yet.
+		expect(panel.style.width).toBe("350px");
+		expect(handle).toHaveAttribute("aria-valuenow", "350");
+
+		fireEvent.pointerMove(window, { clientX: 180 });
+		await flushAnimationFrame();
+		expect(panel.style.width).toBe("380px");
+
+		fireEvent.pointerUp(window);
+	});
+
+	it("inverts direction for a left-edge handle during a drag, same as the keyboard case", async () => {
+		const { setWidth, panel } = setupDrag("left", 300);
+		const handle = screen.getByRole("separator");
+
+		fireEvent.pointerDown(handle, { clientX: 200, pointerId: 1 });
+		fireEvent.pointerMove(window, { clientX: 150 });
+		await flushAnimationFrame();
+		expect(panel.style.width).toBe("350px");
+
+		fireEvent.pointerUp(window);
+		expect(setWidth).toHaveBeenCalledWith(350);
+	});
+
+	it("clamps the live width to the panel bounds during a drag", async () => {
+		const { setWidth, panel } = setupDrag("right", 300);
+		const handle = screen.getByRole("separator");
+
+		fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1 });
+		fireEvent.pointerMove(window, { clientX: 100 + PANEL_MAX_WIDTH * 2 });
+		await flushAnimationFrame();
+		expect(panel.style.width).toBe(`${PANEL_MAX_WIDTH}px`);
+
+		fireEvent.pointerUp(window);
+		expect(setWidth).toHaveBeenCalledWith(PANEL_MAX_WIDTH);
+	});
+
+	it("keeps writing the store immediately on double-click, not just on drag end", () => {
+		const { setWidth, handle } = setupDrag("right", 300);
+		fireEvent.doubleClick(handle);
+		expect(setWidth).toHaveBeenCalledWith(260);
 	});
 });
