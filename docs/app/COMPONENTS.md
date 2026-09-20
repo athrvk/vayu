@@ -2066,6 +2066,8 @@ importers.
 
 The **variables table is deliberately not a consumer.** `modules/variables/main/VariableTableEditor.tsx` keeps its own rows for the reasons recorded in [Variables](#variables-modulesvariables); the parity it must hold with this table anyway is guarded by `key-value-parity.test.tsx`, not by hand.
 
+**`KeyValueRow` is `memo`-wrapped, so the table's callback identities are what decide which rows repaint on a keystroke** (issue #1716). `handleRemove`, `handleUpdate`, `handlePickFile` and `handleToggleKind` in `index.tsx` do not list `items` in their `useCallback` deps - `onChange` rewrites `items` to a fresh array on every keystroke, so a dep on `items` would give all four callbacks a new identity every keystroke and fail every row's shallow prop compare, however many rows a single edit actually touched. Each callback instead reads the current list through a ref (`itemsRef`, kept in step by a `useEffect`), so their deps are `[onChange, canEdit]`/`[onChange, canRemove]`/`[onChange, canEdit, canDisable]` only - stable as long as the caller's `canEdit`/`canRemove`/`canDisable` are - and only the row whose own `item` changed re-renders. The `canEdit`/`canRemove`/`canDisable` defaults are module constants for the same reason: an inline arrow in the parameter list is a fresh function every render, which would defeat the ref-backed callbacks exactly as a dep on `items` did for any caller that leaves them unset.
+
 `key-value.ts` is the table's **row model**: `toKeyValueItems` /
 `toKeyValueEntries` convert between the domain `FormFieldEntry[]` and the
 UI-layer `KeyValueItem[]` (which adds the ephemeral `id` React keys need), and
