@@ -251,8 +251,10 @@ TEST (GraphQLEnvelope, PassesAnEnvelopeThroughByteForByte) {
 // the renderer's `toGraphQLEnvelope` applies, and the two have to agree or a
 // body would mean different things on either side of the process boundary.
 TEST (GraphQLEnvelope, WrapsAJsonObjectThatIsNotAnEnvelope) {
-    EXPECT_EQ (graphql_wire_body (R"({"notQuery":1})"), R"({"query":"{\"notQuery\":1}"})");
-    EXPECT_EQ (graphql_wire_body (R"({"query":42})"), R"({"query":"{\"query\":42}"})");
+    // Ordinary literals: MSVC's preprocessor mis-stringizes a raw string
+    // holding `\"` when the assertion macro echoes its arguments.
+    EXPECT_EQ (graphql_wire_body ("{\"notQuery\":1}"), "{\"query\":\"{\\\"notQuery\\\":1}\"}");
+    EXPECT_EQ (graphql_wire_body ("{\"query\":42}"), "{\"query\":\"{\\\"query\\\":42}\"}");
 }
 
 // JSON that is not an object at all - an array, a number, a bare string - is a

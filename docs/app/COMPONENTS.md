@@ -111,6 +111,7 @@ Labels and icons come from `tab-descriptors.ts`, a sibling module rather than th
 - **One tab per open entity**, deduplicated per type and `entityId`. Tabs show: icon (method badge for requests, folder for collections, lightning for dashboard, etc.), label (request method + URL path / collection name / screen name).
 - **Max 12 tabs** with LRU eviction when exceeding; dashboard tabs are exempt from eviction. Dirty tabs (unsaved) are skipped during eviction (autosave is the safety net).
 - **Middle-click closes** a tab (browser-like).
+- **An empty strip says what to do, and does not collapse** (issue #1688). With no tabs open it was a blank 32px band with a lone "+" - a user whose last tab had just closed had nothing on screen saying where the app went. It now carries a muted line, "Open a request from the drawer, or press <chord>", with the chord read from `constants/shortcuts.ts` through `formatChord` so the modifier is this platform's. The band itself stays: its height is the same token the drawer's header band reads, so a strip that disappeared would leave that header as a step in the rule running across the window and would jump the content area by a band's height at the moment the last tab closed. → `TabStrip.empty.test.tsx`
 - **No unsaved dot** - autosave ensures safety.
 - **Keyboard support:** ⌘1–9 jump to tab, bound to the physical digit row (`e.code`) rather than to the character it types, so they work on AZERTY and every other shifted-digit layout; displayed via dock shortcuts. ⇧⌘] and ⇧⌘[ sit beside them, matched by `code` (`BracketRight`/`BracketLeft`) for the same layout reason, and step to the next and previous open tab. All four chords are `Shell`'s, not the strip's, and all four **activate** the destination tab - the bracket pair through `focusAdjacentTab` (`tabs-store.ts`, `openTabs` order, wrapping at both ends), the digits by direct index - where the strip's own Left/Right move only DOM focus along its roving tabindex and leave the active tab untouched.
 - **The strip is one Tab stop, and stays one.** Roving tabindex: exactly one tab carries `tabIndex=0`, Left/Right/Home/End move focus within the strip, and Enter or Space activates - focus moves *without* activating, so skating past a dashboard tab mounts nothing. The arrow handler resets every tab to -1 before promoting the destination; setting the destination alone leaked a stop per press, because the DOM write sits on top of a vdom prop React never re-applies. Delete or Backspace closes the focused tab (both keys, since a Mac's "delete" reports `Backspace`). → `TabStrip.keyboard.test.tsx`
@@ -1599,6 +1600,45 @@ confirmation was given. One component rather than the same chip twice: the Servi
 inbox tab both render it, and as two copies they had drifted to two different wordings for one fact
 (issue #556). `variant="chip"` per the Badge rule - any other variant keeps its own `hover:bg-*`,
 which `cn()` does not replace, so the warning fill would turn the accent colour under the pointer.
+
+## Drawer Section (`components/shared/DrawerSection.tsx`)
+
+A group of rows inside a drawer view, and its header: muted small type, an optional scope glyph, an
+optional count, an optional collapse chevron and a trailing actions slot. `DrawerPanel` gave the four
+views one frame; the groups *inside* a view had none - Services drew muted labels with a plus,
+Variables a chevron, an icon, a filled `Badge` count and a plus, and the collection rows wrote the
+same fact as inline `(2)` text one click away from that badge (issue #1688).
+
+**One count idiom, and the badge loses**: `DrawerSectionCount` is the muted inline count in
+parentheses, exported so a *row* inside a section writes it exactly as its header does - which is how
+`CollectionItem` stays in step without gaining a section header (its `DrawerPanel` band already says
+"Collections"; a section of the same name inside it would be the double heading this issue removed
+from Settings). A string count (`"-"`) is for a number the app does not have yet: a literal `0`
+beside "Couldn't load collections" asserts something untrue.
+
+**The header's semantics stay at the call site.** Variables' headers are `role="treeitem"` rows in a
+roving-tabindex tree, and the "+" beside one is deliberately outside that row - the tree has no
+create key, so the button is the drawer's own tab stop. `rowProps` and `activatorProps` are spread
+through, so this component owns the shape and never has to know about the tree.
+
+## Field Error (`components/shared/FieldError.tsx`)
+
+The message under a control that will not take what you typed, and the bottom of the app's three
+error levels: **field-level** is `FieldError`, **block-level** is [`Callout`](../design-system.md),
+**pane-level** is `ErrorState`. Before issue #1688 the middle of that range was hand-written
+`text-destructive-text` paragraphs at three sizes - the import dialog alone carried `text-sm`,
+`text-xs` and `text-[11px]` - some with a leading glyph, some announced and most not.
+
+One size (`text-xs`: the sizes were the order the code was written in, not a hierarchy),
+`role="alert"` so a message that appears after a keystroke announces itself, an `id` for the
+control's `aria-describedby`, an optional leading `icon` for a message that has to be found among
+other lines of the same size, and `as="span"` for a parent whose content model is phrasing only (a
+`<label>`, another `<span>`) where a `<p>` would be silently reparented out of its row. It renders
+nothing for an empty message, so a call site is `<FieldError>{error}</FieldError>` rather than
+`{error && …}` - the same swallowing `TabCount` does with a zero. `error-presentation.test.ts`
+fails on red prose outside the three primitives; a site where the token is on data rather than on a
+message (a failure count, the Dock's "Not saved") is named in that guard's exemption list with what
+the red text is instead.
 
 ## Number Field (`components/shared/NumberField.tsx`)
 

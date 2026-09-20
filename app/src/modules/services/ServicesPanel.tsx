@@ -36,10 +36,12 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Copy, KeyRound, Plus, Square, Trash2 } from "lucide-react";
 import {
 	DrawerPanel,
+	DrawerSection,
 	EmptyState,
 	ErrorState,
 	NonLoopbackBadge,
 	TruncatedText,
+	FieldError,
 } from "@/components/shared";
 import {
 	Badge,
@@ -71,6 +73,7 @@ import type { Inbox, MockIssuer, MockIssuerFailureMode, MockServer } from "@/typ
 import { DeleteInboxDialog } from "@/modules/inbox/DeleteInboxDialog";
 import { useInboxDeletion } from "@/modules/inbox/useInboxDeletion";
 import type { InboxWatchSummary } from "@/services/inbox-watch-service";
+import { isCommitEnter } from "@/lib/keyboard";
 import { useInboxWatchSummary } from "./useInboxWatchSummary";
 import { FAILURE_MODE_LABELS, MAX_SLOW_MS, failureModeSummary } from "./failure-modes";
 import { NewIssuerDialog } from "./NewIssuerDialog";
@@ -164,25 +167,6 @@ function ServiceRow({
 	);
 }
 
-interface ServiceGroupProps {
-	title: string;
-	/** The group's own create affordance - "New inbox", "New issuer…". */
-	action?: React.ReactNode;
-	children: React.ReactNode;
-}
-
-function ServiceGroup({ title, action, children }: ServiceGroupProps) {
-	return (
-		<section className="mb-4">
-			<div className="flex items-center justify-between gap-1 px-3 py-1.5">
-				<h3 className="text-xs tracking-wider text-muted-foreground">{title}</h3>
-				{action}
-			</div>
-			{children}
-		</section>
-	);
-}
-
 /** `px-3 py-2 text-left`: a drawer group's line, not a centred pane. */
 const GROUP_NOTE_CLASS = "px-3 py-2 text-left text-xs";
 
@@ -230,7 +214,7 @@ function NotNotifyingBadge() {
 function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const openTab = useTabsStore((s) => s.openTab);
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const stopInbox = useStopInboxMutation();
 	// No capture list on this surface, so the record's own count is all it knows.
 	const deletion = useInboxDeletion(inbox);
@@ -347,7 +331,7 @@ function IssuerRow({
 	onToggle: () => void;
 }) {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const stopIssuer = useStopMockIssuerMutation();
 	const updateIssuer = useUpdateMockIssuerMutation();
 
@@ -550,7 +534,9 @@ function IssuerDelayControl({
 					onChange={(e) => setDraft(e.target.value)}
 					onBlur={commit}
 					onKeyDown={(e) => {
-						if (e.key === "Enter") commit();
+						// `isCommitEnter`, not a bare Enter (#939, #935): mod+Enter is
+						// the Send chord, not this field's apply.
+						if (isCommitEnter(e)) commit();
 					}}
 					disabled={pending}
 					aria-invalid={!valid}
@@ -559,11 +545,9 @@ function IssuerDelayControl({
 				/>
 				<span className="text-xs text-muted-foreground">ms</span>
 			</label>
-			{!valid && (
-				<p id={errorId} className="pt-1 text-xs text-destructive-text">
-					{`A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
-				</p>
-			)}
+			<FieldError id={errorId} className="pt-1">
+				{!valid && `A whole number of milliseconds, 0 to ${MAX_SLOW_MS}.`}
+			</FieldError>
 		</div>
 	);
 }
@@ -576,7 +560,7 @@ function IssuerDelayControl({
  */
 function MockServerRow({ mock }: { mock: MockServer }) {
 	const showToast = useToastStore((s) => s.showToast);
-	const copy = useCopy();
+	const { copy } = useCopy();
 	const openTab = useTabsStore((s) => s.openTab);
 	const stopMock = useStopMockServerMutation();
 
@@ -707,9 +691,9 @@ export default function ServicesPanel() {
 	return (
 		<DrawerPanel title="Services">
 			<div className="flex w-full flex-col py-2">
-				<ServiceGroup
+				<DrawerSection
 					title="Webhook inboxes"
-					action={
+					actions={
 						/* "New inbox", matching the issuer group's "New issuer", and a
 						   Plus rather than a Play: this always mints a *new* listener,
 						   and beside a stopped row a Play labelled "Start inbox" read
@@ -747,11 +731,11 @@ export default function ServicesPanel() {
 							/>
 						))
 					)}
-				</ServiceGroup>
+				</DrawerSection>
 
-				<ServiceGroup
+				<DrawerSection
 					title="OAuth issuers"
-					action={
+					actions={
 						<TooltipIconButton
 							label="New issuer"
 							icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -786,12 +770,12 @@ export default function ServicesPanel() {
 							/>
 						))
 					)}
-				</ServiceGroup>
+				</DrawerSection>
 
 				{/* No create affordance: a mock needs a collection to serve, and
 				    this drawer has none selected. The collection header starts
 				    one; this is where every running mock can be found. */}
-				<ServiceGroup title="Mock servers">
+				<DrawerSection title="Mock servers">
 					{showMockError ? (
 						<ErrorState
 							variant="inline"
@@ -808,7 +792,7 @@ export default function ServicesPanel() {
 					) : (
 						orderedMocks.map((mock) => <MockServerRow key={mock.mockId} mock={mock} />)
 					)}
-				</ServiceGroup>
+				</DrawerSection>
 			</div>
 
 			{newIssuerOpen && (

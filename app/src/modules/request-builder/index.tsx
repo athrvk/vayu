@@ -37,7 +37,7 @@ import {
 } from "@/queries";
 import { EmptyState, ErrorState } from "@/components/shared";
 import { Button } from "@/components/ui";
-import { useEngine, useVariableResolver } from "@/hooks";
+import { useCopy, useEngine, useVariableResolver } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { apiService, loadTestService } from "@/services";
 import { generateCurl } from "@/services/codegen";
@@ -169,6 +169,7 @@ function buildUpdatePayload(
 function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 	const { request } = useRequestBuilderContext();
 	const showToast = useToastStore((s) => s.showToast);
+	const { copy } = useCopy();
 
 	const handleCopyCurl = useCallback(async () => {
 		try {
@@ -188,13 +189,15 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 				verifySSL: request.verifySSL,
 				followRedirects: request.followRedirects,
 			});
-			await navigator.clipboard.writeText(snippet.code);
-			showToast("Copied as curl", "success");
+			// A text button, so the acknowledgement is the toast rather than a
+			// check swap (design-system.md, Component Patterns) - and `useCopy`
+			// owns the failure path, which this used to duplicate by hand.
+			await copy(snippet.code, "curl command");
 		} catch (error) {
-			console.error("Failed to copy the request as curl:", error);
-			showToast("Couldn't copy to the clipboard", "error");
+			console.error("Failed to build the request as curl:", error);
+			showToast("Couldn't build the curl command", "error");
 		}
-	}, [request, showToast]);
+	}, [copy, request, showToast]);
 
 	return (
 		<ErrorState

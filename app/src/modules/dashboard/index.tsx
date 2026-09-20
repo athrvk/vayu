@@ -443,10 +443,7 @@ export default function LoadTestDashboard() {
 			)}
 
 			{/* Tab bar */}
-			<TabsList
-				size="sm"
-				className="border-b border-border bg-panel px-5 shrink-0 justify-start"
-			>
+			<TabsList variant="pane" size="sm" className="shrink-0 justify-start">
 				<TabsTrigger value="metrics">
 					<TabLabel>Metrics</TabLabel>
 				</TabsTrigger>

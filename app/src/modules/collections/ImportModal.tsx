@@ -34,6 +34,7 @@ import {
 	TabLabel,
 	Textarea,
 	LabelSwap,
+	ICON_MOTION,
 } from "@/components/ui";
 import { useImportModalStore, useTabsStore } from "@/stores";
 import { useImportMutation } from "@/queries/import";
@@ -60,7 +61,7 @@ import {
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { fileBaseName } from "@/lib/file-path";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
-import { MethodBadge } from "@/components/shared";
+import { MethodBadge, FieldError } from "@/components/shared";
 import { isCommitEnter } from "@/lib/keyboard";
 
 type Tab = "file" | "url" | "paste";
@@ -691,12 +692,9 @@ export function ImportModal() {
 					{/* An apply that failed leaves the list on screen - the per-file
 					    outcomes are in it - so the message that would have replaced it
 					    is stated here instead. */}
-					{error && (
-						<p className="mt-3 flex items-center gap-1.5 text-xs text-destructive-text">
-							<AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-							{error}
-						</p>
-					)}
+					<FieldError icon={AlertTriangle} className="mt-3">
+						{error}
+					</FieldError>
 				</>
 			) : (
 				<>
@@ -722,7 +720,11 @@ export function ImportModal() {
 						<button
 							type="button"
 							disabled={isBusy}
-							className="w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center disabled:cursor-default disabled:opacity-60"
+							// `group`: the Upload glyph's `lift` fires from this
+							// dropzone's hover, and the `Icon motion` block gates on a
+							// `[data-slot="button"]` or `.group` ancestor - a bare
+							// <button> element is neither.
+							className="group w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center disabled:cursor-default disabled:opacity-60"
 							onClick={() => fileInputRef.current?.click()}
 							onDragOver={(e) => e.preventDefault()}
 							onDrop={(e) => {
@@ -737,7 +739,10 @@ export function ImportModal() {
 								void handleFiles(Array.from(e.dataTransfer.files));
 							}}
 						>
-							<Upload className="mx-auto h-6 w-6 text-muted-foreground" />
+							<Upload
+								className="mx-auto h-6 w-6 text-muted-foreground"
+								data-icon-motion={ICON_MOTION.lift}
+							/>
 							<span className="mt-2 block text-sm font-medium">
 								Drop files here, or click to browse
 							</span>
@@ -858,9 +863,7 @@ export function ImportModal() {
 							<ImportProgressView progress={progress ?? { stage: "reading" }} />
 						</div>
 					)}
-					{phase === "error" && (
-						<p className="mt-3 text-xs text-destructive-text">{error}</p>
-					)}
+					{phase === "error" && <FieldError className="mt-3">{error}</FieldError>}
 				</>
 			)}
 		</>
@@ -936,7 +939,7 @@ export function ImportModal() {
 					onValueChange={(v) => setTab(v as Tab)}
 					className="flex min-h-0 flex-1 flex-col"
 				>
-					<TabsList className="w-full px-4">
+					<TabsList variant="pane" className="w-full">
 						{(["file", "url", "paste"] as Tab[]).map((t) => (
 							<TabsTrigger key={t} value={t}>
 								<TabLabel>
@@ -1134,24 +1137,18 @@ function PreviewView({
 				examples · {meta.environmentCount} environments · {meta.globalCount} globals
 			</p>
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
-				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-					<AlertTriangle className="h-3.5 w-3.5" />
+				<FieldError icon={AlertTriangle}>
 					{importEnvironments
 						? "Nothing to import from this file."
 						: "No collections in this file. Enable Import environments & variables below to import its environments."}
-				</p>
+				</FieldError>
 			)}
 			{globalCount > 0 && (
 				<p className="text-[11px] text-muted-foreground">
 					Existing globals are kept; a variable of the same name is overwritten.
 				</p>
 			)}
-			{lossSummary(meta) && (
-				<p className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-					<AlertTriangle className="h-3.5 w-3.5" />
-					{lossSummary(meta)}
-				</p>
-			)}
+			<FieldError icon={AlertTriangle}>{lossSummary(meta)}</FieldError>
 			{noticeSummary(meta) && (
 				<p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
 					<Info className="h-3.5 w-3.5 shrink-0" />
@@ -1342,18 +1339,12 @@ function BatchRow({
 						Referenced by {bundledInto} - imported as part of it
 					</span>
 				)}
-				{error && (
-					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-						<FileWarning className="size-icon-sm shrink-0" />
-						{error}
-					</span>
-				)}
-				{loss && (
-					<span className="flex items-center gap-1.5 text-[11px] text-destructive-text">
-						<AlertTriangle className="size-icon-sm shrink-0" />
-						{loss}
-					</span>
-				)}
+				<FieldError as="span" icon={FileWarning}>
+					{error}
+				</FieldError>
+				<FieldError as="span" icon={AlertTriangle}>
+					{loss}
+				</FieldError>
 				{notices && (
 					<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
 						<Info className="size-icon-sm shrink-0" />

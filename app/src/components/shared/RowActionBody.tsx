@@ -13,12 +13,17 @@
 
 import type { RowAction } from "./row-actions";
 
-/** An item's contents: its glyph, then its label. */
+/**
+ * An item's contents: its glyph, then its label.
+ *
+ * `data-icon-motion` arrives in a variable, so no source scan can see it - the
+ * rendered-class half of `icon-motion.call-sites.test.tsx` is what holds it.
+ */
 export function RowActionBody({ action }: { action: RowAction }) {
 	const Icon = action.icon;
 	return (
 		<>
-			<Icon className="size-icon shrink-0" />
+			<Icon className="size-icon shrink-0" data-icon-motion={action.iconMotion} />
 			{action.label}
 		</>
 	);

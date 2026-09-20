@@ -136,6 +136,18 @@ describe("the app settings catalogue", () => {
 				// here keeps one defect from failing two tests with two stories.
 				if (block === null) continue;
 
+				// A panel-level anchor is headed by the pane's band, not by a card
+				// inside the panel: the catalogue label and the panel label are the
+				// same string (Keyboard shortcuts is the only one), and a card
+				// repeating it was the double heading issue #1688 removed. The band
+				// half is asserted in SettingsMain.panel-heading.test.tsx, which
+				// renders it - this file renders the panel alone, so the heading it
+				// is looking for is genuinely elsewhere rather than missing.
+				if (setting.label === panel.label) {
+					checked += 1;
+					continue;
+				}
+
 				const heading = blockHeading(block);
 				expect(
 					heading,

@@ -251,7 +251,7 @@ export default function CollectionDetail() {
 	return (
 		<div className="flex flex-col h-full overflow-hidden">
 			{/* Header */}
-			<div className="flex items-center gap-2.5 h-[52px] px-5 bg-panel border-b border-border shrink-0">
+			<div className="flex items-center gap-2.5 h-band-lg px-5 bg-panel border-b border-rule shrink-0">
 				<Folder className="w-[15px] h-[15px] text-primary shrink-0" />
 				<span className="text-sm font-semibold text-foreground">{collection.name}</span>
 				<span className="text-xs text-muted-foreground">
@@ -281,7 +281,10 @@ export default function CollectionDetail() {
 				{/* The active trigger's weight change used to shift its neighbours
 				    on every switch; TabLabel reserves the bold width, so it no
 				    longer can. */}
-				<TabsList className="bg-panel px-4 shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip">
+				<TabsList
+					variant="pane"
+					className="shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
+				>
 					{TABS.map((t) => {
 						const count =
 							t.id === "variables"

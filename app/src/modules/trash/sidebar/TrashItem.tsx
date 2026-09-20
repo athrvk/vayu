@@ -7,7 +7,7 @@
 
 import { Folder, FileJson, Loader2, RotateCcw, Trash2 } from "lucide-react";
 
-import { Button } from "@/components/ui";
+import { Button, ICON_MOTION } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import { formatRelativeTime } from "@/lib/format-time";
 import type { TrashEntry } from "@/types";
@@ -112,7 +112,10 @@ export default function TrashItem({
 						{isRestoring ? (
 							<Loader2 className="size-icon-sm animate-spin" />
 						) : (
-							<RotateCcw className="size-icon-sm" />
+							<RotateCcw
+								className="size-icon-sm"
+								data-icon-motion={ICON_MOTION.spinBack}
+							/>
 						)}
 					</Button>
 					<Button

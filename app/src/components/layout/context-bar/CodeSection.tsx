@@ -36,8 +36,11 @@ import { apiService } from "@/services/api";
 import { queryKeys } from "@/queries/keys";
 import { useRequestQuery, useCollectionAncestors } from "@/queries";
 import { useSessionStore } from "@/stores";
+import { useCopy } from "@/hooks/useCopy";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import {
+	ICON_MOTION,
+	IconSwap,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -47,7 +50,6 @@ import {
 	ToggleGroupItem,
 	TooltipIconButton,
 } from "@/components/ui";
-import { TIMING } from "@/config/timing";
 import { CODE_TARGETS, authSecrets, generateSnippet, type CodeTargetId } from "@/services/codegen";
 import type { SnippetRequest } from "@/services/codegen";
 import { SectionEmpty, SectionLoading } from "./Section";
@@ -60,7 +62,7 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 	const [target, setTarget] = useState<CodeTargetId>("curl");
 	const [mode, setMode] = useState<Mode>("resolved");
 	const [revealed, setRevealed] = useState(false);
-	const [copied, setCopied] = useState(false);
+	const { copy, copied } = useCopy({ feedback: "icon" });
 
 	const { data: request } = useRequestQuery(tab.entityId);
 	const ancestors = useCollectionAncestors(request?.collectionId ?? null);
@@ -123,9 +125,7 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 
 	const handleCopy = async () => {
 		if (!snippet) return;
-		await navigator.clipboard.writeText(snippet.code);
-		setCopied(true);
-		setTimeout(() => setCopied(false), TIMING.STATUS_RESET_MS);
+		await copy(snippet.code, "Snippet");
 	};
 
 	return (
@@ -173,7 +173,12 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 				{mode === "resolved" && (
 					<TooltipIconButton
 						label="Recompose"
-						icon={<RefreshCw className="w-3.5 h-3.5" />}
+						icon={
+							<RefreshCw
+								className="w-3.5 h-3.5"
+								data-icon-motion={ICON_MOTION.spinOnce}
+							/>
+						}
 						onClick={() => void composed.refetch()}
 					/>
 				)}
@@ -197,11 +202,15 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 							<TooltipIconButton
 								label="Copy snippet"
 								icon={
-									copied ? (
-										<Check className="w-3.5 h-3.5 text-status-success-text" />
-									) : (
-										<Copy className="w-3.5 h-3.5" />
-									)
+									<IconSwap
+										state={copied ? "copied" : "copy"}
+										icons={{
+											copy: <Copy className="w-3.5 h-3.5" />,
+											copied: (
+												<Check className="w-3.5 h-3.5 text-status-success-text" />
+											),
+										}}
+									/>
 								}
 								onClick={() => void handleCopy()}
 							/>
