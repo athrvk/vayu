@@ -41,7 +41,7 @@ import {
 	Input,
 	Label,
 } from "@/components/ui";
-import { Callout } from "@/components/shared";
+import { Callout, FieldError } from "@/components/shared";
 import {
 	DEFAULT_MOCK_OPTIONS,
 	MAX_MOCK_ERROR_RATE_PCT,
@@ -120,11 +120,7 @@ export function StartMockServerDialog({
 								aria-describedby={latencyError ? "mock-latency-error" : undefined}
 							/>
 						</div>
-						{latencyError && (
-							<p id="mock-latency-error" className="text-xs text-destructive-text">
-								{latencyError}
-							</p>
-						)}
+						<FieldError id="mock-latency-error">{latencyError}</FieldError>
 					</div>
 
 					<div className="space-y-1">
@@ -152,11 +148,7 @@ export function StartMockServerDialog({
 								}
 							/>
 						</div>
-						{errorRateError && (
-							<p id="mock-error-rate-error" className="text-xs text-destructive-text">
-								{errorRateError}
-							</p>
-						)}
+						<FieldError id="mock-error-rate-error">{errorRateError}</FieldError>
 					</div>
 
 					{/* The engine's own refusal - a collection with nothing to serve,

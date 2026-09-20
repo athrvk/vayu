@@ -324,8 +324,12 @@ describe("control heights", () => {
 	});
 
 	it("states the row's own floor, rather than deriving it", () => {
+		// `min-h-band-md` since #1688: the floor is still stated here rather than
+		// derived from a control height plus padding, but as the band token the
+		// design system names for this row, not as a bracketed literal that no
+		// other file could reach.
 		const { container } = renderBar(true);
-		expect(container.querySelector(".bg-panel")?.className).toContain("min-h-[40px]");
+		expect(container.querySelector(".bg-panel")?.className).toContain("min-h-band-md");
 	});
 });
 
