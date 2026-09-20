@@ -42,7 +42,7 @@ const ALLOWED = [
 	"lib/keyboard.ts",
 	"components/ui/variable-popover.tsx",
 	"components/ui/markdown-editor.tsx",
-	"components/layout/TabStrip.tsx",
+	"components/layout/TabItem.tsx",
 	"modules/collections/useRovingTreeFocus.ts",
 ];
 
