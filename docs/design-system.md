@@ -1384,6 +1384,7 @@ One curve pair and one duration per tier, declared once as CSS custom properties
 | `--dur-panel-in` / `--dur-panel-out` | 180ms / 130ms | Dialog - the whole view dims |
 | `--dur-menu-in` / `--dur-menu-out` | 140ms / 100ms | Popover, DropdownMenu, Select, ContextMenu |
 | `--dur-tooltip-in` / `--dur-tooltip-out` | 100ms / 80ms | Tooltip - must read near-instant |
+| `--dur-icon-nudge` / `--dur-icon-play` | 200ms / 280ms | Icon motion - a hover nudge that unwinds, a one-shot sequence (x2 for two-phase) |
 
 **Dialog** (`.dialog-panel`/`.dialog-overlay`) consumes these directly in hand-written `@keyframes` - see the comment above them for why it does not use `tw-animate-css`'s stock utility stack (a centring hack it does not need, no overlay-sync problem the others don't have).
 
@@ -3260,7 +3261,7 @@ The policy, in five rules:
    `--tw-duration`: a `.motion-menu` / `.motion-tooltip` ancestor sets that one
    for `tw-animate-css`, and reading it here would let a menu's tier leak into
    the glyph inside it. No `will-change` - a standing compositor hint on every
-   icon in a hovered row costs more than a 12px glyph's 100-180ms buys.
+   icon in a hovered row costs more than a 12px glyph's 200-560ms buys.
 
 A call site spells the name once, as `data-icon-motion` on the icon, and takes
 it from `ICON_MOTION` in `app/src/components/ui/icon-motion.ts` so a name the
@@ -3268,32 +3269,32 @@ stylesheet does not implement is a compile error rather than a dead attribute.
 
 | Name | Icons | Motion | Duration | Leaves the frame |
 |------|-------|--------|----------|------------------|
-| `lid` | `Trash2` | Lid bar and handle hinge up off the can (`rotate: -12deg`, `translate: 0 -1px`) about the bar's left end | `--dur-tooltip-in` | yes |
-| `hands` | `Clock` | The hands polyline sweeps one full revolution about the dial centre (12,12); the dial stays | `--dur-panel-in` x2 | no |
-| `waves` | `Radio` | The four arcs travel outward and fade, inner pair then outer pair; the centre dot stays | `--dur-panel-in` x2 | yes |
-| `spread` | `Braces` | The two curves part by 1px each, outward, and close again | `--dur-tooltip-in` | no |
-| `tilt` | `FolderOpen` | Tips `-6deg` with a 4% grow about the ink's bottom-left corner (2,20) - a folder opening toward you | `--dur-tooltip-in` | yes |
-| `wiggle` | `Search` | `-8deg`, `+8deg`, back, once, about the lens centre (11,11) | `--dur-panel-in` | no |
-| `drop` | `Download` | The arrow (shaft and head) drops 2px into its tray; the tray stays | `--dur-tooltip-in` | no |
-| `lift` | `Upload` | The arrow rises 2px out of its tray; the tray stays | `--dur-tooltip-in` | yes |
-| `press` | `Save` | The whole glyph goes to 92% and back, a button pressed | `--dur-panel-in` | no |
-| `tilt-pin` | `Pin`, `PinOff` | Leans `-20deg` about the needle's point (12,22) and rights itself | `--dur-panel-in` | yes |
-| `ring` | `Bell` | A decaying swing (`+12deg`, `-10deg`, `+6deg`, 0) about the point it hangs from (12,2) | `--dur-panel-in` x2 | yes |
-| `bob` | `Info` | A 1.5px rise and settle, for a mark with no part to hinge and no direction of its own | `--dur-panel-in` | yes |
-| `part` | `Code2`, `Code` | The two chevrons part by 1px each. `spread`'s reading against a glyph lucide draws right-to-left, which is why it is not that name | `--dur-tooltip-in` | yes |
-| `tiles` | `LayoutDashboard` | The four tiles step 1px away from the frame's centre and back, diagonal pairs staggered | `--dur-panel-in` | no |
-| `sweep` | `Gauge` | The needle swings `-70deg` about its hub (12,14) and returns; the dial stays | `--dur-panel-in` x2 | no |
-| `plug-in` | `Plug` | 1.5px along the axis the prongs point, which is up | `--dur-tooltip-in` | yes |
-| `pulse` | `Network` | The three node rects swell 18% in turn, top node first; the connectors stay | `--dur-panel-in` x2 | no |
-| `trace` | `Activity` | The trace is stroked on from its left end, over a measured path length | `--dur-panel-in` x2 | no |
-| `stack` | `Database` | The top disc lifts 1.5px off the stack and settles back | `--dur-tooltip-in` | yes |
-| `spin-once` | `RefreshCw` | One 360deg turn (`@keyframes icon-spin-once`), so pointer-out does not unwind it backwards | `--dur-panel-in` | no |
-| `spin-back` | `RotateCcw` | The same turn counter-clockwise, for "put it back" rather than "do it again" | `--dur-panel-in` | no |
-| `flash` | `Zap` | Dims to 40% and back with a 6% grow - a strike, not a movement | `--dur-panel-in` | no |
-| `rotate-90` | `Plus`, `X` | A quarter turn; both glyphs are symmetric under it, so only the movement is visible | `--dur-tooltip-in` | no |
-| `nudge-x` | `ChevronRight`, `SlidersHorizontal` | 1px along the direction it points | `--dur-tooltip-in` | no |
-| `nudge-y` | `ChevronDown` | The same, vertically | `--dur-tooltip-in` | no |
-| `scale` | `Play` | The whole glyph grows 10% - the last resort for a mark that is one path with no reading of its own to act out | `--dur-tooltip-in` | no |
+| `lid` | `Trash2` | Lid bar and handle hinge up off the can (`rotate: -12deg`, `translate: 0 -1px`) about the bar's left end | `--dur-icon-nudge` | yes |
+| `hands` | `Clock` | The hands polyline sweeps one full revolution about the dial centre (12,12); the dial stays | `--dur-icon-play` x2 | no |
+| `waves` | `Radio` | The four arcs travel outward and fade, inner pair then outer pair; the centre dot stays | `--dur-icon-play` x2 | yes |
+| `spread` | `Braces` | The two curves part by 1px each, outward, and close again | `--dur-icon-nudge` | no |
+| `tilt` | `FolderOpen` | Tips `-6deg` with a 4% grow about the ink's bottom-left corner (2,20) - a folder opening toward you | `--dur-icon-nudge` | yes |
+| `wiggle` | `Search` | `-8deg`, `+8deg`, back, once, about the lens centre (11,11) | `--dur-icon-play` | no |
+| `drop` | `Download` | The arrow (shaft and head) drops 2px into its tray; the tray stays | `--dur-icon-nudge` | no |
+| `lift` | `Upload` | The arrow rises 2px out of its tray; the tray stays | `--dur-icon-nudge` | yes |
+| `press` | `Save` | The whole glyph goes to 92% and back, a button pressed | `--dur-icon-play` | no |
+| `tilt-pin` | `Pin`, `PinOff` | Leans `-20deg` about the needle's point (12,22) and rights itself | `--dur-icon-play` | yes |
+| `ring` | `Bell` | A decaying swing (`+12deg`, `-10deg`, `+6deg`, 0) about the point it hangs from (12,2) | `--dur-icon-play` x2 | yes |
+| `bob` | `Info` | A 1.5px rise and settle, for a mark with no part to hinge and no direction of its own | `--dur-icon-play` | yes |
+| `part` | `Code2`, `Code` | The two chevrons part by 1px each. `spread`'s reading against a glyph lucide draws right-to-left, which is why it is not that name | `--dur-icon-nudge` | yes |
+| `tiles` | `LayoutDashboard` | The four tiles step 1px away from the frame's centre and back, diagonal pairs staggered | `--dur-icon-play` | no |
+| `sweep` | `Gauge` | The needle swings `-70deg` about its hub (12,14) and returns; the dial stays | `--dur-icon-play` x2 | no |
+| `plug-in` | `Plug` | 1.5px along the axis the prongs point, which is up | `--dur-icon-nudge` | yes |
+| `pulse` | `Network` | The three node rects swell 18% in turn, top node first; the connectors stay | `--dur-icon-play` x2 | no |
+| `trace` | `Activity` | The trace is stroked on from its left end, over a measured path length | `--dur-icon-play` x2 | no |
+| `stack` | `Database` | The top disc lifts 1.5px off the stack and settles back | `--dur-icon-nudge` | yes |
+| `spin-once` | `RefreshCw` | One 360deg turn (`@keyframes icon-spin-once`), so pointer-out does not unwind it backwards | `--dur-icon-play` | no |
+| `spin-back` | `RotateCcw` | The same turn counter-clockwise, for "put it back" rather than "do it again" | `--dur-icon-play` | no |
+| `flash` | `Zap` | Dims to 40% and back with a 6% grow - a strike, not a movement | `--dur-icon-play` | no |
+| `rotate-90` | `Plus`, `X` | A quarter turn; both glyphs are symmetric under it, so only the movement is visible | `--dur-icon-nudge` | no |
+| `nudge-x` | `ChevronRight`, `SlidersHorizontal` | 1px along the direction it points | `--dur-icon-nudge` | no |
+| `nudge-y` | `ChevronDown` | The same, vertically | `--dur-icon-nudge` | no |
+| `scale` | `Play` | The whole glyph grows 10% - the last resort for a mark that is one path with no reading of its own to act out | `--dur-icon-nudge` | no |
 
 A motion whose ink leaves the 24-unit viewBox sets `overflow: visible` on the
 `svg`, because an inline SVG clips to its viewBox by default and the travel is
@@ -3318,7 +3319,7 @@ When the reading matches but the child order does not, the second name is the
 honest answer.
 
 A sequence that genuinely needs longer than its tier - `hands`, `waves`,
-`ring`, `sweep`, `pulse`, `trace` - multiplies the token (`calc(var(--dur-panel-in) * 2)`) rather than
+`ring`, `sweep`, `pulse`, `trace` - multiplies the token (`calc(var(--dur-icon-play) * 2)`) rather than
 introducing a literal, and says why in the rule's comment. A stagger inside a
 sequence is keyframe percentages, never `animation-delay`: the reduced-motion
 rules collapse a duration, not a delay, so a delayed step would survive them as

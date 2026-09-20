@@ -1089,6 +1089,13 @@
 	--dur-menu-out: 100ms;
 	--dur-tooltip-in: 100ms;
 	--dur-tooltip-out: 80ms;
+	/* Icon motion (`data-icon-motion`, further down) has its own pair rather
+	   than borrowing the tooltip and panel tiers: a 12px glyph acting something
+	   out reads as a flick at the tempo a tooltip reads as prompt. `icon-nudge`
+	   is a hover transition that unwinds on pointer-out; `icon-play` is a
+	   one-shot keyframe sequence; a two-phase sequence is `icon-play` x2. */
+	--dur-icon-nudge: 200ms;
+	--dur-icon-play: 280ms;
 }
 
 /*
@@ -1252,7 +1259,7 @@
  *    one for `tw-animate-css`, and reading it here would let a menu's tier leak
  *    into the glyph inside it.
  *
- * No `will-change`: these are 12px glyphs whose motion lasts 100-180ms, and a
+ * No `will-change`: these are 12px glyphs whose motion lasts 200-560ms, and a
  * standing compositor-layer hint on every icon in a hovered row costs more than
  * it buys.
  *
@@ -1262,9 +1269,9 @@
  */
 
 [data-icon-motion] {
-	/* The default tier: a hover nudge must read as instant or it reads as lag,
-	   exactly the Tooltip argument. `spin-once` below raises it. */
-	--icon-motion-duration: var(--dur-tooltip-in);
+	/* The default tier: a hover nudge that unwinds on pointer-out. Keyframe
+	   sequences below use `--dur-icon-play` directly. */
+	--icon-motion-duration: var(--dur-icon-nudge);
 }
 
 /*
@@ -1339,7 +1346,7 @@
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="spin-once"] {
-	animation: icon-spin-once var(--dur-panel-in) var(--ease-enter);
+	animation: icon-spin-once var(--dur-icon-play) var(--ease-enter);
 }
 
 @keyframes icon-spin-once {
@@ -1431,7 +1438,7 @@
  * animating the wrong path.
  *
  * Where a sequence needs longer than a tier gives it, the duration is that
- * tier multiplied - `calc(var(--dur-panel-in) * 2)` - never a new literal. The
+ * tier multiplied - `calc(var(--dur-icon-play) * 2)` - never a new literal. The
  * stagger inside `waves` is keyframe percentages rather than `animation-delay`
  * for the same reason the whole block is CSS: the reduced-motion rules at the
  * end of this file collapse a duration, not a delay, so a delayed step would
@@ -1458,7 +1465,7 @@
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
 	[data-icon-motion="hands"]
 	> path:nth-child(2) {
-	animation: icon-hands calc(var(--dur-panel-in) * 2) var(--ease-enter);
+	animation: icon-hands calc(var(--dur-icon-play) * 2) var(--ease-enter);
 }
 
 @keyframes icon-hands {
@@ -1519,7 +1526,7 @@
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
 	[data-icon-motion="waves"]
 	> path:nth-child(4) {
-	animation: icon-wave calc(var(--dur-panel-in) * 2) var(--ease-enter);
+	animation: icon-wave calc(var(--dur-icon-play) * 2) var(--ease-enter);
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
@@ -1528,7 +1535,7 @@
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
 	[data-icon-motion="waves"]
 	> path:nth-child(3) {
-	animation: icon-wave-outer calc(var(--dur-panel-in) * 2) var(--ease-enter);
+	animation: icon-wave-outer calc(var(--dur-icon-play) * 2) var(--ease-enter);
 }
 
 @keyframes icon-wave {
@@ -1635,7 +1642,7 @@
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="wiggle"] {
-	animation: icon-wiggle var(--dur-panel-in) var(--ease-enter);
+	animation: icon-wiggle var(--dur-icon-play) var(--ease-enter);
 }
 
 @keyframes icon-wiggle {
@@ -1722,7 +1729,7 @@
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="press"] {
-	animation: icon-press var(--dur-panel-in) var(--ease-enter);
+	animation: icon-press var(--dur-icon-play) var(--ease-enter);
 }
 
 @keyframes icon-press {
@@ -1755,7 +1762,7 @@
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="tilt-pin"] {
-	animation: icon-tilt-pin var(--dur-panel-in) var(--ease-enter);
+	animation: icon-tilt-pin var(--dur-icon-play) var(--ease-enter);
 }
 
 @keyframes icon-tilt-pin {
@@ -1786,7 +1793,7 @@
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="spin-back"] {
-	animation: icon-spin-back var(--dur-panel-in) var(--ease-enter);
+	animation: icon-spin-back var(--dur-icon-play) var(--ease-enter);
 }
 
 @keyframes icon-spin-back {
@@ -1814,7 +1821,7 @@
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="flash"] {
-	animation: icon-flash var(--dur-panel-in) var(--ease-enter);
+	animation: icon-flash var(--dur-icon-play) var(--ease-enter);
 }
 
 @keyframes icon-flash {
@@ -1873,7 +1880,7 @@
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="bob"] {
-	animation: icon-bob var(--dur-panel-in) var(--ease-enter);
+	animation: icon-bob var(--dur-icon-play) var(--ease-enter);
 }
 
 @keyframes icon-bob {
@@ -1976,7 +1983,7 @@
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
 	[data-icon-motion="tiles"]
 	> rect:nth-child(3) {
-	animation: icon-tile var(--dur-panel-in) var(--ease-enter);
+	animation: icon-tile var(--dur-icon-play) var(--ease-enter);
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
@@ -1985,7 +1992,7 @@
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
 	[data-icon-motion="tiles"]
 	> rect:nth-child(4) {
-	animation: icon-tile-late var(--dur-panel-in) var(--ease-enter);
+	animation: icon-tile-late var(--dur-icon-play) var(--ease-enter);
 }
 
 @keyframes icon-tile {
@@ -2042,7 +2049,7 @@
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
 	[data-icon-motion="sweep"]
 	> path:nth-child(1) {
-	animation: icon-sweep calc(var(--dur-panel-in) * 2) var(--ease-enter);
+	animation: icon-sweep calc(var(--dur-icon-play) * 2) var(--ease-enter);
 }
 
 @keyframes icon-sweep {
@@ -2081,7 +2088,7 @@
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible) [data-icon-motion="ring"] {
-	animation: icon-ring calc(var(--dur-panel-in) * 2) var(--ease-enter);
+	animation: icon-ring calc(var(--dur-icon-play) * 2) var(--ease-enter);
 }
 
 @keyframes icon-ring {
@@ -2150,7 +2157,7 @@
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
 	[data-icon-motion="pulse"]
 	> rect:nth-child(3) {
-	animation: icon-pulse calc(var(--dur-panel-in) * 2) var(--ease-enter);
+	animation: icon-pulse calc(var(--dur-icon-play) * 2) var(--ease-enter);
 }
 
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
@@ -2159,7 +2166,7 @@
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
 	[data-icon-motion="pulse"]
 	> rect:nth-child(2) {
-	animation: icon-pulse-late calc(var(--dur-panel-in) * 2) var(--ease-enter);
+	animation: icon-pulse-late calc(var(--dur-icon-play) * 2) var(--ease-enter);
 }
 
 @keyframes icon-pulse {
@@ -2217,7 +2224,7 @@
 :where([data-slot="button"], .group):is(:hover, :focus-visible)
 	[data-icon-motion="trace"]
 	> path:nth-child(1) {
-	animation: icon-trace calc(var(--dur-panel-in) * 2) var(--ease-enter);
+	animation: icon-trace calc(var(--dur-icon-play) * 2) var(--ease-enter);
 }
 
 @keyframes icon-trace {
