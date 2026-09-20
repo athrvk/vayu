@@ -89,9 +89,13 @@ describe("EYEBROW_CLASS is written once", () => {
  * (`tracking-wide`, `-wider`, `[0.06em]`, `[0.07em]`, `[0.08em]`) and two
  * weights - every one of them a near-miss the old scan waved through.
  *
- * What they had in common is the shape: `uppercase` and a `tracking-` utility
- * in one class string. That is a section label in this app, and a section label
- * is `Eyebrow`, which takes `size="xs"` for the 10px tier.
+ * What they had in common is `uppercase` in a class string. The first cut of
+ * this rule also required a `tracking-` utility beside it, and #1683's closing
+ * audit found two `uppercase` class strings that carried none and so were
+ * never asked to justify themselves. Now every `uppercase` in a `.tsx` class
+ * string is a section label unless the file is named below with what the caps
+ * are instead - and a section label is `Eyebrow`, which takes `size="xs"` for
+ * the 10px tier.
  *
  * Comments are stripped first, because a comment explaining why a label is not
  * an eyebrow names both classes and would otherwise be the violation.
@@ -113,6 +117,12 @@ const EXEMPT: Record<string, string> = {
 		"`Sends` labels the line it shares, rather than the block below it",
 	// A `<tr>`. The primitive is a `<p>`, and a paragraph is not table markup.
 	"modules/variables/main/VariableTableEditor.tsx": "table header row",
+	// A value printed in capitals, not a label above a block: the HTTP method
+	// itself, and the run-kind chip (Load / Design) that sits beside it in a
+	// recent-runs row.
+	"components/shared/MethodBadge.tsx": "the HTTP method name, a value in caps by convention",
+	"modules/welcome/components/RecentRuns.tsx":
+		"the run-kind chip (Load / Design) beside the row's method badge, a value not a heading",
 };
 
 describe("no hand-rolled eyebrow", () => {
@@ -125,8 +135,8 @@ describe("no hand-rolled eyebrow", () => {
 	const hits = tsx
 		.map((file) => ({
 			file: relative(srcRoot, file).split(sep).join("/"),
-			labels: classStrings(readFileSync(file, "utf8")).filter(
-				(literal) => literal.includes("uppercase") && /\btracking-/.test(literal)
+			labels: classStrings(readFileSync(file, "utf8")).filter((literal) =>
+				/\buppercase\b/.test(literal)
 			),
 		}))
 		.filter(({ labels }) => labels.length > 0);
@@ -138,7 +148,7 @@ describe("no hand-rolled eyebrow", () => {
 		expect(hits.length).toBeGreaterThan(0);
 	});
 
-	it("only the primitive and the named exemptions combine uppercase with tracking", () => {
+	it("only the primitive and the named exemptions set uppercase in a class string", () => {
 		const offenders = hits
 			.filter(({ file }) => file !== "components/ui/eyebrow.tsx")
 			.filter(({ file }) => !(file in EXEMPT))
@@ -146,7 +156,8 @@ describe("no hand-rolled eyebrow", () => {
 				({ file, labels }) =>
 					`${file}  ${labels.join(" | ")}\n  ` +
 					`A section label is <Eyebrow> (size="xs" for the 10px tier), not a ` +
-					`hand-rolled uppercase+tracking class string.`
+					`hand-rolled uppercase class string; a value that is capitals by ` +
+					`convention is named in EXEMPT with what it is.`
 			);
 
 		expect(offenders.join("\n")).toBe("");
