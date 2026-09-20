@@ -46,7 +46,7 @@ vi.mock("@/queries", () => ({
 	useEnvironmentsQuery: () => ({ data: environments }),
 }));
 vi.mock("@/stores", () => ({
-	useSessionStore: () => session,
+	useSessionStore: (selector: (s: typeof session) => unknown) => selector(session),
 }));
 
 import { useVariableResolver } from "./useVariableResolver";

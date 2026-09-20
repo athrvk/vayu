@@ -73,18 +73,16 @@ export function useSaveManager({
 	changeToken,
 	enabled = true,
 }: UseSaveManagerOptions): UseSaveManagerReturn {
-	const {
-		status,
-		markPendingSave,
-		startSaving,
-		completeSaveThenIdle,
-		failSave,
-		reset,
-		registerContext,
-		unregisterContext,
-		updateContext,
-		setActiveContext,
-	} = useSaveStore();
+	const status = useSaveStore((s) => s.status);
+	const markPendingSave = useSaveStore((s) => s.markPendingSave);
+	const startSaving = useSaveStore((s) => s.startSaving);
+	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
+	const failSave = useSaveStore((s) => s.failSave);
+	const reset = useSaveStore((s) => s.reset);
+	const registerContext = useSaveStore((s) => s.registerContext);
+	const unregisterContext = useSaveStore((s) => s.unregisterContext);
+	const updateContext = useSaveStore((s) => s.updateContext);
+	const setActiveContext = useSaveStore((s) => s.setActiveContext);
 
 	const autoSaveEnabled = useClientSettingsStore((s) => s.autoSave.enabled);
 	const autoSaveDelayMs = useClientSettingsStore((s) => s.autoSave.delayMs);

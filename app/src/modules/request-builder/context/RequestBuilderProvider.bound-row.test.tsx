@@ -51,8 +51,10 @@ vi.mock("@/queries", () => ({
 }));
 vi.mock("@/stores", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/stores")>()),
-	useSessionStore: () => session,
-	useResponseStore: () => ({ getResponse: () => null, setResponse: vi.fn() }),
+	useSessionStore: (selector: (s: typeof session) => unknown) => selector(session),
+	useResponseStore: (
+		selector: (s: { getResponse: () => null; setResponse: ReturnType<typeof vi.fn> }) => unknown
+	) => selector({ getResponse: () => null, setResponse: vi.fn() }),
 }));
 vi.mock("@/hooks", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/hooks")>();
