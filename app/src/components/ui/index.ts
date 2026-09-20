@@ -51,6 +51,8 @@ export {
 
 export { DeleteConfirmDialog } from "./delete-confirm-dialog";
 export type { DeleteConfirmDialogProps } from "./delete-confirm-dialog";
+export { deleteConfirmCopy } from "./delete-confirm-copy";
+export type { DeleteScope } from "./delete-confirm-copy";
 
 export {
 	DropdownMenu,
@@ -105,6 +107,8 @@ export {
 	TooltipProvider,
 } from "./tooltip";
 export { TooltipIconButton } from "./tooltip-icon-button";
+export { DisabledHint } from "./disabled-hint";
+export type { DisabledHintProps } from "./disabled-hint";
 export type { TooltipIconButtonProps } from "./tooltip-icon-button";
 export { InfoChip } from "./info-chip";
 export type { InfoChipProps } from "./info-chip";

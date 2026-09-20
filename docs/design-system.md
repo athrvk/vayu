@@ -1701,7 +1701,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **20 directives across 14 files**, listed
+file that provides the missing half. **21 directives across 15 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1740,6 +1740,12 @@ not rule names - two of these lines silence two rules at once.
   `jsx-a11y/no-static-element-interactions` on the box that widens the hit area
   around a native input, and `no-static-element-interactions` again on the
   `pointerEvents: none` overlay whose keydown delegates for the tokens inside it.
+- `components/ui/disabled-hint.tsx` (1) -
+  `jsx-a11y/no-noninteractive-tabindex` on the wrapper span that explains a
+  disabled control (issue #1690): the child it wraps is `disabled`, so it is
+  neither focusable nor able to receive a pointer event, and the wrapper's tab
+  stop is the only keyboard path to the reason - the same argument the three
+  `Dock.tsx` tooltips above are suppressed on.
 - `modules/collections/CollectionTree.tsx` (1) -
   `jsx-a11y/interactive-supports-focus`, the roving tab stop seeded by
   `useRovingTreeFocus`.
@@ -1820,6 +1826,15 @@ leave a list of names that reads as inert. The test is the same one the state
 toggle above passes - would the row still say what it is for with the control
 absent - and here the answer is no.
 
+**Every row that has actions draws them this way, Services included** (issue
+#1690). The Services drawer's rows were the last holdout - two or three
+always-visible `TooltipIconButton`s on a 32px row whose payload is a URL, so the
+URL truncated to make room for controls the user had not come for. They are one
+hover-revealed `⋯` menu now, and the values those tooltips carried (the inbox
+URL, the mock's base URL) ride the items' `hint`, which reads without hovering.
+There is no exemption: the rows that keep visible controls are the two the rules
+above name - a state toggle, and a row with no job of its own.
+
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
 consistently and get focus management, Escape-to-close and arrow-key navigation
@@ -1827,6 +1842,14 @@ for free. Used by request rows and environment rows. It opens on a pointer and
 on a click reporting `detail === 0` - the keyboard's kind - and takes a
 `tabIndex` prop, `0` unless the row sits in a roving-tabindex tree. See Tree
 Navigation for why.
+
+**A disabled item says why on the item.** `RowAction`'s `disabledReason` draws
+the reason at the row's trailing edge - "Move up / Already first" - rather than
+in a tooltip: `DisabledHint`'s wrapper works by taking a tab stop of its own,
+and inside a menu that second stop competes with Radix's own focus management,
+which deliberately skips a disabled item. `RowActionBody` draws it, so the `⋯`
+dropdown and the right-click menu explain a gate the same way. See
+"A disabled control says why" under Component Patterns for the button case.
 
 **Right-click reaches the same actions through `RowContextMenu`** (issue
 #1360): one list, two menus. `row-actions.ts` holds the one rule about the
@@ -2104,8 +2127,17 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
 - **Alt+Arrow moves the row itself**, the keyboard half of drag-and-reorder:
   Up/Down among its siblings, Right into the folder rendered above it, Left out
   to after its parent. Alt because the tree owns the bare arrows and the app owns
-  Ctrl/Cmd; every move is announced in the live region below, and the row menu's
-  **"Move to..."** is the same move with no chord at all.
+  Ctrl/Cmd; every move is announced in the live region below.
+- **The row menu carries the same moves with no chord at all**: **Move up**,
+  **Move down** and **"Move to..."** (issue #1690). A chord has to be known
+  before it can be used, so until these existed a keyboard user who had not read
+  the shortcut list could not reorder the tree - while the element list had
+  carried Move up / Move down in its own menu all along, which made one action
+  two actions depending on the list. They call the same `moveByKeyboard` the
+  chords do (one move, one function) and are off at the ends carrying "Already
+  first" / "Already last" as a `disabledReason`, gated off the same block the
+  announcement is computed from. They sit above the row's destructive tail, since
+  the separator there belongs to Delete.
 - Every control inside a row is `tabIndex={-1}`, so those keys are the *only*
   keyboard path to row actions - do not remove one without providing another.
   Both row types must render every hidden control: a folder row without
@@ -2611,6 +2643,33 @@ its own regression.
 
 Sentence case for titles, everywhere.
 
+### Loading
+
+Three shapes, one rule each, decided once here rather than per module
+(issue #1683/#1689) because the app had accumulated `Loader2` in 35 files,
+`ListSkeleton`/`DetailSkeleton` in about a dozen, `EmptyState`'s
+`iconClassName="animate-spin"`, and `ImportProgressView` - four idioms with
+nothing saying which one a new screen should reach for.
+
+- **First load of a list or pane is a skeleton.** `ListSkeleton` or
+  `DetailSkeleton` - the shape of the content that is about to appear, so
+  the layout does not jump when it arrives.
+- **An in-place action on an existing control is an inline spinner.**
+  `Loader2` inside the button or row that triggered it - Send, Stop, Save,
+  a per-row purge. The control that was clicked is what shows it is working;
+  nothing else on the pane should move.
+- **A multi-step job is a progress view.** `ImportProgressView` and its kin -
+  several named steps with their own state, not a single spinner standing in
+  for all of them.
+
+A screen reaching for a fourth idiom, or for the wrong one of these three, is
+the bug this rule exists to catch.
+
+**Default entity names are Title Case** ("New Collection", "New Folder"),
+even beside sentence-case headings and button labels ("No collections yet",
+"Delete forever?"). The name is a proper noun for the thing until the user
+renames it; the surrounding UI copy is not.
+
 ### Error text has three levels, and one component each
 
 | Level | What it is | Component |
@@ -2864,6 +2923,40 @@ owns the behaviour:
 A surface that renames something in place uses the hook rather than a fourth
 copy of those four rules.
 
+### A disabled control says why: `DisabledHint`
+
+A gated control that gives no reason reads as a broken one, and the obvious fix
+does not work: `Button`'s baseline is `disabled:pointer-events-none`, so a
+`Tooltip` wrapped around a disabled button never receives the pointer events its
+trigger listens for, and a disabled button is not focusable either. Both paths to
+an explanation close at the moment there is something to explain.
+
+`DisabledHint` (`app/src/components/ui/disabled-hint.tsx`) is the wrapper that
+keeps them open - a `span` with its own `pointer-events-auto` and its own tab
+stop, holding the tooltip, with the inert control inside it:
+
+```tsx
+<DisabledHint reason={captures.length === 0 && "No captures to clear"}>
+  <Button disabled={captures.length === 0}>Clear</Button>
+</DisabledHint>
+```
+
+- **`reason` is the switch as well as the text.** Falsy renders the children
+  alone, so one expression covers both states rather than two copies of the same
+  button - which is how a hover class or an `aria-label` ends up on one of them
+  and not the other.
+- **The gate stays the child's `disabled` prop.** This adds the explanation and
+  changes nothing about what refuses the click.
+- **The reason names the state, not the remedy in full.** "No captures to
+  clear", "Already first", "No unsaved changes" - one line, present tense. A
+  sentence that needs more than that belongs beside the control, as the
+  elements list's missing-field note already is.
+- **A disabled menu item is the exception.** `RowAction`'s `disabledReason`
+  (`components/shared/row-actions.ts`) draws the reason on the item itself,
+  because a tooltip inside a menu's focus trap competes with the menu for the
+  keyboard and Radix deliberately skips a disabled item. Both menus get it at
+  once through `RowActionBody`. See Row Actions.
+
 ### Destructive Actions
 
 ```tsx
@@ -2887,6 +2980,32 @@ copy of those four rules.
   <Trash2 className="w-3 h-3" />
 </Button>
 ```
+
+#### Reversibility
+
+Two lanes, decided once here rather than per module (issue #1683/#1689):
+
+- **Collections and requests go to Trash, with Undo.** Deleting either is
+  recoverable for the retention window Settings shows - the undo toast handles
+  the immediate "I clicked the wrong row", and Trash's own restore handles
+  everything after that.
+- **Everything else confirms and deletes permanently**: environments, history
+  runs, load-test examples, inbox listeners and their captures, certificates.
+  The owner decided this deliberately (#1683) - a second Trash lane for every
+  other entity is not coming, so a module reaching for one should reach for
+  `DeleteConfirmDialog` instead.
+- **A destructive action never runs from a single click without one of the
+  two.** A control that removes data either lands in Trash (no confirm needed
+  - it is reversible) or opens `DeleteConfirmDialog` (no Trash - it is not).
+  Wiring a mutation straight to a button's `onClick` for anything that
+  destroys data is the bug this rule exists to catch (#1689's Clear captures
+  and Empty trash were both found this way).
+- **One template writes the sentence.** `DeleteConfirmDialog` takes `name` and
+  an optional `scope` (`"default"` or `"cascade"`) and builds "Delete
+  {name}? {name} is removed permanently." itself, with a suffix for a
+  container that takes its contents with it. A call site passes `description`
+  only for prose the template cannot say - a count, a conditional clause -
+  never to restate what `name`/`scope` already produce.
 
 ### URL Bar (Flat Style)
 
@@ -3474,6 +3593,7 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
+| `app/src/components/ui/disabled-hint.tsx` | The wrapper that lets a disabled control say why it is off |
 | `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |
 | `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/modules/dashboard/components/MetricsView.tsx` | Sparkline, SvgAreaChart, LatencyBar, HeroCard, StatCard |

@@ -8,5 +8,5 @@
 /** Name pre-filled when creating a new root collection, until the user edits it. */
 export const DEFAULT_COLLECTION_NAME = "New Collection";
 
-/** Name pre-filled when creating a new sub-collection (folder). */
-export const DEFAULT_FOLDER_NAME = "New Sub Collection";
+/** Name pre-filled when creating a new folder. */
+export const DEFAULT_FOLDER_NAME = "New Folder";

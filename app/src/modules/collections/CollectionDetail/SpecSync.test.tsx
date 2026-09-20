@@ -487,7 +487,7 @@ describe("SpecSync", () => {
 
 		// The confirm stands between the tick and the call.
 		expect(syncSpec).toHaveBeenCalledTimes(1);
-		expect(await screen.findByText(/1 request will be deleted/i)).toBeTruthy();
+		expect(await screen.findByText(/1 request and everything saved on it/i)).toBeTruthy();
 		fireEvent.click(screen.getByRole("button", { name: /apply and delete/i }));
 
 		await waitFor(() => expect(syncSpec).toHaveBeenCalledTimes(2));
