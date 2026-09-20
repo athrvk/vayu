@@ -43,7 +43,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Globe, Cloud, Folder, Trash2, LucideIcon, KeyRound } from "lucide-react";
+import { Globe, Cloud, Folder, Trash2, LucideIcon } from "lucide-react";
 import {
 	useGlobalsQuery,
 	useUpdateGlobalsMutation,
@@ -55,20 +55,7 @@ import {
 import { useSaveStore, useSessionStore } from "@/stores";
 import { useVariablesStore } from "@/modules/variables/variables-store";
 import type { VariableValue, Collection, Environment } from "@/types";
-import {
-	Button,
-	Checkbox,
-	Input,
-	Badge,
-	DeleteConfirmDialog,
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-	SecretInput,
-	TooltipIconButton,
-} from "@/components/ui";
+import { Button, Badge, DeleteConfirmDialog, TooltipIconButton } from "@/components/ui";
 import { Callout, ErrorState } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import type { VariableType } from "@/lib/variable-cast";
@@ -80,15 +67,9 @@ import {
 	type VariableChanges,
 	type VariableConflict,
 } from "@/lib/variable-merge";
+import VariableRow from "./VariableRow";
 
-const VARIABLE_TYPES: { value: VariableType; label: string }[] = [
-	{ value: "string", label: "String" },
-	{ value: "number", label: "Number" },
-	{ value: "boolean", label: "Boolean" },
-	{ value: "json", label: "JSON" },
-];
-
-interface VariableRow {
+export interface VariableRowData {
 	/**
 	 * Editor-local row identity, never persisted (`performSave` builds its
 	 * payload field by field, so this cannot leak into a scope's variables).
@@ -128,7 +109,7 @@ function nextRowId(): string {
  * The trailing "type here to add one" row. Takes an id so a reseed can hand it
  * the one the current blank row already has.
  */
-function blankRow(id: string = nextRowId()): VariableRow {
+function blankRow(id: string = nextRowId()): VariableRowData {
 	return { id, key: "", value: "", enabled: true, secret: false, type: "string", isNew: true };
 }
 
@@ -149,7 +130,7 @@ type VariableEditorType = "globals" | "environment" | "collection";
  * counting it as a change would be the same "dirty forever" bug in a new
  * disguise.
  */
-function sameRows(a: VariableRow[], b: VariableRow[]): boolean {
+function sameRows(a: VariableRowData[], b: VariableRowData[]): boolean {
 	if (a.length !== b.length) return false;
 	return a.every((row, i) => {
 		const other = b[i];
@@ -165,7 +146,7 @@ function sameRows(a: VariableRow[], b: VariableRow[]): boolean {
 	});
 }
 
-function toVariableValue(row: VariableRow): VariableValue {
+function toVariableValue(row: VariableRowData): VariableValue {
 	return {
 		value: row.value,
 		enabled: row.enabled,
@@ -177,7 +158,7 @@ function toVariableValue(row: VariableRow): VariableValue {
 	};
 }
 
-function rowFromValue(key: string, value: VariableValue, id?: string): VariableRow {
+function rowFromValue(key: string, value: VariableValue, id?: string): VariableRowData {
 	return {
 		id: id ?? nextRowId(),
 		key,
@@ -196,7 +177,7 @@ function rowFromValue(key: string, value: VariableValue, id?: string): VariableR
  * write for it through untouched. A key present in `baseline` but no longer
  * among the rows is a deletion.
  */
-function computeUserChanges(rows: VariableRow[], baseline: VariableMap): VariableChanges {
+function computeUserChanges(rows: VariableRowData[], baseline: VariableMap): VariableChanges {
 	const changes: VariableChanges = {};
 	const seenKeys = new Set<string>();
 	rows.forEach((row) => {
@@ -287,25 +268,28 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const deleteEnvironmentMutation = useDeleteEnvironmentMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();
 
-	const { setSelectedCategory } = useVariablesStore();
+	const setSelectedCategory = useVariablesStore((s) => s.setSelectedCategory);
 	const setActiveEnvironment = useSetActiveEnvironmentMutation();
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
-	const {
-		registerContext,
-		unregisterContext,
-		updateContext,
-		setActiveContext,
-		markPendingSave,
-		startSaving,
-		completeSaveThenIdle,
-		failSave,
-	} = useSaveStore();
+	// Per-field selectors, not a bare `useSaveStore()`: the whole-store call
+	// subscribed this editor to every field the store holds - `status`,
+	// `lastErrorMessage`, `activeContextId`, `contexts` - so a save anywhere
+	// else in the app re-rendered this editor even though only these eight
+	// stable action references are ever read (issue #1714).
+	const registerContext = useSaveStore((s) => s.registerContext);
+	const unregisterContext = useSaveStore((s) => s.unregisterContext);
+	const updateContext = useSaveStore((s) => s.updateContext);
+	const setActiveContext = useSaveStore((s) => s.setActiveContext);
+	const markPendingSave = useSaveStore((s) => s.markPendingSave);
+	const startSaving = useSaveStore((s) => s.startSaving);
+	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
+	const failSave = useSaveStore((s) => s.failSave);
 
-	const [variables, setVariables] = useState<VariableRow[]>([]);
+	const [variables, setVariables] = useState<VariableRowData[]>([]);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 	const [hasPendingChanges, setHasPendingChanges] = useState(false);
 	const [conflicts, setConflicts] = useState<VariableConflict[]>([]);
-	const variablesRef = useRef<VariableRow[]>([]);
+	const variablesRef = useRef<VariableRowData[]>([]);
 	const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
 	/**
 	 * The map the user's edits are diffed against - the state a save last
@@ -390,7 +374,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	 * Cmd+S, the quit flush) to write them.
 	 */
 	const finishSave = useCallback(
-		(snapshot: VariableRow[]) => {
+		(snapshot: VariableRowData[]) => {
 			if (sameRows(variablesRef.current, snapshot)) {
 				hasPendingChangesRef.current = false;
 				setHasPendingChanges(false);
@@ -503,11 +487,18 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// There is no debounce here and never was: `saveTimeoutRef` was cleared in
 	// three places and assigned in none, so the three `clearTimeout` calls it
 	// guarded were always no-ops. Saves fire on blur and on the toggles.
+	// Ref-backed rather than depending on the `hasPendingChanges` state value:
+	// every row's text field takes this as `onBlur`, so a dep that changes
+	// identity on every flip of that flag - or, with `VariableRow` now `memo`-
+	// wrapped (issue #1716), any dependency at all beyond what a ref can hold -
+	// would defeat every row's memo the same way a dep on `items` did in
+	// `KeyValueEditor`. `hasPendingChangesRef` already tracks the same flag
+	// synchronously for `markDirty`/`finishSave` above.
 	const handleBlur = useCallback(() => {
-		if (hasPendingChanges) {
+		if (hasPendingChangesRef.current) {
 			performSaveRef.current();
 		}
-	}, [hasPendingChanges]);
+	}, []);
 
 	// Initialize variables from data (sorted by createdAt: oldest first, newest at bottom).
 	// `contextId` is the identity of the active data source, so the effect
@@ -568,7 +559,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		}
 		if (dataVariables && Object.keys(dataVariables).length > 0) {
 			const entries = sortByCreatedAt(Object.entries(dataVariables));
-			const rows: VariableRow[] = entries.map(([key, val]) => ({
+			const rows: VariableRowData[] = entries.map(([key, val]) => ({
 				id: carriedIds.get(key) ?? nextRowId(),
 				key,
 				value: val.value,
@@ -584,46 +575,76 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		}
 	}, [contextId, dataVariables, sortByCreatedAt]);
 
-	const updateVariable = (index: number, field: keyof VariableRow, value: string | boolean) => {
-		const newVariables = [...variables];
-		newVariables[index] = { ...newVariables[index], [field]: value };
+	/*
+	 * Id-based and ref-backed, with an empty-ish dep list (`[markDirty]`,
+	 * itself stable): `variables` in these deps would give both callbacks a new
+	 * identity on every keystroke, which is exactly what `React.memo` on
+	 * `VariableRow` cannot see through (issue #1716). Reading `variablesRef`
+	 * rather than the `index` the row used to be told keeps them stable across
+	 * a row's whole lifetime, not just across one render's array.
+	 */
+	const updateVariable = useCallback(
+		(id: string, field: keyof VariableRowData, value: string | boolean) => {
+			const currentVariables = variablesRef.current;
+			const index = currentVariables.findIndex((v) => v.id === id);
+			if (index === -1) return;
+			const newVariables = [...currentVariables];
+			newVariables[index] = { ...newVariables[index], [field]: value };
 
-		if (newVariables[index].isNew && (newVariables[index].key || newVariables[index].value)) {
-			newVariables[index].isNew = false;
-			// This runs from an input event, not from render: the stamp orders newly
-			// added rows and has to be the real clock, not a render-stable value.
-			// eslint-disable-next-line react-hooks/purity
-			newVariables[index].createdAt = Date.now(); // new ones sort to bottom
-			newVariables[index].type = newVariables[index].type ?? "string";
-			newVariables.push(blankRow());
-		}
+			if (
+				newVariables[index].isNew &&
+				(newVariables[index].key || newVariables[index].value)
+			) {
+				newVariables[index].isNew = false;
+				// This runs from an input event, not from render: the stamp orders newly
+				// added rows and has to be the real clock, not a render-stable value.
+				// Now inside a useCallback body rather than a plain render-scoped
+				// function, which is what let react-hooks/purity stop flagging it.
+				newVariables[index].createdAt = Date.now(); // new ones sort to bottom
+				newVariables[index].type = newVariables[index].type ?? "string";
+				newVariables.push(blankRow());
+			}
 
-		setVariables(newVariables);
-		// Keep the ref in sync immediately (not just via the post-render effect):
-		// the secret toggle calls performSaveRef.current() synchronously right
-		// after this, and performSave reads variablesRef.current - a stale ref
-		// would persist the pre-edit value and the backend re-sync would then
-		// revert the change. Mirrors removeVariable.
-		variablesRef.current = newVariables;
-		markDirty();
-	};
+			setVariables(newVariables);
+			// Keep the ref in sync immediately (not just via the post-render effect):
+			// the secret toggle calls performSaveRef.current() synchronously right
+			// after this, and performSave reads variablesRef.current - a stale ref
+			// would persist the pre-edit value and the backend re-sync would then
+			// revert the change. Mirrors removeVariable.
+			variablesRef.current = newVariables;
+			markDirty();
+		},
+		[markDirty]
+	);
 
-	const removeVariable = (index: number) => {
-		const removedKey = variables[index]?.key;
-		const newVariables = variables.filter((_, i) => i !== index);
-		if (newVariables.length === 0 || !newVariables.some((v) => v.isNew)) {
-			newVariables.push(blankRow());
-		}
-		setVariables(newVariables);
-		variablesRef.current = newVariables;
-		markDirty();
-		// A conflict named this row before it was deleted: with the row gone,
-		// "Take theirs" would find nothing to update and then immediately
-		// re-delete the key on save, since `computeUserChanges` reads its
-		// absence from the rows as the user's own deletion either way.
-		if (removedKey) setConflicts((prev) => prev.filter((c) => c.key !== removedKey));
+	const removeVariable = useCallback(
+		(id: string) => {
+			const currentVariables = variablesRef.current;
+			const removedKey = currentVariables.find((v) => v.id === id)?.key;
+			const newVariables = currentVariables.filter((v) => v.id !== id);
+			if (newVariables.length === 0 || !newVariables.some((v) => v.isNew)) {
+				newVariables.push(blankRow());
+			}
+			setVariables(newVariables);
+			variablesRef.current = newVariables;
+			markDirty();
+			// A conflict named this row before it was deleted: with the row gone,
+			// "Take theirs" would find nothing to update and then immediately
+			// re-delete the key on save, since `computeUserChanges` reads its
+			// absence from the rows as the user's own deletion either way.
+			if (removedKey) setConflicts((prev) => prev.filter((c) => c.key !== removedKey));
+			performSaveRef.current();
+		},
+		[markDirty]
+	);
+
+	// Wraps the ref-held `performSave` so a row can trigger an immediate save
+	// (the enabled checkbox, the type select, the secret toggle) with a
+	// callback identity that never changes - `performSaveRef.current` is
+	// always the latest save, so nothing needs to be in these deps at all.
+	const commitNow = useCallback(() => {
 		performSaveRef.current();
-	};
+	}, []);
 
 	/**
 	 * The explicit half of "the user's value is kept until they choose": drop
@@ -832,208 +853,26 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						</tr>
 					</thead>
 					<tbody>
-						{variables.map((variable, index) => {
-							/*
-							 * A row is a secret field once it is persisted: an
-							 * unsaved blank row masks nothing, because there is
-							 * no stored secret to protect and typing into a
-							 * password field you just created only hides your
-							 * own keystrokes.
-							 */
-							const isSecretField = variable.secret && !variable.isNew;
-
-							return (
-								/*
-								 * Keyed by row id, not by index. With an index key a
-								 * delete reuses the mounted row one position down -
-								 * `SecretInput` included, reveal state and all - so
-								 * deleting a revealed secret displayed its successor
-								 * unmasked (#621). The id follows the row, so a
-								 * deleted row's state is unmounted with it.
-								 */
-								<tr key={variable.id} className="group">
-									{/*
-									 * `px-1` is clearance for the focus ring, not decoration.
-									 * `Checkbox`'s `focus-visible:ring-1 ring-offset-1` draws
-									 * outside the box, and this cell sits against the scroll
-									 * container's clip edge when embedded - so with no
-									 * horizontal padding the ring lost its left side.
-									 *
-									 * Clearance rather than `.panel-clip` on the container: the
-									 * same `Checkbox` appears in the request builder's
-									 * key-value rows, where `KeyValueRow`'s `p-1` gives it the
-									 * same 4px and the ring reads as an outset hairline with a
-									 * gap. Tucking this one inward would have made one control
-									 * look like two, depending on the screen.
-									 */}
-									<td className="py-1 px-1">
-										<Checkbox
-											checked={variable.enabled}
-											onChange={(e) => {
-												updateVariable(index, "enabled", e.target.checked);
-												performSaveRef.current();
-											}}
-											className={cn("size-icon", editorConfig.checkboxColor)}
-											disabled={variable.isNew && !variable.key}
-										/>
-									</td>
-									<td className="py-1 px-2">
-										<Input
-											type="text"
-											value={variable.key}
-											onChange={(e) =>
-												updateVariable(index, "key", e.target.value)
-											}
-											onBlur={handleBlur}
-											placeholder="variable_name"
-											className={cn(
-												"h-8 text-primary",
-												!variable.enabled &&
-													!variable.isNew &&
-													"text-muted-foreground bg-muted"
-											)}
-										/>
-									</td>
-									<td className="py-1 px-2">
-										{/*
-										 * `SecretInput` rather than a masked `Input`
-										 * and an eye of our own: that primitive was
-										 * extracted from this very cell so every
-										 * secret field in the app would share one
-										 * implementation, and the copy left behind
-										 * here missed the fixes it since received.
-										 * Reveal state belongs to the primitive -
-										 * unmounting on un-secret is what clears it,
-										 * which is what the editor's own revealed-set
-										 * used to do by hand.
-										 */}
-										{isSecretField ? (
-											<SecretInput
-												value={variable.value}
-												onChange={(v) => updateVariable(index, "value", v)}
-												onBlur={handleBlur}
-												placeholder="value"
-												className={cn(
-													"h-8",
-													!variable.enabled &&
-														"text-muted-foreground bg-muted"
-												)}
-											/>
-										) : (
-											<Input
-												type="text"
-												value={variable.value}
-												onChange={(e) =>
-													updateVariable(index, "value", e.target.value)
-												}
-												onBlur={handleBlur}
-												placeholder="value"
-												className={cn(
-													"h-8",
-													!variable.enabled &&
-														!variable.isNew &&
-														"text-muted-foreground bg-muted",
-													variable.secret && "font-mono"
-												)}
-											/>
-										)}
-									</td>
-									<td className="py-1 px-2">
-										<Select
-											value={variable.type ?? "string"}
-											onValueChange={(v) => {
-												updateVariable(index, "type", v as VariableType);
-												// Only fire an immediate save if the row is already persisted -
-												// otherwise let the key/value entry commit it on first edit.
-												if (!variable.isNew) {
-													performSaveRef.current();
-												}
-											}}
-										>
-											<SelectTrigger
-												className={cn(
-													"h-8 text-xs px-2",
-													!variable.enabled &&
-														!variable.isNew &&
-														"opacity-60"
-												)}
-											>
-												<SelectValue />
-											</SelectTrigger>
-											<SelectContent>
-												{VARIABLE_TYPES.map((t) => (
-													<SelectItem
-														key={t.value}
-														value={t.value}
-														className="text-xs"
-													>
-														{t.label}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
-									</td>
-									<td className="py-1 text-center">
-										{!variable.isNew && (
-											<TooltipIconButton
-												label={
-													variable.secret
-														? "Unmark as secret"
-														: "Mark as secret (masks value in UI)"
-												}
-												icon={<KeyRound className="size-icon" />}
-												onClick={() => {
-													// Un-securing a row swaps `SecretInput`
-													// out for a plain field, and its reveal
-													// state goes with it - so re-securing
-													// starts masked, without this handler
-													// tracking anything.
-													updateVariable(
-														index,
-														"secret",
-														!variable.secret
-													);
-													performSaveRef.current();
-												}}
-												/*
-												 * Always visible, unlike the delete button beside it.
-												 *
-												 * This is a state toggle, not a row action. Hidden at
-												 * rest, "not secret" looked identical to "no control
-												 * here", so masking a value was undiscoverable unless
-												 * you happened to hover the row - and a keyboard user
-												 * tabbed onto something invisible, since it carried no
-												 * `group-focus-within` either.
-												 *
-												 * Quiet rather than absent: `muted-foreground` clears
-												 * the 3.0 non-text bar on every surface here, and the
-												 * on state stays clearly distinct on `warning-text`.
-												 */
-												className={cn(
-													"h-8 w-8 transition-colors",
-													variable.secret
-														? "text-warning-text hover:text-warning-text hover:bg-warning/10"
-														: "text-muted-foreground hover:text-foreground"
-												)}
-											/>
-										)}
-									</td>
-									<td className="py-1">
-										{!variable.isNew && (
-											<Button
-												variant="rowActionDestructive"
-												size="icon"
-												onClick={() => removeVariable(index)}
-												aria-label="Delete variable"
-												className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-											>
-												<Trash2 className="size-icon" />
-											</Button>
-										)}
-									</td>
-								</tr>
-							);
-						})}
+						{/*
+						 * Keyed by row id, not by index (#621) - see the note on the
+						 * `id` field of `VariableRowData`. `VariableRow` is `memo`-wrapped
+						 * (issue #1716): `updateVariable`/`removeVariable`/`commitNow` are
+						 * ref-backed and stable across a keystroke, and every row but the
+						 * one whose `item` actually changed keeps the identical `variable`
+						 * reference this map handed it last render, so only that row
+						 * re-renders.
+						 */}
+						{variables.map((variable) => (
+							<VariableRow
+								key={variable.id}
+								variable={variable}
+								checkboxColor={editorConfig.checkboxColor}
+								onUpdate={updateVariable}
+								onCommitNow={commitNow}
+								onRemove={removeVariable}
+								onBlur={handleBlur}
+							/>
+						))}
 					</tbody>
 				</table>
 			</div>
