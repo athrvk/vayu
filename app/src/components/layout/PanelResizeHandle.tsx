@@ -26,8 +26,20 @@
  *
  * It governs the *spatial* keys only. Home and End name a point in the value
  * model the handle announces, so they land on the same bound from either side.
+ *
+ * A pointer drag does NOT call `setWidth` per `pointermove` (#1715). At 120-240
+ * events/second that was a synchronous `JSON.stringify` + `localStorage.setItem`
+ * of the whole persisted layout slice on every frame, plus a re-render of every
+ * `layout-store` subscriber. Instead the drag writes the panel's `style.width`
+ * directly, through the handle's own `parentElement` - both the Drawer and the
+ * context bar render this handle as the direct child of the `<aside>` whose
+ * width it controls - once per animation frame, and calls `setWidth` exactly
+ * once, on `pointerup`, with the final value. The double-click and keyboard
+ * resets are discrete, not a per-frame flood, so they keep calling `setWidth`
+ * straight away, same as before.
  */
 
+import { useRef } from "react";
 import { PANEL_MAX_WIDTH, PANEL_MIN_WIDTH } from "@/constants/layout";
 import { cn } from "@/lib/utils";
 
@@ -58,17 +70,46 @@ export function PanelResizeHandle({
 	// delta is inverted relative to one on the right edge.
 	const grow = side === "right" ? 1 : -1;
 
+	// Mirrors the store setters' own clamp (`layout-store.ts`) so the panel
+	// cannot visibly overshoot the bound during a drag, before `setWidth` ever
+	// runs its copy of the same clamp on `pointerup`.
+	const clamp = (w: number) => Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, w));
+
+	// Only ever holds an id while a drag's rAF is in flight, so `onUp` knows
+	// whether there is a scheduled frame left to cancel.
+	const rafIdRef = useRef<number | null>(null);
+
 	const startResize = (e: React.PointerEvent) => {
-		e.currentTarget.setPointerCapture(e.pointerId);
+		const handleEl = e.currentTarget;
+		handleEl.setPointerCapture(e.pointerId);
+		const panel = handleEl.parentElement;
 		const startX = e.clientX;
 		const startWidth = width;
+		let liveWidth = startWidth;
 
 		const onMove = (moveEvent: PointerEvent) => {
-			setWidth(startWidth + (moveEvent.clientX - startX) * grow);
+			liveWidth = clamp(startWidth + (moveEvent.clientX - startX) * grow);
+			// Coalesce to one DOM write per animation frame rather than one per
+			// `pointermove` - a mouse or trackpad fires 120-240 of those a second,
+			// far more often than the display repaints.
+			if (rafIdRef.current !== null) return;
+			rafIdRef.current = requestAnimationFrame(() => {
+				rafIdRef.current = null;
+				if (panel) panel.style.width = `${liveWidth}px`;
+				handleEl.setAttribute("aria-valuenow", String(Math.round(liveWidth)));
+			});
 		};
 		const onUp = () => {
 			window.removeEventListener("pointermove", onMove);
 			window.removeEventListener("pointerup", onUp);
+			if (rafIdRef.current !== null) {
+				cancelAnimationFrame(rafIdRef.current);
+				rafIdRef.current = null;
+			}
+			// The one persisted write the whole drag makes. `setWidth` re-clamps
+			// and re-renders with the same value the last frame already painted,
+			// so this lands with no visible jump.
+			setWidth(liveWidth);
 		};
 		window.addEventListener("pointermove", onMove);
 		window.addEventListener("pointerup", onUp);
