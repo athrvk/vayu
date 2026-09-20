@@ -24,6 +24,7 @@
 
 import * as React from "react";
 import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
+import { Circle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -79,10 +80,42 @@ function ContextMenuSeparator({
 	);
 }
 
+const ContextMenuRadioGroup = ContextMenuPrimitive.RadioGroup;
+
+/**
+ * One of a set the menu picks from - the same classes and dot indicator as
+ * `DropdownMenuRadioItem`, for the reason given at the top of the file.
+ */
+function ContextMenuRadioItem({
+	className,
+	children,
+	...props
+}: React.ComponentProps<typeof ContextMenuPrimitive.RadioItem>) {
+	return (
+		<ContextMenuPrimitive.RadioItem
+			data-slot="context-menu-radio-item"
+			className={cn(
+				"relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+				className
+			)}
+			{...props}
+		>
+			<span className="absolute left-2 flex size-icon-sm items-center justify-center">
+				<ContextMenuPrimitive.ItemIndicator>
+					<Circle className="h-2 w-2 fill-current" />
+				</ContextMenuPrimitive.ItemIndicator>
+			</span>
+			{children}
+		</ContextMenuPrimitive.RadioItem>
+	);
+}
+
 export {
 	ContextMenu,
 	ContextMenuTrigger,
 	ContextMenuContent,
 	ContextMenuItem,
+	ContextMenuRadioGroup,
+	ContextMenuRadioItem,
 	ContextMenuSeparator,
 };

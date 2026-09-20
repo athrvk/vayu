@@ -106,7 +106,7 @@ describe("Shell chords behind an open modal", () => {
 			drawerWidth: 300,
 			contextBarOpen: false,
 			contextBarWidth: 400,
-			requestSplitRatio: 0.5,
+			responsePosition: "beside",
 		});
 	});
 

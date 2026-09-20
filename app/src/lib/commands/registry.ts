@@ -32,6 +32,7 @@ import {
 	CheckCheck,
 	ChevronsRight,
 	Download,
+	PanelBottom,
 	PanelLeft,
 	PanelRight,
 	Play,
@@ -56,6 +57,7 @@ import {
 	SETTINGS_CHORD,
 	TOGGLE_CONTEXT_BAR_CHORD,
 	TOGGLE_DRAWER_CHORD,
+	TOGGLE_RESPONSE_POSITION_CHORD,
 } from "@/constants/shortcuts";
 import { DRAWER_VIEWS } from "@/constants/drawer-views";
 import {
@@ -285,6 +287,19 @@ const ACTION_COMMANDS: readonly Command[] = [
 		icon: PanelRight,
 		shortcut: TOGGLE_CONTEXT_BAR_CHORD,
 		perform: () => useLayoutStore.getState().toggleContextBar(),
+	},
+	{
+		id: "toggle-response-position",
+		title: "Toggle response position",
+		keywords: ["beside", "below", "stacked", "split", "layout", "response", "pane"],
+		group: "action",
+		icon: PanelBottom,
+		shortcut: TOGGLE_RESPONSE_POSITION_CHORD,
+		// A request tab is the only surface with a response pane to move; on
+		// any other the row is present and disabled, like the collection and
+		// send commands are without their host.
+		available: (ctx) => ctx.activeTab?.type === "request",
+		perform: () => useLayoutStore.getState().toggleResponsePosition(),
 	},
 	{
 		id: "toggle-theme",

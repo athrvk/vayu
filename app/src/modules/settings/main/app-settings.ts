@@ -165,6 +165,13 @@ export const APP_SETTINGS = [
 		keywords: ["compact", "comfortable", "spacing", "padding", "rows"],
 	},
 	{
+		anchor: "response-position",
+		panel: "appearance",
+		label: "Response position",
+		searchText: "Whether the response pane sits beside the request or below it.",
+		keywords: ["layout", "split", "stacked", "beside", "below", "response"],
+	},
+	{
 		anchor: "reduced-motion",
 		panel: "appearance",
 		label: "Reduced motion",

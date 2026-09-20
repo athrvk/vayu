@@ -13,11 +13,14 @@ import {
 	DEFAULT_CONTEXT_BAR_WIDTH,
 	DEFAULT_DRAWER_WIDTH,
 	DEFAULT_GRAPHQL_VARIABLES_SIZE,
+	DEFAULT_REQUEST_SPLIT_RATIO,
 	DEFAULT_SCRIPT_EDITOR_HEIGHT,
 	GRAPHQL_VARIABLES_MAX_SIZE,
 	GRAPHQL_VARIABLES_MIN_SIZE,
 	PANEL_MIN_WIDTH,
 	PANEL_MAX_WIDTH,
+	REQUEST_SPLIT_RATIO_MAX,
+	REQUEST_SPLIT_RATIO_MIN,
 	RETIRED_CONTEXT_BAR_SECTIONS,
 	SCRIPT_EDITOR_MAX_HEIGHT,
 	SCRIPT_EDITOR_MIN_HEIGHT,
@@ -25,6 +28,20 @@ import {
 
 export type DrawerView =
 	"collections" | "history" | "variables" | "services" | "trash" | "settings";
+
+/**
+ * Where the response pane sits relative to the request (issue #1711).
+ *
+ * `beside` and `below` are the two arrangements the builder can draw; `auto`
+ * is a rule that picks one of them from the builder's own width
+ * (`useResolvedResponsePosition`). Never "horizontal" or "vertical": those
+ * words name opposite things in Postman and in `react-resizable-panels`, so a
+ * reader could not tell which side of the boundary a comment meant.
+ */
+export type ResponsePosition = "beside" | "below" | "auto";
+
+/** One of the two arrangements `auto` resolves to. */
+export type ResponseArrangement = Exclude<ResponsePosition, "auto">;
 
 interface LayoutState {
 	// Drawer
@@ -55,8 +72,32 @@ interface LayoutState {
 	 */
 	contextBarCollapsedSections: string[];
 
-	// Request / response split ratio (0–1, fraction for the left/request pane)
-	requestSplitRatio: number;
+	/**
+	 * The response position setting. `beside` by default: it is what every
+	 * existing user has today and what the other tools default to, so `auto` is
+	 * an explicit third choice rather than the new normal.
+	 */
+	responsePosition: ResponsePosition;
+
+	/**
+	 * What `auto` currently resolves to, written by the builder's own
+	 * measurement (`useResolvedResponsePosition`) and read by the Dock button
+	 * and by `toggleResponsePosition`, which both need to know which
+	 * arrangement is on screen while the setting says `auto`. Deliberately
+	 * absent from `partialize`: it is derived from a width that does not
+	 * survive a relaunch, and a stale pick would flash the wrong arrangement
+	 * for the first frame.
+	 */
+	autoResponseArrangement: ResponseArrangement;
+
+	/**
+	 * Request / response split ratio (0-1, the request pane's share), one per
+	 * arrangement: the share of the width a request wants beside its response
+	 * is not the share of the height it wants above it, and one number for
+	 * both meant every flip undid the drag before it.
+	 */
+	requestSplitRatioBeside: number;
+	requestSplitRatioBelow: number;
 
 	/**
 	 * Whether the GraphQL body's Variables pane is collapsed to its header, and
@@ -164,7 +205,17 @@ interface LayoutState {
 	setContextBarWidth: (width: number) => void;
 	toggleContextBarSection: (id: string) => void;
 
-	setRequestSplitRatio: (ratio: number) => void;
+	setResponsePosition: (position: ResponsePosition) => void;
+	/**
+	 * Beside <-> below. From `auto` it writes the opposite of the arrangement
+	 * currently resolved: the user chose, so Auto is over until they pick it
+	 * again in Settings.
+	 */
+	toggleResponsePosition: () => void;
+	/** Records what `auto` resolves to right now - see `autoResponseArrangement`. */
+	setAutoResponseArrangement: (arrangement: ResponseArrangement) => void;
+	/** Clamped, into the ratio for the arrangement that was dragged. */
+	setRequestSplitRatio: (arrangement: ResponseArrangement, ratio: number) => void;
 
 	setGraphqlVariablesCollapsed: (collapsed: boolean) => void;
 	setGraphqlVariablesSize: (size: number) => void;
@@ -189,6 +240,23 @@ interface LayoutState {
 
 /** Cap for `scriptEditorHeights` - see the field's own comment. */
 const SCRIPT_EDITOR_HEIGHTS_MAX = 200;
+
+function clampSplitRatio(ratio: number): number {
+	return Math.max(REQUEST_SPLIT_RATIO_MIN, Math.min(REQUEST_SPLIT_RATIO_MAX, ratio));
+}
+
+/**
+ * The arrangement on screen for a given state: the setting itself, or what
+ * `auto` currently resolves to. A selector rather than a stored field so the
+ * two can never disagree.
+ */
+export function resolveResponseArrangement(
+	state: Pick<LayoutState, "responsePosition" | "autoResponseArrangement">
+): ResponseArrangement {
+	return state.responsePosition === "auto"
+		? state.autoResponseArrangement
+		: state.responsePosition;
+}
 
 function clampScriptEditorHeight(height: number): number {
 	return Math.max(SCRIPT_EDITOR_MIN_HEIGHT, Math.min(SCRIPT_EDITOR_MAX_HEIGHT, height));
@@ -224,7 +292,10 @@ export const useLayoutStore = create<LayoutState>()(
 			contextBarOpen: false,
 			contextBarWidth: DEFAULT_CONTEXT_BAR_WIDTH,
 			contextBarCollapsedSections: [...CONTEXT_BAR_DEFAULT_COLLAPSED],
-			requestSplitRatio: 0.5,
+			responsePosition: "beside",
+			autoResponseArrangement: "beside",
+			requestSplitRatioBeside: DEFAULT_REQUEST_SPLIT_RATIO,
+			requestSplitRatioBelow: DEFAULT_REQUEST_SPLIT_RATIO,
 			graphqlVariablesCollapsed: false,
 			graphqlVariablesSize: DEFAULT_GRAPHQL_VARIABLES_SIZE,
 			scriptSnippetsCollapsed: true,
@@ -258,8 +329,20 @@ export const useLayoutStore = create<LayoutState>()(
 						: [...s.contextBarCollapsedSections, id],
 				})),
 
-			setRequestSplitRatio: (ratio) =>
-				set({ requestSplitRatio: Math.max(0.2, Math.min(0.8, ratio)) }),
+			setResponsePosition: (position) => set({ responsePosition: position }),
+			toggleResponsePosition: () =>
+				set((s) => ({
+					responsePosition:
+						resolveResponseArrangement(s) === "beside" ? "below" : "beside",
+				})),
+			setAutoResponseArrangement: (arrangement) =>
+				set({ autoResponseArrangement: arrangement }),
+			setRequestSplitRatio: (arrangement, ratio) =>
+				set(
+					arrangement === "beside"
+						? { requestSplitRatioBeside: clampSplitRatio(ratio) }
+						: { requestSplitRatioBelow: clampSplitRatio(ratio) }
+				),
 
 			setGraphqlVariablesCollapsed: (collapsed) =>
 				set({ graphqlVariablesCollapsed: collapsed }),
@@ -314,11 +397,12 @@ export const useLayoutStore = create<LayoutState>()(
 		}),
 		{
 			name: STORAGE_KEYS.LAYOUT_STORE,
-			version: 5,
+			version: 6,
 			migrate: (persisted, version) => {
 				const state = persisted as LayoutState & {
 					drawerWidths?: Record<string, number>;
 					scriptEditorHeight?: number;
+					requestSplitRatio?: number;
 				};
 				// v1 could persist a skewed split ratio while panel sizes were
 				// misparsed as pixels - reset to an even split
@@ -365,6 +449,20 @@ export const useLayoutStore = create<LayoutState>()(
 					state.scriptEditorHeights = {};
 					delete state.scriptEditorHeight;
 				}
+				// v5 had one split ratio and one arrangement (issue #1711). The
+				// ratio the user had set was set with the response beside the
+				// request, so it becomes the Beside ratio; Below starts even, and
+				// the position stays Beside - an upgrade must not re-arrange the
+				// builder under anyone.
+				if (version < 6) {
+					state.requestSplitRatioBeside =
+						typeof state.requestSplitRatio === "number"
+							? clampSplitRatio(state.requestSplitRatio)
+							: DEFAULT_REQUEST_SPLIT_RATIO;
+					state.requestSplitRatioBelow = DEFAULT_REQUEST_SPLIT_RATIO;
+					state.responsePosition = "beside";
+					delete state.requestSplitRatio;
+				}
 				return state;
 			},
 			partialize: (state) => ({
@@ -374,7 +472,9 @@ export const useLayoutStore = create<LayoutState>()(
 				contextBarOpen: state.contextBarOpen,
 				contextBarWidth: state.contextBarWidth,
 				contextBarCollapsedSections: state.contextBarCollapsedSections,
-				requestSplitRatio: state.requestSplitRatio,
+				responsePosition: state.responsePosition,
+				requestSplitRatioBeside: state.requestSplitRatioBeside,
+				requestSplitRatioBelow: state.requestSplitRatioBelow,
 				graphqlVariablesCollapsed: state.graphqlVariablesCollapsed,
 				graphqlVariablesSize: state.graphqlVariablesSize,
 				scriptSnippetsCollapsed: state.scriptSnippetsCollapsed,

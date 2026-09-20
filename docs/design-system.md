@@ -2541,7 +2541,14 @@ The width itself is a preference, not component state: `drawerWidth` and
 `contextBarWidth` live in `layout-store`, clamped to `PANEL_MIN_WIDTH` (220) and
 `PANEL_MAX_WIDTH` (480) from `app/src/constants/layout.ts`, and survive a
 restart. The request/response split is `react-resizable-panels` through
-`components/ui/resizable.tsx`, with its ratio in the same store.
+`components/ui/resizable.tsx`, with one ratio per arrangement in the same store
+(`requestSplitRatioBeside` / `requestSplitRatioBelow`, #1711): the share of the
+width a request wants beside its response is not the share of the height it
+wants above it. The builder's divider resets its arrangement to an even split
+on double-click (`ResizableHandle`'s `onReset`), the drawer handle's own
+gesture; stacked panes take a `160px` floor rather than the 20% side-by-side
+ones do, because 20% of a short window is a response pane that cannot show a
+status line and a row of body.
 
 **An editor inside a pane is not one of them.** The Body and script editors fill
 the pane they sit in - a `flex-1` box with a `min-h-40` floor and no ceiling -
@@ -2593,21 +2600,45 @@ button per `CONTEXT_BAR_SECTIONS` entry the active tab has something for.
 
 ### Dock
 
-The footer is ambient status only, since #1615 moved its two switchers onto the
-rails above: `Dock` (`app/src/components/layout/Dock.tsx`) is one flex row,
-`h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0`. The
-height is that token rather than a bare `h-8` because the toast viewport is
-`fixed` and offsets itself above this strip by the same value - the token is what
-keeps the two from drifting apart.
+**Status in the centre, per-tab view controls on the right, and every item
+has a non-footer path.** #1615 moved the footer's two switchers onto the rails
+above and left it status-only; #1711 amends that rule to admit a right-aligned
+cluster of controls that act on the *active tab's* view. `Dock`
+(`app/src/components/layout/Dock.tsx`) is one flex row,
+`h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0`,
+with two equal `flex-1` gutters around the centre group so the connection light
+does not shift when the right cluster comes and goes. The height is that token
+rather than a bare `h-8` because the toast viewport is `fixed` and offsets
+itself above this strip by the same value - the token is what keeps the two
+from drifting apart.
 
-The engine connection light (a `bg-current` dot plus Starting… / Connected /
-Disconnected, on `status-success-text` when connected and `--muted-foreground`
-otherwise), a running-services button and a pending-restart button that render
-only when there is something to report, the save status, and the version
-string. **This strip is where the connection state lives** - no sidebar footer
-carries a second copy. Every item here already has a non-footer path when
-there is something to click, so the system Dock covering this strip on macOS
-costs a glance, never a click.
+The centre holds the engine connection light (a `bg-current` dot plus
+Starting… / Connected / Disconnected, on `status-success-text` when connected
+and `--muted-foreground` otherwise), a running-services button and a
+pending-restart button that render only when there is something to report, the
+save status, and the version string. **This strip is where the connection
+state lives** - no sidebar footer carries a second copy.
+
+The right cluster renders **only while the active tab is a request tab**; every
+other tab keeps the centred strip alone. Its one control is
+`ResponsePositionButton` (`app/src/components/layout/ResponsePositionButton.tsx`),
+a `TooltipIconButton` that moves the response pane from beside the request to
+below it and back, its chord in the tooltip. The icon names the destination
+(see Pane Toggles below): `PanelBottom` while the response is beside
+("Response below"), `PanelRight` while it is below ("Response beside"), swapped
+with `IconSwap`. While the setting is Auto the button shows Auto's current pick
+and a click writes an explicit choice. **Right-click picks instead of flipping**:
+a `ContextMenuRadioGroup` over Beside / Below / Auto, the same set as the
+Settings row, which is what puts Auto within reach from the strip and marks
+which setting is in force - the destination glyph by design does not say. →
+`Dock.response-position.test.tsx` (mutation-checked: without the request-tab
+gate, the settings and dashboard cases fail).
+
+The rule that lets a control sit here at all is the one both amendments kept:
+every item has a path that is not the footer (pending restart is the banner in
+Settings, save status opens the tab it names, the response position has its
+chord ⇧⌘B, its palette row and its Settings > Appearance row), so the system
+Dock covering this strip on macOS costs a glance, never a click.
 
 ### Drawer
 
@@ -2645,6 +2676,14 @@ sat at the right of the Query header drawing the `PanelRight*` pair (#1224).
   grow a close button of its own. A control that changes address with the state
   it controls teaches a position and then abandons it, and the two copies drift
   into saying the same thing differently.
+- **A switch between two arrangements names the destination too.** The Dock's
+  response-position button draws `PanelBottom` while the response is *beside*
+  the request and `PanelRight` while it is *below*: the glyph is where a click
+  takes you, not where you are, because a glyph showing the current state
+  reads as one more status in a strip full of them. The vocabulary for that
+  arrangement is **Beside / Below / Auto** everywhere - UI strings, docs, code
+  comments - never "vertical" or "horizontal", which name opposite things in
+  Postman and in `react-resizable-panels`.
 
 ---
 
@@ -3646,7 +3685,8 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/layout/ActivityRail.tsx` | Left-edge nav - the six view buttons the Dock used to hold, with roving tabindex |
 | `app/src/components/layout/ContextRail.tsx` | Right-edge nav - one icon per applicable context-bar section |
 | `app/src/components/layout/RailButton.tsx` | The icon button shared by both rails - edge-indicator and tile variants |
-| `app/src/components/layout/Dock.tsx` | The bottom strip - ambient status only (engine light, version, services, save state, pending restart) |
+| `app/src/components/layout/Dock.tsx` | The bottom strip - status in the centre (engine light, version, services, save state, pending restart), per-tab view controls on the right |
+| `app/src/components/layout/ResponsePositionButton.tsx` | The Dock's response-position switch - click flips Beside / Below, right-click picks Beside / Below / Auto, icon names the destination, request tabs only |
 | `app/src/components/layout/Drawer.tsx` | The sidebar `<aside>` - one of six views, plus its resize handle |
 | `app/src/components/shared/DrawerPanel.tsx` | The frame every drawer view sits in - header plus the one scroll region |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |

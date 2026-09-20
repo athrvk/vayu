@@ -21,6 +21,7 @@ import {
 	CLOSE_TAB_CHORD,
 	TOGGLE_DRAWER_CHORD,
 	TOGGLE_CONTEXT_BAR_CHORD,
+	TOGGLE_RESPONSE_POSITION_CHORD,
 	SETTINGS_CHORD,
 	NEW_REQUEST_CHORD,
 	FOCUS_URL_CHORD,
@@ -178,8 +179,14 @@ export default function Shell() {
 	 * over one dialog's open state"), and both reach the same creation path.
 	 */
 	const { newRequest, pickerProps } = useNewRequest();
-	const { toggleDrawer, activateDrawerView, toggleContextBar, setDrawerOpen, setDrawerView } =
-		useLayoutStore();
+	const {
+		toggleDrawer,
+		activateDrawerView,
+		toggleContextBar,
+		toggleResponsePosition,
+		setDrawerOpen,
+		setDrawerView,
+	} = useLayoutStore();
 	const { triggerSave } = useSaveStore();
 	const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -326,6 +333,13 @@ export default function Shell() {
 				toggleContextBar();
 				return;
 			}
+			if (matchesChord(e, TOGGLE_RESPONSE_POSITION_CHORD)) {
+				e.preventDefault();
+				// Only a request tab has a response pane to move; the Dock's
+				// button and the palette row are gated the same way (#1711).
+				if (activeTab?.type === "request") toggleResponsePosition();
+				return;
+			}
 			if (matchesChord(e, SETTINGS_CHORD)) {
 				e.preventDefault();
 				openTab({ type: "settings", entityId: null });
@@ -362,12 +376,14 @@ export default function Shell() {
 		triggerSave,
 		toggleDrawer,
 		toggleContextBar,
+		toggleResponsePosition,
 		activateDrawerView,
 		openTab,
 		focusTab,
 		focusAdjacentTab,
 		newRequest,
 		activeTabId,
+		activeTab,
 		openTabs,
 	]);
 

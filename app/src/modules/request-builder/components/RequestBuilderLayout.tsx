@@ -8,8 +8,10 @@
 /**
  * RequestBuilderLayout Component
  *
- * Internal layout component that uses ResizablePanelGroup for the vertical split between
- * request editor (left) and response viewer (right).
+ * Internal layout component that uses ResizablePanelGroup for the split between
+ * the request editor and the response viewer - the response beside the request
+ * or below it, per the `responsePosition` setting (issue #1711; `auto` is
+ * resolved by `useResolvedResponsePosition` from this component's own width).
  *
  * Also handles the send shortcuts (Cmd/Ctrl+Enter, and Cmd/Ctrl+Shift+Enter for
  * a load test).
@@ -18,11 +20,14 @@
  * tabs - it is the first request tab now. See `RequestTabs/panels/InfoPanel`.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useGroupRef } from "react-resizable-panels";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui";
 import { useLayoutStore } from "@/stores";
 import { useRequestBuilderContext } from "../context";
+import { useResolvedResponsePosition } from "../hooks/useResolvedResponsePosition";
 import { SEND_CHORD, LOAD_TEST_CHORD, matchesChord } from "@/constants/shortcuts";
+import { DEFAULT_REQUEST_SPLIT_RATIO, STACKED_PANE_MIN_HEIGHT } from "@/constants/layout";
 import { ownsEnterKey } from "@/lib/keyboard";
 import { isModalOpen } from "@/lib/modal";
 import { canSendRequest } from "../utils/send-gate";
@@ -34,23 +39,92 @@ import ResponseAnnouncer from "./ResponseAnnouncer";
 import ResponseViewer from "./ResponseViewer";
 import ExternalChangeNotice from "./ExternalChangeNotice";
 
+/** A 0-1 share as a percentage number, without float noise. */
+const share = (ratio: number) => Math.round(ratio * 10000) / 100;
+/** The same share as the percentage string `defaultSize` wants. */
+const percent = (ratio: number) => `${share(ratio)}%`;
+
 export default function RequestBuilderLayout() {
 	const { request, isExecuting, isStreaming, executeRequest, startLoadTest, canStartLoadTest } =
 		useRequestBuilderContext();
 
-	const { requestSplitRatio, setRequestSplitRatio } = useLayoutStore();
+	const containerRef = useRef<HTMLDivElement>(null);
+	const arrangement = useResolvedResponsePosition(containerRef);
+	const requestSplitRatio = useLayoutStore((s) =>
+		arrangement === "beside" ? s.requestSplitRatioBeside : s.requestSplitRatioBelow
+	);
+	const setRequestSplitRatio = useLayoutStore((s) => s.setRequestSplitRatio);
+	const groupRef = useGroupRef();
 
 	// The collection chain plus this request's name - see `useRequestCrumbs`.
 	const crumbs = useRequestCrumbs();
 
+	/*
+	 * Into the ratio for the arrangement that was dragged. The arrangement is
+	 * captured with the ratio rather than read when the timer fires, so a flip
+	 * inside the debounce window cannot file a Beside drag under Below.
+	 */
 	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const debouncedSetRatio = useCallback(
 		(ratio: number) => {
 			if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-			saveTimeoutRef.current = setTimeout(() => setRequestSplitRatio(ratio), 200);
+			saveTimeoutRef.current = setTimeout(
+				() => setRequestSplitRatio(arrangement, ratio),
+				200
+			);
 		},
-		[setRequestSplitRatio]
+		[setRequestSplitRatio, arrangement]
 	);
+
+	/*
+	 * `defaultSize` is read once at mount, so a ratio that changes on a group
+	 * that is already laid out has to go through the group's imperative handle.
+	 */
+	const applyRatio = useCallback(
+		(ratio: number) => {
+			groupRef.current?.setLayout({ request: share(ratio), response: share(1 - ratio) });
+		},
+		[groupRef]
+	);
+
+	/*
+	 * Double-click on the divider: back to an even split, for this arrangement
+	 * only.
+	 */
+	const resetSplit = useCallback(() => {
+		setRequestSplitRatio(arrangement, DEFAULT_REQUEST_SPLIT_RATIO);
+		applyRatio(DEFAULT_REQUEST_SPLIT_RATIO);
+	}, [setRequestSplitRatio, arrangement, applyRatio]);
+
+	/*
+	 * A flip re-orients the group *in place* - the library re-lays out when its
+	 * `orientation` prop changes - and this effect then applies the ratio the
+	 * new arrangement owns. It is a layout effect so the new ratio is on screen
+	 * in the same frame as the new orientation, and it skips the mount, where
+	 * `defaultSize` has already done the job.
+	 *
+	 * Deliberately not a `key` on the group: a remount would tear down and
+	 * rebuild the request editor and the response viewer, code editors and all,
+	 * and that rebuild is a visible flash of the whole pane on every Auto flip
+	 * while the window is being resized.
+	 */
+	const mountedArrangementRef = useRef(arrangement);
+	useLayoutEffect(() => {
+		if (mountedArrangementRef.current === arrangement) return;
+		mountedArrangementRef.current = arrangement;
+		const s = useLayoutStore.getState();
+		applyRatio(arrangement === "beside" ? s.requestSplitRatioBeside : s.requestSplitRatioBelow);
+	}, [arrangement, applyRatio]);
+
+	/*
+	 * Stacked minimums are pixels, side-by-side ones a share: 20% of a short
+	 * window is a response pane that cannot show a status line and one row of
+	 * body, where 20% of a wide window is still a usable column.
+	 */
+	const paneBounds =
+		arrangement === "beside"
+			? { minSize: "20%", maxSize: "80%" }
+			: { minSize: STACKED_PANE_MIN_HEIGHT };
 
 	/*
 	 * Send and Load Test from the keyboard.
@@ -117,7 +191,7 @@ export default function RequestBuilderLayout() {
 	}, [request.url, isExecuting, isStreaming, executeRequest, startLoadTest, canStartLoadTest]);
 
 	return (
-		<div className="h-full flex flex-col">
+		<div ref={containerRef} className="h-full flex flex-col">
 			{/*
 			 * Rendered unconditionally and outside the panels: the live region has
 			 * to exist before the response does, and it must survive the response
@@ -136,33 +210,40 @@ export default function RequestBuilderLayout() {
 			    MCP agent) has changed to a different value (issue #1436). */}
 			<ExternalChangeNotice />
 
-			{/* Main content area with resizable panels */}
+			{/*
+			 * Only a user's own drag is persisted (`isUserInteraction`) - the
+			 * layout the library reports on mount, after a flip, or after a pixel
+			 * minimum clamps a stacked pane, is not a preference anyone expressed.
+			 */}
 			<ResizablePanelGroup
-				orientation="horizontal"
+				groupRef={groupRef}
+				orientation={arrangement === "beside" ? "horizontal" : "vertical"}
+				data-response-position={arrangement}
 				className="flex-1"
-				onLayoutChanged={(layout) => {
-					const first = Object.values(layout)[0];
+				onLayoutChanged={(layout, meta) => {
+					if (!meta.isUserInteraction) return;
+					const first = layout.request;
 					if (first !== undefined) debouncedSetRatio(first / 100);
 				}}
 			>
 				{/* Request Editor Panel */}
 				<ResizablePanel
+					id="request"
 					// react-resizable-panels v4 treats bare numbers as pixels - percentages must be strings
-					defaultSize={`${requestSplitRatio * 100}%`}
-					minSize="20%"
-					maxSize="80%"
+					defaultSize={percent(requestSplitRatio)}
+					{...paneBounds}
 					className="flex flex-col"
 				>
 					<RequestTabs />
 				</ResizablePanel>
 
-				<ResizableHandle withHandle />
+				<ResizableHandle withHandle onReset={resetSplit} />
 
 				{/* Response Viewer Panel */}
 				<ResizablePanel
-					defaultSize={`${(1 - requestSplitRatio) * 100}%`}
-					minSize="20%"
-					maxSize="80%"
+					id="response"
+					defaultSize={percent(1 - requestSplitRatio)}
+					{...paneBounds}
 					className="flex flex-col"
 				>
 					<ResponseViewer />
