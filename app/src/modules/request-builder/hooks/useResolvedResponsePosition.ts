@@ -74,11 +74,35 @@ export function useResolvedResponsePosition(
 			if (next !== autoResponseArrangement) setAutoResponseArrangement(next);
 		};
 
+		// The mount measurement runs inside a layout effect, outside any
+		// observer delivery, so it may flip synchronously: the first paint of
+		// an `auto` builder is then already the right arrangement.
 		measure();
 		if (typeof ResizeObserver === "undefined") return;
-		const observer = new ResizeObserver(measure);
+
+		/*
+		 * From the observer, the flip is deferred to the next frame. A
+		 * ResizeObserver delivery that changes the layout of elements the same
+		 * delivery already reported on - the panel library observes the group
+		 * and both panes, and the flip re-sizes all three - is the browser's
+		 * "ResizeObserver loop completed with undelivered notifications",
+		 * which `main.tsx` logs as a high-severity window error. One frame of
+		 * the old arrangement at a threshold crossing is the whole cost; the
+		 * flip happens once per crossing, not per pixel.
+		 */
+		let frame: number | null = null;
+		const observer = new ResizeObserver(() => {
+			if (frame !== null) return;
+			frame = requestAnimationFrame(() => {
+				frame = null;
+				measure();
+			});
+		});
 		observer.observe(el);
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			if (frame !== null) cancelAnimationFrame(frame);
+		};
 	}, [setting, containerRef, setAutoResponseArrangement]);
 
 	return arrangement;
