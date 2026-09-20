@@ -43,7 +43,9 @@ import { RailButton } from "./RailButton";
 import { regionProps } from "./region-focus";
 
 export function ActivityRail() {
-	const { drawerOpen, drawerView, activateDrawerView } = useLayoutStore();
+	const drawerOpen = useLayoutStore((s) => s.drawerOpen);
+	const drawerView = useLayoutStore((s) => s.drawerView);
+	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const runningServices = useRunningServiceCount();
 	const navRef = useRef<HTMLElement>(null);
 

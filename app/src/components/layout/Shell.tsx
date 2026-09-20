@@ -170,7 +170,11 @@ function pointerNavigationStep(button: number): NavDirection | null {
 }
 
 export default function Shell() {
-	const { openTabs, activeTabId, focusTab, focusAdjacentTab, openTab } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const focusTab = useTabsStore((s) => s.focusTab);
+	const focusAdjacentTab = useTabsStore((s) => s.focusAdjacentTab);
+	const openTab = useTabsStore((s) => s.openTab);
 	/*
 	 * The Shell hosts the new-request flow for its ⌘N chord, and the palette
 	 * hosts its own for the "New request" command. Two hosts of one hook, not
@@ -179,15 +183,13 @@ export default function Shell() {
 	 * over one dialog's open state"), and both reach the same creation path.
 	 */
 	const { newRequest, pickerProps } = useNewRequest();
-	const {
-		toggleDrawer,
-		activateDrawerView,
-		toggleContextBar,
-		toggleResponsePosition,
-		setDrawerOpen,
-		setDrawerView,
-	} = useLayoutStore();
-	const { triggerSave } = useSaveStore();
+	const toggleDrawer = useLayoutStore((s) => s.toggleDrawer);
+	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
+	const toggleContextBar = useLayoutStore((s) => s.toggleContextBar);
+	const toggleResponsePosition = useLayoutStore((s) => s.toggleResponsePosition);
+	const setDrawerOpen = useLayoutStore((s) => s.setDrawerOpen);
+	const setDrawerView = useLayoutStore((s) => s.setDrawerView);
+	const triggerSave = useSaveStore((s) => s.triggerSave);
 	const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
 	useEffect(() => {

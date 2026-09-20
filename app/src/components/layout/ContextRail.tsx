@@ -86,13 +86,12 @@ function RelevanceReporter({
 }
 
 export function ContextRail() {
-	const {
-		contextBarOpen,
-		setContextBarOpen,
-		contextBarCollapsedSections,
-		toggleContextBarSection,
-	} = useLayoutStore();
-	const { openTabs, activeTabId } = useTabsStore();
+	const contextBarOpen = useLayoutStore((s) => s.contextBarOpen);
+	const setContextBarOpen = useLayoutStore((s) => s.setContextBarOpen);
+	const contextBarCollapsedSections = useLayoutStore((s) => s.contextBarCollapsedSections);
+	const toggleContextBarSection = useLayoutStore((s) => s.toggleContextBarSection);
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 
 	// Read by `onSectionClick` only, never for rendering - a ref rather than

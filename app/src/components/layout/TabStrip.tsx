@@ -80,7 +80,10 @@ function TabItem({
 	width: number;
 	descriptor: TabDescriptor;
 }) {
-	const { focusTab, closeTab } = useTabsStore();
+	// Actions only - stable references, so TabItem never re-renders on a store
+	// write that leaves its own isActive/descriptor props untouched (#1714).
+	const focusTab = useTabsStore((s) => s.focusTab);
+	const closeTab = useTabsStore((s) => s.closeTab);
 	// What this tab can do, beside what it is called. See tab-actions.ts.
 	const actions = useTabActions(tab, descriptor);
 	// Roving tabindex: the strip is one Tab stop, and Left/Right move within it.
@@ -230,7 +233,10 @@ function TabItem({
 }
 
 export function TabStrip() {
-	const { openTabs, activeTabId, openTab, focusTab } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const openTab = useTabsStore((s) => s.openTab);
+	const focusTab = useTabsStore((s) => s.focusTab);
 	const listRef = useRef<HTMLDivElement>(null);
 	const [available, setAvailable] = useState(0);
 	const [font, setFont] = useState("13px sans-serif");
