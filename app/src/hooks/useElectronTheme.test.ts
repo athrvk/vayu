@@ -21,6 +21,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useElectronTheme } from "./useElectronTheme";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
 
 function stubElectronAPI(accentScheme: string | null) {
 	vi.stubGlobal("electronAPI", {
@@ -66,5 +67,31 @@ describe("useElectronTheme - accent support detection", () => {
 
 		await waitFor(() => expect(result.current.isLoading).toBe(false));
 		expect(result.current.supportsAccent).toBe(true);
+	});
+});
+
+describe("useElectronTheme - matching the OS accent at launch", () => {
+	it("applies the fetched OS accent, not a stale stored scheme, when matching is on", async () => {
+		localStorage.setItem(STORAGE_KEYS.COLOR_SCHEME, "ocean");
+		localStorage.setItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT, "true");
+		stubElectronAPI("forest");
+
+		const { result } = renderHook(() => useElectronTheme());
+
+		await waitFor(() => expect(result.current.isLoading).toBe(false));
+		expect(document.documentElement.dataset.colorScheme).toBe("forest");
+		expect(result.current.colorScheme).toBe("forest");
+	});
+
+	it("keeps the stored scheme when matching is off", async () => {
+		localStorage.setItem(STORAGE_KEYS.COLOR_SCHEME, "ocean");
+		localStorage.setItem(STORAGE_KEYS.MATCH_SYSTEM_ACCENT, "false");
+		stubElectronAPI("forest");
+
+		const { result } = renderHook(() => useElectronTheme());
+
+		await waitFor(() => expect(result.current.isLoading).toBe(false));
+		expect(document.documentElement.dataset.colorScheme).toBe("ocean");
+		expect(result.current.colorScheme).toBe("ocean");
 	});
 });
