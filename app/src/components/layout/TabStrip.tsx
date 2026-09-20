@@ -40,7 +40,8 @@
  * differ only in the part a right-hand ellipsis removes first.
  */
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { shallow } from "zustand/shallow";
 import { X, Plus, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTabsStore, type Tab } from "@/stores";
@@ -69,21 +70,35 @@ import { getMethodColor } from "@/lib/method-display";
 import { tabElementId, tabPanelElementId } from "./tab-aria";
 import { closeTabFromKeyboard } from "./tab-focus";
 
-function TabItem({
-	tab,
-	isActive,
-	width,
-	descriptor,
-}: {
+interface TabItemProps {
 	tab: Tab;
 	isActive: boolean;
 	width: number;
 	descriptor: TabDescriptor;
-}) {
+}
+
+function TabItemImpl({ tab, isActive, width, descriptor }: TabItemProps) {
 	// Actions only - stable references, so TabItem never re-renders on a store
 	// write that leaves its own isActive/descriptor props untouched (#1714).
 	const focusTab = useTabsStore((s) => s.focusTab);
 	const closeTab = useTabsStore((s) => s.closeTab);
+	/*
+	 * A render counter, written to `data-render-count` on the root node below,
+	 * purely so `TabStrip.render-count.test.tsx` can tell "this tab's render
+	 * function ran again" from "React reconciled the same output" without
+	 * racing a timer. Counted and applied inside a layout effect rather than
+	 * during render - reading or writing a ref while rendering is exactly what
+	 * `react-hooks/refs` exists to catch, since it can silently desync from
+	 * what actually painted - and the effect itself only runs when this
+	 * function's render actually executed, which a memoized bailout skips
+	 * along with everything else in this function.
+	 */
+	const rootRef = useRef<HTMLDivElement>(null);
+	const renderCount = useRef(0);
+	useEffect(() => {
+		renderCount.current += 1;
+		rootRef.current?.setAttribute("data-render-count", String(renderCount.current));
+	});
 	// What this tab can do, beside what it is called. See tab-actions.ts.
 	const actions = useTabActions(tab, descriptor);
 	// Roving tabindex: the strip is one Tab stop, and Left/Right move within it.
@@ -102,6 +117,7 @@ function TabItem({
 		 */
 		<RowContextMenu label={`More actions for ${descriptor.title}`} actions={actions}>
 			<div
+				ref={rootRef}
 				role="tab"
 				id={tabElementId(tab.id)}
 				aria-selected={isActive}
@@ -231,6 +247,23 @@ function TabItem({
 		</RowContextMenu>
 	);
 }
+
+/*
+ * `descriptor` is rebuilt fresh by `useTabDescriptors` on every TabStrip
+ * render regardless of whether this tab's own content changed, so reference
+ * equality on it would defeat the memo below on every store write. `shallow`
+ * (zustand's generic one-level comparator, not `useShallow` - there is no
+ * hook here) compares its fields instead, which is what actually decides
+ * whether this tab has anything new to draw (#1714).
+ */
+const TabItem = memo(
+	TabItemImpl,
+	(prev, next) =>
+		prev.tab === next.tab &&
+		prev.isActive === next.isActive &&
+		prev.width === next.width &&
+		shallow(prev.descriptor, next.descriptor)
+);
 
 export function TabStrip() {
 	const openTabs = useTabsStore((s) => s.openTabs);
