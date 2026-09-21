@@ -11,6 +11,7 @@
  * Tab navigation and content panels for request configuration
  */
 
+import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { isBlankScriptElement } from "@/lib/elements";
@@ -27,18 +28,44 @@ import SettingsPanel from "./panels/SettingsPanel";
 import { isRequestSettingsNonDefault } from "../../utils/request-state";
 
 /**
- * The tabs whose panel is an editor rather than a form.
+ * The tabs whose panel carries a Monaco editor rather than a form: Body's code
+ * pane, and Elements' `script.pre` / `script.post` rows (one editor each,
+ * issue #1643 gave every row its own height).
  *
- * Their content is a column that fills the pane - the editor takes whatever the
- * controls above it leave - so the panel is a flex container as well as the
- * scroller it already was. The scroll still serves them: an editor at its
- * `min-h-40` floor in a short window overflows, as do the form-data and
- * urlencoded tables on the same tab.
+ * Force-mounted below (issue #1718) so switching to Headers and back does not
+ * tear the editor down and rebuild it - cursor, scroll position and undo
+ * history used to reset on every glance elsewhere, because Radix unmounts an
+ * inactive `TabsContent` and the text is all that survives, read back from the
+ * request store. Params, Headers, Auth and the rest keep their cheap
+ * mount-on-demand behaviour; only these two carry state a remount destroys.
  */
-const EDITOR_TABS = new Set<RequestTab>(["body"]);
+const EDITOR_TABS = new Set<RequestTab>(["body", "elements"]);
 
 export default function RequestTabs() {
 	const { request, activeTab, setActiveTab } = useRequestBuilderContext();
+
+	/*
+	 * Force-mounted from first visit onward, not from mount: a request opened
+	 * on Params should not pay for a Body editor - or, worse, one Monaco
+	 * instance per `script.pre`/`script.post` element - that nobody asked for.
+	 * Once the user has looked at Body or Elements, the panel (and everything
+	 * it mounted) stays alive for the rest of this builder instance; component
+	 * state rather than a ref because it has to trigger the re-render that
+	 * turns `forceMount` on.
+	 *
+	 * Seeded from the incoming `activeTab` so a request restored straight into
+	 * Body force-mounts on this very render, not a frame late - and updated by
+	 * comparing against the last-seen tab during render (the same
+	 * derived-during-render shape `CollectionDetail`'s per-collection tab sync
+	 * uses) rather than in an effect, since the active tab already renders
+	 * regardless of `forceMount` and a `visited` that lagged a render would
+	 * only matter for the one thing this exists to prevent: dropping it the
+	 * instant the user glanced at a sibling tab.
+	 */
+	const [visited, setVisited] = useState<ReadonlySet<RequestTab>>(() => new Set([activeTab]));
+	if (!visited.has(activeTab)) {
+		setVisited((prev) => new Set(prev).add(activeTab));
+	}
 
 	// Calculate badges for tabs
 	const tabs: TabInfo[] = [
@@ -129,46 +156,44 @@ export default function RequestTabs() {
 			 * aria-controls id per trigger from its value, so rendering the
 			 * content outside the Tabs tree left all six triggers pointing at
 			 * panel ids that never existed - a tablist with no reachable panels.
-			 * Only the active TabsContent mounts, so <TabContent /> still renders
-			 * exactly once and its own switch resolves to that tab.
+			 *
+			 * Each panel renders inline against `tab.id` rather than through a
+			 * separate component keyed on `activeTab`: a switch on the *active*
+			 * tab would render nothing for a force-mounted panel the moment focus
+			 * moved elsewhere, undoing the one thing `forceMount` exists to do.
+			 * `EDITOR_TABS.has(tab.id) && visited.has(tab.id)` force-mounts Body
+			 * and Elements from their first visit onward; every other tab keeps
+			 * Radix's default of mounting only while active, so `TabsContent`
+			 * still renders exactly one panel until a second one has actually
+			 * been visited. `components/ui/tabs.tsx` hides an inactive
+			 * force-mounted panel from the accessibility tree and the tab order
+			 * (`data-[state=inactive]:hidden`), the same way `CollectionDetail`
+			 * relies on it for its own force-mounted drafts.
 			 */}
 			{tabs.map((tab) => (
 				<TabsContent
 					key={tab.id}
 					value={tab.id}
+					forceMount={EDITOR_TABS.has(tab.id) && visited.has(tab.id) ? true : undefined}
 					className={cn(
 						"mt-0 flex-1 overflow-y-auto p-4",
-						EDITOR_TABS.has(tab.id) && "flex flex-col"
+						// Only Body's panel is one editor filling the whole pane - the
+						// flex column that lets it do so is not tied to force-mount
+						// membership. Elements is a list of rows with an editor apiece,
+						// laid out by its own scrollable block.
+						tab.id === "body" && "flex flex-col"
 					)}
 				>
-					<TabContent />
+					{tab.id === "info" && <InfoPanel />}
+					{tab.id === "params" && <ParamsPanel />}
+					{tab.id === "headers" && <HeadersPanel />}
+					{tab.id === "body" && <BodyPanel />}
+					{tab.id === "auth" && <AuthPanel />}
+					{tab.id === "elements" && <ElementsPanel />}
+					{tab.id === "examples" && <ExamplesPanel />}
+					{tab.id === "settings" && <SettingsPanel />}
 				</TabsContent>
 			))}
 		</Tabs>
 	);
-}
-
-function TabContent() {
-	const { activeTab } = useRequestBuilderContext();
-
-	switch (activeTab) {
-		case "info":
-			return <InfoPanel />;
-		case "params":
-			return <ParamsPanel />;
-		case "headers":
-			return <HeadersPanel />;
-		case "body":
-			return <BodyPanel />;
-		case "auth":
-			return <AuthPanel />;
-		case "elements":
-			return <ElementsPanel />;
-		case "examples":
-			return <ExamplesPanel />;
-		case "settings":
-			return <SettingsPanel />;
-		default:
-			return null;
-	}
 }
