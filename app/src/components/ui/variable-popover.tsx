@@ -375,18 +375,33 @@ export function VariablePopover({
 		closePopover();
 	};
 
+	/*
+	 * `e.preventDefault()` on both keys. Closing hands focus back to the host -
+	 * for a Monaco token that is `editor.focus()`, called synchronously inside
+	 * this same handler via `onClose` (`useEditorVariableTokens.ts`'s `open`) -
+	 * and an unprevented key event applies its own default action to whatever
+	 * ends up focused when the browser gets to it, not to the element that was
+	 * focused when the event was dispatched. Left unprevented, Enter's default
+	 * (insert a newline) landed on Monaco, which this same keydown had just
+	 * refocused: editing a token in the body split its line the instant the
+	 * popover closed.
+	 */
 	const handleKeyDown = (e: React.KeyboardEvent) => {
 		if (saveMode === "manual") {
 			if (isCommitEnter(e)) {
+				e.preventDefault();
 				handleSave();
 			} else if (e.key === "Escape") {
+				e.preventDefault();
 				handleCancel();
 			}
 		} else {
 			// Auto mode: Enter saves, Escape cancels
 			if (isCommitEnter(e)) {
+				e.preventDefault();
 				handleOpenChange(false);
 			} else if (e.key === "Escape") {
+				e.preventDefault();
 				// Mark as cancelled before Radix fires its own onOpenChange for Escape
 				pendingCancelRef.current = true;
 				closePopover();
