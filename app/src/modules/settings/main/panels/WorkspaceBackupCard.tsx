@@ -135,9 +135,10 @@ export function WorkspaceBackupCard() {
 						    procedure is where the file name is, not in a doc the user
 						    has to know exists. */}
 						<p className="text-xs text-muted-foreground">
-							To restore: quit Vayu, copy this file over the database shown under
-							Storage paths, delete its <code>-wal</code> and <code>-shm</code>{" "}
-							neighbours, and start Vayu again.
+							To restore: quit Vayu, replace the database file shown under Storage
+							paths with a copy of this one renamed to match it, delete its{" "}
+							<code>-wal</code> and <code>-shm</code> neighbours, and start Vayu
+							again.
 						</p>
 					</div>
 				)}
