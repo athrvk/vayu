@@ -20,11 +20,17 @@
  *
  * **The editor box has a definite pixel height** (issue #1605). The element
  * card it sits in (`ElementRow`) is an auto-height block, not a bounded
- * ancestor a percentage or a `ResizablePanelGroup` could divide, so
- * `CodeEditor`'s default `height="100%"` used to resolve against nothing and
- * Monaco laid out at zero height. A drag handle below the box - the GraphQL
- * body's `ResizableHandle` styling, without the panel group it depends on -
- * sets that height directly, in `layout-store`'s `scriptEditorHeights`.
+ * ancestor a percentage or a `ResizablePanelGroup` could divide - `Group`
+ * (`react-resizable-panels`, `components/ui/resizable.tsx`) lays its panels
+ * out as `flex h-full w-full` and divides whatever height its own box
+ * already has; it has no way to *grow* an unbounded ancestor, only to split
+ * a bounded one, so it is the wrong shape for a single box whose own pixel
+ * height is the thing being dragged. A drag handle below the box - the same
+ * rAF-coalesced-write, one-commit-on-release pattern `PanelResizeHandle`
+ * uses for the drawer and context bar widths (issue #1715), inlined here
+ * because that component is wired to a horizontal `parentElement.style.width`
+ * and its own width constants - sets the height directly, in
+ * `layout-store`'s `scriptEditorHeights`.
  *
  * **That height is per element id, not shared across every script row**
  * (issue #1643). A request or collection can show a `script.pre` and a
@@ -50,7 +56,7 @@
  * fallback and this form's lead line.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type * as Monaco from "monaco-editor";
 import { CodeEditor } from "@/components/ui";
 import { ScriptSnippets } from "@/components/shared";
@@ -77,23 +83,6 @@ function clampHeight(height: number): number {
 	return Math.max(SCRIPT_EDITOR_MIN_HEIGHT, Math.min(SCRIPT_EDITOR_MAX_HEIGHT, height));
 }
 
-/**
- * The persisted height save, debounced the way `GraphQLBody`'s
- * `handleVariablesResize` is: a drag fires on every pointer-move frame, and
- * the store writes through to localStorage.
- */
-function useDebouncedHeightSave(save: (height: number) => void) {
-	const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-	useEffect(() => () => clearTimeout(timeout.current ?? undefined), []);
-	return useCallback(
-		(height: number) => {
-			if (timeout.current) clearTimeout(timeout.current);
-			timeout.current = setTimeout(() => save(height), 200);
-		},
-		[save]
-	);
-}
-
 export function ScriptElementForm({
 	id,
 	kind,
@@ -117,26 +106,50 @@ export function ScriptElementForm({
 	const [mountDefault] = useState(() => useLayoutStore.getState().scriptEditorHeightDefault);
 	const storedHeight = ownHeight ?? mountDefault;
 	const setStoredHeight = useLayoutStore((s) => s.setScriptEditorHeight);
-	const saveHeight = useDebouncedHeightSave(
-		useCallback((h: number) => setStoredHeight(id, h), [id, setStoredHeight])
-	);
-	const [dragHeight, setDragHeight] = useState<number | null>(null);
-	const height = dragHeight ?? storedHeight;
+	const height = storedHeight;
 
+	const boxRef = useRef<HTMLDivElement | null>(null);
+	// Only ever holds an id while a drag's rAF is in flight, mirroring
+	// `PanelResizeHandle`'s own ref - `onUp` uses it to know whether there is a
+	// scheduled frame left to cancel.
+	const rafIdRef = useRef<number | null>(null);
+
+	/**
+	 * A pointer drag does NOT call `setStoredHeight` per `pointermove`, the
+	 * same reasoning as `PanelResizeHandle` (issue #1715): a debounced write
+	 * behind a live drag can settle *after* React has already re-rendered the
+	 * box at the pre-drag stored height, which is what produced this form's
+	 * revert-then-jump flash on release before this rewrite. Instead the drag
+	 * writes `boxRef`'s `style.height` directly, once per animation frame, and
+	 * calls `setStoredHeight` exactly once, on `pointerup`, with the final
+	 * (already-clamped) value - the same value the last frame already
+	 * painted, so the store's own re-render lands with no visible jump.
+	 */
 	const startResize = (e: React.PointerEvent) => {
-		e.currentTarget.setPointerCapture(e.pointerId);
+		const handleEl = e.currentTarget;
+		handleEl.setPointerCapture(e.pointerId);
+		const box = boxRef.current;
 		const startY = e.clientY;
 		const startHeight = storedHeight;
+		let liveHeight = startHeight;
 
 		const onMove = (moveEvent: PointerEvent) => {
-			const next = clampHeight(startHeight + (moveEvent.clientY - startY));
-			setDragHeight(next);
-			saveHeight(next);
+			liveHeight = clampHeight(startHeight + (moveEvent.clientY - startY));
+			if (rafIdRef.current !== null) return;
+			rafIdRef.current = requestAnimationFrame(() => {
+				rafIdRef.current = null;
+				if (box) box.style.height = `${liveHeight}px`;
+				handleEl.setAttribute("aria-valuenow", String(Math.round(liveHeight)));
+			});
 		};
 		const onUp = () => {
 			window.removeEventListener("pointermove", onMove);
 			window.removeEventListener("pointerup", onUp);
-			setDragHeight(null);
+			if (rafIdRef.current !== null) {
+				cancelAnimationFrame(rafIdRef.current);
+				rafIdRef.current = null;
+			}
+			setStoredHeight(id, liveHeight);
 		};
 		window.addEventListener("pointermove", onMove);
 		window.addEventListener("pointerup", onUp);
@@ -145,10 +158,10 @@ export function ScriptElementForm({
 	const onHandleKeyDown = (e: React.KeyboardEvent) => {
 		if (e.key === "ArrowDown") {
 			e.preventDefault();
-			saveHeight(clampHeight(storedHeight + SCRIPT_EDITOR_HEIGHT_STEP));
+			setStoredHeight(id, clampHeight(storedHeight + SCRIPT_EDITOR_HEIGHT_STEP));
 		} else if (e.key === "ArrowUp") {
 			e.preventDefault();
-			saveHeight(clampHeight(storedHeight - SCRIPT_EDITOR_HEIGHT_STEP));
+			setStoredHeight(id, clampHeight(storedHeight - SCRIPT_EDITOR_HEIGHT_STEP));
 		}
 	};
 
@@ -170,6 +183,7 @@ export function ScriptElementForm({
 			<p className="text-xs text-muted-foreground">{description}</p>
 			<div className="flex flex-col">
 				<div
+					ref={boxRef}
 					// `min-h-0`: the GraphQL body's own trap (`GraphQLBody.tsx:812-817`) -
 					// a flex item will not shrink below its content, so a card that ever
 					// gains a flex ancestor above this one must not let the editor keep

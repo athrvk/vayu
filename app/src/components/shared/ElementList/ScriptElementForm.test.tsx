@@ -23,11 +23,14 @@
  * 3. The editor could not be resized at all. The handle below the box is
  *    pinned by keyboard (the reliable path in jsdom - `PanelResizeHandle`'s
  *    own test pins its handle the same way) and by a direct pointer-event
- *    dispatch for the drag path.
+ *    dispatch for the drag path - the drag itself writes the box's
+ *    `style.height` inside a `requestAnimationFrame` callback
+ *    (`PanelResizeHandle`'s own rAF-coalescing, issue #1715), which jsdom
+ *    never fires on its own, so the drag tests stub it to run synchronously.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { ScriptElementForm } from "./ScriptElementForm";
 import { useLayoutStore } from "@/stores";
 import {
@@ -112,95 +115,91 @@ describe("the resize handle", () => {
 		expect(handle).toHaveAttribute("aria-valuemax", String(SCRIPT_EDITOR_MAX_HEIGHT));
 	});
 
-	it("nudges the height by the step on ArrowDown/ArrowUp, persisted after the debounce", () => {
-		vi.useFakeTimers();
+	it("nudges the height by the step on ArrowDown/ArrowUp, written immediately - no debounce", () => {
 		renderForm();
 		const handle = heightHandle();
 
-		act(() => fireEvent.keyDown(handle, { key: "ArrowDown" }));
-		// Debounced, the GraphQLBody `handleVariablesResize` way - not written yet,
-		// so "s1" still has no entry of its own.
-		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBeUndefined();
-		act(() => vi.advanceTimersByTime(200));
+		fireEvent.keyDown(handle, { key: "ArrowDown" });
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
 			DEFAULT_SCRIPT_EDITOR_HEIGHT + SCRIPT_EDITOR_HEIGHT_STEP
 		);
 
-		act(() => fireEvent.keyDown(handle, { key: "ArrowUp" }));
-		act(() => vi.advanceTimersByTime(200));
+		fireEvent.keyDown(handle, { key: "ArrowUp" });
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
-
-		vi.useRealTimers();
 	});
 
 	it("clamps at the floor", () => {
-		vi.useFakeTimers();
 		useLayoutStore.setState({ scriptEditorHeights: { s1: SCRIPT_EDITOR_MIN_HEIGHT } });
 		renderForm();
 
-		act(() => fireEvent.keyDown(heightHandle(), { key: "ArrowUp" }));
-		act(() => vi.advanceTimersByTime(200));
+		fireEvent.keyDown(heightHandle(), { key: "ArrowUp" });
 
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(SCRIPT_EDITOR_MIN_HEIGHT);
-		vi.useRealTimers();
 	});
 
 	it("clamps at the ceiling", () => {
-		vi.useFakeTimers();
 		useLayoutStore.setState({ scriptEditorHeights: { s1: SCRIPT_EDITOR_MAX_HEIGHT } });
 		renderForm();
 
-		act(() => fireEvent.keyDown(heightHandle(), { key: "ArrowDown" }));
-		act(() => vi.advanceTimersByTime(200));
+		fireEvent.keyDown(heightHandle(), { key: "ArrowDown" });
 
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(SCRIPT_EDITOR_MAX_HEIGHT);
-		vi.useRealTimers();
 	});
 
-	it("drags to a new height, previewing every frame and persisting after the debounce", () => {
-		vi.useFakeTimers();
+	it("drags to a new height, previewing every frame via a direct style write and committing once on release", async () => {
+		const rafSpy = vi
+			.spyOn(window, "requestAnimationFrame")
+			.mockImplementation((cb: FrameRequestCallback) => {
+				cb(0);
+				return 0;
+			});
 		const { box } = renderForm();
 		const handle = heightHandle();
 
-		act(() => fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1 }));
-		act(() =>
-			window.dispatchEvent(new PointerEvent("pointermove", { clientY: 140, pointerId: 1 }))
-		);
+		fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1 });
+		window.dispatchEvent(new PointerEvent("pointermove", { clientY: 140, pointerId: 1 }));
 
-		// The frame-by-frame preview: no debounce on the box's own height, or on
-		// the store write it eventually causes - "s1" has no entry yet.
+		// The frame-by-frame preview is a direct DOM write, not a re-render: the
+		// store has not been touched yet, so "s1" still has no entry of its own,
+		// but the box's own inline style already shows the live height.
 		expect(box).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT + 40}px` });
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBeUndefined();
 
-		act(() => vi.advanceTimersByTime(200));
+		window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
+
+		// The one commit the whole drag makes, with the exact value the last
+		// frame already painted - no revert-then-jump, because there is nothing
+		// left to jump from.
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
 			DEFAULT_SCRIPT_EDITOR_HEIGHT + 40
 		);
+		expect(box).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT + 40}px` });
 
-		act(() => window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 })));
-		vi.useRealTimers();
+		rafSpy.mockRestore();
 	});
 
 	it("clamps a drag past the ceiling", () => {
-		vi.useFakeTimers();
+		const rafSpy = vi
+			.spyOn(window, "requestAnimationFrame")
+			.mockImplementation((cb: FrameRequestCallback) => {
+				cb(0);
+				return 0;
+			});
 		renderForm();
 		const handle = heightHandle();
 
-		act(() => fireEvent.pointerDown(handle, { clientY: 0, pointerId: 1 }));
-		act(() =>
-			window.dispatchEvent(
-				new PointerEvent("pointermove", {
-					clientY: SCRIPT_EDITOR_MAX_HEIGHT * 2,
-					pointerId: 1,
-				})
-			)
+		fireEvent.pointerDown(handle, { clientY: 0, pointerId: 1 });
+		window.dispatchEvent(
+			new PointerEvent("pointermove", {
+				clientY: SCRIPT_EDITOR_MAX_HEIGHT * 2,
+				pointerId: 1,
+			})
 		);
-		act(() => vi.advanceTimersByTime(200));
+		window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
 
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(SCRIPT_EDITOR_MAX_HEIGHT);
 
-		window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
-		vi.useRealTimers();
+		rafSpy.mockRestore();
 	});
 });
 
@@ -240,15 +239,17 @@ describe("the editor height, per row", () => {
 	}
 
 	it("dragging one row's handle leaves the other row's height unchanged", () => {
-		vi.useFakeTimers();
+		const rafSpy = vi
+			.spyOn(window, "requestAnimationFrame")
+			.mockImplementation((cb: FrameRequestCallback) => {
+				cb(0);
+				return 0;
+			});
 		const { preBox, postBox, preHandle } = renderTwoRows();
 
-		act(() => fireEvent.pointerDown(preHandle, { clientY: 0, pointerId: 1 }));
-		act(() =>
-			window.dispatchEvent(new PointerEvent("pointermove", { clientY: 40, pointerId: 1 }))
-		);
-		act(() => vi.advanceTimersByTime(200));
-		act(() => window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 })));
+		fireEvent.pointerDown(preHandle, { clientY: 0, pointerId: 1 });
+		window.dispatchEvent(new PointerEvent("pointermove", { clientY: 40, pointerId: 1 }));
+		window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
 
 		expect(preBox).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT + 40}px` });
 		expect(postBox).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT}px` });
@@ -259,7 +260,7 @@ describe("the editor height, per row", () => {
 			DEFAULT_SCRIPT_EDITOR_HEIGHT + 40
 		);
 
-		vi.useRealTimers();
+		rafSpy.mockRestore();
 	});
 
 	it("starts a freshly mounted row with no entry of its own from the shared default", () => {
