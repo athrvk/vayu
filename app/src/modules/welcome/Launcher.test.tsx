@@ -45,6 +45,7 @@ describe("the welcome screen's column", () => {
 					collectionCount={2}
 					onImport={noop}
 					onNewRequest={noop}
+					onOpenDemo={noop}
 					onSearch={noop}
 					onHistory={noop}
 					onVariables={noop}

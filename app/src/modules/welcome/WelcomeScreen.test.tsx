@@ -6,6 +6,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import WelcomeScreen from "./WelcomeScreen";
 import { useTabsStore, useSessionStore, useLayoutStore } from "@/stores";
+import { DEMO_REQUEST_PRESET } from "./demo-request";
 import type { Run } from "@/types";
 
 const mocks = vi.hoisted(() => ({
@@ -203,6 +204,38 @@ describe("WelcomeScreen", () => {
 			expect(mocks.createRequest).toHaveBeenCalledWith(
 				expect.objectContaining({ collectionId: "new-col" })
 			);
+		});
+	});
+
+	describe("the demo tile (issue #1694)", () => {
+		beforeEach(() => {
+			mocks.collections = { data: [{ id: "c1", name: "API" }], isLoading: false };
+		});
+
+		it("shows while no run exists, and creates the preset request", async () => {
+			mocks.runs = { data: [], isLoading: false };
+			renderScreen();
+			fireEvent.click(screen.getByRole("button", { name: /Open Demo API/i }));
+			await waitFor(() =>
+				expect(mocks.createRequest).toHaveBeenCalledWith(
+					expect.objectContaining({
+						collectionId: "c1",
+						method: DEMO_REQUEST_PRESET.method,
+						url: DEMO_REQUEST_PRESET.url,
+					})
+				)
+			);
+		});
+
+		// The question this tile asks - "have you sent anything yet?" - is
+		// answered the moment a run exists, and it retires without a dismiss of
+		// its own (the owner's recorded decision on #1694).
+		it("is gone once a run exists", () => {
+			mocks.runs = { data: [run()], isLoading: false };
+			renderScreen();
+			expect(
+				screen.queryByRole("button", { name: /Open Demo API/i })
+			).not.toBeInTheDocument();
 		});
 	});
 

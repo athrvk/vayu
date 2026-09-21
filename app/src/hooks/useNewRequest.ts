@@ -19,7 +19,7 @@
  * `pickerProps`, so two surfaces never fight over one dialog's open state.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
 	useCollectionsQuery,
 	useCreateCollectionMutation,
@@ -33,6 +33,17 @@ import type { Collection } from "@/types";
 
 const CREATE_FAILED = "Could not create the request. Check that the engine is running.";
 
+/**
+ * A request to create with fields already filled in, rather than the blank
+ * `DEFAULT_REQUEST_NAME` / GET / empty-URL shape - the Launcher's demo tile
+ * (issue #1694) uses this to hand over a real method and URL.
+ */
+export interface RequestPreset {
+	name?: string;
+	method: string;
+	url: string;
+}
+
 /** Everything `CollectionPicker` needs, so a caller spreads it and nothing else. */
 export interface NewRequestPickerProps {
 	open: boolean;
@@ -42,8 +53,11 @@ export interface NewRequestPickerProps {
 }
 
 export interface UseNewRequestReturn {
-	/** Start the flow. Opens the picker only when the target is ambiguous. */
-	newRequest: () => void;
+	/**
+	 * Start the flow. Opens the picker only when the target is ambiguous.
+	 * @param preset Fields to create the request with, instead of blank.
+	 */
+	newRequest: (preset?: RequestPreset) => void;
 	pickerProps: NewRequestPickerProps;
 }
 
@@ -55,15 +69,24 @@ export function useNewRequest(): UseNewRequestReturn {
 	const createRequestMutation = useCreateRequestMutation();
 	const createCollectionMutation = useCreateCollectionMutation();
 	const [pickerOpen, setPickerOpen] = useState(false);
+	/*
+	 * A ref, not state: the picker can sit open for as long as the user takes to
+	 * choose, and the preset that opened it must still be there when `onSelect`
+	 * finally runs - a second `newRequest()` call (blank, from elsewhere) between
+	 * open and pick would otherwise have nothing to overwrite it with anyway,
+	 * since only one flow is ever in flight at a time.
+	 */
+	const presetRef = useRef<RequestPreset | null>(null);
 
 	const createRequestIn = useCallback(
 		async (collectionId: string) => {
+			const preset = presetRef.current;
 			try {
 				const newRequest = await createRequestMutation.mutateAsync({
 					collectionId,
-					name: DEFAULT_REQUEST_NAME,
-					method: "GET",
-					url: "",
+					name: preset?.name ?? DEFAULT_REQUEST_NAME,
+					method: preset?.method ?? "GET",
+					url: preset?.url ?? "",
 				});
 				openTab({ type: "request", entityId: newRequest.id });
 			} catch (error) {
@@ -75,29 +98,33 @@ export function useNewRequest(): UseNewRequestReturn {
 		[createRequestMutation, openTab, showToast]
 	);
 
-	const newRequest = useCallback(() => {
-		const target = resolveNewRequestTarget(lastCollectionId, collections);
-		if (target.kind === "pick") {
-			setPickerOpen(true);
-			return;
-		}
-		if (target.kind === "collection") {
-			void createRequestIn(target.collectionId);
-			return;
-		}
-		// No collections yet - requests must belong to one, so make it first.
-		void (async () => {
-			try {
-				const newCollection = await createCollectionMutation.mutateAsync({
-					name: DEFAULT_COLLECTION_NAME,
-				});
-				await createRequestIn(newCollection.id);
-			} catch (error) {
-				console.error("Failed to create collection:", error);
-				showToast(CREATE_FAILED, "error");
+	const newRequest = useCallback(
+		(preset?: RequestPreset) => {
+			presetRef.current = preset ?? null;
+			const target = resolveNewRequestTarget(lastCollectionId, collections);
+			if (target.kind === "pick") {
+				setPickerOpen(true);
+				return;
 			}
-		})();
-	}, [collections, createCollectionMutation, createRequestIn, lastCollectionId, showToast]);
+			if (target.kind === "collection") {
+				void createRequestIn(target.collectionId);
+				return;
+			}
+			// No collections yet - requests must belong to one, so make it first.
+			void (async () => {
+				try {
+					const newCollection = await createCollectionMutation.mutateAsync({
+						name: DEFAULT_COLLECTION_NAME,
+					});
+					await createRequestIn(newCollection.id);
+				} catch (error) {
+					console.error("Failed to create collection:", error);
+					showToast(CREATE_FAILED, "error");
+				}
+			})();
+		},
+		[collections, createCollectionMutation, createRequestIn, lastCollectionId, showToast]
+	);
 
 	const onSelect = useCallback(
 		(collectionId: string) => {

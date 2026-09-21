@@ -1002,12 +1002,17 @@ Vayu's new-tab surface - rendered for the `welcome` tab (opened by TabStrip's `+
 It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restored, so returning users land back on their own tabs. Its job is to start something new. Keep marketing content off it - a feature pitch and static perf claims were removed for exactly that reason. Anything already visible in the Collections sidebar or History drawer is a duplicate and does not belong here either.
 
 - `WelcomeScreen.tsx` - container: queries, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user. The new-request flow itself is `hooks/useNewRequest.ts`, shared with the palette's `new-request` command - two entry points must not disagree about where a request lands. This screen renders that hook's `pickerProps` and nothing more.
-- `EmptyState.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
+- `FirstRunWelcome.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding.
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
 - `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is six tiles: New
   request, Search, Import, History, Variables, Services. Services and History both activate a
   drawer view rather than opening a tab. Search opens the command palette - the
   chord alone is undiscoverable, and this grid is where the app teaches its own surfaces.
+- `components/DemoApiTile.tsx` - "Open Demo API" (issue #1694), its own row below the action grid
+  rather than a seventh cell in it, since the grid's tiles are icon-and-label only with no room for
+  "press this chord to send it". Shown only while `runs.length === 0`; retires the moment a run
+  exists, with no dismiss of its own. Opens `demo-request.ts`'s preset through the same
+  `useNewRequest` targeting as every other "New request" entry point.
 - `LauncherSkeleton.tsx` - one skeleton tile per real tile. It has drifted a tile behind the
   Launcher before; `WelcomeScreen.test.tsx` now asserts both grids against one constant.
 

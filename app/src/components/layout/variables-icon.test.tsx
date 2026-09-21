@@ -98,6 +98,7 @@ describe("the variables icon", () => {
 				collectionCount={0}
 				onImport={() => {}}
 				onNewRequest={() => {}}
+				onOpenDemo={() => {}}
 				onSearch={() => {}}
 				onHistory={() => {}}
 				onVariables={() => {}}
