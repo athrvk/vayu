@@ -44,13 +44,21 @@
  * show.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { KeyValueItem, KeyValueEditorProps } from "@/types";
 import { withTrailingBlank } from "./key-value";
 import KeyValueRow from "./KeyValueRow";
 import type { PickedFile } from "./FilePartCell";
 import { EYEBROW_CLASS } from "@/components/ui/eyebrow";
 import { cn } from "@/lib/utils";
+
+// Module constants, not inline arrows in the parameter list: an inline default
+// is a fresh function every render, which would defeat the ref-backed
+// callbacks below just as surely as `items` in their deps did (issue #1716) -
+// every caller that leaves these unset would hand KeyValueEditor a new
+// identity each render regardless of what its own callbacks do.
+const ALLOW_ALL_ITEMS = () => true;
+const ALLOW_ALL = () => true;
 
 export default function KeyValueEditor({
 	items,
@@ -63,22 +71,38 @@ export default function KeyValueEditor({
 	keySuggestions,
 	allowFiles = false,
 	variables,
-	canEdit = () => true, // Default: allow editing all items
-	canRemove = () => true, // Default: allow removing all items
-	canDisable = () => true, // Default: allow disabling all items
+	canEdit = ALLOW_ALL_ITEMS, // Default: allow editing all items
+	canRemove = ALLOW_ALL, // Default: allow removing all items
+	canDisable = ALLOW_ALL, // Default: allow disabling all items
 }: KeyValueEditorProps) {
+	/*
+	 * `items` is a fresh array on every keystroke (`onChange` writes it back
+	 * through the parent's state), so listing it in these callbacks' deps gave
+	 * every one of them a new identity on every keystroke too - which is
+	 * exactly what defeated `KeyValueRow`'s `memo` (issue #1716). Reading the
+	 * latest items through a ref keeps the callbacks' identities stable across
+	 * keystrokes: only `onChange`, `canEdit`, `canRemove` and `canDisable` -
+	 * expected stable from the caller - remain in their deps.
+	 */
+	const itemsRef = useRef(items);
+	useEffect(() => {
+		itemsRef.current = items;
+	}, [items]);
+
 	const handleRemove = useCallback(
 		(id: string) => {
-			const itemToRemove = items.find((item) => item.id === id);
+			const currentItems = itemsRef.current;
+			const itemToRemove = currentItems.find((item) => item.id === id);
 			if (itemToRemove && !canRemove(itemToRemove)) return;
-			onChange(withTrailingBlank(items.filter((item) => item.id !== id)));
+			onChange(withTrailingBlank(currentItems.filter((item) => item.id !== id)));
 		},
-		[items, onChange, canRemove]
+		[onChange, canRemove]
 	);
 
 	const handleUpdate = useCallback(
 		(id: string, field: keyof KeyValueItem, value: string | boolean) => {
-			const itemToUpdate = items.find((item) => item.id === id);
+			const currentItems = itemsRef.current;
+			const itemToUpdate = currentItems.find((item) => item.id === id);
 			if (!itemToUpdate) return;
 			if (!canEdit(itemToUpdate, field)) return;
 			if (field === "enabled" && value === false && !canDisable(itemToUpdate)) return;
@@ -89,7 +113,7 @@ export default function KeyValueEditor({
 			 * marker. Harmless on a row with no `source` to begin with, which is
 			 * every row outside the request builder's Headers tab.
 			 */
-			const newItems = items.map((item) => {
+			const newItems = currentItems.map((item) => {
 				if (item.id !== id) return item;
 				const updated = { ...item, [field]: value };
 				if (field === "key" || field === "value") delete updated.source;
@@ -97,7 +121,7 @@ export default function KeyValueEditor({
 			});
 			onChange(withTrailingBlank(newItems));
 		},
-		[items, onChange, canEdit, canDisable]
+		[onChange, canEdit, canDisable]
 	);
 
 	/**
@@ -112,11 +136,12 @@ export default function KeyValueEditor({
 	 */
 	const handlePickFile = useCallback(
 		(id: string, file: PickedFile) => {
-			const target = items.find((item) => item.id === id);
+			const currentItems = itemsRef.current;
+			const target = currentItems.find((item) => item.id === id);
 			if (!target || !canEdit(target, "value")) return;
 			onChange(
 				withTrailingBlank(
-					items.map((item) =>
+					currentItems.map((item) =>
 						item.id === id
 							? {
 									...item,
@@ -132,7 +157,7 @@ export default function KeyValueEditor({
 				)
 			);
 		},
-		[items, onChange, canEdit]
+		[onChange, canEdit]
 	);
 
 	/**
@@ -145,11 +170,12 @@ export default function KeyValueEditor({
 	 */
 	const handleToggleKind = useCallback(
 		(id: string, kind: "text" | "file") => {
-			const target = items.find((item) => item.id === id);
+			const currentItems = itemsRef.current;
+			const target = currentItems.find((item) => item.id === id);
 			if (!target || !canEdit(target, "value")) return;
 			onChange(
 				withTrailingBlank(
-					items.map((item) => {
+					currentItems.map((item) => {
 						if (item.id !== id) return item;
 						if (kind === "file") return { ...item, type: "file" as const, value: "" };
 						return {
@@ -164,7 +190,7 @@ export default function KeyValueEditor({
 				)
 			);
 		},
-		[items, onChange, canEdit]
+		[onChange, canEdit]
 	);
 
 	return (

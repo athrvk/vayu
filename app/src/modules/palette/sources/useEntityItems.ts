@@ -72,45 +72,56 @@ export function useEntityItems(): PaletteItem[] {
 	const lastSent = useMemo(() => lastSentByRequest(flattenRunPages(runsData)), [runsData]);
 	const byId = useMemo(() => new Map(collections.map((c) => [c.id, c])), [collections]);
 
-	const items: PaletteItem[] = [];
+	// The palette re-renders on every keystroke (it is filtering as the user
+	// types), and this build was unmemoized - every collection, every request in
+	// it, and a `collectionPath` walk per collection, redone on every one of
+	// those renders for no reason the keystroke gave it (issue #1716).
+	// `useRunItems`, `useSettingsItems` and `useVariableItems` all memoise
+	// theirs; this is the one that did not. Keyed on the five values the loop
+	// actually reads - a query result the loop does not consume (`runsData`
+	// itself, already folded into `lastSent`) staying out of the deps is what
+	// keeps this from re-running on the query's own unrelated refetches.
+	return useMemo(() => {
+		const result: PaletteItem[] = [];
 
-	for (const collection of collections) {
-		const path = collectionPath(collection.id, byId);
-		// Where it sits, not what it is called - a root collection has no parent
-		// to state, so it gets no subtitle rather than an empty one.
-		const parentPath = collection.parentId ? collectionPath(collection.parentId, byId) : "";
-		items.push({
-			id: `collection:${collection.id}`,
-			kind: "collection",
-			title: collection.name,
-			...(parentPath ? { subtitle: parentPath } : {}),
-			icon: Folder,
-			perform: () => openTab({ type: "collection", entityId: collection.id }),
-		});
-
-		for (const request of requestsByCollection.get(collection.id) ?? []) {
-			items.push({
-				id: `request:${request.id}`,
-				kind: "request",
-				title: request.name,
-				subtitle: path,
-				// The URL finds a request whose name says nothing about it - and
-				// it is a keyword rather than the subtitle because the collection
-				// is what the eye needs to tell two "Get user"s apart.
-				//
-				// It is matched literally rather than fuzzily: a path is character
-				// soup to a subsequence scorer, and this one line was the palette's
-				// noise generator - almost any five-letter query found its letters
-				// scattered through some URL, and that request then outranked the
-				// setting the user was actually looking for.
-				keywords: [request.method],
-				substringKeywords: [request.url],
-				method: request.method,
-				...(lastSent.has(request.id) ? { recencyAt: lastSent.get(request.id) } : {}),
-				perform: () => openTab({ type: "request", entityId: request.id }),
+		for (const collection of collections) {
+			const path = collectionPath(collection.id, byId);
+			// Where it sits, not what it is called - a root collection has no parent
+			// to state, so it gets no subtitle rather than an empty one.
+			const parentPath = collection.parentId ? collectionPath(collection.parentId, byId) : "";
+			result.push({
+				id: `collection:${collection.id}`,
+				kind: "collection",
+				title: collection.name,
+				...(parentPath ? { subtitle: parentPath } : {}),
+				icon: Folder,
+				perform: () => openTab({ type: "collection", entityId: collection.id }),
 			});
-		}
-	}
 
-	return items;
+			for (const request of requestsByCollection.get(collection.id) ?? []) {
+				result.push({
+					id: `request:${request.id}`,
+					kind: "request",
+					title: request.name,
+					subtitle: path,
+					// The URL finds a request whose name says nothing about it - and
+					// it is a keyword rather than the subtitle because the collection
+					// is what the eye needs to tell two "Get user"s apart.
+					//
+					// It is matched literally rather than fuzzily: a path is character
+					// soup to a subsequence scorer, and this one line was the palette's
+					// noise generator - almost any five-letter query found its letters
+					// scattered through some URL, and that request then outranked the
+					// setting the user was actually looking for.
+					keywords: [request.method],
+					substringKeywords: [request.url],
+					method: request.method,
+					...(lastSent.has(request.id) ? { recencyAt: lastSent.get(request.id) } : {}),
+					perform: () => openTab({ type: "request", entityId: request.id }),
+				});
+			}
+		}
+
+		return result;
+	}, [collections, requestsByCollection, lastSent, byId, openTab]);
 }
