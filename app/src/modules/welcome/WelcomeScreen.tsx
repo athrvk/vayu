@@ -22,6 +22,7 @@ import { useCollectionsQuery, useRunsQuery, flattenRunPages } from "@/queries";
 import { ErrorState } from "@/components/shared";
 import { useNewRequest } from "@/hooks/useNewRequest";
 import { CollectionPicker } from "./components/CollectionPicker";
+import { DEMO_REQUEST_PRESET } from "./demo-request";
 import { FirstRunWelcome } from "./FirstRunWelcome";
 import { Launcher } from "./Launcher";
 import { LauncherSkeleton } from "./LauncherSkeleton";
@@ -100,6 +101,7 @@ export default function WelcomeScreen() {
 						collectionCount={collections.length}
 						onImport={openImport}
 						onNewRequest={newRequest}
+						onOpenDemo={() => newRequest(DEMO_REQUEST_PRESET)}
 						onSearch={() => setPaletteOpen(true)}
 						onHistory={() => activateDrawerView("history")}
 						onVariables={() => openTab({ type: "variables", entityId: null })}

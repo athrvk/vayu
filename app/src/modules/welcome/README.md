@@ -23,11 +23,12 @@ Two consequences worth keeping in mind before adding anything here:
 ## Structure
 
 - `WelcomeScreen.tsx` - container: queries, `handleNewRequest`, state selection
-- `EmptyState.tsx` - fresh workspace; import leads, and this is the only state
-  that carries branding
+- `FirstRunWelcome.tsx` - fresh workspace; import leads, and this is the only
+  state that carries branding
 - `Launcher.tsx` - populated workspace; actions, recent runs, counts
-- `components/ActionTile.tsx`, `components/RecentRuns.tsx`,
-  `components/FooterLinks.tsx`
+- `components/ActionTile.tsx`, `components/DemoApiTile.tsx`,
+  `components/RecentRuns.tsx`, `components/FooterLinks.tsx`
+- `demo-request.ts` - the request `DemoApiTile` creates
 - `welcome-column.ts` - the one class string the three states share
 
 ## Notes
@@ -48,6 +49,14 @@ Two consequences worth keeping in mind before adding anything here:
   reason that size exists: a surface whose work is reading and choosing.
 - Styling follows `docs/design-system.md` - 11px eyebrows, 13px body, mono
   tabular numerals, `rounded-md`. No `text-5xl`/`text-xl`, no gradients.
+- **The Launcher's "Open Demo API" tile is a second first-run step, decided in
+  issue #1694**: the Launcher is the end state (no separate screen beyond it),
+  it is a tile rather than a strip, and it retires the moment a run exists
+  (`Launcher.tsx` renders `DemoApiTile` only while `runs.length === 0`) - no
+  dismiss of its own, since the question it asks is answered by then. It opens
+  a real, pre-filled request (`demo-request.ts`) through the same
+  `useNewRequest` targeting every other "New request" entry point uses, so it
+  never disagrees with them about where the request lands.
 
 ## Usage
 
