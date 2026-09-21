@@ -937,3 +937,36 @@ describe("an Enter that only commits an IME buffer", () => {
 		expect(onValueChange).toHaveBeenCalledWith("merchantId", "mrc_8813", "environment");
 	});
 });
+
+describe("the commit key never reaches what closing refocuses", () => {
+	/*
+	 * A Monaco token's popover closes by calling `editor.focus()` from
+	 * `onClose`, synchronously inside this same keydown - see
+	 * `useEditorVariableTokens.ts`'s `open`. An unprevented Enter's default
+	 * action (insert a newline) then applies to whichever element the browser
+	 * finds focused when it gets to it, which by then is Monaco, not this
+	 * field: a token clicked mid-body split its line the instant the popover
+	 * closed. `fireEvent` returns `false` for a cancelable event exactly when
+	 * some handler called `preventDefault()`, so this is the one assertion
+	 * that would have caught the missing call - `onValueChange` firing is not
+	 * enough, since that happened either way.
+	 */
+	it("prevents Enter's and Escape's default in auto mode", () => {
+		renderPopover();
+		const field = within(open()).getByLabelText("Value of merchantId");
+		fireEvent.change(field, { target: { value: "mrc_9000" } });
+		expect(fireEvent.keyDown(field, { key: "Enter" })).toBe(false);
+
+		const reopened = within(open()).getByLabelText("Value of merchantId");
+		expect(fireEvent.keyDown(reopened, { key: "Escape" })).toBe(false);
+	});
+
+	it("prevents Enter's and Escape's default in manual mode", () => {
+		renderPopover({ saveMode: "manual" });
+		const field = within(open()).getByLabelText("Value of merchantId");
+		expect(fireEvent.keyDown(field, { key: "Enter" })).toBe(false);
+
+		const reopened = within(open()).getByLabelText("Value of merchantId");
+		expect(fireEvent.keyDown(reopened, { key: "Escape" })).toBe(false);
+	});
+});
