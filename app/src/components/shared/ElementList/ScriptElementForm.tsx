@@ -80,18 +80,33 @@ function clampHeight(height: number): number {
 /**
  * The persisted height save, debounced the way `GraphQLBody`'s
  * `handleVariablesResize` is: a drag fires on every pointer-move frame, and
- * the store writes through to localStorage.
+ * the store writes through to localStorage. `flush` cancels the pending
+ * timer and saves immediately - `onUp` below calls it so the store already
+ * holds the dragged height the instant `dragHeight` clears, rather than
+ * flashing back to whatever the last debounce checkpoint happened to be
+ * (issue: resize snaps on release).
  */
 function useDebouncedHeightSave(save: (height: number) => void) {
 	const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 	useEffect(() => () => clearTimeout(timeout.current ?? undefined), []);
-	return useCallback(
+	const debounced = useCallback(
 		(height: number) => {
 			if (timeout.current) clearTimeout(timeout.current);
 			timeout.current = setTimeout(() => save(height), 200);
 		},
 		[save]
 	);
+	const flush = useCallback(
+		(height: number) => {
+			if (timeout.current) {
+				clearTimeout(timeout.current);
+				timeout.current = null;
+			}
+			save(height);
+		},
+		[save]
+	);
+	return [debounced, flush] as const;
 }
 
 export function ScriptElementForm({
@@ -117,7 +132,7 @@ export function ScriptElementForm({
 	const [mountDefault] = useState(() => useLayoutStore.getState().scriptEditorHeightDefault);
 	const storedHeight = ownHeight ?? mountDefault;
 	const setStoredHeight = useLayoutStore((s) => s.setScriptEditorHeight);
-	const saveHeight = useDebouncedHeightSave(
+	const [saveHeight, flushHeight] = useDebouncedHeightSave(
 		useCallback((h: number) => setStoredHeight(id, h), [id, setStoredHeight])
 	);
 	const [dragHeight, setDragHeight] = useState<number | null>(null);
@@ -127,15 +142,21 @@ export function ScriptElementForm({
 		e.currentTarget.setPointerCapture(e.pointerId);
 		const startY = e.clientY;
 		const startHeight = storedHeight;
+		let lastHeight = startHeight;
 
 		const onMove = (moveEvent: PointerEvent) => {
-			const next = clampHeight(startHeight + (moveEvent.clientY - startY));
-			setDragHeight(next);
-			saveHeight(next);
+			lastHeight = clampHeight(startHeight + (moveEvent.clientY - startY));
+			setDragHeight(lastHeight);
+			saveHeight(lastHeight);
 		};
 		const onUp = () => {
 			window.removeEventListener("pointermove", onMove);
 			window.removeEventListener("pointerup", onUp);
+			// The store has to already hold the dragged height before
+			// `dragHeight` clears - otherwise `height` falls back one render to
+			// whatever the 200ms debounce last committed, then jumps forward
+			// again once that pending save lands, a visible flash on release.
+			flushHeight(lastHeight);
 			setDragHeight(null);
 		};
 		window.addEventListener("pointermove", onMove);

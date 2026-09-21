@@ -181,6 +181,34 @@ describe("the resize handle", () => {
 		vi.useRealTimers();
 	});
 
+	it("does not flash back on release, before the debounce would otherwise land", () => {
+		// A real drag's last pointermove resets the 200ms timer and pointerup
+		// follows immediately after - well inside that window, never past it.
+		// Advancing the fake timer first (the test above) never exercises that
+		// sequence, so it stayed green through the bug this test is for.
+		vi.useFakeTimers();
+		const { box } = renderForm();
+		const handle = heightHandle();
+
+		act(() => fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1 }));
+		act(() =>
+			window.dispatchEvent(new PointerEvent("pointermove", { clientY: 140, pointerId: 1 }))
+		);
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBeUndefined();
+
+		act(() => window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 })));
+
+		// The store already holds the dragged height the instant the drag ends,
+		// so the box's rendered height (now reading from the store, `dragHeight`
+		// having cleared) never reverts to a stale, pre-drag value.
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
+			DEFAULT_SCRIPT_EDITOR_HEIGHT + 40
+		);
+		expect(box).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT + 40}px` });
+
+		vi.useRealTimers();
+	});
+
 	it("clamps a drag past the ceiling", () => {
 		vi.useFakeTimers();
 		renderForm();
