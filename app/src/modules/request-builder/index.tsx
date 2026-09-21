@@ -231,12 +231,15 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
  * Gets request ID from store, fetches data, and provides context
  */
 export default function RequestBuilder() {
-	const { openTabs, activeTabId, openTab, closeTab } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const openTab = useTabsStore((s) => s.openTab);
+	const closeTab = useTabsStore((s) => s.closeTab);
 	// A request is picked from the Collections drawer, so that is where the
 	// "nothing selected" pane sends you.
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
-	const { activeEnvironmentId } = useSessionStore();
-	const { startRun } = useDashboardStore();
+	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
+	const startRun = useDashboardStore((s) => s.startRun);
 	const showToast = useToastStore((s) => s.showToast);
 	const { executeRequest: engineExecuteRequest, composeRequest: engineComposeRequest } =
 		useEngine();

@@ -46,7 +46,10 @@ describe("dashboard error surfacing", () => {
 	});
 
 	it("reads the stream error in the component", () => {
-		expect(code(dashboard)).toMatch(/error:\s*streamError/);
+		// A per-field selector (#1714), not the destructured `error: streamError`
+		// this originally checked for - the store read changed shape, not
+		// whether the value reaches the component.
+		expect(code(dashboard)).toMatch(/useDashboardStore\(\(s\)\s*=>\s*s\.error\)/);
 		expect(code(dashboard)).toContain("streamError");
 	});
 

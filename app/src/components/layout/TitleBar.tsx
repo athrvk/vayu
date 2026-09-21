@@ -315,12 +315,12 @@ function NavigationControls() {
 }
 
 function EnvSwitcher() {
-	const { activeEnvironmentId } = useSessionStore();
+	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const { data: environments = [] } = useEnvironmentsQuery();
 	const setActiveEnvironment = useSetActiveEnvironmentMutation();
 	const createEnvironment = useCreateEnvironmentMutation();
-	const { openTab } = useTabsStore();
-	const { setSelectedCategory } = useVariablesStore();
+	const openTab = useTabsStore((s) => s.openTab);
+	const setSelectedCategory = useVariablesStore((s) => s.setSelectedCategory);
 	const openImport = useImportModalStore((s) => s.open);
 	const showToast = useToastStore((s) => s.showToast);
 	const activeEnv = environments.find((e) => e.id === activeEnvironmentId);

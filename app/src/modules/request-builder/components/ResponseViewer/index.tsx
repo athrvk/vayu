@@ -69,7 +69,8 @@ export default function ResponseViewer() {
 	 * component without remounting it - `request.id` changes underneath the
 	 * same `useState` either way.
 	 */
-	const { getResponseTab, setResponseTab } = useTabSelectionStore();
+	const getResponseTab = useTabSelectionStore((s) => s.getResponseTab);
+	const setResponseTab = useTabSelectionStore((s) => s.setResponseTab);
 	const [activeTab, setActiveTabState] = useState<ResponseTab>(
 		() => (requestId ? getResponseTab(requestId) : null) ?? "body"
 	);

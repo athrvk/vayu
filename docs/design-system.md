@@ -1721,7 +1721,7 @@ correct one here:
   arrow/Page/Home/End and all.
 
 Everything else is suppressed at the line it happens on, with the reason and the
-file that provides the missing half. **21 directives across 15 files**, listed
+file that provides the missing half. **21 directives across 16 files**, listed
 here because a rule-level configuration is visible in one place and a line-level
 one is visible only to whoever opens that file - and because nothing otherwise
 stops the count growing one justified line at a time. `a11y-suppressions.test.ts`
@@ -1732,11 +1732,12 @@ ceiling that comes down when a suppression goes rather than a budget to spend.
 Paths are relative to `app/src`, and the count in brackets is directive lines,
 not rule names - two of these lines silence two rules at once.
 
-- `components/layout/TabStrip.tsx` (2) - `jsx-a11y/interactive-supports-focus`
-  on the tablist, whose tab stop is the active tab;
-  `jsx-a11y/click-events-have-key-events` on the close affordance, which is
-  Delete or Backspace on the focused row and a `tabIndex={-1}` pointer target
-  here.
+- `components/layout/TabStrip.tsx` (1) - `jsx-a11y/interactive-supports-focus`
+  on the tablist, whose tab stop is the active tab.
+- `components/layout/TabItem.tsx` (1) - `jsx-a11y/click-events-have-key-events`
+  on the close affordance, which is Delete or Backspace on the focused row and
+  a `tabIndex={-1}` pointer target here (the row moved out of `TabStrip.tsx`
+  with #1714).
 - `components/layout/ActivityRail.tsx` (1) -
   `jsx-a11y/no-noninteractive-element-interactions` on the `<nav>`: roving
   `tabindex` for Up/Down between the six view buttons, the same shape

@@ -141,7 +141,7 @@ export function useVariableResolver(
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
 
-	const { activeEnvironmentId } = useSessionStore();
+	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	/*
 	 * Collection scope is explicit only. There used to be a session-store
 	 * fallback (`activeCollectionId`) for option-less callers, but nothing ever

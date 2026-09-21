@@ -63,7 +63,8 @@ vi.mock("@/queries", () => ({
 }));
 vi.mock("@/stores", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/stores")>()),
-	useSessionStore: () => ({ activeEnvironmentId: "env" }),
+	useSessionStore: (selector: (s: { activeEnvironmentId: string }) => unknown) =>
+		selector({ activeEnvironmentId: "env" }),
 }));
 
 const { useBoundRowStore } = await import("@/stores");

@@ -40,8 +40,10 @@ import { isCommitEnter } from "@/lib/keyboard";
 
 export default function CollectionTree() {
 	const openImport = useImportModalStore((s) => s.open);
-	const { openTabs, activeTabId } = useTabsStore();
-	const { expandedCollectionIds, expandCollections } = useCollectionsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const expandedCollectionIds = useCollectionsStore((s) => s.expandedCollectionIds);
+	const expandCollections = useCollectionsStore((s) => s.expandCollections);
 	const treeRef = useRef<HTMLDivElement>(null);
 	const treeFocus = useRovingTreeFocus(treeRef);
 

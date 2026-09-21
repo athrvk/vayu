@@ -44,10 +44,9 @@ vi.mock("@/queries", () => ({
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({
-	useVariablesStore: () => ({
-		selectedCategory: state.selectedCategory,
-		setSelectedCategory: vi.fn(),
-	}),
+	useVariablesStore: (
+		selector: (s: { selectedCategory: unknown; setSelectedCategory: () => void }) => unknown
+	) => selector({ selectedCategory: state.selectedCategory, setSelectedCategory: vi.fn() }),
 }));
 
 describe("VariablesMain - loading vs not found", () => {

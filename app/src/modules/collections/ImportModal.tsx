@@ -102,7 +102,8 @@ const FORMAT_BADGES = [
 ];
 
 export function ImportModal() {
-	const { isOpen, close } = useImportModalStore();
+	const isOpen = useImportModalStore((s) => s.isOpen);
+	const close = useImportModalStore((s) => s.close);
 	const importMutation = useImportMutation();
 	const { data: collections = [] } = useCollectionsQuery();
 	const readBoundSpecs = useBoundSpecReader();

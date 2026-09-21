@@ -82,9 +82,11 @@ function SectionHeading({ children, icon: Icon }: { children: string; icon?: Luc
 }
 
 export default function SettingsCategoryTree() {
-	const { selectedCategory, setSelectedCategory, searchQuery: query } = useSettingsStore();
+	const selectedCategory = useSettingsStore((s) => s.selectedCategory);
+	const setSelectedCategory = useSettingsStore((s) => s.setSelectedCategory);
+	const query = useSettingsStore((s) => s.searchQuery);
 	const setQuery = useSettingsStore((s) => s.setSearchQuery);
-	const { openTab } = useTabsStore();
+	const openTab = useTabsStore((s) => s.openTab);
 	const { isLoading, error, refetch } = useConfigQuery();
 
 	// Selecting a category shows its panel in the settings tab. The tree now

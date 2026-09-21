@@ -102,9 +102,13 @@ export function useTreeCrud({
 	requestsByCollection,
 	getRequestsByCollection,
 }: TreeCrudOptions): TreeCrud {
-	const { openTab, closeTabsForEntities } = useTabsStore();
-	const { expandCollection, toggleCollectionExpanded } = useCollectionsStore();
-	const { startSaving, completeSaveThenIdle, failSave } = useSaveStore();
+	const openTab = useTabsStore((s) => s.openTab);
+	const closeTabsForEntities = useTabsStore((s) => s.closeTabsForEntities);
+	const expandCollection = useCollectionsStore((s) => s.expandCollection);
+	const toggleCollectionExpanded = useCollectionsStore((s) => s.toggleCollectionExpanded);
+	const startSaving = useSaveStore((s) => s.startSaving);
+	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
+	const failSave = useSaveStore((s) => s.failSave);
 
 	const createCollectionMutation = useCreateCollectionMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();

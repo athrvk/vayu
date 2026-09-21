@@ -204,7 +204,8 @@ export default function RequestBuilderProvider({
 	}, [request.id]);
 
 	// Response state - use store for persistence across view switches
-	const { getResponse, setResponse: storeSetResponse } = useResponseStore();
+	const getResponse = useResponseStore((s) => s.getResponse);
+	const storeSetResponse = useResponseStore((s) => s.setResponse);
 	const [response, setLocalResponse] = useState<ResponseState | null>(() => {
 		// Initialize from store if available
 		const requestId = initialRequest?.id;
@@ -283,7 +284,8 @@ export default function RequestBuilderProvider({
 	 * open request tabs reuses this same provider instance rather than
 	 * remounting it.
 	 */
-	const { getRequestTab, setRequestTab } = useTabSelectionStore();
+	const getRequestTab = useTabSelectionStore((s) => s.getRequestTab);
+	const setRequestTab = useTabSelectionStore((s) => s.setRequestTab);
 	const [activeTab, setActiveTabState] = useState<RequestTab>(
 		() => (initialRequest?.id ? getRequestTab(initialRequest.id) : null) ?? "params"
 	);

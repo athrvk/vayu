@@ -24,7 +24,11 @@ import { ServicesPanel } from "@/modules/services";
 import { TrashList } from "@/modules/trash";
 
 export function Drawer() {
-	const { drawerOpen, setDrawerOpen, drawerView, drawerWidth, setDrawerWidth } = useLayoutStore();
+	const drawerOpen = useLayoutStore((s) => s.drawerOpen);
+	const setDrawerOpen = useLayoutStore((s) => s.setDrawerOpen);
+	const drawerView = useLayoutStore((s) => s.drawerView);
+	const drawerWidth = useLayoutStore((s) => s.drawerWidth);
+	const setDrawerWidth = useLayoutStore((s) => s.setDrawerWidth);
 
 	const width = drawerWidth;
 

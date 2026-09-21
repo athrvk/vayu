@@ -35,7 +35,9 @@ import DesignRunView from "./DesignRunView";
 import ScenarioRunView from "./ScenarioRunView";
 
 export default function HistoryDetail() {
-	const { openTabs, activeTabId, closeTab } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const closeTab = useTabsStore((s) => s.closeTab);
 
 	// Get selectedRunId from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);

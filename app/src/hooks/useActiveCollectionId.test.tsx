@@ -30,7 +30,7 @@ const requests: Record<string, { id: string; collectionId: string }> = {
 const requested: Array<string | null> = [];
 
 vi.mock("@/stores", () => ({
-	useTabsStore: () => tabs,
+	useTabsStore: (selector: (s: typeof tabs) => unknown) => selector(tabs),
 }));
 
 vi.mock("@/queries", () => ({

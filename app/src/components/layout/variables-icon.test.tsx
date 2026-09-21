@@ -53,7 +53,8 @@ vi.mock("@/queries", () => ({
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({
-	useVariablesStore: () => ({ selectedCategory: null }),
+	useVariablesStore: (selector: (s: { selectedCategory: null }) => unknown) =>
+		selector({ selectedCategory: null }),
 }));
 
 /**

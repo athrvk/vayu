@@ -35,7 +35,11 @@ import type { RowAction } from "@/components/shared";
 import type { TabDescriptor } from "./tab-descriptors";
 
 export function useTabActions(tab: Tab, descriptor: TabDescriptor): RowAction[] {
-	const { openTabs, closeTab, closeOtherTabs, closeTabsToRight, closeSavedTabs } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const closeTab = useTabsStore((s) => s.closeTab);
+	const closeOtherTabs = useTabsStore((s) => s.closeOtherTabs);
+	const closeTabsToRight = useTabsStore((s) => s.closeTabsToRight);
+	const closeSavedTabs = useTabsStore((s) => s.closeSavedTabs);
 	const { copy } = useCopy();
 
 	const index = openTabs.findIndex((t) => t.id === tab.id);

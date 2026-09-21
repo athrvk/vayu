@@ -53,7 +53,7 @@ vi.mock("@/queries", () => ({
 	useUpdateEnvironmentMutation: () => ({ mutate: mutateEnvironment }),
 }));
 vi.mock("@/stores", () => ({
-	useSessionStore: () => session,
+	useSessionStore: (selector: (s: typeof session) => unknown) => selector(session),
 }));
 
 import { useVariableWriter } from "./useVariableWriter";

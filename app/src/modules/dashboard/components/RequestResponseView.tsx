@@ -11,7 +11,7 @@
  * Displays status codes, errors, timing breakdown, sampled requests, and validation results
  */
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, Badge, ScrollArea } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { XCircle } from "lucide-react";
@@ -53,7 +53,10 @@ function formatTime(timestamp: number): string {
 	return `${timeStr}.${ms}`;
 }
 
-export default function RequestResponseView({ report }: RequestResponseViewProps) {
+// memo'd (#1714): `report` is a stable reference from the dashboard store
+// (`finalReport`, unchanged until a new run completes), so during a run's up
+// to 10 Hz metrics ticks this tab's content should not re-execute at all.
+function RequestResponseView({ report }: RequestResponseViewProps) {
 	const [expandedResults, setExpandedResults] = useState<Set<number>>(new Set());
 
 	// Fetched only once a row is open. The captured bodies are deliberately not
@@ -459,3 +462,5 @@ export default function RequestResponseView({ report }: RequestResponseViewProps
 		</div>
 	);
 }
+
+export default memo(RequestResponseView);

@@ -63,7 +63,7 @@ function statusLabel(status: Run["status"]): { text: string; className: string }
 }
 
 export function RecentRuns({ runs }: { runs: Run[] }) {
-	const { openTab } = useTabsStore();
+	const openTab = useTabsStore((s) => s.openTab);
 
 	// Copy before sorting: `runs` is the TanStack Query cache array.
 	const recent = [...runs]

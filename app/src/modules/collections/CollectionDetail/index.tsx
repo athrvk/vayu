@@ -65,7 +65,11 @@ const TABS: { id: CollectionTab; label: string }[] = [
 const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set(["info", "auth", "elements"]);
 
 export default function CollectionDetail() {
-	const { openTabs, activeTabId, specTabTarget, clearSpecTabTarget, openTab } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const specTabTarget = useTabsStore((s) => s.specTabTarget);
+	const clearSpecTabTarget = useTabsStore((s) => s.clearSpecTabTarget);
+	const openTab = useTabsStore((s) => s.openTab);
 
 	// Get selected collection ID from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -153,7 +157,8 @@ export default function CollectionDetail() {
 	 * fact), so the derived-during-render sync below restores it again on
 	 * every collection change too.
 	 */
-	const { getCollectionTab, setCollectionTab } = useTabSelectionStore();
+	const getCollectionTab = useTabSelectionStore((s) => s.getCollectionTab);
+	const setCollectionTab = useTabSelectionStore((s) => s.setCollectionTab);
 	const initialTab = (): CollectionTab =>
 		(selectedCollectionId ? getCollectionTab(selectedCollectionId) : null) ?? "info";
 	const [tab, setTabState] = useState<CollectionTab>(initialTab);

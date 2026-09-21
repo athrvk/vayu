@@ -66,20 +66,21 @@ function deleteRunErrorMessage(error: unknown): string {
 }
 
 export default function HistoryList() {
-	const { openTab, openTabs, activeTabId, closeTabsForEntities } = useTabsStore();
-	const { activateDrawerView } = useLayoutStore();
-	const {
-		searchQuery,
-		setSearchQuery,
-		filterType,
-		setFilterType,
-		filterStatus,
-		setFilterStatus,
-		pinnedOnly,
-		setPinnedOnly,
-		sortBy,
-		setSortBy,
-	} = useHistoryStore();
+	const openTab = useTabsStore((s) => s.openTab);
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
+	const closeTabsForEntities = useTabsStore((s) => s.closeTabsForEntities);
+	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
+	const searchQuery = useHistoryStore((s) => s.searchQuery);
+	const setSearchQuery = useHistoryStore((s) => s.setSearchQuery);
+	const filterType = useHistoryStore((s) => s.filterType);
+	const setFilterType = useHistoryStore((s) => s.setFilterType);
+	const filterStatus = useHistoryStore((s) => s.filterStatus);
+	const setFilterStatus = useHistoryStore((s) => s.setFilterStatus);
+	const pinnedOnly = useHistoryStore((s) => s.pinnedOnly);
+	const setPinnedOnly = useHistoryStore((s) => s.setPinnedOnly);
+	const sortBy = useHistoryStore((s) => s.sortBy);
+	const setSortBy = useHistoryStore((s) => s.setSortBy);
 
 	// Get selectedRunId from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);

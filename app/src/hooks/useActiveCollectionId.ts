@@ -27,7 +27,8 @@ import { useTabsStore } from "@/stores";
 import { useRequestQuery } from "@/queries";
 
 export function useActiveCollectionId(): string | undefined {
-	const { openTabs, activeTabId } = useTabsStore();
+	const openTabs = useTabsStore((s) => s.openTabs);
+	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 
 	// A collection tab needs no lookup - the Collection Detail script panels are

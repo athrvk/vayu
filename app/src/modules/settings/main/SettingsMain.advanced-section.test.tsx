@@ -76,35 +76,38 @@ vi.mock("@/queries", () => ({
 }));
 
 vi.mock("@/modules/settings/settings-store", () => ({
-	useSettingsStore: () => ({ selectedCategory: "data_retention" }),
+	useSettingsStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({ selectedCategory: "data_retention" }),
 }));
 
 const showToast = vi.fn();
 vi.mock("@/stores", () => ({
-	useEngineStore: () => ({
-		engineStatus: "connected",
-		pendingRestart: false,
-		restartRequiredKeys: [],
-		addRestartRequiredKey: vi.fn(),
-		clearRestartRequired: vi.fn(),
-	}),
+	useEngineStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			engineStatus: "connected",
+			pendingRestart: false,
+			restartRequiredKeys: [],
+			addRestartRequiredKey: vi.fn(),
+			clearRestartRequired: vi.fn(),
+		}),
 	// The panel toasts the edits a category-switch flush had to drop.
 	useToastStore: (selector: (s: { showToast: typeof showToast }) => unknown) =>
 		selector({ showToast }),
 }));
 
 vi.mock("@/stores/save-store", () => ({
-	useSaveStore: () => ({
-		startSaving: vi.fn(),
-		completeSaveThenIdle: vi.fn(),
-		failSave: vi.fn(),
-		setStatus: vi.fn(),
-		markPendingSave: vi.fn(),
-		registerContext: vi.fn(),
-		unregisterContext: vi.fn(),
-		setActiveContext: vi.fn(),
-		updateContext: vi.fn(),
-	}),
+	useSaveStore: (selector: (s: Record<string, unknown>) => unknown) =>
+		selector({
+			startSaving: vi.fn(),
+			completeSaveThenIdle: vi.fn(),
+			failSave: vi.fn(),
+			setStatus: vi.fn(),
+			markPendingSave: vi.fn(),
+			registerContext: vi.fn(),
+			unregisterContext: vi.fn(),
+			setActiveContext: vi.fn(),
+			updateContext: vi.fn(),
+		}),
 }));
 
 function renderSettings() {
