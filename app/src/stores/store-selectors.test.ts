@@ -63,6 +63,11 @@ interface Finding {
 	readonly text: string;
 }
 
+function isCommentLine(line: string): boolean {
+	const trimmed = line.trim();
+	return trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*");
+}
+
 function scan(): Finding[] {
 	const findings: Finding[] = [];
 	for (const file of scanned) {
@@ -71,6 +76,9 @@ function scan(): Finding[] {
 		lines.forEach((line, at) => {
 			const site = `${posixFile}:${at + 1}`;
 			if (ALLOWLIST.has(site)) return;
+			// A comment that names the anti-pattern (a "not a bare
+			// `useSaveStore()`" note beside the fix) is not a call site.
+			if (isCommentLine(line)) return;
 			if (NO_SELECTOR.test(line)) {
 				findings.push({
 					file: posixFile,
