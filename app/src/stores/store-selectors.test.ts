@@ -43,12 +43,7 @@ const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
  * to a sibling issue's fix, not this one. Remove the entry in the same
  * commit that issue lands.
  */
-const ALLOWLIST = new Set<string>([
-	// #1716 rebuilds VariableTableEditor's rows into a memoised `VariableRow`;
-	// narrowing this store read now would be redone by that issue's refactor.
-	"modules/variables/main/VariableTableEditor.tsx:290",
-	"modules/variables/main/VariableTableEditor.tsx:302",
-]);
+const ALLOWLIST = new Set<string>([]);
 
 const scanned = globSync("**/*.{ts,tsx}", { cwd: srcRoot }).filter(
 	(file) => !file.includes(".test.") && !file.includes(".testkit.")
