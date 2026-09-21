@@ -103,10 +103,18 @@ export default function HeadersPanel() {
 	const variables = useVariableSupport();
 	const { data: requestDefaults } = useRequestDefaultsQuery();
 
+	// Stable, not an inline arrow: `useHeadersManager` hands this straight back
+	// as `handleHeadersChange`, which is `KeyValueEditor`'s `onChange` and a
+	// dependency of every row callback there - a fresh identity per render
+	// would re-render every header row on every keystroke (issue #1716).
+	const onHeadersUpdate = useCallback(
+		(newHeaders: KeyValueItem[]) => updateField("headers", newHeaders),
+		[updateField]
+	);
 	const { displayHeaders, handleHeadersChange, handleBulkEdit, formatForBulkEdit } =
 		useHeadersManager({
 			headers: request.headers,
-			onUpdate: (newHeaders: KeyValueItem[]) => updateField("headers", newHeaders),
+			onUpdate: onHeadersUpdate,
 		});
 
 	const disabled = request.disabledDefaultHeaders;

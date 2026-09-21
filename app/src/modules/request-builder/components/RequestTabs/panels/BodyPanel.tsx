@@ -246,8 +246,14 @@ export default function BodyPanel() {
 	const isTable =
 		request.bodyMode === "form-data" || request.bodyMode === "x-www-form-urlencoded";
 	const tableItems = request.bodyMode === "form-data" ? request.formData : request.urlEncoded;
-	const onTableChange = (items: KeyValueItem[]) =>
-		updateField(request.bodyMode === "form-data" ? "formData" : "urlEncoded", items);
+	// Stable across keystrokes for the same reason as HeadersPanel's handler:
+	// it is `KeyValueEditor`'s `onChange`, so its identity gates every row's
+	// memo (issue #1716). It changes only with the body mode.
+	const onTableChange = useCallback(
+		(items: KeyValueItem[]) =>
+			updateField(request.bodyMode === "form-data" ? "formData" : "urlEncoded", items),
+		[updateField, request.bodyMode]
+	);
 
 	return (
 		/*

@@ -81,13 +81,20 @@ const saveStore = {
 	setStatus: vi.fn(),
 };
 
+const variablesStoreState = { selectedCategory: null, setSelectedCategory: vi.fn() };
+
 vi.mock("@/stores", () => ({
-	useSaveStore: () => saveStore,
+	// Selector-aware, not a bare `() => saveStore`: `VariableTableEditor` reads
+	// this store through per-field selectors now (issue #1714), so a mock that
+	// ignores the selector argument would hand every field the whole object
+	// back instead of the one function it asked for.
+	useSaveStore: (selector: (state: typeof saveStore) => unknown) => selector(saveStore),
 	useSessionStore: Object.assign(() => sessionStore, { getState: () => sessionStore }),
 }));
 
 vi.mock("@/modules/variables/variables-store", () => ({
-	useVariablesStore: () => ({ selectedCategory: null, setSelectedCategory: vi.fn() }),
+	useVariablesStore: (selector: (state: typeof variablesStoreState) => unknown) =>
+		selector(variablesStoreState),
 }));
 
 function makeCollection(variables: Record<string, VariableValue>): Collection {
