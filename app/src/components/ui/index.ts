@@ -166,7 +166,7 @@ export { VariablePopover } from "./variable-popover";
 export type { VariablePopoverProps, VariableInfo as VariablePopoverInfo } from "./variable-popover";
 
 export { VariableAutocomplete } from "./variable-autocomplete";
-export { SuggestionList, SUGGESTION_LIST_LIMIT } from "./suggestion-list";
+export { SuggestionList } from "./suggestion-list";
 export type { SuggestionListProps } from "./suggestion-list";
 export type {
 	VariableAutocompleteProps,

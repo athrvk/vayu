@@ -39,12 +39,7 @@ import {
 	type KeyboardEvent,
 	type ChangeEvent,
 } from "react";
-import {
-	VariableAutocomplete,
-	SuggestionList,
-	SUGGESTION_LIST_LIMIT,
-	type CommandListboxState,
-} from "@/components/ui";
+import { VariableAutocomplete, SuggestionList, type CommandListboxState } from "@/components/ui";
 import { buildVariableSuggestions, variableSuggestionKey } from "@/lib/variable-suggestions";
 import { isCommitEnter } from "@/lib/keyboard";
 import { cn } from "@/lib/utils";
@@ -332,13 +327,17 @@ export default function VariableInput({
 		);
 	}, [allVariables]);
 
-	// Filter plain text suggestions based on current value
+	// Filter plain text suggestions based on current value. Unsliced: `SuggestionList`
+	// below is the one place that caps what renders, the same way the command
+	// palette's own `CommandList` is - a cap here too used to mean the header list
+	// (31 names) never grew past 10 matches for `SuggestionList`'s max-height to
+	// scroll *within*, so the other 21 were unreachable, not merely unscrolled to.
 	const filteredSuggestions = useMemo(() => {
 		if (suggestions.length === 0) return [];
 		const lowerValue = value.toLowerCase();
-		return suggestions
-			.filter((s) => s.toLowerCase().includes(lowerValue) && s.toLowerCase() !== lowerValue)
-			.slice(0, SUGGESTION_LIST_LIMIT);
+		return suggestions.filter(
+			(s) => s.toLowerCase().includes(lowerValue) && s.toLowerCase() !== lowerValue
+		);
 	}, [suggestions, value]);
 
 	/*

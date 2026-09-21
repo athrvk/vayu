@@ -45,18 +45,18 @@ import {
 } from "./command";
 import { cn } from "@/lib/utils";
 
-/**
- * Cap on the rows drawn. Exported because the caller navigates the list with
- * the arrow keys and has to step through exactly what is on screen - a second
- * copy of the number is how the highlight walks off the end of the list.
- */
-export const SUGGESTION_LIST_LIMIT = 10;
-
 export interface SuggestionListProps {
 	/** Already filtered and ordered by the caller. */
 	items: string[];
 	onSelect: (value: string) => void;
-	/** Cap on what is shown; the caller may pass more. */
+	/**
+	 * Cap on what is shown, if any. Omitted, every item renders and
+	 * `CommandList`'s own `max-h-[300px] overflow-y-auto` scrolls to the rest -
+	 * the same way the command palette's uncapped list already does. A header
+	 * list of 31 names used to be sliced to 10 here on top of an identical
+	 * slice the caller already applied, so the other 21 were never reachable
+	 * by scrolling - there was nothing past the tenth row to scroll *to*.
+	 */
 	limit?: number;
 	className?: string;
 	/**
@@ -77,13 +77,14 @@ export interface SuggestionListProps {
 export function SuggestionList({
 	items,
 	onSelect,
-	limit = SUGGESTION_LIST_LIMIT,
+	limit,
 	className,
 	value,
 	onValueChange,
 	onListboxState,
 }: SuggestionListProps) {
 	if (items.length === 0) return null;
+	const shown = limit === undefined ? items : items.slice(0, limit);
 
 	return (
 		<div className={cn("enter-fade w-64 rounded-lg border bg-popover shadow-md", className)}>
@@ -92,7 +93,7 @@ export function SuggestionList({
 					{onListboxState && <CommandListboxProbe onChange={onListboxState} />}
 					<CommandScrollIntoView />
 					<CommandGroup>
-						{items.slice(0, limit).map((item) => (
+						{shown.map((item) => (
 							<CommandItem
 								key={item}
 								value={item}
