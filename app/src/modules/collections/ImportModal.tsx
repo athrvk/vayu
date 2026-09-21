@@ -924,9 +924,14 @@ export function ImportModal() {
 				 * underline tabs. These were hand-rolled buttons with `py-2` and no
 				 * horizontal padding, which is what made the focus ring look wrong:
 				 * the ring correctly wrapped a 73x38 box around 73px of text, so it
-				 * read as a tall rectangle floating around the label. Every other
-				 * tab in the app is px-4 py-2.5, so the ring wraps a proportioned
-				 * target.
+				 * read as a tall rectangle floating around the label.
+				 *
+				 * `size="sm"` (28px), not the `xs` default: File/URL/Paste is this
+				 * dialog's only top-level navigation, the role the dashboard's own
+				 * root tabs play - not a strip nested inside an already-chosen
+				 * section, which is what `xs` is sized for (Collection Detail, the
+				 * response viewer). Left at `xs` this read thinner than the header
+				 * and footer bands around it.
 				 *
 				 * Radix also brings the keyboard model tabs are supposed to have -
 				 * one tab stop for the set, arrow keys to move between them. The
@@ -941,7 +946,7 @@ export function ImportModal() {
 					onValueChange={(v) => setTab(v as Tab)}
 					className="flex min-h-0 flex-1 flex-col"
 				>
-					<TabsList variant="pane" className="w-full">
+					<TabsList variant="pane" size="sm" className="w-full">
 						{(["file", "url", "paste"] as Tab[]).map((t) => (
 							<TabsTrigger key={t} value={t}>
 								<TabLabel>
