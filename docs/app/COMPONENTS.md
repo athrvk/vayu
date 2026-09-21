@@ -1842,8 +1842,15 @@ row's own entry onto the new id, so a duplicated script starts at its
 source's height rather than the default. A handle below the box - the
 GraphQL body's `ResizableHandle` styling, without the panel group it depends
 on - drags it between `SCRIPT_EDITOR_MIN_HEIGHT` and `SCRIPT_EDITOR_MAX_HEIGHT`
-(`constants/layout.ts`), previewing every pointer-move frame and persisting
-debounced, plus ArrowUp/ArrowDown by `SCRIPT_EDITOR_HEIGHT_STEP`.
+(`constants/layout.ts`). The drag writes the box's `style.height` directly,
+coalesced to one write per animation frame, and commits to the store exactly
+once on release - `PanelResizeHandle`'s own rAF/one-commit-on-release pattern
+(issue #1715), inlined here rather than shared, because a per-pointer-move
+debounced write left a window where the store's stale value could win a race
+against the drag's own live value and flash the box back before jumping
+forward again. Issue #1738 tracks extracting that mechanism into one shared
+hook instead of two independently-written copies. Arrow keys nudge by
+`SCRIPT_EDITOR_HEIGHT_STEP` and commit immediately, with no debounce.
 
 **Five kinds pick one strategy instead of showing every one at once**
 (`ModeElementForm.tsx`, with the table in `element-modes.ts`). `assert.status`

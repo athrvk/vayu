@@ -20,17 +20,29 @@
  *
  * **The editor box has a definite pixel height** (issue #1605). The element
  * card it sits in (`ElementRow`) is an auto-height block, not a bounded
- * ancestor a percentage or a `ResizablePanelGroup` could divide - `Group`
- * (`react-resizable-panels`, `components/ui/resizable.tsx`) lays its panels
- * out as `flex h-full w-full` and divides whatever height its own box
- * already has; it has no way to *grow* an unbounded ancestor, only to split
- * a bounded one, so it is the wrong shape for a single box whose own pixel
- * height is the thing being dragged. A drag handle below the box - the same
- * rAF-coalesced-write, one-commit-on-release pattern `PanelResizeHandle`
- * uses for the drawer and context bar widths (issue #1715), inlined here
- * because that component is wired to a horizontal `parentElement.style.width`
- * and its own width constants - sets the height directly, in
- * `layout-store`'s `scriptEditorHeights`.
+ * ancestor a percentage or a `ResizablePanelGroup` could divide. `Group`
+ * (`react-resizable-panels`, `components/ui/resizable.tsx`) sizes a panel
+ * with `flex-grow` against the group's own measured `getBoundingClientRect`
+ * (v4 does take a pixel `minSize`/`maxSize`/`resize()`, but those are still
+ * validated against that same measured total) - so it can constrain a
+ * *share* of a definite total, never set one, which is exactly what this
+ * box's own absolute, unbounded-parent height needs. A drag handle below the
+ * box - the same rAF-coalesced-write, one-commit-on-release pattern
+ * `PanelResizeHandle` uses for the drawer and context bar widths (issue
+ * #1715), inlined here because that component is wired to a horizontal
+ * `parentElement.style.width` and its own width constants (see the follow-up
+ * issue below) - sets the height directly, in `layout-store`'s
+ * `scriptEditorHeights`.
+ *
+ * **This is a second implementation of that mechanism, not a shared one**
+ * (issue #1738). Extracting the rAF/clamp/commit-on-release logic itself
+ * into a hook - the way `modules/collections/drag-gesture.ts` extracts an
+ * ordering gesture into a pure, ref-free state machine - is tracked there,
+ * along with two gaps the extraction should close for both copies at once:
+ * neither handles `pointercancel` (a touch interruption or OS overlay mid-drag
+ * leaves the listeners attached and the store never commits), and this copy's
+ * keyboard handling covers only Arrow keys, not `PanelResizeHandle`'s
+ * Page/Home/End/reset.
  *
  * **That height is per element id, not shared across every script row**
  * (issue #1643). A request or collection can show a `script.pre` and a
@@ -106,7 +118,6 @@ export function ScriptElementForm({
 	const [mountDefault] = useState(() => useLayoutStore.getState().scriptEditorHeightDefault);
 	const storedHeight = ownHeight ?? mountDefault;
 	const setStoredHeight = useLayoutStore((s) => s.setScriptEditorHeight);
-	const height = storedHeight;
 
 	const boxRef = useRef<HTMLDivElement | null>(null);
 	// Only ever holds an id while a drag's rAF is in flight, mirroring
@@ -189,7 +200,7 @@ export function ScriptElementForm({
 					// gains a flex ancestor above this one must not let the editor keep
 					// its old height and grow a second scrollbar beside Monaco's own.
 					className="min-h-0 shrink-0 rounded-t-md border border-b-0 border-rule surface-card bg-card overflow-hidden"
-					style={{ height }}
+					style={{ height: storedHeight }}
 				>
 					<CodeEditor
 						language="javascript"

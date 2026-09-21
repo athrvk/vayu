@@ -2656,7 +2656,13 @@ straight onto the `<aside>`'s inline `style.width` (it is the handle's own
 `parentElement`) once per animation frame, and calls `setWidth` - the write
 `layout-store` persists - exactly once, on `pointerup`. Keyboard nudges and the
 double-click reset are discrete key presses and clicks, not a per-frame stream,
-so they still call `setWidth` straight away.
+so they still call `setWidth` straight away. The script editor's own resize
+handle (`ScriptElementForm`, `components/shared/ElementList/`) writes its box's
+`style.height` the same way for the same reason - a per-move debounced write
+left a window where a stale store value could win a race against the live drag
+and flash the box back before jumping forward again - as a second, independent
+copy of this pattern rather than a shared one; issue #1738 tracks extracting
+it into one hook both consume.
 
 **The Drawer wraps no view in a scroll region.** Each view supplies its own
 `DrawerPanel` (`app/src/components/shared/DrawerPanel.tsx`), which owns the

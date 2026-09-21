@@ -178,6 +178,85 @@ describe("the resize handle", () => {
 		rafSpy.mockRestore();
 	});
 
+	it("coalesces several moves within one frame into a single scheduled write", () => {
+		// A macrotask, not a synchronous callback: `PanelResizeHandle.test.tsx`'s
+		// `stubAnimationFrame` does the same, because a callback that runs
+		// inline never leaves a frame "pending" for a second `pointermove` to
+		// observe - `if (rafIdRef.current !== null) return` would never see a
+		// non-null ref to return on.
+		vi.useFakeTimers();
+		const rafSpy = vi.fn((cb: FrameRequestCallback) => setTimeout(() => cb(0), 0) as never);
+		vi.stubGlobal("requestAnimationFrame", rafSpy);
+		const { box } = renderForm();
+		const handle = heightHandle();
+		// React's own scheduler can call requestAnimationFrame during mount,
+		// unrelated to the drag - only calls from here on are the resize
+		// handler's.
+		rafSpy.mockClear();
+
+		fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1 });
+		window.dispatchEvent(new PointerEvent("pointermove", { clientY: 140, pointerId: 1 }));
+		window.dispatchEvent(new PointerEvent("pointermove", { clientY: 160, pointerId: 1 }));
+
+		// One frame requested for both moves, and the box has painted nothing
+		// yet - the frame hasn't run.
+		expect(rafSpy).toHaveBeenCalledTimes(1);
+		expect(box).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT}px` });
+
+		vi.runAllTimers();
+
+		// The single frame paints the *latest* move, not the first - the
+		// coalescing drops intermediate positions, never the final one.
+		expect(box).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT + 60}px` });
+
+		window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
+			DEFAULT_SCRIPT_EDITOR_HEIGHT + 60
+		);
+
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	it("cancels a still-pending frame on release rather than painting after the commit", () => {
+		// A manual capture-and-never-flush stub, not the macrotask one above:
+		// stubbing both `requestAnimationFrame` and `cancelAnimationFrame`
+		// together under `vi.useFakeTimers()` collides with `ScriptSnippets`'
+		// own Radix Collapsible, which schedules its own frame in the same
+		// tree - Vitest's fake-timer bookkeeping then sees a timer "created
+		// with setTimeout" get "cleared with cancelAnimationFrame" and throws.
+		// `vi.spyOn` alone never touches Vitest's timer registry, so it
+		// doesn't collide with whatever else in the tree also calls these.
+		const held: { frame: FrameRequestCallback | null } = { frame: null };
+		const rafSpy = vi
+			.spyOn(window, "requestAnimationFrame")
+			.mockImplementation((cb: FrameRequestCallback) => {
+				held.frame = cb;
+				return 7;
+			});
+		const cancelSpy = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+		renderForm();
+		const handle = heightHandle();
+
+		fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1 });
+		window.dispatchEvent(new PointerEvent("pointermove", { clientY: 140, pointerId: 1 }));
+		// Released before the browser ever ran the scheduled frame.
+		window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
+
+		expect(cancelSpy).toHaveBeenCalledWith(7);
+		// The commit still lands with the drag's last computed height, even
+		// though no frame ever painted it - onUp reads its own `liveHeight`
+		// closure variable, not the DOM. The frame is never flushed (`held.frame`
+		// is intentionally left uncalled), matching a real cancelled frame.
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
+			DEFAULT_SCRIPT_EDITOR_HEIGHT + 40
+		);
+		void held;
+
+		rafSpy.mockRestore();
+		cancelSpy.mockRestore();
+	});
+
 	it("clamps a drag past the ceiling", () => {
 		const rafSpy = vi
 			.spyOn(window, "requestAnimationFrame")
