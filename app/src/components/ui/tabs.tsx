@@ -23,10 +23,10 @@
  * and a bare `data-[state=active]:font-semibold` widens the trigger, so
  * switching tab shoves its neighbours sideways. `CollectionDetail` shipped that
  * bug. `TabLabel` reserves the bold width up front, in the primitive, so no
- * call site can reintroduce it. `MARK_SLOT` further down is the same idea for
- * the other half of a trigger's width: a count or an error dot that mounts
- * widens its trigger and shoves its neighbours, so the slot is always there and
- * only its contents change.
+ * call site can reintroduce it. `MARK_TRACK` further down answers the same
+ * problem for the other half of a trigger's width: a count or an error dot
+ * that mounts at full width widens its trigger and shoves its neighbours, so
+ * the mark's own track animates open from zero instead of jumping.
  *
  * This file previously shipped shadcn's segmented-pill default, which four of
  * the five call sites immediately undid with `h-auto p-0 bg-transparent` before
@@ -234,40 +234,41 @@ function TabLabel({ children }: { children: string }) {
 }
 
 /*
- * The slot a trailing mark on a trigger sits in - the count, the error dot.
+ * The track a trailing mark on a trigger animates into - the count, the error
+ * dot.
  *
- * **Why the slot is reserved, and not just the mark's contents.** A mark is a
- * flex item on the trigger; the trigger is `shrink-0` inside a `flex-nowrap`
- * list. So a mark that *mounts* widens its own trigger by its own width plus
- * the trigger's `gap-1.5`, and every trigger to its right moves along with it -
- * and so does whatever else shares the row (the request strip's `Table`
- * toggle). Typing the first character into an empty Params table moved the
- * seven tabs after Params and the toggle past them. This is the same defect
- * `TabLabel` above fixes for the active weight, arriving through content
- * instead of through a class.
+ * **Why this animates a track instead of reserving one.** A mark is a flex
+ * item on the trigger; the trigger is `shrink-0` inside a `flex-nowrap` list.
+ * So a mark that *mounts* at its full width widens its own trigger instantly
+ * and every trigger to its right jumps along with it - and so does whatever
+ * else shares the row (the request strip's `Table` toggle). Typing the first
+ * character into an empty Params table moved the seven tabs after Params and
+ * the toggle past them. This is the same defect `TabLabel` above fixes for
+ * the active weight, arriving through content instead of through a class.
  *
- * `TabLabel`'s own trick - a hidden copy at the widest state - does not
- * transfer, because a count has no widest state: it is a number, not one
- * string rendered two ways. So the slot is held open instead, and the mark
- * empties rather than unmounting.
+ * An earlier version fixed the jump by holding a `min-w-[1ch]` slot open at
+ * all times - it worked, but every countable tab then paid that width (plus
+ * the trigger's `gap-1.5` before it) permanently, on every tab strip in the
+ * app, whether or not anything was ever counted. That is dead space a strip
+ * that already scrolls at seven or eight tabs (see SIZE) cannot afford to
+ * spend on tabs that usually show nothing.
  *
- * `1ch`, in the `font-mono` `text-micro` this sets: one `ch` there *is* one
- * digit, whatever the font scale resolves that to, and in a monospace face
- * every digit has the same advance. A pixel or `rem` literal would be a
- * number nudged until it
- * looked right, and would drift the moment the micro step moved. Both marks
- * carry the same class so the Console tab's either/or (dot *or* count) is
- * width-neutral too, which a `size-[5px]` dot beside a `1ch` count is not.
- *
- * `min-w`, not `w`: a count crossing 9 to 10 is content genuinely growing, and
- * a pinned slot would clip it. That transition still moves the triggers to its
- * right, by one digit, and is left that way on purpose - reserving two digits
- * would cost that width permanently on every counted tab, on strips that
- * already scroll at seven and eight tabs (see SIZE). The transition worth
- * spending width on is nothing-to-something, which every counted tab makes and
- * most make often; nine-to-ten is a tab strip most requests never reach.
+ * The replacement is the `grid-template-columns: 0fr -> 1fr` technique
+ * (industry-standard for animating an element's own contribution to its
+ * container's size without a fixed target width: `0fr` is exactly zero,
+ * `1fr` resolves to the content's intrinsic width, and both are real track
+ * sizes a transition can interpolate between - unlike animating to `auto`,
+ * which cannot transition at all). `MARK_TRACK` is the wrapper: `grid-cols-*`
+ * carries the width, `overflow-hidden` clips the content mid-transition, and
+ * `-ms-1.5`/`ms-0` cancels and restores the trigger's own `gap-1.5` in step
+ * with the width so an empty mark costs nothing, not even its own gap - the
+ * two `transition-[...]` properties move together for exactly that reason.
+ * `TabLabel`'s hidden-copy trick does not transfer here: a count has no
+ * "widest state" to reserve, it is a number, not one string rendered two
+ * ways.
  */
-const MARK_SLOT = "min-w-[1ch] text-center font-mono text-micro leading-none";
+const MARK_TRACK =
+	"grid overflow-hidden transition-[grid-template-columns,margin-inline-start] duration-150 ease-out";
 
 /**
  * The small superscript count on a tab.
@@ -293,15 +294,16 @@ const MARK_SLOT = "min-w-[1ch] text-center font-mono text-micro leading-none";
  * the string `"0"`.
  *
  * **"Renders nothing" means nothing *perceptible*, not nothing at all.** The
- * `<sup>` is always here, holding `MARK_SLOT` open; only its contents come and
- * go, so a count appearing shifts no sibling. It is empty, not `0` and not a
- * placeholder glyph, so it contributes no text to the trigger's accessible
- * name and a screen reader reads "Params", not "Params 0".
+ * `<sup>` is always here, at a `grid-cols-[0fr]` track (see `MARK_TRACK`);
+ * only its contents and its own track size come and go, so a count appearing
+ * grows in rather than popping and costs nothing at rest. It is empty, not
+ * `0` and not a placeholder glyph, so it contributes no text to the trigger's
+ * accessible name and a screen reader reads "Params", not "Params 0".
  *
  * The contract that follows for callers: render `TabCount` **unconditionally**
  * on any tab that can carry a count, passing `undefined` when it has none -
  * gating the element is what reintroduces the shift. A tab that can never
- * carry one renders no `TabCount` at all and pays no reserved width.
+ * carry one renders no `TabCount` at all and pays no width, ever.
  */
 function TabCount({ value, className }: { value?: React.ReactNode; className?: string }) {
 	const shown = value === 0 || value === undefined || value === null ? null : value;
@@ -309,16 +311,19 @@ function TabCount({ value, className }: { value?: React.ReactNode; className?: s
 	return (
 		<sup
 			data-slot="tab-count"
-			className={cn(MARK_SLOT, "tabular-nums text-primary-text", className)}
+			className={cn(
+				MARK_TRACK,
+				shown === null ? "grid-cols-[0fr] -ms-1.5" : "grid-cols-[1fr] ms-0"
+			)}
 		>
-			{/*
-			 * The fade rides the value, not the slot. `.enter-fade` is a mount
-			 * effect (`@starting-style`), and the slot no longer mounts - so the
-			 * span that does carries it, and a count appearing still fades in
-			 * rather than popping. React keeps this node across a 1 -> 2, so only
-			 * absent-to-present fades, which is the transition worth marking.
-			 */}
-			{shown === null ? null : <span className="enter-fade">{shown}</span>}
+			<span
+				className={cn(
+					"min-w-0 text-center font-mono text-micro leading-none tabular-nums text-primary-text",
+					className
+				)}
+			>
+				{shown}
+			</span>
 		</sup>
 	);
 }
@@ -331,10 +336,13 @@ function TabCount({ value, className }: { value?: React.ReactNode; className?: s
  * silently deleted the only signal that a script failed. Keeping the mark its
  * own element means the two can be controlled separately.
  *
- * It shares `MARK_SLOT` with the count, and the 5px dot centres inside it: its
- * one call site swaps the two on the same trigger, so a bare 5px dot standing
- * where a `1ch` count stood would move the tabs to its right every time a
- * script failed.
+ * It shares `MARK_TRACK` with the count, but unlike `TabCount` it is not kept
+ * mounted at rest - its one call site swaps it in for a `TabCount` outright
+ * (`hasScriptError ? <TabErrorDot /> : <TabCount .../>`), a real mount, not a
+ * prop flip on an already-present node. `transition-*` only animates a value
+ * that changes on an element already in the DOM, so a genuine mount needs
+ * `starting:` (`@starting-style`) to have a "before" frame to animate from -
+ * the same mechanism `.enter-fade` uses for the same reason.
  */
 function TabErrorDot({
 	label = "Script error",
@@ -346,14 +354,19 @@ function TabErrorDot({
 	return (
 		<span
 			data-slot="tab-error-dot"
-			className={cn(MARK_SLOT, "inline-flex items-center justify-center", className)}
+			className={cn(
+				MARK_TRACK,
+				"starting:grid-cols-[0fr] starting:-ms-1.5 grid-cols-[1fr] ms-0"
+			)}
 		>
-			<span
-				role="img"
-				aria-label={label}
-				title={label}
-				className="size-[5px] shrink-0 rounded-full bg-status-error enter-fade"
-			/>
+			<span className="flex min-w-0 items-center justify-center">
+				<span
+					role="img"
+					aria-label={label}
+					title={label}
+					className={cn("size-[5px] shrink-0 rounded-full bg-status-error", className)}
+				/>
+			</span>
 		</span>
 	);
 }

@@ -293,10 +293,11 @@ export default function CollectionDetail() {
 					{TABS.map((t) => {
 						/*
 						 * Two of the six can carry a count, and those two render
-						 * `TabCount` unconditionally: it reserves the slot and empties
-						 * itself at zero, so the first variable appearing no longer
-						 * pushes Data and Spec rightward. The other four render no
-						 * slot and pay no reserved width.
+						 * `TabCount` unconditionally: it animates its own track open
+						 * from zero width, so the first variable appearing grows in
+						 * rather than instantly pushing Data and Spec rightward, and
+						 * costs nothing while there is nothing to count. The other
+						 * four render no `TabCount` at all and pay no width, ever.
 						 */
 						const counted = t.id === "variables" || t.id === "data";
 						const count = t.id === "variables" ? variableCount : declaredColumnCount;

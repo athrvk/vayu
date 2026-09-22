@@ -215,11 +215,12 @@ describe("a force-mounted panel stays out of sight", () => {
 describe("counts and the error mark are different things", () => {
 	it("renders a count as an accent superscript that sets no height floor", () => {
 		render(<TabCount value={5} />);
-		// The value rides an inner span so `.enter-fade` still has a mount to
-		// fire on; the slot it sits in is the `sup` and no longer unmounts.
-		const el = screen.getByText("5").closest("sup")!;
+		// The value rides an inner span so its own text colour lives there,
+		// separate from the `sup` that carries the animated track.
+		const value = screen.getByText("5");
+		expect(value.className).toContain("text-primary-text");
+		const el = value.closest("sup")!;
 		expect(el).not.toBeNull();
-		expect(el.className).toContain("text-primary-text");
 		// An h-5 Badge pill is what kept the old band at 38px.
 		expect(el.className).not.toMatch(/\bh-\d/);
 	});
@@ -235,7 +236,9 @@ describe("counts and the error mark are different things", () => {
 });
 
 /*
- * The mark slot holds its width open (the Params-badge report).
+ * The mark's track animates open rather than staying reserved (the Params-
+ * badge report, and the later "dead space" pushback against a permanent
+ * `min-w-[1ch]` slot).
  *
  * `TabCount` used to be gated at each call site (`badge !== undefined &&`) and
  * to return `null` at zero, so a count arriving *mounted a flex item* on a
@@ -244,15 +247,16 @@ describe("counts and the error mark are different things", () => {
  * whatever else shared the row - moved. Typing one character into an empty
  * Params table moved seven tabs and a toggle.
  *
- * jsdom lays nothing out, so the width itself is unobservable here (the same
- * limit TabLabel's tests hit). What is observable is the mechanism: the `sup`
- * is present in both states and carries the reserved-width class, and the
- * trigger's own class list does not change.
+ * jsdom lays nothing out, so the animated width itself is unobservable here
+ * (the same limit TabLabel's tests hit). What is observable is the mechanism:
+ * the `sup` is present in both states, its `grid-template-columns` track and
+ * cancelling margin flip between the zero and full-width classes as the value
+ * changes, and the trigger's own class list never changes.
  *
  * Mutation check (confirmed): restore `if (value === undefined) return null;`
  * at the top of `TabCount` and "keeps the count's slot..." fails on the absent
- * `sup`; drop `min-w-[1ch]` from `MARK_SLOT` and "reserves exactly one digit"
- * and the error-dot case both fail.
+ * `sup`; swap the `grid-cols-[0fr]`/`grid-cols-[1fr]` branches in `TabCount`
+ * and "opens the track when the count arrives" fails on the inverted classes.
  */
 describe("a count appearing does not move the tabs beside it", () => {
 	function Counted({ badge }: { badge?: number }) {
@@ -275,27 +279,32 @@ describe("a count appearing does not move the tabs beside it", () => {
 
 	const slotOf = (tab: HTMLElement) => tab.querySelector<HTMLElement>("[data-slot='tab-count']");
 
-	it("keeps the count's slot in the DOM with nothing to count", () => {
+	it("keeps the count's slot in the DOM with nothing to count, at a zero-width track", () => {
 		render(<Counted />);
 		const slot = slotOf(screen.getByRole("tab", { name: "Params" }));
 		expect(slot, "no slot - the count will widen the trigger when it arrives").not.toBeNull();
 		expect(slot?.tagName).toBe("SUP");
+		expect(slot?.className).toContain("grid-cols-[0fr]");
+		// Cancels the trigger's gap-1.5 so an empty slot costs no width at all.
+		expect(slot?.className).toContain("-ms-1.5");
 	});
 
-	it("reserves exactly one digit, in the count's own font", () => {
+	it("opens the track when the count arrives, in the count's own font", () => {
 		render(<Counted badge={3} />);
 		// `/Params/`, not `"Params"`: a count that is *showing* joins the
 		// trigger's accessible name ("Params 3"), which is the behaviour this
 		// file's other cases pin. Only the empty slot has to stay silent.
 		const slot = slotOf(screen.getByRole("tab", { name: /Params/ }))!;
+		expect(slot.className).toContain("grid-cols-[1fr]");
+		expect(slot.className).toContain("ms-0");
 		// `ch` in `font-mono` `text-micro` is one digit of the count itself - a
 		// px literal would drift the moment the micro step moved.
-		expect(slot.className).toContain("min-w-[1ch]");
-		expect(slot.className).toContain("font-mono");
-		expect(slot.className).toContain("text-micro");
+		const value = slot.querySelector("span")!;
+		expect(value.className).toContain("font-mono");
+		expect(value.className).toContain("text-micro");
 	});
 
-	it("changes only the slot's contents when the count arrives", () => {
+	it("changes the same node's track and contents when the count arrives", () => {
 		const { rerender } = render(<Counted />);
 		const params = screen.getByRole("tab", { name: "Params" });
 		const headers = screen.getByRole("tab", { name: "Headers" });
@@ -303,16 +312,15 @@ describe("a count appearing does not move the tabs beside it", () => {
 		const emptySlot = slotOf(params)!;
 		expect(emptySlot.textContent).toBe("");
 		const triggerClasses = params.className;
-		const slotClasses = emptySlot.className;
 
 		rerender(<Counted badge={3} />);
 
 		const filledSlot = slotOf(params)!;
 		expect(params.className).toBe(triggerClasses);
 		expect(filledSlot.textContent).toBe("3");
-		// The same element, not a remount: only its child changed.
+		// The same element, not a remount: only the track and its child changed.
 		expect(filledSlot).toBe(emptySlot);
-		expect(filledSlot.className).toBe(slotClasses);
+		expect(filledSlot.className).toContain("grid-cols-[1fr]");
 		expect(params.className).toBe(triggerClasses);
 		// Nothing was inserted before Headers, which is how the shift travelled.
 		expect(headers.querySelector("[data-slot='tab-count']")).toBeNull();
@@ -331,18 +339,23 @@ describe("a count appearing does not move the tabs beside it", () => {
 
 	it("still swallows a zero rather than announcing 'there are none'", () => {
 		render(<Counted badge={0} />);
-		expect(slotOf(screen.getByRole("tab", { name: "Params" }))?.textContent).toBe("");
+		const slot = slotOf(screen.getByRole("tab", { name: "Params" }))!;
+		expect(slot.textContent).toBe("");
+		expect(slot.className).toContain("grid-cols-[0fr]");
 		expect(screen.getByRole("tab", { name: "Params" }).textContent).not.toMatch(/\d/);
 	});
 
-	it("gives the error dot the same slot, so the Console swap is width-neutral", () => {
+	it("gives the error dot the same track, so the Console swap is width-neutral", () => {
 		// The one call site renders the dot *instead of* the count. A bare 5px
-		// dot standing where a 1ch count stood moves everything to its right.
+		// dot standing where a count's track stood moves everything to its right.
 		const { container } = render(<TabErrorDot />);
 		const slot = container.querySelector<HTMLElement>("[data-slot='tab-error-dot']")!;
 		expect(slot).not.toBeNull();
-		expect(slot.className).toContain("min-w-[1ch]");
-		expect(slot.className).toContain("text-micro");
+		expect(slot.className).toContain("grid-cols-[1fr]");
+		// A genuine mount (the dot swaps in for a `TabCount`, not a prop flip on
+		// an already-present node), so it needs a `starting:` frame to animate
+		// from - `.enter-fade`'s own reason for existing.
+		expect(slot.className).toContain("starting:grid-cols-[0fr]");
 		expect(slot.querySelector("[aria-label='Script error']")).not.toBeNull();
 	});
 });

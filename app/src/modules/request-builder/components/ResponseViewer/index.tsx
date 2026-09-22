@@ -21,6 +21,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { BookmarkPlus } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
 	Tabs,
 	TabsContent,
@@ -59,52 +60,46 @@ import SaveAsExampleDialog from "./SaveAsExampleDialog";
 import type { ResponseState, ResponseTab } from "../../types";
 
 /**
- * The Tests tab's pass/fail chip, in a slot that is always the same width.
+ * The Tests tab's pass/fail chip, animated into a track that costs nothing at
+ * rest.
  *
  * A result, not a count - it keeps its `Badge` rather than becoming a
  * `TabCount`, and it says nothing at all when nothing ran, because "0/0" reads
- * like a result. What it must *not* do is arrive by mounting: a mark on a
- * trigger is a flex item, the trigger is `shrink-0` inside this strip's
- * `flex-nowrap` list, so a chip appearing widened the Tests trigger by its own
- * width plus the trigger's `gap-1.5` and pushed Events and Raw along with it.
- * A response with tests and one without would draw the strip two different
- * ways, under a pointer on its way to one of those two tabs. This is the same
- * defect `MARK_SLOT` in `tabs.tsx` fixes for `TabCount` and `TabErrorDot`; the
- * chip simply could not take that fix, because `MARK_SLOT`'s "empty the mark
- * and keep the slot" leaves a `Badge` painting an empty coloured pill.
+ * like a result. What it must *not* do is arrive by an instant jump: a mark on
+ * a trigger is a flex item, the trigger is `shrink-0` inside this strip's
+ * `flex-nowrap` list, so a chip appearing widens the Tests trigger by its own
+ * width plus the trigger's `gap-1.5` and pushes Events and Raw along with it -
+ * a response with tests and one without would draw the strip two different
+ * ways, under a pointer on its way to one of those two tabs.
  *
- * So the width is reserved the other way the app already reserves one -
- * `TabLabel`'s trick: a hidden twin of the chip at its narrowest real form
- * (`0/0`) sits in the same grid cell, `invisible` and `h-0`, sizing the column
- * while contributing no height and no accessible text. The cell still takes the
- * wider of the two, so a `12/12` is content genuinely growing and does move the
- * two triggers to its right by a digit - left that way on purpose, the same
- * trade `MARK_SLOT` documents for a count crossing 9 to 10. The transition
- * worth spending permanent width on is nothing-to-something, which every
- * response that runs tests makes.
+ * This is the same defect `MARK_TRACK` in `tabs.tsx` fixes for `TabCount` and
+ * `TabErrorDot`, and the same fix: a `grid-template-columns: 0fr -> 1fr` track
+ * that is genuinely zero width - and cancels its own `ml-0.5` alongside it -
+ * when there is nothing to show, and animates open to the chip's intrinsic
+ * width when there is. Unlike the `TabLabel`-style hidden-twin reservation
+ * this replaces, nothing is ever reserved for a response that never runs
+ * tests. The `Badge` itself stays mounted with empty content rather than
+ * mounting fresh, matching `TabCount`'s contract, so this is a value change on
+ * an existing node and needs no `starting:` frame to transition from.
  */
 function TestsResultChip({ results }: { results: readonly { passed: boolean }[] }) {
 	const passed = results.filter((t) => t.passed).length;
+	const hasResults = results.length > 0;
 
 	return (
-		<span data-slot="tests-result-chip" className="ml-0.5 grid">
-			<span
-				data-slot="tests-result-chip-reserve"
-				aria-hidden="true"
-				className="invisible col-start-1 row-start-1 h-0"
-			>
-				<Badge variant="default" className="h-4 px-1 text-micro">
-					0/0
-				</Badge>
-			</span>
-			{results.length > 0 && (
-				<Badge
-					variant={results.every((t) => t.passed) ? "default" : "destructive"}
-					className="col-start-1 row-start-1 h-4 px-1 text-micro enter-fade"
-				>
-					{passed}/{results.length}
-				</Badge>
+		<span
+			data-slot="tests-result-chip"
+			className={cn(
+				"grid overflow-hidden transition-[grid-template-columns,margin-left] duration-150 ease-out",
+				hasResults ? "grid-cols-[1fr] ml-1" : "grid-cols-[0fr] ml-0"
 			)}
+		>
+			<Badge
+				variant={hasResults && results.every((t) => t.passed) ? "default" : "destructive"}
+				className="h-4 min-w-0 px-1 text-micro"
+			>
+				{hasResults ? `${passed}/${results.length}` : null}
+			</Badge>
 		</span>
 	);
 }

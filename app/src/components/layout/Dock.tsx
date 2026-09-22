@@ -285,54 +285,44 @@ function SaveError() {
 }
 
 /**
- * The save line, in a slot whose width never changes.
+ * The save line, animated into a track that costs nothing while idle.
  *
- * **Why a slot and not four conditional spans.** The four lines used to be four
+ * **Why this animates rather than reserving.** The four lines used to be four
  * `{status === "x" && ...}` children of the ambient group, which is centred in
  * the strip by two equal `flex-1` gutters - so the group's own width decides
- * where it starts, and every item in it moves when that width changes. One edit
- * walks the store through `pending` -> `saving` -> `saved` -> `idle`, four
- * different widths in a couple of seconds, and each step slid the connection
- * light one way and the version string the other, by half the difference. It is
- * the ambient row of the whole app, on screen behind every surface in it, and
- * it twitched on every keystroke sequence the user typed anywhere.
+ * where it starts, and every item in it moves when that width changes. One
+ * edit walks the store through `pending` -> `saving` -> `saved` -> `idle`,
+ * four different widths in a couple of seconds, and each step slid the
+ * connection light one way and the version string the other, by half the
+ * difference. It is the ambient row of the whole app, on screen behind every
+ * surface in it, and it twitched on every keystroke sequence the user typed
+ * anywhere. An earlier fix reserved the widest line's width permanently (the
+ * `MARK_SLOT` mechanism in `ui/tabs.tsx`), which stopped the twitch but left a
+ * standing gap between the connection light and the version on every screen,
+ * for the far more common case of nothing needing saving at all.
  *
- * **The mechanism is `MARK_SLOT`'s** (`ui/tabs.tsx`): hold the slot open and
- * let its contents come and go. The width it holds is `TabLabel`'s and
- * `LabelSwap`'s: the four lines are a finite, enumerable set, so each renders a
- * hidden twin into the same grid cell - `invisible` and `h-0`, so the column is
- * sized by the widest while only the live line has height - and the error
- * twin carries the `Info` glyph, because reasoning that "Unsaved changes" is
- * wider than "Not saved" plus an icon is a measurement that rots. The live line
- * is centred in what that reserves, so the group stays symmetrical about it.
- *
- * **The cost is ~1 sentence of permanent whitespace** between the connection
- * light and the version, in the one row of the app that is otherwise empty
- * across its whole width. Two alternatives were weighed and rejected. Moving
- * the line into one of the `flex-1` gutters would cost no width at all - a
- * gutter absorbs its content without moving the centre group - but the gutters
- * are what centre that group, and putting status in them is the strip's
- * "status in the centre, per-tab view controls on the right" rule going away
- * to save space this row has plenty of. Leaving it alone is what this fixes.
+ * **The mechanism is `MARK_TRACK`'s** (`ui/tabs.tsx`): a
+ * `grid-template-columns: 0fr -> 1fr` track that is genuinely zero width at
+ * `idle`, and animates open to the live line's own intrinsic width otherwise -
+ * `-mx-4` cancels this row's `gap-4` on both sides while the track is `0fr`,
+ * the same way `MARK_TRACK` cancels a trigger's `gap-1.5`, so an idle save
+ * state costs neither width nor gap. `pending` -> `saving` -> `saved` -> `idle`
+ * is now a smooth grow-then-shrink instead of a jump, and `idle` at rest looks
+ * exactly like the row did before any of this existed.
  */
 function SaveStatusLine() {
 	const status = useSaveStore((s) => s.status);
 	const line = status === "idle" ? null : SAVE_LINES[status];
 
 	return (
-		<div data-slot="dock-save-status" className="grid text-xs text-muted-foreground">
-			{Object.entries(SAVE_LINES).map(([key, reserved]) => (
-				<span
-					key={key}
-					data-slot="dock-save-status-reserve"
-					aria-hidden="true"
-					className="invisible col-start-1 row-start-1 flex h-0 items-center gap-1"
-				>
-					{reserved.text}
-					{reserved.hint && <Info className="size-icon-sm" />}
-				</span>
-			))}
-			<span className="col-start-1 row-start-1 flex items-center justify-center">
+		<div
+			data-slot="dock-save-status"
+			className={cn(
+				"grid overflow-hidden text-xs text-muted-foreground transition-[grid-template-columns,margin-inline] duration-150 ease-out",
+				line ? "grid-cols-[1fr] mx-0" : "grid-cols-[0fr] -mx-4"
+			)}
+		>
+			<span className="flex min-w-0 items-center justify-center">
 				{/*
 				 * The toast still carries the reason, first - it is the one channel
 				 * every failure in the app reports through, and it has room for a
@@ -346,9 +336,9 @@ function SaveStatusLine() {
 				{status === "error" ? (
 					<SaveError />
 				) : line ? (
-					// `key`, so `.enter-fade` gets the mount it needs on every change -
-					// the slot around it no longer has one to give.
-					<span key={line.text} className="enter-fade">
+					// `key`, so `.enter-fade` still gets a mount to fade in on every
+					// text change, independent of the track's own width animation.
+					<span key={line.text} className="enter-fade whitespace-nowrap">
 						{line.text}
 					</span>
 				) : null}

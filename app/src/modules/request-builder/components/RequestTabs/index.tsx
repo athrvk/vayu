@@ -146,14 +146,14 @@ export default function RequestTabs() {
 						<TabLabel>{tab.label}</TabLabel>
 						{/*
 						 * Unconditional for every tab that *can* carry a count,
-						 * `undefined` and all - `TabCount` reserves the slot and
-						 * empties it. Gating the element here is exactly what made
-						 * typing the first character into an empty Params table shove
-						 * the seven tabs after Params, and the `Table` toggle sharing
-						 * their row, sideways. Examples can never carry a count, so it
-						 * declares no `badge` key at all and pays no reserved width -
-						 * which is why this asks whether the key is *there*, not
-						 * whether its value is set.
+						 * `undefined` and all - `TabCount` animates its own track
+						 * open rather than reserving one. Gating the element here is
+						 * exactly what made typing the first character into an empty
+						 * Params table shove the seven tabs after Params, and the
+						 * `Table` toggle sharing their row, sideways. Examples can
+						 * never carry a count, so it declares no `badge` key at all
+						 * and pays no width at all, ever - which is why this asks
+						 * whether the key is *there*, not whether its value is set.
 						 */}
 						{"badge" in tab && <TabCount value={tab.badge} />}
 					</TabsTrigger>

@@ -124,9 +124,15 @@ function schemaBadgeFace(entry: SchemaEntry | null): SchemaBadgeFace {
  * twice hits the toggle beside it instead. `SchemaControls`' own doc comment
  * opens with "one row that does not move"; this is what makes that true.
  *
- * Two reservations, because there are two things that change. The glyph gets a
- * `MARK_SLOT`-style fixed box (`ui/tabs.tsx`) that is always there and empty for
- * `idle`, since a glyph is a mark that mounts. The word goes through
+ * Two reservations, because there are two things that change - and both are
+ * genuinely reserved, not animated, unlike `TabCount`'s `MARK_TRACK` or the
+ * Dock's `SaveStatusLine`. Those cost width only for what they measure
+ * (nothing to count, nothing to save); this badge sits *before* a button a
+ * user has just pressed, so a track that grows into place would still slide
+ * Refresh out from under a second click while it animates, which is the exact
+ * hazard this component exists to remove. A fixed slot has no such window.
+ * The glyph gets a fixed box (`size-icon-sm`) that is always there and empty
+ * for `idle`, since a glyph is a mark that mounts. The word goes through
  * `LabelSwap`, which sizes its cell to the widest of `SCHEMA_WORDS` - the
  * `TabLabel` trick, and the right one here precisely because the set is three
  * known strings rather than a number.

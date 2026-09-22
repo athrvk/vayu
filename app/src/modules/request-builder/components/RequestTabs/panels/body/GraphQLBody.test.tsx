@@ -199,10 +199,13 @@ describe("the active schema target", () => {
  * twice - and a second press landed on the toggle beside it.
  *
  * jsdom lays nothing out, so the width itself is unobservable (the same limit
- * `tabs.test.tsx` documents for `MARK_SLOT`). The mechanism is: the badge is
- * the same node in every state, its glyph box is always present and only its
- * contents change, and every word it can say has a hidden twin holding the
- * column open.
+ * `tabs.test.tsx` hits for its own tab marks). Unlike those marks, this badge
+ * keeps its width genuinely reserved rather than animated - it sits before a
+ * button a user has just pressed, and a track growing into place would still
+ * slide Refresh out from under a second click while it animates. The mechanism
+ * is: the badge is the same node in every state, its glyph box is always
+ * present and only its contents change, and every word it can say has a
+ * hidden twin holding the column open.
  *
  * Mutation check (confirmed): restore `if (status === "idle") return null` in
  * `SchemaStatusBadge` and "is the same node…" fails on the absent badge; drop

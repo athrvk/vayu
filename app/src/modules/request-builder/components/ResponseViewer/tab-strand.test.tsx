@@ -240,12 +240,13 @@ describe("a tab count of zero", () => {
 
 		/*
 		 * An *empty* `sup`, not an absent one, and not an equality on the text.
-		 * The slot itself is always rendered - it reserves the count's width so
-		 * a count arriving cannot shove Tests, Events and Raw sideways (see
-		 * `MARK_SLOT` in `ui/tabs.tsx`) - and what must not appear is any
-		 * content in it. `TabLabel` renders its label twice - once `invisible
-		 * font-semibold` to reserve the width the active state will need - so
-		 * `textContent` is "ConsoleConsole" and always will be.
+		 * The slot itself is always rendered - it animates the count's own
+		 * track open so a count arriving grows in rather than shoving Tests,
+		 * Events and Raw sideways (see `MARK_TRACK` in `ui/tabs.tsx`) - and what
+		 * must not appear is any content in it. `TabLabel` renders its label
+		 * twice - once `invisible font-semibold` to reserve the width the
+		 * active state will need - so `textContent` is "ConsoleConsole" and
+		 * always will be.
 		 */
 		const trigger = screen.getByRole("tab", { name: /console/i });
 		expect(trigger.querySelector("sup")?.textContent).toBe("");
@@ -264,66 +265,62 @@ describe("a tab count of zero", () => {
 });
 
 /*
- * A result chip arriving does not move the tabs beside it.
+ * A result chip arriving grows into place rather than jumping the tabs beside
+ * it.
  *
  * The constant tab set above stopped the *strip* from changing shape between
  * responses; the Tests chip was the one thing left inside it that still did.
  * It was `{testResults.length > 0 && <Badge …>}`, so a response that ran tests
  * mounted a flex item on a `shrink-0` trigger inside this `flex-nowrap` list -
  * the trigger grew by the chip plus its own `gap-1.5`, and Events and Raw moved
- * with it. Re-sending the same request with and without a test script drew the
- * strip two different ways, under a pointer on its way to one of those tabs.
- * This is `MARK_SLOT`'s defect (`ui/tabs.tsx`), which the chip could not take
- * `MARK_SLOT`'s own fix for: an emptied `Badge` still paints a coloured pill.
+ * with it instantly. Re-sending the same request with and without a test
+ * script drew the strip two different ways, under a pointer on its way to one
+ * of those tabs. A first fix (`MARK_SLOT` in `ui/tabs.tsx`) reserved the
+ * chip's width permanently instead, which the chip could not actually take -
+ * an emptied `Badge` still paints a coloured pill - so it fell back to
+ * `TabLabel`'s hidden-twin trick, paying that width on every response, tested
+ * or not.
  *
- * jsdom lays nothing out, so the width is unobservable here - the mechanism is
- * what these read. Mutation check (confirmed): put the
- * `{testResults.length > 0 && <Badge …>}` gate back and "keeps the chip's slot"
- * and "changes only the slot's contents" both fail on the absent slot; delete
- * the reserve twin from `TestsResultChip` and "reserves a chip's width" fails.
+ * The chip now uses `MARK_TRACK`'s `grid-template-columns: 0fr -> 1fr`
+ * animation instead: a genuinely zero-width track when no tests ran, animating
+ * open to the chip's own width when a result arrives, with no permanent
+ * reservation either way.
+ *
+ * jsdom lays nothing out, so the animated width is unobservable here - the
+ * mechanism is what these read. Mutation check (confirmed): put the
+ * `{testResults.length > 0 && <Badge …>}` gate back and "keeps the chip's
+ * slot" and "reuses the same node" both fail on the absent slot; swap the
+ * `grid-cols-[0fr]`/`grid-cols-[1fr]` branches in `TestsResultChip` and "opens
+ * the track when a result arrives" fails on the inverted classes.
  */
 describe("the Tests chip does not shove the tabs after it", () => {
 	const chipSlot = () =>
 		screen
 			.getByRole("tab", { name: /tests/i })
 			.querySelector<HTMLElement>("[data-slot='tests-result-chip']");
-	const reserve = () =>
-		document.querySelector<HTMLElement>("[data-slot='tests-result-chip-reserve']");
-	/** The live chip only - the slot also holds the hidden twin that sizes it. */
-	const liveChip = () =>
-		chipSlot()?.querySelector<HTMLElement>(
-			":scope > *:not([data-slot='tests-result-chip-reserve'])"
-		) ?? null;
 
-	it("keeps the chip's slot on the trigger when no tests ran", () => {
+	it("keeps the chip's slot on the trigger when no tests ran, at a zero-width track", () => {
 		state.response = { ...fullResponse(), testResults: undefined };
 		renderViewer();
-		expect(
-			chipSlot(),
-			"no slot - the chip will widen the trigger when a test runs"
-		).not.toBeNull();
-		expect(liveChip(), "an empty slot still paints a chip").toBeNull();
-	});
-
-	it("reserves a chip's width with a hidden twin that costs no height", () => {
-		state.response = { ...fullResponse(), testResults: undefined };
-		renderViewer();
-		const twin = reserve()!;
-		expect(twin).not.toBeNull();
-		// `0/0` - the narrowest real chip, the same "reserve one, not two" trade
-		// `MARK_SLOT` documents for a count crossing 9 to 10.
-		expect(twin.textContent).toBe("0/0");
-		expect(twin.className).toContain("invisible");
-		expect(twin.className).toContain("h-0");
-		// Or the strip announces "Tests 0/0" on a response that ran none.
-		expect(twin.getAttribute("aria-hidden")).toBe("true");
-		// The accessible name, not `textContent`: the twin is in the tree either
-		// way, and `aria-hidden` is what keeps it out of what is announced.
-		expect(screen.getByRole("tab", { name: /tests/i }).textContent).toMatch(/0\/0/);
+		const slot = chipSlot();
+		expect(slot, "no slot - the chip will widen the trigger when a test runs").not.toBeNull();
+		expect(slot?.className).toContain("grid-cols-[0fr]");
+		expect(slot?.textContent).toBe("");
 		expect(screen.queryByRole("tab", { name: /0\/0/ })).toBeNull();
 	});
 
-	it("changes only the slot's contents when a result arrives", () => {
+	it("opens the track when a result arrives, sized to the chip's own content", () => {
+		state.response = {
+			...fullResponse(),
+			testResults: [{ name: "status is 200", passed: true }],
+		};
+		renderViewer();
+		const slot = chipSlot()!;
+		expect(slot.className).toContain("grid-cols-[1fr]");
+		expect(slot.textContent).toBe("1/1");
+	});
+
+	it("reuses the same node across the transition", () => {
 		state.response = { ...fullResponse(), testResults: undefined };
 		const { rerender } = renderViewer();
 
@@ -331,7 +328,6 @@ describe("the Tests chip does not shove the tabs after it", () => {
 		const events = screen.getByRole("tab", { name: /events/i });
 		const emptySlot = chipSlot()!;
 		const triggerClasses = tests.className;
-		const slotClasses = emptySlot.className;
 
 		state.response = {
 			...fullResponse(),
@@ -343,11 +339,11 @@ describe("the Tests chip does not shove the tabs after it", () => {
 		rerender();
 
 		const filledSlot = chipSlot()!;
-		// The same element, not a remount: nothing was inserted into the row.
+		// The same element, not a remount: only its track and contents changed.
 		expect(filledSlot).toBe(emptySlot);
-		expect(filledSlot.className).toBe(slotClasses);
+		expect(filledSlot.className).toContain("grid-cols-[1fr]");
 		expect(tests.className).toBe(triggerClasses);
-		expect(liveChip()?.textContent).toBe("1/2");
+		expect(filledSlot.textContent).toBe("1/2");
 		// Nothing was inserted before Events, which is how the shift travelled.
 		expect(events.querySelector("[data-slot='tests-result-chip']")).toBeNull();
 	});

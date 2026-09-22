@@ -60,15 +60,9 @@ const renderDock = () => {
 	);
 };
 
-/**
- * The live line only - the slot also renders one hidden twin per state to hold
- * its width, and every one of those carries real text.
- */
+/** The slot's own text - nothing else lives inside it now. */
 const liveSaveLine = () =>
-	document
-		.querySelector("[data-slot='dock-save-status']")
-		?.querySelector(":scope > span:not([data-slot='dock-save-status-reserve'])")
-		?.textContent?.trim() ?? null;
+	document.querySelector("[data-slot='dock-save-status']")?.textContent?.trim() ?? null;
 
 beforeEach(() => {
 	useSaveStore.setState({ status: "idle", lastErrorMessage: null });
@@ -157,7 +151,8 @@ describe("unsaved work is visible", () => {
 });
 
 /*
- * The save line does not move the strip around it.
+ * The save line does not jump the strip around it, and costs nothing while
+ * idle.
  *
  * The four lines used to be four `{status === "x" && …}` children of the Dock's
  * ambient group. That group is centred in the strip by two equal `flex-1`
@@ -165,72 +160,61 @@ describe("unsaved work is visible", () => {
  * when that width changes - and one edit walks the store `pending` -> `saving`
  * -> `saved` -> `idle`, four different widths within a couple of seconds. The
  * connection light slid one way and the version string the other, on every
- * keystroke sequence typed anywhere in the app.
+ * keystroke sequence typed anywhere in the app. A first fix reserved the widest
+ * line's width permanently, which stopped the jump but left a standing gap on
+ * every screen where nothing was being saved - the far more common case.
  *
- * jsdom lays nothing out, so the width itself is unobservable here (the same
- * limit `tabs.test.tsx` hits for `MARK_SLOT`). What is observable is the
- * mechanism: the slot is in the DOM in every state including `idle`, it is the
- * *same* node across a transition rather than a remount, its own layout classes
- * do not change, and it carries one hidden twin per state so the widest sizes
- * the column.
+ * jsdom lays nothing out, so the animated width itself is unobservable here
+ * (the same limit `tabs.test.tsx` hits for `MARK_TRACK`). What is observable is
+ * the mechanism: the slot is in the DOM in every state including `idle`, it is
+ * the *same* node across a transition rather than a remount, and its
+ * `grid-template-columns` track and cancelling margin flip between the zero
+ * and full-width classes as the status changes.
  *
  * Mutation check (confirmed): put the four `{saveStatus === "x" && …}` spans
- * back in place of `<SaveStatusLine />` and "keeps the slot in the DOM",
- * "reuses the same node" and "reserves every line it can show" all fail on the
- * absent slot; drop the twins from `SaveStatusLine` and "reserves every line it
- * can show" fails alone.
+ * back in place of `<SaveStatusLine />` and "keeps the slot in the DOM" and
+ * "reuses the same node" both fail on the absent slot; swap the
+ * `grid-cols-[0fr]`/`grid-cols-[1fr]` branches in `SaveStatusLine` and "opens
+ * the track when a save state arrives" fails on the inverted classes.
  */
 describe("the save line holds its own width", () => {
 	const slot = () => document.querySelector<HTMLElement>("[data-slot='dock-save-status']");
-	const reserves = () =>
-		Array.from(
-			document.querySelectorAll("[data-slot='dock-save-status-reserve']"),
-			(el) => el.textContent?.trim() ?? ""
-		);
 
-	it("keeps the slot in the DOM with nothing to say", () => {
+	it("keeps the slot in the DOM with nothing to say, at a zero-width track", () => {
 		renderDock();
 		expect(slot(), "no slot - the line will widen the group when it arrives").not.toBeNull();
+		expect(slot()?.className).toContain("grid-cols-[0fr]");
+		// Cancels the row's gap-4 so an idle slot costs no width at all.
+		expect(slot()?.className).toContain("-mx-4");
 	});
 
-	it("reserves every line it can show, and only reserves them invisibly", () => {
+	it("opens the track when a save state arrives", () => {
 		renderDock();
-		// The set, not a hand-picked widest: which string is widest is a
-		// measurement, and a measurement written into a class rots.
-		expect(reserves().sort()).toEqual(["Not saved", "Saved", "Saving…", "Unsaved changes"]);
-		for (const twin of document.querySelectorAll("[data-slot='dock-save-status-reserve']")) {
-			// `invisible h-0`: sizes the column, contributes no height.
-			expect(twin.className).toContain("invisible");
-			expect(twin.className).toContain("h-0");
-			// Silent to a screen reader, or the strip reads out all four states.
-			expect(twin.getAttribute("aria-hidden")).toBe("true");
-		}
+		act(() => useSaveStore.setState({ status: "pending" }));
+		expect(slot()?.className).toContain("grid-cols-[1fr]");
+		expect(slot()?.className).toContain("mx-0");
 	});
 
-	it("reuses the same node, with the same classes, across the whole save cycle", () => {
+	it("reuses the same node across the whole save cycle", () => {
 		renderDock();
 		const idle = slot()!;
-		const classes = idle.className;
 
 		for (const status of ["pending", "saving", "saved"] as const) {
 			// `act`, or React batches the store write past the assertion and the
 			// node-identity check below passes without anything having rerendered.
 			act(() => useSaveStore.setState({ status }));
 			const next = slot()!;
-			// The same element, not a remount: only its live cell changed, so
-			// nothing was inserted into or removed from the centred group.
+			// The same element, not a remount: only its track and live cell
+			// changed, so nothing was inserted into or removed from the centred
+			// group.
 			expect(next, `the slot remounted on ${status}`).toBe(idle);
-			expect(next.className, `the slot restyled on ${status}`).toBe(classes);
 		}
 
 		expect(liveSaveLine()).toBe("Saved");
 	});
 
-	it("says nothing a screen reader can hear while the slot is empty", () => {
+	it("says nothing at rest, and reaches no screen reader while idle", () => {
 		renderDock();
-		// The twins are the only text in an idle slot and every one of them is
-		// aria-hidden, so the strip announces the engine status and the version
-		// and nothing about a save that is not happening.
 		expect(liveSaveLine()).toBe("");
 	});
 });
