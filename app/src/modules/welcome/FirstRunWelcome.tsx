@@ -42,7 +42,12 @@ interface FirstRunWelcomeProps {
 
 export function FirstRunWelcome({ onImport, onNewRequest, onOpenDemo }: FirstRunWelcomeProps) {
 	return (
-		<div className={`flex flex-col gap-8 ${WELCOME_COLUMN}`}>
+		// `enter-fade`: this replaces `LauncherSkeleton` on mount, a plain
+		// conditional swap with no Radix `data-state` to key off, the shape
+		// `.enter-fade` exists for. Without it the branded pitch popped in a
+		// frame after the skeleton's own bars, while `ErrorState` - the sibling
+		// branch for the same swap - already fades (it carries the class itself).
+		<div className={`enter-fade flex flex-col gap-8 ${WELCOME_COLUMN}`}>
 			<div className="flex flex-col gap-2">
 				<div className="flex items-center gap-2">
 					<img src={iconUrl} alt="" className="h-6 w-6" />
