@@ -345,3 +345,62 @@ describe("the save line's floor on how long 'Saving…' stays up", () => {
 		expect(liveSaveLine()).toBe("Saved");
 	});
 });
+
+/*
+ * The save line fades out on its way to idle, rather than being cut.
+ *
+ * `SAVE_LINES` has no entry for `idle`, so the moment `status` reached it the
+ * live text was removed from the tree in the same update that started the
+ * track's own `transition-[grid-template-columns]` - the track shrank
+ * smoothly, but the text inside it was simply gone, which read as a hard cut
+ * rather than the fade the surrounding motion implied. `useSaveStatusDisplay`
+ * holds `displayed` on the last real status for `TIMING.SAVE_LINE_FADE_MS`
+ * past the store's own return to `idle`, which is what gives the live cell's
+ * `opacity-0` a still-populated node to fade against instead of an empty one.
+ *
+ * Mutation check (confirmed): drop the `status === "idle" && displayed !==
+ * "idle"` branch from `useSaveStatusDisplay` (so `idle` is mirrored
+ * immediately, the old behaviour) and "keeps the text and track open while
+ * fading" fails on the empty line; hardcode `fading` to `false` in
+ * `SaveStatusLine` and "starts fading the instant the store goes idle" fails
+ * on the missing `opacity-0`.
+ */
+describe("the save line fades rather than cuts on its way to idle", () => {
+	const liveCell = () =>
+		document.querySelector<HTMLElement>("[data-slot='dock-save-status'] > span");
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		useSaveStore.setState({ status: "idle", lastErrorMessage: null });
+		useToastStore.setState({ toasts: [] });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("keeps the text and track open while fading, then clears both", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saved" }));
+		act(() => useSaveStore.setState({ status: "idle" }));
+
+		// Still "Saved" - the fade has something to animate against.
+		expect(liveSaveLine()).toBe("Saved");
+
+		act(() => vi.advanceTimersByTime(TIMING.SAVE_LINE_FADE_MS - 1));
+		expect(liveSaveLine()).toBe("Saved");
+
+		act(() => vi.advanceTimersByTime(1));
+		expect(liveSaveLine()).toBe("");
+	});
+
+	it("starts fading the instant the store goes idle, not after the hold", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saved" }));
+		expect(liveCell()?.className).toContain("opacity-100");
+
+		act(() => useSaveStore.setState({ status: "idle" }));
+		expect(liveCell()?.className).toContain("opacity-0");
+	});
+});

@@ -18,8 +18,9 @@
  * Radix has decided which trigger is selected.
  */
 
-import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
+import { TIMING } from "@/config/timing";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
@@ -464,5 +465,116 @@ describe("every TabsList call site declares its variant", () => {
 		for (const [file, tag] of tags) {
 			expect(tag, `${file} renders a TabsList with no variant`).toMatch(/variant=/);
 		}
+	});
+});
+
+/*
+ * A count going away fades; it used to be cut while the track faded for it.
+ *
+ * `TabCount` emptied its live cell in the same commit that put its track back
+ * to `grid-cols-[0fr]`, so the 150ms collapse ran around a box that was
+ * already empty and the digit itself vanished in one frame. The collapse is
+ * exactly what made it easy to miss: something *was* moving, just not the
+ * part carrying the count. `useHeldValue` keeps the outgoing digit in the
+ * node for `TIMING.MARK_FADE_MS` so the opacity transition has something to
+ * animate against, and the track still collapses off the *live* value so the
+ * two halves finish together rather than back to back.
+ *
+ * jsdom runs no transitions, so what is observable is the mechanism: which
+ * value the node holds at each point in the window, and that the fade class
+ * arrives in the same commit as the zero-width track rather than after the
+ * hold.
+ *
+ * Mutation check (confirmed): drop the `useHeldValue` call and read `live`
+ * directly in the `<span>` and "holds the last count…" fails on an empty node
+ * at the first assertion after the value goes; pin `fading` to `false` and
+ * "starts the fade in the same commit…" fails on the missing `opacity-0`.
+ */
+describe("a count going away fades rather than being cut", () => {
+	const slotIn = (container: HTMLElement) =>
+		container.querySelector<HTMLElement>("[data-slot='tab-count']")!;
+	const liveCellIn = (container: HTMLElement) => slotIn(container).querySelector("span")!;
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("holds the last count on screen for the fade, then clears it", () => {
+		const { container, rerender } = render(<TabCount value={3} />);
+		expect(slotIn(container).textContent).toBe("3");
+
+		rerender(<TabCount value={undefined} />);
+		// Still "3": the fade has a populated node to take out.
+		expect(slotIn(container).textContent).toBe("3");
+
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS - 1);
+		});
+		expect(slotIn(container).textContent).toBe("3");
+
+		act(() => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(slotIn(container).textContent).toBe("");
+	});
+
+	it("starts the fade in the same commit as the track's collapse, not after the hold", () => {
+		const { container, rerender } = render(<TabCount value={3} />);
+		expect(liveCellIn(container).className).toContain("opacity-100");
+
+		// A zero is the same "nothing to count" as `undefined`, by TabCount's
+		// own contract - and the same cut before this fix.
+		rerender(<TabCount value={0} />);
+
+		// The track goes immediately, off the live value...
+		expect(slotIn(container).className).toContain("grid-cols-[0fr]");
+		// ...and the digit it is collapsing around fades with it, rather than
+		// having been gone since the first frame of that collapse.
+		expect(liveCellIn(container).className).toContain("opacity-0");
+		expect(slotIn(container).textContent).toBe("3");
+	});
+
+	it("rests at zero opacity with nothing to count, rather than transitioning back up", () => {
+		// Invisible either way behind a zero-width track - but a transition
+		// climbing an empty box back to full opacity is the same "motion with
+		// nothing behind it" this fix is about, and it makes the entry the
+		// mirror of the exit: a count arriving fades up as its track opens.
+		const { container } = render(<TabCount value={undefined} />);
+		expect(liveCellIn(container).className).toContain("opacity-0");
+		expect(liveCellIn(container).className).not.toContain("opacity-100");
+	});
+
+	it("does not fade a count that is merely replaced by another count", () => {
+		const { container, rerender } = render(<TabCount value={3} />);
+		rerender(<TabCount value={4} />);
+
+		// Nothing went to nothing here, so nothing is held or faded - a count
+		// changing is a track-width change on a full node, as it always was.
+		expect(slotIn(container).textContent).toBe("4");
+		expect(slotIn(container).className).toContain("grid-cols-[1fr]");
+		expect(liveCellIn(container).className).toContain("opacity-100");
+	});
+
+	it("re-fills without waiting out a fade it started", () => {
+		const { container, rerender } = render(<TabCount value={3} />);
+		rerender(<TabCount value={undefined} />);
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS - 50);
+		});
+
+		rerender(<TabCount value={7} />);
+		expect(slotIn(container).textContent).toBe("7");
+		expect(liveCellIn(container).className).toContain("opacity-100");
+
+		// The scheduled clear was cancelled with the fade it belonged to.
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS);
+		});
+		expect(slotIn(container).textContent).toBe("7");
 	});
 });

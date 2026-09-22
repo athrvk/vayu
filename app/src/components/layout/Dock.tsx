@@ -289,24 +289,33 @@ function SaveError() {
 
 /**
  * Holds "saving" on screen for `TIMING.SAVING_MIN_VISIBLE_MS` before letting
- * "saved" replace it - a display concern, not the store's.
+ * "saved" replace it, and holds whatever is showing for
+ * `TIMING.SAVE_LINE_FADE_MS` past a return to `idle` so a CSS fade has
+ * something to animate against - both a display concern, not the store's.
  *
- * `save-store`'s own `status` flips to `"saved"` the instant a save lands,
- * and every other reader of it (the eight `startSaving`/`completeSaveThenIdle`
- * call sites, and their own tests) needs that truth immediately. A save
- * against the local engine often lands in well under 100ms though, which is
- * under what a state needs to be on screen to register as one at all - so the
- * Dock's own line used to jump "Unsaved changes" straight to "Saved" with
- * "Saving…" gone in the same frame most people would notice it. This hook is
- * the fix, entirely local to the one place that renders `status` for a human:
- * it mirrors the store's status immediately for every transition except
- * "saving" -> "saved", which it holds back until the floor has actually
- * elapsed since "saving" was first shown.
+ * `save-store`'s own `status` flips the instant a save lands or its indicator
+ * expires, and every other reader of it (the eight
+ * `startSaving`/`completeSaveThenIdle` call sites, and their own tests) needs
+ * that truth immediately. Two things about the Dock's own line used to be
+ * true as a result, both wrong for a human watching it:
  *
- * No generation counters, unlike a store-level version of this would need:
- * a plain `useEffect` cleanup already cancels a stale scheduled update
- * whenever `status` (or `displayed`) changes again before it fires - React's
- * ordinary effect lifecycle is the whole mechanism.
+ * - A save against the local engine often lands in well under 100ms, under
+ *   what a state needs to be on screen to register as one at all, so
+ *   "Unsaved changes" jumped straight to "Saved" with "Saving…" gone in the
+ *   same frame most people would notice it.
+ * - `idle` has no line at all (`SAVE_LINES` has no entry for it), so the
+ *   moment `status` became `idle` the live text was gone and the track's own
+ *   `transition-[grid-template-columns]` had nothing left to shrink around -
+ *   a hard cut, not the fade the track's own CSS transition implies is there.
+ *
+ * The fix for both is the same shape: `displayed` mirrors `status`
+ * immediately for every transition except the two that need to be held back
+ * - `"saving"` -> `"saved"`, and anything -> `"idle"` - each governed by its
+ * own `TIMING` constant. Neither needs a generation counter the way a
+ * store-level version of this would: a plain `useEffect` cleanup already
+ * cancels a stale scheduled update whenever `status` (or `displayed`)
+ * changes again before it fires, so React's ordinary effect lifecycle is the
+ * whole mechanism.
  */
 function useSaveStatusDisplay(status: SaveStatus): SaveStatus {
 	const [displayed, setDisplayed] = useState(status);
@@ -329,6 +338,16 @@ function useSaveStatusDisplay(status: SaveStatus): SaveStatus {
 			}
 		}
 
+		if (status === "idle" && displayed !== "idle") {
+			const timer = setTimeout(() => setDisplayed(status), TIMING.SAVE_LINE_FADE_MS);
+			return () => clearTimeout(timer);
+		}
+
+		// Every other transition (idle -> pending, pending -> saving, anything ->
+		// error) has nothing to hold for and mirrors `status` immediately - syncing
+		// local display state to an external store's value is exactly what this
+		// effect is for; the two blocks above are what make this the *un*-held path.
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
 		setDisplayed(status);
 	}, [status, displayed]);
 
@@ -367,8 +386,14 @@ function useSaveStatusDisplay(status: SaveStatus): SaveStatus {
  * any of this existed - one `gap-4` between neighbours, never two, never zero.
  */
 function SaveStatusLine() {
-	const status = useSaveStatusDisplay(useSaveStore((s) => s.status));
+	const rawStatus = useSaveStore((s) => s.status);
+	const status = useSaveStatusDisplay(rawStatus);
 	const line = status === "idle" ? null : SAVE_LINES[status];
+	// True for exactly the `TIMING.SAVE_LINE_FADE_MS` window the hook holds
+	// `status` open past the store's own return to `idle` - the store has
+	// already moved on, `displayed` has not caught up yet, and this is what
+	// tells the live cell to start fading rather than sit at full opacity.
+	const fading = rawStatus === "idle" && status !== "idle";
 
 	return (
 		<div
@@ -378,7 +403,12 @@ function SaveStatusLine() {
 				line ? "grid-cols-[1fr] ms-0" : "grid-cols-[0fr] -ms-4"
 			)}
 		>
-			<span className="flex min-w-0 items-center justify-center">
+			<span
+				className={cn(
+					"flex min-w-0 items-center justify-center transition-opacity duration-200 ease-out",
+					fading ? "opacity-0" : "opacity-100"
+				)}
+			>
 				{/*
 				 * The toast still carries the reason, first - it is the one channel
 				 * every failure in the app reports through, and it has room for a

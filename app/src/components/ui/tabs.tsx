@@ -61,6 +61,8 @@ import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 
 import { cn } from "@/lib/utils";
+import { TIMING } from "@/config/timing";
+import { useHeldValue } from "@/hooks/useHeldValue";
 
 const Tabs = TabsPrimitive.Root;
 
@@ -300,25 +302,53 @@ const MARK_TRACK =
  * `0` and not a placeholder glyph, so it contributes no text to the trigger's
  * accessible name and a screen reader reads "Params", not "Params 0".
  *
+ * **Going empty is held, not instant** (`useHeldValue`,
+ * `TIMING.MARK_FADE_MS`). The contents used to clear in the same commit that
+ * put the track back to `0fr`, so the track spent 150ms collapsing around a
+ * box that was already empty and the digit itself was cut - the appearance
+ * animates and the disappearance did not, which the track's own motion made
+ * easy to miss. The last count now stays in the node for one track duration
+ * while an opacity transition takes it out, so the two halves of the mark's
+ * life are mirror images.
+ *
  * The contract that follows for callers: render `TabCount` **unconditionally**
  * on any tab that can carry a count, passing `undefined` when it has none -
  * gating the element is what reintroduces the shift. A tab that can never
  * carry one renders no `TabCount` at all and pays no width, ever.
  */
-function TabCount({ value, className }: { value?: React.ReactNode; className?: string }) {
-	const shown = value === 0 || value === undefined || value === null ? null : value;
+function TabCount({ value, className }: { value?: number | string | null; className?: string }) {
+	const live = value === 0 || value === undefined || value === null ? null : value;
+	/*
+	 * The track reads `live`, the text reads `shown`: the collapse starts on
+	 * time while the digit it is collapsing around is still there to fade. The
+	 * contents used to empty in the same commit the track began shrinking, so
+	 * the track animated around an already-empty box and the count itself was
+	 * a hard cut - motion everywhere except on the part that carried the
+	 * meaning. See `useHeldValue`.
+	 */
+	const { shown, fading } = useHeldValue(live, TIMING.MARK_FADE_MS);
 
 	return (
 		<sup
 			data-slot="tab-count"
 			className={cn(
 				MARK_TRACK,
-				shown === null ? "grid-cols-[0fr] -ms-1.5" : "grid-cols-[1fr] ms-0"
+				live === null ? "grid-cols-[0fr] -ms-1.5" : "grid-cols-[1fr] ms-0"
 			)}
 		>
 			<span
 				className={cn(
 					"min-w-0 text-center font-mono text-micro leading-none tabular-nums text-primary-text",
+					// `shown === null` as well as `fading`, so an empty cell rests at
+					// zero rather than transitioning back up to full opacity behind
+					// a collapsed track - invisible either way, but a transition
+					// running on an empty box is the thing this whole fix is about.
+					// It also makes the entry a mirror of the exit: a count
+					// arriving fades up while its track opens. Not on first paint,
+					// where `shown` starts at the live value and the class never
+					// changes.
+					"transition-opacity duration-150 ease-out",
+					shown === null || fading ? "opacity-0" : "opacity-100",
 					className
 				)}
 			>

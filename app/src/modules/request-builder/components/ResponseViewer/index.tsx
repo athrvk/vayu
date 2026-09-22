@@ -39,6 +39,8 @@ import { useExecutionEventsStore } from "@/stores";
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import { chordKeys } from "@/lib/platform";
 import { SEND_CHORD } from "@/constants/shortcuts";
+import { TIMING } from "@/config/timing";
+import { useHeldValue } from "@/hooks/useHeldValue";
 import {
 	ResponseBody as SharedResponseBody,
 	ResponseStatusBar,
@@ -87,13 +89,37 @@ import type { ResponseState, ResponseTab } from "../../types";
  * own padding - would otherwise leave a stray filled pixel or two showing as
  * a small solid mark next to "Tests" on every response that never ran one,
  * which is worse than the jump this whole mechanism exists to fix. So the
- * `Badge` itself mounts only when `hasResults`, the same true mount/unmount
- * `TabErrorDot` has, and needs the same `starting:` opacity for its own
- * fade-in independent of the track's width animation.
+ * `Badge` itself mounts only when there is a result, the same true
+ * mount/unmount `TabErrorDot` has, and needs the same `starting:` opacity for
+ * its own fade-in independent of the track's width animation.
+ *
+ * **Unmounting it is held by one fade** (`useHeldValue`,
+ * `TIMING.MARK_FADE_MS`), the mirror of that `starting:` fade-in and the same
+ * fix `TabCount` and the Dock's save line take: the `Badge` used to be
+ * removed in the commit that put the track back to `0fr`, so the track spent
+ * 150ms collapsing around nothing and the chip itself was cut - which the
+ * collapse made easy to miss. It still leaves the tree entirely once the fade
+ * is over, so the stray-filled-pixel hazard above is unchanged: nothing is
+ * mounted at rest.
  */
 function TestsResultChip({ results }: { results: readonly { passed: boolean }[] }) {
 	const passed = results.filter((t) => t.passed).length;
 	const hasResults = results.length > 0;
+	/*
+	 * The chip's whole content in one string, because `useHeldValue` holds a
+	 * primitive: `results` is a fresh `[]` on every render of a response that
+	 * ran none, so an array could never settle. The track reads `hasResults`
+	 * and collapses on time; the `Badge` reads `shown` and survives one fade
+	 * past it.
+	 */
+	const { shown, fading } = useHeldValue(
+		hasResults ? `${passed}/${results.length}` : null,
+		TIMING.MARK_FADE_MS
+	);
+	// Tone from the held label, not from `results`: while the chip is on its
+	// way out there are no live results left to read one from, and a green
+	// chip must not turn red in the last frames of its life.
+	const allPassed = shown !== null && shown.split("/")[0] === shown.split("/")[1];
 
 	return (
 		<span
@@ -103,12 +129,15 @@ function TestsResultChip({ results }: { results: readonly { passed: boolean }[] 
 				hasResults ? "grid-cols-[1fr] ms-0" : "grid-cols-[0fr] -ms-1.5"
 			)}
 		>
-			{hasResults && (
+			{shown !== null && (
 				<Badge
-					variant={results.every((t) => t.passed) ? "default" : "destructive"}
-					className="starting:opacity-0 opacity-100 transition-opacity duration-150 h-4 min-w-0 px-1 text-micro"
+					variant={allPassed ? "default" : "destructive"}
+					className={cn(
+						"starting:opacity-0 transition-opacity duration-150 h-4 min-w-0 px-1 text-micro",
+						fading ? "opacity-0" : "opacity-100"
+					)}
 				>
-					{passed}/{results.length}
+					{shown}
 				</Badge>
 			)}
 		</span>

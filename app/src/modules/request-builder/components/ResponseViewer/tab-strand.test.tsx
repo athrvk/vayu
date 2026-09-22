@@ -26,9 +26,10 @@
  * body panel in the tree.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { TIMING } from "@/config/timing";
 import type { ResponseState } from "../../types";
 import ResponseViewer from "./index";
 
@@ -352,5 +353,97 @@ describe("the Tests chip does not shove the tabs after it", () => {
 		expect(filledSlot.textContent).toBe("1/2");
 		// Nothing was inserted before Events, which is how the shift travelled.
 		expect(events.querySelector("[data-slot='tests-result-chip']")).toBeNull();
+	});
+});
+
+/*
+ * The Tests chip fades on its way out; it used to be cut while the track
+ * faded for it.
+ *
+ * The `Badge` mounts only while there is a result (an emptied one still
+ * paints a coloured pill, so it cannot simply stay), and it used to leave the
+ * tree in the same commit that put the track back to `grid-cols-[0fr]` - so
+ * the 150ms collapse ran around an already-empty box and the chip itself was
+ * a hard cut. The collapse is what made it easy to miss: the trigger *was*
+ * animating, just not the part carrying the result. `useHeldValue` keeps the
+ * outgoing label for `TIMING.MARK_FADE_MS` so the opacity transition, the
+ * mirror of the `starting:opacity-0` fade-in it already had, has a populated
+ * node to take out. Nothing is mounted once that window closes, so the
+ * stray-pixel hazard the mount/unmount exists for is unchanged.
+ *
+ * Reachable the ordinary way: re-sending a request whose test script was
+ * removed, and switching to a response that ran none.
+ *
+ * Mutation check (confirmed): gate the `Badge` on `hasResults` again and
+ * "holds the chip through its fade" fails on the missing badge; pin `fading`
+ * to `false` and "starts the fade in the same commit…" fails on the missing
+ * `opacity-0`.
+ */
+describe("the Tests chip fades rather than being cut", () => {
+	const chip = () =>
+		screen
+			.getByRole("tab", { name: /tests/i })
+			.querySelector<HTMLElement>("[data-slot='tests-result-chip']")!;
+	const badge = () => chip().querySelector<HTMLElement>("[data-slot='badge']");
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("holds the chip through its fade, then drops it out of the tree", () => {
+		state.response = {
+			...fullResponse(),
+			testResults: [{ name: "status is 200", passed: true }],
+		};
+		const { rerender } = renderViewer();
+		expect(badge()?.textContent).toBe("1/1");
+
+		// The same request re-sent with its test script gone.
+		state.response = { ...fullResponse(), testResults: undefined };
+		rerender();
+
+		// Still showing - the fade has a populated node to take out.
+		expect(badge()?.textContent).toBe("1/1");
+
+		act(() => {
+			vi.advanceTimersByTime(TIMING.MARK_FADE_MS - 1);
+		});
+		expect(badge()?.textContent).toBe("1/1");
+
+		act(() => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(badge(), "an emptied Badge still paints a pill - it must leave").toBeNull();
+	});
+
+	it("starts the fade in the same commit as the track's collapse, not after the hold", () => {
+		state.response = {
+			...fullResponse(),
+			testResults: [{ name: "status is 200", passed: false }],
+		};
+		const { rerender } = renderViewer();
+		// A class-boundary match, not `toContain`: the chip's own fade-in
+		// variant is spelled `starting:opacity-0`, so a bare substring check
+		// would read the entry half and pass with the exit half gone.
+		const opacityClass = (el: HTMLElement | null) =>
+			(el?.className ?? "").split(/\s+/).find((c) => /^opacity-\d+$/.test(c)) ?? null;
+
+		expect(opacityClass(badge())).toBe("opacity-100");
+
+		state.response = { ...fullResponse(), testResults: [] };
+		rerender();
+
+		// The track goes immediately, off the live results...
+		expect(chip().className).toContain("grid-cols-[0fr]");
+		// ...and the chip it is collapsing around fades with it.
+		expect(opacityClass(badge())).toBe("opacity-0");
+		// Tone is the held one: a failing chip must not turn green on the way out.
+		expect(badge()?.textContent).toBe("0/1");
+		expect(badge()?.className).toContain("destructive");
 	});
 });

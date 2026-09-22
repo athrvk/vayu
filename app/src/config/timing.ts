@@ -197,6 +197,45 @@ export const TIMING = {
 	/** Wait after asking electron to restart the engine before refetching. */
 	ENGINE_RESTART_WAIT_MS: 1500,
 
+	/**
+	 * How long the Dock's save line takes to fade out on its way to idle, and
+	 * how long its track is held open to let that fade actually play.
+	 *
+	 * Must stay in step with the opacity transition on `layout/Dock.tsx`'s live
+	 * cell (`duration-200`) - the same pairing `TOAST_EXIT_MS` documents for
+	 * `ui/toast.tsx`, for the same reason: `useSaveStatusDisplay` still reports
+	 * the *old* status (so the text and the track's open width do not move)
+	 * for exactly this long after the store goes `idle`, which is what gives
+	 * the opacity transition a frame to animate against instead of the node's
+	 * content vanishing in the same update that starts the fade.
+	 */
+	SAVE_LINE_FADE_MS: 200,
+
+	/**
+	 * How long a tab mark keeps its last content on screen after the thing it
+	 * was counting is gone.
+	 *
+	 * The same defect `SAVE_LINE_FADE_MS` answers for the Dock's save line, at
+	 * the two marks that sit on a tab trigger: `TabCount` in `ui/tabs.tsx` and
+	 * `TestsResultChip` in the response viewer. Both empty their content the
+	 * instant there is nothing to show, while `MARK_TRACK`'s
+	 * `grid-template-columns: 1fr -> 0fr` goes on collapsing around them - so
+	 * the track shrank smoothly and the digit inside it was simply gone, a cut
+	 * masked by the container's own motion. `useHeldValue` holds the outgoing
+	 * content for this long so the opacity transition has a populated node.
+	 *
+	 * 150ms rather than `SAVE_LINE_FADE_MS`'s 200 because the two play the
+	 * motion in a different order. The Dock's line is centred in its track, so
+	 * a squeeze would eat a whole sentence from both ends; it fades first and
+	 * collapses after, two gestures back to back. A mark is a digit or a
+	 * four-character chip already clipped by `overflow-hidden`, so it fades
+	 * *while* its own track closes - one gesture, and this has to match that
+	 * track's `duration-150` for the two halves to land together. A count
+	 * changes with every keystroke in the Params table; 200 + 150 sequential
+	 * there would read as lag rather than as motion.
+	 */
+	MARK_FADE_MS: 150,
+
 	/** GraphQL editor diagnostics debounce. */
 	GRAPHQL_DIAGNOSTICS_DEBOUNCE_MS: 250,
 	/** GraphQL schema introspection debounce after URL/headers change. */
