@@ -996,7 +996,10 @@ export function ImportModal() {
 							 * descendant, so clicking the words "Import pre-request &
 							 * test scripts" toggled Import environments instead - and the
 							 * second checkbox had no label at all, shrinking its hit
-							 * target to the 13px box.
+							 * target to the box itself. `size-target` (issue #1679, 24-28px)
+							 * is that box's own floor for exactly this reason - the label
+							 * fixed which words each checkbox answers to, not how small
+							 * the checkbox was to begin with.
 							 */}
 							<div className="flex flex-col gap-1 text-label text-muted-foreground">
 								<label className="flex w-fit items-center gap-1.5">
@@ -1004,7 +1007,7 @@ export function ImportModal() {
 										checked={importEnvironments}
 										disabled={applying}
 										onChange={(e) => toggleEnvironments(e.target.checked)}
-										className="size-icon"
+										className="size-target"
 									/>
 									Import environments &amp; variables
 								</label>
@@ -1013,7 +1016,7 @@ export function ImportModal() {
 										checked={importScripts}
 										disabled={applying}
 										onChange={(e) => toggleScripts(e.target.checked)}
-										className="size-icon"
+										className="size-target"
 									/>
 									Import pre-request &amp; test scripts
 								</label>

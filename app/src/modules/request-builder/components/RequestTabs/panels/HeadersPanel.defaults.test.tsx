@@ -144,6 +144,16 @@ describe("the rows the engine declares", () => {
 	});
 });
 
+describe("the checkbox's own hit target", () => {
+	// `size-target` (issue #1679), not `size-icon`: a bare checkbox is its own
+	// hit target. Mutation check: put `size-icon` back and this fails.
+	it("is size-target, not the smaller icon step", () => {
+		const ui = mount(harness());
+		expect(ui.tick("User-Agent").className).toContain("size-target");
+		expect(ui.tick("User-Agent").className).not.toContain("size-icon");
+	});
+});
+
 describe("switching one off", () => {
 	it("sends its name and only its name on the wire", () => {
 		const h = harness();
