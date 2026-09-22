@@ -304,11 +304,16 @@ function SaveError() {
  * **The mechanism is `MARK_TRACK`'s** (`ui/tabs.tsx`): a
  * `grid-template-columns: 0fr -> 1fr` track that is genuinely zero width at
  * `idle`, and animates open to the live line's own intrinsic width otherwise -
- * `-mx-4` cancels this row's `gap-4` on both sides while the track is `0fr`,
- * the same way `MARK_TRACK` cancels a trigger's `gap-1.5`, so an idle save
- * state costs neither width nor gap. `pending` -> `saving` -> `saved` -> `idle`
- * is now a smooth grow-then-shrink instead of a jump, and `idle` at rest looks
- * exactly like the row did before any of this existed.
+ * `-ms-4` cancels the row's leading `gap-4` (the one *before* this slot) while
+ * the track is `0fr`, the same single-sided cancellation `MARK_TRACK` uses for
+ * a trigger's `gap-1.5`. Deliberately one side, not `-mx-4`: `gap-4` still
+ * applies once, between this slot and `EngineVersion` after it, so the row
+ * reads as one normal gap between the connection light and the version -
+ * cancelling both sides removes that surviving gap too and jams the two
+ * together with none at all.
+ * `pending` -> `saving` -> `saved` -> `idle` is now a smooth grow-then-shrink
+ * instead of a jump, and `idle` at rest looks exactly like the row did before
+ * any of this existed - one `gap-4` between neighbours, never two, never zero.
  */
 function SaveStatusLine() {
 	const status = useSaveStore((s) => s.status);
@@ -318,8 +323,8 @@ function SaveStatusLine() {
 		<div
 			data-slot="dock-save-status"
 			className={cn(
-				"grid overflow-hidden text-xs text-muted-foreground transition-[grid-template-columns,margin-inline] duration-150 ease-out",
-				line ? "grid-cols-[1fr] mx-0" : "grid-cols-[0fr] -mx-4"
+				"grid overflow-hidden text-xs text-muted-foreground transition-[grid-template-columns,margin-inline-start] duration-150 ease-out",
+				line ? "grid-cols-[1fr] ms-0" : "grid-cols-[0fr] -ms-4"
 			)}
 		>
 			<span className="flex min-w-0 items-center justify-center">

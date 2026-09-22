@@ -184,15 +184,21 @@ describe("the save line holds its own width", () => {
 		renderDock();
 		expect(slot(), "no slot - the line will widen the group when it arrives").not.toBeNull();
 		expect(slot()?.className).toContain("grid-cols-[0fr]");
-		// Cancels the row's gap-4 so an idle slot costs no width at all.
-		expect(slot()?.className).toContain("-mx-4");
+		// Cancels the row's leading gap-4 (not the trailing one, or the row's
+		// only surviving gap-4 would vanish too - see the note in Dock.tsx).
+		// `-mx-4` (both sides) shipped once and jammed "Connected" straight
+		// against the version string with no gap at all - this guards the
+		// single-sided form specifically, not just "some cancelling margin".
+		expect(slot()?.className).toContain("-ms-4");
+		expect(slot()?.className).not.toContain("-mx-4");
+		expect(slot()?.className).not.toContain("-me-4");
 	});
 
 	it("opens the track when a save state arrives", () => {
 		renderDock();
 		act(() => useSaveStore.setState({ status: "pending" }));
 		expect(slot()?.className).toContain("grid-cols-[1fr]");
-		expect(slot()?.className).toContain("mx-0");
+		expect(slot()?.className).toContain("ms-0");
 	});
 
 	it("reuses the same node across the whole save cycle", () => {

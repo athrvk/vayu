@@ -307,6 +307,12 @@ describe("the Tests chip does not shove the tabs after it", () => {
 		expect(slot?.className).toContain("grid-cols-[0fr]");
 		expect(slot?.textContent).toBe("");
 		expect(screen.queryByRole("tab", { name: /0\/0/ })).toBeNull();
+		// The `Badge` itself must not be in the DOM at all here, not just
+		// textless: `Badge` always paints an opaque `bg-*` fill regardless of
+		// content, so an empty-but-mounted one showed as a small solid red mark
+		// next to "Tests" on every response that never ran a test - worse than
+		// the jump this component exists to fix.
+		expect(slot?.querySelector("[data-slot='badge']")).toBeNull();
 	});
 
 	it("opens the track when a result arrives, sized to the chip's own content", () => {

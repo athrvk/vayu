@@ -73,14 +73,23 @@ import type { ResponseState, ResponseTab } from "../../types";
  * ways, under a pointer on its way to one of those two tabs.
  *
  * This is the same defect `MARK_TRACK` in `tabs.tsx` fixes for `TabCount` and
- * `TabErrorDot`, and the same fix: a `grid-template-columns: 0fr -> 1fr` track
- * that is genuinely zero width - and cancels its own `ml-0.5` alongside it -
- * when there is nothing to show, and animates open to the chip's intrinsic
- * width when there is. Unlike the `TabLabel`-style hidden-twin reservation
- * this replaces, nothing is ever reserved for a response that never runs
- * tests. The `Badge` itself stays mounted with empty content rather than
- * mounting fresh, matching `TabCount`'s contract, so this is a value change on
- * an existing node and needs no `starting:` frame to transition from.
+ * `TabErrorDot`: a `grid-template-columns: 0fr -> 1fr` track that is
+ * genuinely zero width - and cancels the trigger's own leading `gap-1.5`
+ * alongside it, via `-ms-1.5`/`ms-0` - when there is nothing to show, and
+ * animates open to the chip's intrinsic width when there is.
+ *
+ * **Unlike `TabCount`, the `Badge` does not stay mounted empty.** `TabCount`'s
+ * live cell is bare text, so an empty one is genuinely invisible; `Badge`
+ * always paints an opaque `bg-*` fill regardless of its content, the same
+ * fact the width-reservation version of this component was written around
+ * ("an emptied `Badge` still paints a coloured pill"). A track that has not
+ * quite finished collapsing - or hits a rounding residual from the badge's
+ * own padding - would otherwise leave a stray filled pixel or two showing as
+ * a small solid mark next to "Tests" on every response that never ran one,
+ * which is worse than the jump this whole mechanism exists to fix. So the
+ * `Badge` itself mounts only when `hasResults`, the same true mount/unmount
+ * `TabErrorDot` has, and needs the same `starting:` opacity for its own
+ * fade-in independent of the track's width animation.
  */
 function TestsResultChip({ results }: { results: readonly { passed: boolean }[] }) {
 	const passed = results.filter((t) => t.passed).length;
@@ -90,16 +99,18 @@ function TestsResultChip({ results }: { results: readonly { passed: boolean }[] 
 		<span
 			data-slot="tests-result-chip"
 			className={cn(
-				"grid overflow-hidden transition-[grid-template-columns,margin-left] duration-150 ease-out",
-				hasResults ? "grid-cols-[1fr] ml-1" : "grid-cols-[0fr] ml-0"
+				"grid overflow-hidden transition-[grid-template-columns,margin-inline-start] duration-150 ease-out",
+				hasResults ? "grid-cols-[1fr] ms-0" : "grid-cols-[0fr] -ms-1.5"
 			)}
 		>
-			<Badge
-				variant={hasResults && results.every((t) => t.passed) ? "default" : "destructive"}
-				className="h-4 min-w-0 px-1 text-micro"
-			>
-				{hasResults ? `${passed}/${results.length}` : null}
-			</Badge>
+			{hasResults && (
+				<Badge
+					variant={results.every((t) => t.passed) ? "default" : "destructive"}
+					className="starting:opacity-0 opacity-100 transition-opacity duration-150 h-4 min-w-0 px-1 text-micro"
+				>
+					{passed}/{results.length}
+				</Badge>
+			)}
 		</span>
 	);
 }
