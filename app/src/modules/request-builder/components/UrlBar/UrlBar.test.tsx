@@ -37,6 +37,8 @@ vi.mock("./UrlInput", () => ({ default: () => null }));
 interface CtxOverrides {
 	isStreaming?: boolean;
 	stopStream?: () => Promise<void>;
+	/** Whether a collection's data file is bound, so Send's row caret renders. */
+	canBindRows?: boolean;
 }
 
 function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBuilderContextValue {
@@ -77,7 +79,7 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		// preview can resolve against the picked one. No case here declares a
 		// contract, so the affordance is absent and nothing reads the rest.
 		sendWithRow: {
-			available: false,
+			available: overrides.canBindRows ?? false,
 			contract: undefined,
 			fileName: undefined,
 			status: "idle",
@@ -330,6 +332,21 @@ describe("control heights", () => {
 		// other file could reach.
 		const { container } = renderBar(true);
 		expect(container.querySelector(".bg-panel")?.className).toContain("min-h-band-md");
+	});
+
+	/*
+	 * The row-caret's own trigger, which the two checks above cannot see - it
+	 * only renders once a collection's data file is bound (`canBindRows`), a
+	 * state neither existing `renderBar` call reaches. It carried `h-8` after
+	 * Send and Load Test had both already moved to `h-control` for #1679, so it
+	 * was visibly shorter than its neighbours in exactly the one state that
+	 * shows it.
+	 */
+	it("gives the row caret the same height as Send and Load Test beside it", () => {
+		renderBar(true, { canBindRows: true });
+		const caret = screen.getByRole("button", { name: /send with a data row/i });
+		expect(caret.className).toContain("h-control");
+		expect(caret.className).not.toContain("h-8");
 	});
 });
 

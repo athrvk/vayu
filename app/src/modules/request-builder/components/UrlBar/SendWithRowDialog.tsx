@@ -387,7 +387,14 @@ export default function SendWithRowDialog({
 					aria-label="Send with a data row"
 					disabled={disabled}
 					className={cn(
-						"h-8 px-2 inline-flex items-center shrink-0",
+						// `h-control`, not `h-8` - this caret sits between two
+						// `h-control` buttons (issue #1679) and a leftover `h-8`
+						// read as the same height only by coincidence before
+						// `--spacing` moved to the 3px rhythm (#1670); after that it
+						// is visibly shorter than Send and Load Test on either side
+						// of it, and it only shows up once a collection's data file
+						// is bound, which is why it survived unnoticed.
+						"h-control px-2 inline-flex items-center shrink-0",
 						// Send's own fill and border - this is Send's caret, not a
 						// control beside it - with the shared edge transparent so the
 						// two do not draw a 2px line between them.
