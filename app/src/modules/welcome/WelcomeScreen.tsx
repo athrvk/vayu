@@ -93,7 +93,11 @@ export default function WelcomeScreen() {
 							onRetry={retry}
 						/>
 					) : (
-						<FirstRunWelcome onImport={openImport} onNewRequest={newRequest} />
+						<FirstRunWelcome
+							onImport={openImport}
+							onNewRequest={newRequest}
+							onOpenDemo={() => newRequest(DEMO_REQUEST_PRESET)}
+						/>
 					)
 				) : (
 					<Launcher

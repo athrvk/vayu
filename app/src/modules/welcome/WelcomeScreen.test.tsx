@@ -80,6 +80,27 @@ describe("WelcomeScreen", () => {
 			expect(screen.queryByText(/50k\+/)).not.toBeInTheDocument();
 			expect(screen.queryByText(/Requests per second/i)).not.toBeInTheDocument();
 		});
+
+		// The demo tile was scoped to the Launcher alone (issue #1694), which
+		// meant a truly fresh workspace - no collection yet either - never saw
+		// it, only appearing once the user had already created their first
+		// collection or request. A workspace this empty creates a collection
+		// behind the scenes the same way "New request" does here, so the tile
+		// belongs on this screen too.
+		it("shows the demo tile, and creates a collection first to hold the preset request", async () => {
+			renderScreen();
+			expect(screen.getByRole("button", { name: /Open Demo API/i })).toBeInTheDocument();
+
+			fireEvent.click(screen.getByRole("button", { name: /Open Demo API/i }));
+			await waitFor(() => expect(mocks.createCollection).toHaveBeenCalled());
+			expect(mocks.createRequest).toHaveBeenCalledWith(
+				expect.objectContaining({
+					collectionId: "new-col",
+					method: DEMO_REQUEST_PRESET.method,
+					url: DEMO_REQUEST_PRESET.url,
+				})
+			);
+		});
 	});
 
 	describe("populated workspace", () => {
