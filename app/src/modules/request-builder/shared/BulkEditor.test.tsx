@@ -37,6 +37,7 @@ function setup(format = () => "a: 1\nb: 2") {
 			placeholder="Name: value"
 			hint={<>Format: Name: value</>}
 			tableHeader={<span>empty hint</span>}
+			after={<span>the resolved URL</span>}
 		>
 			<div data-testid="table">the table</div>
 		</BulkEditor>
@@ -45,7 +46,9 @@ function setup(format = () => "a: 1\nb: 2") {
 }
 
 const textarea = () => screen.queryByRole("textbox");
-const toggle = () => screen.getByRole("button");
+// Named rather than "the button": once a draft diverges, a Discard button
+// sits beside this one, and `getByRole("button")` alone would find both.
+const toggle = () => screen.getByRole("button", { name: /Bulk edit|Table/ });
 
 describe("switching between the table and the text", () => {
 	it("starts on the table", () => {
@@ -108,5 +111,50 @@ describe("the header slot", () => {
 		setup();
 		fireEvent.click(toggle());
 		expect(screen.queryByText("empty hint")).not.toBeInTheDocument();
+	});
+});
+
+describe("the `after` slot", () => {
+	// Distinct from `tableHeader`: what describes the send (the resolved URL,
+	// the engine's declared headers) is true regardless of which editor is
+	// showing, unlike the empty-state hint above, which is about the table.
+	it("stays visible in both the table and the text", () => {
+		setup();
+		expect(screen.getByText("the resolved URL")).toBeInTheDocument();
+
+		fireEvent.click(toggle());
+		expect(screen.getByText("the resolved URL")).toBeInTheDocument();
+	});
+});
+
+describe("discarding a draft", () => {
+	it("has no Discard button on an unedited draft", () => {
+		setup();
+		fireEvent.click(toggle());
+		expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
+	});
+
+	it("offers Discard once the draft diverges, and it leaves the request untouched", () => {
+		const { onCommit } = setup();
+		fireEvent.click(toggle());
+		fireEvent.change(textarea()!, { target: { value: "c: 3" } });
+
+		const discard = screen.getByRole("button", { name: "Discard" });
+		fireEvent.click(discard);
+
+		expect(onCommit).not.toHaveBeenCalled();
+		expect(screen.getByTestId("table")).toBeInTheDocument();
+	});
+
+	it("reopens to the current rows, not the discarded draft", () => {
+		// Discarding must not leave the stale text sitting in state for the next
+		// open - the whole point is that the edit never happened.
+		setup();
+		fireEvent.click(toggle());
+		fireEvent.change(textarea()!, { target: { value: "c: 3" } });
+		fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+		fireEvent.click(toggle());
+		expect((textarea() as HTMLTextAreaElement).value).toBe("a: 1\nb: 2");
 	});
 });

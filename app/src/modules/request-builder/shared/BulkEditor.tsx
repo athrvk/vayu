@@ -32,6 +32,18 @@
  * paste a block, fix it up, and it commits when you switch back to the table.
  * Parsing on every keystroke would rewrite the request underneath a
  * half-finished paste.
+ *
+ * **`after` renders in both modes.** "Added by Vayu" and the resolved-URL line
+ * used to be part of `children`, so they vanished the moment you switched to
+ * text - exactly when a bulk-pasted block of params most wants to be checked
+ * against the URL it will produce. Only the table itself, and its empty-state
+ * `tableHeader`, are table-only; everything that describes *this send* rather
+ * than *this table* belongs in `after`.
+ *
+ * **Committing is still the only way out, but it is no longer the only way
+ * back.** A draft that diverges from the table gets a `Discard` action beside
+ * the mode toggle, so switching in to look something up and changing your mind
+ * does not force a commit the way toggling back always did.
  */
 
 import { useState } from "react";
@@ -59,6 +71,12 @@ export interface BulkEditorProps {
 	children: React.ReactNode;
 	/** Sits between the toggle and the table - the empty-state hint. */
 	tableHeader?: React.ReactNode;
+	/**
+	 * Rendered below the table or the textarea, in both modes - what describes
+	 * the send rather than the table (the engine's declared headers, the
+	 * resolved URL). See the module doc for why this is not part of `children`.
+	 */
+	after?: React.ReactNode;
 }
 
 export function BulkEditor({
@@ -69,19 +87,34 @@ export function BulkEditor({
 	hint,
 	children,
 	tableHeader,
+	after,
 }: BulkEditorProps) {
 	const [isText, setIsText] = useState(false);
 	const [draft, setDraft] = useState("");
+	// What the table held the moment text mode opened, so `isDirty` reads the
+	// draft against the edit's own starting point rather than re-deriving it
+	// from a `format()` call that would recompute against the table's *current*
+	// (unrelated) state on every render.
+	const [opened, setOpened] = useState("");
+
+	const isDirty = isText && draft !== opened;
 
 	const toggle = () => {
 		if (isText) {
 			onCommit(draft);
 			setIsText(false);
 		} else {
-			setDraft(format());
+			const text = format();
+			setDraft(text);
+			setOpened(text);
 			setIsText(true);
 		}
 	};
+
+	// Leaves text mode without committing. Only ever shown once the draft has
+	// actually diverged (`isDirty`), so this is never a second, quieter way to
+	// do what the toggle already does.
+	const discard = () => setIsText(false);
 
 	/*
 	 * Derived from the label, so Headers and Query Parameters get different ids.
@@ -100,19 +133,26 @@ export function BulkEditor({
 				 * once rather than every time.
 				 */}
 				<div className="min-w-0">{!isText && tableHeader}</div>
-				<Button variant="outline" size="sm" onClick={toggle} className="shrink-0">
-					{isText ? (
-						<>
-							<Table2 className="size-icon-sm mr-1" />
-							Table
-						</>
-					) : (
-						<>
-							<Edit3 className="size-icon-sm mr-1" />
-							Bulk edit
-						</>
+				<div className="flex items-center gap-2 shrink-0">
+					{isDirty && (
+						<Button variant="ghost" size="sm" onClick={discard}>
+							Discard
+						</Button>
 					)}
-				</Button>
+					<Button variant="outline" size="sm" onClick={toggle}>
+						{isText ? (
+							<>
+								<Table2 className="size-icon-sm mr-1" />
+								Table
+							</>
+						) : (
+							<>
+								<Edit3 className="size-icon-sm mr-1" />
+								Bulk edit
+							</>
+						)}
+					</Button>
+				</div>
 			</div>
 
 			{isText ? (
@@ -130,6 +170,8 @@ export function BulkEditor({
 			) : (
 				children
 			)}
+
+			{after}
 		</div>
 	);
 }

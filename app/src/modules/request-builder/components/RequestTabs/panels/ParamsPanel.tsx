@@ -83,27 +83,16 @@ export default function ParamsPanel() {
 					Add query parameters to send with this request.
 				</EmptyTableHint>
 			}
-		>
-			<div className="space-y-3">
-				<KeyValueEditor
-					items={displayParams}
-					onChange={handleParamsChange}
-					keyPlaceholder="Parameter"
-					valuePlaceholder="Value"
-					showResolved={true}
-					allowDisable={true}
-					variables={variables}
-				/>
-
-				{/*
-				 * The resolved URL, on one line.
-				 *
-				 * Not redundant with the bar above, which is the thing worth being
-				 * careful about: the bar shows the URL *with* its `{{variables}}`,
-				 * this shows what will actually be sent. It was a `p-3` slab under a
-				 * 13px label - two rows of chrome for one line of text - in a tab
-				 * whose table is now 36px per row. It is a labelled line now.
-				 */}
+			/*
+			 * The resolved URL, on one line, in both modes - not just the table's.
+			 * It was a `p-3` slab under a 13px label - two rows of chrome for one
+			 * line of text - in a tab whose table is now 36px per row. It is a
+			 * labelled line now, and it stays visible while bulk-editing because
+			 * that is exactly when a pasted block of params most wants checking
+			 * against the URL it will produce - not redundant with the bar above,
+			 * which shows the URL *with* its `{{variables}}` rather than resolved.
+			 */
+			after={
 				<div className="flex items-baseline gap-2 text-xs">
 					<span className="shrink-0 uppercase tracking-wide text-subtle-foreground">
 						Sends
@@ -112,7 +101,17 @@ export default function ParamsPanel() {
 						{resolvedUrl || <span className="italic">No URL</span>}
 					</span>
 				</div>
-			</div>
+			}
+		>
+			<KeyValueEditor
+				items={displayParams}
+				onChange={handleParamsChange}
+				keyPlaceholder="Parameter"
+				valuePlaceholder="Value"
+				showResolved={true}
+				allowDisable={true}
+				variables={variables}
+			/>
 		</BulkEditor>
 	);
 }
