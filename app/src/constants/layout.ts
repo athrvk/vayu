@@ -216,3 +216,5 @@ export const DEFAULT_SCRIPT_EDITOR_HEIGHT = 160;
 export const SCRIPT_EDITOR_MIN_HEIGHT = 120;
 export const SCRIPT_EDITOR_MAX_HEIGHT = 800;
 export const SCRIPT_EDITOR_HEIGHT_STEP = 16;
+/** Page Up/Down jump, the same 4x-the-step ratio `PANEL_MAX_WIDTH`'s own page step uses. */
+export const SCRIPT_EDITOR_HEIGHT_PAGE_STEP = 64;

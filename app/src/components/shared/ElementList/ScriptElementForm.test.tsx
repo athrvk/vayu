@@ -35,6 +35,7 @@ import { ScriptElementForm } from "./ScriptElementForm";
 import { useLayoutStore } from "@/stores";
 import {
 	DEFAULT_SCRIPT_EDITOR_HEIGHT,
+	SCRIPT_EDITOR_HEIGHT_PAGE_STEP,
 	SCRIPT_EDITOR_HEIGHT_STEP,
 	SCRIPT_EDITOR_MAX_HEIGHT,
 	SCRIPT_EDITOR_MIN_HEIGHT,
@@ -279,6 +280,86 @@ describe("the resize handle", () => {
 		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(SCRIPT_EDITOR_MAX_HEIGHT);
 
 		rafSpy.mockRestore();
+	});
+
+	// A touch interruption or an OS overlay taking the gesture mid-drag used to
+	// leave the listeners attached and the store never written - `pointerup`
+	// just never came. `pointercancel` aborts instead: the box's live preview
+	// reverts to where the drag started, and nothing is committed.
+	it("aborts on pointercancel - the box reverts and nothing is written", () => {
+		const rafSpy = vi
+			.spyOn(window, "requestAnimationFrame")
+			.mockImplementation((cb: FrameRequestCallback) => {
+				cb(0);
+				return 0;
+			});
+		const { box } = renderForm();
+		const handle = heightHandle();
+
+		fireEvent.pointerDown(handle, { clientY: 100, pointerId: 1 });
+		window.dispatchEvent(new PointerEvent("pointermove", { clientY: 140, pointerId: 1 }));
+		expect(box).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT + 40}px` });
+
+		window.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 1 }));
+
+		expect(box).toHaveStyle({ height: `${DEFAULT_SCRIPT_EDITOR_HEIGHT}px` });
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBeUndefined();
+
+		rafSpy.mockRestore();
+	});
+
+	// Page/Home/End/reset - the gap this row's keyboard handling had against
+	// `PanelResizeHandle`'s before both shared `useResizeGesture` (#1738).
+	it("jumps with Page keys, Home/End, and resets with Enter", () => {
+		renderForm();
+		const handle = heightHandle();
+
+		fireEvent.keyDown(handle, { key: "PageDown" });
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
+			DEFAULT_SCRIPT_EDITOR_HEIGHT + SCRIPT_EDITOR_HEIGHT_PAGE_STEP
+		);
+		fireEvent.keyUp(handle, { key: "PageDown" });
+
+		fireEvent.keyDown(handle, { key: "PageUp" });
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
+		fireEvent.keyUp(handle, { key: "PageUp" });
+
+		fireEvent.keyDown(handle, { key: "End" });
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(SCRIPT_EDITOR_MAX_HEIGHT);
+
+		fireEvent.keyDown(handle, { key: "Home" });
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(SCRIPT_EDITOR_MIN_HEIGHT);
+
+		fireEvent.keyDown(handle, { key: "Enter" });
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(DEFAULT_SCRIPT_EDITOR_HEIGHT);
+	});
+
+	// Holding an arrow key auto-repeats about as fast as a drag fires
+	// `pointermove` (#1738) - a naive per-repeat commit is the same
+	// `JSON.stringify` + `localStorage.setItem` flood the drag path was fixed
+	// for. A single press still commits immediately (the test above); only a
+	// held key's repeats coalesce.
+	it("coalesces a held key's repeats into one commit, flushed on release", () => {
+		vi.useFakeTimers();
+		vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+			return setTimeout(() => cb(0), 0) as unknown as number;
+		});
+		vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+		renderForm();
+		const handle = heightHandle();
+
+		fireEvent.keyDown(handle, { key: "ArrowDown", repeat: true });
+		fireEvent.keyDown(handle, { key: "ArrowDown", repeat: true });
+		// Nothing committed yet - both repeats coalesced into one pending frame.
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBeUndefined();
+
+		vi.runAllTimers();
+		expect(useLayoutStore.getState().scriptEditorHeights.s1).toBe(
+			DEFAULT_SCRIPT_EDITOR_HEIGHT + SCRIPT_EDITOR_HEIGHT_STEP * 2
+		);
+
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
 	});
 });
 

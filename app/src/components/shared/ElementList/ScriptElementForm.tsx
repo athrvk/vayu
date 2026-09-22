@@ -27,22 +27,14 @@
  * validated against that same measured total) - so it can constrain a
  * *share* of a definite total, never set one, which is exactly what this
  * box's own absolute, unbounded-parent height needs. A drag handle below the
- * box - the same rAF-coalesced-write, one-commit-on-release pattern
- * `PanelResizeHandle` uses for the drawer and context bar widths (issue
- * #1715), inlined here because that component is wired to a horizontal
- * `parentElement.style.width` and its own width constants (see the follow-up
- * issue below) - sets the height directly, in `layout-store`'s
- * `scriptEditorHeights`.
- *
- * **This is a second implementation of that mechanism, not a shared one**
- * (issue #1738). Extracting the rAF/clamp/commit-on-release logic itself
- * into a hook - the way `modules/collections/drag-gesture.ts` extracts an
- * ordering gesture into a pure, ref-free state machine - is tracked there,
- * along with two gaps the extraction should close for both copies at once:
- * neither handles `pointercancel` (a touch interruption or OS overlay mid-drag
- * leaves the listeners attached and the store never commits), and this copy's
- * keyboard handling covers only Arrow keys, not `PanelResizeHandle`'s
- * Page/Home/End/reset.
+ * box sets the height directly, in `layout-store`'s `scriptEditorHeights`,
+ * through `useResizeGesture` (issue #1715) - the same rAF-coalesced-write,
+ * one-commit-on-release mechanism `PanelResizeHandle` uses for the drawer
+ * and context bar widths, extracted into a shared hook (issue #1738) rather
+ * than left as two independently-drifting copies: this row's keyboard
+ * handling now matches `PanelResizeHandle`'s (Page keys, Home/End, a reset),
+ * and both copies now abort a `pointercancel`'d drag instead of leaving it
+ * uncommitted with its listeners still attached.
  *
  * **That height is per element id, not shared across every script row**
  * (issue #1643). A request or collection can show a `script.pre` and a
@@ -73,8 +65,11 @@ import type * as Monaco from "monaco-editor";
 import { CodeEditor } from "@/components/ui";
 import { ScriptSnippets } from "@/components/shared";
 import { insertSnippetAtCursor } from "@/lib/editor-snippet";
+import { useResizeGesture } from "@/lib/resize-gesture";
 import { useLayoutStore } from "@/stores";
 import {
+	DEFAULT_SCRIPT_EDITOR_HEIGHT,
+	SCRIPT_EDITOR_HEIGHT_PAGE_STEP,
 	SCRIPT_EDITOR_HEIGHT_STEP,
 	SCRIPT_EDITOR_MAX_HEIGHT,
 	SCRIPT_EDITOR_MIN_HEIGHT,
@@ -89,10 +84,6 @@ export interface ScriptElementFormProps {
 	/** The kind's own catalogue description - the form's lead sentence. */
 	description: string;
 	onChange: (config: Record<string, unknown>) => void;
-}
-
-function clampHeight(height: number): number {
-	return Math.max(SCRIPT_EDITOR_MIN_HEIGHT, Math.min(SCRIPT_EDITOR_MAX_HEIGHT, height));
 }
 
 export function ScriptElementForm({
@@ -120,59 +111,46 @@ export function ScriptElementForm({
 	const setStoredHeight = useLayoutStore((s) => s.setScriptEditorHeight);
 
 	const boxRef = useRef<HTMLDivElement | null>(null);
-	// Only ever holds an id while a drag's rAF is in flight, mirroring
-	// `PanelResizeHandle`'s own ref - `onUp` uses it to know whether there is a
-	// scheduled frame left to cancel.
-	const rafIdRef = useRef<number | null>(null);
+	const gesture = useResizeGesture({
+		min: SCRIPT_EDITOR_MIN_HEIGHT,
+		max: SCRIPT_EDITOR_MAX_HEIGHT,
+		getValue: () => storedHeight,
+		commit: (height) => setStoredHeight(id, height),
+		paint: (height) => {
+			if (boxRef.current) boxRef.current.style.height = `${height}px`;
+		},
+	});
 
-	/**
-	 * A pointer drag does NOT call `setStoredHeight` per `pointermove`, the
-	 * same reasoning as `PanelResizeHandle` (issue #1715): a debounced write
-	 * behind a live drag can settle *after* React has already re-rendered the
-	 * box at the pre-drag stored height, which is what produced this form's
-	 * revert-then-jump flash on release before this rewrite. Instead the drag
-	 * writes `boxRef`'s `style.height` directly, once per animation frame, and
-	 * calls `setStoredHeight` exactly once, on `pointerup`, with the final
-	 * (already-clamped) value - the same value the last frame already
-	 * painted, so the store's own re-render lands with no visible jump.
-	 */
-	const startResize = (e: React.PointerEvent) => {
-		const handleEl = e.currentTarget;
-		handleEl.setPointerCapture(e.pointerId);
-		const box = boxRef.current;
-		const startY = e.clientY;
-		const startHeight = storedHeight;
-		let liveHeight = startHeight;
-
-		const onMove = (moveEvent: PointerEvent) => {
-			liveHeight = clampHeight(startHeight + (moveEvent.clientY - startY));
-			if (rafIdRef.current !== null) return;
-			rafIdRef.current = requestAnimationFrame(() => {
-				rafIdRef.current = null;
-				if (box) box.style.height = `${liveHeight}px`;
-				handleEl.setAttribute("aria-valuenow", String(Math.round(liveHeight)));
-			});
-		};
-		const onUp = () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-			if (rafIdRef.current !== null) {
-				cancelAnimationFrame(rafIdRef.current);
-				rafIdRef.current = null;
-			}
-			setStoredHeight(id, liveHeight);
-		};
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp);
-	};
-
-	const onHandleKeyDown = (e: React.KeyboardEvent) => {
-		if (e.key === "ArrowDown") {
+	const onHandleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+		const nudge = (delta: number) => {
 			e.preventDefault();
-			setStoredHeight(id, clampHeight(storedHeight + SCRIPT_EDITOR_HEIGHT_STEP));
-		} else if (e.key === "ArrowUp") {
+			gesture.applyKey(e, gesture.currentValue() + delta);
+		};
+		const jumpTo = (target: number) => {
 			e.preventDefault();
-			setStoredHeight(id, clampHeight(storedHeight - SCRIPT_EDITOR_HEIGHT_STEP));
+			gesture.applyKey(e, target);
+		};
+
+		switch (e.key) {
+			case "ArrowDown":
+				return nudge(SCRIPT_EDITOR_HEIGHT_STEP);
+			case "ArrowUp":
+				return nudge(-SCRIPT_EDITOR_HEIGHT_STEP);
+			case "PageDown":
+				return nudge(SCRIPT_EDITOR_HEIGHT_PAGE_STEP);
+			case "PageUp":
+				return nudge(-SCRIPT_EDITOR_HEIGHT_PAGE_STEP);
+			case "Home":
+				return jumpTo(SCRIPT_EDITOR_MIN_HEIGHT);
+			case "End":
+				return jumpTo(SCRIPT_EDITOR_MAX_HEIGHT);
+			case "Enter":
+			case " ":
+				e.preventDefault();
+				gesture.applyKey(e, DEFAULT_SCRIPT_EDITOR_HEIGHT);
+				return;
+			default:
+				return;
 		}
 	};
 
@@ -221,8 +199,10 @@ export function ScriptElementForm({
 					aria-valuemin={SCRIPT_EDITOR_MIN_HEIGHT}
 					aria-valuemax={SCRIPT_EDITOR_MAX_HEIGHT}
 					tabIndex={0}
-					onPointerDown={startResize}
+					onPointerDown={(e) => gesture.startDrag(e, "y")}
 					onKeyDown={onHandleKeyDown}
+					onKeyUp={gesture.flushKey}
+					onBlur={gesture.flushKey}
 					className={cn(
 						"h-1.5 w-full shrink-0 cursor-row-resize rounded-b-md border border-t-0 border-rule bg-rule transition-colors",
 						"hover:bg-primary focus-visible:bg-primary focus-visible:outline-none"

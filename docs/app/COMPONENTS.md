@@ -1839,18 +1839,20 @@ part 2). A row with no entry of its own starts from the last height set on
 subscribed to - so a still-mounted row with no entry is never retroactively
 resized by a later drag elsewhere. Duplicate (issue #1608) copies the source
 row's own entry onto the new id, so a duplicated script starts at its
-source's height rather than the default. A handle below the box - the
-GraphQL body's `ResizableHandle` styling, without the panel group it depends
-on - drags it between `SCRIPT_EDITOR_MIN_HEIGHT` and `SCRIPT_EDITOR_MAX_HEIGHT`
-(`constants/layout.ts`). The drag writes the box's `style.height` directly,
-coalesced to one write per animation frame, and commits to the store exactly
-once on release - `PanelResizeHandle`'s own rAF/one-commit-on-release pattern
-(issue #1715), inlined here rather than shared, because a per-pointer-move
-debounced write left a window where the store's stale value could win a race
-against the drag's own live value and flash the box back before jumping
-forward again. Issue #1738 tracks extracting that mechanism into one shared
-hook instead of two independently-written copies. Arrow keys nudge by
-`SCRIPT_EDITOR_HEIGHT_STEP` and commit immediately, with no debounce.
+source's height rather than the default. A handle below the box drags it
+between `SCRIPT_EDITOR_MIN_HEIGHT` and `SCRIPT_EDITOR_MAX_HEIGHT`
+(`constants/layout.ts`) through `useResizeGesture` (`lib/resize-gesture.ts`,
+issue #1738), the rAF-coalesced-write, one-commit-on-release mechanism
+`PanelResizeHandle` also uses for the drawer and context bar widths (issue
+#1715) - a shared hook rather than two independently-written copies, after
+those copies had already drifted (this row's keyboard handling covered only
+Arrow keys, and neither handled `pointercancel`). Arrow keys, Page keys,
+Home/End and a reset (Enter/Space, to `DEFAULT_SCRIPT_EDITOR_HEIGHT`) all
+commit immediately on a discrete press; a held key's repeats coalesce to one
+commit per animation frame, the same way the drag's paint does, so holding a
+key does not flood `localStorage` with one write per repeat. A `pointercancel`
+mid-drag (a touch interruption, an OS overlay) reverts the box to the height
+the drag started from and writes nothing.
 
 **Five kinds pick one strategy instead of showing every one at once**
 (`ModeElementForm.tsx`, with the table in `element-modes.ts`). `assert.status`
