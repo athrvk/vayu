@@ -27,21 +27,21 @@
  * It governs the *spatial* keys only. Home and End name a point in the value
  * model the handle announces, so they land on the same bound from either side.
  *
- * A pointer drag does NOT call `setWidth` per `pointermove` (#1715). At 120-240
- * events/second that was a synchronous `JSON.stringify` + `localStorage.setItem`
- * of the whole persisted layout slice on every frame, plus a re-render of every
- * `layout-store` subscriber. Instead the drag writes the panel's `style.width`
- * directly, through the handle's own `parentElement` - both the Drawer and the
- * context bar render this handle as the direct child of the `<aside>` whose
- * width it controls - once per animation frame, and calls `setWidth` exactly
- * once, on `pointerup`, with the final value. The double-click and keyboard
- * resets are discrete, not a per-frame flood, so they keep calling `setWidth`
- * straight away, same as before.
+ * The drag and keyboard-repeat mechanics are `useResizeGesture`'s (issue
+ * #1715, generalized in #1738 rather than left as this component's own copy
+ * once `ScriptElementForm` needed the identical shape for a vertical drag):
+ * a pointer drag paints the panel's `style.width` - through the handle's own
+ * `parentElement`, since both the Drawer and the context bar render this
+ * handle as the direct child of the `<aside>` whose width it controls - once
+ * per animation frame and writes the store exactly once, on release. The
+ * double-click reset and a single keyboard press still write immediately;
+ * only a held key's repeat coalesces, the same way the drag's paint does.
  */
 
 import { useRef } from "react";
 import { PANEL_MAX_WIDTH, PANEL_MIN_WIDTH } from "@/constants/layout";
 import { cn } from "@/lib/utils";
+import { useResizeGesture } from "@/lib/resize-gesture";
 
 /** One arrow press. Enough to see, small enough to aim with. */
 const STEP = 16;
@@ -70,57 +70,24 @@ export function PanelResizeHandle({
 	// delta is inverted relative to one on the right edge.
 	const grow = side === "right" ? 1 : -1;
 
-	// Mirrors the store setters' own clamp (`layout-store.ts`) so the panel
-	// cannot visibly overshoot the bound during a drag, before `setWidth` ever
-	// runs its copy of the same clamp on `pointerup`.
-	const clamp = (w: number) => Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, w));
+	const handleRef = useRef<HTMLDivElement | null>(null);
+	const gesture = useResizeGesture({
+		min: PANEL_MIN_WIDTH,
+		max: PANEL_MAX_WIDTH,
+		getValue: () => width,
+		commit: setWidth,
+		paint: (value) => {
+			const panel = handleRef.current?.parentElement;
+			if (panel) panel.style.width = `${value}px`;
+		},
+	});
 
-	// Only ever holds an id while a drag's rAF is in flight, so `onUp` knows
-	// whether there is a scheduled frame left to cancel.
-	const rafIdRef = useRef<number | null>(null);
-
-	const startResize = (e: React.PointerEvent) => {
-		const handleEl = e.currentTarget;
-		handleEl.setPointerCapture(e.pointerId);
-		const panel = handleEl.parentElement;
-		const startX = e.clientX;
-		const startWidth = width;
-		let liveWidth = startWidth;
-
-		const onMove = (moveEvent: PointerEvent) => {
-			liveWidth = clamp(startWidth + (moveEvent.clientX - startX) * grow);
-			// Coalesce to one DOM write per animation frame rather than one per
-			// `pointermove` - a mouse or trackpad fires 120-240 of those a second,
-			// far more often than the display repaints.
-			if (rafIdRef.current !== null) return;
-			rafIdRef.current = requestAnimationFrame(() => {
-				rafIdRef.current = null;
-				if (panel) panel.style.width = `${liveWidth}px`;
-				handleEl.setAttribute("aria-valuenow", String(Math.round(liveWidth)));
-			});
-		};
-		const onUp = () => {
-			window.removeEventListener("pointermove", onMove);
-			window.removeEventListener("pointerup", onUp);
-			if (rafIdRef.current !== null) {
-				cancelAnimationFrame(rafIdRef.current);
-				rafIdRef.current = null;
-			}
-			// The one persisted write the whole drag makes. `setWidth` re-clamps
-			// and re-renders with the same value the last frame already painted,
-			// so this lands with no visible jump.
-			setWidth(liveWidth);
-		};
-		window.addEventListener("pointermove", onMove);
-		window.addEventListener("pointerup", onUp);
-	};
-
-	const onKeyDown = (e: React.KeyboardEvent) => {
+	const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
 		// Arrows and Page keys are spatial: the direction they move the pointer is
 		// the direction the edge travels, so they follow `grow`.
 		const nudge = (delta: number) => {
 			e.preventDefault();
-			setWidth(width + delta * grow);
+			gesture.applyKey(e, gesture.currentValue() + delta * grow);
 		};
 
 		// Home and End are absolute against the value model this handle declares
@@ -129,7 +96,7 @@ export function PanelResizeHandle({
 		// "min 220, max 480" announced Home as the minimum while it jumped to 480.
 		const jumpTo = (target: number) => {
 			e.preventDefault();
-			setWidth(target);
+			gesture.applyKey(e, target);
 		};
 
 		switch (e.key) {
@@ -150,7 +117,7 @@ export function PanelResizeHandle({
 				// The keyboard equivalent of the double-click reset, which was
 				// otherwise the one affordance with no non-mouse route to it.
 				e.preventDefault();
-				setWidth(defaultWidth);
+				gesture.applyKey(e, defaultWidth);
 				return;
 			default:
 				return;
@@ -160,6 +127,7 @@ export function PanelResizeHandle({
 	return (
 		// eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- WAI-ARIA window splitter - a focusable `role="separator"` is its sanctioned interactive form, with the arrow/Page/Home/End handling in the onKeyDown just below
 		<div
+			ref={handleRef}
 			role="separator"
 			aria-orientation="vertical"
 			aria-label={label}
@@ -167,9 +135,11 @@ export function PanelResizeHandle({
 			aria-valuemin={PANEL_MIN_WIDTH}
 			aria-valuemax={PANEL_MAX_WIDTH}
 			tabIndex={0}
-			onPointerDown={startResize}
+			onPointerDown={(e) => gesture.startDrag(e, "x", grow)}
 			onDoubleClick={() => setWidth(defaultWidth)}
 			onKeyDown={onKeyDown}
+			onKeyUp={gesture.flushKey}
+			onBlur={gesture.flushKey}
 			className={cn(
 				"absolute top-0 bottom-0 w-2 cursor-col-resize transition-colors hover:bg-accent/20",
 				// The handle is a 8px strip with no content, so the focus state is
