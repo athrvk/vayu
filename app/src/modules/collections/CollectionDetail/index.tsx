@@ -291,16 +291,19 @@ export default function CollectionDetail() {
 					className="shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
 				>
 					{TABS.map((t) => {
-						const count =
-							t.id === "variables"
-								? variableCount
-								: t.id === "data"
-									? declaredColumnCount
-									: 0;
+						/*
+						 * Two of the six can carry a count, and those two render
+						 * `TabCount` unconditionally: it reserves the slot and empties
+						 * itself at zero, so the first variable appearing no longer
+						 * pushes Data and Spec rightward. The other four render no
+						 * slot and pay no reserved width.
+						 */
+						const counted = t.id === "variables" || t.id === "data";
+						const count = t.id === "variables" ? variableCount : declaredColumnCount;
 						return (
 							<TabsTrigger key={t.id} value={t.id}>
 								<TabLabel>{t.label}</TabLabel>
-								{count > 0 && <TabCount value={count} />}
+								{counted && <TabCount value={count} />}
 							</TabsTrigger>
 						);
 					})}

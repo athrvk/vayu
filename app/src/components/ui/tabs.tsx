@@ -23,7 +23,10 @@
  * and a bare `data-[state=active]:font-semibold` widens the trigger, so
  * switching tab shoves its neighbours sideways. `CollectionDetail` shipped that
  * bug. `TabLabel` reserves the bold width up front, in the primitive, so no
- * call site can reintroduce it.
+ * call site can reintroduce it. `MARK_SLOT` further down is the same idea for
+ * the other half of a trigger's width: a count or an error dot that mounts
+ * widens its trigger and shoves its neighbours, so the slot is always there and
+ * only its contents change.
  *
  * This file previously shipped shadcn's segmented-pill default, which four of
  * the five call sites immediately undid with `h-auto p-0 bg-transparent` before
@@ -230,8 +233,44 @@ function TabLabel({ children }: { children: string }) {
 	);
 }
 
+/*
+ * The slot a trailing mark on a trigger sits in - the count, the error dot.
+ *
+ * **Why the slot is reserved, and not just the mark's contents.** A mark is a
+ * flex item on the trigger; the trigger is `shrink-0` inside a `flex-nowrap`
+ * list. So a mark that *mounts* widens its own trigger by its own width plus
+ * the trigger's `gap-1.5`, and every trigger to its right moves along with it -
+ * and so does whatever else shares the row (the request strip's `Table`
+ * toggle). Typing the first character into an empty Params table moved the
+ * seven tabs after Params and the toggle past them. This is the same defect
+ * `TabLabel` above fixes for the active weight, arriving through content
+ * instead of through a class.
+ *
+ * `TabLabel`'s own trick - a hidden copy at the widest state - does not
+ * transfer, because a count has no widest state: it is a number, not one
+ * string rendered two ways. So the slot is held open instead, and the mark
+ * empties rather than unmounting.
+ *
+ * `1ch`, in the `font-mono` `text-micro` this sets: one `ch` there *is* one
+ * digit, whatever the font scale resolves that to, and in a monospace face
+ * every digit has the same advance. A pixel or `rem` literal would be a
+ * number nudged until it
+ * looked right, and would drift the moment the micro step moved. Both marks
+ * carry the same class so the Console tab's either/or (dot *or* count) is
+ * width-neutral too, which a `size-[5px]` dot beside a `1ch` count is not.
+ *
+ * `min-w`, not `w`: a count crossing 9 to 10 is content genuinely growing, and
+ * a pinned slot would clip it. That transition still moves the triggers to its
+ * right, by one digit, and is left that way on purpose - reserving two digits
+ * would cost that width permanently on every counted tab, on strips that
+ * already scroll at seven and eight tabs (see SIZE). The transition worth
+ * spending width on is nothing-to-something, which every counted tab makes and
+ * most make often; nine-to-ten is a tab strip most requests never reach.
+ */
+const MARK_SLOT = "min-w-[1ch] text-center font-mono text-micro leading-none";
+
 /**
- * A count beside a tab label.
+ * The small superscript count on a tab.
  *
  * A superscript rather than the `h-5` `Badge` pill this replaces: the pill set
  * a 20px floor that no 24px band can accommodate, and it was the single reason
@@ -239,34 +278,47 @@ function TabLabel({ children }: { children: string }) {
  *
  * 10px is the documented micro step - see type-scale.test.ts, which rejects the
  * half-pixel sizes that come from nudging a number until it looks right.
- */
-/**
- * The small superscript count on a tab.
  *
- * **Zero renders nothing.** A count is there to say "there are this many"; a
- * `0` says "there are none", which the tab's own empty state already says at
- * more length and without asking you to read a superscript to find out there is
- * nothing to read. The Console tab showed one the moment its gating was removed
- * and it always rendered - a `0` beside a tab whose panel says "No console
- * output".
+ * **Zero renders nothing, and so does `undefined`.** A count is there to say
+ * "there are this many"; a `0` says "there are none", which the tab's own empty
+ * state already says at more length and without asking you to read a
+ * superscript to find out there is nothing to read. The Console tab showed one
+ * the moment its gating was removed and it always rendered - a `0` beside a tab
+ * whose panel says "No console output".
  *
  * Handled here rather than at each call site because the call sites were
- * already working around it by hand: `RequestTabs` passes `badge: undefined`
- * and guards with `tab.badge !== undefined`, which is the same remembering
+ * already working around it by hand: `RequestTabs` passed `badge: undefined`
+ * and guarded with `tab.badge !== undefined`, which is the same remembering
  * problem one level up. A caller that genuinely wants to show a zero can pass
  * the string `"0"`.
+ *
+ * **"Renders nothing" means nothing *perceptible*, not nothing at all.** The
+ * `<sup>` is always here, holding `MARK_SLOT` open; only its contents come and
+ * go, so a count appearing shifts no sibling. It is empty, not `0` and not a
+ * placeholder glyph, so it contributes no text to the trigger's accessible
+ * name and a screen reader reads "Params", not "Params 0".
+ *
+ * The contract that follows for callers: render `TabCount` **unconditionally**
+ * on any tab that can carry a count, passing `undefined` when it has none -
+ * gating the element is what reintroduces the shift. A tab that can never
+ * carry one renders no `TabCount` at all and pays no reserved width.
  */
-function TabCount({ value, className }: { value: React.ReactNode; className?: string }) {
-	if (value === 0) return null;
+function TabCount({ value, className }: { value?: React.ReactNode; className?: string }) {
+	const shown = value === 0 || value === undefined || value === null ? null : value;
 
 	return (
 		<sup
-			className={cn(
-				"font-mono text-micro leading-none tabular-nums text-primary-text",
-				className
-			)}
+			data-slot="tab-count"
+			className={cn(MARK_SLOT, "tabular-nums text-primary-text", className)}
 		>
-			{value}
+			{/*
+			 * The fade rides the value, not the slot. `.enter-fade` is a mount
+			 * effect (`@starting-style`), and the slot no longer mounts - so the
+			 * span that does carries it, and a count appearing still fades in
+			 * rather than popping. React keeps this node across a 1 -> 2, so only
+			 * absent-to-present fades, which is the transition worth marking.
+			 */}
+			{shown === null ? null : <span className="enter-fade">{shown}</span>}
 		</sup>
 	);
 }
@@ -278,6 +330,11 @@ function TabCount({ value, className }: { value: React.ReactNode; className?: st
  * script-error state in the count slot, so turning counts off would have
  * silently deleted the only signal that a script failed. Keeping the mark its
  * own element means the two can be controlled separately.
+ *
+ * It shares `MARK_SLOT` with the count, and the 5px dot centres inside it: its
+ * one call site swaps the two on the same trigger, so a bare 5px dot standing
+ * where a `1ch` count stood would move the tabs to its right every time a
+ * script failed.
  */
 function TabErrorDot({
 	label = "Script error",
@@ -288,11 +345,16 @@ function TabErrorDot({
 }) {
 	return (
 		<span
-			role="img"
-			aria-label={label}
-			title={label}
-			className={cn("size-[5px] shrink-0 rounded-full bg-status-error", className)}
-		/>
+			data-slot="tab-error-dot"
+			className={cn(MARK_SLOT, "inline-flex items-center justify-center", className)}
+		>
+			<span
+				role="img"
+				aria-label={label}
+				title={label}
+				className="size-[5px] shrink-0 rounded-full bg-status-error enter-fade"
+			/>
+		</span>
 	);
 }
 

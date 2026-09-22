@@ -67,6 +67,17 @@ export type RequestTab =
 export interface TabInfo {
 	id: RequestTab;
 	label: string;
+	/**
+	 * The count beside the label, or `undefined` for "nothing to show".
+	 *
+	 * Whether the key is *present* is what says the tab can carry a count at
+	 * all, and `RequestTabs` reads it with `"badge" in tab`: a present-but-
+	 * `undefined` badge still renders `TabCount`, which holds the count's width
+	 * open so the badge appearing shifts no tab beside it. Omitting the key is
+	 * the opt-out - no slot, no reserved width - and Examples is the one tab
+	 * that takes it. Setting it to `undefined` and omitting it are therefore
+	 * *not* the same thing here.
+	 */
 	badge?: number;
 }
 

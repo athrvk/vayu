@@ -239,13 +239,16 @@ describe("a tab count of zero", () => {
 		renderViewer();
 
 		/*
-		 * The absence of a `sup`, not an equality on the text. `TabLabel` renders
-		 * its label twice - once `invisible font-semibold` to reserve the width
-		 * the active state will need - so `textContent` is "ConsoleConsole" and
-		 * always will be.
+		 * An *empty* `sup`, not an absent one, and not an equality on the text.
+		 * The slot itself is always rendered - it reserves the count's width so
+		 * a count arriving cannot shove Tests, Events and Raw sideways (see
+		 * `MARK_SLOT` in `ui/tabs.tsx`) - and what must not appear is any
+		 * content in it. `TabLabel` renders its label twice - once `invisible
+		 * font-semibold` to reserve the width the active state will need - so
+		 * `textContent` is "ConsoleConsole" and always will be.
 		 */
 		const trigger = screen.getByRole("tab", { name: /console/i });
-		expect(trigger.querySelector("sup")).toBeNull();
+		expect(trigger.querySelector("sup")?.textContent).toBe("");
 		expect(trigger.textContent).not.toMatch(/\d/);
 	});
 
