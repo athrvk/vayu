@@ -25,6 +25,7 @@ import {
 	Button,
 	Checkbox,
 	ICON_MOTION,
+	IconSwap,
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
@@ -269,11 +270,13 @@ function KeyValueRow({
 								}
 								className="h-6 w-5 rounded-md text-subtle-foreground hover:text-primary-text"
 							>
-								{isFileRow ? (
-									<Type className="size-icon-sm" />
-								) : (
-									<Paperclip className="size-icon-sm" />
-								)}
+								<IconSwap
+									state={isFileRow ? "file" : "text"}
+									icons={{
+										text: <Paperclip className="size-icon-sm" />,
+										file: <Type className="size-icon-sm" />,
+									}}
+								/>
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="left">
