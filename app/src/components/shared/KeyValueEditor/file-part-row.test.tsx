@@ -88,6 +88,27 @@ describe("switching a row between text and file", () => {
 		expect(row.contentType).toBeUndefined();
 		expect(row.unresolved).toBeUndefined();
 	});
+
+	it("crossfades the switch's glyph rather than popping it", () => {
+		// The Eye/EyeOff shape: a toggle whose glyph names what a click does,
+		// so the glyph changes under the pointer that just clicked it.
+		const tree = (item: KeyValueItem) => (
+			<TooltipProvider>
+				<KeyValueEditor items={[item]} onChange={vi.fn()} allowFiles />
+			</TooltipProvider>
+		);
+		const { container, rerender } = render(tree(textRow));
+		const before = kindButton(container).querySelector(".enter-fade");
+		expect(before, "the glyph has no fading live cell").not.toBeNull();
+		expect(before!.querySelector(".lucide-paperclip")).not.toBeNull();
+
+		rerender(tree(fileRow));
+
+		const after = kindButton(container).querySelector(".enter-fade");
+		expect(after, "the glyph has no fading live cell").not.toBeNull();
+		expect(after!.querySelector(".lucide-type")).not.toBeNull();
+		expect(after, "the live glyph was repainted, not remounted").not.toBe(before);
+	});
 });
 
 describe("picking a file", () => {

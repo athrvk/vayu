@@ -66,4 +66,32 @@ describe("the welcome screen's column", () => {
 			expect(className).toContain("max-w-2xl");
 		}
 	});
+
+	// `LauncherSkeleton` is the one welcome state with no content of its own to
+	// fade - it *is* the placeholder - so only the two real states carry the
+	// class. Without it, the swap from skeleton to `Launcher` or
+	// `FirstRunWelcome` popped in a frame after the skeleton's own bars, while
+	// the sibling `isEmpty && hasFailed` branch (`ErrorState`) already faded,
+	// since that primitive carries `enter-fade` itself.
+	it("fades in Launcher and FirstRunWelcome, the two states that replace the skeleton", () => {
+		const launcherClass = classesOf(
+			<Launcher
+				runs={[]}
+				collectionCount={2}
+				onImport={noop}
+				onNewRequest={noop}
+				onOpenDemo={noop}
+				onSearch={noop}
+				onHistory={noop}
+				onVariables={noop}
+				onServices={noop}
+			/>
+		);
+		const firstRunClass = classesOf(
+			<FirstRunWelcome onImport={noop} onNewRequest={noop} onOpenDemo={noop} />
+		);
+
+		expect(launcherClass).toContain("enter-fade");
+		expect(firstRunClass).toContain("enter-fade");
+	});
 });

@@ -2832,13 +2832,28 @@ user is reading, which is right for a first load and wrong for a re-fetch -
 re-sending a request whose response is on screen used to blank the response
 pane, so the exchange being replaced was gone from the press of Send. The rule
 is the second bullet's, read to its end: the control that was clicked shows the
-work, and *nothing else on the pane moves*. So the stale content stays exactly
-where it is, the pane takes `aria-busy` and drops to `opacity-60` with a
-`transition-opacity duration-150`, and the dim lifting is what says the new
-data landed. No spinner, no bar, no reflow - anything that moves is the thing
-this replaces. `ResponseViewer` (`modules/request-builder/`) is the pattern's
-call site; the loading branch there keeps the centred spinner for the case
-where there is genuinely nothing to hold on to.
+work, and *nothing else on the pane moves size or position*. So the stale
+content stays exactly where it is, the pane takes `aria-busy` and drops to
+`opacity-60` with a `transition-opacity duration-150`, and the dim lifting is
+what says the new data landed. No spinner, no bar, no reflow - anything that
+*reflows* is the thing this replaces. `ResponseViewer` (`modules/request-
+builder/`) is the pattern's call site; the loading branch there keeps the
+centred spinner for the case where there is genuinely nothing to hold on to.
+
+**One exception to "nothing moves": `SendingWave`.** A dim that never moves at
+all reads as inert rather than as a request in flight - easy to mistake for a
+stalled send on anything longer than a beat. `ResponseViewer`'s busy state
+layers a faint band (`response-wave` in `index.css`, `via-foreground/[0.08]`)
+that loops across the pane for as long as the send is open, over the dim
+rather than instead of it. The opacity is the load-bearing number: low enough
+that the stale text underneath stays legible through every pass, which is what
+keeps this from becoming the shimmer this rule is otherwise written against -
+a shimmer built to stand in for content nobody can see yet is stronger than a
+band drawn over content that is already fully there. `pointer-events-none` and
+`aria-hidden`, since it is a hint over content that is still clickable, not a
+control of its own, and `aria-busy` on the pane already carries the state for
+assistive tech. Confined to `ResponseViewer` - the pane it says something about
+is the one with the wave.
 
 **Default entity names are Title Case** ("New Collection", "New Folder"),
 even beside sentence-case headings and button labels ("No collections yet",

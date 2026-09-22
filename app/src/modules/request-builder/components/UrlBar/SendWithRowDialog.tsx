@@ -70,6 +70,9 @@ import {
 	TableHeader,
 	TableRow,
 	DialogCancelButton,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
 } from "@/components/ui";
 import { Callout, FieldError } from "@/components/shared";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
@@ -381,25 +384,45 @@ export default function SendWithRowDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogTrigger asChild>
-				<button
-					type="button"
-					aria-label="Send with a data row"
-					disabled={disabled}
-					className={cn(
-						"h-8 px-2 inline-flex items-center shrink-0",
-						// Send's own fill and border - this is Send's caret, not a
-						// control beside it - with the shared edge transparent so the
-						// two do not draw a 2px line between them.
-						"bg-primary-fill text-white border border-primary-fill border-l-white/25",
-						"hover:bg-primary-fill/90 hover:border-primary-fill/90",
-						"disabled:opacity-50 disabled:hover:bg-primary-fill transition-colors",
-						lastInGroup ? "rounded-r-md rounded-l-none" : "rounded-none"
-					)}
-				>
-					<ChevronDown aria-hidden="true" className="size-icon-sm" />
-				</button>
-			</DialogTrigger>
+			{/*
+			 * Send and Load Test on either side of this caret both carry a
+			 * `Hint` tooltip (their chord); this had none at all, so hovering
+			 * the one control between two tooltipped ones read as broken rather
+			 * than deliberately silent. No chord to show - the picker opens on
+			 * click only - so a plain label rather than `Hint`, which requires
+			 * one.
+			 */}
+			<Tooltip>
+				<TooltipTrigger asChild>
+					<DialogTrigger asChild>
+						<button
+							type="button"
+							aria-label="Send with a data row"
+							disabled={disabled}
+							className={cn(
+								// `h-control`, not `h-8` - this caret sits between two
+								// `h-control` buttons (issue #1679) and a leftover `h-8`
+								// read as the same height only by coincidence before
+								// `--spacing` moved to the 3px rhythm (#1670); after that it
+								// is visibly shorter than Send and Load Test on either side
+								// of it, and it only shows up once a collection's data file
+								// is bound, which is why it survived unnoticed.
+								"h-control px-2 inline-flex items-center shrink-0",
+								// Send's own fill and border - this is Send's caret, not a
+								// control beside it - with the shared edge transparent so the
+								// two do not draw a 2px line between them.
+								"bg-primary-fill text-white border border-primary-fill border-l-white/25",
+								"hover:bg-primary-fill/90 hover:border-primary-fill/90",
+								"disabled:opacity-50 disabled:hover:bg-primary-fill transition-colors",
+								lastInGroup ? "rounded-r-md rounded-l-none" : "rounded-none"
+							)}
+						>
+							<ChevronDown aria-hidden="true" className="size-icon-sm" />
+						</button>
+					</DialogTrigger>
+				</TooltipTrigger>
+				<TooltipContent side="bottom">Send with a data row</TooltipContent>
+			</Tooltip>
 
 			{/* `2xl`, the browser width - see `DialogContent`. Seven columns of
 			    ordinary CSV is the shape this is sized for. */}

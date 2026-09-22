@@ -498,7 +498,7 @@ function ChangedRow({
 
 	return (
 		<li className="rounded-md border border-rule surface-sunken p-2 space-y-1">
-			<label className="flex items-baseline gap-2">
+			<label className="flex items-center gap-2">
 				<Checkbox
 					checked={applying}
 					onChange={(e) =>
@@ -513,7 +513,12 @@ function ChangedRow({
 						)
 					}
 					aria-label={`Apply changes to ${changed.name}`}
-					className="size-icon"
+					// `size-target` (issue #1679), not `size-icon`: same reason as
+					// the field-level checkbox below - a bare checkbox is its own
+					// hit target. `items-center`, not `items-baseline`, above: a
+					// checkbox this size floats above a single-line label at its
+					// text baseline rather than sitting level with it.
+					className="size-target"
 				/>
 				<span className="text-xs font-medium">{changed.name}</span>
 				<span className="text-label font-mono text-muted-foreground break-all">
@@ -541,13 +546,17 @@ function ChangedRow({
 				<ul className="space-y-1">
 					{changed.fields.map((field) => (
 						<li key={field.field} className="text-label">
-							<label className="flex items-baseline gap-1.5">
+							<label className="flex items-center gap-1.5">
 								<Checkbox
 									checked={fields?.has(field.field) ?? false}
 									disabled={!applying}
 									onChange={(e) => toggleField(field.field, e.target.checked)}
 									aria-label={`Apply ${field.field} to ${changed.name}`}
-									className="size-icon-sm"
+									// `size-target` (issue #1679), not `size-icon-sm`: a bare
+									// checkbox is its own hit target, same as `KeyValueRow`'s.
+									// `items-center`, not `items-baseline`, above - see the
+									// group checkbox's comment.
+									className="size-target"
 								/>
 								<span className="font-semibold">{field.field}</span>
 								{field.userTouched && (
@@ -606,7 +615,10 @@ function CheckRow({
 					checked={checked}
 					onChange={(e) => onChange(e.target.checked)}
 					aria-label={`${title} (${detail})`}
-					className="size-icon"
+					// `size-target` (issue #1679), not `size-icon`: same reason as
+					// the field-level checkbox above - a bare checkbox is its own
+					// hit target.
+					className="size-target"
 				/>
 				<span className="text-xs font-medium">{title}</span>
 				<span className="text-label font-mono text-muted-foreground break-all">

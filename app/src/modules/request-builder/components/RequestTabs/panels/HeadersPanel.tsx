@@ -63,7 +63,12 @@ function DefaultHeaderRow({
 				// Named after the header it governs: one per row, and a bare
 				// "checkbox" says nothing about which.
 				aria-label={`Send ${header.name}`}
-				className="size-icon"
+				// `size-target` (issue #1679), not `size-icon`: a bare checkbox is
+				// its own hit target, the same reason `KeyValueRow`'s row-enable
+				// checkbox already carries this class - this one was the sweep's
+				// own blind spot, never wired through a `Button`/`TooltipIconButton`
+				// so #1679's "swap the icon-button override" fix never found it.
+				className="size-target"
 			/>
 			<span
 				className={cn(

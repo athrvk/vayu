@@ -54,7 +54,9 @@ export function Launcher({
 }: LauncherProps) {
 	return (
 		// A centred column, not the full width of the tab - see WELCOME_COLUMN.
-		<div className={`flex flex-col gap-8 ${WELCOME_COLUMN}`}>
+		// `enter-fade`: this replaces `LauncherSkeleton` on mount, the same plain
+		// conditional-swap shape `FirstRunWelcome` fades in for (see its comment).
+		<div className={`enter-fade flex flex-col gap-8 ${WELCOME_COLUMN}`}>
 			<section className="flex flex-col gap-2">
 				<Eyebrow>Start</Eyebrow>
 				{/* Six columns since Search joined the row: the tiles are

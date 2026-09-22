@@ -69,6 +69,8 @@ using nlohmann::json;
 using vayu::core::apply_auth_data_template;
 using vayu::core::bind_auth_row;
 using vayu::core::bind_data_row;
+using vayu::core::bind_iteration;
+using vayu::core::tokenize_bindable_fields;
 using vayu::http::routes::plan_send_row_auth;
 using vayu::http::routes::read_data_row;
 using vayu::http::routes::read_stream_flag;
@@ -361,10 +363,22 @@ class SendWithRowTest : public ::testing::Test {
     /// order execution.cpp runs it. Driven here rather than hand-ordered per
     /// test because the *order* is what these tests are about: a credential
     /// bound after `apply_auth` is a credential bound too late.
+    ///
+    /// The bind itself goes through `bind_iteration` - the *same one call*
+    /// execution.cpp makes, not the two-call `bind_data_row` + `bind_auth_row`
+    /// shape this used to hand-roll. That used to be a second copy of the
+    /// route's own sequence, and a second copy is a copy that does not
+    /// receive the first one's fixes: execution.cpp's real call left
+    /// `tokenize_bindable_fields` its empty default `bound_columns`, so a
+    /// bare `{{column}}` in the body never bound on a live send, while this
+    /// helper's own `bind_data_row` read the row's columns correctly and kept
+    /// passing regardless. Calling the one function the route calls is what
+    /// makes this suite able to catch that class of drift at all.
     static RowSend build_with_row (const json& payload, const json& row) {
         RowSend out;
 
-        const auto plan = plan_send_row_auth (payload);
+        const auto row_columns = vayu::core::bound_columns_of (row);
+        const auto plan        = plan_send_row_auth (payload, row_columns);
         if (!plan.ok) {
             return RowSend{ false, plan.error, {} };
         }
@@ -375,14 +389,13 @@ class SendWithRowTest : public ::testing::Test {
         }
         out.request = std::move (built.request);
 
-        auto bound = bind_data_row (out.request, row, 0);
-        if (bound.ok) {
-            const vayu::core::IterationBinding binding{ &row, 0,
-                vayu::core::IterationIdentity{} };
-            bound = bind_auth_row (out.request, plan.auth, plan.credentials, binding);
-        }
-        out.ok    = bound.ok;
-        out.error = bound.error;
+        const vayu::core::IterationBinding binding{ &row, 0,
+            vayu::core::IterationIdentity{} };
+        const auto bound = bind_iteration (out.request,
+        tokenize_bindable_fields (out.request, row_columns), plan.auth,
+        plan.credentials, binding);
+        out.ok           = bound.ok;
+        out.error        = bound.error;
         return out;
     }
 
@@ -570,6 +583,35 @@ TEST_F (SendWithRowTest, RequestAndCredentialsBindFromTheSameRow) {
     ASSERT_EQ (outcome.response.status_code, 200);
     EXPECT_EQ (server_->path (), "/echo/users/7");
     EXPECT_EQ (server_->header ("Authorization"), "Bearer t-7");
+}
+
+/// A bare `{{column}}` in the *body* binds through `build_with_row` too - the
+/// route's own call shape, not just the `bind_data_row` convenience helper
+/// `ABareColumnReachesTheWireAsWell` above drives directly.
+///
+/// This is the regression the route itself shipped: `execution.cpp`'s real
+/// bind call left `tokenize_bindable_fields` its empty default `bound_columns`,
+/// so `is_bound_column_name` never matched a bare name and every such token -
+/// in the URL, a header, or here in a JSON body - reached the wire exactly as
+/// written, `{{shop}}` included, while `{{data.shop}}` still worked because
+/// that namespace needs no `bound_columns` at all. Invisible in this suite
+/// until `build_with_row` called the same `bind_iteration` the route does;
+/// invisible in the app until a data-bound send's body carried a bare column.
+///
+/// Mutation-check: revert `build_with_row` to call `bind_data_row` instead of
+/// `bind_iteration`, or drop `row_columns` from the `tokenize_bindable_fields`
+/// call, and this fails with `"shop": "{{shop}}"` still in the body.
+TEST_F (SendWithRowTest, ABareColumnInTheBodyBindsThroughTheRoutesOwnCall) {
+    const json payload{ { "method", "POST" }, { "url", server_->url () },
+        { "body", { { "mode", "json" }, { "content", R"({"shop":"{{shop}}"})" } } } };
+    const json row{ { "shop", "01-partnership-prod-v3.myshopify.com" } };
+
+    auto prepared = build_with_row (payload, row);
+    ASSERT_TRUE (prepared.ok) << prepared.error;
+
+    auto outcome = send (std::move (prepared.request), &row, "", "");
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_EQ (server_->body (), R"({"shop":"01-partnership-prod-v3.myshopify.com"})");
 }
 
 /// A static credential still resolves inside the build on a send that carries a

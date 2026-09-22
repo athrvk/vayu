@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
-import { Button, IconSwap, TooltipIconButton } from "@/components/ui";
+import { Button, IconSwap, LabelSwap, TooltipIconButton } from "@/components/ui";
 import { ApiError } from "@/services/http-client";
 import {
 	useOAuth2TokenStatusQuery,
@@ -27,6 +27,8 @@ interface TokenStatusRowProps {
 	/** The config with {{variables}} already resolved (used for the token request). */
 	resolvedConfig: OAuth2Config;
 }
+
+const TOKEN_ACTION_LABELS = ["Get Token", "Renew", "Refresh"] as const;
 
 function maskToken(token: string): string {
 	if (token.length <= 10) return "••••";
@@ -177,7 +179,15 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 					)}
 				</div>
 
-				{/* Action rail - fixed position, never shifts */}
+				{/*
+				 * Action rail. The token action is its last child, so the row's
+				 * right edge pins it: everything that mounts once a token lands
+				 * goes before it, and its glyph and label reserve their widest
+				 * state. With Clear after it, the button slid left by Clear's
+				 * width the moment a fetch landed, and a second click on the same
+				 * spot cleared the token just fetched - the hazard
+				 * `SchemaStatusBadge` documents for its Refresh button.
+				 */}
 				<div className="flex items-center gap-1 shrink-0">
 					{token && (
 						<TooltipIconButton
@@ -196,23 +206,6 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							}
 						/>
 					)}
-					<Button
-						size="sm"
-						variant="outline"
-						onClick={handleGetToken}
-						disabled={busy || incomplete}
-					>
-						{fetchMutation.isPending || authorizing ? (
-							<Loader2 className="size-icon-sm animate-spin" />
-						) : token && !expired ? (
-							<RefreshCw className="size-icon-sm" />
-						) : (
-							<KeyRound className="size-icon-sm" />
-						)}
-						<span className="ml-1.5">
-							{token ? (expired ? "Refresh" : "Renew") : "Get Token"}
-						</span>
-					</Button>
 					{token && (
 						<TooltipIconButton
 							size="sm"
@@ -222,6 +215,32 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 							icon={<Trash2 className="size-icon-sm" />}
 						/>
 					)}
+					<Button
+						size="sm"
+						variant="outline"
+						onClick={handleGetToken}
+						disabled={busy || incomplete}
+					>
+						<IconSwap
+							state={
+								fetchMutation.isPending || authorizing
+									? "pending"
+									: token && !expired
+										? "renew"
+										: "fetch"
+							}
+							icons={{
+								fetch: <KeyRound className="size-icon-sm" />,
+								renew: <RefreshCw className="size-icon-sm" />,
+								pending: <Loader2 className="size-icon-sm animate-spin" />,
+							}}
+						/>
+						<LabelSwap
+							className="ml-1.5"
+							label={token ? (expired ? "Refresh" : "Renew") : "Get Token"}
+							states={TOKEN_ACTION_LABELS}
+						/>
+					</Button>
 				</div>
 			</div>
 

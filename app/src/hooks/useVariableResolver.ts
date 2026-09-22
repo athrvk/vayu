@@ -52,6 +52,7 @@ import { castByType } from "@/lib/variable-cast";
 import { walkAncestors } from "@/modules/collections/tree-utils";
 import {
 	coerceVariableValue,
+	dataColumnName,
 	isEnabledDefinition,
 	renderDataValue,
 	resolveTemplate,
@@ -324,17 +325,26 @@ export function useVariableResolver(
 	 * flagged as the winner is a list that cannot be rendered honestly, and
 	 * `winner` means "what the send will use" to every reader of it.
 	 *
-	 * A `{{data.column}}` name never lands here: the cells are keyed by bare
-	 * column name, so the reserved spelling finds nothing and keeps the terminal
-	 * explanation it already had - which is correct for it, and wrong for a bare
-	 * name, since defining a variable of *that* name does something.
+	 * `{{data.column}}` reads the same cell a bare `{{column}}` does, by the
+	 * column name with the prefix stripped - `resolveTemplateWithRow`'s own
+	 * rule ("`{{data.column}}` answers from the same row" as the bare name,
+	 * "because they are one bind"). This used to look the *whole* name up in
+	 * `rowCells`, which is keyed by bare column names alone, so `data.shop`
+	 * never matched anything and the hover card fell back to the declared-
+	 * column description with no value - correct when no row is bound, wrong
+	 * once one is: the token is going to send exactly the bare spelling's
+	 * value, and a reader comparing the two hovers side by side saw one with a
+	 * value and one without for what is, at send time, the same cell.
+	 * `originsByName` itself is unaffected: `data.*` cannot be scope-defined,
+	 * so `defined` is always empty for it, exactly as before.
 	 */
 	const getVariableOrigins = useCallback(
 		(name: string): VariableOrigin[] => {
 			const defined: VariableOrigin[] = originsByName[name] ?? [];
+			const column = dataColumnName(name) ?? name;
 			// `get`, not a truthiness check: a column whose cell is empty still
 			// answers the name, and answers it with "".
-			const cell = rowCells?.get(name);
+			const cell = rowCells?.get(column);
 			if (cell === undefined) return defined;
 			return [
 				...defined.map((o) => ({ ...o, winner: false })),

@@ -398,6 +398,28 @@ describe("the caret's place in the attached group", () => {
 	});
 
 	/**
+	 * Send and Load Test on either side both carry a tooltip; the caret used to
+	 * carry none, which read as the one broken control between two working
+	 * ones rather than a deliberately silent one.
+	 *
+	 * `data-state` alone would not prove it: this trigger is also a
+	 * `DialogTrigger`, which stamps that same attribute for the dialog's own
+	 * open/closed state, so it is present with or without the `Tooltip`
+	 * wrapper. Focus is what actually opens a Radix tooltip (the same
+	 * mechanism `keyboard-reachability.test.tsx` uses for `TooltipIconButton`),
+	 * so this checks the rendered tooltip itself.
+	 */
+	it("carries a tooltip of its own", () => {
+		rememberFile();
+		renderBar(
+			vi.fn(async () => {}),
+			CONTRACT
+		);
+		fireEvent.focus(caret()!);
+		expect(screen.getByRole("tooltip")).toHaveTextContent("Send with a data row");
+	});
+
+	/**
 	 * While a stream is open Send *is* Stop, and a caret beside it would offer
 	 * to start the very run it is ending.
 	 */

@@ -35,6 +35,7 @@ import {
 	CardDescription,
 	CardHeader,
 	CardTitle,
+	IconSwap,
 	Input,
 	Label,
 } from "@/components/ui";
@@ -151,7 +152,24 @@ export function ConnectionTestCard() {
 							disabled={testing || url.trim() === ""}
 							onClick={() => void run()}
 						>
-							{testing && <Loader2 className="size-icon-sm animate-spin" />}
+							{/*
+							 * A glyph that is always there, not a spinner that mounts:
+							 * mounting one widened the button by an icon and a gap for
+							 * the length of every test, shrinking the URL field beside
+							 * it and handing the width back when the result landed.
+							 */}
+							<IconSwap
+								state={testing ? "testing" : "idle"}
+								icons={{
+									idle: <PlugZap className="size-icon-sm" aria-hidden="true" />,
+									testing: (
+										<Loader2
+											className="size-icon-sm animate-spin"
+											aria-hidden="true"
+										/>
+									),
+								}}
+							/>
 							Test
 						</Button>
 					</div>

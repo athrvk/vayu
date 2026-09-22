@@ -124,6 +124,27 @@ describe("ImportModal", () => {
 		expect(screen.getByRole("button", { name: /^Import/i })).toBeInTheDocument();
 	});
 
+	// `size-target` (issue #1679), not `size-icon`: a bare checkbox is its own
+	// hit target. Mutation check: put `size-icon` back and this fails.
+	it("gives the import-environments and import-scripts checkboxes their own hit target", async () => {
+		stubParse(() =>
+			result({
+				collections: [collection({ name: "Sample API", requests: [request()] })],
+			})
+		);
+		renderModal();
+		selectTab(/Paste JSON/i);
+		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: postman } });
+		fireEvent.click(screen.getByRole("button", { name: /Detect & Preview/i }));
+		await waitFor(() => expect(screen.getByText(/Sample API/)).toBeInTheDocument());
+
+		for (const label of [/Import environments/i, /Import pre-request/i]) {
+			const box = screen.getByRole("checkbox", { name: label });
+			expect(box.className).toContain("size-target");
+			expect(box.className).not.toContain("size-icon");
+		}
+	});
+
 	it("shows an error for unrecognised pasted content", async () => {
 		// `null` is the engine's 400 carrying "Unrecognised format", which
 		// `factory.ts` turns back into `UnrecognisedFormatError` - the path the
