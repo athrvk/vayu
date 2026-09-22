@@ -56,6 +56,7 @@ import {
 	CardHeader,
 	CardTitle,
 	DeleteConfirmDialog,
+	IconSwap,
 	Input,
 	Label,
 	SecretInput,
@@ -487,9 +488,16 @@ export function ClientCertificatesCard() {
 								onClick={() => void submit()}
 								disabled={!canSubmit || createCertificate.isPending}
 							>
-								{createCertificate.isPending && (
-									<Loader2 className="size-icon mr-1.5 animate-spin" />
-								)}
+								{/* Swapped, not mounted: a spinner that mounts widens
+								    the button and slides Cancel beside it. */}
+								<IconSwap
+									className="mr-1.5"
+									state={createCertificate.isPending ? "adding" : "idle"}
+									icons={{
+										idle: <Plus className="size-icon" />,
+										adding: <Loader2 className="size-icon animate-spin" />,
+									}}
+								/>
 								Add certificate
 							</Button>
 						</div>

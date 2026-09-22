@@ -73,9 +73,15 @@ let queryResult: { data?: typeof certificates; isError: boolean } = {
 	isError: false,
 };
 
+/** Whether a create is in flight - flipped by hand, then re-rendered. */
+let createPending = false;
+
 vi.mock("@/queries", () => ({
 	useClientCertificatesQuery: () => queryResult,
-	useCreateClientCertificateMutation: () => ({ mutateAsync: createMutate, isPending: false }),
+	useCreateClientCertificateMutation: () => ({
+		mutateAsync: createMutate,
+		isPending: createPending,
+	}),
 	useDeleteClientCertificateMutation: () => ({ mutateAsync: deleteMutate, isPending: false }),
 }));
 
@@ -90,6 +96,7 @@ beforeEach(() => {
 	deleteMutate.mockClear();
 	showToast.mockClear();
 	queryResult = { data: certificates, isError: false };
+	createPending = false;
 });
 
 /** Open the add form and fill the three required fields. */
@@ -295,5 +302,27 @@ describe("ClientCertificatesCard", () => {
 		// make - an unreachable engine holds whatever it holds.
 		expect(screen.getByText(/did not answer/i)).toBeInTheDocument();
 		expect(screen.queryByText(/no certificates registered/i)).not.toBeInTheDocument();
+	});
+
+	it("swaps the submit glyph for a spinner in place rather than mounting one", () => {
+		// A spinner that mounts widens the button by an icon and a margin while
+		// the create is in flight, sliding Cancel beside it. jsdom has no
+		// layout, so the guard is that the button's first child is one node
+		// throughout and the spinner arrives inside it.
+		const { rerender } = renderCard();
+		fillDraft({ host: "api.example.com" });
+		const submit = () => screen.getByRole("button", { name: /^add certificate$/i });
+		const glyphBox = submit().firstElementChild;
+		expect(glyphBox, "the idle submit carries no glyph box").not.toBeNull();
+
+		createPending = true;
+		rerender(
+			<TooltipProvider>
+				<ClientCertificatesCard />
+			</TooltipProvider>
+		);
+
+		expect(submit().firstElementChild).toBe(glyphBox);
+		expect(submit().querySelector(".enter-fade .animate-spin")).not.toBeNull();
 	});
 });
