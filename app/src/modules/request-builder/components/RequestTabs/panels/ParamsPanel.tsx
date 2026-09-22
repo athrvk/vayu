@@ -14,7 +14,7 @@
  * is now `BulkEditor`; only the format differs, and that is what this passes.
  */
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useRequestBuilderContext } from "../../../context";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { BulkEditor } from "../../../shared/BulkEditor";
@@ -47,7 +47,13 @@ export default function ParamsPanel() {
 		[request.url, updateField]
 	);
 
-	const resolvedUrl = resolveString(request.url);
+	// Memoized on the URL text itself, not called inline: a dynamic variable
+	// like `{{$randomInt}}` generates a fresh value on every call
+	// (`lib/dynamic-variables.ts`'s own contract), and this panel re-renders on
+	// far more than a URL edit - switching tabs away and back included. An
+	// unmemoized call rerolled the value on every one of those, which read as
+	// this line changing on its own rather than describing one resolved URL.
+	const resolvedUrl = useMemo(() => resolveString(request.url), [request.url, resolveString]);
 	const displayParams = request.params.filter((param) => !param.system);
 
 	return (

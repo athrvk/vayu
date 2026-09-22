@@ -126,7 +126,15 @@ export function useHostCookies(tab: Tab) {
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const { data, isLoading } = useCookiesQuery();
 
-	const host = request ? hostOf(resolveString(request.url)) : null;
+	// Memoized on the URL text, not called inline: a dynamic variable like
+	// `{{$randomInt}}` generates a fresh value on every call
+	// (`lib/dynamic-variables.ts`'s own contract), and this hook re-renders on
+	// far more than a URL edit - an unmemoized call could flip which host the
+	// cookie jar matches against on a render the URL never changed.
+	const host = useMemo(
+		() => (request ? hostOf(resolveString(request.url)) : null),
+		[request, resolveString]
+	);
 	const scope = data?.scopes.find((s) => (s.environmentId ?? null) === activeEnvironmentId);
 	const matches = host ? (scope?.cookies ?? []).filter((c) => cookieMatchesHost(c, host)) : [];
 
