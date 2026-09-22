@@ -57,7 +57,11 @@ const labelOf = (tab: HTMLElement) =>
 const elementsTab = () =>
 	screen.getAllByRole("tab").find((tab) => labelOf(tab).startsWith("Elements")) as HTMLElement;
 
-const countOf = (tab: HTMLElement) => tab.querySelector("sup")?.textContent ?? null;
+// `|| null`, not `?? null`: the count's `sup` is always in the DOM - it
+// reserves the badge's width so one appearing cannot shift the tabs beside it
+// (`MARK_SLOT` in `ui/tabs.tsx`) - and reads `""` when there is nothing to
+// show. "No count" is the empty slot, not a missing element.
+const countOf = (tab: HTMLElement) => tab.querySelector("sup")?.textContent || null;
 
 describe("the Elements tab badge", () => {
 	it("counts a real, enabled element", () => {

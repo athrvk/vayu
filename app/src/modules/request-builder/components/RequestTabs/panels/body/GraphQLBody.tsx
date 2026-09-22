@@ -63,7 +63,6 @@ import type { SchemaTreeNode } from "@/lib/graphql/schema-tree";
 import { SchemaExplorer } from "./graphql-explorer/SchemaExplorer";
 import { BadgeText, SchemaStatusBadge } from "./SchemaStatusBadge";
 import { sendsGraphQLInTheUrl } from "./graphql-method";
-import { schemaStatusTitle } from "@/lib/graphql/schema-status";
 import { useLayoutStore } from "@/stores";
 import {
 	GRAPHQL_PANE_HEADER_HEIGHT,
@@ -297,8 +296,7 @@ function SchemaControls({
 	onToggle: () => void;
 	onRefresh: () => void;
 }) {
-	const status = entry?.status ?? "idle";
-	const loading = status === "loading";
+	const loading = entry?.status === "loading";
 	return (
 		<span className="flex items-center gap-1">
 			<TooltipIconButton
@@ -321,17 +319,14 @@ function SchemaControls({
 			 * a target - the two things a user does about the schema are the
 			 * buttons on either side of it.
 			 *
-			 * A schema nothing has been said about yet falls back to a plain label
-			 * rather than the badge's `null`, so the row keeps its shape from the
-			 * first render.
+			 * A schema nothing has been said about yet is the badge's own `idle`
+			 * face now, not a fallback spelled out here: the badge renders
+			 * unconditionally and holds its width across every state, so the row
+			 * keeps its shape from the first render *and* keeps it when the state
+			 * changes - Refresh, one element to the right, used to slide out from
+			 * under the pointer that had just pressed it.
 			 */}
-			{status === "idle" ? (
-				<BadgeText className="text-muted-foreground" title={schemaStatusTitle(entry)}>
-					Schema
-				</BadgeText>
-			) : (
-				<SchemaStatusBadge entry={entry} />
-			)}
+			<SchemaStatusBadge entry={entry} />
 			<TooltipIconButton
 				label="Refresh schema"
 				className="shrink-0"

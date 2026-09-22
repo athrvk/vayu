@@ -730,6 +730,47 @@ Three rules decide what happens at a token:
    defect this feature was added to fix - so it is left where it can be seen, and
    the token stays marked unresolved in the UI.
 
+### A preview holds the value it showed
+
+Rule 2 is right for resolution and wrong for a preview of it. A line that says
+what one field resolves to - the Params tab's "Sends" URL, a request tab's
+label, the Body tab's resolved pane, a key/value row's Σ peek - describes a
+single occurrence, so it must show the same value until something about that
+occurrence changes. Resolving it inline in a React component body meant a new
+value on every render, and on every *remount*: Radix unmounts the tab panel you
+are not looking at, so Params → Headers → Params rebuilt the panel and rerolled
+the number (#1739).
+
+**A resolved value that feeds a cache key is the same defect one level
+removed.** The GraphQL schema cache (`BodyPanel`) and the OAuth 2.0 token cache
+(`OAuth2Form`, `AuthContextSection` → `TokenStatusRow`) both key on resolved
+text, so an unstable resolution changed the key on every render: a refetch loop
+rather than a flicker, and for the token row a cached token reading as "No token
+cached" after a tab switch.
+
+Two tools, and which one applies depends on where the resolver comes from:
+
+- **`useMemo`** where the component that resolves also outlives the resolution -
+  `BodyPanel`, force-mounted from its first visit - or where it builds its own
+  resolver, so a remount would invalidate any cache anyway: `useHostCookies`,
+  and the context bar's `AuthContextSection`.
+- **`lib/dynamic-variable-cache.ts`'s `createStableResolve`** where the
+  component is torn down but its `resolveString` is not, because that function
+  comes from a provider above it (`ParamsPanel`, `KeyValueRow`, the builder's
+  `OAuth2Form`) - or where the caller resolves a variable-length list and so
+  cannot call a hook per item (`useTabDescriptors`, and `KeyValueRow` again,
+  which is one component per row). Entries are keyed by the id of the *field*
+  being previewed - a request id, or a row id plus `key`/`value`, or a request
+  id plus the OAuth field name - and never by the template text: two fields
+  holding an identical `{{$guid}}` must still differ, which is rule 2. They are
+  invalidated when the text changes or when `resolveString` changes identity,
+  which is exactly a variable edit, an environment switch or a bound-row change.
+
+Fresh-per-call stays right where the value is not a preview at all: the send
+path (`POST /compose` resolves engine-side, and `buildExecBody` is handed an
+identity resolver), and a variable token's own popover, which answers for the
+stored variable rather than for a generated one.
+
 ### The Postman generators Vayu deliberately does not carry
 
 Postman ships around 120 dynamic variables. The table above is the tier imported

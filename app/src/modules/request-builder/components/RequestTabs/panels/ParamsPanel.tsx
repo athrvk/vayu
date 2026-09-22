@@ -16,6 +16,7 @@
 
 import { useCallback } from "react";
 import { useRequestBuilderContext } from "../../../context";
+import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { BulkEditor } from "../../../shared/BulkEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
@@ -27,6 +28,19 @@ import {
 } from "../../../utils/params-format";
 import { buildUrlWithParams } from "../../../utils/url";
 import { EmptyTableHint } from "./EmptyTableHint";
+
+/*
+ * The "Sends" line's resolved URL, cached across this panel's own unmount.
+ *
+ * A `useMemo` here would be worthless: this tab is not force-mounted
+ * (`RequestTabs/index.tsx` force-mounts Body and Elements only), so Params →
+ * Headers → Params destroys the component and builds a new one, and a first
+ * render has no previous value to memoize against - a `{{$randomInt}}` in the
+ * URL rerolled on every round trip through another tab. See
+ * `lib/dynamic-variable-cache.ts` for why this is module scope and why it is
+ * keyed by request id rather than by the URL text.
+ */
+const stableResolvedUrl = createStableResolve();
 
 export default function ParamsPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
@@ -47,7 +61,14 @@ export default function ParamsPanel() {
 		[request.url, updateField]
 	);
 
-	const resolvedUrl = resolveString(request.url);
+	// Not called inline: a dynamic variable like `{{$randomInt}}` generates a
+	// fresh value on every call (`lib/dynamic-variables.ts`'s own contract), and
+	// this panel both re-renders and *remounts* on far more than a URL edit, so
+	// the line read as changing on its own rather than describing one resolved
+	// URL. A request with no id yet shares one entry: an unsaved draft has
+	// nothing else stable to key on, and the only cost is two blank new tabs
+	// previewing the same generated value.
+	const resolvedUrl = stableResolvedUrl(request.id ?? "new", request.url, resolveString);
 	const displayParams = request.params.filter((param) => !param.system);
 
 	return (
@@ -83,27 +104,16 @@ export default function ParamsPanel() {
 					Add query parameters to send with this request.
 				</EmptyTableHint>
 			}
-		>
-			<div className="space-y-3">
-				<KeyValueEditor
-					items={displayParams}
-					onChange={handleParamsChange}
-					keyPlaceholder="Parameter"
-					valuePlaceholder="Value"
-					showResolved={true}
-					allowDisable={true}
-					variables={variables}
-				/>
-
-				{/*
-				 * The resolved URL, on one line.
-				 *
-				 * Not redundant with the bar above, which is the thing worth being
-				 * careful about: the bar shows the URL *with* its `{{variables}}`,
-				 * this shows what will actually be sent. It was a `p-3` slab under a
-				 * 13px label - two rows of chrome for one line of text - in a tab
-				 * whose table is now 36px per row. It is a labelled line now.
-				 */}
+			/*
+			 * The resolved URL, on one line, in both modes - not just the table's.
+			 * It was a `p-3` slab under a 13px label - two rows of chrome for one
+			 * line of text - in a tab whose table is now 36px per row. It is a
+			 * labelled line now, and it stays visible while bulk-editing because
+			 * that is exactly when a pasted block of params most wants checking
+			 * against the URL it will produce - not redundant with the bar above,
+			 * which shows the URL *with* its `{{variables}}` rather than resolved.
+			 */
+			after={
 				<div className="flex items-baseline gap-2 text-xs">
 					<span className="shrink-0 uppercase tracking-wide text-subtle-foreground">
 						Sends
@@ -112,7 +122,17 @@ export default function ParamsPanel() {
 						{resolvedUrl || <span className="italic">No URL</span>}
 					</span>
 				</div>
-			</div>
+			}
+		>
+			<KeyValueEditor
+				items={displayParams}
+				onChange={handleParamsChange}
+				keyPlaceholder="Parameter"
+				valuePlaceholder="Value"
+				showResolved={true}
+				allowDisable={true}
+				variables={variables}
+			/>
 		</BulkEditor>
 	);
 }

@@ -154,20 +154,8 @@ export default function HeadersPanel() {
 					Add headers to send with this request.
 				</EmptyTableHint>
 			}
-		>
-			<div className="space-y-3">
-				<KeyValueEditor
-					items={displayHeaders}
-					onChange={handleHeadersChange}
-					keyPlaceholder="Header"
-					valuePlaceholder="Value"
-					showResolved={true}
-					allowDisable={true}
-					keySuggestions={STANDARD_HEADERS}
-					variables={variables}
-				/>
-
-				{declared.length > 0 && (
+			after={
+				declared.length > 0 && (
 					<div className="enter-fade surface-sunken border border-rule rounded-md p-2 space-y-1">
 						<div className="px-1">
 							<Eyebrow>Added by Vayu</Eyebrow>
@@ -186,8 +174,19 @@ export default function HeadersPanel() {
 							/>
 						))}
 					</div>
-				)}
-			</div>
+				)
+			}
+		>
+			<KeyValueEditor
+				items={displayHeaders}
+				onChange={handleHeadersChange}
+				keyPlaceholder="Header"
+				valuePlaceholder="Value"
+				showResolved={true}
+				allowDisable={true}
+				keySuggestions={STANDARD_HEADERS}
+				variables={variables}
+			/>
 		</BulkEditor>
 	);
 }

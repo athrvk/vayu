@@ -291,16 +291,20 @@ export default function CollectionDetail() {
 					className="shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
 				>
 					{TABS.map((t) => {
-						const count =
-							t.id === "variables"
-								? variableCount
-								: t.id === "data"
-									? declaredColumnCount
-									: 0;
+						/*
+						 * Two of the six can carry a count, and those two render
+						 * `TabCount` unconditionally: it animates its own track open
+						 * from zero width, so the first variable appearing grows in
+						 * rather than instantly pushing Data and Spec rightward, and
+						 * costs nothing while there is nothing to count. The other
+						 * four render no `TabCount` at all and pay no width, ever.
+						 */
+						const counted = t.id === "variables" || t.id === "data";
+						const count = t.id === "variables" ? variableCount : declaredColumnCount;
 						return (
 							<TabsTrigger key={t.id} value={t.id}>
 								<TabLabel>{t.label}</TabLabel>
-								{count > 0 && <TabCount value={count} />}
+								{counted && <TabCount value={count} />}
 							</TabsTrigger>
 						);
 					})}

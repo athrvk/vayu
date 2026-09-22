@@ -49,14 +49,19 @@ Two consequences worth keeping in mind before adding anything here:
   reason that size exists: a surface whose work is reading and choosing.
 - Styling follows `docs/design-system.md` - 11px eyebrows, 13px body, mono
   tabular numerals, `rounded-md`. No `text-5xl`/`text-xl`, no gradients.
-- **The Launcher's "Open Demo API" tile is a second first-run step, decided in
-  issue #1694**: the Launcher is the end state (no separate screen beyond it),
-  it is a tile rather than a strip, and it retires the moment a run exists
-  (`Launcher.tsx` renders `DemoApiTile` only while `runs.length === 0`) - no
-  dismiss of its own, since the question it asks is answered by then. It opens
-  a real, pre-filled request (`demo-request.ts`) through the same
-  `useNewRequest` targeting every other "New request" entry point uses, so it
-  never disagrees with them about where the request lands.
+- **The "Open Demo API" tile is a second first-run step, decided in issue
+  #1694**: it is a tile rather than a strip, and on the Launcher it retires the
+  moment a run exists (`Launcher.tsx` renders `DemoApiTile` only while
+  `runs.length === 0`) - no dismiss of its own, since the question it asks is
+  answered by then. It opens a real, pre-filled request (`demo-request.ts`)
+  through the same `useNewRequest` targeting every other "New request" entry
+  point uses, so it never disagrees with them about where the request lands.
+  **`FirstRunWelcome` carries it too**, unconditionally: the original scoping
+  to "the Launcher is the end state" missed that a workspace this empty has no
+  collection yet either, and `onNewRequest` already creates one behind the
+  scenes on this screen - the demo tile's pitch is exactly as available here
+  as once the Launcher takes over, so there is no `runs.length` gate to write
+  (this screen only renders when both `collections` and `runs` are empty).
 
 ## Usage
 

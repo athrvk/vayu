@@ -62,17 +62,28 @@ interface LabelSwapProps {
  */
 export function LabelSwap({ label, states, className }: LabelSwapProps) {
 	return (
-		<span className={cn("grid", className)}>
+		/*
+		 * `data-slot` on both halves, the way `tabs.tsx` marks `TabLabel`'s own
+		 * reserve twin. The twins render the same strings as the live cell, so
+		 * `getByText` cannot tell them apart, and without a handle a test that
+		 * means "the label says X" has no way to say so.
+		 */
+		<span data-slot="label-swap" className={cn("grid", className)}>
 			{states.map((state) => (
 				<span
 					key={state}
+					data-slot="label-swap-reserve"
 					aria-hidden="true"
 					className="invisible col-start-1 row-start-1 h-0"
 				>
 					{state}
 				</span>
 			))}
-			<span key={label} className="enter-fade col-start-1 row-start-1">
+			<span
+				key={label}
+				data-slot="label-swap-live"
+				className="enter-fade col-start-1 row-start-1"
+			>
 				{label}
 			</span>
 		</span>

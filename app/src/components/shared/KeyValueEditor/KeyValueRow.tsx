@@ -30,6 +30,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { isBlankRow } from "./key-value";
 import type { KeyValueItem, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
@@ -76,6 +77,11 @@ interface KeyValueRowProps {
  * It renders only where there is something to resolve, so the column is empty
  * on an ordinary row and the marker is its own affordance - the alternative was
  * a hover with nothing on screen to say it existed.
+ *
+ * What it shows is the row's resolved text as the row itself computed it
+ * (`stableRowField` below), not a resolution of its own: "peek" promises the
+ * value this row stands for, and opening it twice without editing anything has
+ * to answer the same thing both times.
  */
 function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) {
 	return (
@@ -95,6 +101,30 @@ function ResolvedPeek({ label, resolved }: { label: string; resolved: string }) 
 		</Tooltip>
 	);
 }
+
+/*
+ * One entry per row *field* - `<row id>:key` and `<row id>:value` - cached
+ * across this row's own unmount.
+ *
+ * A `useMemo` cannot hold this and a memo per row cannot even be written: the
+ * row is one component rendered per item, so the memo would die with the row,
+ * and Params, Headers, form-data and urlencoded all live behind a
+ * `TabsContent` that Radix unmounts when you look at another tab
+ * (`RequestTabs/index.tsx` force-mounts Body and Elements only). Without this,
+ * a `{{$randomInt}}` in a value rerolled on every render the row took *and*
+ * every round trip through another tab, so the Σ peek answered with a
+ * different number each time it was opened, beside a "Sends" line one tab over
+ * that is stable.
+ *
+ * The resolver outliving the row is what makes the cache reachable: it arrives
+ * as `variables.resolveString`, which the request builder's provider owns
+ * (`useVariableSupport`), so it is the same function on the way back in. Row
+ * ids come from `toKeyValueItems` at the point the request is fetched, one
+ * level above every panel, so they survive the same unmount. See
+ * `lib/dynamic-variable-cache.ts` for why this is module scope and keyed by
+ * id rather than by the text.
+ */
+const stableRowField = createStableResolve();
 
 function KeyValueRow({
 	item,
@@ -116,8 +146,12 @@ function KeyValueRow({
 	canDisable = true,
 }: KeyValueRowProps) {
 	const resolveString = variables?.resolveString;
-	const resolvedKey = resolveString ? resolveString(item.key) : item.key;
-	const resolvedValue = resolveString ? resolveString(item.value) : item.value;
+	const resolvedKey = resolveString
+		? stableRowField(`${item.id}:key`, item.key, resolveString)
+		: item.key;
+	const resolvedValue = resolveString
+		? stableRowField(`${item.id}:value`, item.value, resolveString)
+		: item.value;
 	/*
 	 * "Contains a variable" is exactly "resolving changed something". A row whose
 	 * text is already literal has nothing to peek at, which is the condition the

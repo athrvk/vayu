@@ -57,7 +57,7 @@
  * comes from the request/response splitter, which persists.
  */
 
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import {
 	Select,
 	SelectContent,
@@ -151,10 +151,28 @@ export default function BodyPanel() {
 	 * URL interpolates - or the credential the auth resolves to, wherever in the
 	 * chain it lives - points at a different schema instead of reusing the old
 	 * one.
+	 *
+	 * `resolvedUrl` is memoized on the URL text: a dynamic variable like
+	 * `{{$randomInt}}` generates a fresh value on every call
+	 * (`lib/dynamic-variables.ts`'s own contract), and `schemaCacheKey` below
+	 * folds it straight into the introspection cache key - an unmemoized call
+	 * changed that key on every render this panel took for any reason, which
+	 * read as a schema refetch loop rather than a cache.
+	 *
+	 * A `useMemo` and not `lib/dynamic-variable-cache.ts`'s module-scope cache,
+	 * unlike `ParamsPanel`'s "Sends" line: this panel is force-mounted from its
+	 * first visit onward (`RequestTabs/index.tsx`), so the tab switch that
+	 * destroys Params leaves this instance - and its memo - standing. The only
+	 * thing that unmounts it is the builder going away, which takes
+	 * `resolveString` with it and so would miss that cache anyway.
 	 */
+	const resolvedGqlUrl = useMemo(
+		() => resolveString(request.url || "").trim(),
+		[request.url, resolveString]
+	);
 	const gqlSchemaTarget: SchemaTarget = {
 		url: (request.url || "").trim(),
-		resolvedUrl: resolveString(request.url || "").trim(),
+		resolvedUrl: resolvedGqlUrl,
 		headers: toFlatHeaders(request.headers),
 		auth: { ...request.auth },
 		resolvedAuth,
@@ -237,7 +255,14 @@ export default function BodyPanel() {
 
 	const activeMode = BODY_MODES.find((m) => m.value === request.bodyMode);
 	const hasVariables = containsVariableToken(request.body);
-	const resolvedBody = request.body ? resolveString(request.body) : "";
+	// Memoized for the same reason as `resolvedGqlUrl` above, and a `useMemo`
+	// for the same reason too: an unmemoized call rerolled every
+	// `{{$randomInt}}`-style value in the body on every render this panel took,
+	// not only on an actual edit.
+	const resolvedBody = useMemo(
+		() => (request.body ? resolveString(request.body) : ""),
+		[request.body, resolveString]
+	);
 	const isCodeMode =
 		request.bodyMode === "json" ||
 		request.bodyMode === "text" ||

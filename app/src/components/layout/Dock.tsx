@@ -5,8 +5,10 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useEffect, useRef, useState } from "react";
 import { Info, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TIMING } from "@/config/timing";
 import {
 	useEngineStore,
 	useLayoutStore,
@@ -15,6 +17,7 @@ import {
 	// Aliased: `EngineStatus` is the component below, and the type is what it
 	// switches on.
 	type EngineStatus as EngineConnectionStatus,
+	type SaveStatus,
 } from "@/stores";
 import { ICON_MOTION, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { useRunningServiceCount } from "@/modules/services";
@@ -240,10 +243,26 @@ function RunningServices() {
  * `--muted-foreground` like its three siblings, so only the word that means
  * trouble is coloured.
  */
+/**
+ * Every line the save slot below can show, and whether that line carries the
+ * `Info` glyph - `SaveError`'s, the only one of the four that does.
+ *
+ * One table rather than four hand-written spans, because it is read twice: once
+ * to draw the live line, and once to draw the hidden twins that hold the slot's
+ * width. A fifth state added to the store and not to this table would reserve
+ * the wrong width, which is the one way this can go quietly wrong.
+ */
+const SAVE_LINES = {
+	pending: { text: "Unsaved changes", hint: false },
+	saving: { text: "Saving…", hint: false },
+	saved: { text: "Saved", hint: false },
+	error: { text: "Not saved", hint: true },
+} as const;
+
 function SaveError() {
 	const message = useSaveStore((s) => s.lastErrorMessage);
 
-	const label = <span className="text-destructive-text">Not saved</span>;
+	const label = <span className="text-destructive-text">{SAVE_LINES.error.text}</span>;
 
 	if (!message) {
 		return <span className="enter-fade text-xs text-muted-foreground">{label}</span>;
@@ -265,6 +284,157 @@ function SaveError() {
 				<p className="max-w-64 whitespace-normal break-words">{message}</p>
 			</TooltipContent>
 		</Tooltip>
+	);
+}
+
+/**
+ * Holds "saving" on screen for `TIMING.SAVING_MIN_VISIBLE_MS` before letting
+ * "saved" replace it, and holds whatever is showing for
+ * `TIMING.SAVE_LINE_FADE_MS` past a return to `idle` so a CSS fade has
+ * something to animate against - both a display concern, not the store's.
+ *
+ * `save-store`'s own `status` flips the instant a save lands or its indicator
+ * expires, and every other reader of it (the eight
+ * `startSaving`/`completeSaveThenIdle` call sites, and their own tests) needs
+ * that truth immediately. Two things about the Dock's own line used to be
+ * true as a result, both wrong for a human watching it:
+ *
+ * - A save against the local engine often lands in well under 100ms, under
+ *   what a state needs to be on screen to register as one at all, so
+ *   "Unsaved changes" jumped straight to "Saved" with "Saving…" gone in the
+ *   same frame most people would notice it.
+ * - `idle` has no line at all (`SAVE_LINES` has no entry for it), so the
+ *   moment `status` became `idle` the live text was gone and the track's own
+ *   `transition-[grid-template-columns]` had nothing left to shrink around -
+ *   a hard cut, not the fade the track's own CSS transition implies is there.
+ *
+ * The fix for both is the same shape: `displayed` mirrors `status`
+ * immediately for every transition except the two that need to be held back
+ * - `"saving"` -> `"saved"`, and anything -> `"idle"` - each governed by its
+ * own `TIMING` constant. Neither needs a generation counter the way a
+ * store-level version of this would: a plain `useEffect` cleanup already
+ * cancels a stale scheduled update whenever `status` (or `displayed`)
+ * changes again before it fires, so React's ordinary effect lifecycle is the
+ * whole mechanism.
+ */
+function useSaveStatusDisplay(status: SaveStatus): SaveStatus {
+	const [displayed, setDisplayed] = useState(status);
+	const savingShownAtRef = useRef<number | null>(null);
+
+	useEffect(() => {
+		if (status === "saving") savingShownAtRef.current = Date.now();
+	}, [status]);
+
+	useEffect(() => {
+		if (status === displayed) return;
+
+		if (displayed === "saving" && status === "saved") {
+			const shownAt = savingShownAtRef.current;
+			const elapsed = shownAt === null ? Infinity : Date.now() - shownAt;
+			const remaining = Math.max(0, TIMING.SAVING_MIN_VISIBLE_MS - elapsed);
+			if (remaining > 0) {
+				const timer = setTimeout(() => setDisplayed(status), remaining);
+				return () => clearTimeout(timer);
+			}
+		}
+
+		if (status === "idle" && displayed !== "idle") {
+			const timer = setTimeout(() => setDisplayed(status), TIMING.SAVE_LINE_FADE_MS);
+			return () => clearTimeout(timer);
+		}
+
+		// Every other transition (idle -> pending, pending -> saving, anything ->
+		// error) has nothing to hold for and mirrors `status` immediately - syncing
+		// local display state to an external store's value is exactly what this
+		// effect is for; the two blocks above are what make this the *un*-held path.
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+		setDisplayed(status);
+	}, [status, displayed]);
+
+	return displayed;
+}
+
+/**
+ * The save line, animated into a track that costs nothing while idle.
+ *
+ * **Why this animates rather than reserving.** The four lines used to be four
+ * `{status === "x" && ...}` children of the ambient group, which is centred in
+ * the strip by two equal `flex-1` gutters - so the group's own width decides
+ * where it starts, and every item in it moves when that width changes. One
+ * edit walks the store through `pending` -> `saving` -> `saved` -> `idle`,
+ * four different widths in a couple of seconds, and each step slid the
+ * connection light one way and the version string the other, by half the
+ * difference. It is the ambient row of the whole app, on screen behind every
+ * surface in it, and it twitched on every keystroke sequence the user typed
+ * anywhere. An earlier fix reserved the widest line's width permanently (the
+ * `MARK_SLOT` mechanism in `ui/tabs.tsx`), which stopped the twitch but left a
+ * standing gap between the connection light and the version on every screen,
+ * for the far more common case of nothing needing saving at all.
+ *
+ * **The mechanism is `MARK_TRACK`'s** (`ui/tabs.tsx`): a
+ * `grid-template-columns: 0fr -> 1fr` track that is genuinely zero width at
+ * `idle`, and animates open to the live line's own intrinsic width otherwise -
+ * `-ms-4` cancels the row's leading `gap-4` (the one *before* this slot) while
+ * the track is `0fr`, the same single-sided cancellation `MARK_TRACK` uses for
+ * a trigger's `gap-1.5`. Deliberately one side, not `-mx-4`: `gap-4` still
+ * applies once, between this slot and `EngineVersion` after it, so the row
+ * reads as one normal gap between the connection light and the version -
+ * cancelling both sides removes that surviving gap too and jams the two
+ * together with none at all.
+ * `pending` -> `saving` -> `saved` -> `idle` is now a smooth grow-then-shrink
+ * instead of a jump, and `idle` at rest looks exactly like the row did before
+ * any of this existed - one `gap-4` between neighbours, never two, never zero.
+ */
+function SaveStatusLine() {
+	const rawStatus = useSaveStore((s) => s.status);
+	const status = useSaveStatusDisplay(rawStatus);
+	const line = status === "idle" ? null : SAVE_LINES[status];
+	// True for exactly the `TIMING.SAVE_LINE_FADE_MS` window the hook holds
+	// `status` open past the store's own return to `idle` - the store has
+	// already moved on, `displayed` has not caught up yet, and this is what
+	// tells the live cell to start fading rather than sit at full opacity.
+	const fading = rawStatus === "idle" && status !== "idle";
+
+	return (
+		<div
+			data-slot="dock-save-status"
+			className={cn(
+				"grid overflow-hidden text-xs text-muted-foreground transition-[grid-template-columns,margin-inline-start] duration-150 ease-out",
+				line ? "grid-cols-[1fr] ms-0" : "grid-cols-[0fr] -ms-4"
+			)}
+		>
+			<span
+				className={cn(
+					"flex min-w-0 items-center justify-center transition-opacity duration-200 ease-out",
+					fading ? "opacity-0" : "opacity-100"
+				)}
+			>
+				{/*
+				 * The toast still carries the reason, first - it is the one channel
+				 * every failure in the app reports through, and it has room for a
+				 * message like "database is locked" that a 60-char span cannot. But
+				 * it clears itself after ten seconds, and a failed save leaves the
+				 * draft unsaved for as long as the engine stays down. This line is
+				 * the part that outlives the toast: the same tooltip-on-hover shape
+				 * `EngineStatus` uses for its own error, so the strip has one
+				 * pattern for "there is a reason, hover for it" rather than two.
+				 */}
+				{status === "error" ? (
+					<SaveError />
+				) : line ? (
+					// No `key`, deliberately: a `key={line.text}` here remounted this
+					// span on every status change, and `.enter-fade` replayed on each
+					// one - `pending` -> `saving` -> `saved` fired three fade-ins in a
+					// few seconds, on top of the old text vanishing in the same frame
+					// the new text started its fade (`.enter-fade` has no exit half),
+					// which read as a flash rather than motion. The track opening from
+					// `idle` already says "something just appeared"; a text change
+					// within an already-open track is a plain swap, calmer than a
+					// fade-flash repeated on every step of one save.
+					<span className="whitespace-nowrap">{line.text}</span>
+				) : null}
+			</span>
+		</div>
 	);
 }
 
@@ -311,7 +481,6 @@ function PendingRestartButton() {
 }
 
 export function Dock() {
-	const saveStatus = useSaveStore((s) => s.status);
 	// The type alone, so the strip does not re-render on every tab-store write.
 	const activeTabType = useTabsStore(
 		(s) => s.openTabs.find((t) => t.id === s.activeTabId)?.type ?? null
@@ -363,31 +532,12 @@ export function Dock() {
 					 * user can turn off, and with it off nothing was ever written
 					 * back and nothing said as much. `pending` was set on every
 					 * edit and rendered nowhere.
+					 *
+					 * Unconditional, and holding its own width: see
+					 * `SaveStatusLine`. Four gated spans is what slid the
+					 * connection light and the version string on every edit.
 					 */}
-					{saveStatus === "pending" && (
-						<span className="enter-fade text-xs text-muted-foreground">
-							Unsaved changes
-						</span>
-					)}
-					{saveStatus === "saving" && (
-						<span className="enter-fade text-xs text-muted-foreground">Saving…</span>
-					)}
-					{saveStatus === "saved" && (
-						<span className="enter-fade text-xs text-muted-foreground">Saved</span>
-					)}
-					{/*
-					 * The toast still carries the reason, first - it is the one
-					 * channel every failure in the app reports through, and it has
-					 * room for a message like "database is locked" that a 60-char
-					 * span cannot. But it clears itself after ten seconds, and a
-					 * failed save leaves the draft unsaved for as long as the
-					 * engine stays down, not for ten seconds. This line is the
-					 * part that outlives the toast: the same tooltip-on-hover
-					 * shape `EngineStatus` above uses for its own error, so the
-					 * strip has one pattern for "there is a reason, hover for it"
-					 * rather than two.
-					 */}
-					{saveStatus === "error" && <SaveError />}
+					<SaveStatusLine />
 
 					{/*
 					 * Full muted-foreground, not /50. At half opacity the version

@@ -52,7 +52,7 @@ describe("the welcome screen's column", () => {
 					onServices={noop}
 				/>
 			),
-			classesOf(<FirstRunWelcome onImport={noop} onNewRequest={noop} />),
+			classesOf(<FirstRunWelcome onImport={noop} onNewRequest={noop} onOpenDemo={noop} />),
 			classesOf(<LauncherSkeleton />),
 		];
 

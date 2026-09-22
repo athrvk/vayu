@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { BulkEditor } from "./BulkEditor";
 
 function setup(format = () => "a: 1\nb: 2") {
@@ -37,6 +37,7 @@ function setup(format = () => "a: 1\nb: 2") {
 			placeholder="Name: value"
 			hint={<>Format: Name: value</>}
 			tableHeader={<span>empty hint</span>}
+			after={<span>the resolved URL</span>}
 		>
 			<div data-testid="table">the table</div>
 		</BulkEditor>
@@ -45,7 +46,11 @@ function setup(format = () => "a: 1\nb: 2") {
 }
 
 const textarea = () => screen.queryByRole("textbox");
-const toggle = () => screen.getByRole("button");
+// The two segments of the `ToggleGroup`, not one button that swaps its own
+// label - both are always rendered, so "enter" and "back" are two distinct
+// controls rather than one toggle.
+const enterText = () => screen.getByRole("radio", { name: /Bulk edit/i });
+const backToTable = () => screen.getByRole("radio", { name: /^Table$/i });
 
 describe("switching between the table and the text", () => {
 	it("starts on the table", () => {
@@ -56,7 +61,7 @@ describe("switching between the table and the text", () => {
 
 	it("loads the current rows as text when switching in", () => {
 		setup();
-		fireEvent.click(toggle());
+		fireEvent.click(enterText());
 		expect((textarea() as HTMLTextAreaElement).value).toBe("a: 1\nb: 2");
 		expect(screen.queryByTestId("table")).not.toBeInTheDocument();
 	});
@@ -64,11 +69,11 @@ describe("switching between the table and the text", () => {
 	it("commits the draft only when switching back", () => {
 		// The staging property. Typing must not rewrite the request.
 		const { onCommit } = setup();
-		fireEvent.click(toggle());
+		fireEvent.click(enterText());
 		fireEvent.change(textarea()!, { target: { value: "c: 3" } });
 		expect(onCommit).not.toHaveBeenCalled();
 
-		fireEvent.click(toggle());
+		fireEvent.click(backToTable());
 		expect(onCommit).toHaveBeenCalledExactlyOnceWith("c: 3");
 		expect(screen.getByTestId("table")).toBeInTheDocument();
 	});
@@ -77,12 +82,12 @@ describe("switching between the table and the text", () => {
 		// A stale draft would silently revert whatever the table did in between.
 		let rows = "a: 1";
 		setup(() => rows);
-		fireEvent.click(toggle());
+		fireEvent.click(enterText());
 		expect((textarea() as HTMLTextAreaElement).value).toBe("a: 1");
-		fireEvent.click(toggle());
+		fireEvent.click(backToTable());
 
 		rows = "a: 1\nb: 2";
-		fireEvent.click(toggle());
+		fireEvent.click(enterText());
 		expect((textarea() as HTMLTextAreaElement).value).toBe("a: 1\nb: 2");
 	});
 });
@@ -92,21 +97,90 @@ describe("the label and the field agree", () => {
 		// Both old copies hardcoded `id="bulk-edit"`, so two of these on one
 		// screen would have pointed one label at the other's field.
 		setup();
-		fireEvent.click(toggle());
+		fireEvent.click(enterText());
 		expect(textarea()).toHaveAttribute("id", "bulk-edit-headers");
 		expect(screen.getByText("Headers")).toHaveAttribute("for", "bulk-edit-headers");
 	});
 });
 
 describe("the header slot", () => {
-	it("shows the caller's hint beside the table", () => {
+	it("shows the caller's hint below the table", () => {
 		setup();
 		expect(screen.getByText("empty hint")).toBeInTheDocument();
 	});
 
 	it("hides it in text mode, where it does not apply", () => {
 		setup();
-		fireEvent.click(toggle());
+		fireEvent.click(enterText());
 		expect(screen.queryByText("empty hint")).not.toBeInTheDocument();
+	});
+
+	// Regression: the hint used to share a `justify-between` row with the
+	// toggle, so the row's own height was `max(hint, toggle)` - a
+	// conditionally-mounted two-line sentence made the row (and the toggle
+	// inside it) jump every time the hint mounted or unmounted. Asserting it
+	// sits outside the toggle's own row is what would catch a regression back
+	// to that shape - a plain text-presence check would not.
+	it("does not share the toggle's row, so the toggle's row height cannot depend on it", () => {
+		setup();
+		const toggleRow = screen.getByRole("radiogroup").parentElement as HTMLElement;
+		expect(within(toggleRow).queryByText("empty hint")).not.toBeInTheDocument();
+	});
+
+	// Regression: even out of the toggle row, the hint used to render *above*
+	// the table - so its own mount/unmount still moved the table's top edge,
+	// the row the user is typing in, and the caret. Below the table, only
+	// content the user isn't looking at moves. DOCUMENT_POSITION_FOLLOWING
+	// means the table node comes first in the DOM, i.e. the hint follows it.
+	it("renders after the table, not before it", () => {
+		setup();
+		const table = screen.getByTestId("table");
+		const hint = screen.getByText("empty hint");
+		expect(table.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+});
+
+describe("the `after` slot", () => {
+	// Distinct from `tableHeader`: what describes the send (the resolved URL,
+	// the engine's declared headers) is true regardless of which editor is
+	// showing, unlike the empty-state hint above, which is about the table.
+	it("stays visible in both the table and the text", () => {
+		setup();
+		expect(screen.getByText("the resolved URL")).toBeInTheDocument();
+
+		fireEvent.click(enterText());
+		expect(screen.getByText("the resolved URL")).toBeInTheDocument();
+	});
+});
+
+describe("discarding a draft", () => {
+	it("has no Discard button on an unedited draft", () => {
+		setup();
+		fireEvent.click(enterText());
+		expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
+	});
+
+	it("offers Discard once the draft diverges, and it leaves the request untouched", () => {
+		const { onCommit } = setup();
+		fireEvent.click(enterText());
+		fireEvent.change(textarea()!, { target: { value: "c: 3" } });
+
+		const discard = screen.getByRole("button", { name: "Discard" });
+		fireEvent.click(discard);
+
+		expect(onCommit).not.toHaveBeenCalled();
+		expect(screen.getByTestId("table")).toBeInTheDocument();
+	});
+
+	it("reopens to the current rows, not the discarded draft", () => {
+		// Discarding must not leave the stale text sitting in state for the next
+		// open - the whole point is that the edit never happened.
+		setup();
+		fireEvent.click(enterText());
+		fireEvent.change(textarea()!, { target: { value: "c: 3" } });
+		fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+		fireEvent.click(enterText());
+		expect((textarea() as HTMLTextAreaElement).value).toBe("a: 1\nb: 2");
 	});
 });
