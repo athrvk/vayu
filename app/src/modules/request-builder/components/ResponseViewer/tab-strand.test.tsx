@@ -262,3 +262,93 @@ describe("a tab count of zero", () => {
 		expect(trigger.querySelector("sup")?.textContent).toBe("2");
 	});
 });
+
+/*
+ * A result chip arriving does not move the tabs beside it.
+ *
+ * The constant tab set above stopped the *strip* from changing shape between
+ * responses; the Tests chip was the one thing left inside it that still did.
+ * It was `{testResults.length > 0 && <Badge …>}`, so a response that ran tests
+ * mounted a flex item on a `shrink-0` trigger inside this `flex-nowrap` list -
+ * the trigger grew by the chip plus its own `gap-1.5`, and Events and Raw moved
+ * with it. Re-sending the same request with and without a test script drew the
+ * strip two different ways, under a pointer on its way to one of those tabs.
+ * This is `MARK_SLOT`'s defect (`ui/tabs.tsx`), which the chip could not take
+ * `MARK_SLOT`'s own fix for: an emptied `Badge` still paints a coloured pill.
+ *
+ * jsdom lays nothing out, so the width is unobservable here - the mechanism is
+ * what these read. Mutation check (confirmed): put the
+ * `{testResults.length > 0 && <Badge …>}` gate back and "keeps the chip's slot"
+ * and "changes only the slot's contents" both fail on the absent slot; delete
+ * the reserve twin from `TestsResultChip` and "reserves a chip's width" fails.
+ */
+describe("the Tests chip does not shove the tabs after it", () => {
+	const chipSlot = () =>
+		screen
+			.getByRole("tab", { name: /tests/i })
+			.querySelector<HTMLElement>("[data-slot='tests-result-chip']");
+	const reserve = () =>
+		document.querySelector<HTMLElement>("[data-slot='tests-result-chip-reserve']");
+	/** The live chip only - the slot also holds the hidden twin that sizes it. */
+	const liveChip = () =>
+		chipSlot()?.querySelector<HTMLElement>(
+			":scope > *:not([data-slot='tests-result-chip-reserve'])"
+		) ?? null;
+
+	it("keeps the chip's slot on the trigger when no tests ran", () => {
+		state.response = { ...fullResponse(), testResults: undefined };
+		renderViewer();
+		expect(
+			chipSlot(),
+			"no slot - the chip will widen the trigger when a test runs"
+		).not.toBeNull();
+		expect(liveChip(), "an empty slot still paints a chip").toBeNull();
+	});
+
+	it("reserves a chip's width with a hidden twin that costs no height", () => {
+		state.response = { ...fullResponse(), testResults: undefined };
+		renderViewer();
+		const twin = reserve()!;
+		expect(twin).not.toBeNull();
+		// `0/0` - the narrowest real chip, the same "reserve one, not two" trade
+		// `MARK_SLOT` documents for a count crossing 9 to 10.
+		expect(twin.textContent).toBe("0/0");
+		expect(twin.className).toContain("invisible");
+		expect(twin.className).toContain("h-0");
+		// Or the strip announces "Tests 0/0" on a response that ran none.
+		expect(twin.getAttribute("aria-hidden")).toBe("true");
+		// The accessible name, not `textContent`: the twin is in the tree either
+		// way, and `aria-hidden` is what keeps it out of what is announced.
+		expect(screen.getByRole("tab", { name: /tests/i }).textContent).toMatch(/0\/0/);
+		expect(screen.queryByRole("tab", { name: /0\/0/ })).toBeNull();
+	});
+
+	it("changes only the slot's contents when a result arrives", () => {
+		state.response = { ...fullResponse(), testResults: undefined };
+		const { rerender } = renderViewer();
+
+		const tests = screen.getByRole("tab", { name: /tests/i });
+		const events = screen.getByRole("tab", { name: /events/i });
+		const emptySlot = chipSlot()!;
+		const triggerClasses = tests.className;
+		const slotClasses = emptySlot.className;
+
+		state.response = {
+			...fullResponse(),
+			testResults: [
+				{ name: "status is 200", passed: true },
+				{ name: "body has id", passed: false },
+			],
+		};
+		rerender();
+
+		const filledSlot = chipSlot()!;
+		// The same element, not a remount: nothing was inserted into the row.
+		expect(filledSlot).toBe(emptySlot);
+		expect(filledSlot.className).toBe(slotClasses);
+		expect(tests.className).toBe(triggerClasses);
+		expect(liveChip()?.textContent).toBe("1/2");
+		// Nothing was inserted before Events, which is how the shift travelled.
+		expect(events.querySelector("[data-slot='tests-result-chip']")).toBeNull();
+	});
+});

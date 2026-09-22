@@ -240,10 +240,26 @@ function RunningServices() {
  * `--muted-foreground` like its three siblings, so only the word that means
  * trouble is coloured.
  */
+/**
+ * Every line the save slot below can show, and whether that line carries the
+ * `Info` glyph - `SaveError`'s, the only one of the four that does.
+ *
+ * One table rather than four hand-written spans, because it is read twice: once
+ * to draw the live line, and once to draw the hidden twins that hold the slot's
+ * width. A fifth state added to the store and not to this table would reserve
+ * the wrong width, which is the one way this can go quietly wrong.
+ */
+const SAVE_LINES = {
+	pending: { text: "Unsaved changes", hint: false },
+	saving: { text: "Saving…", hint: false },
+	saved: { text: "Saved", hint: false },
+	error: { text: "Not saved", hint: true },
+} as const;
+
 function SaveError() {
 	const message = useSaveStore((s) => s.lastErrorMessage);
 
-	const label = <span className="text-destructive-text">Not saved</span>;
+	const label = <span className="text-destructive-text">{SAVE_LINES.error.text}</span>;
 
 	if (!message) {
 		return <span className="enter-fade text-xs text-muted-foreground">{label}</span>;
@@ -265,6 +281,79 @@ function SaveError() {
 				<p className="max-w-64 whitespace-normal break-words">{message}</p>
 			</TooltipContent>
 		</Tooltip>
+	);
+}
+
+/**
+ * The save line, in a slot whose width never changes.
+ *
+ * **Why a slot and not four conditional spans.** The four lines used to be four
+ * `{status === "x" && ...}` children of the ambient group, which is centred in
+ * the strip by two equal `flex-1` gutters - so the group's own width decides
+ * where it starts, and every item in it moves when that width changes. One edit
+ * walks the store through `pending` -> `saving` -> `saved` -> `idle`, four
+ * different widths in a couple of seconds, and each step slid the connection
+ * light one way and the version string the other, by half the difference. It is
+ * the ambient row of the whole app, on screen behind every surface in it, and
+ * it twitched on every keystroke sequence the user typed anywhere.
+ *
+ * **The mechanism is `MARK_SLOT`'s** (`ui/tabs.tsx`): hold the slot open and
+ * let its contents come and go. The width it holds is `TabLabel`'s and
+ * `LabelSwap`'s: the four lines are a finite, enumerable set, so each renders a
+ * hidden twin into the same grid cell - `invisible` and `h-0`, so the column is
+ * sized by the widest while only the live line has height - and the error
+ * twin carries the `Info` glyph, because reasoning that "Unsaved changes" is
+ * wider than "Not saved" plus an icon is a measurement that rots. The live line
+ * is centred in what that reserves, so the group stays symmetrical about it.
+ *
+ * **The cost is ~1 sentence of permanent whitespace** between the connection
+ * light and the version, in the one row of the app that is otherwise empty
+ * across its whole width. Two alternatives were weighed and rejected. Moving
+ * the line into one of the `flex-1` gutters would cost no width at all - a
+ * gutter absorbs its content without moving the centre group - but the gutters
+ * are what centre that group, and putting status in them is the strip's
+ * "status in the centre, per-tab view controls on the right" rule going away
+ * to save space this row has plenty of. Leaving it alone is what this fixes.
+ */
+function SaveStatusLine() {
+	const status = useSaveStore((s) => s.status);
+	const line = status === "idle" ? null : SAVE_LINES[status];
+
+	return (
+		<div data-slot="dock-save-status" className="grid text-xs text-muted-foreground">
+			{Object.entries(SAVE_LINES).map(([key, reserved]) => (
+				<span
+					key={key}
+					data-slot="dock-save-status-reserve"
+					aria-hidden="true"
+					className="invisible col-start-1 row-start-1 flex h-0 items-center gap-1"
+				>
+					{reserved.text}
+					{reserved.hint && <Info className="size-icon-sm" />}
+				</span>
+			))}
+			<span className="col-start-1 row-start-1 flex items-center justify-center">
+				{/*
+				 * The toast still carries the reason, first - it is the one channel
+				 * every failure in the app reports through, and it has room for a
+				 * message like "database is locked" that a 60-char span cannot. But
+				 * it clears itself after ten seconds, and a failed save leaves the
+				 * draft unsaved for as long as the engine stays down. This line is
+				 * the part that outlives the toast: the same tooltip-on-hover shape
+				 * `EngineStatus` uses for its own error, so the strip has one
+				 * pattern for "there is a reason, hover for it" rather than two.
+				 */}
+				{status === "error" ? (
+					<SaveError />
+				) : line ? (
+					// `key`, so `.enter-fade` gets the mount it needs on every change -
+					// the slot around it no longer has one to give.
+					<span key={line.text} className="enter-fade">
+						{line.text}
+					</span>
+				) : null}
+			</span>
+		</div>
 	);
 }
 
@@ -311,7 +400,6 @@ function PendingRestartButton() {
 }
 
 export function Dock() {
-	const saveStatus = useSaveStore((s) => s.status);
 	// The type alone, so the strip does not re-render on every tab-store write.
 	const activeTabType = useTabsStore(
 		(s) => s.openTabs.find((t) => t.id === s.activeTabId)?.type ?? null
@@ -363,31 +451,12 @@ export function Dock() {
 					 * user can turn off, and with it off nothing was ever written
 					 * back and nothing said as much. `pending` was set on every
 					 * edit and rendered nowhere.
+					 *
+					 * Unconditional, and holding its own width: see
+					 * `SaveStatusLine`. Four gated spans is what slid the
+					 * connection light and the version string on every edit.
 					 */}
-					{saveStatus === "pending" && (
-						<span className="enter-fade text-xs text-muted-foreground">
-							Unsaved changes
-						</span>
-					)}
-					{saveStatus === "saving" && (
-						<span className="enter-fade text-xs text-muted-foreground">Saving…</span>
-					)}
-					{saveStatus === "saved" && (
-						<span className="enter-fade text-xs text-muted-foreground">Saved</span>
-					)}
-					{/*
-					 * The toast still carries the reason, first - it is the one
-					 * channel every failure in the app reports through, and it has
-					 * room for a message like "database is locked" that a 60-char
-					 * span cannot. But it clears itself after ten seconds, and a
-					 * failed save leaves the draft unsaved for as long as the
-					 * engine stays down, not for ten seconds. This line is the
-					 * part that outlives the toast: the same tooltip-on-hover
-					 * shape `EngineStatus` above uses for its own error, so the
-					 * strip has one pattern for "there is a reason, hover for it"
-					 * rather than two.
-					 */}
-					{saveStatus === "error" && <SaveError />}
+					<SaveStatusLine />
 
 					{/*
 					 * Full muted-foreground, not /50. At half opacity the version
