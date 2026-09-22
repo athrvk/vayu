@@ -203,10 +203,27 @@ export default function ResponseViewer() {
 
 	const shown = response ?? streamedResponse;
 
-	// Loading state. A stream that has been accepted but whose headers have not
-	// arrived belongs here too: the send is over - `isExecuting` was cleared
-	// when the engine answered - but there is genuinely nothing to draw yet.
-	if (isExecuting || (isStreaming && !shown)) {
+	/*
+	 * Loading state - **only when there is nothing on screen to keep**.
+	 *
+	 * It used to be `isExecuting || …`, which replaced the whole pane with a
+	 * centred spinner on every send, the re-sends included: press Send on a
+	 * request you already have a response for and the status, the headers and
+	 * the body you were reading vanished until the new ones landed. That is the
+	 * loading state destroying the context the user is working in - the defect
+	 * stale-while-revalidate exists to fix, and what this pane's own rule in
+	 * docs/design-system.md ("Loading") already said not to do: an in-place
+	 * action on an existing control is an inline spinner on *that control*, and
+	 * nothing else on the pane should move. Send already carries it, relabelling
+	 * itself Sending. A re-send now keeps the previous exchange on screen and
+	 * marks it stale (see `busy` below) instead.
+	 *
+	 * What is left here is the case where there is genuinely nothing to keep:
+	 * the first send for this request, and a stream that has been accepted but
+	 * whose headers have not arrived - the send is over there, `isExecuting` was
+	 * cleared when the engine answered, but no exchange exists to draw yet.
+	 */
+	if (!shown && (isExecuting || isStreaming)) {
 		return (
 			<div className="flex-1 flex items-center justify-center bg-panel">
 				<div className="text-center space-y-4">
@@ -251,6 +268,36 @@ export default function ResponseViewer() {
 			</div>
 		);
 	}
+
+	/*
+	 * A send is in flight over an exchange that is already on screen.
+	 *
+	 * The treatment is deliberately quiet and deliberately still: the whole
+	 * exchange recedes to 60% and nothing else about it changes - no spinner,
+	 * no bar, no layout of any kind, so not one pixel moves and everything
+	 * stays readable and clickable while the new response is on its way. That
+	 * is what the "Loading" rule in docs/design-system.md asks for (the control
+	 * that was clicked shows the work; nothing else on the pane moves) and it
+	 * is the treatment React Query's own paginated-queries guide reaches for
+	 * when it hands back the previous page's data - dim what is stale, do not
+	 * replace it.
+	 *
+	 * It has to say *something*, though, or a re-send whose response is
+	 * byte-identical to the one already showing would look like a Send that
+	 * never fired - the same trap `ResponseAnnouncer` bumps a key to get out
+	 * of. The dim lifting as the new response lands is that signal.
+	 *
+	 * `aria-busy` rather than a live region: the pane is not one, and the
+	 * announcement of both the send and its result is `ResponseAnnouncer`'s
+	 * job. This only tells assistive tech that what it is reading here is
+	 * mid-update.
+	 *
+	 * Not `isStreaming`: an open stream's pane is being written to, not held
+	 * stale, and the status band already carries its live dot and its running
+	 * event count.
+	 */
+	const busy = isExecuting;
+	const staleClass = cn("transition-opacity duration-150", busy && "opacity-60");
 
 	/*
 	 * Every tab always renders.
@@ -327,8 +374,9 @@ export default function ResponseViewer() {
 	// Show dedicated error view for client-side errors
 	if (isClientError) {
 		return (
-			<div className="flex-1 flex flex-col surface-card overflow-hidden">
+			<div className="flex-1 flex flex-col surface-card overflow-hidden" aria-busy={busy}>
 				<ResponseStatusBar
+					className={staleClass}
 					status={shown.status}
 					statusText={shown.statusText}
 					time={shown.time}
@@ -340,13 +388,21 @@ export default function ResponseViewer() {
 					receivedAt={shown.receivedAt}
 					restoredFrom={shown.restoredFrom}
 				/>
-				<ClientErrorView errorCode={shown.errorCode} errorMessage={shown.errorMessage} />
+				{/* The wrapper is what carries the dim, `ClientErrorView` taking no
+				    class of its own; `flex-1 flex flex-col` is the box it was
+				    already given as a direct child of this column. */}
+				<div className={cn("flex-1 flex flex-col min-h-0", staleClass)}>
+					<ClientErrorView
+						errorCode={shown.errorCode}
+						errorMessage={shown.errorMessage}
+					/>
+				</div>
 			</div>
 		);
 	}
 
 	return (
-		<div className="flex-1 flex flex-col surface-card overflow-hidden">
+		<div className="flex-1 flex flex-col surface-card overflow-hidden" aria-busy={busy}>
 			{/*
 			 * Its own band, above the tabs.
 			 *
@@ -357,6 +413,7 @@ export default function ResponseViewer() {
 			 * ResponseStatusBar.
 			 */}
 			<ResponseStatusBar
+				className={staleClass}
 				status={shown.status}
 				statusText={shown.statusText}
 				time={shown.time}
@@ -377,7 +434,7 @@ export default function ResponseViewer() {
 			<Tabs
 				value={activeTab}
 				onValueChange={(v) => setActiveTab(v as ResponseTab)}
-				className="flex-1 flex flex-col overflow-hidden"
+				className={cn("flex-1 flex flex-col overflow-hidden", staleClass)}
 			>
 				{/* `border-rule`, and the `surface-card` root above is what gives it a
 				    value. Every divider in this pane says the same thing and the

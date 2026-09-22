@@ -2824,6 +2824,20 @@ nothing saying which one a new screen should reach for.
 A screen reaching for a fourth idiom, or for the wrong one of these three, is
 the bug this rule exists to catch.
 
+**Refreshing something already on screen is none of the three: it is a dim.**
+A skeleton and a full-pane spinner both begin by throwing away the content the
+user is reading, which is right for a first load and wrong for a re-fetch -
+re-sending a request whose response is on screen used to blank the response
+pane, so the exchange being replaced was gone from the press of Send. The rule
+is the second bullet's, read to its end: the control that was clicked shows the
+work, and *nothing else on the pane moves*. So the stale content stays exactly
+where it is, the pane takes `aria-busy` and drops to `opacity-60` with a
+`transition-opacity duration-150`, and the dim lifting is what says the new
+data landed. No spinner, no bar, no reflow - anything that moves is the thing
+this replaces. `ResponseViewer` (`modules/request-builder/`) is the pattern's
+call site; the loading branch there keeps the centred spinner for the case
+where there is genuinely nothing to hold on to.
+
 **Default entity names are Title Case** ("New Collection", "New Folder"),
 even beside sentence-case headings and button labels ("No collections yet",
 "Delete forever?"). The name is a proper noun for the thing until the user
