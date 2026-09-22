@@ -53,19 +53,32 @@
  * all visible - and its `xs` step is the one `ResponseBody`'s own Pretty/Raw/
  * Preview switch already sits on a dense toolbar row.
  *
- * **`tableHeader` is not in the toggle row.** It used to share a
- * `justify-between` flex row with the toggle, so the row's own height was
- * `max(sentence, toggle)` - and the sentence is a conditionally-mounted
- * two-line `<p>` (`EmptyTableHint`), gone the moment the table gets its first
- * row *or* the moment bulk edit opens. Either trigger snapped the row from
- * two-line-tall down to the toggle's own ~24px, and everything below it
- * jumped. A conditionally-mounted element must never be the tallest thing in
- * a box other persistent chrome shares - the toggle row now holds only the
- * toggle (and `Discard`, shorter than it either way), so its height is fixed
- * in every state. `tableHeader` renders where it is read anyway, directly
- * above the table it describes, so its own mount/unmount only moves the
- * table's top edge - the honest consequence of content leaving, not chrome
- * jumping above the control the user is looking at.
+ * **`tableHeader` is not in the toggle row, and it renders below the table,
+ * not above it.** It used to share a `justify-between` flex row with the
+ * toggle, so the row's own height was `max(sentence, toggle)` - and the
+ * sentence is a conditionally-mounted, sometimes two-line `<p>`
+ * (`EmptyTableHint`), gone the moment the table gets its first row *or* the
+ * moment bulk edit opens. Either trigger snapped the row from two-line-tall
+ * down to the toggle's own ~24px, and everything below it jumped. Moving it
+ * out of the toggle row fixed that jump, but the sentence was still *above*
+ * the table at that point, so the table's own top edge (every row, the
+ * caret you are typing into) still moved on the first keystroke into an
+ * empty table - a shift right where the user is looking and typing.
+ *
+ * The remaining fix is order, not visibility: `tableHeader` renders *after*
+ * `children`, below the table's own trailing blank row. Its mount/unmount
+ * still moves content, but only content below the row the user's cursor is
+ * in - the row itself, everything above it, and the toggle never move. This
+ * is deliberately not "always show it": the sentence restates what the row
+ * placeholder and the `{{token}}` colouring already say once there is a real
+ * row, and a permanent two-line strip on every request forever is exactly
+ * the furniture `EmptyTableHint`'s own doc comment describes removing.
+ * Reserving its height so it fades instead of unmounting was considered and
+ * rejected too - that keeps the clutter (an invisible box the same size as
+ * the text) while still not being visible, the worst of both. Hiding it
+ * behind a tooltip/info-icon was also rejected: burying the one thing this
+ * sentence exists to teach (`{{variable}}` syntax) behind a disclosure is
+ * wrong for the one moment - a genuinely empty tab - discovery matters most.
  */
 
 import { useState } from "react";
@@ -92,10 +105,10 @@ export interface BulkEditorProps {
 	/** The table, rendered when not in text mode. */
 	children: React.ReactNode;
 	/**
-	 * The empty-state hint, rendered directly above the table - table-only,
-	 * like `children`, and not part of the toggle row. See the module doc for
-	 * why: a box the toggle also lives in cannot have this in it without the
-	 * toggle's own row height following the hint's mount state.
+	 * The empty-state hint, rendered directly below the table - table-only,
+	 * like `children`, and not part of the toggle row. See the module doc:
+	 * neither the toggle row nor the table's own top edge can carry this
+	 * without a mount/unmount of it moving content the user is looking at.
 	 */
 	tableHeader?: React.ReactNode;
 	/**
@@ -198,8 +211,8 @@ export function BulkEditor({
 				</div>
 			) : (
 				<div className="space-y-2">
-					{tableHeader}
 					{children}
+					{tableHeader}
 				</div>
 			)}
 

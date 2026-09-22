@@ -104,7 +104,7 @@ describe("the label and the field agree", () => {
 });
 
 describe("the header slot", () => {
-	it("shows the caller's hint beside the table", () => {
+	it("shows the caller's hint below the table", () => {
 		setup();
 		expect(screen.getByText("empty hint")).toBeInTheDocument();
 	});
@@ -125,6 +125,18 @@ describe("the header slot", () => {
 		setup();
 		const toggleRow = screen.getByRole("radiogroup").parentElement as HTMLElement;
 		expect(within(toggleRow).queryByText("empty hint")).not.toBeInTheDocument();
+	});
+
+	// Regression: even out of the toggle row, the hint used to render *above*
+	// the table - so its own mount/unmount still moved the table's top edge,
+	// the row the user is typing in, and the caret. Below the table, only
+	// content the user isn't looking at moves. DOCUMENT_POSITION_FOLLOWING
+	// means the table node comes first in the DOM, i.e. the hint follows it.
+	it("renders after the table, not before it", () => {
+		setup();
+		const table = screen.getByTestId("table");
+		const hint = screen.getByText("empty hint");
+		expect(table.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 });
 
