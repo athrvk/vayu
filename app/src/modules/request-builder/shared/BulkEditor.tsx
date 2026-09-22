@@ -44,11 +44,19 @@
  * back.** A draft that diverges from the table gets a `Discard` action beside
  * the mode toggle, so switching in to look something up and changing your mind
  * does not force a commit the way toggling back always did.
+ *
+ * **The toggle is a `ToggleGroup`, not a `Button` that swaps its own label.**
+ * A pill `Button` at `size="sm"` (`h-control-sm` plus a border and `px-3`) reads
+ * as a heavier control than anything else on this panel - the table rows it
+ * sits above are a 36px grid with no border on their own inputs. `ToggleGroup`
+ * is the app's existing primitive for exactly this - one choice out of a few,
+ * all visible - and its `xs` step is the one `ResponseBody`'s own Pretty/Raw/
+ * Preview switch already sits on a dense toolbar row.
  */
 
 import { useState } from "react";
 import { Edit3, Table2 } from "lucide-react";
-import { Button, Label, Textarea } from "@/components/ui";
+import { Button, Label, Textarea, ToggleGroup, ToggleGroupItem } from "@/components/ui";
 
 export interface BulkEditorProps {
 	/** The rows as text, for when the user switches *into* text mode. */
@@ -99,16 +107,24 @@ export function BulkEditor({
 
 	const isDirty = isText && draft !== opened;
 
-	const toggle = () => {
-		if (isText) {
-			onCommit(draft);
-			setIsText(false);
-		} else {
-			const text = format();
-			setDraft(text);
-			setOpened(text);
-			setIsText(true);
-		}
+	const enterText = () => {
+		const text = format();
+		setDraft(text);
+		setOpened(text);
+		setIsText(true);
+	};
+
+	const commitText = () => {
+		onCommit(draft);
+		setIsText(false);
+	};
+
+	// Radix's single-select toggle group reports "" on a click that would
+	// deselect the active item - ignored, the same way ResponseBody's own view
+	// mode switch ignores it, since a mode toggle here has no "neither" state.
+	const onModeChange = (next: string) => {
+		if (next === "text" && !isText) enterText();
+		if (next === "table" && isText) commitText();
 	};
 
 	// Leaves text mode without committing. Only ever shown once the draft has
@@ -139,19 +155,21 @@ export function BulkEditor({
 							Discard
 						</Button>
 					)}
-					<Button variant="outline" size="sm" onClick={toggle}>
-						{isText ? (
-							<>
-								<Table2 className="size-icon-sm mr-1" />
-								Table
-							</>
-						) : (
-							<>
-								<Edit3 className="size-icon-sm mr-1" />
-								Bulk edit
-							</>
-						)}
-					</Button>
+					<ToggleGroup
+						size="xs"
+						value={isText ? "text" : "table"}
+						onValueChange={onModeChange}
+						aria-label={`${label} view`}
+					>
+						<ToggleGroupItem value="table">
+							<Table2 className="size-icon-sm" />
+							Table
+						</ToggleGroupItem>
+						<ToggleGroupItem value="text">
+							<Edit3 className="size-icon-sm" />
+							Bulk edit
+						</ToggleGroupItem>
+					</ToggleGroup>
 				</div>
 			</div>
 
