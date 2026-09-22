@@ -52,6 +52,20 @@
  * is the app's existing primitive for exactly this - one choice out of a few,
  * all visible - and its `xs` step is the one `ResponseBody`'s own Pretty/Raw/
  * Preview switch already sits on a dense toolbar row.
+ *
+ * **`tableHeader` is not in the toggle row.** It used to share a
+ * `justify-between` flex row with the toggle, so the row's own height was
+ * `max(sentence, toggle)` - and the sentence is a conditionally-mounted
+ * two-line `<p>` (`EmptyTableHint`), gone the moment the table gets its first
+ * row *or* the moment bulk edit opens. Either trigger snapped the row from
+ * two-line-tall down to the toggle's own ~24px, and everything below it
+ * jumped. A conditionally-mounted element must never be the tallest thing in
+ * a box other persistent chrome shares - the toggle row now holds only the
+ * toggle (and `Discard`, shorter than it either way), so its height is fixed
+ * in every state. `tableHeader` renders where it is read anyway, directly
+ * above the table it describes, so its own mount/unmount only moves the
+ * table's top edge - the honest consequence of content leaving, not chrome
+ * jumping above the control the user is looking at.
  */
 
 import { useState } from "react";
@@ -77,7 +91,12 @@ export interface BulkEditorProps {
 	hint: React.ReactNode;
 	/** The table, rendered when not in text mode. */
 	children: React.ReactNode;
-	/** Sits between the toggle and the table - the empty-state hint. */
+	/**
+	 * The empty-state hint, rendered directly above the table - table-only,
+	 * like `children`, and not part of the toggle row. See the module doc for
+	 * why: a box the toggle also lives in cannot have this in it without the
+	 * toggle's own row height following the hint's mount state.
+	 */
 	tableHeader?: React.ReactNode;
 	/**
 	 * Rendered below the table or the textarea, in both modes - what describes
@@ -142,35 +161,27 @@ export function BulkEditor({
 
 	return (
 		<div className="space-y-3">
-			<div className="flex items-center justify-between gap-3">
-				{/*
-				 * Empty when the table has rows: the instruction that used to live
-				 * here permanently now belongs to the empty state, where it is read
-				 * once rather than every time.
-				 */}
-				<div className="min-w-0">{!isText && tableHeader}</div>
-				<div className="flex items-center gap-2 shrink-0">
-					{isDirty && (
-						<Button variant="ghost" size="sm" onClick={discard}>
-							Discard
-						</Button>
-					)}
-					<ToggleGroup
-						size="xs"
-						value={isText ? "text" : "table"}
-						onValueChange={onModeChange}
-						aria-label={`${label} view`}
-					>
-						<ToggleGroupItem value="table">
-							<Table2 className="size-icon-sm" />
-							Table
-						</ToggleGroupItem>
-						<ToggleGroupItem value="text">
-							<Edit3 className="size-icon-sm" />
-							Bulk edit
-						</ToggleGroupItem>
-					</ToggleGroup>
-				</div>
+			<div className="flex items-center justify-end gap-2">
+				{isDirty && (
+					<Button variant="ghost" size="sm" onClick={discard}>
+						Discard
+					</Button>
+				)}
+				<ToggleGroup
+					size="xs"
+					value={isText ? "text" : "table"}
+					onValueChange={onModeChange}
+					aria-label={`${label} view`}
+				>
+					<ToggleGroupItem value="table">
+						<Table2 className="size-icon-sm" />
+						Table
+					</ToggleGroupItem>
+					<ToggleGroupItem value="text">
+						<Edit3 className="size-icon-sm" />
+						Bulk edit
+					</ToggleGroupItem>
+				</ToggleGroup>
 			</div>
 
 			{isText ? (
@@ -186,7 +197,10 @@ export function BulkEditor({
 					<p className="text-xs text-muted-foreground">{hint}</p>
 				</div>
 			) : (
-				children
+				<div className="space-y-2">
+					{tableHeader}
+					{children}
+				</div>
 			)}
 
 			{after}

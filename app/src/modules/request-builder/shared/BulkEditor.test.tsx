@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { BulkEditor } from "./BulkEditor";
 
 function setup(format = () => "a: 1\nb: 2") {
@@ -113,6 +113,18 @@ describe("the header slot", () => {
 		setup();
 		fireEvent.click(enterText());
 		expect(screen.queryByText("empty hint")).not.toBeInTheDocument();
+	});
+
+	// Regression: the hint used to share a `justify-between` row with the
+	// toggle, so the row's own height was `max(hint, toggle)` - a
+	// conditionally-mounted two-line sentence made the row (and the toggle
+	// inside it) jump every time the hint mounted or unmounted. Asserting it
+	// sits outside the toggle's own row is what would catch a regression back
+	// to that shape - a plain text-presence check would not.
+	it("does not share the toggle's row, so the toggle's row height cannot depend on it", () => {
+		setup();
+		const toggleRow = screen.getByRole("radiogroup").parentElement as HTMLElement;
+		expect(within(toggleRow).queryByText("empty hint")).not.toBeInTheDocument();
 	});
 });
 
