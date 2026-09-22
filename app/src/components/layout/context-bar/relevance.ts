@@ -117,6 +117,17 @@ export function useVariablesRelevance(tab: Tab): SectionRelevance {
  * The host is a resolved template, not `request.url`, which is the part worth
  * having in one place: a second copy of that resolution would be a second answer
  * to "which host is this" for the two halves of one section to disagree about.
+ *
+ * **Deliberately a `useMemo` and not `lib/dynamic-variable-cache.ts`'s
+ * module-scope cache**, unlike the request builder's previews. That cache
+ * validates an entry by the identity of the `resolveString` that filled it, and
+ * this hook *creates its own resolver* - two of them, because
+ * `useCookiesRelevance` and `CookiesSection` both call it for the same tab at
+ * the same time. One cache entry per request id shared between two resolvers
+ * would be invalidated by whichever of the pair rendered last, rerolling on
+ * every render instead of none. The memo below is per hook instance, so the two
+ * cannot fight; what it does not survive is the bar's own unmount, which
+ * re-creates the resolver anyway and so would miss the cache regardless.
  */
 export function useHostCookies(tab: Tab) {
 	const { data: request } = useRequestQuery(tab.entityId);

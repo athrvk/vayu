@@ -158,6 +158,13 @@ export default function BodyPanel() {
 	 * folds it straight into the introspection cache key - an unmemoized call
 	 * changed that key on every render this panel took for any reason, which
 	 * read as a schema refetch loop rather than a cache.
+	 *
+	 * A `useMemo` and not `lib/dynamic-variable-cache.ts`'s module-scope cache,
+	 * unlike `ParamsPanel`'s "Sends" line: this panel is force-mounted from its
+	 * first visit onward (`RequestTabs/index.tsx`), so the tab switch that
+	 * destroys Params leaves this instance - and its memo - standing. The only
+	 * thing that unmounts it is the builder going away, which takes
+	 * `resolveString` with it and so would miss that cache anyway.
 	 */
 	const resolvedGqlUrl = useMemo(
 		() => resolveString(request.url || "").trim(),
@@ -248,9 +255,10 @@ export default function BodyPanel() {
 
 	const activeMode = BODY_MODES.find((m) => m.value === request.bodyMode);
 	const hasVariables = containsVariableToken(request.body);
-	// Memoized for the same reason as `resolvedGqlUrl` above: an unmemoized call
-	// rerolled every `{{$randomInt}}`-style value in the body on every render
-	// this panel took, not only on an actual edit.
+	// Memoized for the same reason as `resolvedGqlUrl` above, and a `useMemo`
+	// for the same reason too: an unmemoized call rerolled every
+	// `{{$randomInt}}`-style value in the body on every render this panel took,
+	// not only on an actual edit.
 	const resolvedBody = useMemo(
 		() => (request.body ? resolveString(request.body) : ""),
 		[request.body, resolveString]

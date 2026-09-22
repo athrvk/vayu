@@ -14,8 +14,9 @@
  * is now `BulkEditor`; only the format differs, and that is what this passes.
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import { useRequestBuilderContext } from "../../../context";
+import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { BulkEditor } from "../../../shared/BulkEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
@@ -27,6 +28,19 @@ import {
 } from "../../../utils/params-format";
 import { buildUrlWithParams } from "../../../utils/url";
 import { EmptyTableHint } from "./EmptyTableHint";
+
+/*
+ * The "Sends" line's resolved URL, cached across this panel's own unmount.
+ *
+ * A `useMemo` here would be worthless: this tab is not force-mounted
+ * (`RequestTabs/index.tsx` force-mounts Body and Elements only), so Params →
+ * Headers → Params destroys the component and builds a new one, and a first
+ * render has no previous value to memoize against - a `{{$randomInt}}` in the
+ * URL rerolled on every round trip through another tab. See
+ * `lib/dynamic-variable-cache.ts` for why this is module scope and why it is
+ * keyed by request id rather than by the URL text.
+ */
+const stableResolvedUrl = createStableResolve();
 
 export default function ParamsPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
@@ -47,13 +61,14 @@ export default function ParamsPanel() {
 		[request.url, updateField]
 	);
 
-	// Memoized on the URL text itself, not called inline: a dynamic variable
-	// like `{{$randomInt}}` generates a fresh value on every call
-	// (`lib/dynamic-variables.ts`'s own contract), and this panel re-renders on
-	// far more than a URL edit - switching tabs away and back included. An
-	// unmemoized call rerolled the value on every one of those, which read as
-	// this line changing on its own rather than describing one resolved URL.
-	const resolvedUrl = useMemo(() => resolveString(request.url), [request.url, resolveString]);
+	// Not called inline: a dynamic variable like `{{$randomInt}}` generates a
+	// fresh value on every call (`lib/dynamic-variables.ts`'s own contract), and
+	// this panel both re-renders and *remounts* on far more than a URL edit, so
+	// the line read as changing on its own rather than describing one resolved
+	// URL. A request with no id yet shares one entry: an unsaved draft has
+	// nothing else stable to key on, and the only cost is two blank new tabs
+	// previewing the same generated value.
+	const resolvedUrl = stableResolvedUrl(request.id ?? "new", request.url, resolveString);
 	const displayParams = request.params.filter((param) => !param.system);
 
 	return (

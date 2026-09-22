@@ -13,7 +13,8 @@
  * dynamic variable (`{{$randomInt}}`, `{{$guid}}`, …, `lib/dynamic-variables.ts`) -
  * `useTabDescriptors` has no memoization of its own, so it recomputed the
  * label on every render `TabStrip` took for any reason, not only a URL edit
- * (issue #1739). `titleUrlCache` fixes that; this pins the fix, and its
+ * (issue #1739). `stableTitleUrl` (`lib/dynamic-variable-cache.ts`) fixes
+ * that; this pins the fix, and its
  * `describe.each` sibling ("a second, distinct request") is what proves the
  * cache is keyed by request id rather than by URL text - the module-scope Map
  * would otherwise leak one request's cached value into another's.
@@ -43,7 +44,7 @@ const REQUESTS: Record<string, typeof REQUEST_A> = { req_a: REQUEST_A, req_b: RE
 // TanStack Query hooks return the same `data` identity across renders while
 // the underlying cache entry is unchanged, which is what lets `resolveString`
 // (`useVariableResolver`'s `variableMap`/`rowCells` memo) hold a stable
-// identity of its own - the very thing `titleUrlCache` keys its cache
+// identity of its own - the very thing `stableTitleUrl` keys its cache
 // validity on. A mock returning `{ data: [] }` fresh each call would recreate
 // that memo, and so `resolveString`, on every render - failing this test for
 // a reason that has nothing to do with `tab-descriptors.ts`.

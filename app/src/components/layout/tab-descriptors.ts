@@ -24,6 +24,7 @@ import { walkAncestors } from "@/modules/collections/tree-utils";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
+import { createStableResolve } from "@/lib/dynamic-variable-cache";
 
 /**
  * Extract a short display path from a request URL. URLs may contain
@@ -146,25 +147,13 @@ export function iconForTab(
  * fresh on every call (`lib/dynamic-variables.ts`'s own contract), and this
  * hook has no memoization of its own - it recomputes on every render the strip
  * takes, for any tab, not only when a URL actually changed (issue #1739).
- * `titleUrlCache` holds the last resolved value per request id. It is a plain
- * module-scope `Map`, not a `useRef`/`useState` - a caching layer keyed on
- * every open tab, of which there can be any number, does not fit either: a
- * `.current` write reachable from render trips this repo's `react-hooks/refs`
- * gate, and committing the miss from a `useEffect` trips
- * `react-hooks/set-state-in-effect` right back. A cache miss (a new tab, or one whose
- * resolver/URL changed) still resolves inline for that render - the label is
- * correct immediately - and the same call writes the cache so the *next*
- * render, whatever triggers it, reads the same value back instead of rolling
- * a new one. Bounded by the number of distinct requests ever opened as a tab
- * this session, the same magnitude several other caches in the app keep.
+ * `stableTitleUrl` holds the last resolved value per request id, in the
+ * module-scope cache `lib/dynamic-variable-cache.ts` describes - which is also
+ * why it cannot be a `useMemo` or a `useRef` here, quite apart from the hooks
+ * lint: this is a caching layer keyed on every open tab, of which there can be
+ * any number, so it is not one hook's worth of state to begin with.
  */
-interface UrlCacheEntry {
-	url: string;
-	resolver: unknown;
-	resolved: string;
-}
-
-const titleUrlCache = new Map<string, UrlCacheEntry>();
+const stableTitleUrl = createStableResolve();
 
 export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 	const requests = useQueries({
@@ -183,15 +172,6 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 	 * in.
 	 */
 	const bound = useBoundRowStore((s) => s.bound);
-
-	const resolveForTitle = (id: string, url: string): string => {
-		const cached = titleUrlCache.get(id);
-		if (cached && cached.url === url && cached.resolver === resolveString)
-			return cached.resolved;
-		const resolved = resolveString(url);
-		titleUrlCache.set(id, { url, resolver: resolveString, resolved });
-		return resolved;
-	};
 
 	return tabs.map((tab, i) => {
 		const request = requests[i]?.data;
@@ -236,7 +216,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				// callers elsewhere apply (see `useVariableResolver`).
 				const resolvedUrl = row
 					? resolveString(request.url, row)
-					: resolveForTitle(request.id ?? tab.entityId ?? "", request.url);
+					: stableTitleUrl(request.id ?? tab.entityId ?? "", request.url, resolveString);
 				const name = requestTabTitle(request.name, resolvedUrl);
 				return {
 					label: name,

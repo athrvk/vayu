@@ -730,6 +730,31 @@ Three rules decide what happens at a token:
    defect this feature was added to fix - so it is left where it can be seen, and
    the token stays marked unresolved in the UI.
 
+### A preview holds the value it showed
+
+Rule 2 is right for resolution and wrong for a preview of it. A line that says
+what one field resolves to - the Params tab's "Sends" URL, a request tab's
+label, the Body tab's resolved pane - describes a single occurrence, so it must
+show the same value until something about that occurrence changes. Resolving it
+inline in a React component body meant a new value on every render, and on every
+*remount*: Radix unmounts the tab panel you are not looking at, so Params →
+Headers → Params rebuilt the panel and rerolled the number (#1739).
+
+Two tools, and which one applies depends on where the resolver comes from:
+
+- **`useMemo`** where the component that resolves also outlives the resolution -
+  `BodyPanel`, force-mounted from its first visit, and `useHostCookies`, which
+  builds its own resolver so a remount would invalidate any cache anyway.
+- **`lib/dynamic-variable-cache.ts`'s `createStableResolve`** where the
+  component is torn down but its `resolveString` is not, because that function
+  comes from a provider above it (`ParamsPanel`) - or where the caller resolves
+  a variable-length list and so cannot call a hook per item
+  (`useTabDescriptors`). Entries are keyed by request id, never by the template
+  text: two fields holding an identical `{{$guid}}` must still differ, which is
+  rule 2. They are invalidated when the text changes or when `resolveString`
+  changes identity, which is exactly a variable edit, an environment switch or a
+  bound-row change.
+
 ### The Postman generators Vayu deliberately does not carry
 
 Postman ships around 120 dynamic variables. The table above is the tier imported
