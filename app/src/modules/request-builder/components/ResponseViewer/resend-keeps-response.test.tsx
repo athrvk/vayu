@@ -98,6 +98,15 @@ describe("a send in flight over a response that is already on screen", () => {
 		const pane = container.querySelector('[aria-busy="true"]');
 		expect(pane).not.toBeNull();
 		expect(pane?.querySelectorAll(".opacity-60").length).toBeGreaterThan(0);
+
+		// The one deliberate exception to "nothing moves" - `SendingWave`, faint
+		// enough (`via-foreground/[0.08]`) to leave the dimmed body still
+		// legible, and never a click target of its own.
+		const wave = pane?.querySelector(".response-wave");
+		expect(wave).not.toBeNull();
+		expect(wave?.className).toContain("via-foreground/[0.08]");
+		expect(wave?.parentElement?.getAttribute("aria-hidden")).toBe("true");
+		expect(wave?.parentElement?.className).toContain("pointer-events-none");
 	});
 
 	it("lifts the dim when the new response lands", () => {
@@ -108,6 +117,9 @@ describe("a send in flight over a response that is already on screen", () => {
 		expect(screen.getByTestId("body-content")).toHaveTextContent(BODY);
 		expect(container.querySelector('[aria-busy="true"]')).toBeNull();
 		expect(container.querySelectorAll(".opacity-60")).toHaveLength(0);
+		// The wave is scoped to the busy window - it does not linger once the
+		// dim itself has lifted.
+		expect(container.querySelectorAll(".response-wave")).toHaveLength(0);
 	});
 
 	it("still shows the loading screen when there is nothing to keep", () => {

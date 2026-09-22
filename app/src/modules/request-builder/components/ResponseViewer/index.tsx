@@ -59,6 +59,7 @@ import TestResults from "./TestResults";
 import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
 import SaveAsExampleDialog from "./SaveAsExampleDialog";
+import SendingWave from "./SendingWave";
 import type { ResponseState, ResponseTab } from "../../types";
 
 /**
@@ -301,20 +302,25 @@ export default function ResponseViewer() {
 	/*
 	 * A send is in flight over an exchange that is already on screen.
 	 *
-	 * The treatment is deliberately quiet and deliberately still: the whole
-	 * exchange recedes to 60% and nothing else about it changes - no spinner,
-	 * no bar, no layout of any kind, so not one pixel moves and everything
-	 * stays readable and clickable while the new response is on its way. That
-	 * is what the "Loading" rule in docs/design-system.md asks for (the control
-	 * that was clicked shows the work; nothing else on the pane moves) and it
-	 * is the treatment React Query's own paginated-queries guide reaches for
-	 * when it hands back the previous page's data - dim what is stale, do not
-	 * replace it.
+	 * The layout is still: the whole exchange recedes to 60% and nothing about
+	 * its own content changes size or position, so everything stays readable
+	 * and clickable while the new response is on its way. That is what the
+	 * "Loading" rule in docs/design-system.md asks for (the control that was
+	 * clicked shows the work; nothing else on the pane moves) and it is the
+	 * treatment React Query's own paginated-queries guide reaches for when it
+	 * hands back the previous page's data - dim what is stale, do not replace
+	 * it. `SendingWave` is the one deliberate exception to "nothing moves": a
+	 * faint band layered on top, low enough opacity to leave the dimmed text
+	 * legible under it, because a dim with no motion at all read as inert
+	 * rather than as a request actually in flight (see the doc's own
+	 * paragraph for the reasoning). It is not itself a live region and adds
+	 * nothing an assistive-tech user does not already get from `aria-busy`.
 	 *
-	 * It has to say *something*, though, or a re-send whose response is
-	 * byte-identical to the one already showing would look like a Send that
-	 * never fired - the same trap `ResponseAnnouncer` bumps a key to get out
-	 * of. The dim lifting as the new response lands is that signal.
+	 * It has to say *something* when the wave is off too, though, or a re-send
+	 * whose response is byte-identical to the one already showing would look
+	 * like a Send that never fired - the same trap `ResponseAnnouncer` bumps a
+	 * key to get out of. The dim lifting as the new response lands is that
+	 * signal.
 	 *
 	 * `aria-busy` rather than a live region: the pane is not one, and the
 	 * announcement of both the send and its result is `ResponseAnnouncer`'s
@@ -403,7 +409,11 @@ export default function ResponseViewer() {
 	// Show dedicated error view for client-side errors
 	if (isClientError) {
 		return (
-			<div className="flex-1 flex flex-col surface-card overflow-hidden" aria-busy={busy}>
+			<div
+				className="relative flex-1 flex flex-col surface-card overflow-hidden"
+				aria-busy={busy}
+			>
+				{busy && <SendingWave />}
 				<ResponseStatusBar
 					className={staleClass}
 					status={shown.status}
@@ -431,7 +441,11 @@ export default function ResponseViewer() {
 	}
 
 	return (
-		<div className="flex-1 flex flex-col surface-card overflow-hidden" aria-busy={busy}>
+		<div
+			className="relative flex-1 flex flex-col surface-card overflow-hidden"
+			aria-busy={busy}
+		>
+			{busy && <SendingWave />}
 			{/*
 			 * Its own band, above the tabs.
 			 *

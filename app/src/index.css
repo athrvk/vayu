@@ -972,6 +972,35 @@
 	}
 }
 
+/*
+ * The response pane's sending wave (see ResponseViewer/SendingWave.tsx).
+ *
+ * A re-send dims the whole pane to `opacity-60` and moves nothing else - the
+ * "Loading" rule in docs/design-system.md - but a dim with no motion at all
+ * reads as inert rather than active, easy to mistake for a stalled request. The
+ * stripe is deliberately faint (`via-foreground/[0.08]`, set at the call site)
+ * so it never competes with the stale text still readable underneath it, and it
+ * loops for as long as the send is in flight rather than firing once, because
+ * a request can take longer than one pass and a wave that stops partway through
+ * a long send would read as finished before it is. The reduced-motion rule
+ * below collapses it like any other animation; the dim alone still says "stale"
+ * with nothing moving for a user who asked for less.
+ */
+@keyframes response-wave {
+	0% {
+		transform: translateX(-100%);
+	}
+	100% {
+		transform: translateX(400%);
+	}
+}
+
+@layer components {
+	.response-wave {
+		animation: response-wave 1.8s ease-in-out infinite;
+	}
+}
+
 @keyframes vayu-fadepulse {
 	0%,
 	100% {
