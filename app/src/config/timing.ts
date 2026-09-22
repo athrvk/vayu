@@ -40,6 +40,30 @@ export const TIMING = {
 	SAVED_STATUS_DURATION_MS: 3000,
 
 	/**
+	 * The floor on how long the Dock's "Saving…" line stays on screen before it
+	 * shows "Saved" in its place.
+	 *
+	 * A save against the local engine often lands in under 50ms, which is well
+	 * under the ~100-200ms a state needs to be legible at all - "Saving…" was
+	 * there and gone in the same frame most people would notice it, so every
+	 * save read as an instant, flickerless jump from "Unsaved changes" straight
+	 * to "Saved". 400ms sits inside the 300-600ms range general loading-state
+	 * guidance gives for "long enough to register as a state, short enough not
+	 * to read as latency".
+	 *
+	 * Deliberately a presentation concern, not a store one: `save-store.ts`'s
+	 * `status` still flips to `"saved"` the instant a save lands - every other
+	 * reader of that store (the eight `startSaving`/`completeSaveThenIdle`
+	 * callers' own tests among them) needs the truth as soon as it is known, not
+	 * a truth held back for legibility. Read in exactly one place -
+	 * `SaveStatusLine` in `layout/Dock.tsx`, the only surface that renders
+	 * `status` for a human to read - which holds the *display* on "saving" a
+	 * little past a status change it has already received, rather than delaying
+	 * the store underneath it.
+	 */
+	SAVING_MIN_VISIBLE_MS: 400,
+
+	/**
 	 * Ceiling on the backoff `useSaveManager` doubles through after a failed
 	 * auto-save. Read in exactly one place - the retry scheduled from
 	 * `performSave`'s catch - so a save that keeps failing settles into a fixed

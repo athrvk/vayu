@@ -34,6 +34,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, cleanup, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
+import { TIMING } from "@/config/timing";
 import { Dock } from "./Dock";
 import { useSaveStore, useToastStore } from "@/stores";
 
@@ -216,11 +217,131 @@ describe("the save line holds its own width", () => {
 			expect(next, `the slot remounted on ${status}`).toBe(idle);
 		}
 
-		expect(liveSaveLine()).toBe("Saved");
+		// The line itself still reads "Saving…" here - `useSaveStatusDisplay`
+		// (see the dedicated describe block below) holds that text on screen for
+		// SAVING_MIN_VISIBLE_MS before showing "Saved", independent of the slot
+		// identity this loop is checking.
+		expect(liveSaveLine()).toBe("Saving…");
 	});
 
 	it("says nothing at rest, and reaches no screen reader while idle", () => {
 		renderDock();
 		expect(liveSaveLine()).toBe("");
+	});
+});
+
+/*
+ * The live text does not flash on every step of one save.
+ *
+ * A `key={line.text}` on the live span used to force a remount on every status
+ * change so `.enter-fade` would replay - but `.enter-fade` has no exit half
+ * (React removes a conditionally-rendered node synchronously), so the old text
+ * vanished in the same frame the new text started fading in from opacity 0.
+ * `pending` -> `saving` -> `saved` fired that hard-cut-then-fade three times in
+ * a few seconds, which read as a flash rather than motion - worse than the
+ * jump the track-animation mechanism exists to smooth over.
+ *
+ * The track opening from `idle` already carries the "something just appeared"
+ * motion; a text change within an already-open track needs none of its own.
+ *
+ * Mutation check (confirmed): restore `key={line.text}` and `enter-fade` on
+ * the live span and "keeps the same text node across a save cycle" fails on
+ * the remount; "carries no enter-fade class" fails on the class returning.
+ */
+describe("the save line's text does not flash on every step of one save", () => {
+	const liveTextNode = () =>
+		document.querySelector<HTMLElement>("[data-slot='dock-save-status'] span span");
+
+	it("keeps the same text node across a save cycle, not a remount per state", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "pending" }));
+		const pendingNode = liveTextNode()!;
+
+		act(() => useSaveStore.setState({ status: "saving" }));
+		const savingNode = liveTextNode()!;
+		expect(savingNode, "remounted on pending -> saving").toBe(pendingNode);
+
+		act(() => useSaveStore.setState({ status: "saved" }));
+		const savedNode = liveTextNode()!;
+		expect(savedNode, "remounted on saving -> saved").toBe(pendingNode);
+	});
+
+	it("carries no enter-fade class, so a text change replays no fade", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "pending" }));
+		expect(liveTextNode()?.className).not.toContain("enter-fade");
+
+		act(() => useSaveStore.setState({ status: "saving" }));
+		expect(liveTextNode()?.className).not.toContain("enter-fade");
+	});
+});
+
+/*
+ * "Saving…" holds the screen for SAVING_MIN_VISIBLE_MS before "Saved" can
+ * replace it - `useSaveStatusDisplay`'s own floor, distinct from the "no
+ * flash on a text change" cases above (those are about *how* a change is
+ * shown; this is about *when* one particular change is allowed to happen).
+ *
+ * A save against the local engine often lands in well under
+ * SAVING_MIN_VISIBLE_MS, which used to mean "Saving…" was on screen for less
+ * time than a person needs to register a state change at all - the store's
+ * own `status` jumped `pending` -> `saving` -> `saved` inside one render, and
+ * the Dock showed exactly that. The hook is what holds the *display* back on
+ * "saving" a beat past a "saved" it has already received, without touching
+ * `save-store.ts` itself - every other reader of `status` still gets the
+ * truth the instant it changes.
+ *
+ * Mutation check (confirmed): hardcode `remaining` to `0` in
+ * `useSaveStatusDisplay` and "holds 'Saving…' until the floor" fails on the
+ * line reading "Saved" immediately; drop the `elapsed`/`remaining`
+ * computation entirely (jump straight from "saving" to "saved" with no
+ * `setTimeout`) and the same case fails the same way.
+ */
+describe("the save line's floor on how long 'Saving…' stays up", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		useSaveStore.setState({ status: "idle", lastErrorMessage: null });
+		useToastStore.setState({ toasts: [] });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("holds 'Saving…' until the floor, then shows 'Saved'", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saving" }));
+		act(() => useSaveStore.setState({ status: "saved" }));
+
+		expect(liveSaveLine()).toBe("Saving…");
+
+		act(() => vi.advanceTimersByTime(TIMING.SAVING_MIN_VISIBLE_MS - 1));
+		expect(liveSaveLine()).toBe("Saving…");
+
+		act(() => vi.advanceTimersByTime(1));
+		expect(liveSaveLine()).toBe("Saved");
+	});
+
+	it("does not hold a failure behind the floor", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saving" }));
+		act(() =>
+			useSaveStore.setState({ status: "error", lastErrorMessage: "database is locked" })
+		);
+
+		// The floor only ever applies to saving -> saved.
+		expect(liveSaveLine()).toBe("Not saved");
+	});
+
+	it("does not add to a save already slower than the floor", () => {
+		renderDock();
+		act(() => useSaveStore.setState({ status: "saving" }));
+		act(() => vi.advanceTimersByTime(TIMING.SAVING_MIN_VISIBLE_MS + 500));
+
+		act(() => useSaveStore.setState({ status: "saved" }));
+
+		// Already past the floor when "saved" arrived - no further wait.
+		expect(liveSaveLine()).toBe("Saved");
 	});
 });

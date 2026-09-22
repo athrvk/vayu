@@ -5,8 +5,10 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useEffect, useRef, useState } from "react";
 import { Info, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TIMING } from "@/config/timing";
 import {
 	useEngineStore,
 	useLayoutStore,
@@ -15,6 +17,7 @@ import {
 	// Aliased: `EngineStatus` is the component below, and the type is what it
 	// switches on.
 	type EngineStatus as EngineConnectionStatus,
+	type SaveStatus,
 } from "@/stores";
 import { ICON_MOTION, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { useRunningServiceCount } from "@/modules/services";
@@ -285,6 +288,54 @@ function SaveError() {
 }
 
 /**
+ * Holds "saving" on screen for `TIMING.SAVING_MIN_VISIBLE_MS` before letting
+ * "saved" replace it - a display concern, not the store's.
+ *
+ * `save-store`'s own `status` flips to `"saved"` the instant a save lands,
+ * and every other reader of it (the eight `startSaving`/`completeSaveThenIdle`
+ * call sites, and their own tests) needs that truth immediately. A save
+ * against the local engine often lands in well under 100ms though, which is
+ * under what a state needs to be on screen to register as one at all - so the
+ * Dock's own line used to jump "Unsaved changes" straight to "Saved" with
+ * "Saving…" gone in the same frame most people would notice it. This hook is
+ * the fix, entirely local to the one place that renders `status` for a human:
+ * it mirrors the store's status immediately for every transition except
+ * "saving" -> "saved", which it holds back until the floor has actually
+ * elapsed since "saving" was first shown.
+ *
+ * No generation counters, unlike a store-level version of this would need:
+ * a plain `useEffect` cleanup already cancels a stale scheduled update
+ * whenever `status` (or `displayed`) changes again before it fires - React's
+ * ordinary effect lifecycle is the whole mechanism.
+ */
+function useSaveStatusDisplay(status: SaveStatus): SaveStatus {
+	const [displayed, setDisplayed] = useState(status);
+	const savingShownAtRef = useRef<number | null>(null);
+
+	useEffect(() => {
+		if (status === "saving") savingShownAtRef.current = Date.now();
+	}, [status]);
+
+	useEffect(() => {
+		if (status === displayed) return;
+
+		if (displayed === "saving" && status === "saved") {
+			const shownAt = savingShownAtRef.current;
+			const elapsed = shownAt === null ? Infinity : Date.now() - shownAt;
+			const remaining = Math.max(0, TIMING.SAVING_MIN_VISIBLE_MS - elapsed);
+			if (remaining > 0) {
+				const timer = setTimeout(() => setDisplayed(status), remaining);
+				return () => clearTimeout(timer);
+			}
+		}
+
+		setDisplayed(status);
+	}, [status, displayed]);
+
+	return displayed;
+}
+
+/**
  * The save line, animated into a track that costs nothing while idle.
  *
  * **Why this animates rather than reserving.** The four lines used to be four
@@ -316,7 +367,7 @@ function SaveError() {
  * any of this existed - one `gap-4` between neighbours, never two, never zero.
  */
 function SaveStatusLine() {
-	const status = useSaveStore((s) => s.status);
+	const status = useSaveStatusDisplay(useSaveStore((s) => s.status));
 	const line = status === "idle" ? null : SAVE_LINES[status];
 
 	return (
@@ -341,11 +392,16 @@ function SaveStatusLine() {
 				{status === "error" ? (
 					<SaveError />
 				) : line ? (
-					// `key`, so `.enter-fade` still gets a mount to fade in on every
-					// text change, independent of the track's own width animation.
-					<span key={line.text} className="enter-fade whitespace-nowrap">
-						{line.text}
-					</span>
+					// No `key`, deliberately: a `key={line.text}` here remounted this
+					// span on every status change, and `.enter-fade` replayed on each
+					// one - `pending` -> `saving` -> `saved` fired three fade-ins in a
+					// few seconds, on top of the old text vanishing in the same frame
+					// the new text started its fade (`.enter-fade` has no exit half),
+					// which read as a flash rather than motion. The track opening from
+					// `idle` already says "something just appeared"; a text change
+					// within an already-open track is a plain swap, calmer than a
+					// fade-flash repeated on every step of one save.
+					<span className="whitespace-nowrap">{line.text}</span>
 				) : null}
 			</span>
 		</div>
