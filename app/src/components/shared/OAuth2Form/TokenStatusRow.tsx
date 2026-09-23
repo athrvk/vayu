@@ -28,7 +28,7 @@ interface TokenStatusRowProps {
 	resolvedConfig: OAuth2Config;
 }
 
-const TOKEN_ACTION_LABELS = ["Get Token", "Renew", "Refresh"] as const;
+const TOKEN_ACTION_LABELS = ["Get token", "Renew", "Refresh"] as const;
 
 function maskToken(token: string): string {
 	if (token.length <= 10) return "••••";
@@ -133,7 +133,7 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 					const message =
 						err instanceof ApiError
 							? humanizeOAuth2Error(err.message)
-							: "Failed to get token";
+							: "Couldn't get token";
 					showToast(message, "error");
 				},
 			}
@@ -237,7 +237,7 @@ export default function TokenStatusRow({ resolvedConfig }: TokenStatusRowProps) 
 						/>
 						<LabelSwap
 							className="ml-1.5"
-							label={token ? (expired ? "Refresh" : "Renew") : "Get Token"}
+							label={token ? (expired ? "Refresh" : "Renew") : "Get token"}
 							states={TOKEN_ACTION_LABELS}
 						/>
 					</Button>

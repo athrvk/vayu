@@ -147,7 +147,7 @@ describe("TokenStatusRow with an incomplete config", () => {
 			})
 		);
 
-		// The action reads "Renew" once a token is cached, not "Get Token".
+		// The action reads "Renew" once a token is cached, not "Get token".
 		expect(screen.getByRole("button", { name: /renew/i })).toBeDisabled();
 		expect(screen.getByText(/Authorization URL/)).toBeInTheDocument();
 	});
@@ -211,7 +211,7 @@ describe("TokenStatusRow's action rail when a token lands", () => {
 		const reserved = [
 			...getTokenButton().querySelectorAll('[data-slot="label-swap-reserve"]'),
 		].map((node) => node.textContent);
-		expect(reserved).toEqual(["Get Token", "Renew", "Refresh"]);
+		expect(reserved).toEqual(["Get token", "Renew", "Refresh"]);
 	});
 });
 

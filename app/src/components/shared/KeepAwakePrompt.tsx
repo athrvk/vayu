@@ -76,8 +76,8 @@ export default function KeepAwakePrompt() {
 					<br />
 					<br />
 					Vayu can ask the system not to sleep until the run finishes. The display still
-					dims and locks as usual. To answer this once for every run, use Settings &gt;
-					Load testing &gt; Keep the machine awake during runs.
+					dims and locks as usual. To answer this once for every run, use Settings › Load
+					testing › Keep the machine awake during runs.
 				</>
 			}
 			confirmLabel="Keep awake"

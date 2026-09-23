@@ -117,7 +117,7 @@ describe("a failed load says so", () => {
 		render(<CodeEditor value="" language="json" ariaLabel="Request body" />);
 		await act(async () => {});
 
-		expect(screen.getByRole("alert")).toHaveTextContent(/editor failed to load/i);
+		expect(screen.getByRole("alert")).toHaveTextContent(/couldn't load the editor/i);
 		expect(screen.queryByRole("status", { name: "Loading editor" })).toBeNull();
 		expect(consoleError).toHaveBeenCalled();
 	});

@@ -223,7 +223,7 @@ export default function OAuth2Form({
 				<TextInput
 					value={value.scope ?? ""}
 					onChange={(v) => set("scope", v)}
-					placeholder="space-separated scopes"
+					placeholder="openid profile email"
 				/>
 			)}
 

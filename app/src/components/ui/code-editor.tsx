@@ -236,7 +236,7 @@ export function CodeEditor({
 			<div role="alert" style={{ height }} className={className}>
 				<ErrorState
 					variant="inline"
-					title="Editor failed to load. Reopen the app to try again."
+					title="Couldn't load the editor. Reopen the app to try again."
 					className="h-full p-3"
 				/>
 			</div>

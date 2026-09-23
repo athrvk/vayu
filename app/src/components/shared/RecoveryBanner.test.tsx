@@ -118,7 +118,7 @@ describe("RecoveryBanner", () => {
 		});
 		render(<RecoveryBanner />);
 
-		expect(screen.getByText(/the backup beside it could not be opened either/)).toBeTruthy();
+		expect(screen.getByText(/the backup beside it couldn't be opened either/)).toBeTruthy();
 		expect(screen.queryByText(/no usable backup was found/)).toBeNull();
 	});
 

@@ -160,7 +160,7 @@ export default function AuthFields({
 						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="header">Header</SelectItem>
-							<SelectItem value="query">Query Params</SelectItem>
+							<SelectItem value="query">Query params</SelectItem>
 						</SelectContent>
 					</Select>
 				</Field>

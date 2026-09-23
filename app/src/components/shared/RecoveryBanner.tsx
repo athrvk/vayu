@@ -30,10 +30,10 @@ const HEADLINE: Record<EngineRecovery["outcome"], string> = {
 
 const DETAIL: Record<EngineRecovery["outcome"], string> = {
 	restored_from_backup:
-		"The database could not be opened, so the last backup beside it was restored. Anything saved after that backup was taken is gone.",
-	deleted_corrupt: `The database could not be opened and no usable backup was found, so it was deleted and a new empty one was created. ${LOSS}`,
-	backup_also_corrupt: `The database could not be opened, and the backup beside it could not be opened either - so it was left untouched and a new empty database was created. ${LOSS}`,
-	started_fresh_quarantined: `The database could not be opened and no usable backup was found, so a new empty one was created. ${LOSS}`,
+		"The database couldn't be opened, so the last backup beside it was restored. Anything saved after that backup was taken is gone.",
+	deleted_corrupt: `The database couldn't be opened and no usable backup was found, so it was deleted and a new empty one was created. ${LOSS}`,
+	backup_also_corrupt: `The database couldn't be opened, and the backup beside it couldn't be opened either - so it was left untouched and a new empty database was created. ${LOSS}`,
+	started_fresh_quarantined: `The database couldn't be opened and no usable backup was found, so a new empty one was created. ${LOSS}`,
 };
 
 /**
