@@ -48,7 +48,7 @@
  * a scope that cannot be written is a Create button that does nothing.
  */
 
-import { useState, useRef, useMemo, useId } from "react";
+import { useState, useRef, useMemo, useId, useEffect } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Button } from "./button";
 import { DialogCancelButton } from "./dialog-cancel-button";
@@ -60,6 +60,7 @@ import { VARIABLE_SCOPE_CONFIG, VARIABLE_SCOPE_DOT } from "@/constants/variables
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { isDataVariableName } from "@/lib/variable-resolution";
+import { MENU_TRIGGERED_CLICK_DETAIL } from "@/lib/context-menu";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import type { ResolvedVariable, VariableOrigin } from "@/types";
 import { Eyebrow } from "./eyebrow";
@@ -182,18 +183,33 @@ export interface VariablePopoverProps {
 	/**
 	 * Open on mount, for a host that has already decided to open it (issue
 	 * #1220): a `{{token}}` in a Monaco editor has no DOM node to click, so the
-	 * editor mounts this over the token's screen rectangle already open.
-	 *
-	 * Deliberately `defaultOpen` and not a controlled `open`: opening seeds the
-	 * edit buffer from `varInfo`, and the initial state below does that for free.
-	 * A controlled prop would need an effect to re-seed on every external open,
-	 * which is the effect that used to reset the buffer under a user mid-type.
+	 * editor mounts this over the token's screen rectangle already open - a
+	 * fresh instance per open, since there is no persistent trigger element to
+	 * drive a controlled `open` on instead.
 	 */
 	defaultOpen?: boolean;
 	/**
+	 * Drives `isOpen` from outside instead of `defaultOpen`'s once-at-mount
+	 * value (issue #1220 hover redesign) - for a host with a real, persistent
+	 * trigger element, like `EditableVariable`'s token, that needs to open the
+	 * *same* instance for more than one reason (a hover with no focus, a
+	 * keyboard chord with one). Mounting a fresh instance per open instead, as
+	 * Monaco's anchor does, replaces that element's own DOM node - invisible for
+	 * an anchor with nothing else on screen, but for a real, hoverable token it
+	 * is a live node destroyed and recreated under the pointer, which the
+	 * browser reports as a leave-then-enter of two different elements. That
+	 * retriggers whatever hover logic is watching, which is how a hover-driven
+	 * remount produced a flicker loop rather than one clean open.
+	 *
+	 * Left undefined, `isOpen` falls back to `defaultOpen`'s local state,
+	 * unchanged from before this prop existed.
+	 */
+	open?: boolean;
+	/**
 	 * Told whenever the popover opens or closes, after the save this component
 	 * already does on close. A host that positioned the trigger itself uses it
-	 * to unmount and to put focus back where it came from.
+	 * to unmount and to put focus back where it came from - or, with `open`
+	 * above, to notice a request to open the same instance it already owns.
 	 */
 	onOpenChange?: (open: boolean) => void;
 	/**
@@ -205,6 +221,33 @@ export interface VariablePopoverProps {
 	 * keyboard user who cannot reach what opened is no better off than before.
 	 */
 	focusOnOpen?: boolean;
+	/**
+	 * Forwarded straight onto the trigger span (issue #1220 hover redesign): a
+	 * host driving its own hover-open/close timers off this exact token needs
+	 * the listener on the one element that visually *is* the token, not on an
+	 * extra wrapper around it - `VariableInput/`'s font and layout guards read
+	 * `[data-variable-token] span` expecting this trigger to be the first span
+	 * inside, and a wrapper would put a different one there instead.
+	 */
+	onMouseEnter?: () => void;
+	onMouseLeave?: () => void;
+	/**
+	 * Told when the pointer enters or leaves the popover's *content*, once it
+	 * renders (issue #1220 leave-grace hardening) - ordinary React props on
+	 * `PopoverContent` itself, wired below. A host with a leave-grace timer for
+	 * a hover-opened popover needs to know when the pointer has actually
+	 * reached the content, to cancel a pending close, and when it has left the
+	 * content again, to restart one.
+	 *
+	 * `PopoverContent` is rendered directly in this component's own JSX, so
+	 * these fire as part of the very same commit that creates the content's DOM
+	 * node - there is no "has the node mounted yet" race to route around, the
+	 * way a host reaching for the node from outside (a `document.querySelector`
+	 * after a `setTimeout`, or a document-level `mouseover`/`mouseout`
+	 * delegation) would have to.
+	 */
+	onContentMouseEnter?: () => void;
+	onContentMouseLeave?: () => void;
 }
 
 export function VariablePopover({
@@ -220,29 +263,52 @@ export function VariablePopover({
 	writableScopes,
 	tabIndex = 0,
 	defaultOpen = false,
+	open,
 	onOpenChange,
 	focusOnOpen = false,
+	onMouseEnter,
+	onMouseLeave,
+	onContentMouseEnter,
+	onContentMouseLeave,
 }: VariablePopoverProps) {
-	const [isOpen, setIsOpen] = useState(defaultOpen);
+	/*
+	 * Uncontrolled unless a host passes `open` (see that prop's own comment):
+	 * `isOpen` then tracks the prop directly, and `setIsOpen` becomes a no-op
+	 * for the host's own state to drive on the next render via `onOpenChange`
+	 * instead of writing here twice.
+	 */
+	const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+	const isOpen = open ?? uncontrolledOpen;
+	const setIsOpen = (next: boolean) => {
+		if (open === undefined) setUncontrolledOpen(next);
+	};
 	const [editValue, setEditValue] = useState(varInfo?.value || "");
 	const [isSecretRevealed, setIsSecretRevealed] = useState(false);
 	const openValueRef = useRef(varInfo?.value || "");
 	const pendingCancelRef = useRef(false);
 
 	/**
-	 * Opening seeds the edit buffer from the variable, and closing drops the
-	 * reveal so a secret is masked again next time.
+	 * Seeds the edit buffer on the transition into open, wherever it came from -
+	 * this component's own trigger, or a controlled `open` a host flipped
+	 * directly (a hover that never touches the trigger at all).
 	 *
-	 * Both belong to the open/close *event*, not to a render: seeding from an
-	 * effect keyed on `isOpen` re-ran whenever the parent handed down a fresh
-	 * `varInfo` object, which reset `editValue` under a user mid-type (the
-	 * reason the effect carried an `exhaustive-deps` suppression).
+	 * Gated on the edge (`isOpen` true, `wasOpen` false) rather than run on every
+	 * `isOpen`/`varInfo` change: an effect that re-seeded whenever the parent
+	 * handed down a fresh `varInfo` object reset `editValue` under a user
+	 * mid-type. The guard makes that impossible - `varInfo` changing while
+	 * already open never re-enters the body - which is what lets one effect
+	 * cover every path safely instead of each host reseeding by hand.
 	 */
-	const openPopover = () => {
-		if (varInfo) {
+	const wasOpenRef = useRef(isOpen);
+	useEffect(() => {
+		if (isOpen && !wasOpenRef.current && varInfo) {
 			openValueRef.current = varInfo.value;
 			setEditValue(varInfo.value);
 		}
+		wasOpenRef.current = isOpen;
+	}, [isOpen, varInfo]);
+
+	const openPopover = () => {
 		setIsOpen(true);
 		onOpenChange?.(true);
 	};
@@ -436,9 +502,30 @@ export function VariablePopover({
 		<span
 			role="button"
 			tabIndex={disabled ? -1 : tabIndex}
-			className={triggerClassName}
+			className={cn("inline", triggerClassName)}
+			onMouseEnter={onMouseEnter}
+			onMouseLeave={onMouseLeave}
 			onClick={(e) => {
 				if (disabled) return;
+				/*
+				 * A click dispatched by the "Edit variable" menu command
+				 * (`lib/context-menu.ts`) carries this sentinel instead of an
+				 * ordinary click count - a deliberate, explicit request to open,
+				 * unlike an ordinary pointer click, which places a caret in the
+				 * underlying text instead (`VariableInput/index.tsx`) and must
+				 * open nothing here.
+				 */
+				if (e.detail !== MENU_TRIGGERED_CLICK_DETAIL) {
+					/*
+					 * `PopoverTrigger asChild` composes Radix's own click-to-toggle
+					 * handler with this one (`composeEventHandlers`), which still
+					 * runs unless the event's default was prevented - so an ordinary
+					 * click would otherwise open the popover through Radix's own
+					 * handler regardless of anything decided here.
+					 */
+					e.preventDefault();
+					return;
+				}
 				e.stopPropagation(); // Prevent input blur
 				if (!isOpen) openPopover();
 			}}
@@ -452,7 +539,6 @@ export function VariablePopover({
 					openPopover();
 				}
 			}}
-			style={{ display: "inline" }}
 		>
 			{trigger}
 		</span>
@@ -466,10 +552,26 @@ export function VariablePopover({
 				align="start"
 				side="bottom"
 				onClick={(e) => e.stopPropagation()}
+				onMouseEnter={onContentMouseEnter}
+				onMouseLeave={onContentMouseLeave}
 				onPointerDownOutside={(e) => {
 					if (saveMode === "manual") {
 						e.preventDefault();
 					}
+				}}
+				onEscapeKeyDown={() => {
+					/*
+					 * Radix's `DismissableLayer` closes on Escape through a
+					 * document-level listener that runs before this component's own
+					 * `<Input>` ever sees the key (capture beats the input's bubble
+					 * handler) - so the flag set there arrived too late, and Radix's
+					 * own call to `onOpenChange(false)` (`handleOpenChange` below)
+					 * ran its auto-save check first, committing whatever was typed.
+					 * Setting it here, in the callback Radix itself invokes as part
+					 * of that same dismissal, guarantees it lands before
+					 * `handleOpenChange` reads it, however either handler races.
+					 */
+					pendingCancelRef.current = true;
 				}}
 				onOpenAutoFocus={(e) => {
 					// See `focusOnOpen`: a token over a live input must not take the
@@ -627,8 +729,14 @@ export function VariablePopover({
 											 * user could not read (issue #1215). The eye is the right
 											 * landing: revealing is the only action here, and it hands
 											 * focus on to the editable field.
+											 *
+											 * Gated on `focusOnOpen` (issue #1220 hover redesign): this
+											 * `autoFocus` is a real DOM attribute, so it fires on mount
+											 * whatever Radix's own `onOpenAutoFocus` decided - a hover
+											 * that opens this same branch unfocused would otherwise
+											 * still land the caret here.
 											 */
-											autoFocus
+											autoFocus={focusOnOpen}
 										/>
 									</div>
 								) : (
@@ -643,7 +751,9 @@ export function VariablePopover({
 												isSecret && "pr-8"
 											)}
 											aria-label={`Value of ${name}`}
-											autoFocus
+											// See the masked branch above: a real DOM attribute,
+											// gated the same way for the same reason.
+											autoFocus={focusOnOpen}
 										/>
 										{isSecret && (
 											<RevealButton
@@ -712,7 +822,11 @@ export function VariablePopover({
 								placeholder="value…"
 								className="h-8 font-mono text-sm"
 								aria-label={`Value for new variable ${name}`}
-								autoFocus
+								// See the resolved branch's own `autoFocus={focusOnOpen}`: a
+								// real DOM attribute fires on mount regardless of Radix's own
+								// `onOpenAutoFocus`, so an inert (hover) open of an undefined
+								// variable must gate this the same way.
+								autoFocus={focusOnOpen}
 							/>
 							{/*
 							 * The label sits above the control, not beside it, which is

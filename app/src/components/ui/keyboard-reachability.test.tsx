@@ -43,6 +43,11 @@ describe("variable token popover", () => {
 				varInfo={{ value: "abc123", scope: "global" }}
 				resolved
 				trigger={<span>{"{{api_key}}"}</span>}
+				// This file's Enter/Space cases are exactly the keyboard-open path
+				// (issue #1220 hover redesign gave `focusOnOpen` a second, unfocused
+				// caller - a hover - so a keyboard open now says so explicitly
+				// instead of relying on the default).
+				focusOnOpen
 				{...props}
 			/>
 		);
@@ -157,6 +162,8 @@ function openSecret() {
 				resolved
 				onValueChange={() => {}}
 				trigger={<span>{"{{api_key}}"}</span>}
+				// See `renderToken` above: this opens via Enter, the keyboard path.
+				focusOnOpen
 			/>
 		</TooltipProvider>
 	);

@@ -146,6 +146,60 @@ describe("EditorVariableTokensProvider", () => {
 	});
 
 	/**
+	 * Hover opens the same popover as the chord, but inert (issue #1220 hover
+	 * redesign): resting the pointer on a token must never steal focus from
+	 * wherever the reader is actually typing, and closing it again must not
+	 * yank focus back to the editor either - unless the reader actually
+	 * reached into it.
+	 */
+	describe("an unfocused (hover-triggered) open", () => {
+		it("lands no focus at all, unlike a keyboard-triggered open", () => {
+			const tokens = mountProvider();
+			act(() => tokens.openTokenEditor({ name: "baseUrl", rect, focus: false }));
+			expect(document.activeElement).toBe(document.body);
+		});
+
+		it("opens focused by default - the chord's own long-standing behaviour", () => {
+			const tokens = mountProvider();
+			act(() => tokens.openTokenEditor({ name: "baseUrl", rect }));
+			expect(document.activeElement).not.toBe(document.body);
+		});
+
+		it("never writes anything if it closes untouched", () => {
+			// The autosave-on-close path (`variable-popover.tsx`) only writes when
+			// `editValue !== openValueRef.current`, so an untouched open is already
+			// safe - this is the mutation check that it stays that way.
+			const tokens = mountProvider();
+			act(() => tokens.openTokenEditor({ name: "baseUrl", rect, focus: false }));
+			act(() => tokens.closeTokenEditor());
+			expect(updateVariable).not.toHaveBeenCalled();
+		});
+
+		it("does not tell the editor to refocus, having never actually taken focus", () => {
+			const tokens = mountProvider();
+			const onClose = vi.fn();
+			act(() => tokens.openTokenEditor({ name: "baseUrl", rect, focus: false, onClose }));
+			act(() => tokens.closeTokenEditor());
+			// Mutation check: call `active?.onClose?.()` unconditionally on close,
+			// the way it used to, and this fails - a hover the reader merely moved
+			// past would yank focus off whatever field they are really typing in.
+			expect(onClose).not.toHaveBeenCalled();
+		});
+
+		it("does tell the editor to refocus once the reader has actually reached into it", () => {
+			const tokens = mountProvider();
+			const onClose = vi.fn();
+			act(() => tokens.openTokenEditor({ name: "baseUrl", rect, focus: false, onClose }));
+			// A real focus, not `fireEvent.focus` (which does not bubble as
+			// `focusin` the way a genuine focus move does) - the provider's own
+			// tracking listens on `focusin`.
+			screen.getByDisplayValue("https://api.example.com").focus();
+			act(() => tokens.closeTokenEditor());
+			expect(onClose).toHaveBeenCalled();
+		});
+	});
+
+	/**
 	 * The hover card, which replaced Monaco's own hover widget (issue #1320).
 	 *
 	 * What it says has to be what a `{{token}}` in the URL bar says, because it

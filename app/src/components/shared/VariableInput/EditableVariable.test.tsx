@@ -9,44 +9,30 @@
  */
 
 /**
- * Hovering a `{{token}}` reads it; clicking edits it.
+ * Hovering a `{{token}}` now opens the same, full popover a click used to -
+ * just inert, so resting the pointer never steals focus or risks an edit
+ * (issue #1220 hover redesign). A click places a caret instead
+ * (`VariableInput/index.tsx` owns that half - not exercised here, since this
+ * component has no real `<input>` of its own to place one in); Enter/Space
+ * opens the popover focused, for a keyboard user who has no hover state at
+ * all.
  *
- * Most clicks on a variable token were only ever to *see* what it resolved to,
- * and a click commits you to a popover you then have to dismiss. The tooltip
- * answers that without one.
+ * jsdom fires no real pointer events, so every hover here is a direct
+ * `fireEvent.mouseEnter`/`mouseLeave` on the token's own stable wrapper, and
+ * the open debounce and the leave-grace are both driven by fake timers.
  *
- * **The risk it introduces is the reason for this file.** `varInfo.secret`
- * gates the popover's value behind a deliberate reveal - a tooltip that printed
- * the resolved value on mouseover would walk straight around that gate, turning
- * a click-to-reveal into a mouseover. So the secret path is asserted here in
- * both directions: dots shown, value absent.
- *
- * jsdom fires no real pointer events, so `Tooltip.Root open` is set directly -
- * the assertion is about what the content renders, not about Radix's hover
- * timing, which is Radix's to test.
- *
- * Radix renders the content twice while open: the visible tooltip, plus a
- * visually-hidden copy for assistive tech. So these count matches rather than
- * demanding exactly one, and the secret test asserts against the whole tree -
- * which is the stronger assertion anyway, since it covers the hidden copy too.
+ * **The risk this redesign introduces is the reason for this file.**
+ * `varInfo.secret` gates the popover's value behind a deliberate reveal, and a
+ * hover that opened the real, editable-looking popover has to still respect
+ * that gate - so the secret path is asserted in both directions: masked on an
+ * ordinary hover, and never written to on a hover that merely came and went.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { TIMING } from "@/config/timing";
 import { variableSupportStub } from "@/test/variable-support";
-
-// Radix only mounts tooltip content while open, and jsdom synthesises no hover.
-// Forcing `open` is the narrowest way to reach the content this file is about.
-vi.mock("@/components/ui", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@/components/ui")>();
-	return {
-		...actual,
-		Tooltip: ({ children }: { children: React.ReactNode }) => (
-			<actual.Tooltip open>{children}</actual.Tooltip>
-		),
-	};
-});
 
 const { default: EditableVariable } = await import("./EditableVariable");
 
@@ -60,119 +46,116 @@ function renderToken(props: Partial<React.ComponentProps<typeof EditableVariable
 				resolved
 				sourceName="Staging"
 				variables={variableSupportStub()}
+				onValueChange={vi.fn()}
 				{...props}
 			/>
 		</TooltipProvider>
 	);
 }
 
-/**
- * Issue #1195. jsdom has no layout, so the assertion is the class contract that
- * decides the layout rather than a measurement: the value and its hint are
- * stacked (`flex-col`), and the hint no longer refuses to shrink beside a
- * `break-all` value. Under the one-row shape those two classes were the reason
- * a long source name took the whole 320px cap and left the value a vertical
- * strip of letter fragments - so restoring that shape reds this.
- *
- * Radix renders the content twice while open; the first match is the visible
- * copy and the hidden one carries the same markup.
- */
-function expectStacked(valueText: string, hintText: string) {
-	const value = screen.getAllByText(valueText)[0];
-	const hint = screen.getAllByText(hintText)[0];
-	expect(value.parentElement).toBe(hint.parentElement);
-	expect(value.parentElement?.className).toContain("flex-col");
-	expect(hint.className).not.toContain("shrink-0");
-	// The other half of the contract, and the half the stack exists to make
-	// safe: a value long enough to need it still wraps mid-token rather than
-	// widening the tooltip past its cap or spilling out of it.
-	expect(value.className).toContain("break-all");
+/** The token's own trigger span - what hover is tracked on, and the component's root. */
+function wrapperOf(container: HTMLElement): HTMLElement {
+	return container.firstElementChild as HTMLElement;
 }
 
-describe("a long value stays readable beside a long source name", () => {
-	// The reported pair: an unbroken domain, and an environment named in prose.
-	const LONG_VALUE = "acme-eu-storefront-staging.myshopify.com";
-	const LONG_SOURCE = "Staging - EU storefront integration";
+/** Where `VariablePopover` renders its content - see `variable-popover.tsx`. */
+function popoverContent(): HTMLElement {
+	const content = document.querySelector<HTMLElement>('[data-slot="popover-content"]');
+	if (!content) throw new Error("no popover content on screen");
+	return content;
+}
 
-	it("stacks the value above its source rather than sharing one row", () => {
-		renderToken({ value: LONG_VALUE, sourceName: LONG_SOURCE });
-		expectStacked(LONG_VALUE, LONG_SOURCE);
-	});
+/** Hover the token and let the open debounce run out. */
+function hover(container: HTMLElement) {
+	fireEvent.mouseEnter(wrapperOf(container));
+	act(() => vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS));
+}
 
-	it("still prints both, in full", () => {
-		// The layout must not have bought its width by clipping either one.
-		renderToken({ value: LONG_VALUE, sourceName: LONG_SOURCE });
-		expect(screen.getAllByText(LONG_VALUE).length).toBeGreaterThan(0);
-		expect(screen.getAllByText(LONG_SOURCE).length).toBeGreaterThan(0);
-	});
+/** Leave the token, without waiting the close grace out. */
+function leave(container: HTMLElement) {
+	fireEvent.mouseLeave(wrapperOf(container));
+}
+
+beforeEach(() => {
+	vi.useFakeTimers();
 });
 
-describe("the hover preview", () => {
-	it("shows the resolved value without opening anything", () => {
-		renderToken();
-		expect(screen.getAllByText("mrc_8813").length).toBeGreaterThan(0);
-		// No popover was opened to get it.
+afterEach(() => {
+	vi.useRealTimers();
+});
+
+describe("hovering an editable token", () => {
+	it("opens the real popover, not a lightweight tooltip", () => {
+		const { container } = renderToken();
+		hover(container);
+		const dialog = screen.getByRole("dialog");
+		expect(within(dialog).getByDisplayValue("mrc_8813")).toBeInTheDocument();
+		expect(within(dialog).getByText("Staging")).toBeInTheDocument();
+	});
+
+	it("opens inert - nothing is focused, so the caret is never stolen", () => {
+		const { container } = renderToken();
+		hover(container);
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.contains(document.activeElement)).toBe(false);
+	});
+
+	it("waits the debounce out, so a sweep across the field opens nothing", () => {
+		const { container } = renderToken();
+		fireEvent.mouseEnter(wrapperOf(container));
+		act(() => vi.advanceTimersByTime(TIMING.TOOLTIP_DELAY_MS - 1));
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 
-	it("names the environment it came from", () => {
-		renderToken();
-		expect(screen.getAllByText("Staging").length).toBeGreaterThan(0);
-	});
-
 	it("says so when the variable does not resolve", () => {
-		renderToken({ resolved: false, value: "", sourceName: undefined });
-		expect(screen.getAllByText("not defined").length).toBeGreaterThan(0);
+		const { container } = renderToken({ resolved: false, value: "", sourceName: undefined });
+		hover(container);
+		expect(screen.getByRole("dialog")).toHaveTextContent("Variable not defined");
 	});
 
 	it("distinguishes a defined-but-empty variable from an undefined one", () => {
-		renderToken({ value: "" });
-		expect(screen.getAllByText("empty").length).toBeGreaterThan(0);
-		expect(screen.queryByText("not defined")).not.toBeInTheDocument();
-	});
-});
-
-describe("secrets never appear on hover", () => {
-	it("says it is a secret rather than drawing dots", () => {
-		/*
-		 * Dots on hover are the worst of both: they take the space of an answer,
-		 * say nothing the token's own colour did not, and invite a second look to
-		 * check you did not misread them. Whether it is *set* belongs in the
-		 * popover, where revealing is a deliberate act.
-		 */
-		renderToken({ secret: true, value: "sk_live_abcdef" });
-		expect(screen.getAllByText("secret").length).toBeGreaterThan(0);
-		expect(screen.queryByText("••••••••")).not.toBeInTheDocument();
+		// Read-only (no `onValueChange`): an editable field showing "" just
+		// looks blank, and "empty" is the read-only branch's own placeholder
+		// for exactly that case (`variable-popover.tsx`).
+		const { container } = renderToken({ value: "", onValueChange: undefined });
+		hover(container);
+		expect(screen.getByRole("dialog")).toHaveTextContent("empty");
+		expect(screen.queryByText("Variable not defined")).not.toBeInTheDocument();
 	});
 
-	it("does not put the secret anywhere in the document", () => {
-		// The whole point: the popover gates this behind a reveal button, and a
-		// hover must not be a way around it.
-		//
-		// `document.body`, not the render container. Radix portals tooltip
-		// content out of the container, so a container-scoped assertion here
-		// passes whether or not the secret leaks - which it did, until a mutation
-		// run printed the raw value and this test stayed green.
-		renderToken({ secret: true, value: "sk_live_abcdef" });
+	it("masks a secret exactly as a keyboard-opened popover would", () => {
+		const { container } = renderToken({ secret: true, value: "sk_live_abcdef" });
+		hover(container);
+		const dialog = screen.getByRole("dialog");
+		expect(within(dialog).getByDisplayValue("••••••••")).toBeInTheDocument();
 		expect(document.body.textContent).not.toContain("sk_live_abcdef");
 	});
 
-	it("still names the source, which is not the secret", () => {
-		renderToken({ secret: true, value: "sk_live_abcdef", sourceName: "Production" });
-		expect(screen.getAllByText("Production").length).toBeGreaterThan(0);
+	/**
+	 * Mounting a fresh `VariablePopover` per open used to key this trigger by
+	 * the open, so opening from a hover replaced the very node the pointer was
+	 * resting on. A DOM node destroyed and recreated under a live pointer is
+	 * reported by the browser as that node being left and a new one entered,
+	 * which retriggered `handleMouseEnter`/`handleMouseLeave` and produced a
+	 * hover-open/close loop - the token's background flashing rather than
+	 * settling. Mutation check: reintroduce a `key` on the popover this
+	 * component renders and this fails.
+	 */
+	it("never replaces the token's own DOM node across a hover-open", () => {
+		const { container } = renderToken();
+		const before = wrapperOf(container);
+		hover(container);
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+		expect(wrapperOf(container)).toBe(before);
 	});
 });
 
 /**
- * Issue #1064. A bound row's column answers a bare name above every scope, and
- * the popover was taught to say so - but hovering and clicking are two readings
- * of the same token, and a tooltip still printing the environment's value made
- * one token say two things about one send.
- *
- * The paint is deliberately unchanged (D18): a shadowed bare name keeps the
- * variable's accent, and the explanation is what moves.
+ * Issue #1064. A bound row's column answers a bare name above every scope,
+ * and the popover already says so for a click - a hover-opened instance is
+ * the same component, so it has to say the same thing.
  */
-describe("a bound row's column answers the token", () => {
+describe("a bound row's column, on hover", () => {
 	const withRow = variableSupportStub(
 		{},
 		{
@@ -189,72 +172,118 @@ describe("a bound row's column answers the token", () => {
 		}
 	);
 
-	it("reads the row's cell on hover, not the definition it beat", () => {
-		/*
-		 * The mutation check: drop `boundRowValue` and the tooltip falls back to
-		 * the resolved branch, which prints "staging@acme.io" - the value the send
-		 * is not going to use, which is the whole defect.
-		 */
-		renderToken({ name: "email", value: "staging@acme.io", variables: withRow });
-		expect(screen.getAllByText("alice@acme.io").length).toBeGreaterThan(0);
-		expect(screen.queryByText("staging@acme.io")).not.toBeInTheDocument();
-		expect(screen.getAllByText("Bound row").length).toBeGreaterThan(0);
-	});
-
-	it("answers a name no scope defines rather than calling it undefined", () => {
-		const rowOnly = variableSupportStub(
-			{},
-			{
-				getVariableOrigins: () => [
-					{ scope: "row", value: "alice@acme.io", enabled: true, winner: true },
-				],
-			}
-		);
-		renderToken({ name: "email", value: "", resolved: false, variables: rowOnly });
-		expect(screen.queryByText("not defined")).not.toBeInTheDocument();
-		expect(screen.getAllByText("alice@acme.io").length).toBeGreaterThan(0);
-	});
-
-	it("leaves a token no row answers exactly as it was", () => {
-		// With no row origin the tooltip must be the one this file already pins,
-		// value and source name and all.
-		renderToken();
-		expect(screen.getAllByText("mrc_8813").length).toBeGreaterThan(0);
-		expect(screen.queryByText("Bound row")).not.toBeInTheDocument();
-	});
-
-	it("stacks the cell above its Bound row hint too", () => {
-		// The bound-row branch is the second copy of the layout below, and it was
-		// the second copy of the defect.
-		renderToken({ name: "email", value: "staging@acme.io", variables: withRow });
-		expectStacked("alice@acme.io", "Bound row");
-	});
-
-	it("never lets a row's cell reveal a secret variable's value", () => {
-		// A cell is not a secret, but the variable it shadows may be - and the
-		// tooltip must still not print the secret it is standing in front of.
-		const shadowingSecret = variableSupportStub(
-			{},
-			{
-				getVariableOrigins: () => [
-					{
-						scope: "environment",
-						sourceName: "Prod",
-						value: "sk_live_abcdef",
-						secret: true,
-						enabled: true,
-						winner: false,
-					},
-					{ scope: "row", value: "alice@acme.io", enabled: true, winner: true },
-				],
-			}
-		);
-		renderToken({
-			name: "apiKey",
-			value: "sk_live_abcdef",
-			secret: true,
-			variables: shadowingSecret,
+	it("names the row rather than the definition it beat", () => {
+		// Unresolved everywhere but the row: the "row" chip and the shadowed
+		// list are `VariablePopover`'s own reading of `origins`, not something
+		// `resolved`/`value` need to say twice - see `variable-popover.test.tsx`'s
+		// "a bound data row outranks every definition" for the same shape.
+		const { container } = renderToken({
+			name: "email",
+			value: "",
+			resolved: false,
+			sourceName: undefined,
+			variables: withRow,
 		});
-		expect(document.body.textContent).not.toContain("sk_live_abcdef");
+		hover(container);
+		const dialog = screen.getByRole("dialog");
+		expect(within(dialog).getByText("row")).toBeInTheDocument();
+		expect(within(dialog).getByText("staging@acme.io")).toBeInTheDocument();
+	});
+});
+
+describe("no accidental writes or focus theft from a hover", () => {
+	it("closes without writing anything when the pointer just moves away", () => {
+		const onValueChange = vi.fn();
+		const { container } = renderToken({ onValueChange });
+		hover(container);
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+		leave(container);
+		act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
+
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		// Mutation check: this is `VariablePopover`'s existing
+		// `editValue !== openValueRef.current` guard - break it and this fails.
+		expect(onValueChange).not.toHaveBeenCalled();
+	});
+
+	it("never moves focus merely by opening from a hover", () => {
+		const { container } = renderToken();
+		const before = document.activeElement;
+		hover(container);
+		expect(document.activeElement).toBe(before);
+	});
+
+	it("stays open across the grace period once the pointer moves into the popover itself", () => {
+		const { container } = renderToken();
+		hover(container);
+		leave(container);
+		// `mouseover`, not `mouseenter`: the tracking is delegated on `document`
+		// (see `EditableVariable`'s own comment on why), and only `mouseover`
+		// bubbles there for it to catch.
+		fireEvent.mouseOver(popoverContent());
+
+		act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS * 3));
+
+		// Mutation check: close on the token's own leave with no grace at all,
+		// and this closes before the popover content is ever reached.
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+	});
+
+	it("closes once the pointer has left the popover too, after its own grace", () => {
+		const { container } = renderToken();
+		hover(container);
+		leave(container);
+		const content = popoverContent();
+		fireEvent.mouseOver(content);
+		fireEvent.mouseOut(content, { relatedTarget: document.body });
+
+		act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
+
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+	});
+
+	it("does not close while the reader has actually focused into it to edit", () => {
+		const { container } = renderToken();
+		hover(container);
+		screen.getByDisplayValue("mrc_8813").focus();
+		leave(container);
+
+		act(() => vi.advanceTimersByTime(TIMING.VARIABLE_POPOVER_LEAVE_GRACE_MS));
+
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+	});
+});
+
+describe("the keyboard chord", () => {
+	it("opens the popover focused, since a keyboard user has no hover state", () => {
+		renderToken();
+		const trigger = screen.getByRole("button", { name: /merchantId/ });
+		fireEvent.keyDown(trigger, { key: "Enter" });
+
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.contains(document.activeElement)).toBe(true);
+	});
+});
+
+describe("clicking the token", () => {
+	it("does not open the popover by itself any more", () => {
+		renderToken();
+		const trigger = screen.getByRole("button", { name: /merchantId/ });
+		fireEvent.click(trigger);
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+	});
+
+	it("still does not open one already open from a keyboard focus, or close it either", () => {
+		// A click that lands on the token while it is already open (say, from a
+		// prior hover) is only redefined for opening - `VariableInput/index.tsx`
+		// places a caret instead of doing anything here.
+		renderToken();
+		const trigger = screen.getByRole("button", { name: /merchantId/ });
+		fireEvent.keyDown(trigger, { key: "Enter" });
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+		fireEvent.click(trigger);
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
 	});
 });
