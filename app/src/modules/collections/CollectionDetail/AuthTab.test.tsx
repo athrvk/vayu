@@ -20,7 +20,7 @@
  *
  * 2. A rejected save rendered nothing at all. There is no global
  *    MutationCache.onError, and no tab read `isError`, so the button just went
- *    from "Saving…" back to "Save Auth".
+ *    from "Saving…" back to "Save auth".
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

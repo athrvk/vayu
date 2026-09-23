@@ -140,8 +140,8 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		<div className="max-w-[680px] space-y-3.5">
 			<InfoBanner>
 				Elements set here run <strong>before and after every request</strong> in this
-				collection. They compose outer→inner: the parent collection runs first, then child
-				folders, then the request&apos;s own elements.
+				collection. They compose outer→inner: the parent collection runs first, then nested
+				collections, then the request&apos;s own elements.
 			</InfoBanner>
 
 			{externalValue !== null && (

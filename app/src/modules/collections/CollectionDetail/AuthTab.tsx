@@ -185,7 +185,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 				<code className="font-mono text-label bg-accent px-1 rounded-sm">
 					Inherit from collection
 				</code>
-				. Nested folders take precedence over parent folders.
+				. Nested collections take precedence over parent collections.
 			</InfoBanner>
 
 			{externalValue !== null && (
@@ -243,7 +243,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 			{hasCredentialFields && (
 				<p className="text-label text-muted-foreground mb-2 flex items-center gap-1.5">
 					<Lock className="size-icon-sm shrink-0" aria-hidden="true" />
-					These fields are saved together, when you press Save Auth - not as you type.
+					These fields are saved together, when you press Save auth - not as you type.
 				</p>
 			)}
 
@@ -286,8 +286,8 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 					className="font-semibold"
 				>
 					<LabelSwap
-						label={updateCollection.isPending ? "Saving…" : "Save Auth"}
-						states={["Save Auth", "Saving…"]}
+						label={updateCollection.isPending ? "Saving…" : "Save auth"}
+						states={["Save auth", "Saving…"]}
 					/>
 				</Button>
 				<Button
